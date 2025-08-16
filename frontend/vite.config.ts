@@ -8,7 +8,8 @@ export default defineConfig({
   },
   build: {
     outDir: '../app/static/parts-ui',
-    emptyOutDir: true
+    emptyOutDir: true,
+    manifest: true
   },
   base: '/static/parts-ui/'
 })
