@@ -84,6 +84,9 @@ def create_app(config_object=None):
     from .views.admin_roles import bp as admin_roles_bp
     app.register_blueprint(admin_roles_bp)
     
+    from .views.bom import bp as bom_bp
+    app.register_blueprint(bom_bp)
+    
 
     from .cli import init_app as init_cli
     init_cli(app)
