@@ -1,30 +1,26 @@
-from mongoengine import Document, StringField, ReferenceField, FloatField, ListField, DateTimeField, BooleanField
+# app/models/bom.py
+from mongoengine import Document, StringField, FloatField, ListField, DateTimeField, BooleanField
 from datetime import datetime
-from .part import Part
+from app.models.part import Part  # <-- absolute import
 
 class BOMLink(Document):
-    # Store PNs as strings so we can show BOM even if child Part not created yet
-    parent_pn   = StringField(required=True)       # e.g. "ASM-1001"
-    child_pn    = StringField(required=True)       # e.g. "CMP-2002"
+    parent_pn   = StringField(required=True)
+    child_pn    = StringField(required=True)
     qty         = FloatField(default=1.0)
     uom         = StringField(default="EA")
-    refdes      = ListField(StringField())         # e.g. ["R1","R2"] for PCB, or position notes
-    scrap_rate  = FloatField(default=0.0)          # percentage 0..1
-    alt_group   = StringField(default="")          # optional alternates group token
+    refdes      = ListField(StringField())
+    scrap_rate  = FloatField(default=0.0)
+    alt_group   = StringField(default="")
     effective_from = DateTimeField()
     effective_to   = DateTimeField()
-    phantom     = BooleanField(default=False)      # pass-through BOM (if you use that concept)
+    phantom     = BooleanField(default=False)
     updated_at  = DateTimeField(default=datetime.utcnow)
 
     meta = {
-        "collection": "bom_links",
-        "indexes": [
-            "parent_pn", "child_pn",
-            {"fields": ["parent_pn", "child_pn"], "unique": False},
-        ],
+        "collection": "bom",
+        "indexes": ["parent_pn", "child_pn", ("parent_pn", "child_pn")],
     }
 
-    # Convenience lookups (safe if Part missing)
     @property
     def parent(self):
         return Part.objects(part_number=self.parent_pn).first()
