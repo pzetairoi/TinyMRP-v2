@@ -3,6 +3,8 @@ from mongoengine import Document, StringField, FloatField, ListField, DateTimeFi
 from datetime import datetime
 from app.models.part import Part  # <-- absolute import
 
+DB_ALIAS = "tinymrp-v2"
+
 class BOMLink(Document):
     parent_pn   = StringField(required=True)
     child_pn    = StringField(required=True)
@@ -19,6 +21,7 @@ class BOMLink(Document):
     meta = {
         "collection": "bom",
         "indexes": ["parent_pn", "child_pn", ("parent_pn", "child_pn")],
+        "db_alias": DB_ALIAS
     }
 
     @property

@@ -2,10 +2,12 @@
 from flask import Blueprint, request, jsonify
 from mongoengine.queryset.visitor import Q
 from app.models.part import Part
+from app.extensions import csrf
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
 @bp.post("/parts_lazy")
+@csrf.exempt 
 def parts_lazy():
     body = request.get_json(force=True, silent=True) or {}
     first = int(body.get("first", 0))
