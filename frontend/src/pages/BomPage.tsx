@@ -170,11 +170,11 @@ export default function BomPage() {
         stripedRows
         responsiveLayout="scroll"
       >
-        <Column field="parent_pn" header="Parent PN" sortable filter showFilterMenu={false} />
-        <Column field="parent_desc" header="Parent Description" sortable filter showFilterMenu={false} />
+        <Column field="parent_pn" header="Parent PN" sortable filter showFilterMenu={false} filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
+        <Column field="parent_desc" header="Parent Description" sortable filter showFilterMenu={false} filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
         <Column field="qty" header="Qty" sortable />
         <Column field="uom" header="UoM" sortable />
-        <Column field="alt_group" header="Alt Group" sortable filter showFilterMenu={false} />
+        <Column field="alt_group" header="Alt Group" sortable filter showFilterMenu={false} filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
       </DataTable>
     </div>
   )

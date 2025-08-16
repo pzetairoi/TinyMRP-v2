@@ -19,14 +19,12 @@ def _match_op(mode: str) -> str:
 @csrf.exempt
 def whereused_lazy():
     body = request.get_json(force=True, silent=True) or {}
-    print(body)
     pn = (body.get("pn") or "").strip()
     first = int(body.get("first", 0))
     rows = int(body.get("rows", 25))
     sort_field = (body.get("sortField") or "parent_pn")
-    sort_order = int(body.get("sortOrder", 1))  # 1 asc, -1 desc
+    sort_order = int(body.get("sortOrder", 1))     # 1 asc, -1 desc
     filters = body.get("filters", {})
-    print("Filters ",filters)
 
     ALLOWED = {"parent_pn", "parent_desc", "qty", "uom", "alt_group"}
     if sort_field not in ALLOWED:
@@ -35,47 +33,54 @@ def whereused_lazy():
     q = Q(child_pn=pn)
 
     # parent_pn filter
-    if "parent_pn" in filters:
-        f = filters["parent_pn"] or {}
-        val = (f.get("value") or "").strip()
-        if val:
-            q &= Q(**{f"parent_pn__{_match_op(f.get('matchMode'))}": val})
+    f = filters.get("parent_pn") or {}
+    val = (f.get("value") or "").strip()
+    if val:
+        q &= Q(**{f"parent_pn__{_match_op(f.get('matchMode'))}": val})
+
+    # parent_desc filter (JOIN via Part)
+    fd = filters.get("parent_desc") or {}
+    desc = (fd.get("value") or "").strip()
+    if desc:
+        op = _match_op(fd.get("matchMode"))
+        parents = Part.objects(**{f"description__{op}": desc}).only("part_number")
+        parent_set = [p.part_number for p in parents]
+        if not parent_set:
+            return jsonify({"data": [], "totalRecords": 0, "totalAll": BOMLink.objects(child_pn=pn).count()})
+        q &= Q(parent_pn__in=parent_set)
 
     # alt_group filter
-    if "alt_group" in filters:
-        f = filters["alt_group"] or {}
-        val = (f.get("value") or "").strip()
-        if val:
-            q &= Q(**{f"alt_group__{_match_op(f.get('matchMode'))}": val})
+    fa = filters.get("alt_group") or {}
+    alt = (fa.get("value") or "").strip()
+    if alt:
+        q &= Q(**{f"alt_group__{_match_op(fa.get('matchMode'))}": alt})
 
-    # We'll build a slice and attach parent_desc (needs a lookup)
+    # Query slice
     qs = BOMLink.objects(q).only("parent_pn", "qty", "uom", "alt_group")
-
     total_for_child = BOMLink.objects(child_pn=pn).count()
     filtered_count = qs.count()
-
-    # Fetch page
     page = list(qs.skip(first).limit(rows))
 
     # Attach parent descriptions
     parent_pns = list({l.parent_pn for l in page})
-    desc_map = {p.part_number: (p.description or "")
-                for p in Part.objects(part_number__in=parent_pns).only("part_number", "description")}
+    desc_map = {
+        p.part_number: (p.description or "")
+        for p in Part.objects(part_number__in=parent_pns).only("part_number", "description")
+    }
 
-    # Build row objects
-    data = []
-    for l in page:
-        data.append({
-            "parent_pn": l.parent_pn,
-            "parent_desc": desc_map.get(l.parent_pn, ""),
-            "qty": l.qty or 1.0,
-            "uom": l.uom or "EA",
-            "alt_group": l.alt_group or ""
-        })
+    data = [{
+        "parent_pn": l.parent_pn,
+        "parent_desc": desc_map.get(l.parent_pn, ""),
+        "qty": l.qty or 1.0,
+        "uom": l.uom or "EA",
+        "alt_group": l.alt_group or "",
+    } for l in page]
 
-    # Server-side sort for the slice (good enough for UI; full-accurate sort would require pre-join)
+    # Sort the page (simple slice sort)
     reverse = (sort_order == -1)
-    data.sort(key=lambda r: r.get(sort_field, ""), reverse=reverse)
-    print(data)
+    if sort_field == "qty":
+        data.sort(key=lambda r: float(r.get("qty") or 0), reverse=reverse)
+    else:
+        data.sort(key=lambda r: (r.get(sort_field) or "").lower(), reverse=reverse)
 
     return jsonify({"data": data, "totalRecords": filtered_count, "totalAll": total_for_child})
