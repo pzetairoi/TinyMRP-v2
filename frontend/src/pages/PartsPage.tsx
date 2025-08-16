@@ -54,9 +54,15 @@ export default function PartsPage() {
         stripedRows responsiveLayout="scroll"
       >
         <Column field="part_number" header="Part Number" sortable filter showFilterMenu={false}
-          body={(p: Part) => <Link to={`/ui/bom/${encodeURIComponent(p.part_number)}`}>{p.part_number}</Link>} />
-        <Column field="description" header="Description" sortable filter showFilterMenu={false} />
-        <Column field="category" header="Category" sortable filter showFilterMenu={false} />
+        filterMatchMode="contains" filterMatchModeOptions={["contains"]}
+        body={(p) => <a href={`/ui/bom/${encodeURIComponent(p.part_number)}`}>{p.part_number}</a>} />
+
+        <Column field="description" header="Description" sortable filter showFilterMenu={false}
+                filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
+
+        <Column field="category" header="Category" sortable filter showFilterMenu={false}
+                filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
+
       </DataTable>
     </div>
   )
