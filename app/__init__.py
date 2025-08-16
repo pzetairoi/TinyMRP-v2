@@ -3,7 +3,7 @@ from mongoengine import connect
 from flask_security import Security, MongoEngineUserDatastore
 from .models.auth import User, Role
 
-import os
+
 
 from flask_wtf import CSRFProtect   # CSRF protection for forms
 csrf = CSRFProtect()  # Initialize CSRF protection
@@ -15,8 +15,16 @@ from .extensions import csrf, init_mongo # Import CSRF and MongoDB init
 
 
 
-
 security = None
+
+import os, json
+def _load_vite_manifest(app):
+    manifest_path = os.path.join(app.static_folder, "parts-ui", "manifest.json")
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as f:
+            app.config["VITE_MANIFEST"] = json.load(f)
+    else:
+        app.config["VITE_MANIFEST"] = None
 
 
 def create_app(config_object=None):
@@ -96,6 +104,11 @@ def create_app(config_object=None):
     from .views.admin_roles import bp as admin_roles_bp
     app.register_blueprint(admin_roles_bp)
     
+    # Load Vite manifest for static files
+    _load_vite_manifest(app)
+    # register blueprints for ui
+    from app.views.ui import bp as ui_bp
+    app.register_blueprint(ui_bp)
     
     #Bom and parts APIs
     from app.views.parts import bp as parts_api_bp
@@ -104,10 +117,6 @@ def create_app(config_object=None):
     app.register_blueprint(parts_api_bp)
     app.register_blueprint(bom_tree_api_bp)
     app.register_blueprint(whereused_api_bp)
-    
-    # UI routes
-    from app.views.ui import bp as ui_bp
-    app.register_blueprint(ui_bp)
     
 
     from .cli import init_app as init_cli
