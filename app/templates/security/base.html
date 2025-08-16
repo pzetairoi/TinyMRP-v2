@@ -53,6 +53,11 @@
                    href="{{ url_for('main.app_home') }}">App</a>
               </li>
 
+              <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint=='parts.browse' else '' }}"
+                  href="{{ url_for('parts.browse') }}">Parts</a>
+              </li>
+
               {# Examples of feature groups you likely had in your old navbar. 
                  If an endpoint doesn't exist yet, leave the link as '#' or comment it out. #}
               <li class="nav-item dropdown">

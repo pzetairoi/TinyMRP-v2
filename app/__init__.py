@@ -87,6 +87,10 @@ def create_app(config_object=None):
     from .views.bom import bp as bom_bp
     app.register_blueprint(bom_bp)
     
+    from app.views.parts import bp as parts_bp
+    app.register_blueprint(parts_bp)
+
+    
 
     from .cli import init_app as init_cli
     init_cli(app)
