@@ -3,10 +3,12 @@ from flask import Blueprint, request, jsonify
 from mongoengine.queryset.visitor import Q
 from app.models.bom import BOMLink
 from app.models.part import Part
+from app.extensions import csrf
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
 @bp.post("/whereused_lazy")
+@csrf.exempt
 def whereused_lazy():
     body = request.get_json(force=True, silent=True) or {}
     pn = (body.get("pn") or "").strip()
@@ -35,4 +37,6 @@ def whereused_lazy():
 
     total = BOMLink.objects(child_pn=pn).count()
     filtered = BOMLink.objects(q).count()
+    print("ROWS DATA", rows_data)
+    print("totalRecords", filtered, "totalAll", total)
     return jsonify({"data": rows_data, "totalRecords": filtered, "totalAll": total})

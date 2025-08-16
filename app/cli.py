@@ -80,5 +80,275 @@ def seed_bom():
 
 def init_app(app):
     app.cli.add_command(user)
+    app.cli.add_command(data)
+
+
+
+
+
+
+
+##########################seed generation commands##########################
+# app/cli.py (append at bottom, below existing imports / groups)
+import random, string, math, datetime as dt
+from mongoengine.errors import NotUniqueError
+from flask.cli import with_appcontext
+import click
+
+from .models.part import Part
+from .models.bom import BOMLink
+
+def _now():
+    return dt.datetime.utcnow()
+
+def _pn(prefix: str, n: int) -> str:
+    return f"{prefix}-{n:04d}"
+
+def _choose_many(pool, kmin, kmax):
+    k = random.randint(kmin, kmax)
+    return random.sample(pool, min(k, len(pool)))
+
+def _upsert_part(pn, **kw):
+    p = Part.objects(part_number=pn).first()
+    if not p:
+        p = Part(part_number=pn)
+    # sane defaults
+    p.revision    = kw.get("revision", "A")
+    p.description = kw.get("description", "")
+    p.category    = kw.get("category", "")
+    p.uom         = kw.get("uom", "EA")
+    p.manufacturer= kw.get("manufacturer", "")
+    p.mfr_part    = kw.get("mfr_part", "")
+    p.status      = kw.get("status", "active")
+    attrs         = kw.get("attrs") or {}
+    p.attrs       = {**(p.attrs or {}), **attrs}
+    p.updated_at  = _now()
+    p.save()
+    return p
+
+def _link(parent_pn, child_pn, qty=1.0, uom="EA", alt_group="", phantom=False, scrap_rate=0.0,
+          eff_from=None, eff_to=None):
+    # Avoid exact duplicate link
+    existing = BOMLink.objects(parent_pn=parent_pn, child_pn=child_pn).first()
+    if existing:
+        # update minor fields if needed
+        existing.qty = qty
+        existing.uom = uom
+        if alt_group: existing.alt_group = alt_group
+        existing.phantom = phantom
+        existing.scrap_rate = scrap_rate
+        existing.effective_from = eff_from
+        existing.effective_to = eff_to
+        existing.updated_at = _now()
+        existing.save()
+        return existing
+    return BOMLink(
+        parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom=uom,
+        alt_group=alt_group, phantom=phantom, scrap_rate=scrap_rate,
+        effective_from=eff_from, effective_to=eff_to, updated_at=_now()
+    ).save()
+
+@click.group()
+def data():
+    """Data generation commands (demo parts & BOM)"""
+
+@data.command("clear-demo")
+@click.option("--tag", default="demo", help="Seed tag to clear (attrs.seed)")
+@with_appcontext
+def clear_demo(tag):
+    """Delete all parts and BOM links that were seeded with a given tag."""
+    q = {"attrs__seed": tag}
+    parts = Part.objects(**q).only("part_number")
+    pns = [p.part_number for p in parts]
+    deleted_parts = parts.delete()
+    deleted_links = 0
+    if pns:
+        deleted_links = BOMLink.objects(parent_pn__in=pns).delete() + BOMLink.objects(child_pn__in=pns).delete()
+    click.echo(f"Deleted parts={deleted_parts}, bom_links={deleted_links} for seed tag '{tag}'")
+
+@data.command("seed-demo")
+@click.option("--scale", type=click.Choice(["small","medium","large"], case_sensitive=False), default="medium")
+@click.option("--tag", default="demo", help="Seed tag to mark generated docs (attrs.seed)")
+@click.option("--random-seed", type=int, default=42, help="Deterministic RNG seed")
+@with_appcontext
+def seed_demo(scale, tag, random_seed):
+    """
+    Generate a multi-level BOM dataset with overlaps/alternates/phantoms.
+    Re-run with the same random-seed for reproducible data.
+    """
+    random.seed(random_seed)
+
+    cfg = {
+        "small":  dict(n_common=10, n_comp=120, n_sub=30, n_top=6, depth=3, fan_min=2, fan_max=6),
+        "medium": dict(n_common=20, n_comp=300, n_sub=80, n_top=12, depth=4, fan_min=3, fan_max=8),
+        "large":  dict(n_common=40, n_comp=800, n_sub=200, n_top=25, depth=4, fan_min=4, fan_max=10),
+    }[scale]
+
+    # Vocab
+    CATEGORIES = ["Component","Material","Fastener","PCB","IC","Resistor","Capacitor","Assembly","Subassembly"]
+    UOMS = ["EA","EA","EA","EA","SHT","M","KG"]  # weighted to EA
+    MFRS = ["ACME","SKF","Vishay","TI","NXP","Infineon","ST","Omron","Panasonic","Murata"]
+    STATUSES = ["active"]*9 + ["obsolete"]  # 10% obsolete
+
+    # ---------- 1) Parts ----------
+    click.echo(f"Seeding parts for tag='{tag}' …")
+    created = 0
+    # Common components (heavily reused)
+    common_pns = []
+    for i in range(1, cfg["n_common"]+1):
+        pn = _pn("CMP", 1000+i)
+        common_pns.append(pn)
+        _upsert_part(
+            pn,
+            description=f"Common Component {i}",
+            category=random.choice(["Component","Fastener","Resistor","Capacitor"]),
+            uom=random.choice(UOMS),
+            manufacturer=random.choice(MFRS),
+            mfr_part=f"{random.choice(MFRS)}-{1000+i}",
+            status=random.choice(STATUSES),
+            attrs={"seed": tag}
+        ); created += 1
+
+    # Regular components/materials
+    comp_pns = []
+    for i in range(1, cfg["n_comp"]+1):
+        prefix = random.choice(["CMP","MAT","CMP","CMP","PCB","IC"])
+        pn = _pn(prefix, 2000+i)
+        comp_pns.append(pn)
+        cat = random.choice(["Component","Material","PCB","IC","Resistor","Capacitor","Fastener"])
+        _upsert_part(
+            pn,
+            description=f"{cat} {i}",
+            category=cat,
+            uom=random.choice(UOMS),
+            manufacturer=random.choice(MFRS) if cat in ["IC","PCB","Resistor","Capacitor","Component"] else "",
+            mfr_part=f"{random.choice(MFRS)}-{2000+i}" if cat in ["IC","PCB","Resistor","Capacitor","Component"] else "",
+            status=random.choice(STATUSES),
+            attrs={"seed": tag}
+        ); created += 1
+
+    # Subassemblies (no children yet)
+    sub_pns = []
+    for i in range(1, cfg["n_sub"]+1):
+        pn = _pn("SUB", 3000+i)
+        sub_pns.append(pn)
+        _upsert_part(
+            pn,
+            description=f"Subassembly {i}",
+            category="Subassembly",
+            uom="EA",
+            status="active",
+            attrs={"seed": tag}
+        ); created += 1
+
+    # Top-level assemblies
+    top_pns = []
+    for i in range(1, cfg["n_top"]+1):
+        pn = _pn("ASM", 4000+i)
+        top_pns.append(pn)
+        _upsert_part(
+            pn,
+            description=f"Top Assembly {i}",
+            category="Assembly",
+            uom="EA",
+            status="active",
+            attrs={"seed": tag}
+        ); created += 1
+
+    click.echo(f"Parts created/updated: {created}")
+
+    # ---------- 2) BOM Links ----------
+    click.echo("Seeding BOM links …")
+
+    def make_children(parent, level, max_level):
+        """Attach children to parent: mix of components, common components, maybe subassemblies, alternates, phantom."""
+        # Base fanout
+        kids = []
+
+        # Always add some common components for overlap
+        common_pick = _choose_many(common_pns, 1, min(3, len(common_pns)))
+        kids.extend([(c, random.randint(1,5), "EA", "") for c in common_pick])
+
+        # Mix in regular parts
+        pool_parts = comp_pns[:]
+        # Occasionally attach a subassembly if we are not too deep
+        if level < max_level-1 and sub_pns:
+            pool_parts = pool_parts + random.sample(sub_pns, min( max(1, len(sub_pns)//5), len(sub_pns)))
+
+        # random unique picks
+        others = _choose_many(pool_parts, cfg["fan_min"], cfg["fan_max"])
+        for ch in others:
+            qty = random.choice([1,1,2,3,4,5])
+            uom = "EA" if ch.startswith(("CMP","SUB","ASM","IC","PCB")) else random.choice(UOMS)
+            kids.append((ch, qty, uom, ""))
+
+        # Some alternates: pick 1–2 groups of 2–3 items and mark same alt_group
+        if len(others) >= 4:
+            group_count = random.choice([0,1,1,2])
+            for g in range(group_count):
+                group_id = "ALT-" + ''.join(random.choices(string.ascii_uppercase+string.digits, k=4))
+                alt_members = random.sample(others, k=min(3, len(others)))
+                for ch in alt_members:
+                    idx = next(i for i,t in enumerate(kids) if t[0]==ch)
+                    kids[idx] = (kids[idx][0], kids[idx][1], kids[idx][2], group_id)
+
+        # Occasionally insert a phantom subassembly layer
+        if level < max_level-1 and random.random() < 0.25:
+            ph = _pn("SUB", 8000+random.randint(1, 9999))
+            _upsert_part(ph, description="Phantom Subassembly", category="Subassembly", attrs={"seed": tag})
+            _link(parent, ph, qty=1, uom="EA", phantom=True)
+            # Phantom carries some of the kids
+            carry = random.sample(kids, k=min(len(kids)//2 or 1, len(kids)))
+            for ch, qty, uom, alt_group in carry:
+                _link(ph, ch, qty=qty, uom=uom, alt_group=alt_group)
+            # and keep remaining directly under parent
+            for ch, qty, uom, alt_group in [k for k in kids if k not in carry]:
+                _link(parent, ch, qty=qty, uom=uom, alt_group=alt_group)
+        else:
+            for ch, qty, uom, alt_group in kids:
+                _link(parent, ch, qty=qty, uom=uom, alt_group=alt_group)
+
+    # Build from subassemblies up (so SUB can also have SUB children)
+    # Level 1: subassemblies get components
+    for p in sub_pns:
+        make_children(p, level=1, max_level=cfg["depth"])
+
+    # Level 2: subassemblies may include other subassemblies to increase depth/cross-links
+    for p in random.sample(sub_pns, k=max(1, len(sub_pns)//2)):
+        # attach a few other SUBs as children to deepen the tree
+        attach = random.sample([x for x in sub_pns if x != p], k=min(3, len(sub_pns)-1))
+        for ch in attach:
+            _link(p, ch, qty=random.randint(1,3))
+        make_children(p, level=2, max_level=cfg["depth"])
+
+    # Top-level: assemblies reference subassemblies + components
+    for a in top_pns:
+        # ensure some SUBs
+        subs = _choose_many(sub_pns, 2, min(6, len(sub_pns)))
+        for s in subs:
+            _link(a, s, qty=random.randint(1,3))
+        make_children(a, level=3, max_level=cfg["depth"])
+
+    # Some effective date toys: mark a few links as expired or future-dated
+    all_links = list(BOMLink.objects())
+    for l in random.sample(all_links, k=min( max(1, len(all_links)//20), len(all_links) )):
+        r = random.random()
+        if r < 0.5:
+            l.effective_to = _now() - dt.timedelta(days=random.randint(30, 400))
+        else:
+            l.effective_from = _now() + dt.timedelta(days=random.randint(30, 180))
+        l.save()
+
+    # Stats
+    n_parts = Part.objects(attrs__seed=tag).count()
+    n_links = BOMLink.objects().count()
+    # Heavily used components (where-used stress)
+    counter = {}
+    for l in BOMLink.objects().only("child_pn"):
+        counter[l.child_pn] = counter.get(l.child_pn, 0) + 1
+    hot = sorted(counter.items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+    click.echo(f"Done. Seed tag='{tag}' "
+               f"parts={n_parts}, bom_links={n_links}, common/top where-used: {hot[:5]}")
     
     

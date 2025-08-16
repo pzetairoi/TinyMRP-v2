@@ -2,10 +2,12 @@
 from flask import Blueprint, request, jsonify
 from app.models.bom import BOMLink
 from app.models.part import Part
+from app.extensions import csrf
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
 @bp.get("/bom_tree")
+@csrf.exempt
 def bom_tree():
     """GET /api/bom_tree?pn=ROOT (root) or /api/bom_tree?parent=PN (children)"""
     pn = (request.args.get("pn") or "").strip()
