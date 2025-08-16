@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}TinyMRP{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css" rel="stylesheet">
+    {% block extra_head %}{% endblock %}
+    <style>
+      body { background-color: #f8f9fa; }
+      .navbar-brand { font-weight: 600; }
+      .card { border-radius: 1rem; }
+    </style>
+  </head>
+  <body>
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark mb-4">
+      <div class="container">
+        <a class="navbar-brand" href="{{ url_for('main.app_home') }}">TinyMRP</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain" aria-controls="navbarMain" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarMain">
+            <ul class="navbar-nav ms-auto mb-2 mb-md-0">
+                <!-- Public landing -->
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('main.index') }}">Home</a>
+                </li>
+
+                {% if current_user.is_authenticated %}
+                    <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('main.app_home') }}">App</a>
+                    </li>
+
+                    {% if current_user.has_role('admin') %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.users_list') }}">Admin</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
+                    {% endif %}
+
+                    <li class="nav-item">
+                    <form class="d-inline" method="post" action="{{ url_for_security('logout') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button class="btn btn-link nav-link p-0" type="submit">Logout</button>
+                    </form>
+                    </li>
+                {% else %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for_security('login') }}">Login</a></li>
+                {% endif %}
+            </ul>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container">
+      {% include "security/_messages.html" %}
+      {% block content %}{% endblock %}
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"></script>
+    {% block extra_scripts %}{% endblock %}
+  </body>
+</html>

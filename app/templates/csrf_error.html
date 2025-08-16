@@ -1,0 +1,7 @@
+{% extends "security/base.html" %}
+{% block title %}CSRF Error{% endblock %}
+{% block content %}
+  <div class="alert alert-danger">
+    <strong>CSRF Error:</strong> {{ reason }}
+  </div>
+{% endblock %}

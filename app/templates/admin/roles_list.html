@@ -1,0 +1,23 @@
+{% extends "security/base.html" %}
+{% block title %}Roles · Admin{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 m-0">Roles</h1>
+  <a class="btn btn-primary" href="{{ url_for('admin_roles.roles_create') }}">New role</a>
+</div>
+<div class="table-responsive bg-white border rounded-3 shadow-sm">
+  <table class="table align-middle mb-0">
+    <thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Actions</th></tr></thead>
+    <tbody>
+      {% for r in roles %}
+      <tr>
+        <td>{{ r.name }}</td>
+        <td>{{ r.description or '-' }}</td>
+        <td>{{ (r.permissions | join(', ')) or '-' }}</td>
+        <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_roles.roles_edit', role_id=r.id) }}">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

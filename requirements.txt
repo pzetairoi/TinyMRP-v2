@@ -1,0 +1,13 @@
+# Core
+Flask~=3.1.1            # current stable 3.1 line
+Flask-Security~=5.6.2   # includes MongoEngine datastore support
+mongoengine~=0.29.1     # ODM
+pymongo~=4.14.0         # driver used by MongoEngine under the hood
+Flask-WTF~=1.2.2        # CSRF/forms
+email-validator~=2.1.0  # used by Flask-Security for email checks
+argon2-cffi~=25.1.0     # password hashing
+
+python-dotenv>=1.0  # for .env file support
+
+# (optional, tests)
+mongomock~=4.1.2

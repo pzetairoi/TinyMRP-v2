@@ -1,0 +1,116 @@
+{% extends "security/base.html" %}
+{% block title %}TinyMRP · Lightweight manufacturing MRP{% endblock %}
+
+{% block extra_head %}
+<meta name="description" content="TinyMRP — lightweight manufacturing planning with BOM, work orders, and inventory.">
+<meta property="og:title" content="TinyMRP">
+<meta property="og:description" content="Lightweight manufacturing MRP.">
+<meta property="og:type" content="website">
+{% endblock %}
+
+{% block content %}
+  <!-- Hero -->
+  <section class="py-5">
+    <div class="row align-items-center">
+      <div class="col-lg-7">
+        <h1 class="display-6 fw-semibold mb-3">TinyMRP</h1>
+        <p class="lead text-muted mb-4">
+          A clean, MongoDB-backed MRP starter: BOM trees, work orders, inventory, and planning — built the simple way.
+        </p>
+
+        {% if current_user.is_authenticated %}
+          <a class="btn btn-primary btn-lg me-2" href="{{ url_for('main.app_home') }}">Open App</a>
+          {% if current_user.has_role('admin') %}
+            <a class="btn btn-outline-secondary btn-lg" href="{{ url_for('admin.users_list') }}">Admin</a>
+          {% endif %}
+        {% else %}
+          <a class="btn btn-primary btn-lg me-2" href="{{ url_for_security('login') }}">Log in</a>
+        {% endif %}
+      </div>
+      <div class="col-lg-5 mt-4 mt-lg-0">
+        <div class="p-4 bg-white border rounded-3 shadow-sm">
+          <h2 class="h5 mb-3">Why TinyMRP?</h2>
+          <ul class="mb-0">
+            <li>MongoDB-first data model (great for BOM trees)</li>
+            <li>Secure auth with Flask-Security</li>
+            <li>Bootstrap 5 UI, CSRF on all forms</li>
+            <li>Admin dashboard for users & roles</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Feature cards -->
+  <section class="py-4">
+    <div class="row g-3">
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm">
+          <div class="card-body">
+            <h3 class="h6">Users & Roles</h3>
+            <p class="text-muted">RBAC built-in — manage accounts and permissions.</p>
+            <a class="btn btn-sm btn-outline-primary"
+               href="{% if current_user.is_authenticated and current_user.has_role('admin') %}{{ url_for('admin.users_list') }}{% else %}{{ url_for_security('login') }}{% endif %}">
+              Manage users
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm">
+          <div class="card-body">
+            <h3 class="h6">Roles & Permissions</h3>
+            <p class="text-muted">Define granular permissions for planning and execution.</p>
+            <a class="btn btn-sm btn-outline-primary"
+               href="{% if current_user.is_authenticated and current_user.has_role('admin') %}{{ url_for('admin_roles.roles_list') }}{% else %}{{ url_for_security('login') }}{% endif %}">
+              Manage roles
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm">
+          <div class="card-body">
+            <h3 class="h6">Get Started</h3>
+            <p class="text-muted mb-3">Already have an account? Jump right in.</p>
+            {% if current_user.is_authenticated %}
+              <a class="btn btn-sm btn-primary" href="{{ url_for('main.app_home') }}">Open App</a>
+            {% else %}
+              <a class="btn btn-sm btn-primary" href="{{ url_for_security('login') }}">Log in</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  
+<div class="container-fluid">
+    
+    <div class="row " >
+        
+        <div class="col-sm-12 " >
+            
+            <div class="text-center">
+                
+                <img  src="{{url_for('static', filename='images/homepage_logo.svg')}}"  vspace="100" 
+                style="width:500px;" class="img-responsive center-block"
+                alt="homepage_logo" usemap="#homemap"> 
+
+                
+                <map name="homemap">
+                    <area shape="poly" coords="67,390,35,345,22,285,78,295,100,342"  href="{{ url_for('main.app_home') }}"> 
+                    <area shape="poly" coords="18,220,84,209,104,165,65,107,27,165 " href="{{ url_for('main.app_home') }}"> 
+                    <area shape="poly" coords="102,63,158,34, 222,19,209,87,165,104," href="{{ url_for('main.app_home') }}"> 
+                    <area shape="poly" coords="279,18,344,34,395,65,338,104,295,87 " href="{{ url_for('main.app_home') }}"> 
+                    <area shape="poly" coords="439,107,473,165,478,220,419,210,398,162 " href="{{ url_for('main.app_home') }}"> 
+                    <area shape="poly" coords="485,280,473,337,473,393,401,340,420,295 " href="{{ url_for('main.app_home') }}"> 
+                </map>
+
+            </div>
+        </div>
+    </div>
+
+    
+    <div class="text-center" style="color: #000080ff;">Copyright (c) 2024 TinyMRP Ltd.</div>
+</div>
+{% endblock %}
