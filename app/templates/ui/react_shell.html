@@ -2,7 +2,6 @@
 {% block title %}{{ title or 'TinyMRP' }}{% endblock %}
 
 {% block extra_head %}
-  {# Inject built CSS from Vite #}
   {% for href in assets.css %}
     <link rel="stylesheet" href="{{ href }}">
   {% endfor %}
@@ -14,7 +13,6 @@
 
 {% block extra_scripts %}
   {% if initial %}<script>window.__INITIAL__ = {{ initial|tojson }};</script>{% endif %}
-  {# Inject built JS (ES modules) #}
   {% for src in assets.js %}
     <script type="module" src="{{ src }}"></script>
   {% endfor %}
