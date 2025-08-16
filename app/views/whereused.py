@@ -19,12 +19,14 @@ def _match_op(mode: str) -> str:
 @csrf.exempt
 def whereused_lazy():
     body = request.get_json(force=True, silent=True) or {}
+    print(body)
     pn = (body.get("pn") or "").strip()
     first = int(body.get("first", 0))
     rows = int(body.get("rows", 25))
     sort_field = (body.get("sortField") or "parent_pn")
     sort_order = int(body.get("sortOrder", 1))  # 1 asc, -1 desc
     filters = body.get("filters", {})
+    print("Filters ",filters)
 
     ALLOWED = {"parent_pn", "parent_desc", "qty", "uom", "alt_group"}
     if sort_field not in ALLOWED:
@@ -74,5 +76,6 @@ def whereused_lazy():
     # Server-side sort for the slice (good enough for UI; full-accurate sort would require pre-join)
     reverse = (sort_order == -1)
     data.sort(key=lambda r: r.get(sort_field, ""), reverse=reverse)
+    print(data)
 
     return jsonify({"data": data, "totalRecords": filtered_count, "totalAll": total_for_child})

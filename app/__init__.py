@@ -18,13 +18,28 @@ from .extensions import csrf, init_mongo # Import CSRF and MongoDB init
 security = None
 
 import os, json
+def _find_manifest_path(static_folder: str):
+    candidates = [
+        os.path.join(static_folder, "parts-ui", "manifest.json"),
+        os.path.join(static_folder, "parts-ui", ".vite", "manifest.json"),  # <-- also check .vite
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
 def _load_vite_manifest(app):
-    manifest_path = os.path.join(app.static_folder, "parts-ui", "manifest.json")
-    if os.path.exists(manifest_path):
-        with open(manifest_path) as f:
+    path = _find_manifest_path(app.static_folder)
+    if path:
+        with open(path, "r", encoding="utf-8") as f:
             app.config["VITE_MANIFEST"] = json.load(f)
+        app.config["VITE_MANIFEST_PATH"] = path
     else:
         app.config["VITE_MANIFEST"] = None
+        app.config["VITE_MANIFEST_PATH"] = None
+    print("VITE_MANIFEST loaded:", bool(app.config["VITE_MANIFEST"]), "path:", app.config["VITE_MANIFEST_PATH"])
+
+
 
 
 def create_app(config_object=None):
@@ -92,6 +107,9 @@ def create_app(config_object=None):
     # Mongo
     app.config.setdefault("MONGODB_ALIAS", "tinymrp-v2")
     init_mongo(app)
+    
+    # Load manifest ONCE at startup
+    _load_vite_manifest(app)
 
     
     # Register blueprints
@@ -104,8 +122,7 @@ def create_app(config_object=None):
     from .views.admin_roles import bp as admin_roles_bp
     app.register_blueprint(admin_roles_bp)
     
-    # Load Vite manifest for static files
-    _load_vite_manifest(app)
+
     # register blueprints for ui
     from app.views.ui import bp as ui_bp
     app.register_blueprint(ui_bp)
