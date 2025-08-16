@@ -84,12 +84,18 @@ def create_app(config_object=None):
     from .views.admin_roles import bp as admin_roles_bp
     app.register_blueprint(admin_roles_bp)
     
-    from .views.bom import bp as bom_bp
-    app.register_blueprint(bom_bp)
     
-    from app.views.parts import bp as parts_bp
-    app.register_blueprint(parts_bp)
-
+    #Bom and parts APIs
+    from app.views.parts import bp as parts_api_bp
+    from app.views.bom_tree import bp as bom_tree_api_bp
+    from app.views.whereused import bp as whereused_api_bp
+    app.register_blueprint(parts_api_bp)
+    app.register_blueprint(bom_tree_api_bp)
+    app.register_blueprint(whereused_api_bp)
+    
+    # UI routes
+    from app.views.ui import bp as ui_bp
+    app.register_blueprint(ui_bp)
     
 
     from .cli import init_app as init_cli
