@@ -1,13 +1,15 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
-import PartsPage from './pages/PartsPage'
-import BomPage from './pages/BomPage'
+import { Outlet, Link } from 'react-router-dom'
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/ui/parts" replace />} />
-      <Route path="/ui/parts" element={<PartsPage />} />
-      <Route path="/ui/bom/:pn" element={<BomPage />} />
-    </Routes>
+    <div>
+      <nav className="p-2 border-bottom">
+        <a className="me-3" href="/app">Home</a>
+        <Link className="me-3" to="/ui/parts">Parts</Link>
+      </nav>
+      <div className="container py-3">
+        <Outlet />
+      </div>
+    </div>
   )
 }
