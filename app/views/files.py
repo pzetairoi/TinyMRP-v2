@@ -46,6 +46,7 @@ def part_images():
     q = {"part_number": pn, "ext_group__in": ["png"]}
     if rev: q["revision"] = rev
     docs = list(PartFile.objects(**q).order_by("-mtime", "path"))
+    print("DOCS",docs)
 
     if not rev and docs:
         latest_rev = docs[0].revision
@@ -81,4 +82,5 @@ def part_images():
             "group": d.ext_group,
             "mtime": d.mtime.isoformat() if d.mtime else None,
         })
+        print(out)
     return jsonify(out)
