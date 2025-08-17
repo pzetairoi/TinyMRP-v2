@@ -74,6 +74,11 @@ def create_app(config_object=None):
     app.config.setdefault("WTF_CSRF_ENABLED", True)
     app.config.setdefault("SECURITY_LOGOUT_METHODS", ["POST"])  # explicit
     app.config.setdefault("SECURITY_POST_LOGOUT_VIEW", "/login")  # where to go after logout
+    
+    # Optional: file roots and hash max bytes
+    app.config["FILE_ROOTS"] = [p.strip() for p in (os.getenv("FILE_ROOTS") or "").split(",") if p.strip()]
+    app.config["FILE_HASH_MAX_BYTES"] = int(os.getenv("FILE_HASH_MAX_BYTES") or "0")
+
 
     csrf.init_app(app)
     
@@ -134,6 +139,11 @@ def create_app(config_object=None):
     app.register_blueprint(parts_api_bp)
     app.register_blueprint(bom_tree_api_bp)
     app.register_blueprint(whereused_api_bp)
+    
+    # Importer views for BOM uploads
+    from app.views.importer import bp as importer_bp
+    app.register_blueprint(importer_bp)
+
     
 
     from .cli import init_app as init_cli

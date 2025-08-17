@@ -7,6 +7,13 @@ from .models.auth import User, Role
 from .models.part import Part
 from .models.bom import BOMLink
 
+# Import necessary extensions for zip import functionality
+from app.services.import_zip import import_bom_zip
+
+from flask import current_app
+
+
+
 @click.group()
 def user():
     """User management commands"""
@@ -352,3 +359,68 @@ def seed_demo(scale, tag, random_seed):
                f"parts={n_parts}, bom_links={n_links}, common/top where-used: {hot[:5]}")
     
     
+###########################################
+## Import utilities for ZIP uploads
+
+@click.group()
+def importcmd():
+    """Import utilities"""
+
+@importcmd.command("zip")
+@click.option("--file", "path", required=True, help="Path to ZIP file")
+@click.option("--tag", default="upload-cli")
+@with_appcontext
+def import_zip_cmd(path, tag):
+    with open(path, "rb") as f:
+        result = import_bom_zip(f.read(), path, seed_tag=tag)
+    click.echo(result)
+
+def init_app(app):
+    # keep your existing registrations...
+    app.cli.add_command(importcmd, "import")  # flask import zip --file ...
+    
+    
+    
+################################################################
+#File discovery commands
+
+
+import click
+from flask.cli import with_appcontext
+from app.services.filescan import discover_part_files, upsert_part_files
+from app.models.part import Part
+
+@click.group()
+def files():
+    """File discovery commands"""
+
+@files.command("scan-one")
+@click.option("--pn", required=True, help="Part number")
+@click.option("--rev", required=True, help="Revision")
+@with_appcontext
+def scan_one(pn, rev):
+    roots = current_app.config.get("FILE_ROOTS", [])
+    limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0))
+    recs = discover_part_files(pn, rev, roots, hash_limit_bytes=limit)
+    ins = upsert_part_files(recs)
+    click.echo({"inserted": ins, "found": len(recs)})
+
+@files.command("scan-all")
+@click.option("--with-empty-rev", is_flag=True, default=False, help="Also scan parts without revision")
+@with_appcontext
+def scan_all(with_empty_rev):
+    roots = current_app.config.get("FILE_ROOTS", [])
+    limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0))
+    total_found = total_inserted = 0
+    for p in Part.objects.only("part_number","revision"):
+        rev = (p.revision or "").strip()
+        if not rev and not with_empty_rev:
+            continue
+        recs = discover_part_files(p.part_number, rev or "", roots, hash_limit_bytes=limit)
+        total_found += len(recs)
+        total_inserted += upsert_part_files(recs)
+    click.echo({"found": total_found, "inserted": total_inserted})
+
+def init_app(app):
+    # keep existing registrations...
+    app.cli.add_command(files)

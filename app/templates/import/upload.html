@@ -1,0 +1,17 @@
+{% extends "security/base.html" %}
+{% block title %}Import BOM{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h4 class="mb-3">Import BOM (ZIP)</h4>
+  <form action="{{ url_for('importer.upload_post') }}" method="post" enctype="multipart/form-data">
+    <div class="mb-3">
+      <label class="form-label">Choose ZIP file</label>
+      <input class="form-control" type="file" name="file" accept=".zip" required>
+    </div>
+    <button class="btn btn-primary">Upload & Import</button>
+  </form>
+  <p class="text-muted mt-3">
+    Expected ZIP contents: <code>*_FLATBOM.txt</code> (lines of dictionaries) and <code>*_TREEBOM.txt</code> (tab-separated tree).
+  </p>
+</div>
+{% endblock %}
