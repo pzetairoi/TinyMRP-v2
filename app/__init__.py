@@ -21,26 +21,26 @@ import os, json
 import json as _json
 
 
-def _find_manifest_path(static_folder: str):
-    candidates = [
+def _find_manifest(static_folder: str):
+    cands = [
         os.path.join(static_folder, "parts-ui", "manifest.json"),
-        os.path.join(static_folder, "parts-ui", ".vite", "manifest.json"),  # <-- also check .vite
+        os.path.join(static_folder, "parts-ui", ".vite", "manifest.json"),
     ]
-    for p in candidates:
+    for p in cands:
         if os.path.exists(p):
             return p
     return None
 
 def _load_vite_manifest(app):
-    path = _find_manifest_path(app.static_folder)
+    path = _find_manifest(app.static_folder)
+    app.config["VITE_MANIFEST_PATH"] = path
     if path:
         with open(path, "r", encoding="utf-8") as f:
             app.config["VITE_MANIFEST"] = json.load(f)
-        app.config["VITE_MANIFEST_PATH"] = path
     else:
         app.config["VITE_MANIFEST"] = None
-        app.config["VITE_MANIFEST_PATH"] = None
-    print("VITE_MANIFEST loaded:", bool(app.config["VITE_MANIFEST"]), "path:", app.config["VITE_MANIFEST_PATH"])
+    # Debug
+    print("VITE_MANIFEST loaded:", bool(app.config["VITE_MANIFEST"]), "path:", path)
 
 
 
