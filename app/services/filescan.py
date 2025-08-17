@@ -55,6 +55,7 @@ def discover_part_files(part_number: str, revision: str, roots: Iterable[str], h
     for root in roots or []:
         for ext_group, exts in EXT_MAP.items():
             folder = os.path.join(root, ext_group)
+            print(folder)
             if not os.path.isdir(folder):
                 continue
             try:

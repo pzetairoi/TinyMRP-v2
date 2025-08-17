@@ -1,19 +1,22 @@
 from datetime import datetime
 from mongoengine import Document, StringField, DateTimeField, IntField, DictField
 
-DB_ALIAS = "tinymrp-v2"  # keep aligned with your other models
+DB_ALIAS = "tinymrp-v2"
 
 class PartFile(Document):
-    part_number = StringField(required=True)      # e.g., "AWS-B-008968"
-    revision    = StringField(default="")         # normalized (e.g., "A", "1")
+    part_number = StringField(required=True)
+    revision    = StringField(default="")
     ext_group   = StringField(required=True, choices=["pdf","dxf","step","edr","png","3mf","other"])
-    ext         = StringField(required=True)      # actual extension, e.g., ".pdf"
-    path        = StringField(required=True)      # absolute OS/UNC path
-    size        = IntField()                      # bytes
-    sha256      = StringField()                   # optional checksum (see config below)
-    mtime       = DateTimeField()                 # file modification time (UTC)
-    source      = StringField(default="scan")     # "scan" | "upload" | etc
-    meta_info   = DictField()                     # room for viewers/derived data
+    ext         = StringField(required=True)           # ".pdf", ".png", ...
+    path        = StringField(required=True, unique=True)
+    rel_path    = StringField()                        # relative to the root folder
+    root_idx    = IntField(default=0)                  # index in FILE_ROOTS_JSON
+    size        = IntField()
+    sha256      = StringField()
+    mtime       = DateTimeField()
+    content_type= StringField()
+    source      = StringField(default="scan")
+    meta_info   = DictField()
     discovered_at = DateTimeField(default=datetime.utcnow)
 
     meta = {
@@ -21,6 +24,6 @@ class PartFile(Document):
         "db_alias": DB_ALIAS,
         "indexes": [
             {"fields": ["part_number", "revision", "ext_group"]},
-            {"fields": ["path"], "unique": True},
+            "rel_path",
         ],
     }

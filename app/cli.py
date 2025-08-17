@@ -421,6 +421,65 @@ def scan_all(with_empty_rev):
         total_inserted += upsert_part_files(recs)
     click.echo({"found": total_found, "inserted": total_inserted})
 
+
+
+
+
+##############################################
+
+import os
+import click
+from flask.cli import with_appcontext
+from flask import current_app
+from app.models.artifact import PartFile
+
+@click.group()
+def files():
+    """File utilities"""
+
+@files.command("backfill-paths")
+@with_appcontext
+def backfill_paths():
+    roots = current_app.config.get("FILE_ROOTS_JSON") or []
+    print("rppts", roots)
+    count = 0
+    for d in PartFile.objects():
+        if getattr(d, "rel_path", None) and getattr(d, "root_idx", None) is not None:
+            continue
+        p = getattr(d, "path", "")
+        if not p:
+            continue
+        best_idx = None
+        best_rel = None
+        print("rppts", roots)
+        for i, r in enumerate(roots):
+            base = r.get("local") or ""
+            if not base:
+                continue
+            try:
+                rp = os.path.relpath(p, base)
+                # if relpath didn’t escape (‘..’), accept
+                if not rp.startswith(".."):
+                    best_idx = i
+                    best_rel = rp.replace("\\", "/")
+                    break
+            except Exception:
+                continue
+        if best_idx is not None:
+            d.root_idx = best_idx
+            d.rel_path = best_rel
+            d.save()
+            count += 1
+    click.echo(f"Backfilled {count} documents")
+    
+    
+    
+    ###################################
+
+
+
+
+
 def init_app(app):
     # keep existing registrations...
     app.cli.add_command(files)
