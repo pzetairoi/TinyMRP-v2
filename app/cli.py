@@ -476,7 +476,42 @@ def backfill_paths():
     
     ###################################
 
+import click, os
+from flask.cli import with_appcontext
+from flask import current_app
+from app.services.filescan import discover_part_files, upsert_part_files
+from app.models.artifact import PartFile
 
+@click.group()
+def files():
+    """File utilities"""
+
+@files.command("scan-one")
+@click.option("--pn", required=True)
+@click.option("--rev", required=True)
+@with_appcontext
+def scan_one(pn, rev):
+    roots = current_app.config.get("FILE_ROOTS_JSON") or []
+    limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0) or 0)
+    recs = discover_part_files(pn, rev, roots, hash_limit_bytes=limit)
+    ins = upsert_part_files(recs)
+    click.echo({"found": len(recs), "inserted": ins})
+
+@files.command("scan-all")
+@with_appcontext
+def scan_all():
+    from app.models.part import Part
+    roots = current_app.config.get("FILE_ROOTS_JSON") or []
+    limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0) or 0)
+    total_found = total_inserted = 0
+    for p in Part.objects.only("part_number","revision"):
+        rev = (p.revision or "").strip()
+        if not rev:
+            continue
+        recs = discover_part_files(p.part_number, rev, roots, hash_limit_bytes=limit)
+        total_found += len(recs)
+        total_inserted += upsert_part_files(recs)
+    click.echo({"found": total_found, "inserted": total_inserted})
 
 
 

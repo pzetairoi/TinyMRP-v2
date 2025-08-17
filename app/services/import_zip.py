@@ -178,12 +178,11 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 created_links += 1
                 
     # 3) Discover and register artifacts for all parts with a known revision
-    roots = current_app.config.get("FILE_ROOTS", []) if current_app else []
-    hash_limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0)) if current_app else 0
-
+    roots = current_app.config.get("FILE_ROOTS_JSON") or []
+    hash_limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0) or 0)
     artifact_inserts = 0
+
     if roots:
-        # Collect candidates: (pn, revision). Prefer revision from FLATBOM; if not present, skip.
         seen = set()
         for pn, norm in part_props.items():
             rev = (norm.get("revision") or "").strip()

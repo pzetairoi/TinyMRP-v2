@@ -1,27 +1,19 @@
-import os, re, hashlib
+# app/services/filescan.py
+import os, re, hashlib, mimetypes
 from datetime import datetime, timezone
 from typing import Dict, List, Iterable
 from app.models.artifact import PartFile
 
-# Folder names we scan (under each root) -> extension variants we accept
+# Subfolder name -> allowed extensions
 EXT_MAP: Dict[str, List[str]] = {
     "pdf":  [".pdf"],
     "dxf":  [".dxf"],
     "step": [".step", ".stp"],
-    "edr":  [".eprt", ".easm", ".edrw", ".eprtx", ".easmtx", ".edrwt"],  # cover eDrawings variants
+    "edr":  [".eprt", ".easm", ".edrw", ".eprtx", ".easmtx", ".edrwt"],
     "png":  [".png"],
     "3mf":  [".3mf"],
+    # add more if needed
 }
-
-def _norm(s: str) -> str:
-    return (s or "").strip()
-
-def _norm_casefold(s: str) -> str:
-    return _norm(s).casefold()  # robust case-insensitive normalization
-
-def _stem_for_match(part_number: str, revision: str) -> str:
-    # filenames like PARTNUMBER_REV_REVISION.ext
-    return f"{_norm(part_number)}_REV_{_norm(revision)}"
 
 def _sha256(path: str, limit_bytes: int) -> str:
     if limit_bytes <= 0:
@@ -38,85 +30,104 @@ def _sha256(path: str, limit_bytes: int) -> str:
     except Exception:
         return ""
 
-def discover_part_files(part_number: str, revision: str, roots: Iterable[str], hash_limit_bytes: int = 0) -> List[Dict]:
+def _guess_ct(path: str) -> str:
+    ct, _ = mimetypes.guess_type(path)
+    return ct or "application/octet-stream"
+
+def _build_patterns(pn: str, rev: str):
     """
-    Scan configured roots and their typed subfolders for any file whose
-    case-insensitive stem equals f"{PN}_REV_{REV}" and extension is in EXT_MAP.
-    Returns a list of dicts ready to upsert into PartFile.
+    Return regexes (case-insensitive) for filename stem. We try strict first,
+    then a slightly relaxed variant that allows suffixes like '_REV_A_v2' etc.
     """
-    pn_norm  = _norm(part_number)
-    rev_norm = _norm(revision)
-    if not pn_norm or not rev_norm:
+    esc_pn  = re.escape(pn)
+    esc_rev = re.escape(rev)
+    strict  = re.compile(rf'^{esc_pn}_REV_{esc_rev}$', re.IGNORECASE)
+    loose   = re.compile(rf'^{esc_pn}_REV_{esc_rev}(?:[\s_\-].*)?$', re.IGNORECASE)
+    return strict, loose
+
+def _norm_path(p: str) -> str:
+    return p.replace("\\", "/")
+
+def _safe_rel(path: str, root: str) -> str | None:
+    try:
+        rp = os.path.relpath(path, root)
+        if rp.startswith(".."):
+            return None
+        return _norm_path(rp)
+    except Exception:
+        return None
+
+def discover_part_files(part_number: str, revision: str, roots: Iterable[dict], hash_limit_bytes: int = 0) -> List[Dict]:
+    pn = (part_number or "").strip()
+    rv = (revision or "").strip()
+    if not pn or not rv:
         return []
 
-    wanted_stem = _stem_for_match(pn_norm, rev_norm).casefold()
+    strict, loose = _build_patterns(pn, rv)
     found: List[Dict] = []
 
-    for root in roots or []:
+    for idx, root in enumerate(roots or []):
+        base = (root.get("local") or "").strip()
+        if not base or not os.path.isdir(base):
+            continue
+
         for ext_group, exts in EXT_MAP.items():
-            folder = os.path.join(root, ext_group)
-            print(folder)
+            folder = os.path.join(base, ext_group)
             if not os.path.isdir(folder):
                 continue
-            try:
-                with os.scandir(folder) as it:
-                    for entry in it:
-                        if not entry.is_file():
-                            continue
-                        name_cf = entry.name.casefold()
-                        # Quick ext filter
-                        if not any(name_cf.endswith(e) for e in [x.lower() for x in exts]):
-                            continue
-                        # Match stem (before last dot)
-                        stem_cf = name_cf.rsplit(".", 1)[0]
-                        if stem_cf != wanted_stem:
-                            continue
-                        p = entry.path
-                        try:
-                            stat = entry.stat()
-                            mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-                            ext = os.path.splitext(entry.name)[1]
-                            record = {
-                                "part_number": pn_norm,
-                                "revision": rev_norm,
-                                "ext_group": ext_group,
-                                "ext": ext.lower(),
-                                "path": p,
-                                "size": stat.st_size,
-                                "mtime": mtime,
-                                "sha256": _sha256(p, hash_limit_bytes) if hash_limit_bytes else "",
-                                "source": "scan",
-                                "meta_info": {},
-                            }
-                            found.append(record)
-                        except Exception:
-                            # skip unreadable entries
-                            continue
-            except FileNotFoundError:
-                continue
+
+            # Recurse in subfolders: png/**/*
+            for dirpath, _, filenames in os.walk(folder):
+                for name in filenames:
+                    name_cf = name.casefold()
+                    if not any(name_cf.endswith(e) for e in [x.lower() for x in exts]):
+                        continue
+                    stem = os.path.splitext(name)[0]
+                    # First try strict, then loose
+                    if not strict.match(stem) and not loose.match(stem):
+                        continue
+
+                    full = os.path.join(dirpath, name)
+                    try:
+                        st = os.stat(full)
+                    except OSError:
+                        continue
+
+                    rel_path = _safe_rel(full, base)
+                    if rel_path is None:
+                        continue
+
+                    rec = {
+                        "part_number": pn,
+                        "revision": rv,
+                        "ext_group": ext_group,
+                        "ext": os.path.splitext(name)[1].lower(),
+                        "path": full,
+                        "rel_path": rel_path,  # includes the ext_group, e.g. "png/PN_REV_A.png" or "png/sub/f.png"
+                        "root_idx": idx,
+                        "size": st.st_size,
+                        "mtime": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc),
+                        "sha256": _sha256(full, hash_limit_bytes) if hash_limit_bytes else "",
+                        "content_type": _guess_ct(full),
+                        "source": "scan",
+                        "meta_info": {},
+                    }
+                    found.append(rec)
     return found
 
 def upsert_part_files(records: List[Dict]) -> int:
-    """
-    Upsert by unique 'path'. If exists, update metadata; otherwise insert.
-    Returns number of inserts.
-    """
     inserts = 0
     for r in records:
         doc = PartFile.objects(path=r["path"]).first()
         if doc:
-            doc.part_number = r["part_number"]
-            doc.revision    = r["revision"]
-            doc.ext_group   = r["ext_group"]
-            doc.ext         = r["ext"]
-            doc.size        = r.get("size")
-            doc.mtime       = r.get("mtime")
+            # update metadata
+            for k in ("part_number","revision","ext_group","ext","rel_path","root_idx","size","mtime","content_type"):
+                setattr(doc, k, r.get(k))
             if r.get("sha256"):
                 doc.sha256 = r["sha256"]
-            doc.source      = r.get("source") or doc.source
-            meta            = doc.meta_info or {}
+            meta = doc.meta_info or {}
             meta.update(r.get("meta_info") or {})
-            doc.meta_info   = meta
+            doc.meta_info = meta
             doc.save()
         else:
             PartFile(**r).save()
