@@ -27,14 +27,6 @@ def _http_bases_for(doc: PartFile) -> list[str]:
         return [h for h in http if isinstance(h, str) and h.strip()]
     return []
 
-def _filesvc_url(doc: PartFile) -> str | None:
-    base = (current_app.config.get("FILESVC_PUBLIC_BASE") or "").strip()
-    rel  = getattr(doc, "rel_path", None)
-    idx  = getattr(doc, "root_idx", None)
-    if not base or rel is None or idx is None:
-        return None
-    return f"{base.rstrip('/')}/{idx}/{rel}"
-
 @bp.get("/part_images")
 @csrf.exempt
 def part_images():
@@ -44,9 +36,9 @@ def part_images():
         return jsonify([])
 
     q = {"part_number": pn, "ext_group__in": ["png"]}
-    if rev: q["revision"] = rev
+    if rev:
+        q["revision"] = rev
     docs = list(PartFile.objects(**q).order_by("-mtime", "path"))
-    print("Docs found:", docs)
 
     if not rev and docs:
         latest_rev = docs[0].revision
@@ -55,22 +47,14 @@ def part_images():
     out = []
     for d in docs:
         urls: list[str] = []
-        # 1) external HTTP bases (one or many)
         for base in _http_bases_for(d):
-            rel = getattr(d, "rel_path", None)
+            rel = getattr(d, "rel_path", "")
             if rel:
                 urls.append(f"{base.rstrip('/')}/{rel}")
-        # 2) micro-service (if configured)
-        fs = _filesvc_url(d)
-        if fs:
-            urls.append(fs)
-        # 3) app-served token fallback (always)
         urls.append(_token_url(getattr(d, "path", "")))
-        # 4) any extra externals saved
         for extra in (getattr(d, "meta_info", {}) or {}).get("external_urls", []):
             if isinstance(extra, str) and extra and extra not in urls:
                 urls.append(extra)
-
         out.append({
             "urls": urls,
             "best": urls[0] if urls else "",
