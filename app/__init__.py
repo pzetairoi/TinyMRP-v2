@@ -18,6 +18,9 @@ from .extensions import csrf, init_mongo # Import CSRF and MongoDB init
 security = None
 
 import os, json
+import json as _json
+
+
 def _find_manifest_path(static_folder: str):
     candidates = [
         os.path.join(static_folder, "parts-ui", "manifest.json"),
@@ -78,6 +81,34 @@ def create_app(config_object=None):
     # Optional: file roots and hash max bytes
     app.config["FILE_ROOTS"] = [p.strip() for p in (os.getenv("FILE_ROOTS") or "").split(",") if p.strip()]
     app.config["FILE_HASH_MAX_BYTES"] = int(os.getenv("FILE_HASH_MAX_BYTES") or "0")
+    app.config["FILESVC_PUBLIC_BASE"] = os.getenv("FILESVC_PUBLIC_BASE", "").strip()
+
+    
+        
+    # Roots: prefer JSON; if not present, fallback to FILE_ROOTS/FILE_EXTERNAL_BASE_URLS compatibility
+    try:
+        roots = _json.loads(os.getenv("FILE_ROOTS_JSON") or "[]")
+        if isinstance(roots, list) and roots:
+            app.config["FILE_ROOTS_JSON"] = roots
+        else:
+            app.config["FILE_ROOTS_JSON"] = []
+    except Exception:
+        app.config["FILE_ROOTS_JSON"] = []
+
+    # Compatibility (opcional)
+    legacy_roots = [p.strip() for p in (os.getenv("FILE_ROOTS") or "").split(",") if p.strip()]
+    legacy_map = {}
+    try:
+        legacy_map = _json.loads(os.getenv("FILE_EXTERNAL_BASE_URLS") or "{}")
+    except Exception:
+        legacy_map = {}
+    if legacy_roots and not app.config["FILE_ROOTS_JSON"]:
+        app.config["FILE_ROOTS_JSON"] = [
+            {"local": legacy_roots[i], "http": legacy_map.get(str(i), "")} for i in range(len(legacy_roots))
+        ]
+
+
+
 
 
     csrf.init_app(app)

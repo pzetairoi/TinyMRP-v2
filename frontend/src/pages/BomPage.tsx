@@ -7,6 +7,10 @@ import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
 
+// Import the ImageStrip component to display images for the part
+import ImageStrip from "../components/ImageStrip"
+
+
 // Backend must return Where-Used rows as objects with these keys:
 // { parent_pn, parent_desc, qty, uom, alt_group }
 // See app/views/whereused.py in the backend patch.
@@ -131,7 +135,10 @@ export default function BomPage() {
 
   return (
     <div className="p-3">
-      <h5 className="mb-3">BOM · {pn}</h5>
+      <h5 className="mb-2">BOM · {pn}</h5>
+
+      {/* Imágenes del PN (usa última revisión si no se especifica) */}
+      <ImageStrip pn={pn} />
 
       {/* Tree */}
       <div className="mb-4">
