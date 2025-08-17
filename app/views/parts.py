@@ -100,28 +100,42 @@ def part_detail():
         "alt_group": l.alt_group or "",
     } for l in pulinks]
 
-    # Files & images
-    files_q = {"part_number": pn}
-    if rev:
-        files_q["revision"] = rev
+    # Files & images — prefer empty revision if the part's own revision is ""
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
-    files = []
-    for f in PartFile.objects(**files_q).order_by("ext_group", "rel_path"):
-        urls = []
-        if http_base and f.rel_path:
-            urls.append(f"{http_base}/{f.rel_path}")
-        urls.append(_token_url(f.path))
-        files.append({
-            "ext_group": f.ext_group,
-            "ext": f.ext,
-            "rel_path": f.rel_path,
-            "size": f.size,
-            "mtime": f.mtime.isoformat() if f.mtime else None,
-            "url": urls[0],
-            "urls": urls,
-        })
+    files: list[dict] = []
+
+    def add_files(q):
+        for f in PartFile.objects(**q).order_by("ext_group", "rel_path"):
+            urls = []
+            if http_base and f.rel_path:
+                urls.append(f"{http_base}/{f.rel_path}")
+            tok = base64.urlsafe_b64encode((f.path or "").encode("utf-8")).decode("ascii")
+            urls.append(f"/files/view/{tok}")
+            files.append({
+                "ext_group": f.ext_group,
+                "ext": f.ext,
+                "rel_path": f.rel_path,
+                "size": f.size,
+                "mtime": f.mtime.isoformat() if f.mtime else None,
+                "url": urls[0],
+                "urls": urls,
+            })
+
+    if rev == "":
+        add_files({"part_number": pn, "revision": ""})
+    else:
+        # try exact rev first; if none, prefer empty; then fall back to latest
+        add_files({"part_number": pn, "revision": rev})
+        if not files:
+            add_files({"part_number": pn, "revision": ""})
+        if not files:
+            all_docs = list(PartFile.objects(part_number=pn).order_by("-mtime", "path"))
+            if all_docs:
+                latest = (all_docs[0].revision or "")
+                add_files({"part_number": pn, "revision": latest})
 
     images = [x for x in files if x["ext_group"] == "png"]
+
 
     return jsonify({
         "part": {

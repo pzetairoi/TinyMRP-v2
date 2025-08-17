@@ -1,3 +1,4 @@
+# app/services/filescan.py
 import os, re, hashlib, mimetypes
 from datetime import datetime, timezone
 from typing import Dict, List
@@ -9,7 +10,7 @@ EXT_MAP: Dict[str, List[str]] = {
     "dxf":  [".dxf"],
     "step": [".step", ".stp"],
     "edr":  [".eprt", ".easm", ".edrw", ".eprtx", ".easmtx", ".edrwt"],
-    "png":  [".png"],  # add ".jpg", ".jpeg" here if you need them
+    "png":  [".png"],   # add ".jpg", ".jpeg" if needed
     "3mf":  [".3mf"],
 }
 
@@ -28,11 +29,29 @@ def _guess_ct(path: str) -> str:
     ct, _ = mimetypes.guess_type(path)
     return ct or "application/octet-stream"
 
-def _patterns(pn: str, rev: str):
-    esc_pn, esc_rev = re.escape(pn), re.escape(rev)
-    strict = re.compile(rf'^{esc_pn}_REV_{esc_rev}$', re.IGNORECASE)
-    loose  = re.compile(rf'^{esc_pn}_REV_{esc_rev}(?:[\s_\-].*)?$', re.IGNORECASE)
-    return strict, loose
+def _match_stem(pn: str, rev: str, stem: str) -> bool:
+    """
+    True if filename 'stem' corresponds to (pn, rev).
+    - Normal case: <PN>_REV_<REV> (strict), but accept suffixes: ...[_ -]<anything>
+    - Empty rev: accept either:
+        * exactly <PN>
+        * <PN>_REV   (no trailing underscore)
+        * <PN>_REV_  (trailing underscore)
+      and allow suffixes after those with [_ -]...
+    All case-insensitive.
+    """
+    esc_pn = re.escape(pn)
+    if rev:
+        esc_rev = re.escape(rev)
+        strict  = re.compile(rf'^{esc_pn}_REV_{esc_rev}$', re.IGNORECASE)
+        loose   = re.compile(rf'^{esc_pn}_REV_{esc_rev}(?:[\s_\-].+)?$', re.IGNORECASE)
+        return bool(strict.match(stem) or loose.match(stem))
+    else:
+        # empty revision
+        pat_exact = re.compile(rf'^{esc_pn}$', re.IGNORECASE)
+        pat_rev   = re.compile(rf'^{esc_pn}_REV_?$', re.IGNORECASE)            # PN_REV or PN_REV_
+        pat_loose = re.compile(rf'^(?:{esc_pn}|{esc_pn}_REV_?)(?:[\s_\-].+)?$', re.IGNORECASE)
+        return bool(pat_exact.match(stem) or pat_rev.match(stem) or pat_loose.match(stem))
 
 def _rel_from_root(full_path: str, root: str) -> str | None:
     try:
@@ -44,13 +63,12 @@ def _rel_from_root(full_path: str, root: str) -> str | None:
 
 def discover_part_files_single_root(part_number: str, revision: str) -> List[Dict]:
     pn = (part_number or "").strip()
-    rv = (revision or "").strip()
-    if not pn or not rv: return []
+    rv = (revision or "")  # allow empty string intentionally
+    if not pn: return []
 
     root = (current_app.config.get("FILE_ROOT_LOCAL") or "").strip()
     if not root or not os.path.isdir(root): return []
 
-    strict, loose = _patterns(pn, rv)
     found: List[Dict] = []
 
     for ext_group, exts in EXT_MAP.items():
@@ -62,7 +80,8 @@ def discover_part_files_single_root(part_number: str, revision: str) -> List[Dic
                 name_cf = name.casefold()
                 if not any(name_cf.endswith(e) for e in [x.lower() for x in exts]): continue
                 stem = os.path.splitext(name)[0]
-                if not strict.match(stem) and not loose.match(stem): continue
+                if not _match_stem(pn, rv, stem):
+                    continue
 
                 full = os.path.join(dirpath, name)
                 try: st = os.stat(full)
@@ -73,11 +92,11 @@ def discover_part_files_single_root(part_number: str, revision: str) -> List[Dic
 
                 rec = {
                     "part_number": pn,
-                    "revision": rv,
+                    "revision": rv,  # may be ""
                     "ext_group": ext_group,
                     "ext": os.path.splitext(name)[1].lower(),
                     "path": full,
-                    "rel_path": rel,  # e.g. "png/AWS-B-008968_REV_1.png" or "png/sub/x.png"
+                    "rel_path": rel,
                     "size": st.st_size,
                     "mtime": datetime.fromtimestamp(st.st_mtime, tz=timezone.utc),
                     "sha256": _sha256(full, int(current_app.config.get("FILE_HASH_MAX_BYTES", 0) or 0)),
