@@ -1,39 +1,22 @@
-# app/views/fileserve.py
 import os, base64, mimetypes
 from flask import Blueprint, current_app, send_file, abort
 
 bp = Blueprint("fileserve", __name__, url_prefix="/files")
 
 def _allowed_path(abs_path: str) -> bool:
-    """
-    Returns True if abs_path is inside ANY configured FILE_ROOTS_JSON[i].local.
-    Robust on Windows: tolerates different drives by skipping those comparisons.
-    """
     try:
         ap = os.path.abspath(abs_path)
+        base = os.path.abspath((current_app.config.get("FILE_ROOT_LOCAL") or "").strip())
+        if not base: return False
+        # Windows-safe comparison
+        ap_norm, base_norm = os.path.normcase(ap), os.path.normcase(base)
+        try:
+            return os.path.commonpath([ap_norm, base_norm]) == base_norm
+        except Exception:
+            # If drives differ, simple prefix fallback
+            return ap_norm.startswith(base_norm)
     except Exception:
         return False
-
-    roots = current_app.config.get("FILE_ROOTS_JSON") or []
-    for r in roots:
-        local = (r.get("local") or "").strip()
-        if not local:
-            continue
-        try:
-            base = os.path.abspath(local)
-            # Normalize case for Windows comparisons
-            ap_norm   = os.path.normcase(ap)
-            base_norm = os.path.normcase(base)
-            try:
-                common = os.path.commonpath([ap_norm, base_norm])
-            except ValueError:
-                # Different drives (e.g., Z:\ vs \\server\), just skip this root
-                continue
-            if common == base_norm:
-                return True
-        except Exception:
-            continue
-    return False
 
 @bp.get("/view/<token>")
 def view(token: str):

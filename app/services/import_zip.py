@@ -6,7 +6,7 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 
 # Import necessary services for file scanning and upserting
-from app.services.filescan import discover_part_files, upsert_part_files
+from app.services.filescan import discover_part_files_single_root, upsert_part_files
 
 from flask import current_app
 
@@ -177,23 +177,17 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 BOMLink(parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom="EA").save()
                 created_links += 1
                 
-    # 3) Discover and register artifacts for all parts with a known revision
-    roots = current_app.config.get("FILE_ROOTS_JSON") or []
-    hash_limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0) or 0)
-    artifact_inserts = 0
+    # 3) Discover and register artifacts for all parts 
+    from app.services.filescan import discover_part_files_single_root, upsert_part_files
 
-    if roots:
-        seen = set()
-        for pn, norm in part_props.items():
-            rev = (norm.get("revision") or "").strip()
-            if not rev:
-                continue
-            key = (pn, rev)
-            if key in seen:
-                continue
-            seen.add(key)
-            recs = discover_part_files(pn, rev, roots, hash_limit_bytes=hash_limit)
-            artifact_inserts += upsert_part_files(recs)
+    artifact_inserts = 0
+    for pn, norm in part_props.items():
+        rev = (norm.get("revision") or "").strip()
+        if not rev: continue
+        recs = discover_part_files_single_root(pn, rev)
+        artifact_inserts += upsert_part_files(recs)
+
+
 
     # root guess for convenience (top item in TREEBOM)
     root_pn = None

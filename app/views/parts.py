@@ -47,3 +47,93 @@ def parts_lazy():
     data = [{"part_number": p.part_number, "description": p.description or "", "category": p.category or ""} for p in docs]
 
     return jsonify({"data": data, "totalRecords": filtered})
+
+
+
+
+
+
+# app/views/parts.py (append at bottom)
+from flask import request, jsonify, abort, current_app
+from app.models.part import Part
+from app.models.bom import BOMLink
+from app.models.artifact import PartFile
+import base64
+
+def _token_url(path: str) -> str:
+    tok = base64.urlsafe_b64encode((path or "").encode("utf-8")).decode("ascii")
+    return f"/files/view/{tok}"
+
+@bp.get("/part_detail")
+@csrf.exempt  # GET only; CSRF not required
+def part_detail():
+    pn = (request.args.get("pn") or "").strip()
+    if not pn:
+        return jsonify({"error": "pn required"}), 400
+
+    p = Part.objects(part_number=pn).first()
+    if not p:
+        abort(404)
+
+    rev = (p.revision or "").strip()
+    # Children (one level)
+    links = list(BOMLink.objects(parent_pn=pn))
+    child_pns = [l.child_pn for l in links]
+    parts_map = {x.part_number: x for x in Part.objects(part_number__in=child_pns)}
+    children = [{
+        "child_pn": l.child_pn,
+        "child_desc": (parts_map.get(l.child_pn).description or "") if parts_map.get(l.child_pn) else "",
+        "qty": float(l.qty or 1.0),
+        "uom": l.uom or "EA",
+        "alt_group": l.alt_group or "",
+    } for l in links]
+
+    # Where-used (parents)
+    pulinks = list(BOMLink.objects(child_pn=pn))
+    parent_pns = [l.parent_pn for l in pulinks]
+    parents_map = {x.part_number: x for x in Part.objects(part_number__in=parent_pns)}
+    whereused = [{
+        "parent_pn": l.parent_pn,
+        "parent_desc": (parents_map.get(l.parent_pn).description or "") if parents_map.get(l.parent_pn) else "",
+        "qty": float(l.qty or 1.0),
+        "uom": l.uom or "EA",
+        "alt_group": l.alt_group or "",
+    } for l in pulinks]
+
+    # Files & images
+    files_q = {"part_number": pn}
+    if rev:
+        files_q["revision"] = rev
+    http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
+    files = []
+    for f in PartFile.objects(**files_q).order_by("ext_group", "rel_path"):
+        urls = []
+        if http_base and f.rel_path:
+            urls.append(f"{http_base}/{f.rel_path}")
+        urls.append(_token_url(f.path))
+        files.append({
+            "ext_group": f.ext_group,
+            "ext": f.ext,
+            "rel_path": f.rel_path,
+            "size": f.size,
+            "mtime": f.mtime.isoformat() if f.mtime else None,
+            "url": urls[0],
+            "urls": urls,
+        })
+
+    images = [x for x in files if x["ext_group"] == "png"]
+
+    return jsonify({
+        "part": {
+            "part_number": p.part_number,
+            "description": p.description or "",
+            "revision": rev,
+            "category": p.category or "",
+            "uom": p.uom or "EA",
+            "attrs": (p.attrs or {}),
+        },
+        "images": images,
+        "files": files,
+        "children": children,
+        "whereused": whereused,
+    })

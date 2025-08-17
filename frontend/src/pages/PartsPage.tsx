@@ -55,7 +55,8 @@ export default function PartsPage() {
       >
         <Column field="part_number" header="Part Number" sortable filter showFilterMenu={false}
         filterMatchMode="contains" filterMatchModeOptions={["contains"]}
-        body={(p) => <a href={`/ui/bom/${encodeURIComponent(p.part_number)}`}>{p.part_number}</a>} />
+        body={(p) => <a href={`/ui/part/${encodeURIComponent(p.part_number)}`}>{p.part_number}</a>} />
+
 
         <Column field="description" header="Description" sortable filter showFilterMenu={false}
                 filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
