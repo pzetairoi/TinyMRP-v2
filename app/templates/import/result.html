@@ -1,0 +1,19 @@
+{% extends "security/base.html" %}
+{% block title %}Import Result{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h4>Import Result</h4>
+  <dl class="row">
+    <dt class="col-sm-3">ZIP</dt><dd class="col-sm-9">{{ result.zip }}</dd>
+    <dt class="col-sm-3">Root</dt><dd class="col-sm-9">{{ result.root or '-' }}</dd>
+    <dt class="col-sm-3">Parts created</dt><dd class="col-sm-9">{{ result.parts_created }}</dd>
+    <dt class="col-sm-3">Parts updated</dt><dd class="col-sm-9">{{ result.parts_updated }}</dd>
+    <dt class="col-sm-3">Links created</dt><dd class="col-sm-9">{{ result.links_created }}</dd>
+    <dt class="col-sm-3">Links skipped</dt><dd class="col-sm-9">{{ result.links_skipped }}</dd>
+    <dt class="col-sm-3">Parts with properties</dt><dd class="col-sm-9">{{ result.parts_with_props }}</dd>
+  </dl>
+  {% if result.root %}
+    <a class="btn btn-outline-secondary" href="/ui/bom/{{ result.root|urlencode }}">Open BOM UI</a>
+  {% endif %}
+</div>
+{% endblock %}
