@@ -17,7 +17,7 @@ from .extensions import csrf, init_mongo # Import CSRF and MongoDB init
 
 security = None
 
-import os, json
+import os
 import json as _json
 
 
@@ -36,7 +36,7 @@ def _load_vite_manifest(app):
     app.config["VITE_MANIFEST_PATH"] = path
     if path:
         with open(path, "r", encoding="utf-8") as f:
-            app.config["VITE_MANIFEST"] = json.load(f)
+            app.config["VITE_MANIFEST"] = _json.load(f)
     else:
         app.config["VITE_MANIFEST"] = None
     # Debug
@@ -79,8 +79,11 @@ def create_app(config_object=None):
     app.config.setdefault("SECURITY_POST_LOGOUT_VIEW", "/login")  # where to go after logout
     
     # Optional: file roots and hash max bytes
-    app.config["FILE_ROOTS"] = [p.strip() for p in (os.getenv("FILE_ROOTS") or "").split(",") if p.strip()]
-    app.config["FILE_HASH_MAX_BYTES"] = int(os.getenv("FILE_HASH_MAX_BYTES") or "0")
+    # load FILE_ROOTS_JSON and optional FILESVC_PUBLIC_BASE
+    try:
+        app.config["FILE_ROOTS_JSON"] = _json.loads(os.getenv("FILE_ROOTS_JSON") or "[]")
+    except Exception:
+        app.config["FILE_ROOTS_JSON"] = []
     app.config["FILESVC_PUBLIC_BASE"] = os.getenv("FILESVC_PUBLIC_BASE", "").strip()
 
     
@@ -174,8 +177,16 @@ def create_app(config_object=None):
     # Importer views for BOM uploads
     from app.views.importer import bp as importer_bp
     app.register_blueprint(importer_bp)
-
     
+    # Register file serving blueprints
+    from app.views.files import bp as files_api_bp
+    app.register_blueprint(files_api_bp)
+
+    from app.views.fileserve import bp as fileserve_bp
+    app.register_blueprint(fileserve_bp)
+
+    print("FILE_ROOTS_JSON count:", len(app.config["FILE_ROOTS_JSON"]))
+
 
     from .cli import init_app as init_cli
     init_cli(app)
