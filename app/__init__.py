@@ -78,38 +78,12 @@ def create_app(config_object=None):
     app.config.setdefault("SECURITY_LOGOUT_METHODS", ["POST"])  # explicit
     app.config.setdefault("SECURITY_POST_LOGOUT_VIEW", "/login")  # where to go after logout
     
-    # Optional: file roots and hash max bytes
-    # load FILE_ROOTS_JSON and optional FILESVC_PUBLIC_BASE
-    try:
-        app.config["FILE_ROOTS_JSON"] = _json.loads(os.getenv("FILE_ROOTS_JSON") or "[]")
-    except Exception:
-        app.config["FILE_ROOTS_JSON"] = []
-    app.config["FILESVC_PUBLIC_BASE"] = os.getenv("FILESVC_PUBLIC_BASE", "").strip()
+    #Simple files config
+    app.config["FILE_ROOT_LOCAL"] = (os.getenv("FILE_ROOT_LOCAL") or "").strip()
+    app.config["FILE_ROOT_HTTP"]  = (os.getenv("FILE_ROOT_HTTP")  or "").strip()
+    app.config["FILE_HASH_MAX_BYTES"] = int(os.getenv("FILE_HASH_MAX_BYTES") or "0")
 
-    
-        
-    # Roots: prefer JSON; if not present, fallback to FILE_ROOTS/FILE_EXTERNAL_BASE_URLS compatibility
-    try:
-        roots = _json.loads(os.getenv("FILE_ROOTS_JSON") or "[]")
-        if isinstance(roots, list) and roots:
-            app.config["FILE_ROOTS_JSON"] = roots
-        else:
-            app.config["FILE_ROOTS_JSON"] = []
-    except Exception:
-        app.config["FILE_ROOTS_JSON"] = []
-
-    # Compatibility (opcional)
-    legacy_roots = [p.strip() for p in (os.getenv("FILE_ROOTS") or "").split(",") if p.strip()]
-    legacy_map = {}
-    try:
-        legacy_map = _json.loads(os.getenv("FILE_EXTERNAL_BASE_URLS") or "{}")
-    except Exception:
-        legacy_map = {}
-    if legacy_roots and not app.config["FILE_ROOTS_JSON"]:
-        app.config["FILE_ROOTS_JSON"] = [
-            {"local": legacy_roots[i], "http": legacy_map.get(str(i), "")} for i in range(len(legacy_roots))
-        ]
-
+    print("FILES: local=", app.config["FILE_ROOT_LOCAL"], "http=", app.config["FILE_ROOT_HTTP"])
 
 
 
@@ -185,7 +159,7 @@ def create_app(config_object=None):
     from app.views.fileserve import bp as fileserve_bp
     app.register_blueprint(fileserve_bp)
 
-    print("FILE_ROOTS_JSON count:", len(app.config["FILE_ROOTS_JSON"]))
+    
 
 
     from .cli import init_app as init_cli

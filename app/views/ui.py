@@ -63,3 +63,11 @@ def bom_ui(pn):
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
     return render_template("ui/react_shell.html", title=f"BOM · {pn}", assets=assets, initial={"pn": pn})
+
+
+@bp.get("/part/<path:pn>")
+def part_ui(pn):
+    assets = vite_assets()
+    if not assets["js"]:
+        abort(404, "React build missing. Run `npm run build` in /frontend.")
+    return render_template("ui/react_shell.html", title=f"Part · {pn}", assets=assets, initial={"pn": pn})

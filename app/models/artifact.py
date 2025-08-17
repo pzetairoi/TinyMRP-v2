@@ -1,4 +1,3 @@
-# app/models/artifact.py
 from datetime import datetime
 from mongoengine import Document, StringField, DateTimeField, IntField, DictField
 
@@ -10,8 +9,7 @@ class PartFile(Document):
     ext_group   = StringField(required=True, choices=["pdf","dxf","step","edr","png","3mf","other"])
     ext         = StringField(required=True)           # ".pdf", ".png", ...
     path        = StringField(required=True, unique=True)  # absolute OS/UNC path
-    rel_path    = StringField()                        # relative to FILE_ROOTS_JSON[i].local
-    root_idx    = IntField(default=0)                  # index in FILE_ROOTS_JSON
+    rel_path    = StringField()                        # path relative to FILE_ROOT_LOCAL
     size        = IntField()
     sha256      = StringField()
     mtime       = DateTimeField()

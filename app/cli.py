@@ -85,9 +85,6 @@ def seed_bom():
     click.echo("Seeded demo BOM links")
 
 
-def init_app(app):
-    app.cli.add_command(user)
-    app.cli.add_command(data)
 
 
 
@@ -375,111 +372,15 @@ def import_zip_cmd(path, tag):
         result = import_bom_zip(f.read(), path, seed_tag=tag)
     click.echo(result)
 
-def init_app(app):
-    # keep your existing registrations...
-    app.cli.add_command(importcmd, "import")  # flask import zip --file ...
-    
     
     
 ################################################################
 #File discovery commands
 
-
-import click
-from flask.cli import with_appcontext
-from app.services.filescan import discover_part_files, upsert_part_files
-from app.models.part import Part
-
-@click.group()
-def files():
-    """File discovery commands"""
-
-@files.command("scan-one")
-@click.option("--pn", required=True, help="Part number")
-@click.option("--rev", required=True, help="Revision")
-@with_appcontext
-def scan_one(pn, rev):
-    roots = current_app.config.get("FILE_ROOTS", [])
-    limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0))
-    recs = discover_part_files(pn, rev, roots, hash_limit_bytes=limit)
-    ins = upsert_part_files(recs)
-    click.echo({"inserted": ins, "found": len(recs)})
-
-@files.command("scan-all")
-@click.option("--with-empty-rev", is_flag=True, default=False, help="Also scan parts without revision")
-@with_appcontext
-def scan_all(with_empty_rev):
-    roots = current_app.config.get("FILE_ROOTS", [])
-    limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0))
-    total_found = total_inserted = 0
-    for p in Part.objects.only("part_number","revision"):
-        rev = (p.revision or "").strip()
-        if not rev and not with_empty_rev:
-            continue
-        recs = discover_part_files(p.part_number, rev or "", roots, hash_limit_bytes=limit)
-        total_found += len(recs)
-        total_inserted += upsert_part_files(recs)
-    click.echo({"found": total_found, "inserted": total_inserted})
-
-
-
-
-
-##############################################
-
-import os
-import click
-from flask.cli import with_appcontext
-from flask import current_app
-from app.models.artifact import PartFile
-
-@click.group()
-def files():
-    """File utilities"""
-
-@files.command("backfill-paths")
-@with_appcontext
-def backfill_paths():
-    roots = current_app.config.get("FILE_ROOTS_JSON") or []
-    print("rppts", roots)
-    count = 0
-    for d in PartFile.objects():
-        if getattr(d, "rel_path", None) and getattr(d, "root_idx", None) is not None:
-            continue
-        p = getattr(d, "path", "")
-        if not p:
-            continue
-        best_idx = None
-        best_rel = None
-        print("rppts", roots)
-        for i, r in enumerate(roots):
-            base = r.get("local") or ""
-            if not base:
-                continue
-            try:
-                rp = os.path.relpath(p, base)
-                # if relpath didn’t escape (‘..’), accept
-                if not rp.startswith(".."):
-                    best_idx = i
-                    best_rel = rp.replace("\\", "/")
-                    break
-            except Exception:
-                continue
-        if best_idx is not None:
-            d.root_idx = best_idx
-            d.rel_path = best_rel
-            d.save()
-            count += 1
-    click.echo(f"Backfilled {count} documents")
-    
-    
-    
-    ###################################
-
 import click, os
 from flask.cli import with_appcontext
 from flask import current_app
-from app.services.filescan import discover_part_files, upsert_part_files
+from app.services.filescan import discover_part_files_single_root, upsert_part_files
 from app.models.artifact import PartFile
 
 @click.group()
@@ -491,30 +392,38 @@ def files():
 @click.option("--rev", required=True)
 @with_appcontext
 def scan_one(pn, rev):
-    roots = current_app.config.get("FILE_ROOTS_JSON") or []
-    limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0) or 0)
-    recs = discover_part_files(pn, rev, roots, hash_limit_bytes=limit)
+    recs = discover_part_files_single_root(pn, rev)
     ins = upsert_part_files(recs)
     click.echo({"found": len(recs), "inserted": ins})
 
-@files.command("scan-all")
+@files.command("backfill-rel")
 @with_appcontext
-def scan_all():
-    from app.models.part import Part
-    roots = current_app.config.get("FILE_ROOTS_JSON") or []
-    limit = int(current_app.config.get("FILE_HASH_MAX_BYTES", 0) or 0)
-    total_found = total_inserted = 0
-    for p in Part.objects.only("part_number","revision"):
-        rev = (p.revision or "").strip()
-        if not rev:
+def backfill_rel():
+    """Compute rel_path for docs missing it (based on FILE_ROOT_LOCAL)."""
+    root = (current_app.config.get("FILE_ROOT_LOCAL") or "").strip()
+    if not root:
+        click.echo("FILE_ROOT_LOCAL not set"); return
+    base = os.path.abspath(root)
+    n = 0
+    for d in PartFile.objects():
+        if getattr(d, "rel_path", None): continue
+        p = getattr(d, "path", "")
+        if not p: continue
+        try:
+            rp = os.path.relpath(p, base)
+            if rp.startswith(".."): continue
+            d.rel_path = rp.replace("\\", "/")
+            d.save(); n += 1
+        except Exception:
             continue
-        recs = discover_part_files(p.part_number, rev, roots, hash_limit_bytes=limit)
-        total_found += len(recs)
-        total_inserted += upsert_part_files(recs)
-    click.echo({"found": total_found, "inserted": total_inserted})
+    click.echo({"rel_paths_added": n})
+
 
 
 
 def init_app(app):
     # keep existing registrations...
+    app.cli.add_command(importcmd, "import")
     app.cli.add_command(files)
+    app.cli.add_command(user)
+    app.cli.add_command(data)
