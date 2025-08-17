@@ -181,9 +181,13 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     from app.services.filescan import discover_part_files_single_root, upsert_part_files
 
     artifact_inserts = 0
+    seen = set()
     for pn, norm in part_props.items():
-        rev = (norm.get("revision") or "").strip()
-        if not rev: continue
+        rev = (norm.get("revision") or "")  # allow ""
+        key = (pn, rev)
+        if key in seen:
+            continue
+        seen.add(key)
         recs = discover_part_files_single_root(pn, rev)
         artifact_inserts += upsert_part_files(recs)
 
