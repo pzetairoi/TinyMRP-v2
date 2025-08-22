@@ -6,28 +6,69 @@ from app.extensions import csrf
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
+def _node_for_part(p: Part) -> dict:
+    return {
+        "key": p.part_number,
+        "leaf": False,  # we don't know yet; front-end will lazy fetch
+        "data": {
+            "pn": p.part_number,
+            "desc": p.description,
+            "rev": p.revision or "",
+            "thumb_urls": thumb_urls_for(p.part_number, p.revision or None),
+        },
+        "children": [],  # optional; we attach on expand
+    }
+
 @bp.get("/bom_tree")
-@csrf.exempt
 def bom_tree():
-    """GET /api/bom_tree?pn=ROOT (root) or /api/bom_tree?parent=PN (children)"""
     pn = (request.args.get("pn") or "").strip()
     parent = (request.args.get("parent") or "").strip()
+    # Root request
+    if pn:
+        p = Part.objects(part_number=pn).first()
+        if not p:
+            return jsonify([])
+        # children for the root
+        kids = []
+        for l in BOMLink.objects(parent=pn):
+            c = Part.objects(part_number=l.child).first()
+            if not c:
+                continue
+            kids.append({
+                "key": c.part_number,
+                "leaf": False,
+                "data": {
+                    "pn": c.part_number,
+                    "desc": c.description,
+                    "rev": c.revision or "",
+                    "qty": l.qty,
+                    "uom": l.uom,
+                    "alt_group": l.alt_group or "",
+                    "thumb_urls": thumb_urls_for(c.part_number, c.revision or None),
+                },
+            })
+        return jsonify([_node_for_part(p) | {"children": kids}])
 
-    # root node
-    if pn and not parent:
-        part = Part.objects(part_number=pn).only("description").first()
-        label = f"{pn}" + (f" — {part.description}" if part and part.description else "")
-        has_children = BOMLink.objects(parent_pn=pn).first() is not None
-        return jsonify([{"key": pn, "label": label, "leaf": not has_children}])
+    # Lazy children request for an expanded node
+    if parent:
+        rows = []
+        for l in BOMLink.objects(parent=parent):
+            c = Part.objects(part_number=l.child).first()
+            if not c:
+                continue
+            rows.append({
+                "key": c.part_number,
+                "leaf": False,
+                "data": {
+                    "pn": c.part_number,
+                    "desc": c.description,
+                    "rev": c.revision or "",
+                    "qty": l.qty,
+                    "uom": l.uom,
+                    "alt_group": l.alt_group or "",
+                    "thumb_urls": thumb_urls_for(c.part_number, c.revision or None),
+                },
+            })
+        return jsonify(rows)
 
-    # children
-    p = parent or pn
-    links = BOMLink.objects(parent_pn=p)
-    out = []
-    for l in links:
-        child = Part.objects(part_number=l.child_pn).only("description").first()
-        base = f"{l.child_pn}" + (f" — {child.description}" if child and child.description else "")
-        label = f"{base} ×{l.qty:g}"
-        has_children = BOMLink.objects(parent_pn=l.child_pn).first() is not None
-        out.append({"key": l.child_pn, "label": label, "leaf": not has_children})
-    return jsonify(out)
+    return jsonify([])

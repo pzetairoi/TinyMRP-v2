@@ -4,6 +4,7 @@ from mongoengine.queryset.visitor import Q
 from app.models.bom import BOMLink
 from app.models.part import Part
 from app.extensions import csrf
+from app.services.thumbs import thumb_urls_for
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
@@ -74,6 +75,7 @@ def whereused_lazy():
         "qty": l.qty or 1.0,
         "uom": l.uom or "EA",
         "alt_group": l.alt_group or "",
+        "parent_thumb_urls": thumb_urls_for(parent.part_number, parent.revision or None),
     } for l in page]
 
     # Sort the page (simple slice sort)

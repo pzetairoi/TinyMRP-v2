@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Tuple, Iterable
 from mongoengine.queryset.visitor import Q
 from app.models.part import Part
 from app.models.bom import BOMLink
+from app.services.thumbs_gen import generate_thumbs_for_parts
 
 # Import necessary services for file scanning and upserting
 from app.services.filescan import discover_part_files_single_root, upsert_part_files
@@ -178,7 +179,6 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 created_links += 1
                 
     # 3) Discover and register artifacts for all parts 
-    from app.services.filescan import discover_part_files_single_root, upsert_part_files
 
     artifact_inserts = 0
     seen = set()
@@ -190,6 +190,9 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         seen.add(key)
         recs = discover_part_files_single_root(pn, rev)
         artifact_inserts += upsert_part_files(recs)
+    
+    thumbs = generate_thumbs_for_parts(seen)
+    
 
 
 
@@ -213,4 +216,5 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         "links_skipped": skipped_links,
         "parts_with_props": len(part_props),
         "artifacts_added": artifact_inserts,
+        "thumbnails_built": thumbs
     }
