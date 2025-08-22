@@ -4,6 +4,16 @@ import { DataTable } from "primereact/datatable"
 import { Column } from "primereact/column"
 import ImageStrip from "../components/ImageStrip"
 
+import { TreeTable } from 'primereact/treetable'
+import type { TreeNode } from 'primereact/treenode'
+import { Column } from 'primereact/column'
+import ThumbImg from '../components/ThumbImg'
+
+const [bomNodes, setBomNodes] = useState<TreeNode[]>([])
+const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({})
+
+
+
 type Part = {
   part_number: string; description: string; revision?: string; category?: string; uom?: string; attrs: Record<string, any>
 }
@@ -20,6 +30,32 @@ export default function PartDetailPage() {
   const [wu, setWU] = useState<WURow[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Load BOM tree nodes
+  function setNodeChildren(tree: TreeNode[], key: string, children: TreeNode[]): TreeNode[] {
+  return tree.map((n) => {
+    if (String(n.key) === String(key)) return { ...n, children }
+    if (n.children?.length) return { ...n, children: setNodeChildren(n.children as any, key, children) }
+    return n
+  })
+}
+
+//
+async function onExpandNode(e: any) {
+  const key = String(e?.node?.key || '')
+  if (!key) return
+  try {
+    const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`)
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const kids: TreeNode[] = await r.json()
+    setBomNodes((prev) => setNodeChildren(prev, key, kids))
+    setBomExpanded((prev) => ({ ...prev, [key]: true }))
+  } catch (err) {
+    console.error('bom_tree children (detail) failed', err)
+  }
+}
+
+
+  // Fetch part details
   useEffect(() => {
     let canceled = false
     ;(async () => {
@@ -54,6 +90,25 @@ export default function PartDetailPage() {
     const rest = Object.entries(a).filter(([k]) => !order.includes(k)).sort(([a],[b]) => a.localeCompare(b))
     return [...picked, ...rest]
   }, [part])
+
+// Load BOM root with thumbnails
+useEffect(() => {
+   let cancelled = false
+   ;(async () => {
+     try {
+       const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&withThumb=1`)
+       if (!r.ok) throw new Error(`HTTP ${r.status}`)
+       const root: TreeNode[] = await r.json()
+       if (!cancelled) setBomNodes(root)
+     } catch (e) {
+       console.error('bom_tree root (detail) failed', e)
+       if (!cancelled) setBomNodes([])
+     }
+   })()
+   return () => { cancelled = true }
+ }, [pn])
+
+
 
   return (
     <div className="p-3">
@@ -98,22 +153,47 @@ export default function PartDetailPage() {
       </div>
 
       {/* Children (contains) */}
-      <div className="mb-4">
-        <h6 className="mb-2">Contains</h6>
-        <DataTable value={children} size="small" stripedRows responsiveLayout="scroll">
-          <Column field="child_pn" header="Child PN"
-                  body={(r: ChildRow) => <Link to={`/ui/part/${encodeURIComponent(r.child_pn)}`}>{r.child_pn}</Link>} sortable />
-          <Column field="child_desc" header="Description" sortable />
-          <Column field="qty" header="Qty" sortable />
-          <Column field="uom" header="UoM" sortable />
-          <Column field="alt_group" header="Alt Group" sortable />
-        </DataTable>
-      </div>
+<div className="mb-4">
+  <h6 className="mb-2">BOM</h6>
+  <TreeTable
+    value={bomNodes}
+    expandedKeys={bomExpanded}
+    onToggle={(e) => setBomExpanded(e.value)}
+    onExpand={onExpandNode}
+    scrollable
+    scrollHeight="55vh"
+    resizableColumns
+    size="small"
+    showGridlines
+  >
+    <Column
+      header=""
+      body={(node) => <ThumbImg urls={node.node.data?.thumb_urls} maxH={32} maxW={48} />}
+      style={{ width: 60 }}
+    />
+    <Column
+      field="data.pn"
+      header="Part Number"
+      sortable
+      body={(node) => <a href={`/ui/part/${encodeURIComponent(node.node.data?.pn || '')}`}>{node.node.data?.pn}</a>}
+      style={{ width: 240 }}
+    />
+    <Column field="data.desc" header="Description" sortable />
+    <Column field="data.qty" header="Qty" sortable style={{ width: 100 }} />
+    <Column field="data.uom" header="UoM" sortable style={{ width: 100 }} />
+    <Column field="data.alt_group" header="Alt Group" sortable style={{ width: 140 }} />
+  </TreeTable>
+</div>
+
 
       {/* Where used */}
       <div className="mb-4">
         <h6 className="mb-2">Where-used</h6>
         <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll">
+          <Column  header=""
+          body={(row) => <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />}
+          style={{ width: 56 }}/>
+
           <Column field="parent_pn" header="Parent PN"
                   body={(r: WURow) => <Link to={`/ui/part/${encodeURIComponent(r.parent_pn)}`}>{r.parent_pn}</Link>} sortable />
           <Column field="parent_desc" header="Description" sortable />
