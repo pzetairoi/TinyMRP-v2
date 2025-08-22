@@ -6,11 +6,9 @@ import ImageStrip from "../components/ImageStrip"
 
 import { TreeTable } from 'primereact/treetable'
 import type { TreeNode } from 'primereact/treenode'
-import { Column } from 'primereact/column'
 import ThumbImg from '../components/ThumbImg'
 
-const [bomNodes, setBomNodes] = useState<TreeNode[]>([])
-const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({})
+
 
 
 
@@ -29,6 +27,8 @@ export default function PartDetailPage() {
   const [children, setChildren] = useState<ChildRow[]>([])
   const [wu, setWU] = useState<WURow[]>([])
   const [loading, setLoading] = useState(true)
+  const [bomNodes, setBomNodes] = useState<TreeNode[]>([])
+  const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({})
 
   // Load BOM tree nodes
   function setNodeChildren(tree: TreeNode[], key: string, children: TreeNode[]): TreeNode[] {
@@ -39,7 +39,7 @@ export default function PartDetailPage() {
   })
 }
 
-//
+// Handle expand event for BOM tree nodesasync 
 async function onExpandNode(e: any) {
   const key = String(e?.node?.key || '')
   if (!key) return
