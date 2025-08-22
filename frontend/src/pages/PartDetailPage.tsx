@@ -168,16 +168,16 @@ useEffect(() => {
   >
     <Column
       header=""
-      body={(node) => <ThumbImg urls={node.node.data?.thumb_urls} maxH={32} maxW={48} />}
+      body={(node: any) => <ThumbImg urls={node?.data?.thumb_urls} maxH={32} maxW={48} />}
       style={{ width: 60 }}
     />
-    <Column
-      field="data.pn"
-      header="Part Number"
-      sortable
-      body={(node) => <a href={`/ui/part/${encodeURIComponent(node.node.data?.pn || '')}`}>{node.node.data?.pn}</a>}
-      style={{ width: 240 }}
-    />
+    <Column field="data.pn" header="Part Number" sortable filter showFilterMenu={false}
+            filterMatchMode="contains"
+            body={(node: any) => {
+              const pn = node?.data?.pn || ''
+              return <a href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
+            }}
+            style={{ width: 220 }}/>
     <Column field="data.desc" header="Description" sortable />
     <Column field="data.qty" header="Qty" sortable style={{ width: 100 }} />
     <Column field="data.uom" header="UoM" sortable style={{ width: 100 }} />
