@@ -419,11 +419,38 @@ def backfill_rel():
     click.echo({"rel_paths_added": n})
 
 
+import click
+from flask.cli import with_appcontext
+from app.services.thumbs_gen import generate_thumbs_for_parts
+from app.models.part import Part
 
+@click.group()
+def thumbs():
+    """Thumbnail utilities"""
+
+@thumbs.command("rebuild-one")
+@click.option("--pn", required=True)
+@click.option("--rev", default=None, help='Revision string, use "" to target empty, omit for all')
+@with_appcontext
+def rebuild_one(pn, rev):
+    num = generate_thumbs_for_parts([(pn, rev)])
+    click.echo({"rebuilt": num})
+
+@thumbs.command("rebuild-all")
+@with_appcontext
+def rebuild_all():
+    pairs = []
+    for p in Part.objects.only("part_number","revision"):
+        pairs.append((p.part_number, p.revision or ""))
+    num = generate_thumbs_for_parts(pairs)
+    click.echo({"rebuilt": num})
 
 def init_app(app):
-    # keep existing registrations...
+    app.cli.add_command(thumbs)
     app.cli.add_command(importcmd, "import")
     app.cli.add_command(files)
     app.cli.add_command(user)
     app.cli.add_command(data)
+
+
+

@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify
 from mongoengine.queryset.visitor import Q
 from app.models.part import Part
 from app.extensions import csrf
+from app.services.thumbs import thumb_urls_for
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
@@ -37,16 +38,32 @@ def parts_lazy():
         return q & Q(**{f"{field}__{suffix}": val})
 
     q = Q()
-    for fld in ("part_number", "description", "category"):
+    for fld in ("part_number","revision", "description","revision", "category"):
         q = add_filter(q, fld)
 
     qs = Part.objects(q)
     filtered = qs.count()
 
-    docs = qs.order_by(order_by).only("part_number", "description", "category").skip(first).limit(rows)
-    data = [{"part_number": p.part_number, "description": p.description or "", "category": p.category or ""} for p in docs]
+    docs = qs.order_by(order_by).only("part_number","revision", "description", "category").skip(first).limit(rows)
+    data = [{"part_number": p.part_number,
+             "revision": p.revision or "", 
+             "description": p.description or "",
+             "category": p.category or ""} for p in docs]
+    
+    out = []
+    for p in data:  # p is your Part doc
+        pn = p["part_number"]
+        rev = (p["revision"] or None)  # pass None so helper prefers "" then latest
+        out.append({
+            "part_number": pn,
+            "description": p["description"],
+            "category": p["category"],
+            "revision": rev,
+            # 👇 always include thumbnail candidates
+            "thumb_urls": thumb_urls_for(pn, rev),
+        })
 
-    return jsonify({"data": data, "totalRecords": filtered})
+    return jsonify({"data": out, "totalRecords": filtered})
 
 
 
