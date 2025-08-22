@@ -3,6 +3,8 @@ from flask import Blueprint, request, jsonify
 from app.models.bom import BOMLink
 from app.models.part import Part
 from app.extensions import csrf
+from app.services.thumbs import thumb_urls_for
+
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
@@ -30,7 +32,7 @@ def bom_tree():
             return jsonify([])
         # children for the root
         kids = []
-        for l in BOMLink.objects(parent=pn):
+        for l in BOMLink.objects(parent_pn=pn):
             c = Part.objects(part_number=l.child).first()
             if not c:
                 continue
@@ -52,7 +54,7 @@ def bom_tree():
     # Lazy children request for an expanded node
     if parent:
         rows = []
-        for l in BOMLink.objects(parent=parent):
+        for l in BOMLink.objects(parent_pn=parent):
             c = Part.objects(part_number=l.child).first()
             if not c:
                 continue
