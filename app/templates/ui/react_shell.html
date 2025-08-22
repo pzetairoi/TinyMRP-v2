@@ -1,19 +1,10 @@
 {% extends "security/base.html" %}
-{% block title %}{{ title or 'TinyMRP' }}{% endblock %}
-
-{% block extra_head %}
-  {% for href in assets.css %}
-    <link rel="stylesheet" href="{{ href }}">
-  {% endfor %}
-{% endblock %}
-
+{% block title %}{{ title or "UI" }}{% endblock %}
 {% block content %}
+  {% if assets.css %}<link rel="stylesheet" href="{{ assets.css }}">{% endif %}
   <div id="root"></div>
-{% endblock %}
-
-{% block extra_scripts %}
-  {% if initial %}<script>window.__INITIAL__ = {{ initial|tojson }};</script>{% endif %}
-  {% for src in assets.js %}
-    <script type="module" crossorigin src="{{ assets.js }}"></script>
-  {% endfor %}
+  <script>
+    window.__INITIAL__ = {{ (initial or {})|tojson }};
+  </script>
+  <script type="module" crossorigin src="{{ assets.js }}"></script>
 {% endblock %}
