@@ -6,7 +6,7 @@ DB_ALIAS = "tinymrp-v2"
 
 class Part(Document):
     part_number = StringField(required=True, unique=True)
-    revision    = StringField(default="A")
+    revision    = StringField(default="")
     description = StringField(default="")
     category    = StringField(default="")
     uom         = StringField(default="EA")
