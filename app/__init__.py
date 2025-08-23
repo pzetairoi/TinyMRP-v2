@@ -21,6 +21,9 @@ import os
 import json as _json
 
 
+
+
+
 def _find_manifest(static_folder: str):
     cands = [
         os.path.join(static_folder, "parts-ui", "manifest.json"),
@@ -147,6 +150,7 @@ def create_app(config_object=None):
     app.register_blueprint(parts_api_bp)
     app.register_blueprint(bom_tree_api_bp)
     app.register_blueprint(whereused_api_bp)
+    csrf.exempt(whereused_api_bp)
     
     # Importer views for BOM uploads
     from app.views.importer import bp as importer_bp
@@ -158,9 +162,7 @@ def create_app(config_object=None):
 
     from app.views.fileserve import bp as fileserve_bp
     app.register_blueprint(fileserve_bp)
-
-    
-
+ 
 
     from .cli import init_app as init_cli
     init_cli(app)

@@ -1,88 +1,74 @@
 # app/views/whereused.py
 from flask import Blueprint, request, jsonify
-from mongoengine.queryset.visitor import Q
-from app.models.bom import BOMLink
 from app.models.part import Part
-from app.extensions import csrf
+from app.models.bom import BOMLink
 from app.services.thumbs import thumb_urls_for
+from app.services.attrs import harvest_part_attrs
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
-def _match_op(mode: str) -> str:
-    return {
-        "contains": "icontains",
-        "equals": "iexact",
-        "startsWith": "istartswith",
-        "endsWith": "iendswith",
-    }.get((mode or "").strip(), "icontains")
+def _rows_for_child_pn(pn: str):
+    """Return where-used rows for a child part number, tolerant of both link schemas."""
+    # Fetch links where this PN is the child
+    if "child_pn" in BOMLink._fields:
+        links = BOMLink.objects(child_pn=pn)
+    else:
+        child_part = Part.objects(part_number=pn).only("id").first()
+        links = BOMLink.objects(child=child_part)
+
+    rows = []
+    for l in links:
+        if "parent_pn" in BOMLink._fields:
+            parent_pn = getattr(l, "parent_pn", None)
+            parent_part = Part.objects(part_number=parent_pn).first()
+        else:
+            parent_part = getattr(l, "parent", None)
+            parent_pn = getattr(parent_part, "part_number", None)
+
+        if not parent_pn:
+            continue
+
+        attrs = harvest_part_attrs(parent_part) if parent_part else {}
+        rows.append({
+            "parent_pn": parent_pn,
+            "parent_desc": attrs.get("description", "") or getattr(parent_part, "description", "") or "",
+            "qty": getattr(l, "qty", None),
+            "uom": getattr(l, "uom", "") or "",
+            "alt_group": getattr(l, "alt_group", "") or "",
+            "parent_thumb_urls": thumb_urls_for(parent_pn, (attrs.get("revision") or None)),
+        })
+    return rows
 
 @bp.post("/whereused_lazy")
-@csrf.exempt
 def whereused_lazy():
-    body = request.get_json(force=True, silent=True) or {}
-    pn = (body.get("pn") or "").strip()
-    first = int(body.get("first", 0))
-    rows = int(body.get("rows", 25))
-    sort_field = (body.get("sortField") or "parent_pn")
-    sort_order = int(body.get("sortOrder", 1))     # 1 asc, -1 desc
-    filters = body.get("filters", {})
+    p = request.get_json(silent=True) or {}
+    pn = (p.get("pn") or "").strip()
+    first = int(p.get("first") or 0)
+    rows_per_page = int(p.get("rows") or 25)
+    sort_field = (p.get("sortField") or "parent_pn")
+    sort_order = int(p.get("sortOrder") or 1)
+    filters = p.get("filters") or {}
 
-    ALLOWED = {"parent_pn", "parent_desc", "qty", "uom", "alt_group"}
-    if sort_field not in ALLOWED:
-        sort_field = "parent_pn"
+    rows = _rows_for_child_pn(pn)
 
-    q = Q(child_pn=pn)
+    # filters (contains)
+    def contains(val, needle):
+        return (needle or "").lower() in (str(val or "")).lower()
 
-    # parent_pn filter
-    f = filters.get("parent_pn") or {}
-    val = (f.get("value") or "").strip()
-    if val:
-        q &= Q(**{f"parent_pn__{_match_op(f.get('matchMode'))}": val})
+    fp = (filters.get("parent_pn", {}) or {}).get("value")
+    fd = (filters.get("parent_desc", {}) or {}).get("value")
+    fa = (filters.get("alt_group", {}) or {}).get("value")
+    if fp: rows = [r for r in rows if contains(r["parent_pn"], fp)]
+    if fd: rows = [r for r in rows if contains(r["parent_desc"], fd)]
+    if fa: rows = [r for r in rows if contains(r["alt_group"], fa)]
 
-    # parent_desc filter (JOIN via Part)
-    fd = filters.get("parent_desc") or {}
-    desc = (fd.get("value") or "").strip()
-    if desc:
-        op = _match_op(fd.get("matchMode"))
-        parents = Part.objects(**{f"description__{op}": desc}).only("part_number")
-        parent_set = [p.part_number for p in parents]
-        if not parent_set:
-            return jsonify({"data": [], "totalRecords": 0, "totalAll": BOMLink.objects(child_pn=pn).count()})
-        q &= Q(parent_pn__in=parent_set)
-
-    # alt_group filter
-    fa = filters.get("alt_group") or {}
-    alt = (fa.get("value") or "").strip()
-    if alt:
-        q &= Q(**{f"alt_group__{_match_op(fa.get('matchMode'))}": alt})
-
-    # Query slice
-    qs = BOMLink.objects(q).only("parent_pn", "qty", "uom", "alt_group")
-    total_for_child = BOMLink.objects(child_pn=pn).count()
-    filtered_count = qs.count()
-    page = list(qs.skip(first).limit(rows))
-
-    # Attach parent descriptions
-    parent_pns = list({l.parent_pn for l in page})
-    desc_map = {
-        p.part_number: (p.description or "")
-        for p in Part.objects(part_number__in=parent_pns).only("part_number", "description")
-    }
-
-    data = [{
-        "parent_pn": l.parent_pn,
-        "parent_desc": desc_map.get(l.parent_pn, ""),
-        "qty": l.qty or 1.0,
-        "uom": l.uom or "EA",
-        "alt_group": l.alt_group or "",
-        "parent_thumb_urls": thumb_urls_for(parent.part_number, parent.revision or None),
-    } for l in page]
-
-    # Sort the page (simple slice sort)
+    # sort
     reverse = (sort_order == -1)
-    if sort_field == "qty":
-        data.sort(key=lambda r: float(r.get("qty") or 0), reverse=reverse)
-    else:
-        data.sort(key=lambda r: (r.get(sort_field) or "").lower(), reverse=reverse)
+    if sort_field in ("parent_pn", "parent_desc", "alt_group", "uom"):
+        rows.sort(key=lambda r: (r.get(sort_field) or "").lower(), reverse=reverse)
+    elif sort_field == "qty":
+        rows.sort(key=lambda r: (r.get("qty") or 0), reverse=reverse)
 
-    return jsonify({"data": data, "totalRecords": filtered_count, "totalAll": total_for_child})
+    total = len(rows)
+    page = rows[first:first+rows_per_page]
+    return jsonify({"data": page, "totalRecords": total})
