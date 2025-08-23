@@ -165,6 +165,7 @@ export default function BomPage() {
       <ImageStrip pn={pn} />
 
 {/* BOM TreeTable */}
+
 <div className="mb-4">
   <TreeTable
     value={nodes}
@@ -177,17 +178,25 @@ export default function BomPage() {
     showGridlines
     size="small"
   >
-    {/* Thumbnail column */}
     <Column
       header=""
-      body={(node: any) => <ImageThumb urls={node?.data?.thumb_urls} />}
+      body={(node: any) => {
+        const urls = node?.data?.thumb_urls || []
+        return urls.length ? (
+          <img
+            src={urls[0]}
+            onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
+            alt=""
+            style={{ maxHeight: 40, maxWidth: 64, objectFit: 'contain', border: '1px solid #eee', borderRadius: 8, padding: 4, background: '#fff' }}
+          />
+        ) : <div style={{ width: 64, height: 40, background: '#f2f2f2', borderRadius: 8 }} />
+      }}
       style={{ width: 70 }}
     />
-    {/* Part Number column with expander + link */}
     <Column
-      field="pn"                 // <- property of node.data
+      field="pn"           // <- NOTE: not "data.pn"
       header="Part Number"
-      expander                   // <- shows tree toggler
+      expander             // <- toggler here
       sortable
       body={(node: any) => {
         const cpn = node?.data?.pn || ''
@@ -195,7 +204,6 @@ export default function BomPage() {
       }}
       style={{ width: 240 }}
     />
-    {/* Other mapped fields */}
     <Column field="desc" header="Description" sortable />
     <Column field="qty" header="Qty" sortable style={{ width: 100 }} />
     <Column field="uom" header="UoM" sortable style={{ width: 100 }} />

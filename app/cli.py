@@ -12,6 +12,9 @@ from app.services.import_zip import import_bom_zip
 
 from flask import current_app
 
+from app.services.attrs import harvest_part_attrs, merge_save_part_attrs
+
+
 
 
 @click.group()
@@ -445,12 +448,57 @@ def rebuild_all():
     num = generate_thumbs_for_parts(pairs)
     click.echo({"rebuilt": num})
 
+
+@click.group()
+def attrs():
+    """Attribute utilities"""
+
+@attrs.command("backfill")
+@with_appcontext
+def attrs_backfill():
+    """Ensure all Parts have full attribute dict with defaults."""
+    fixed = 0
+    for p in Part.objects():
+        before = dict(getattr(p, "props", {}) or {})
+        attrs = harvest_part_attrs(p)
+        # If something changed (missing defaults added), save back
+        if attrs != before or p.description != attrs.get("description","") or p.revision != attrs.get("revision","") or p.category != attrs.get("category",""):
+            merge_save_part_attrs(p, attrs)
+            fixed += 1
+    click.echo({"updated": fixed})
+
+
+@click.group()
+def attrs():
+    """Attribute utils"""
+
+@attrs.command("backfill")
+@with_appcontext
+def attrs_backfill():
+    count = 0
+    for p in Part.objects():
+        norm = harvest_part_attrs(p)
+        # Save only if we would change stored attrs or mirrors
+        changed = (norm != (p.attrs or {})) \
+            or (p.description != norm.get("description","")) \
+            or (p.revision != norm.get("revision","")) \
+            or (p.category != norm.get("category",""))
+        if changed:
+            merge_save_part_attrs(p, norm)
+            count += 1
+    click.echo({"updated": count})
+
+
+
 def init_app(app):
+    # ... your existing CLI registrations ...
+    app.cli.add_command(attrs)
     app.cli.add_command(thumbs)
     app.cli.add_command(importcmd, "import")
     app.cli.add_command(files)
     app.cli.add_command(user)
     app.cli.add_command(data)
+    app.cli.add_command(attrs)
 
 
 

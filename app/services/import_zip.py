@@ -8,6 +8,9 @@ from app.services.thumbs_gen import generate_thumbs_for_parts
 
 # Import necessary services for file scanning and upserting
 from app.services.filescan import discover_part_files_single_root, upsert_part_files
+# Import necessary services for attributes normalization and merging
+from app.services.attrs import normalize_props, merge_save_part_attrs
+
 
 from flask import current_app
 
@@ -153,6 +156,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         attrs = p.attrs or {}
         attrs.update(norm.get("attrs") or {})
         attrs["seed"] = seed_tag
+        attrs = normalize_props(attrs)
         p.attrs = attrs
         p.save()
 

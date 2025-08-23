@@ -30,6 +30,28 @@ export default function PartDetailPage() {
   const [bomNodes, setBomNodes] = useState<TreeNode[]>([])
   const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({})
 
+  // helpers to make payloads safe
+const asArr = <T,>(x: any): T[] => (Array.isArray(x) ? (x as T[]) : []);
+
+function flattenFiles(f: any): FileRow[] {
+  const out: FileRow[] = [];
+  if (!f || typeof f !== 'object') return out;
+  for (const [ext_group, arr] of Object.entries(f)) {
+    for (const item of asArr<any>(arr)) {
+      out.push({
+        ext_group,
+        ext: ext_group,                 // you can refine if backend adds exact ext
+        rel_path: item.rel,
+        url: item.url,
+        urls: [item.url],
+      });
+    }
+  }
+  return out;
+}
+
+
+
   // Load BOM tree nodes
   function setNodeChildren(tree: TreeNode[], key: string, children: TreeNode[]): TreeNode[] {
   return tree.map((n) => {
@@ -46,7 +68,7 @@ async function onExpandNode(e: any) {
   try {
     const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`)
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    const kids: TreeNode[] = await r.json()
+    const kids: TreeNode[] = asArr(await r.json())
     setBomNodes((prev) => setNodeChildren(prev, key, kids))
     setBomExpanded((prev) => ({ ...prev, [key]: true }))
   } catch (err) {
@@ -65,10 +87,10 @@ async function onExpandNode(e: any) {
         if (!r.ok) throw new Error(await r.text())
         const j = await r.json()
         if (canceled) return
-        setPart(j.part)
-        setFiles(j.files || [])
-        setChildren(j.children || [])
-        setWU(j.whereused || [])
+        setPart(j.part || null)
+        setFiles(flattenFiles(j.files))
+        setChildren(asArr<ChildRow>(j.children))
+        setWU(asArr<WURow>(j.whereused))
       } catch (e) {
         console.error("part_detail failed", e)
         if (!canceled) {
@@ -82,7 +104,7 @@ async function onExpandNode(e: any) {
   }, [pn])
 
   const attrs = useMemo(() => {
-    const a = part?.attrs || {}
+    const a = (part as any)?.attrs || (part as any)?.attributes || {}
     // Put some common keys first, the rest sorted
     const order = ["manufacturer", "oem_partnumber", "category", "uom", "weight", "material"]
     const picked: [string, any][] = []
@@ -99,7 +121,7 @@ useEffect(() => {
        const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&withThumb=1`)
        if (!r.ok) throw new Error(`HTTP ${r.status}`)
        const root: TreeNode[] = await r.json()
-       if (!cancelled) setBomNodes(root)
+       if (!cancelled) setBomNodes(asArr(root)) // TreeTable requires an array
      } catch (e) {
        console.error('bom_tree root (detail) failed', e)
        if (!cancelled) setBomNodes([])
@@ -157,7 +179,7 @@ useEffect(() => {
   <h6 className="mb-2">BOM</h6>
   
   <TreeTable
-    value={bomNodes}
+    value={bomNodes || []}
     expandedKeys={bomExpanded}
     onToggle={(e) => setBomExpanded(e.value)}
     onExpand={onExpandNode}
@@ -167,28 +189,24 @@ useEffect(() => {
     size="small"
     showGridlines
   >
-    <Column
-    header=""
-    body={(node: any) => <ThumbImg urls={node?.data?.thumb_urls} />}
-    style={{ width: 60 }}
-  />
-  <Column
-    field="pn"                      // was "data.pn"
-    header="Part Number"
-    expander
-    sortable
-    body={(node: any) => {
-      const pn = node?.data?.pn || ''
-      return <a href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
-    }}
-    style={{ width: 240 }}
-  />
-  <Column field="desc" header="Description" sortable />
-  <Column field="qty" header="Qty" sortable style={{ width: 100 }} />
-  <Column field="uom" header="UoM" sortable style={{ width: 100 }} />
-  <Column field="alt_group" header="Alt Group" sortable style={{ width: 140 }} />
-  
-  </TreeTable>
+    <Column header="" body={(node: any) => {
+      const urls = node?.data?.thumb_urls || []
+      return urls.length ? (
+        <img src={urls[0]} onError={(ev: any)=>urls[1]&&(ev.currentTarget.src=urls[1])}
+            style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain' }} />
+      ) : null
+    }} style={{ width: 60 }}/>
+    <Column field="pn" header="Partnumber" expander sortable
+            body={(n:any)=><a href={`/ui/part/${encodeURIComponent(n?.data?.pn||'')}`}>{n?.data?.pn}</a>}
+            style={{ width: 220 }}/>
+    <Column field="rev" header="Rev" sortable style={{ width: 90 }}/>
+    <Column field="desc" header="Description" sortable/>
+    <Column field="process" header="Process" sortable/>
+    <Column field="finish" header="Finish" sortable/>
+    <Column field="material" header="Material" sortable/>
+    <Column field="qty" header="Level QTY" sortable style={{ width: 110 }}/>
+    
+    </TreeTable>
 
 
 
@@ -201,7 +219,7 @@ useEffect(() => {
         <h6 className="mb-2">Where-used</h6>
         <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll">
           <Column  header=""
-          body={(row) => <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />}
+          body={(row) => <ThumbImg urls={row?.parent_thumb_urls || []} maxH={28} maxW={44} />}
           style={{ width: 56 }}/>
 
           <Column field="parent_pn" header="Parent PN"
