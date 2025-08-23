@@ -1,15 +1,23 @@
 # app/views/parts.py
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
+from flask_login import login_required
 from mongoengine.queryset.visitor import Q
+import re
+from base64 import urlsafe_b64encode
+
+# Import necessary models and services
 from app.models.part import Part
 from app.extensions import csrf
-from app.services.thumbs import thumb_urls_for
+from app.services.thumbs import thumb_urls_for, drawing_urls_for
 from app.services.attrs import harvest_part_attrs
+from app.models.artifact import PartFile
+
 
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
-@bp.post("/parts_lazy")
+@login_required
+@bp.route("/parts_lazy", methods=["GET", "POST"])
 @csrf.exempt 
 def parts_lazy():
     body = request.get_json(force=True, silent=True) or {}
@@ -69,16 +77,6 @@ def parts_lazy():
 
 
 
-
-
-
-from flask import Blueprint, request, jsonify, current_app
-from base64 import urlsafe_b64encode
-from app.models.part import Part
-from app.models.artifact import PartFile
-from app.services.thumbs import thumb_urls_for, drawing_urls_for
-
-bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
 @bp.get("/part_detail")
 def part_detail():
