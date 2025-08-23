@@ -155,6 +155,7 @@ useEffect(() => {
       {/* Children (contains) */}
 <div className="mb-4">
   <h6 className="mb-2">BOM</h6>
+  
   <TreeTable
     value={bomNodes}
     expandedKeys={bomExpanded}
@@ -167,22 +168,31 @@ useEffect(() => {
     showGridlines
   >
     <Column
-      header=""
-      body={(node: any) => <ThumbImg urls={node?.data?.thumb_urls} maxH={32} maxW={48} />}
-      style={{ width: 60 }}
-    />
-    <Column field="data.pn" header="Part Number" sortable filter showFilterMenu={false}
-            filterMatchMode="contains"
-            body={(node: any) => {
-              const pn = node?.data?.pn || ''
-              return <a href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
-            }}
-            style={{ width: 220 }}/>
-    <Column field="data.desc" header="Description" sortable />
-    <Column field="data.qty" header="Qty" sortable style={{ width: 100 }} />
-    <Column field="data.uom" header="UoM" sortable style={{ width: 100 }} />
-    <Column field="data.alt_group" header="Alt Group" sortable style={{ width: 140 }} />
+    header=""
+    body={(node: any) => <ThumbImg urls={node?.data?.thumb_urls} />}
+    style={{ width: 60 }}
+  />
+  <Column
+    field="pn"                      // was "data.pn"
+    header="Part Number"
+    expander
+    sortable
+    body={(node: any) => {
+      const pn = node?.data?.pn || ''
+      return <a href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
+    }}
+    style={{ width: 240 }}
+  />
+  <Column field="desc" header="Description" sortable />
+  <Column field="qty" header="Qty" sortable style={{ width: 100 }} />
+  <Column field="uom" header="UoM" sortable style={{ width: 100 }} />
+  <Column field="alt_group" header="Alt Group" sortable style={{ width: 140 }} />
+  
   </TreeTable>
+
+
+
+
 </div>
 
 
