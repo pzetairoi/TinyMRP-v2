@@ -11,6 +11,7 @@ from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
 from app.services.attrs import harvest_part_attrs
 from app.models.artifact import PartFile
+from app.views.whereused import _rows_for_child_pn
 
 
 
@@ -105,19 +106,22 @@ def part_detail():
         if f.ext_group in files:
             files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path})
 
+    wu_rows = _rows_for_child_pn(p.part_number)
+
     return jsonify({
-    "part": {
-        "part_number": p.part_number,
-        "description": attrs.get("description", ""),
-        "revision": attrs.get("revision", ""),
-        "category": attrs.get("category", ""),
-        "material": attrs.get("material", ""),
-        "finish": attrs.get("finish", ""),
-        "mass": attrs.get("mass", ""),
-        "processes": ", ".join(attrs.get("processes", [])),  # UI string; full list is in attributes
-        "attributes": attrs,  # ← full, normalized, complete
-    },
-    "images": images,
-    "drawing_urls": drawings,
-    "files": files,
+        "part": {
+            "part_number": p.part_number,
+            "description": attrs.get("description",""),
+            "revision": attrs.get("revision",""),
+            "category": attrs.get("category",""),
+            "material": attrs.get("material",""),
+            "finish": attrs.get("finish",""),
+            "mass": attrs.get("mass",""),
+            "processes": ", ".join(attrs.get("processes", [])),
+            "attributes": attrs,
+        },
+        "images": images,
+        "drawing_urls": drawings,
+        "files": files,
+        "whereused": wu_rows,          # ← add this
     })
