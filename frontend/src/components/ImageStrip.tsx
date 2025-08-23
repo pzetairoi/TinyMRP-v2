@@ -2,7 +2,8 @@ import { useEffect, useState } from "react"
 
 type ApiRow = { urls: string[]; best?: string; revision?: string }
 
-export default function ImageStrip({ pn, rev }: { pn: string; rev?: string }) {
+export default function ImageStrip({ pn, rev, urls }: { pn?: string; rev?: string; urls?: any }) {
+  const list: string[] = Array.isArray(urls) ? urls : []
   const [rows, setRows] = useState<ApiRow[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -12,8 +13,8 @@ export default function ImageStrip({ pn, rev }: { pn: string; rev?: string }) {
       setLoading(true)
       try {
         const qs = new URLSearchParams({ pn })
-        // Important: if rev is defined (including empty ""), pass it through
-        if (rev !== undefined) qs.set("rev", rev)
+        // pass rev even if empty string so backend can prefer exact rev (‘’ means “no rev”)
+        if (rev !== undefined) qs.set("rev", String(rev))
         const r = await fetch(`/api/part_images?${qs.toString()}`)
         if (!r.ok) throw new Error(await r.text())
         const j: ApiRow[] = await r.json()

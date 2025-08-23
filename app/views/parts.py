@@ -4,6 +4,8 @@ from mongoengine.queryset.visitor import Q
 from app.models.part import Part
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for
+from app.services.attrs import harvest_part_attrs
+
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
@@ -70,101 +72,54 @@ def parts_lazy():
 
 
 
-# app/views/parts.py (append at bottom)
-from flask import request, jsonify, abort, current_app
+from flask import Blueprint, request, jsonify, current_app
+from base64 import urlsafe_b64encode
 from app.models.part import Part
-from app.models.bom import BOMLink
 from app.models.artifact import PartFile
-import base64
+from app.services.thumbs import thumb_urls_for, drawing_urls_for
 
-def _token_url(path: str) -> str:
-    tok = base64.urlsafe_b64encode((path or "").encode("utf-8")).decode("ascii")
-    return f"/files/view/{tok}"
+bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
 @bp.get("/part_detail")
-@csrf.exempt  # GET only; CSRF not required
 def part_detail():
     pn = (request.args.get("pn") or "").strip()
-    if not pn:
-        return jsonify({"error": "pn required"}), 400
-
     p = Part.objects(part_number=pn).first()
     if not p:
-        abort(404)
+        return jsonify({"error": "not found"}), 404
 
-    rev = (p.revision or "").strip()
-    # Children (one level)
-    links = list(BOMLink.objects(parent_pn=pn))
-    child_pns = [l.child_pn for l in links]
-    parts_map = {x.part_number: x for x in Part.objects(part_number__in=child_pns)}
-    children = [{
-        "child_pn": l.child_pn,
-        "child_desc": (parts_map.get(l.child_pn).description or "") if parts_map.get(l.child_pn) else "",
-        "qty": float(l.qty or 1.0),
-        "uom": l.uom or "EA",
-        "alt_group": l.alt_group or "",
-    } for l in links]
+    attrs = harvest_part_attrs(p)
+    material = attrs.get("material","")
+    finish   = attrs.get("finish","")
+    mass     = attrs.get("mass","")
+    processes= ", ".join(attrs.get("processes", [])) or attrs.get("process","")
 
-    # Where-used (parents)
-    pulinks = list(BOMLink.objects(child_pn=pn))
-    parent_pns = [l.parent_pn for l in pulinks]
-    parents_map = {x.part_number: x for x in Part.objects(part_number__in=parent_pns)}
-    whereused = [{
-        "parent_pn": l.parent_pn,
-        "parent_desc": (parents_map.get(l.parent_pn).description or "") if parents_map.get(l.parent_pn) else "",
-        "qty": float(l.qty or 1.0),
-        "uom": l.uom or "EA",
-        "alt_group": l.alt_group or "",
-    } for l in pulinks]
+    images   = thumb_urls_for(p.part_number, (p.revision or None))
+    drawings = drawing_urls_for(p.part_number, (p.revision or None))
 
-    # Files & images — prefer empty revision if the part's own revision is ""
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
-    files: list[dict] = []
+    def to_url(f: PartFile):
+        if http_base and f.rel_path:
+            return f"{http_base}/{f.rel_path}"
+        return f"/files/view/{urlsafe_b64encode((f.path or '').encode()).decode()}"
 
-    def add_files(q):
-        for f in PartFile.objects(**q).order_by("ext_group", "rel_path"):
-            urls = []
-            if http_base and f.rel_path:
-                urls.append(f"{http_base}/{f.rel_path}")
-            tok = base64.urlsafe_b64encode((f.path or "").encode("utf-8")).decode("ascii")
-            urls.append(f"/files/view/{tok}")
-            files.append({
-                "ext_group": f.ext_group,
-                "ext": f.ext,
-                "rel_path": f.rel_path,
-                "size": f.size,
-                "mtime": f.mtime.isoformat() if f.mtime else None,
-                "url": urls[0],
-                "urls": urls,
-            })
-
-    if rev == "":
-        add_files({"part_number": pn, "revision": ""})
-    else:
-        # try exact rev first; if none, prefer empty; then fall back to latest
-        add_files({"part_number": pn, "revision": rev})
-        if not files:
-            add_files({"part_number": pn, "revision": ""})
-        if not files:
-            all_docs = list(PartFile.objects(part_number=pn).order_by("-mtime", "path"))
-            if all_docs:
-                latest = (all_docs[0].revision or "")
-                add_files({"part_number": pn, "revision": latest})
-
-    images = [x for x in files if x["ext_group"] == "png"]
-
+    files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": []}
+    for f in PartFile.objects(part_number=p.part_number).only("ext_group","rel_path","path").order_by("ext_group","rel_path"):
+        if f.ext_group in files:
+            files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path})
 
     return jsonify({
-        "part": {
-            "part_number": p.part_number,
-            "description": p.description or "",
-            "revision": rev,
-            "category": p.category or "",
-            "uom": p.uom or "EA",
-            "attrs": (p.attrs or {}),
-        },
-        "images": images,
-        "files": files,
-        "children": children,
-        "whereused": whereused,
+    "part": {
+        "part_number": p.part_number,
+        "description": attrs.get("description", ""),
+        "revision": attrs.get("revision", ""),
+        "category": attrs.get("category", ""),
+        "material": attrs.get("material", ""),
+        "finish": attrs.get("finish", ""),
+        "mass": attrs.get("mass", ""),
+        "processes": ", ".join(attrs.get("processes", [])),  # UI string; full list is in attributes
+        "attributes": attrs,  # ← full, normalized, complete
+    },
+    "images": images,
+    "drawing_urls": drawings,
+    "files": files,
     })
