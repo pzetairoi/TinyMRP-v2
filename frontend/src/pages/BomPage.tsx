@@ -1,11 +1,12 @@
 // frontend/src/pages/BomPage.tsx
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Tree } from 'primereact/tree'
+import { TreeTable } from 'primereact/treetable'
 import type { TreeNode } from 'primereact/treenode'
 import { DataTable } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
+import ThumbImg from '../components/ThumbImg'
 
 // Import the ImageStrip component to display images for the part
 import ImageStrip from "../components/ImageStrip"
@@ -40,6 +41,14 @@ export default function BomPage() {
   // --- BOM Tree ---
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({})
+
+  // Lazy loading state for Where-Used table
+  const [treeFilters, setTreeFilters] = useState<any>({
+   global: { value: '', matchMode: FilterMatchMode.CONTAINS },
+  'data.pn': { value: '', matchMode: FilterMatchMode.CONTAINS },
+  'data.desc': { value: '', matchMode: FilterMatchMode.CONTAINS },
+  'data.alt_group': { value: '', matchMode: FilterMatchMode.CONTAINS },
+})
 
   // Load root
   useEffect(() => {
@@ -133,6 +142,21 @@ export default function BomPage() {
     }
   }, [pn, lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters)])
 
+  function ImageThumb({ urls }: { urls?: string[] }) {
+  if (!urls || !urls.length) return <div style={{ width: 64, height: 40, background: '#f2f2f2', borderRadius: 8 }} />
+  // simple fallback: if first fails try the next
+  const [i, setI] = useState(0)
+  return (
+    <img
+      src={urls[i]}
+      onError={() => i < (urls?.length || 0) - 1 && setI(i + 1)}
+      alt=""
+      style={{ maxHeight: 40, maxWidth: 64, objectFit: 'contain', border: '1px solid #eee', borderRadius: 8, padding: 4, background: '#fff' }}
+    />
+  )
+}
+
+
   return (
     <div className="p-3">
       <h5 className="mb-2">BOM · {pn}</h5>
@@ -140,15 +164,48 @@ export default function BomPage() {
       {/* Imágenes del PN (usa última revisión si no se especifica) */}
       <ImageStrip pn={pn} />
 
-      {/* Tree */}
-      <div className="mb-4">
-        <Tree
-          value={nodes}
-          expandedKeys={expandedKeys}
-          onToggle={(e: any) => setExpandedKeys(e.value)}
-          onExpand={(e: any) => e?.node?.key && loadChildrenFor(String(e.node.key))}
-        />
-      </div>
+{/* BOM TreeTable */}
+<div className="mb-4">
+  <TreeTable
+    value={nodes}
+    expandedKeys={expandedKeys}
+    onToggle={(e: any) => setExpandedKeys(e.value)}
+    onExpand={(e: any) => e?.node?.key && loadChildrenFor(String(e.node.key))}
+    scrollable
+    scrollHeight="60vh"
+    resizableColumns
+    showGridlines
+    size="small"
+  >
+    {/* Thumbnail column */}
+    <Column
+      header=""
+      body={(node: any) => <ImageThumb urls={node?.data?.thumb_urls} />}
+      style={{ width: 70 }}
+    />
+    {/* Part Number column with expander + link */}
+    <Column
+      field="pn"                 // <- property of node.data
+      header="Part Number"
+      expander                   // <- shows tree toggler
+      sortable
+      body={(node: any) => {
+        const cpn = node?.data?.pn || ''
+        return <a href={`/ui/part/${encodeURIComponent(cpn)}`}>{cpn}</a>
+      }}
+      style={{ width: 240 }}
+    />
+    {/* Other mapped fields */}
+    <Column field="desc" header="Description" sortable />
+    <Column field="qty" header="Qty" sortable style={{ width: 100 }} />
+    <Column field="uom" header="UoM" sortable style={{ width: 100 }} />
+    <Column field="alt_group" header="Alt Group" sortable style={{ width: 140 }} />
+  </TreeTable>
+</div>
+
+
+
+
 
       {/* Where-used */}
       <DataTable

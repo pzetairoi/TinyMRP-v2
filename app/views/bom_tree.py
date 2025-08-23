@@ -1,66 +1,65 @@
-# at top with your other imports
-from app.services.thumbs import thumb_urls_for
+from flask import Blueprint, request, jsonify
 from app.models.part import Part
 from app.models.bom import BOMLink
-from flask import Blueprint, request, jsonify
+from app.services.thumbs import thumb_urls_for
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
 def _pn_from_link_child(l):
-    # Prefer explicit child_pn string; otherwise take ReferenceField.part_number
+    # prefer explicit child_pn, else take ReferenceField.child.part_number
     if hasattr(l, "child_pn") and l.child_pn:
         return l.child_pn
-    if hasattr(l, "child") and l.child:
-        try:
-            return l.child.part_number
-        except Exception:
-            return None
-    return None
+    c = getattr(l, "child", None)
+    return getattr(c, "part_number", None) if c else None
 
 def _pn_from_link_parent(l):
     if hasattr(l, "parent_pn") and l.parent_pn:
         return l.parent_pn
-    if hasattr(l, "parent") and l.parent:
-        try:
-            return l.parent.part_number
-        except Exception:
-            return None
-    return None
+    p = getattr(l, "parent", None)
+    return getattr(p, "part_number", None) if p else None
 
 @bp.get("/bom_tree")
 def bom_tree():
     pn = (request.args.get("pn") or "").strip()
     parent = (request.args.get("parent") or "").strip()
 
-    # ROOT: build node for pn and preload its immediate children
+    # Helper to build a node dict from PN and optional link info
+    def node_for_pn(child_pn: str, link=None):
+        c = Part.objects(part_number=child_pn).only("part_number", "description", "revision").first()
+        return {
+            "key": child_pn,
+            "leaf": False,  # unknown until expanded; TreeTable can lazy load
+            "data": {
+                "pn": child_pn,
+                "desc": (c.description if c else ""),
+                "rev": (c.revision or "") if c else "",
+                "qty": getattr(link, "qty", None),
+                "uom": getattr(link, "uom", None),
+                "alt_group": (getattr(link, "alt_group", "") or "") if link else "",
+                "thumb_urls": thumb_urls_for(child_pn, (c.revision if c else None)),
+            },
+        }
+
+    # ROOT: node for pn + its immediate children
     if pn:
-        p = Part.objects(part_number=pn).first()
+        p = Part.objects(part_number=pn).only("part_number", "description", "revision").first()
         if not p:
             return jsonify([])
 
+        # Prefer string-field query if present; else ReferenceField
+        if "parent_pn" in BOMLink._fields:
+            links = BOMLink.objects(parent_pn=pn).only("child_pn", "qty", "uom", "alt_group")
+        else:
+            links = BOMLink.objects(parent=p).only("child", "qty", "uom", "alt_group")
+
         children = []
-        # support either parent_pn (string) or parent (ref)
-        # try string first
-        q = BOMLink.objects(parent_pn=pn) if "parent_pn" in BOMLink._fields else BOMLink.objects(parent=p)
-        for l in q:
+        for l in links:
             child_pn = _pn_from_link_child(l)
             if not child_pn:
                 continue
-            # Avoid querying if we already have the child Part object
-            c = l.child if getattr(l, "child", None) else Part.objects(part_number=child_pn).first()
-            children.append({
-                "key": child_pn,
-                "leaf": False,
-                "data": {
-                    "pn": child_pn,
-                    "desc": (c.description if c else ""),
-                    "rev": (c.revision if c and c.revision is not None else ""),
-                    "qty": getattr(l, "qty", None),
-                    "uom": getattr(l, "uom", None),
-                    "alt_group": getattr(l, "alt_group", "") or "",
-                    "thumb_urls": thumb_urls_for(child_pn, (c.revision if c else None)),
-                }
-            })
+            if child_pn == pn:  # avoid self-link
+                continue
+            children.append(node_for_pn(child_pn, l))
 
         root = {
             "key": p.part_number,
@@ -75,29 +74,23 @@ def bom_tree():
         }
         return jsonify([root])
 
-    # LAZY CHILDREN: expanding an existing node
+    # LAZY CHILDREN: expanding an existing node by parent PN
     if parent:
+        # Work with parent PN directly (don’t pass Part objects to filters wrongly)
+        if "parent_pn" in BOMLink._fields:
+            links = BOMLink.objects(parent_pn=parent).only("child_pn", "qty", "uom", "alt_group")
+        else:
+            parent_part = Part.objects(part_number=parent).only("id").first()
+            links = BOMLink.objects(parent=parent_part).only("child", "qty", "uom", "alt_group")
+
         rows = []
-        # same dual-shape support as above
-        q = BOMLink.objects(parent_pn=parent) if "parent_pn" in BOMLink._fields else BOMLink.objects(parent=Part.objects(part_number=parent).first())
-        for l in q:
+        for l in links:
             child_pn = _pn_from_link_child(l)
             if not child_pn:
                 continue
-            c = l.child if getattr(l, "child", None) else Part.objects(part_number=child_pn).first()
-            rows.append({
-                "key": child_pn,
-                "leaf": False,
-                "data": {
-                    "pn": child_pn,
-                    "desc": (c.description if c else ""),
-                    "rev": (c.revision if c and c.revision is not None else ""),
-                    "qty": getattr(l, "qty", None),
-                    "uom": getattr(l, "uom", None),
-                    "alt_group": getattr(l, "alt_group", "") or "",
-                    "thumb_urls": thumb_urls_for(child_pn, (c.revision if c else None)),
-                }
-            })
+            if child_pn == parent:  # avoid self-link
+                continue
+            rows.append(node_for_pn(child_pn, l))
         return jsonify(rows)
 
     return jsonify([])
