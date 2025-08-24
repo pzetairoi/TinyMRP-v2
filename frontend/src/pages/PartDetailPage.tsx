@@ -290,13 +290,7 @@ export default function PartDetailPage() {
         <div className="col-lg-4">
           <div className="pd-card">
             <div className="pd-hero">
-              {heroUrl ? (
-                <a href={heroUrl} target="_blank" rel="noreferrer">
-                  <img src={heroUrl} alt="" />
-                </a>
-              ) : (
-                <div className="text-muted small">No preview</div>
-              )}
+            <ImageStrip pn={pn} mode="preview" />
             </div>
 
             {/* quick info */}
@@ -371,12 +365,7 @@ export default function PartDetailPage() {
         <div className="col-lg-8">
           <TabView>
             <TabPanel header="Drawing">
-              {/* draw image (_DWG.png) given by your backend in drawing_urls */}
-              {drawingUrls.length ? (
-                <img src={drawingUrls[0]} alt="" className="img-fluid border" />
-              ) : (
-                <div className="text-muted small">No drawing image.</div>
-              )}
+              <ImageStrip pn={pn} mode="drawing" />
             </TabPanel>
 
             <TabPanel header="All attributes">

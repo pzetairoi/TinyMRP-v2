@@ -383,7 +383,7 @@ def import_zip_cmd(path, tag):
 import click, os
 from flask.cli import with_appcontext
 from flask import current_app
-from app.services.filescan import discover_part_files_single_root, upsert_part_files
+from app.services.filescan import discover_part_files, upsert_part_files
 from app.models.artifact import PartFile
 
 @click.group()
@@ -395,7 +395,7 @@ def files():
 @click.option("--rev", required=True)
 @with_appcontext
 def scan_one(pn, rev):
-    recs = discover_part_files_single_root(pn, rev)
+    recs = discover_part_files(pn, rev)
     ins = upsert_part_files(recs)
     click.echo({"found": len(recs), "inserted": ins})
 

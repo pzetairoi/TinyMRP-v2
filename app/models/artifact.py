@@ -1,16 +1,21 @@
 from datetime import datetime
-from mongoengine import Document, StringField, DateTimeField, IntField, DictField
+from mongoengine import FloatField, BooleanField, Document, StringField, DateTimeField, IntField, DictField
+ 
+
 
 DB_ALIAS = "tinymrp-v2"
 
 class PartFile(Document):
     part_number = StringField(required=True)
-    revision    = StringField(default="")
-    ext_group   = StringField(required=True, choices=["pdf","dxf","step","edr","png","3mf","other"])
-    ext         = StringField(required=True)
+    revision    = StringField(default="")  # empty revision allowed
+    ext_group   = StringField(required=True)  # e.g. 'png','pdf','step','dxf','edr','3mf','datasheet'
+    ext         = StringField(required=True)  # actual extension
+    rel_path    = StringField(required=True)  # relative to FILE_ROOT_LOCAL
+    http_url    = StringField()               # prebuilt http absolute url
+    size        = FloatField()
+    mtime_iso   = DateTimeField()
+    is_dwg      = BooleanField(default=False) # <-- key: distinguishes *_DWG.png    
     path        = StringField(required=True, unique=True)   # absolute OS path
-    rel_path    = StringField()                             # relative to FILE_ROOT_LOCAL
-    size        = IntField()
     sha256      = StringField()
     mtime       = DateTimeField()
     content_type= StringField()
@@ -26,7 +31,7 @@ class PartFile(Document):
         "collection": "part_files",
         "db_alias": DB_ALIAS,
         "indexes": [
-            {"fields": ["part_number", "revision", "ext_group"]},
+            {"fields": ["part_number", "revision", "ext_group","is_dwg"], "unique": True},
             "rel_path",
             "thumb_rel_path",
         ],
