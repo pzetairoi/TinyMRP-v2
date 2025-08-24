@@ -30,9 +30,10 @@ class PartFile(Document):
     meta = {
         "collection": "part_files",
         "db_alias": DB_ALIAS,
-        "indexes": [
-            {"fields": ["part_number", "revision", "ext_group","is_dwg"], "unique": True},
-            "rel_path",
-            "thumb_rel_path",
-        ],
-    }
+    "indexes": [
+        # unique identity for an artifact type per PN+REV
+        {"fields": ["part_number", "revision", "ext_group", "ext","is_dwg"], "unique": True},
+        # allow multiple docs without 'path' (we store rel_path/http_url instead)
+        {"fields": ["path"], "unique": True, "sparse": True},
+    ]
+}
