@@ -146,53 +146,81 @@ def _group_from_ext(ext: str) -> Optional[str]:
     if ext in {"eprt", "easm", "edrw"}: return "edr"
     if ext in {"3mf"}: return "3mf"
     return None
+# app/services/filescan.py
 
 def upsert_part_files(
     recs: List[Dict[str, Any]],
     pn: Optional[str] = None,
     rev: Optional[str] = None,
 ) -> int:
+    """
+    Upsert a batch of file records.
+    - recs: list of dicts (each may include pn/part_number, rev/revision,
+      ext_group/group, ext, rel_path, size, mtime_iso, http_url, is_dwg, etc.)
+    - pn, rev: optional defaults applied to all records when missing.
+    Returns number of upserts attempted.
+    """
     n = 0
     for r in recs or []:
-        if not isinstance(r, dict):
-            continue
-
         print("upsert", r)
 
-        rpn  = pn
-        rrev = rev if rev is not None else ""
-        ext  = (r.get("ext") or "").lower()
+        rpn = pn or r.get("pn") or r.get("part_number")
+        rrev = (rev if rev is not None else r.get("rev") or r.get("revision") or "")
         group = (r.get("ext_group") or r.get("group") or "").lower()
+        ext = (r.get("ext") or "").lower()
 
-        # derive group if missing
-        if not group:
-            rp = r.get("rel_path") or ""
-            if isinstance(rp, str) and "/" in rp:
-                group = rp.split("/", 1)[0].lower()
-            if not group:
-                group = _group_from_ext(ext) or "others"
-
-        if not rpn or not ext:
-            # cannot uniquely identify
+        if not rpn or ext == "":
+            # Not enough to identify the artifact; skip quietly
             continue
 
-        print("upsert key", rpn, rrev, group, ext)
+        # Unique key for your "one file per ext_group+ext per (pn,rev)" rule
         query = dict(part_number=rpn, revision=rrev, ext_group=group, ext=ext)
         print("query", query)
 
-        allowed = set(PartFile._fields.keys())  # type: ignore[attr-defined]
+        # Allowed fields from the model
+        allowed = set(PartFile._fields.keys())
         print("allowed", allowed)
 
-        # Normalize fields we write
-        update_doc: Dict[str, Any] = {}
-        for k in ("rel_path", "size", "mtime", "mtime_iso", "is_dwg", "http_url", "url", "thumb_rel_path", "thumb_mtime"):
-            if k in r and k in allowed:
-                update_doc[k] = r[k]
+        # Build atomic updates for modify()
+        updates: Dict[str, Any] = {}
 
-        # Expand into MongoEngine update kwargs (avoid set__=dict)
-        updates = {f"set__{k}": v for k, v in update_doc.items()}
+        # Normalized rel_path -> also use as unique, non-null `path`
+        rel_path = r.get("rel_path") or ""
+        norm_rel = rel_path.replace("\\", "/").lstrip("/")
+
+        if "rel_path" in allowed and norm_rel:
+            updates["set__rel_path"] = norm_rel
+
+        # Ensure `path` is set to a non-null, unique value (avoid dup key on path_1)
+        # We intentionally use rel_path (not absolute) to keep it stable & portable.
+        if "path" in allowed and norm_rel:
+            updates["set__path"] = norm_rel
+
+        # Pass through common metadata if present
+        if "http_url" in r and "http_url" in allowed:
+            updates["set__http_url"] = r["http_url"]
+        if "urls" in r and "urls" in allowed:
+            updates["set__urls"] = r["urls"]
+        if "size" in r and "size" in allowed:
+            updates["set__size"] = r["size"]
+        if "mtime_iso" in r and "mtime_iso" in allowed:
+            updates["set__mtime_iso"] = r["mtime_iso"]
+        if "is_dwg" in r and "is_dwg" in allowed:
+            updates["set__is_dwg"] = r["is_dwg"]
+        if "content_type" in r and "content_type" in allowed:
+            updates["set__content_type"] = r["content_type"]
+
+        # Optional: stamp first discovery without touching on updates
+        if "discovered_at" in allowed:
+            updates.setdefault("set_on_insert__discovered_at", datetime.utcnow())
+
+        # Safety: never send an empty update
+        if not updates:
+            continue
+
         print("updates", updates)
 
+        # Upsert
         PartFile.objects(**query).modify(upsert=True, new=True, **updates)  # type: ignore
         n += 1
 
