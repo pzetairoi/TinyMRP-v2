@@ -7,7 +7,7 @@ from app.models.bom import BOMLink
 from app.services.thumbs_gen import generate_thumbs_for_parts
 
 # Import necessary services for file scanning and upserting
-from app.services.filescan import discover_part_files_single_root, upsert_part_files
+from app.services.filescan import discover_part_files, upsert_part_files
 # Import necessary services for attributes normalization and merging
 from app.services.attrs import normalize_props, merge_save_part_attrs
 
@@ -192,8 +192,20 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         if key in seen:
             continue
         seen.add(key)
-        recs = discover_part_files_single_root(pn, rev)
-        artifact_inserts += upsert_part_files(recs)
+
+        found = discover_part_files(pn, rev)
+        
+        recs = []
+        for (group, is_dwg), meta in found.items():
+            # meta is the dict you printed as "record {...}"
+            rec = dict(meta)
+            rec["ext_group"] = group  # e.g. 'png','pdf','dxf','step','edr','3mf','datasheet'
+            rec["is_dwg"] = bool(is_dwg)
+            recs.append(rec)
+
+        print("upserting", len(recs), "artifacts for", pn, rev)
+        artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
+
     
     thumbs = generate_thumbs_for_parts(seen)
     

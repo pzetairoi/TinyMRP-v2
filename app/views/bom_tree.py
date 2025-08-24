@@ -1,108 +1,75 @@
+# app/views/bom_tree.py
 from flask import Blueprint, request, jsonify
 from app.models.part import Part
 from app.models.bom import BOMLink
-from app.services.thumbs import thumb_urls_for
+from app.services.thumbs import preview_png_urls_for
 from app.services.attrs import harvest_part_attrs
-
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
-
 def _has_children(pn: str) -> bool:
-    # Works for both denormalized (parent_pn) and referenced (parent) BOMLink
     if "parent_pn" in BOMLink._fields:
-        return BOMLink.objects(parent_pn=pn).first() is not None
-    parent_part = Part.objects(part_number=pn).only("id").first()
-    if not parent_part:
+        return BOMLink.objects(parent_pn=pn).limit(1).count() > 0
+    p = Part.objects(part_number=pn).only("id").first()
+    if not p:
         return False
-    return BOMLink.objects(parent=parent_part).first() is not None
+    return BOMLink.objects(parent=p).limit(1).count() > 0
 
-
-def _pn_from_link_child(l):
-    if hasattr(l, "child_pn") and l.child_pn:
-        return l.child_pn
-    c = getattr(l, "child", None)
-    return getattr(c, "part_number", None) if c else None
+def _node(pn: str, link=None):
+    p = Part.objects(part_number=pn).first()
+    attrs = harvest_part_attrs(p) if p else {}
+    return {
+        "key": pn,
+        "leaf": not _has_children(pn),
+        "data": {
+            "pn": pn,
+            "desc": attrs.get("description",""),
+            "rev":  attrs.get("revision",""),
+            "qty":  getattr(link,"qty",None),
+            "uom":  getattr(link,"uom",None),
+            "alt_group": getattr(link,"alt_group","") or "",
+            "material":  attrs.get("material",""),
+            "finish":    attrs.get("finish",""),
+            "process":   ", ".join([x for x in attrs.get("processes",[]) if x]) or (attrs.get("process","") or ""),
+            "thumb_urls": preview_png_urls_for(pn, attrs.get("revision")),
+            "attrs": attrs,
+        }
+    }
 
 @bp.get("/bom_tree")
 def bom_tree():
     pn = (request.args.get("pn") or "").strip()
     parent = (request.args.get("parent") or "").strip()
 
-    def node_for_pn(child_pn: str, link=None):
-        c = Part.objects(part_number=child_pn).first()
-        attrs = harvest_part_attrs(c) if c else {}
-        material = attrs.get("material","")
-        finish   = attrs.get("finish","")
-        desc     = attrs.get("description","")
-        rev      = attrs.get("revision","")
-
-        return {
-            "key": child_pn,
-            "leaf": not _has_children(child_pn),
-            "data": {
-                "pn": child_pn,
-                "desc": desc,
-                "rev": rev,
-                "qty": getattr(link, "qty", None),
-                "uom": getattr(link, "uom", None),
-                "alt_group": getattr(link, "alt_group", "") or "",
-                "material": material,
-                "finish": finish,
-                "thumb_urls": thumb_urls_for(child_pn, (rev or None)),
-                "attrs": attrs,   # <- full attributes available to the UI (optional today)
-            },
-        }
-
-    # ROOT
     if pn:
         p = Part.objects(part_number=pn).first()
-        if not p: 
+        if not p:
             return jsonify([])
-        root_attrs = harvest_part_attrs(p)
-        
-        if "parent_pn" in BOMLink._fields:
-            links = BOMLink.objects(parent_pn=pn).only("child_pn", "qty", "uom", "alt_group")
-        else:
-            links = BOMLink.objects(parent=p).only("child", "qty", "uom", "alt_group")
-
-        children = []
-        for l in links:
-            child_pn = _pn_from_link_child(l)
-            if not child_pn or child_pn == pn:   # avoid self-link
-                continue
-            children.append(node_for_pn(child_pn, l))
-
-        root = {
-        "key": p.part_number,
-        "leaf": not _has_children(p.part_number), 
-        "data": {
-            "pn": p.part_number,
-            "desc": root_attrs.get("description",""),
-            "rev": root_attrs.get("revision",""),
-            "material": root_attrs.get("material",""),
-            "finish": root_attrs.get("finish",""),
-            "thumb_urls": thumb_urls_for(p.part_number, (root_attrs.get("revision") or None)),
-            "attrs": root_attrs,
-        },
-        "children": children,
-        }
+        root = _node(pn)
+        root["children"] = []   # lazy
         return jsonify([root])
 
-    # LAZY
     if parent:
+        # children
         if "parent_pn" in BOMLink._fields:
-            links = BOMLink.objects(parent_pn=parent).only("child_pn", "qty", "uom", "alt_group")
+            links = BOMLink.objects(parent_pn=parent).only("child_pn","qty","uom","alt_group")
+            kids = []
+            for l in links:
+                child_pn = getattr(l, "child_pn", None)
+                if child_pn and child_pn != parent:
+                    kids.append(_node(child_pn, l))
+            return jsonify(kids)
         else:
-            parent_part = Part.objects(part_number=parent).only("id").first()
-            links = BOMLink.objects(parent=parent_part).only("child", "qty", "uom", "alt_group")
-
-        rows = []
-        for l in links:
-            child_pn = _pn_from_link_child(l)
-            if not child_pn or child_pn == parent:
-                continue
-            rows.append(node_for_pn(child_pn, l))
-        return jsonify(rows)
+            pp = Part.objects(part_number=parent).only("id").first()
+            if not pp:
+                return jsonify([])
+            links = BOMLink.objects(parent=pp).only("child","qty","uom","alt_group")
+            kids = []
+            for l in links:
+                c = getattr(l, "child", None)
+                child_pn = getattr(c, "part_number", None) if c else None
+                if child_pn and child_pn != parent:
+                    kids.append(_node(child_pn, l))
+            return jsonify(kids)
 
     return jsonify([])

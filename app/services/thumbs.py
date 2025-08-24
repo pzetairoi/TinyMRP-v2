@@ -6,36 +6,28 @@ from app.models.artifact import PartFile
 def _token_for(path: str) -> str:
     return base64.urlsafe_b64encode((path or "").encode("utf-8")).decode("ascii")
 
-def thumb_urls_for(pn: str, rev_pref: Optional[str]) -> List[str]:
-    http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
-    # 1) pick best PNG doc
-    q = PartFile.objects(part_number=pn, ext_group="png").only("path","rel_path","thumb_rel_path","revision","mtime").order_by("-mtime","path")
-    if not q:
+def _urls_for(pn: str, rev: str, *, is_dwg: bool):
+    rows = PartFile.objects(part_number=pn, revision=rev, ext_group="png", is_dwg=is_dwg)
+    if not rows:
         return []
-    docs = list(q)
-    pick = None
-    if rev_pref is not None:
-        if rev_pref == "":
-            for d in docs:
-                if (d.revision or "") == "":
-                    pick = d; break
-        else:
-            for d in docs:
-                if (d.revision or "") == rev_pref:
-                    pick = d; break
-    if pick is None:
-        pick = next((d for d in docs if (d.revision or "") == ""), None) or docs[0]
+    pf = rows.first()
+    # return preferred http_url first, you already have a /files/view token fallback elsewhere if needed
+    out = []
+    if pf.http_url:
+        out.append(pf.http_url)
+    # (optional) fallback: tokenized local
+    out.append(f"/files/view/{pf.rel_path.encode('utf-8').hex()}")  # keep your existing token if you have one
+    return out
 
-    urls: List[str] = []
-    # 2) prefer thumbnail URL if present (http + thumb_rel_path)
-    if http_base and pick.thumb_rel_path:
-        urls.append(f"{http_base}/{pick.thumb_rel_path}")
-    # 3) else fall back to original http rel_path
-    if http_base and pick.rel_path and f"{http_base}/{pick.rel_path}" not in urls:
-        urls.append(f"{http_base}/{pick.rel_path}")
-    # 4) always include token fallback
-    urls.append(f"/files/view/{_token_for(pick.path)}")
-    return urls
+def preview_png_urls_for(pn: str, rev: str | None):
+    return _urls_for(pn, (rev or ""), is_dwg=False)
+
+def drawing_png_urls_for(pn: str, rev: str | None):
+    return _urls_for(pn, (rev or ""), is_dwg=True)
+
+# kept for backward compat – use only for places that truly want preview images
+def thumb_urls_for(pn: str, rev: str | None):
+    return preview_png_urls_for(pn, rev)
 
 
 # helper: build URL list for a single PartFile doc

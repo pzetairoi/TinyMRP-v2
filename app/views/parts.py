@@ -13,6 +13,7 @@ from app.services.attrs import harvest_part_attrs
 from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
+from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
 
 
 
@@ -101,8 +102,9 @@ def part_detail():
     mass     = attrs.get("mass","")
     processes= ", ".join(attrs.get("processes", [])) or attrs.get("process","")
 
-    images   = thumb_urls_for(p.part_number, (p.revision or None))
-    drawings = drawing_urls_for(p.part_number, (p.revision or None))
+    
+    preview_urls = preview_png_urls_for(p.part_number, p.revision)
+    drawing_urls = drawing_png_urls_for(p.part_number, p.revision)
 
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
     def to_url(f: PartFile):
@@ -130,8 +132,8 @@ def part_detail():
             "processes": proc_list,
             "attributes": attrs,
         },
-        "images": images,
-        "drawing_urls": drawings,
+        "images": preview_urls,  # non-DWG
+        "drawing_urls": drawing_urls,  # only *_DWG.png
         "files": files,
         "whereused": wu_rows,          # ← add this
     })
