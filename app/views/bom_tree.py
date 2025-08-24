@@ -7,6 +7,17 @@ from app.services.attrs import harvest_part_attrs
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
+
+def _has_children(pn: str) -> bool:
+    # Works for both denormalized (parent_pn) and referenced (parent) BOMLink
+    if "parent_pn" in BOMLink._fields:
+        return BOMLink.objects(parent_pn=pn).first() is not None
+    parent_part = Part.objects(part_number=pn).only("id").first()
+    if not parent_part:
+        return False
+    return BOMLink.objects(parent=parent_part).first() is not None
+
+
 def _pn_from_link_child(l):
     if hasattr(l, "child_pn") and l.child_pn:
         return l.child_pn
@@ -28,7 +39,7 @@ def bom_tree():
 
         return {
             "key": child_pn,
-            "leaf": False,
+            "leaf": not _has_children(child_pn),
             "data": {
                 "pn": child_pn,
                 "desc": desc,
@@ -64,7 +75,7 @@ def bom_tree():
 
         root = {
         "key": p.part_number,
-        "leaf": False,
+        "leaf": not _has_children(p.part_number), 
         "data": {
             "pn": p.part_number,
             "desc": root_attrs.get("description",""),

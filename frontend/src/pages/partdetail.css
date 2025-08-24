@@ -1,0 +1,115 @@
+/* frontend/src/pages/partdetail.css */
+
+.pd-card {
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
+.pd-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 240px;
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 8px;
+  background: #fafafa;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.pd-hero img { max-height: 230px; width: auto; object-fit: contain; }
+
+.pd-th { width: 28%; white-space: nowrap; }
+
+.pd-files a { font-weight: 600; }
+
+
+.pd-attr {
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 8px;
+  padding: 8px;
+}
+.pd-attr-k {
+  color: #6c757d;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.pd-attr-v { font-size: 14px; }
+
+
+/* Fixed-height scrolling container for attributes */
+.pd-attrs-wrap {
+  max-height: 420px;   /* <-- fixed height; adjust if you like */
+  overflow: auto;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* Single-column list */
+.pd-attrs-list {
+  display: block;
+}
+
+.pd-attr {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0,0,0,.06);
+}
+.pd-attr:last-child { border-bottom: none; }
+
+.pd-attr-k {
+  width: 180px;          /* label column */
+  flex: 0 0 180px;
+  color: #6c757d;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+
+.pd-attr-v {
+  flex: 1;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+
+.pd-proc-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0 12px;
+}
+.pd-proc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+}
+.pd-proc-chip img {
+  width: 18px;
+  height: 18px;
+  display: inline-block;
+  filter: drop-shadow(0 0 1px rgba(0,0,0,.2));
+}
+
+
+.tt-pncell {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+}
+
+.tt-leaf-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.35);
+  margin-right: .25rem;
+}

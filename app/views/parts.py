@@ -12,6 +12,7 @@ from app.services.thumbs import thumb_urls_for, drawing_urls_for
 from app.services.attrs import harvest_part_attrs
 from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
+from app.services.processmeta import normalize_processes
 
 
 
@@ -87,6 +88,14 @@ def part_detail():
         return jsonify({"error": "not found"}), 404
 
     attrs = harvest_part_attrs(p)
+    
+    meta = current_app.config.get("PROCESS_META", {})
+    proc_list = normalize_processes(attrs, meta)
+
+
+
+
+    
     material = attrs.get("material","")
     finish   = attrs.get("finish","")
     mass     = attrs.get("mass","")
@@ -108,6 +117,7 @@ def part_detail():
 
     wu_rows = _rows_for_child_pn(p.part_number)
 
+
     return jsonify({
         "part": {
             "part_number": p.part_number,
@@ -117,7 +127,7 @@ def part_detail():
             "material": attrs.get("material",""),
             "finish": attrs.get("finish",""),
             "mass": attrs.get("mass",""),
-            "processes": ", ".join(attrs.get("processes", [])),
+            "processes": proc_list,
             "attributes": attrs,
         },
         "images": images,

@@ -1,0 +1,22 @@
+{
+  "purchase":   { "color": "112, 48, 160", "icon": "purchase.svg",  "aliases": ["purchasing","buy","procure","purchased"], "file_groups": ["pdf","datasheet"] },
+  "machine":    { "color": "255, 0, 0",    "icon": "machine.svg",   "aliases": ["machining","cnc"] },
+  "welding":    { "color": "255, 192, 0",  "icon": "welding.svg",   "aliases": ["stud welding","stud_welding","fabrication"] },
+  "folding":    { "color": "0, 102, 0",    "icon": "folding.svg",   "aliases": [] },
+  "rolling":    { "color": "0, 102, 0",    "icon": "roll.svg",      "aliases": [] },
+  "casting":    { "color": "255, 0, 255",  "icon": "casting.svg",   "aliases": [] },
+  "lasercut":   { "color": "0, 176, 80",   "icon": "lasercut.svg",  "aliases": ["laser cut","laser-cut"] },
+  "profile cut":{ "color": "153, 102, 51", "icon": "profilecut.svg","aliases": ["profile-cut","oxy","plasma"] },
+  "3d laser":   { "color": "0, 176, 80",   "icon": "3d-laser.svg",  "aliases": ["3dlaser"] },
+  "cutting":    { "color": "255, 192, 0",  "icon": "cutting.svg",   "aliases": [] },
+  "sewing":     { "color": "192, 0, 0",    "icon": "sewing.svg",    "aliases": [] },
+  "3d print":   { "color": "192, 0, 0",    "icon": "3d-printing.svg","aliases": ["3dprint","additive"] },
+  "paint":      { "color": "0, 32, 96",    "icon": "spray.svg",     "aliases": ["painting","powdercoat","powder coat"] },
+  "zinc":       { "color": "0, 32, 96",    "icon": "zinc.svg",      "aliases": [] },
+  "galvanize":  { "color": "0, 32, 96",    "icon": "galvanize.svg", "aliases": ["galvanised","galvanized"] },
+  "nickel":     { "color": "0, 32, 96",    "icon": "nickel.svg",    "aliases": [] },
+  "assembly":   { "color": "0, 176, 240",  "icon": "assembly.svg",  "aliases": ["assy","assemble"] },
+  "label":      { "color": "0, 176, 240",  "icon": "label.svg",     "aliases": [] },
+  "hardware":   { "color": "208, 206, 206","icon": "hardware.svg",  "aliases": ["fastener","fasteners"] },
+  "others":     { "color": "118, 113, 113","icon": "unknown.svg",   "aliases": [] }
+}

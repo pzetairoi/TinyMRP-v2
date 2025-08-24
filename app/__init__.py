@@ -59,11 +59,15 @@ def create_app(config_object=None):
         print(f".env loaded? SECRET_KEY set: {bool(os.getenv('SECRET_KEY'))}; "
       f"MONGO_URI present: {bool(os.getenv('MONGO_URI'))}")
         print("App SECRET_KEY prefix:", str(os.getenv('SECRET_KEY'))[:8])
-        
-         
+
     except Exception:
         print("ddid not work loading .env file, continuing without it")
         pass
+    
+        
+    from app.services.processmeta import load_process_meta
+    app.config["PROCESS_META"] = load_process_meta()
+
 
     # Load default config if not set
     app.config.setdefault("SECRET_KEY", "change-me")
@@ -162,8 +166,13 @@ def create_app(config_object=None):
 
     from app.views.fileserve import bp as fileserve_bp
     app.register_blueprint(fileserve_bp)
+    
+    from app.views.processmeta import bp as processmeta_bp
+    app.register_blueprint(processmeta_bp)
+
  
 
     from .cli import init_app as init_cli
     init_cli(app)
+    
     return app
