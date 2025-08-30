@@ -57,13 +57,11 @@ python run.py   # visit http://127.0.0.1:5000
 # 6) Create first user (then grant yourself admin)
 flask --app run.py user create
 flask --app run.py user grant-admin --email you@example.com
+```
 
 
 
----
-
-
-When you start with a fresh MongoDB, there are **no users yet**, so you won’t be able to log in until you seed one.
+## When you start with a fresh MongoDB, there are **no users yet**, so you won’t be able to log in until you seed one.
 
 ### Using Docker (recommended)
 
