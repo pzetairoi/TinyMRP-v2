@@ -203,7 +203,7 @@ export default function PartDetailPage() {
         const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&withThumb=1`)
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         const root: TreeNode[] = await r.json()
-        if (!cancelled) setBomNodes(asArr<TreeNode>(root))
+        if (!cancelled) setBomNodes(annotateDepth(asArr(root), 0))
       } catch (e) {
         console.error("bom_tree root (detail) failed", e)
         if (!cancelled) setBomNodes([])
@@ -236,19 +236,26 @@ export default function PartDetailPage() {
   }
 
 
-  async function onExpandNode(e: any) {
-    const key = String(e?.node?.key || "")
-    if (!key) return
-    try {
-      const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const kids: TreeNode[] = asArr(await r.json())
-      setBomNodes((prev) => setNodeChildren(prev, key, kids))
-      setBomExpanded((prev) => ({ ...prev, [key]: true }))
-    } catch (err) {
-      console.error("bom_tree children (detail) failed", err)
-    }
+async function onExpandNode(e: any) {
+  const key = String(e?.node?.key || '')
+  if (!key) return
+  try {
+    const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`)
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const kids: TreeNode[] = asArr(await r.json())
+
+    // depth tagging for new children
+    setBomNodes((prev) => {
+      const parentDepth = findNodeDepth(prev, key) ?? 0
+      const tagged = annotateDepth(kids, parentDepth + 1)
+      return setNodeChildren(prev, key, tagged)
+    })
+    setBomExpanded((prev) => ({ ...prev, [key]: true }))
+  } catch (err) {
+    console.error('bom_tree children (detail) failed', err)
   }
+}
+
 
 
  // Expand the entire tree (recursively loads all children and expands them)
@@ -296,6 +303,25 @@ export default function PartDetailPage() {
   }
   // Expand all once we have the root nodes
 
+// ADD near other helpers
+function annotateDepth(nodes: TreeNode[], depth = 0): TreeNode[] {
+  return (nodes || []).map((n) => {
+    const data = { ...(n.data || {}), _depth: depth };
+    const kids = Array.isArray(n.children) ? annotateDepth(n.children as TreeNode[], depth + 1) : n.children;
+    return { ...n, data, children: kids };
+  });
+}
+
+function findNodeDepth(tree: TreeNode[], key: string, current = 0): number | null {
+  for (const n of tree || []) {
+    if (String(n.key) === String(key)) return (n as any)?.data?._depth ?? current;
+    if (n.children && n.children.length) {
+      const d = findNodeDepth(n.children as TreeNode[], key, (n as any)?.data?._depth ?? current);
+      if (d !== null) return d;
+    }
+  }
+  return null;
+}
 
 
 
@@ -524,6 +550,7 @@ export default function PartDetailPage() {
           filterDisplay="row"
           filterMode="lenient"
           emptyMessage="No matching items"
+          rowClassName={(node) => `depth-${(node as any)?.data?._depth ?? 0}`}
               >
           <Column header=""
             body={(node: any) => {
