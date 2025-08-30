@@ -10,6 +10,7 @@ import ImageStrip from "../components/ImageStrip"
 import ThumbImg from "../components/ThumbImg"
 import ProcessBadges from "../components/ProcessBadges"
 import "./partdetail.css"
+import { FilterMatchMode } from 'primereact/api'
 
 // ---------- Types ----------
 type Part = {
@@ -97,6 +98,17 @@ export default function PartDetailPage() {
   // BOM Tree
   const [bomNodes, setBomNodes] = useState<TreeNode[]>([])
   const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({})
+
+  const [ttFilters, setTtFilters] = useState<any>({
+      pn:        { value: null, matchMode: FilterMatchMode.CONTAINS },
+      rev:       { value: null, matchMode: FilterMatchMode.CONTAINS },
+      desc:      { value: null, matchMode: FilterMatchMode.CONTAINS },
+      process:   { value: null, matchMode: FilterMatchMode.CONTAINS },
+      finish:    { value: null, matchMode: FilterMatchMode.CONTAINS },
+      material:  { value: null, matchMode: FilterMatchMode.CONTAINS },
+      qty:       { value: null, matchMode: FilterMatchMode.EQUALS },
+    })
+
 
   const pnBody = (n: any) => {
   const leaf = !!n?.leaf
@@ -429,13 +441,14 @@ export default function PartDetailPage() {
           resizableColumns
           size="small"
           showGridlines
-          globalFilter={globalFilter} 
-          header={header} 
-          filterMode={filterMode} 
-          tableStyle={{ minWidth: '50rem' }}
-        >
-          <Column
-            header=""
+
+          filters={ttFilters}
+          onFilter={(e) => setTtFilters(e.filters || {})}
+          filterDisplay="row"
+          filterMode="lenient"
+          emptyMessage="No matching items"
+              >
+          <Column header=""
             body={(node: any) => {
               const urls = node?.data?.thumb_urls || []
               return urls.length ? (
@@ -446,26 +459,29 @@ export default function PartDetailPage() {
                 />
               ) : null
             }}
-            style={{ width: 56 }}
-          />
+    style={{ width: 60 }}
+    />
 
-          <Column
-            field="pn"
-            header="Partnumber"
-            expander
-            sortable
-            filter 
-            filterPlaceholder="Filter by name"
-            body={pnBody}
-            style={{ width: 240 }}
-          />
+    <Column field="pn" header="Partnumber" expander sortable filter showFilterMenu={false}
+            filterPlaceholder="Search PN"
+             body={(n:any)=><a href={`/ui/part/${encodeURIComponent(n?.data?.pn||'')}`}>{n?.data?.pn}</a>}
+             style={{ width: 220 }}/>
 
-          <Column field="rev" header="Rev" sortable style={{ width: 90 }} />
-          <Column field="desc" header="Description" sortable />
-          <Column field="process" header="Process" sortable />
-          <Column field="finish" header="Finish" sortable />
-          <Column field="material" header="Material" sortable />
-          <Column field="qty" header="Level QTY" sortable style={{ width: 110 }} />
+    <Column field="rev" header="Rev" sortable filter showFilterMenu={false}
+            filterPlaceholder="Search Rev"
+            style={{ width: 90 }}/>
+    <Column field="desc" header="Description" sortable filter showFilterMenu={false}
+            filterPlaceholder="Search description" />
+    <Column field="process" header="Process" sortable filter showFilterMenu={false}
+            filterPlaceholder="Search process" />
+    <Column field="finish" header="Finish" sortable filter showFilterMenu={false}
+            filterPlaceholder="Search finish" />
+    <Column field="material" header="Material" sortable filter showFilterMenu={false}
+            filterPlaceholder="Search material" />
+    <Column field="qty" header="Level QTY" sortable filter showFilterMenu={false}
+            dataType="numeric"
+            filterPlaceholder="= qty"
+            style={{ width: 110 }}/>
         </TreeTable>
       </div>
 
