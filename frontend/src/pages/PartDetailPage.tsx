@@ -465,10 +465,8 @@ export default function PartDetailPage() {
               </div>
             </TabPanel>
           </TabView>
-        </div>
-      </div>
-
-      {/* Used in */}
+        
+              {/* Used in */}
       <div className="mt-4">
         <h6 className="mb-2">Used in</h6>
         <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll">
@@ -489,6 +487,14 @@ export default function PartDetailPage() {
           <Column field="alt_group" header="Alt Group" sortable />
         </DataTable>
       </div>
+        
+        
+        
+        
+        </div>
+      </div>
+
+
 
       {/* Components table (Tree) */}
       <div className="mt-4">
