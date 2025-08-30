@@ -29,10 +29,10 @@ def part_images():
 
     qs = PartFile.objects(part_number=pn, revision=rev, ext_group="png")
     for d in qs:
-        print("d",d.part_number)
-        print("d",d.revision)
-        print("d",d.ext_group)
-        print("d",d.is_dwg)
+        print("dpartnumber",d.part_number)
+        print("rev ",d.revision)
+        print("ext group ",d.ext_group)
+        print("is dwg",d.is_dwg)
     if mode == "preview":
         qs = qs.filter(is_dwg=False)
     elif mode == "drawing":

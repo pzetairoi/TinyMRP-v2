@@ -32,8 +32,6 @@ class PartFile(Document):
         "db_alias": DB_ALIAS,
     "indexes": [
         # unique identity for an artifact type per PN+REV
-        {"fields": ["part_number", "revision", "ext_group", "ext","is_dwg"], "unique": True},
-        # allow multiple docs without 'path' (we store rel_path/http_url instead)
-        {"fields": ["path"], "unique": True, "sparse": True},
+        {"fields": ["part_number", "revision", "ext_group", "ext","is_dwg"], "unique": True}
     ]
 }
