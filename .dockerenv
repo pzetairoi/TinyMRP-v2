@@ -1,0 +1,59 @@
+
+#  docker  default 
+FILE_ROOT_LOCAL=/data/deliverables
+MONGO_URI=mongodb://mongo:27017/tinymrp-v2
+FILE_ROOT_HTTP=/Deliverables
+
+
+# The manifest path inside the image
+VITE_MANIFEST=/app/app/static/parts-ui/.vite/manifest.json
+
+# External port for NGINX
+HTTP_PORT=5000
+
+# Mongo
+MONGO_DB=tinymrp-v2
+
+
+# Point this to your host path containing folders: png, pdf, dxf, step, edr, 3mf, datasheet, thumbs
+# Windows example:
+DELIVERABLES_DIR=C:\CADEXPORT
+# Linux example:
+# DELIVERABLES_DIR=/mnt/Deliverables
+
+# The app reads either FILE_ROOTS or FILE_ROOTS_JSON
+FILE_ROOTS={"local":"/data/deliverables","http":"/Deliverables"}
+FILE_ROOTS_JSON={"local":"/data/deliverables","http":"/Deliverables"}
+
+
+
+
+SECRET_KEY=<XQTqFJRQMpJvlHR-Zn9qnXD31nPL0UiTUStczyg5E30>
+SECURITY_PASSWORD_SALT=<FGPKQ5x_bQgsmyv9ARtTcDm-2oMf2B19ZFAcUZVbU78>
+SECURITY_PASSWORD_HASH=argon2
+SECURITY_PASSWORD_SALT=disable  # not needed with Argon2; keep unset
+SECURITY_REGISTERABLE=True
+SECURITY_CONFIRMABLE=True
+SECURITY_RECOVERABLE=True
+SECURITY_TRACKABLE=True
+SECURITY_TWO_FACTOR=True
+SECURITY_TOTP_SECRETS=<json or env>
+SECURITY_POST_LOGIN_VIEW=/
+WTF_CSRF_ENABLED=True
+SESSION_COOKIE_SECURE=True
+SESSION_COOKIE_SAMESITE=Lax
+
+
+
+# Optional: compute SHA-256 for files up to this size (bytes). 0 = disable
+FILE_HASH_MAX_BYTES=10485760
+
+
+# Thumbnails
+THUMB_SUBDIR=thumbs
+THUMB_MAX_W=320
+THUMB_MAX_H=240
+THUMB_FORMAT=PNG          # keep as PNG for crisp line drawings
+THUMB_QUALITY=88          # used if switched to JPEG later
+
+
