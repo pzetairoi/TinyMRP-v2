@@ -60,7 +60,7 @@ flask --app run.py user grant-admin --email you@example.com
 
 
 
-
+---
 
 
 When you start with a fresh MongoDB, there are **no users yet**, so you won’t be able to log in until you seed one.
