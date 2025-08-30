@@ -21,6 +21,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+      - docker/.env.overlay
     environment:
       # These defaults are safe—your .env can override anything
       FLASK_ENV: production
