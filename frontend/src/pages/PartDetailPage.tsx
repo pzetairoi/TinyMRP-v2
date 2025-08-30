@@ -429,6 +429,10 @@ export default function PartDetailPage() {
           resizableColumns
           size="small"
           showGridlines
+          globalFilter={globalFilter} 
+          header={header} 
+          filterMode={filterMode} 
+          tableStyle={{ minWidth: '50rem' }}
         >
           <Column
             header=""
@@ -450,6 +454,8 @@ export default function PartDetailPage() {
             header="Partnumber"
             expander
             sortable
+            filter 
+            filterPlaceholder="Filter by name"
             body={pnBody}
             style={{ width: 240 }}
           />

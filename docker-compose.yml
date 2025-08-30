@@ -19,9 +19,8 @@ services:
       context: .
       dockerfile: docker/app/Dockerfile
     restart: unless-stopped
-    env_file:
-      - .env
-      - docker/.env.overlay
+    # env_file:
+    #    - .dockerenv
     environment:
       # These defaults are safe—your .env can override anything
       FLASK_ENV: production
@@ -32,6 +31,8 @@ services:
       FILE_ROOTS_JSON: ${FILE_ROOTS_JSON:-{"local":"/data/deliverables","http":"/Deliverables"}}
       # Vite manifest path (your app already looks here)
       VITE_MANIFEST: /app/app/static/parts-ui/.vite/manifest.json
+      FILE_ROOT_HTTP: /Deliverables
+      DELIVERABLES_DIR: C:/CADEXPORT
     depends_on:
       - mongo
     volumes:
