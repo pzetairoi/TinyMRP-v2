@@ -99,27 +99,69 @@ export default function PartDetailPage() {
   const [bomNodes, setBomNodes] = useState<TreeNode[]>([])
   const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({})
 
-  const [ttFilters, setTtFilters] = useState<any>({
-      pn:        { value: null, matchMode: FilterMatchMode.CONTAINS },
-      rev:       { value: null, matchMode: FilterMatchMode.CONTAINS },
-      desc:      { value: null, matchMode: FilterMatchMode.CONTAINS },
-      process:   { value: null, matchMode: FilterMatchMode.CONTAINS },
-      finish:    { value: null, matchMode: FilterMatchMode.CONTAINS },
-      material:  { value: null, matchMode: FilterMatchMode.CONTAINS },
-      qty:       { value: null, matchMode: FilterMatchMode.EQUALS },
-    })
+// --- TreeTable filters (controlled) ---
+type TTFilters = Record<string, { value: any; matchMode: string }>
+
+const makeInitFilters = (): TTFilters => ({
+  pn:        { value: null, matchMode: FilterMatchMode.CUSTOM },
+  desc:      { value: null, matchMode: FilterMatchMode.CUSTOM },
+  rev:       { value: null, matchMode: FilterMatchMode.CUSTOM },
+  process:   { value: null, matchMode: FilterMatchMode.CUSTOM },
+  finish:    { value: null, matchMode: FilterMatchMode.CUSTOM },
+  material:  { value: null, matchMode: FilterMatchMode.CUSTOM },
+  qty:       { value: null, matchMode: FilterMatchMode.EQUALS },
+});
 
 
-  const pnBody = (n: any) => {
-  const leaf = !!n?.leaf
-  const pn = n?.data?.pn || ''
+const [ttFilters, setTtFilters] = useState<TTFilters>(makeInitFilters())
+
+// Remove cleared filters ('' / null) so they don’t “stick”
+function normalizeFilters(next: TTFilters): TTFilters {
+  const out: TTFilters = { ...makeInitFilters() }
+  for (const k of Object.keys(next || {})) {
+    const v = next[k]?.value
+    if (v !== '' && v !== null && v !== undefined) out[k] = next[k]
+  }
+  return out
+}
+
+function onTTFilter(e: any) {
+  // PrimeReact sends e.filters
+  setTtFilters(normalizeFilters(e.filters || {}))
+}
+
+
+const [ttKey, setTtKey] = useState(0); // to force remount
+function clearTTFilters() {
+  setTtFilters(makeInitFilters());
+  setTtKey(k => k + 1);     // force remount so inputs clear
+}
+
+// Multi-term (space-separated) CONTAINS-ALL, case-insensitive
+const containsAllTerms = (value: any, filter: any) => {
+  if (filter == null || filter === '') return true;
+  const hay = String(value ?? '').toLowerCase();
+  const terms = String(filter).toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  return terms.every(t => hay.includes(t));
+};
+
+
+
+
+
+
+const pnBody = (n: any) => {
+  const isLeaf = !!n?.leaf || !n?.children?.length;
+  const pn = n?.data?.pn || '';
   return (
     <span className="tt-pncell">
-      {leaf && <span className="tt-leaf-dot" aria-hidden="true" />}
+      {isLeaf && <span className="tt-leaf-dot" aria-hidden="true" />}
       <a href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
     </span>
-  )
-  }
+  );
+};
+
 
 
   // ---------- Load Part Detail ----------
@@ -279,12 +321,14 @@ async function onExpandNode(e: any) {
         try {
           const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`)
           if (r.ok) {
-            const kids: TreeNode[] = asArr(await r.json())
-            if (kids.length) {
-              nextTree = setNodeChildren(nextTree, key, kids)
-              expanded[key] = true
-              for (const k of kids) queue.push(String(k.key))
-            }
+          let kids: TreeNode[] = asArr(await r.json());
+          const parentDepth = findNodeDepth(nextTree, key) ?? 0;
+          kids = annotateDepth(kids, parentDepth + 1);   // <-- add depth
+          if (kids.length) {
+            nextTree = setNodeChildren(nextTree, key, kids);
+            expanded[key] = true;
+            for (const k of kids) queue.push(String(k.key));
+          }
           }
         } catch (e) {
           console.warn('expandAll fetch failed for', key, e)
@@ -322,6 +366,12 @@ function findNodeDepth(tree: TreeNode[], key: string, current = 0): number | nul
   }
   return null;
 }
+
+const rowClassName = (node: any) => {
+  const d = Number(node?.data?._depth ?? 0) % 5; // 5-color loop
+  return { [`tt-depth-${d}`]: true };
+};
+
 
 
 
@@ -532,61 +582,142 @@ function findNodeDepth(tree: TreeNode[], key: string, current = 0): number | nul
           <button className="btn btn-sm btn-outline-secondary ms-2" onClick={() => setBomExpanded({})}>
           Collapse all
           </button>
+                <button
+  type="button"
+  className="btn btn-sm btn-outline-secondary"
+  onClick={(e) => { e.preventDefault(); clearTTFilters(); }}
+>
+  Clear filters
+</button>
+
         </div>
 
-        <TreeTable
-          value={Array.isArray(bomNodes) ? bomNodes : []}
-          expandedKeys={bomExpanded}
-          onToggle={(e) => setBomExpanded(e.value)}
-          onExpand={onExpandNode}
-          scrollable
-          scrollHeight="55vh"
-          resizableColumns
-          size="small"
-          showGridlines
+<TreeTable
+  key={ttKey}
+  value={bomNodes || []}
+  expandedKeys={bomExpanded}
+  onToggle={(e) => setBomExpanded(e.value)}
+  onExpand={onExpandNode}
+  filters={ttFilters}
+  onFilter={onTTFilter}
+  filterDisplay="row"
+  rowClassName={rowClassName}
+  showGridlines
+  scrollable
+  scrollHeight="55vh"
+  resizableColumns
+  size="small"
+>
 
-          filters={ttFilters}
-          onFilter={(e) => setTtFilters(e.filters || {})}
-          filterDisplay="row"
-          filterMode="lenient"
-          emptyMessage="No matching items"
-          rowClassName={(node) => `depth-${(node as any)?.data?._depth ?? 0}`}
-              >
-          <Column header=""
-            body={(node: any) => {
-              const urls = node?.data?.thumb_urls || []
-              return urls.length ? (
-                <img
-                  src={urls[0]}
-                  onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
-                  style={{ maxHeight: 28, maxWidth: 44, objectFit: "contain" }}
-                />
-              ) : null
-            }}
-    style={{ width: 60 }}
+    {/* Thumb */}
+    <Column
+      header=""
+      body={(node: any) => {
+        const urls = node?.data?.thumb_urls || []
+        return urls.length ? (
+          <img
+            src={urls[0]}
+            onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
+            style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain' }}
+          />
+        ) : null
+      }}
+      style={{ width: 60 }}
     />
 
-    <Column field="pn" header="Partnumber" expander sortable filter showFilterMenu={false}
-            filterPlaceholder="Search PN"
-             body={(n:any)=><a href={`/ui/part/${encodeURIComponent(n?.data?.pn||'')}`}>{n?.data?.pn}</a>}
-             style={{ width: 220 }}/>
+    {/* Important: field is the key inside node.data; 
+        when using a custom body, set filterField explicitly */}
+    <Column
+  field="pn"
+  filterField="pn"
+  header="Partnumber"
+  expander
+  sortable
+  filter
+  filterMatchMode="custom"
+  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
+  showFilterMenu={false}
+  filterPlaceholder="Filter PN"
+  body={pnBody}
+  style={{ width: 220 }}
+/>
 
-    <Column field="rev" header="Rev" sortable filter showFilterMenu={false}
-            filterPlaceholder="Search Rev"
-            style={{ width: 90 }}/>
-    <Column field="desc" header="Description" sortable filter showFilterMenu={false}
-            filterPlaceholder="Search description" />
-    <Column field="process" header="Process" sortable filter showFilterMenu={false}
-            filterPlaceholder="Search process" />
-    <Column field="finish" header="Finish" sortable filter showFilterMenu={false}
-            filterPlaceholder="Search finish" />
-    <Column field="material" header="Material" sortable filter showFilterMenu={false}
-            filterPlaceholder="Search material" />
-    <Column field="qty" header="Level QTY" sortable filter showFilterMenu={false}
-            dataType="numeric"
-            filterPlaceholder="= qty"
-            style={{ width: 110 }}/>
-        </TreeTable>
+<Column
+  field="rev"
+  filterField="rev"
+  header="Rev"
+  sortable
+  filter
+  filterMatchMode="custom"
+  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
+  showFilterMenu={false}
+  filterPlaceholder="Rev"
+  style={{ width: 90 }}
+/>
+
+<Column
+  field="desc"
+  filterField="desc"
+  header="Description"
+  sortable
+  filter
+  filterMatchMode="custom"
+  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
+  showFilterMenu={false}
+  filterPlaceholder="Filter description"
+/>
+
+<Column
+  field="process"
+  filterField="process"
+  header="Process"
+  sortable
+  filter
+  filterMatchMode="custom"
+  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
+  showFilterMenu={false}
+  filterPlaceholder="Filter process"
+/>
+
+<Column
+  field="finish"
+  filterField="finish"
+  header="Finish"
+  sortable
+  filter
+  filterMatchMode="custom"
+  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
+  showFilterMenu={false}
+  filterPlaceholder="Filter finish"
+/>
+
+<Column
+  field="material"
+  filterField="material"
+  header="Material"
+  sortable
+  filter
+  filterMatchMode="custom"
+  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
+  showFilterMenu={false}
+  filterPlaceholder="Filter material"
+/>
+
+
+    <Column
+      field="qty"
+      filterField="qty"
+      header="Level QTY"
+      sortable
+      filter
+      showFilterMenu={false}
+      filterPlaceholder="= Qty"
+      style={{ width: 110 }}
+    />
+  </TreeTable>
+
+
+
       </div>
 
 
