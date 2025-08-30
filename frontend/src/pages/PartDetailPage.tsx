@@ -223,6 +223,19 @@ export default function PartDetailPage() {
     })
   }
 
+// find a node by key in current tree (shallow + deep)
+  function findNode(tree: TreeNode[], key: string): TreeNode | undefined {
+    for (const n of tree) {
+      if (String(n.key) === String(key)) return n
+      if (n.children?.length) {
+        const hit = findNode(n.children as TreeNode[], key)
+        if (hit) return hit
+      }
+    }
+    return undefined
+  }
+
+
   async function onExpandNode(e: any) {
     const key = String(e?.node?.key || "")
     if (!key) return
@@ -236,6 +249,55 @@ export default function PartDetailPage() {
       console.error("bom_tree children (detail) failed", err)
     }
   }
+
+
+ // Expand the entire tree (recursively loads all children and expands them)
+  async function expandAll() {
+    if (!bomNodes.length) return
+    const seen = new Set<string>()
+    const queue: string[] = bomNodes.map(n => String(n.key))
+    let nextTree = bomNodes
+    const expanded: Record<string, boolean> = { ...bomExpanded }
+
+    while (queue.length) {
+      const key = queue.shift()!
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      let node = findNode(nextTree, key)
+      if (!node) continue
+
+      // If we don't have children yet, try to fetch them
+      if (!node.children || (node.children as TreeNode[]).length === 0) {
+        try {
+          const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`)
+          if (r.ok) {
+            const kids: TreeNode[] = asArr(await r.json())
+            if (kids.length) {
+              nextTree = setNodeChildren(nextTree, key, kids)
+              expanded[key] = true
+              for (const k of kids) queue.push(String(k.key))
+            }
+          }
+        } catch (e) {
+          console.warn('expandAll fetch failed for', key, e)
+        }
+      } else {
+        // already have children
+        const kids = (node.children as TreeNode[]) || []
+        if (kids.length) {
+          expanded[key] = true
+          for (const k of kids) queue.push(String(k.key))
+        }
+      }
+    }
+    setBomNodes(nextTree)
+    setBomExpanded(expanded)
+  }
+  // Expand all once we have the root nodes
+
+
+
 
   // ---------- Derived ----------
   const fileGroups = useMemo(() => groupFiles(files), [files])
@@ -430,7 +492,16 @@ export default function PartDetailPage() {
 
       {/* Components table (Tree) */}
       <div className="mt-4">
-        <h6 className="mb-2">Components Table</h6>
+        <div className="d-flex align-items-center justify-content-between mb-2">
+          <h6 className="mb-0">BOM</h6>
+          <button type="button" className="btn btn-sm btn-outline-secondary" onClick={expandAll}>
+            Expand all
+          </button>
+          <button className="btn btn-sm btn-outline-secondary ms-2" onClick={() => setBomExpanded({})}>
+          Collapse all
+          </button>
+        </div>
+
         <TreeTable
           value={Array.isArray(bomNodes) ? bomNodes : []}
           expandedKeys={bomExpanded}
@@ -485,7 +556,12 @@ export default function PartDetailPage() {
         </TreeTable>
       </div>
 
+
+
+
       {/* Optional: small image strip under everything */}
+      <br></br>
+      <br></br>
       <div className="pd-proc-legend">
         {Object.entries(procMeta).map(([k, m]) => (
           <span key={k} className="pd-proc-chip" style={{ background: `rgb(${m.color})` }}>
