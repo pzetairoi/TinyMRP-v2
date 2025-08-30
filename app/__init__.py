@@ -43,7 +43,7 @@ def _load_vite_manifest(app):
     else:
         app.config["VITE_MANIFEST"] = None
     # Debug
-    print("VITE_MANIFEST loaded:", bool(app.config["VITE_MANIFEST"]), "path:", path)
+    #print("VITE_MANIFEST loaded:", bool(app.config["VITE_MANIFEST"]), "path:", path)
 
 
 
@@ -57,7 +57,7 @@ def create_app(config_object=None):
         from dotenv import load_dotenv; load_dotenv()
         print("Loaded .env file successfully")
         print(f".env loaded? SECRET_KEY set: {bool(os.getenv('SECRET_KEY'))}; "
-      f"MONGO_URI present: {bool(os.getenv('MONGO_URI'))}")
+        f"MONGO_URI present: {bool(os.getenv('MONGO_URI'))}")
         print("App SECRET_KEY prefix:", str(os.getenv('SECRET_KEY'))[:8])
 
     except Exception:
@@ -90,7 +90,7 @@ def create_app(config_object=None):
     app.config["FILE_ROOT_HTTP"]  = (os.getenv("FILE_ROOT_HTTP")  or "").strip()
     app.config["FILE_HASH_MAX_BYTES"] = int(os.getenv("FILE_HASH_MAX_BYTES") or "0")
 
-    print("FILES: local=", app.config["FILE_ROOT_LOCAL"], "http=", app.config["FILE_ROOT_HTTP"])
+    #print("FILES: local=", app.config["FILE_ROOT_LOCAL"], "http=", app.config["FILE_ROOT_HTTP"])
 
 
 

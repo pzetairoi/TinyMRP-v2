@@ -12,7 +12,7 @@ def _roots():
 
     local_root= (os.getenv("FILE_ROOT_LOCAL") or "").strip()
     http_root=(os.getenv("FILE_ROOT_HTTP")  or "").strip()
-    print(local_root,http_root)
+    #print(local_root,http_root)
     # We only support the first root in the simplified setup
     if not local_root and not http_root:
         return None, None
@@ -26,8 +26,9 @@ def _expectations_for(pn: str, rev: str) -> List[Tuple[str, str, bool]]:
       - normal preview: {base}.png
       - drawing screenshot: {base}_DWG.png
     """
-    print("expect",pn,rev)
-    base = f"{pn}_REV_{rev or ''}"
+    #print("expect",pn,rev)
+    # expects files all capitalized PN, with _REV_ (even if rev is empty)
+    base = f"{pn.upper()}_REV_{rev or ''}"
     wants = []
     # png - preview
     wants.append(("png",  f"{base}.png", False))
@@ -87,6 +88,7 @@ def _find_case_insensitive(local_root: Path, rel: str) -> Path | None:
     return None
 
 def _rel_path_for(candidate: Path, local_root: Path) -> str:
+    
     return str(candidate.relative_to(local_root)).replace("\\","/")
 
 def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
@@ -94,9 +96,9 @@ def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
     Return a dict keyed by (ext_group, is_dwg) -> record {ext, rel_path, http_url, size, mtime_iso}
     Only one record per key; if multiple matches exist, last-modified wins.
     """
-    print("discover",pn,rev)
+    #print("discover",pn,rev)
     local, http = _roots()
-    print(local,http)
+    #print(local,http)
     if not local:
         return {}
     local_root = Path(local)
@@ -105,13 +107,13 @@ def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
     # We search by expected relative paths from the known subfolders (png, pdf, dxf, step, edr, 3mf, datasheet).
     # The repo uses subfolders named as ext_groups.
     folders = ("png","pdf","dxf","step","edr","3mf","datasheet")
-    print(folders)
+    #print(folders)
     for ext_group, leaf, is_dwg in _expectations_for(pn, rev):
         # try in the matching folder (png in png/, pdf in pdf/, …)
         subdir = ext_group
         candidate_rel = f"{subdir}/{leaf}"
         p = _find_case_insensitive(local_root, candidate_rel)
-        print("p",p)
+        #print("p",p)
         if not p:
             continue
         stat = p.stat()
@@ -130,8 +132,8 @@ def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
         if prev and prev["mtime_iso"] >= record["mtime_iso"]:
             continue
         found[key] = record
-        print("key",key)
-        print("record",record)
+        #print("key",key)
+        #print("record",record)
 
     return found
 
@@ -162,24 +164,25 @@ def upsert_part_files(
     """
     n = 0
     for r in recs or []:
-        print("upsert", r)
+        #print("upsert", r)
 
         rpn = pn or r.get("pn") or r.get("part_number")
         rrev = (rev if rev is not None else r.get("rev") or r.get("revision") or "")
         group = (r.get("ext_group") or r.get("group") or "").lower()
         ext = (r.get("ext") or "").lower()
+        is_dwg = bool(r.get("is_dwg"))
 
         if not rpn or ext == "":
             # Not enough to identify the artifact; skip quietly
             continue
 
         # Unique key for your "one file per ext_group+ext per (pn,rev)" rule
-        query = dict(part_number=rpn, revision=rrev, ext_group=group, ext=ext)
-        print("query", query)
+        query = dict(part_number=rpn, revision=rrev, ext_group=group, ext=ext, is_dwg=is_dwg)
+        #print("query", query)
 
         # Allowed fields from the model
         allowed = set(PartFile._fields.keys())
-        print("allowed", allowed)
+        #print("allowed", allowed)
 
         # Build atomic updates for modify()
         updates: Dict[str, Any] = {}
@@ -187,6 +190,8 @@ def upsert_part_files(
         # Normalized rel_path -> also use as unique, non-null `path`
         rel_path = r.get("rel_path") or ""
         norm_rel = rel_path.replace("\\", "/").lstrip("/")
+        
+        #print(rel_path, norm_rel)
 
         if "rel_path" in allowed and norm_rel:
             updates["set__rel_path"] = norm_rel
@@ -218,7 +223,7 @@ def upsert_part_files(
         if not updates:
             continue
 
-        print("updates", updates)
+        #print("updates", updates)
 
         # Upsert
         PartFile.objects(**query).modify(upsert=True, new=True, **updates)  # type: ignore

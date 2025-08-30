@@ -202,8 +202,9 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             rec["ext_group"] = group  # e.g. 'png','pdf','dxf','step','edr','3mf','datasheet'
             rec["is_dwg"] = bool(is_dwg)
             recs.append(rec)
+            print
 
-        print("upserting", len(recs), "artifacts for", pn, rev)
+        #print("upserting", len(recs), "artifacts for", pn, rev)
         artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
 
     
