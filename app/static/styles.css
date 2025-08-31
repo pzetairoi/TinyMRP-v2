@@ -218,3 +218,88 @@ div.flask-pagedown-preview h3 {
 .tt-depth-2 td { background-image: linear-gradient(to right, rgba(0,0,0,.04), rgba(0,0,0,0)); }
 .tt-depth-3 td { background-image: linear-gradient(to right, rgba(0,0,0,.05), rgba(0,0,0,0)); }
 .tt-depth-4 td { background-image: linear-gradient(to right, rgba(0,0,0,.06), rgba(0,0,0,0)); }
+
+
+
+/* Smaller text and tight rows */
+.pd-tt .p-treetable-tbody > tr > td {
+  font-size: 0.92rem;
+  vertical-align: middle;
+}
+
+/* Thumbnail (image-only column) */
+.tt-thumb {
+  max-height: 32px;
+  max-width: 48px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+/* PN cell */
+.tt-pncell .tt-pnlink {
+  text-decoration: none;
+}
+
+/* Level guides column */
+.tt-levelcell {
+  --tt-indent: 16px;
+  --tt-guide: rgba(0,0,0,.25);
+  display: flex;
+  align-items: center;
+  height: 100%;
+  /* width set inline from TS (depth * indent) */
+}
+
+.tt-levelcell .tt-lvl {
+  position: relative;
+  width: var(--tt-indent);
+  height: 28px; /* roughly matches small row size */
+  flex: 0 0 var(--tt-indent);
+}
+
+/* vertical guide for ancestor levels */
+.tt-levelcell .tt-lvl.keep::before {
+  content: "";
+  position: absolute;
+  left: calc(50% - 0.5px);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--tt-guide);
+  opacity: 0.8;
+}
+
+/* current level cap: ├ or └ drawn with borders */
+.tt-levelcell .tt-lvl.cap::after {
+  content: "";
+  position: absolute;
+  left: calc(50% - 0.5px);
+  right: 2px;             /* short of the next column */
+  top: 50%;
+  height: 1px;
+  background: var(--tt-guide);
+  opacity: 0.9;
+}
+
+/* vertical part of the cap */
+.tt-levelcell .tt-lvl.cap::before {
+  content: "";
+  position: absolute;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  background: var(--tt-guide);
+  opacity: 0.9;
+}
+
+/* ├ (has next sibling): full vertical through the row */
+.tt-levelcell .tt-lvl.cap.mid::before {
+  top: 0;
+  bottom: 0;
+}
+
+/* └ (last sibling): from top to mid only */
+.tt-levelcell .tt-lvl.cap.last::before {
+  top: 0;
+  bottom: 50%;
+}
