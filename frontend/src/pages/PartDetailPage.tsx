@@ -724,7 +724,13 @@ const rowClassName = (node: any) => {
   />
 
   {/* 2) Expander (arrow only on expandable rows) */}
-  <Column expander style={{ width: 32 }} />
+<Column
+  expander
+  className="tt-expander"
+  bodyClassName="tt-expander"
+  headerClassName="tt-expander"
+  style={{ width: 24, minWidth: 24, maxWidth: 24 }}
+/>
 
   {/* 3) Image preview ONLY */}
   <Column header="" body={thumbOnlyBody} style={{ width: 64 }} />

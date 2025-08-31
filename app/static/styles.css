@@ -303,3 +303,34 @@ div.flask-pagedown-preview h3 {
   top: 0;
   bottom: 50%;
 }
+
+
+/* Expander column: lock width and remove any built-in indent */
+.p-treetable .pd-tt td.tt-expander {
+  width: 28px !important;
+  min-width: 28px !important;
+  max-width: 28px !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  overflow: visible;              /* avoid clipping on small columns */
+}
+
+/* PrimeReact adds left margin to the toggler for depth; kill it */
+.p-treetable .pd-tt td.tt-expander .p-treetable-toggler {
+  margin-left: 0 !important;
+}
+
+/* Make sure the toggler is visible and left-aligned */
+.p-treetable .pd-tt td.tt-expander .p-treetable-toggler,
+.p-treetable .pd-tt td.tt-expander .p-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* Optional: slightly smaller chevron to reduce visual jitter */
+.p-treetable .pd-tt td.tt-expander .p-icon,
+.p-treetable .pd-tt td.tt-expander .pi {
+  font-size: 0.9rem;
+  line-height: 1;
+}
