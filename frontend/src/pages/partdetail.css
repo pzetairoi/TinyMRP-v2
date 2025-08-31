@@ -144,3 +144,35 @@
 
 
 
+
+/* Make file buttons behave like chips: small, wrap, and flow */
+.pd-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+.pd-file-btn {
+  padding: .25rem .5rem;
+  font-size: .85rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+/* Ensure previews fill their containers */
+.pd-hero,
+.pd-drawing-link {
+  display: block;
+  width: 100%;
+}
+
+/* Try to make whatever ImageStrip renders scale nicely */
+.pd-hero img,
+.pd-hero canvas,
+.pd-hero video,
+.pd-drawing-link img,
+.pd-drawing-link canvas,
+.pd-drawing-link video {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
