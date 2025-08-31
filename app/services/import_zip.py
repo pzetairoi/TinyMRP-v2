@@ -9,7 +9,7 @@ from app.services.thumbs_gen import generate_thumbs_for_parts
 # Import necessary services for file scanning and upserting
 from app.services.filescan import discover_part_files, upsert_part_files
 # Import necessary services for attributes normalization and merging
-from app.services.attrs import normalize_props, merge_save_part_attrs
+from app.services.attrs import normalize_props, merge_save_part_attrs, process_attributes
 
 
 from flask import current_app
@@ -129,36 +129,71 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     updated_parts = 0
     created_links = 0
     skipped_links = 0
+    found_artifacts = 0
+    skipped_artifacts = 0
 
     # 1) Parts from FLATBOM
     part_props: Dict[str, Dict[str, Any]] = {}
     if flat_name:
         flat_txt = z.read(flat_name).decode("utf-8", errors="replace")
+        itemcounter=0
         for d in _parse_flatbom(flat_txt):
             norm = _normalize_part(d)
             pn = norm["part_number"]
-            if pn:
-                part_props[pn] = norm
+            rev=norm.get("revision") or ""
+            
+            print("normalized part", pn, rev, norm)
+            if pn and rev:
+                part_props[str(itemcounter)] = norm
+                itemcounter+=1
 
     # Upsert parts
-    for pn, norm in part_props.items():
-        p = Part.objects(part_number=pn).first()
+    for itemref, norm in part_props.items():
+        print( "upserting part", itemref, norm)
+        pn=norm["part_number"]
+        rev=norm.get("revision") or ""        
+        attrs=norm["attrs"] or {}
+
+        
+        p = Part.objects(part_number=pn, revision=rev).first()
+
+        
         if not p:
-            p = Part(part_number=pn)
+            p = Part(part_number=pn, revision=rev)
             created_parts += 1
         else:
             updated_parts += 1
         p.description = norm["description"]
         p.category = norm["category"]
         p.uom = norm["uom"]
-        if norm.get("revision"):
-            p.revision = norm["revision"]
-        attrs = p.attrs or {}
-        attrs.update(norm.get("attrs") or {})
+        
+        
+
+        # attrs = p.attrs or {}
+        # print("attributes", attrs)
+        attrs, processes = process_attributes(attrs)
+        # print("attributes", attrs)
+        # print("processes", processes)
+        
+        
+        # attrs.update(norm.get("attrs") or {})
+        
+        
         attrs["seed"] = seed_tag
-        attrs = normalize_props(attrs)
+        # attrs = normalize_props(attrs)
+        print("#############################")
+        print("attributes", attrs)
+        
+        
+        
         p.attrs = attrs
+        
+        if processes:
+            p.processes = processes
+        
+        
         p.save()
+
 
     # 2) Links from TREEBOM
     if tree_name:
