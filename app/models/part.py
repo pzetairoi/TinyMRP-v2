@@ -5,9 +5,10 @@ from datetime import datetime
 DB_ALIAS = "tinymrp-v2"
 
 class Part(Document):
-    part_number = StringField(required=True, unique=True)
+    part_number = StringField(required=True)
     revision    = StringField(default="")
     description = StringField(default="")
+    processes   = ListField(StringField(), default=list)
     category    = StringField(default="")
     uom         = StringField(default="EA")
     manufacturer= StringField(default="")
@@ -21,9 +22,7 @@ class Part(Document):
     meta = {
         "collection": "parts",
         "indexes": [
-            "part_number","category","uom","status",
-            {"fields": ["$part_number","$description","$manufacturer","$mfr_part"],
-             "default_language": "english"},
+            { "fields": ["part_number", "revision"], "unique": True, "name": "unique_part_rev" },
         ],
         "db_alias": DB_ALIAS
     }

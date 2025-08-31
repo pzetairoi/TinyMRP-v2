@@ -1,6 +1,9 @@
 # app/services/attrs.py
 from __future__ import annotations
 from typing import Dict, Any, Iterable
+import re
+
+_SPLIT = re.compile(r"[;,]")  # split on commas/semicolons
 
 # Canonical keys that must always exist (as strings)
 REQUIRED_KEYS: Iterable[str] = (
@@ -80,6 +83,62 @@ ALIASES: Dict[str, str] = {
     "approveddate": "approveddate",
     "weight": "mass",
 }
+
+def _to_list(v) -> List[str]:
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple)):
+        return [str(x) for x in v if x is not None]
+    if isinstance(v, str):
+        # allow comma/semicolon separated strings
+        parts = [p.strip() for p in _SPLIT.split(v) if p.strip()]
+        return parts
+    return [str(v)]
+
+
+def normalize_processes_from_attrs(attrs: Dict) -> List[str]:
+    """
+    Read process fields from raw attrs and produce a normalized, lowercased,
+    de-duplicated list preserving order.
+      - accepts: processes (list or string), process, process2/secondprocess, process3/thirdprocess
+    """
+    if not isinstance(attrs, dict):
+        return []
+
+    raw: List[str] = []
+    raw += _to_list(attrs.get("processes"))
+    raw += _to_list(attrs.get("process"))
+    raw += _to_list(attrs.get("process2") or attrs.get("secondprocess"))
+    raw += _to_list(attrs.get("process3") or attrs.get("thirdprocess"))
+
+    out: List[str] = []
+    seen = set()
+    for p in raw:
+        p2 = p.strip().lower()
+        if p2 and p2 not in seen:
+            seen.add(p2)
+            out.append(p2)
+    return out
+
+
+def process_attributes(raw_attrs: Dict | None) -> Tuple[Dict, List[str]]:
+    """
+    Main entrypoint used by import/update code.
+    Returns (attrs_dict, processes_list)
+
+    - Ensures attrs is a dict.
+    - Writes the normalized list back into attrs['processes'] (for the Attributes tab).
+    - Leaves legacy attrs['process'] intact if present; do NOT overwrite it.
+    """
+    attrs = dict(raw_attrs or {})
+    processes = normalize_processes_from_attrs(attrs)
+
+    # Mirror the list into attrs for the UI "All attributes" panel
+    attrs["processes"] = processes
+
+    return attrs, processes
+
+
 
 def _as_str(x: Any) -> str:
     if x is None:
