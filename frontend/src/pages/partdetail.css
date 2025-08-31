@@ -113,3 +113,34 @@
   background: rgba(0,0,0,.35);
   margin-right: .25rem;
 }
+
+/* Make the expander column fixed and flush-left */
+.p-treetable.pd-tt td.tt-expander,
+.p-treetable.pd-tt th.tt-expander {
+  width: 24px !important;
+  min-width: 24px !important;
+  max-width: 24px !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  text-align: left !important;
+}
+
+/* Nuke depth-based indent PrimeReact applies to the toggler */
+.p-treetable.pd-tt td.tt-expander .p-treetable-toggler {
+  margin-left: 0 !important;
+  margin-inline-start: 0 !important;
+  transform: none !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* Make sure the icon itself sits hard-left and doesn’t shift */
+.p-treetable.pd-tt td.tt-expander .p-treetable-toggler .p-icon,
+.p-treetable.pd-tt td.tt-expander .p-treetable-toggler .pi {
+  margin: 0 !important;
+  line-height: 1;
+}
+
+
+
