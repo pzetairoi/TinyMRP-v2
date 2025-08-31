@@ -190,47 +190,46 @@ const levelThumbBody = (node: any) => {
   // ---------- Load Part Detail ----------
   // frontend/src/pages/PartDetailPage.tsx
 
+// ---- Load Part Detail (RESTORE THIS) ----
 useEffect(() => {
-  let cancelled = false
+  let canceled = false
   ;(async () => {
+    setLoading(true)
     try {
-      // 1) get the root container (typically a single node)
-      const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&withThumb=1`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const root: TreeNode[] = asArr(await r.json())
-      if (cancelled) return
+      const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(pn)}`)
+      if (!r.ok) throw new Error(await r.text())
+      const j = await r.json()
+      if (canceled) return
 
-      // nothing → nothing
-      if (!root.length) {
-        setBomNodes([])
-        setBomExpanded({})
-        return
-      }
-
-      // 2) fetch its first-level children and make them the table top-level
-      const rootKey = String(root[0].key ?? root[0].data?.pn ?? pn)
-      const r2 = await fetch(`/api/bom_tree?parent=${encodeURIComponent(rootKey)}&withThumb=1`)
-      if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
-      let kids: TreeNode[] = asArr(await r2.json())
-
-      // depth = 0 for the first visible level (children of root)
-      kids = annotateDepth(kids, 0)
-
-      if (!cancelled) {
-        setBomNodes(kids)
-        setBomExpanded({}) // not expanded by default; they each can be expanded further
-      }
+      setPart(
+        j.part
+          ? {
+              part_number: j.part.part_number,
+              description: j.part.description,
+              revision: j.part.revision || "",
+              category: j.part.category || "",
+              uom: j.part.uom || "EA",
+              attrs: j.part.attributes || j.part.attrs || {},
+            }
+          : null
+      )
+      setFiles(asArr<FileRow>(j.files))
+      setChildren(asArr<ChildRow>(j.children))
+      setWU(asArr<WURow>(j.whereused))               // <-- this feeds “Used in”
+      setDrawingUrls(asArr<string>(j.drawing_urls))
+      setImages(asArr<string>(j.images))
     } catch (e) {
-      console.error("bom_tree root (detail) failed", e)
-      if (!cancelled) {
-        setBomNodes([])
-        setBomExpanded({})
+      console.error("part_detail failed", e)
+      if (!canceled) {
+        setPart(null); setFiles([]); setChildren([]); setWU([])
+        setDrawingUrls([]); setImages([])
       }
+    } finally {
+      if (!canceled) setLoading(false)
     }
   })()
-  return () => { cancelled = true }
+  return () => { canceled = true }
 }, [pn])
-
 
 
   // ---------- Process metadata ----------
@@ -252,26 +251,34 @@ useEffect(() => {
   }, [])
 
 
+// ---- BOM: show first-level children as table roots (KEEP this one) ----
+useEffect(() => {
+  let cancelled = false
+  ;(async () => {
+    try {
+      const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&withThumb=1`)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const root: TreeNode[] = asArr(await r.json())
+      if (cancelled) return
 
+      if (!root.length) { setBomNodes([]); setBomExpanded({}); return }
 
-  // ---------- Load BOM (root) ----------
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&withThumb=1`)
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        const root: TreeNode[] = await r.json()
-        if (!cancelled) setBomNodes(annotateDepth(asArr(root), 0))
-      } catch (e) {
-        console.error("bom_tree root (detail) failed", e)
-        if (!cancelled) setBomNodes([])
-      }
-    })()
-    return () => {
-      cancelled = true
+      const rootKey = String(root[0].key ?? root[0].data?.pn ?? pn)
+      const r2 = await fetch(`/api/bom_tree?parent=${encodeURIComponent(rootKey)}&withThumb=1`)
+      if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
+      let kids: TreeNode[] = asArr(await r2.json())
+
+      kids = annotateDepth(kids, 0) // first visible level = depth 0
+      if (!cancelled) { setBomNodes(kids); setBomExpanded({}) }
+    } catch (e) {
+      console.error("bom_tree root (detail) failed", e)
+      if (!cancelled) { setBomNodes([]); setBomExpanded({}) }
     }
-  }, [pn])
+  })()
+  return () => { cancelled = true }
+}, [pn])
+
+
 
   // ---------- Load BOM (lazy children) ----------
   function setNodeChildren(tree: TreeNode[], key: string, kids: TreeNode[]): TreeNode[] {
@@ -609,7 +616,9 @@ const rowClassName = (node: any) => {
 
         </div>
 
+// ---- TreeTable ----
 <TreeTable
+  key={ttKey}                      // <-- ensure inputs reset on “Clear filters”
   className="pd-tt"
   value={bomNodes || []}
   expandedKeys={bomExpanded}
@@ -625,110 +634,54 @@ const rowClassName = (node: any) => {
   resizableColumns
   size="small"
 >
-  {/* 1) Pure expander column – arrow only on expandable rows */}
   <Column expander style={{ width: 38 }} />
+  <Column header="" body={levelThumbBody} style={{ width: 120 }} />
 
-  {/* 2) Level + thumbnail column (dashes + image or leaf dot) */}
   <Column
-    header=""
-    body={levelThumbBody}
-    style={{ width: 120 }}
+    field="pn" filterField="pn" header="Partnumber"
+    sortable filter filterMatchMode="custom"
+    filterFunction={(value, flt) => containsAllTerms(value, flt)}
+    showFilterMenu={false} filterPlaceholder="Filter PN"
+    body={pnBody} style={{ width: 240, textAlign: 'left' }}
   />
-
-  {/* 3) PN column – left aligned, no indent from image/expander */}
   <Column
-    field="pn"
-    filterField="pn"
-    header="Partnumber"
-    sortable
-    filter
-    filterMatchMode="custom"
-    filterFunction={(_, flt, meta) =>
-      containsAllTerms(meta?.rowData?.pn ?? meta?.node?.data?.pn, flt)
-    }
-    showFilterMenu={false}
-    filterPlaceholder="Filter PN"
-    body={pnBody}
-    style={{ width: 240, textAlign: 'left' }}
-  />
-
-  <Column
-    field="rev"
-    filterField="rev"
-    header="Rev"
-    sortable
-    filter
-    filterMatchMode="custom"
-    filterFunction={(_, flt, meta) =>
-      containsAllTerms(meta?.rowData?.rev ?? meta?.node?.data?.rev, flt)
-    }
-    showFilterMenu={false}
-    filterPlaceholder="Rev"
+    field="rev" filterField="rev" header="Rev"
+    sortable filter filterMatchMode="custom"
+    filterFunction={(value, flt) => containsAllTerms(value, flt)}
+    showFilterMenu={false} filterPlaceholder="Rev"
     style={{ width: 90 }}
   />
   <Column
-    field="desc"
-    filterField="desc"
-    header="Description"
-    sortable
-    filter
-    filterMatchMode="custom"
-    filterFunction={(_, flt, meta) =>
-      containsAllTerms(meta?.rowData?.desc ?? meta?.node?.data?.desc, flt)
-    }
-    showFilterMenu={false}
-    filterPlaceholder="Filter description"
+    field="desc" filterField="desc" header="Description"
+    sortable filter filterMatchMode="custom"
+    filterFunction={(value, flt) => containsAllTerms(value, flt)}
+    showFilterMenu={false} filterPlaceholder="Filter description"
   />
   <Column
-    field="process"
-    filterField="process"
-    header="Process"
-    sortable
-    filter
-    filterMatchMode="custom"
-    filterFunction={(_, flt, meta) =>
-      containsAllTerms(meta?.rowData?.process ?? meta?.node?.data?.process, flt)
-    }
-    showFilterMenu={false}
-    filterPlaceholder="Filter process"
+    field="process" filterField="process" header="Process"
+    sortable filter filterMatchMode="custom"
+    filterFunction={(value, flt) => containsAllTerms(value, flt)}
+    showFilterMenu={false} filterPlaceholder="Filter process"
   />
   <Column
-    field="finish"
-    filterField="finish"
-    header="Finish"
-    sortable
-    filter
-    filterMatchMode="custom"
-    filterFunction={(_, flt, meta) =>
-      containsAllTerms(meta?.rowData?.finish ?? meta?.node?.data?.finish, flt)
-    }
-    showFilterMenu={false}
-    filterPlaceholder="Filter finish"
+    field="finish" filterField="finish" header="Finish"
+    sortable filter filterMatchMode="custom"
+    filterFunction={(value, flt) => containsAllTerms(value, flt)}
+    showFilterMenu={false} filterPlaceholder="Filter finish"
   />
   <Column
-    field="material"
-    filterField="material"
-    header="Material"
-    sortable
-    filter
-    filterMatchMode="custom"
-    filterFunction={(_, flt, meta) =>
-      containsAllTerms(meta?.rowData?.material ?? meta?.node?.data?.material, flt)
-    }
-    showFilterMenu={false}
-    filterPlaceholder="Filter material"
+    field="material" filterField="material" header="Material"
+    sortable filter filterMatchMode="custom"
+    filterFunction={(value, flt) => containsAllTerms(value, flt)}
+    showFilterMenu={false} filterPlaceholder="Filter material"
   />
   <Column
-    field="qty"
-    filterField="qty"
-    header="Level QTY"
-    sortable
-    filter
-    showFilterMenu={false}
-    filterPlaceholder="= Qty"
-    style={{ width: 110 }}
+    field="qty" filterField="qty" header="Level QTY"
+    sortable filter showFilterMenu={false}
+    filterPlaceholder="= Qty" style={{ width: 110 }}
   />
 </TreeTable>
+
 
 
       </div>
