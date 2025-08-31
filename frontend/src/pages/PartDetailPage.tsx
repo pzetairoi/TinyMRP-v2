@@ -8,7 +8,6 @@ import type { TreeNode } from "primereact/treenode"
 import { TabView, TabPanel } from "primereact/tabview"
 import ImageStrip from "../components/ImageStrip"
 import ThumbImg from "../components/ThumbImg"
-import ProcessBadges from "../components/ProcessBadges"
 import "./partdetail.css"
 import { FilterMatchMode } from 'primereact/api'
 
@@ -23,14 +22,17 @@ type Part = {
 }
 
 type FileRow = {
-  ext_group: string // pdf|dxf|step|edr|3mf|png|datasheet|qr|thumbnail|others
-  ext: string
-  rel_path?: string
-  size?: number
-  mtime?: string
-  url: string
-  urls: string[]
-}
+  ext_group?: string;
+  group?: string;
+  ext?: string;
+  rel_path?: string;
+  size?: number;
+  mtime?: string;
+  url?: string;
+  http_url?: string;   // <-- add this
+  urls?: string[];     // <-- make optional
+};
+
 
 type ChildRow = {
   child_pn: string
@@ -63,15 +65,17 @@ function pickHero(drawingUrls: string[], images: string[]) {
   return drawingUrls[0] || images[0] || ""
 }
 
-function groupFiles(files: FileRow[]) {
-  const g: Record<string, FileRow[]> = {}
-  for (const f of files) {
-    const k = (f.ext_group || "others").toLowerCase()
-    g[k] ??= []
-    g[k].push(f)
-  }
-  return g
+
+function groupKeyOf(f: FileRow): string {
+  const raw = (f.ext_group || f.group || f.ext || "others").toLowerCase();
+  if (raw === "eprt" || raw === "edr") return "edr";
+  if (raw === "stp" || raw === "step") return "step";
+  if (raw === "jpg" || raw === "jpeg" || raw === "png") return "png";
+  return raw;
 }
+
+
+
 
 // ---------- Check if value has display value ----------
 function hasDisplayValue(v: any): boolean {
@@ -81,6 +85,16 @@ function hasDisplayValue(v: any): boolean {
   if (typeof v === 'object') return Object.keys(v).length > 0
   return true
 }
+
+function groupFiles(files: FileRow[]) {
+  const g: Record<string, FileRow[]> = {};
+  for (const f of files || []) {
+    const k = groupKeyOf(f);
+    (g[k] ||= []).push(f);
+  }
+  return g;
+}
+
 
 
 // ---------- Component ----------
@@ -152,35 +166,47 @@ const containsAllTerms = (value: any, filter: any) => {
 
 
 
-
-
-// New: level + thumbnail cell
-const levelThumbBody = (node: any) => {
-  const depth = Math.max(0, Number(node?.data?._depth ?? 0));
-  const levelGlyph = depth > 0 ? '—'.repeat(depth) : ''; // en-dash chain
-  const urls: string[] = Array.isArray(node?.data?.thumb_urls) ? node.data.thumb_urls : [];
-  const isLeaf = !!node?.leaf || !node?.children?.length;
-
-  return (
-    <div className="tt-thumbcell">
-      <span className="tt-level">{levelGlyph}</span>
-      {isLeaf && !urls.length ? (
-        <span className="tt-leaf-dot" aria-hidden="true" />
-      ) : null}
-      {urls.length ? (
-        <img
-          src={urls[0]}
-          onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
-          className="tt-thumb"
-          alt=""
-        />
-      ) : null}
-    </div>
-  );
-};
-
-
 // --- helpers that rely on component state (must be inside component) ---
+function bestUrl(f: FileRow): string {
+  const direct =
+    f.url ||
+    f.http_url ||
+    (Array.isArray(f.urls) ? f.urls[0] : "");
+  if (direct) return direct;
+
+  if (f.rel_path) {
+    const rp = String(f.rel_path).replace(/^\/+/, "");
+    return `/Deliverables/${rp}`;
+  }
+  return "";
+}
+
+
+
+function normalizeFileRow(raw: any): FileRow {
+  const rel = raw?.rel_path ?? raw?.rel ?? "";
+
+  const urlCandidate =
+    raw?.url ||
+    raw?.http_url ||
+    (Array.isArray(raw?.urls) ? raw.urls[0] : "");
+
+  return {
+    ext_group: raw?.ext_group ?? raw?.group,
+    group: raw?.group,
+    ext: (raw?.ext || "").toLowerCase(),
+    rel_path: rel,
+    size: raw?.size,
+    mtime: raw?.mtime,
+    url: raw?.url,
+    http_url: raw?.http_url,
+    urls: Array.isArray(raw?.urls)
+      ? raw.urls
+      : (urlCandidate ? [urlCandidate] : []),
+  };
+}
+
+
 
 function getNodeByKey(tree: TreeNode[], key: string): TreeNode | undefined {
   for (const n of tree) {
@@ -287,7 +313,36 @@ useEffect(() => {
             }
           : null
       )
-      setFiles(asArr<FileRow>(j.files))
+                // --- files: handle both array and grouped object ---
+                const arrFiles: FileRow[] = [];
+                const src = j.files || j.part_files || j.artifacts || j.file_rows || [];
+
+                // case A: already an array
+                if (Array.isArray(src)) {
+                  arrFiles.push(...src.map(normalizeFileRow));
+                }
+                // case B: grouped object { pdf: [...], dxf: [...], ... }
+                else if (src && typeof src === 'object') {
+                  for (const [grp, list] of Object.entries(src)) {
+                    const items = Array.isArray(list) ? list : [];
+                    for (const item of items) {
+                      arrFiles.push(
+                        normalizeFileRow({
+                          ...item,
+                          ext_group: grp,
+                          group: grp,
+                          // backend uses "rel", unify to rel_path for our fallback
+                          rel_path: item?.rel ?? item?.rel_path,
+                        })
+                      );
+                    }
+                  }
+                }
+
+                setFiles(arrFiles);
+
+
+      
       setChildren(asArr<ChildRow>(j.children))
       setWU(asArr<WURow>(j.whereused))               // <-- this feeds “Used in”
       setDrawingUrls(asArr<string>(j.drawing_urls))
@@ -483,7 +538,25 @@ const rowClassName = (node: any) => {
 
   // ---------- Derived ----------
   const fileGroups = useMemo(() => groupFiles(files), [files])
-  const heroUrl = useMemo(() => pickHero(drawingUrls, images), [drawingUrls, images])
+const firstLinks = useMemo(() => {
+  const pick = (k: string) => {
+    const arr = fileGroups[k] || [];
+    const href = arr.length ? bestUrl(arr[0]) : "";
+    return href ? { href, count: arr.length } : null;
+  };
+  return {
+    edr:       pick("edr"),       // 3D viewing (eDrawings)
+    step:      pick("step"),
+    pdf:       pick("pdf"),
+    dxf:       pick("dxf"),
+    datasheet: pick("datasheet"),
+    threeMF:   pick("3mf"),
+  };
+}, [fileGroups]);
+
+
+
+  
 
   const attrs = useMemo(() => {
     const raw = (part?.attrs || {}) as Record<string, any>
@@ -589,31 +662,47 @@ const rowClassName = (node: any) => {
             </table>
 
             {/* file buttons */}
-            <div className="pd-files d-grid gap-1">
-              {/* model-ish */}
-              {!!fileGroups.edr?.length && (
-                <a className="btn btn-info btn-sm w-100" href={fileGroups.edr[0].url} target="_blank" rel="noreferrer">
-                  3D
-                </a>
-              )}
-              {!!fileGroups.step?.length && (
-                <a className="btn btn-info btn-sm w-100" href={fileGroups.step[0].url} target="_blank" rel="noreferrer">
-                  STEP
-                </a>
-              )}
 
-              {/* docs */}
-              {!!fileGroups.pdf?.length && (
-                <a className="btn btn-success btn-sm w-100" href={fileGroups.pdf[0].url} target="_blank" rel="noreferrer">
-                  PDF
-                </a>
-              )}
-              {!!fileGroups.dxf?.length && (
-                <a className="btn btn-success btn-sm w-100" href={fileGroups.dxf[0].url} target="_blank" rel="noreferrer">
-                  DXF
-                </a>
-              )}
-            </div>
+<div className="pd-files d-grid gap-1 mt-2">
+  {firstLinks.edr && (
+    <a className="btn btn-info btn-sm w-100" href={firstLinks.edr.href} target="_blank" rel="noreferrer">
+      3D{firstLinks.edr.count > 1 ? ` (${firstLinks.edr.count})` : ""}
+    </a>
+  )}
+
+  {firstLinks.step && (
+    <a className="btn btn-info btn-sm w-100" href={firstLinks.step.href} target="_blank" rel="noreferrer">
+      STEP{firstLinks.step.count > 1 ? ` (${firstLinks.step.count})` : ""}
+    </a>
+  )}
+
+  {firstLinks.pdf && (
+    <a className="btn btn-success btn-sm w-100" href={firstLinks.pdf.href} target="_blank" rel="noreferrer">
+      PDF{firstLinks.pdf.count > 1 ? ` (${firstLinks.pdf.count})` : ""}
+    </a>
+  )}
+
+  {firstLinks.dxf && (
+    <a className="btn btn-success btn-sm w-100" href={firstLinks.dxf.href} target="_blank" rel="noreferrer">
+      DXF{firstLinks.dxf.count > 1 ? ` (${firstLinks.dxf.count})` : ""}
+    </a>
+  )}
+
+  {firstLinks.datasheet && (
+    <a className="btn btn-outline-secondary btn-sm w-100" href={firstLinks.datasheet.href} target="_blank" rel="noreferrer">
+      Datasheet{firstLinks.datasheet.count > 1 ? ` (${firstLinks.datasheet.count})` : ""}
+    </a>
+  )}
+
+  {firstLinks.threeMF && (
+    <a className="btn btn-outline-secondary btn-sm w-100" href={firstLinks.threeMF.href} target="_blank" rel="noreferrer">
+      3MF{firstLinks.threeMF.count > 1 ? ` (${firstLinks.threeMF.count})` : ""}
+    </a>
+  )}
+</div>
+
+
+
           </div>
         </div>
 
