@@ -151,17 +151,40 @@ const containsAllTerms = (value: any, filter: any) => {
 
 
 
+// Replace your pnBody with this (no dot here, just the link)
 const pnBody = (n: any) => {
-  const isLeaf = !!n?.leaf || !n?.children?.length;
   const pn = n?.data?.pn || '';
   return (
     <span className="tt-pncell">
-      {isLeaf && <span className="tt-leaf-dot" aria-hidden="true" />}
-      <a href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
+      <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
     </span>
   );
 };
 
+// New: level + thumbnail cell
+const levelThumbBody = (node: any) => {
+  const depth = Math.max(0, Number(node?.data?._depth ?? 0));
+  const levelGlyph = depth > 0 ? '—'.repeat(depth) : ''; // en-dash chain
+  const urls: string[] = Array.isArray(node?.data?.thumb_urls) ? node.data.thumb_urls : [];
+  const isLeaf = !!node?.leaf || !node?.children?.length;
+
+  return (
+    <div className="tt-thumbcell">
+      <span className="tt-level">{levelGlyph}</span>
+      {isLeaf && !urls.length ? (
+        <span className="tt-leaf-dot" aria-hidden="true" />
+      ) : null}
+      {urls.length ? (
+        <img
+          src={urls[0]}
+          onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
+          className="tt-thumb"
+          alt=""
+        />
+      ) : null}
+    </div>
+  );
+};
 
 
   // ---------- Load Part Detail ----------
@@ -587,7 +610,7 @@ const rowClassName = (node: any) => {
         </div>
 
 <TreeTable
-  key={ttKey}
+  className="pd-tt"
   value={bomNodes || []}
   expandedKeys={bomExpanded}
   onToggle={(e) => setBomExpanded(e.value)}
@@ -602,114 +625,110 @@ const rowClassName = (node: any) => {
   resizableColumns
   size="small"
 >
+  {/* 1) Pure expander column – arrow only on expandable rows */}
+  <Column expander style={{ width: 38 }} />
 
-    {/* Thumb */}
-    <Column
-      header=""
-      body={(node: any) => {
-        const urls = node?.data?.thumb_urls || []
-        return urls.length ? (
-          <img
-            src={urls[0]}
-            onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
-            style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain' }}
-          />
-        ) : null
-      }}
-      style={{ width: 60 }}
-    />
+  {/* 2) Level + thumbnail column (dashes + image or leaf dot) */}
+  <Column
+    header=""
+    body={levelThumbBody}
+    style={{ width: 120 }}
+  />
 
-    {/* Important: field is the key inside node.data; 
-        when using a custom body, set filterField explicitly */}
-    <Column
-  field="pn"
-  filterField="pn"
-  header="Partnumber"
-  expander
-  sortable
-  filter
-  filterMatchMode="custom"
-  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
-  showFilterMenu={false}
-  filterPlaceholder="Filter PN"
-  body={pnBody}
-  style={{ width: 220 }}
-/>
+  {/* 3) PN column – left aligned, no indent from image/expander */}
+  <Column
+    field="pn"
+    filterField="pn"
+    header="Partnumber"
+    sortable
+    filter
+    filterMatchMode="custom"
+    filterFunction={(_, flt, meta) =>
+      containsAllTerms(meta?.rowData?.pn ?? meta?.node?.data?.pn, flt)
+    }
+    showFilterMenu={false}
+    filterPlaceholder="Filter PN"
+    body={pnBody}
+    style={{ width: 240, textAlign: 'left' }}
+  />
 
-<Column
-  field="rev"
-  filterField="rev"
-  header="Rev"
-  sortable
-  filter
-  filterMatchMode="custom"
-  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
-  showFilterMenu={false}
-  filterPlaceholder="Rev"
-  style={{ width: 90 }}
-/>
-
-<Column
-  field="desc"
-  filterField="desc"
-  header="Description"
-  sortable
-  filter
-  filterMatchMode="custom"
-  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
-  showFilterMenu={false}
-  filterPlaceholder="Filter description"
-/>
-
-<Column
-  field="process"
-  filterField="process"
-  header="Process"
-  sortable
-  filter
-  filterMatchMode="custom"
-  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
-  showFilterMenu={false}
-  filterPlaceholder="Filter process"
-/>
-
-<Column
-  field="finish"
-  filterField="finish"
-  header="Finish"
-  sortable
-  filter
-  filterMatchMode="custom"
-  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
-  showFilterMenu={false}
-  filterPlaceholder="Filter finish"
-/>
-
-<Column
-  field="material"
-  filterField="material"
-  header="Material"
-  sortable
-  filter
-  filterMatchMode="custom"
-  filterFunction={(value, flt) => containsAllTerms(value, flt)}   // <-- here
-  showFilterMenu={false}
-  filterPlaceholder="Filter material"
-/>
-
-
-    <Column
-      field="qty"
-      filterField="qty"
-      header="Level QTY"
-      sortable
-      filter
-      showFilterMenu={false}
-      filterPlaceholder="= Qty"
-      style={{ width: 110 }}
-    />
-  </TreeTable>
-
+  <Column
+    field="rev"
+    filterField="rev"
+    header="Rev"
+    sortable
+    filter
+    filterMatchMode="custom"
+    filterFunction={(_, flt, meta) =>
+      containsAllTerms(meta?.rowData?.rev ?? meta?.node?.data?.rev, flt)
+    }
+    showFilterMenu={false}
+    filterPlaceholder="Rev"
+    style={{ width: 90 }}
+  />
+  <Column
+    field="desc"
+    filterField="desc"
+    header="Description"
+    sortable
+    filter
+    filterMatchMode="custom"
+    filterFunction={(_, flt, meta) =>
+      containsAllTerms(meta?.rowData?.desc ?? meta?.node?.data?.desc, flt)
+    }
+    showFilterMenu={false}
+    filterPlaceholder="Filter description"
+  />
+  <Column
+    field="process"
+    filterField="process"
+    header="Process"
+    sortable
+    filter
+    filterMatchMode="custom"
+    filterFunction={(_, flt, meta) =>
+      containsAllTerms(meta?.rowData?.process ?? meta?.node?.data?.process, flt)
+    }
+    showFilterMenu={false}
+    filterPlaceholder="Filter process"
+  />
+  <Column
+    field="finish"
+    filterField="finish"
+    header="Finish"
+    sortable
+    filter
+    filterMatchMode="custom"
+    filterFunction={(_, flt, meta) =>
+      containsAllTerms(meta?.rowData?.finish ?? meta?.node?.data?.finish, flt)
+    }
+    showFilterMenu={false}
+    filterPlaceholder="Filter finish"
+  />
+  <Column
+    field="material"
+    filterField="material"
+    header="Material"
+    sortable
+    filter
+    filterMatchMode="custom"
+    filterFunction={(_, flt, meta) =>
+      containsAllTerms(meta?.rowData?.material ?? meta?.node?.data?.material, flt)
+    }
+    showFilterMenu={false}
+    filterPlaceholder="Filter material"
+  />
+  <Column
+    field="qty"
+    filterField="qty"
+    header="Level QTY"
+    sortable
+    filter
+    showFilterMenu={false}
+    filterPlaceholder="= Qty"
+    style={{ width: 110 }}
+  />
+</TreeTable>
 
 
       </div>

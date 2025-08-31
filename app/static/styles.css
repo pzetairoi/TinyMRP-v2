@@ -154,3 +154,67 @@ div.flask-pagedown-preview h3 {
   background: rgba(0,0,0,.45);
   display: inline-block;
 }
+
+
+/* Make the tree a bit more compact */
+.pd-tt.p-treetable {
+  font-size: 0.92rem;
+}
+
+/* Prefer horizontal lines; mute verticals */
+.pd-tt .p-treetable-thead > tr > th,
+.pd-tt .p-treetable-tbody > tr > td {
+  border-width: 0 0 1px 0;
+  border-color: rgba(0,0,0,.08);
+}
+
+/* Slightly smaller cell padding */
+.pd-tt .p-treetable-tbody > tr > td,
+.pd-tt .p-treetable-thead > tr > th {
+  padding: .35rem .5rem;
+}
+
+/* PN cell/link alignment */
+.tt-pncell .tt-pnlink {
+  display: inline-block;
+  text-align: left;
+  line-height: 1.1;
+}
+
+/* Level + thumbnail cell */
+.tt-thumbcell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.tt-level {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  opacity: .6;
+  min-width: 12px;       /* keeps column from jittering when empty */
+}
+
+/* Preview image size */
+.tt-thumb {
+  max-height: 32px;
+  max-width: 48px;
+  object-fit: contain;
+  display: block;
+}
+
+/* Tiny leaf dot (shown only in the level/preview column) */
+.tt-leaf-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.35);
+  display: inline-block;
+}
+
+/* (keeps your depth-row striping/colors) */
+.tt-depth-0 td { background-image: linear-gradient(to right, rgba(0,0,0,.02), rgba(0,0,0,0)); }
+.tt-depth-1 td { background-image: linear-gradient(to right, rgba(0,0,0,.03), rgba(0,0,0,0)); }
+.tt-depth-2 td { background-image: linear-gradient(to right, rgba(0,0,0,.04), rgba(0,0,0,0)); }
+.tt-depth-3 td { background-image: linear-gradient(to right, rgba(0,0,0,.05), rgba(0,0,0,0)); }
+.tt-depth-4 td { background-image: linear-gradient(to right, rgba(0,0,0,.06), rgba(0,0,0,0)); }
