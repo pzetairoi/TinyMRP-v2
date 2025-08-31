@@ -554,6 +554,9 @@ const firstLinks = useMemo(() => {
   };
 }, [fileGroups]);
 
+const pdfHref = firstLinks.pdf?.href || "";
+
+
 
 
   
@@ -663,39 +666,35 @@ const firstLinks = useMemo(() => {
 
             {/* file buttons */}
 
-<div className="pd-files d-grid gap-1 mt-2">
+
+<div className="pd-files mt-2">
   {firstLinks.edr && (
-    <a className="btn btn-info btn-sm w-100" href={firstLinks.edr.href} target="_blank" rel="noreferrer">
+    <a className="btn btn-info btn-sm pd-file-btn" href={firstLinks.edr.href} target="_blank" rel="noreferrer">
       3D{firstLinks.edr.count > 1 ? ` (${firstLinks.edr.count})` : ""}
     </a>
   )}
-
   {firstLinks.step && (
-    <a className="btn btn-info btn-sm w-100" href={firstLinks.step.href} target="_blank" rel="noreferrer">
+    <a className="btn btn-info btn-sm pd-file-btn" href={firstLinks.step.href} target="_blank" rel="noreferrer">
       STEP{firstLinks.step.count > 1 ? ` (${firstLinks.step.count})` : ""}
     </a>
   )}
-
   {firstLinks.pdf && (
-    <a className="btn btn-success btn-sm w-100" href={firstLinks.pdf.href} target="_blank" rel="noreferrer">
+    <a className="btn btn-success btn-sm pd-file-btn" href={firstLinks.pdf.href} target="_blank" rel="noreferrer">
       PDF{firstLinks.pdf.count > 1 ? ` (${firstLinks.pdf.count})` : ""}
     </a>
   )}
-
   {firstLinks.dxf && (
-    <a className="btn btn-success btn-sm w-100" href={firstLinks.dxf.href} target="_blank" rel="noreferrer">
+    <a className="btn btn-success btn-sm pd-file-btn" href={firstLinks.dxf.href} target="_blank" rel="noreferrer">
       DXF{firstLinks.dxf.count > 1 ? ` (${firstLinks.dxf.count})` : ""}
     </a>
   )}
-
   {firstLinks.datasheet && (
-    <a className="btn btn-outline-secondary btn-sm w-100" href={firstLinks.datasheet.href} target="_blank" rel="noreferrer">
+    <a className="btn btn-outline-secondary btn-sm pd-file-btn" href={firstLinks.datasheet.href} target="_blank" rel="noreferrer">
       Datasheet{firstLinks.datasheet.count > 1 ? ` (${firstLinks.datasheet.count})` : ""}
     </a>
   )}
-
   {firstLinks.threeMF && (
-    <a className="btn btn-outline-secondary btn-sm w-100" href={firstLinks.threeMF.href} target="_blank" rel="noreferrer">
+    <a className="btn btn-outline-secondary btn-sm pd-file-btn" href={firstLinks.threeMF.href} target="_blank" rel="noreferrer">
       3MF{firstLinks.threeMF.count > 1 ? ` (${firstLinks.threeMF.count})` : ""}
     </a>
   )}
@@ -709,9 +708,19 @@ const firstLinks = useMemo(() => {
         {/* RIGHT */}
         <div className="col-lg-8">
           <TabView>
-            <TabPanel header="Drawing">
-              <ImageStrip pn={pn} mode="drawing" />
-            </TabPanel>
+<TabPanel header="Drawing">
+  {pdfHref ? (
+    <>
+      <a href={pdfHref} target="_blank" rel="noreferrer" className="pd-drawing-link" title="Open PDF drawing">
+        <ImageStrip pn={pn} mode="drawing" />
+      </a>
+      
+    </>
+  ) : (
+    <ImageStrip pn={pn} mode="drawing" />
+  )}
+</TabPanel>
+
 
             <TabPanel header="All attributes">
               {attrs.length === 0 ? (
