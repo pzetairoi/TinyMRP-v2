@@ -165,55 +165,49 @@ const pnBody = (n: any) => {
 
 
   // ---------- Load Part Detail ----------
-  useEffect(() => {
-    let canceled = false
-    ;(async () => {
-      setLoading(true)
-      try {
-        const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(pn)}`)
-        if (!r.ok) throw new Error(await r.text())
-        const j = await r.json()
+  // frontend/src/pages/PartDetailPage.tsx
 
-        if (canceled) return
+useEffect(() => {
+  let cancelled = false
+  ;(async () => {
+    try {
+      // 1) get the root container (typically a single node)
+      const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&withThumb=1`)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const root: TreeNode[] = asArr(await r.json())
+      if (cancelled) return
 
-        // j.part, j.files (array), j.children (array), j.whereused (array)
-        setPart(
-          j.part
-            ? {
-                part_number: j.part.part_number,
-                description: j.part.description,
-                revision: j.part.revision || "",
-                category: j.part.category || "",
-                uom: j.part.uom || "EA",
-                attrs: j.part.attributes || j.part.attrs || {}, // accept either key
-              }
-            : null
-        )
-
-        setFiles(asArr<FileRow>(j.files))
-        setChildren(asArr<ChildRow>(j.children))
-        setWU(asArr<WURow>(j.whereused))
-
-        setDrawingUrls(asArr<string>(j.drawing_urls))
-        setImages(asArr<string>(j.images))
-      } catch (e) {
-        console.error("part_detail failed", e)
-        if (!canceled) {
-          setPart(null)
-          setFiles([])
-          setChildren([])
-          setWU([])
-          setDrawingUrls([])
-          setImages([])
-        }
-      } finally {
-        if (!canceled) setLoading(false)
+      // nothing → nothing
+      if (!root.length) {
+        setBomNodes([])
+        setBomExpanded({})
+        return
       }
-    })()
-    return () => {
-      canceled = true
+
+      // 2) fetch its first-level children and make them the table top-level
+      const rootKey = String(root[0].key ?? root[0].data?.pn ?? pn)
+      const r2 = await fetch(`/api/bom_tree?parent=${encodeURIComponent(rootKey)}&withThumb=1`)
+      if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
+      let kids: TreeNode[] = asArr(await r2.json())
+
+      // depth = 0 for the first visible level (children of root)
+      kids = annotateDepth(kids, 0)
+
+      if (!cancelled) {
+        setBomNodes(kids)
+        setBomExpanded({}) // not expanded by default; they each can be expanded further
+      }
+    } catch (e) {
+      console.error("bom_tree root (detail) failed", e)
+      if (!cancelled) {
+        setBomNodes([])
+        setBomExpanded({})
+      }
     }
-  }, [pn])
+  })()
+  return () => { cancelled = true }
+}, [pn])
+
 
 
   // ---------- Process metadata ----------
