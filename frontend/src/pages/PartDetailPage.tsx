@@ -55,6 +55,9 @@ type WURow = {
 // ---------- Helpers ----------
 const asArr = <T,>(x: any): T[] => (Array.isArray(x) ? (x as T[]) : [])
 
+
+
+
 function pickHero(drawingUrls: string[], images: string[]) {
   // Prefer drawing (_DWG.png), then any plain image
   return drawingUrls[0] || images[0] || ""
@@ -151,16 +154,6 @@ const containsAllTerms = (value: any, filter: any) => {
 
 
 
-// Replace your pnBody with this (no dot here, just the link)
-const pnBody = (n: any) => {
-  const pn = n?.data?.pn || '';
-  return (
-    <span className="tt-pncell">
-      <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
-    </span>
-  );
-};
-
 // New: level + thumbnail cell
 const levelThumbBody = (node: any) => {
   const depth = Math.max(0, Number(node?.data?._depth ?? 0));
@@ -187,8 +180,89 @@ const levelThumbBody = (node: any) => {
 };
 
 
-  // ---------- Load Part Detail ----------
-  // frontend/src/pages/PartDetailPage.tsx
+// --- helpers that rely on component state (must be inside component) ---
+
+function getNodeByKey(tree: TreeNode[], key: string): TreeNode | undefined {
+  for (const n of tree) {
+    if (String(n.key) === String(key)) return n
+    if (n.children?.length) {
+      const hit = getNodeByKey(n.children as TreeNode[], key)
+      if (hit) return hit
+    }
+  }
+  return undefined
+}
+
+function getChildrenOf(parentKey: string | null): TreeNode[] {
+  if (!parentKey || parentKey === rootKey) return bomNodes
+  const p = getNodeByKey(bomNodes, parentKey)
+  return (p?.children as TreeNode[]) || []
+}
+
+function isLastSibling(nodeKey: string, parentKey: string | null): boolean {
+  const sibs = getChildrenOf(parentKey)
+  const idx = sibs.findIndex(s => String(s.key) === String(nodeKey))
+  return idx >= 0 && idx === sibs.length - 1
+}
+
+function getAncestorChain(node: any): string[] {
+  // keys from top-level parent down to direct parent
+  const chain: string[] = []
+  let p: string | null = node?.data?._parent ?? null
+  while (p) {
+    chain.unshift(p)
+    if (p === rootKey) break
+    const pn = getNodeByKey(bomNodes, p)
+    p = (pn?.data?._parent ?? rootKey) as string | null
+  }
+  return chain
+}
+
+const levelCellBody = (node: any) => {
+  const depth = Math.max(0, Number(node?.data?._depth ?? 0))
+  const parentKey = node?.data?._parent ?? null
+  const ancestors = getAncestorChain(node)
+
+  // draw vertical lines for ancestors that have a next sibling
+  const keepMask = ancestors.map((ak) =>
+    !isLastSibling(ak, getNodeByKey(bomNodes, ak)?.data?._parent ?? rootKey)
+  )
+
+  const lastHere = isLastSibling(String(node?.key ?? node?.data?.pn ?? ''), parentKey)
+  const indent = 16 // px per level
+  const totalSlots = Math.max(1, depth + 1)
+
+  return (
+    <div className="tt-levelcell" style={{ width: totalSlots * indent }}>
+      {Array.from({ length: depth }).map((_, i) => (
+        <span key={`v-${i}`} className={`tt-lvl ${keepMask[i] ? 'keep' : ''}`} />
+      ))}
+      <span className={`tt-lvl cap ${lastHere ? 'last' : 'mid'}`} />
+    </div>
+  )
+}
+
+const thumbOnlyBody = (node: any) => {
+  const urls: string[] = Array.isArray(node?.data?.thumb_urls) ? node.data.thumb_urls : []
+  return urls.length ? (
+    <img
+      src={urls[0]}
+      onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
+      className="tt-thumb"
+      alt=""
+    />
+  ) : null
+}
+
+const pnBody = (n: any) => {
+  const pn = n?.data?.pn || ''
+  return (
+    <span className="tt-pncell">
+      <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(pn)}`}>{pn}</a>
+    </span>
+  )
+}
+
 
 // ---- Load Part Detail (RESTORE THIS) ----
 useEffect(() => {
@@ -260,19 +334,20 @@ useEffect(() => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const root: TreeNode[] = asArr(await r.json())
       if (cancelled) return
+      if (!root.length) { setBomNodes([]); setBomExpanded({}); setRootKey(null); return }
 
-      if (!root.length) { setBomNodes([]); setBomExpanded({}); return }
+      const rk = String(root[0].key ?? root[0].data?.pn ?? pn)
+      setRootKey(rk)
 
-      const rootKey = String(root[0].key ?? root[0].data?.pn ?? pn)
-      const r2 = await fetch(`/api/bom_tree?parent=${encodeURIComponent(rootKey)}&withThumb=1`)
+      const r2 = await fetch(`/api/bom_tree?parent=${encodeURIComponent(rk)}&withThumb=1`)
       if (!r2.ok) throw new Error(`HTTP ${r2.status}`)
       let kids: TreeNode[] = asArr(await r2.json())
 
-      kids = annotateDepth(kids, 0) // first visible level = depth 0
+      kids = annotateDepth(kids, 0, rk)  // depth 0 for first visible level, parent=rootKey
       if (!cancelled) { setBomNodes(kids); setBomExpanded({}) }
     } catch (e) {
       console.error("bom_tree root (detail) failed", e)
-      if (!cancelled) { setBomNodes([]); setBomExpanded({}) }
+      if (!cancelled) { setBomNodes([]); setBomExpanded({}); setRootKey(null) }
     }
   })()
   return () => { cancelled = true }
@@ -308,12 +383,11 @@ async function onExpandNode(e: any) {
   try {
     const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`)
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    const kids: TreeNode[] = asArr(await r.json())
+    let kids: TreeNode[] = asArr(await r.json())
 
-    // depth tagging for new children
     setBomNodes((prev) => {
       const parentDepth = findNodeDepth(prev, key) ?? 0
-      const tagged = annotateDepth(kids, parentDepth + 1)
+      const tagged = annotateDepth(kids, parentDepth + 1, key)  // parent=key
       return setNodeChildren(prev, key, tagged)
     })
     setBomExpanded((prev) => ({ ...prev, [key]: true }))
@@ -321,6 +395,8 @@ async function onExpandNode(e: any) {
     console.error('bom_tree children (detail) failed', err)
   }
 }
+
+
 
 
 
@@ -371,14 +447,20 @@ async function onExpandNode(e: any) {
   }
   // Expand all once we have the root nodes
 
-// ADD near other helpers
-function annotateDepth(nodes: TreeNode[], depth = 0): TreeNode[] {
+// state near other BOM state
+const [rootKey, setRootKey] = useState<string | null>(null)
+
+// annotate depth + parent
+function annotateDepth(nodes: TreeNode[], depth = 0, parentKey: string | null = null): TreeNode[] {
   return (nodes || []).map((n) => {
-    const data = { ...(n.data || {}), _depth: depth };
-    const kids = Array.isArray(n.children) ? annotateDepth(n.children as TreeNode[], depth + 1) : n.children;
-    return { ...n, data, children: kids };
-  });
+    const data = { ...(n.data || {}), _depth: depth, _parent: parentKey }
+    const kids = Array.isArray(n.children)
+      ? annotateDepth(n.children as TreeNode[], depth + 1, String(n.key ?? data?.pn ?? ''))
+      : n.children
+    return { ...n, data, children: kids }
+  })
 }
+
 
 function findNodeDepth(tree: TreeNode[], key: string, current = 0): number | null {
   for (const n of tree || []) {
@@ -618,7 +700,7 @@ const rowClassName = (node: any) => {
 
 // ---- TreeTable ----
 <TreeTable
-  key={ttKey}                      // <-- ensure inputs reset on “Clear filters”
+  key={ttKey}
   className="pd-tt"
   value={bomNodes || []}
   expandedKeys={bomExpanded}
@@ -634,16 +716,29 @@ const rowClassName = (node: any) => {
   resizableColumns
   size="small"
 >
-  <Column expander style={{ width: 38 }} />
-  <Column header="" body={levelThumbBody} style={{ width: 120 }} />
+  {/* 1) Level guides (dynamic width) */}
+  <Column
+    header=""
+    body={levelCellBody}
+    style={{ width: 'auto', padding: 0 }}
+  />
 
+  {/* 2) Expander (arrow only on expandable rows) */}
+  <Column expander style={{ width: 32 }} />
+
+  {/* 3) Image preview ONLY */}
+  <Column header="" body={thumbOnlyBody} style={{ width: 64 }} />
+
+  {/* 4) PN (left aligned) */}
   <Column
     field="pn" filterField="pn" header="Partnumber"
     sortable filter filterMatchMode="custom"
     filterFunction={(value, flt) => containsAllTerms(value, flt)}
     showFilterMenu={false} filterPlaceholder="Filter PN"
-    body={pnBody} style={{ width: 240, textAlign: 'left' }}
+    body={pnBody}
+    style={{ width: 240, textAlign: 'left' }}
   />
+
   <Column
     field="rev" filterField="rev" header="Rev"
     sortable filter filterMatchMode="custom"
