@@ -1,9 +1,12 @@
 {
   "index.html": {
-    "file": "assets/index-Uh5jTIIN.js",
+    "file": "assets/index-SD5FPsCM.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
+    "dynamicImports": [
+      "src/components/ThreeMFViewer.tsx"
+    ],
     "css": [
       "assets/index-BlF7ywJ1.css"
     ],
@@ -44,5 +47,14 @@
   "node_modules/primereact/resources/themes/lara-light-blue/fonts/InterVariable.woff2": {
     "file": "assets/InterVariable-CWi-zmRD.woff2",
     "src": "node_modules/primereact/resources/themes/lara-light-blue/fonts/InterVariable.woff2"
+  },
+  "src/components/ThreeMFViewer.tsx": {
+    "file": "assets/ThreeMFViewer-BrvMgVCd.js",
+    "name": "ThreeMFViewer",
+    "src": "src/components/ThreeMFViewer.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "index.html"
+    ]
   }
 }

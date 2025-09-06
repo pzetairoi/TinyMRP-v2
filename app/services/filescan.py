@@ -26,9 +26,10 @@ def _expectations_for(pn: str, rev: str) -> List[Tuple[str, str, bool]]:
       - normal preview: {base}.png
       - drawing screenshot: {base}_DWG.png
     """
-    #print("expect",pn,rev)
+   #print("expect",pn,rev)
     # expects files all capitalized PN, with _REV_ (even if rev is empty)
     base = f"{pn.upper()}_REV_{rev or ''}"
+   #print("base",base)
     wants = []
     # png - preview
     wants.append(("png",  f"{base}.png", False))
@@ -96,9 +97,9 @@ def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
     Return a dict keyed by (ext_group, is_dwg) -> record {ext, rel_path, http_url, size, mtime_iso}
     Only one record per key; if multiple matches exist, last-modified wins.
     """
-    #print("discover",pn,rev)
+   #print("discover",pn,rev)
     local, http = _roots()
-    #print(local,http)
+   #print(local,http)
     if not local:
         return {}
     local_root = Path(local)
@@ -107,13 +108,14 @@ def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
     # We search by expected relative paths from the known subfolders (png, pdf, dxf, step, edr, 3mf, datasheet).
     # The repo uses subfolders named as ext_groups.
     folders = ("png","pdf","dxf","step","edr","3mf","datasheet")
-    #print(folders)
+   #print(folders)
     for ext_group, leaf, is_dwg in _expectations_for(pn, rev):
         # try in the matching folder (png in png/, pdf in pdf/, …)
         subdir = ext_group
         candidate_rel = f"{subdir}/{leaf}"
+       #print("candidate_rel",candidate_rel)
         p = _find_case_insensitive(local_root, candidate_rel)
-        #print("p",p)
+       #print("p",p)
         if not p:
             continue
         stat = p.stat()
@@ -132,8 +134,8 @@ def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
         if prev and prev["mtime_iso"] >= record["mtime_iso"]:
             continue
         found[key] = record
-        #print("key",key)
-        #print("record",record)
+       #print("key",key)
+       #print("record",record)
 
     return found
 
