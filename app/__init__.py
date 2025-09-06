@@ -169,6 +169,12 @@ def create_app(config_object=None):
     
     from app.views.processmeta import bp as processmeta_bp
     app.register_blueprint(processmeta_bp)
+    
+    # File proxy (for HTTP file roots)
+    from .files_proxy import files_proxy
+    app.register_blueprint(files_proxy)
+
+
 
  
 

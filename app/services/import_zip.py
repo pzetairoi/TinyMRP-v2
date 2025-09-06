@@ -142,14 +142,14 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             pn = norm["part_number"]
             rev=norm.get("revision") or ""
             
-            print("normalized part", pn, rev, norm)
+            ##print("normalized part", pn, rev, norm)
             if pn and rev:
                 part_props[str(itemcounter)] = norm
                 itemcounter+=1
 
     # Upsert parts
     for itemref, norm in part_props.items():
-        print( "upserting part", itemref, norm)
+        ##print( "upserting part", itemref, norm)
         pn=norm["part_number"]
         rev=norm.get("revision") or ""        
         attrs=norm["attrs"] or {}
@@ -170,10 +170,10 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         
 
         # attrs = p.attrs or {}
-        # print("attributes", attrs)
+        ##print("attributes", attrs)
         attrs, processes = process_attributes(attrs)
-        # print("attributes", attrs)
-        # print("processes", processes)
+        ##print("attributes", attrs)
+        ##print("processes", processes)
         
         
         # attrs.update(norm.get("attrs") or {})
@@ -181,8 +181,8 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         
         attrs["seed"] = seed_tag
         # attrs = normalize_props(attrs)
-        print("#############################")
-        print("attributes", attrs)
+        ##print("#############################")
+        ##print("attributes", attrs)
         
         
         
@@ -221,14 +221,18 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
 
     artifact_inserts = 0
     seen = set()
-    for pn, norm in part_props.items():
+   #print("part_props", part_props)
+    for item, norm in part_props.items():
+        pn = norm["part_number"]
         rev = (norm.get("revision") or "")  # allow ""
         key = (pn, rev)
+       #print(key)
         if key in seen:
             continue
         seen.add(key)
 
         found = discover_part_files(pn, rev)
+       #print(found)
         
         recs = []
         for (group, is_dwg), meta in found.items():
@@ -239,7 +243,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             recs.append(rec)
             print
 
-        #print("upserting", len(recs), "artifacts for", pn, rev)
+       #print("upserting", len(recs), "artifacts for", pn, rev)
         artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
 
     
