@@ -1,70 +1,217 @@
-import { useEffect, useState } from 'react'
-import { DataTable } from 'primereact/datatable'
-import type { DataTableFilterMeta } from 'primereact/datatable'
-import { Column } from 'primereact/column'
-import { FilterMatchMode } from 'primereact/api'
-import { Link } from 'react-router-dom'
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import React, { useEffect, useState } from "react";
+import { TreeTable } from "primereact/treetable";
+import { Column } from "primereact/column";
+import type { TreeNode } from "primereact/treenode";
+import { FilterMatchMode } from "primereact/api";
+import { Link } from "react-router-dom";
+import "./partdetail.css";
 
-type Part = { part_number: string; description: string; category: string }
+// ---------- Types ----------
+type TTFilters = Record<string, { value: any; matchMode: string }>;
 
+// ---------- Helpers ----------
+const makeInitFilters = (): TTFilters => ({
+  pn: { value: null, matchMode: FilterMatchMode.CUSTOM },
+  desc: { value: null, matchMode: FilterMatchMode.CUSTOM },
+  process: { value: null, matchMode: FilterMatchMode.CUSTOM },
+  rev: { value: null, matchMode: FilterMatchMode.CUSTOM },
+  material: { value: null, matchMode: FilterMatchMode.CUSTOM },
+  finish: { value: null, matchMode: FilterMatchMode.CUSTOM },
+});
+
+function normalizeFilters(next: TTFilters): TTFilters {
+  const out: TTFilters = { ...makeInitFilters() };
+  for (const k of Object.keys(next || {})) {
+    const v = next[k]?.value;
+    if (v !== "" && v !== null && v !== undefined) out[k] = next[k];
+  }
+  return out;
+}
+
+// Multi-term (space-separated) CONTAINS-ALL, case-insensitive
+const containsAllTerms = (value: any, filter: any) => {
+  if (filter == null || filter === "") return true;
+  const hay = String(value ?? "").toLowerCase();
+  const terms = String(filter)
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!terms.length) return true;
+  return terms.every((t) => hay.includes(t));
+};
+
+// ---------- Component ----------
 export default function PartsPage() {
-  const [rows, setRows] = useState<Part[]>([])
-  const [loading, setLoading] = useState(false)
-  const [totalRecords, setTotal] = useState(0)
-  const [lazy, setLazy] = useState({
-    first: 0, rows: 25, sortField: 'part_number', sortOrder: 1 as 1|-1,
-    filters: {
-      part_number: { value: '', matchMode: FilterMatchMode.CONTAINS },
-      description: { value: '', matchMode: FilterMatchMode.CONTAINS },
-      category:    { value: '', matchMode: FilterMatchMode.CONTAINS },
-    } as DataTableFilterMeta
-  })
+  const [nodes, setNodes] = useState<TreeNode[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [ttFilters, setTtFilters] = useState<TTFilters>(makeInitFilters());
+  const [search, setSearch] = useState("");
 
+  // Load all part roots once
   useEffect(() => {
+    let canceled = false;
     (async () => {
-      setLoading(true)
-      const res = await fetch('/api/parts_lazy', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(lazy)
+      try {
+        setLoading(true);
+        const r = await fetch("/api/parts_lazy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ first: 0, rows: 1000 }),
+        });
+        const j = await r.json();
+        const pns: string[] = (j.data || []).map((p: any) => p.part_number);
+        const roots: TreeNode[] = [];
+        for (const pn of pns) {
+          const rr = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}`);
+          const arr = await rr.json();
+          if (Array.isArray(arr) && arr.length) roots.push(arr[0]);
+        }
+        if (!canceled) setNodes(roots);
+      } finally {
+        if (!canceled) setLoading(false);
+      }
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  function onTTFilter(e: any) {
+    setTtFilters(normalizeFilters(e.filters || {}));
+  }
+
+  const onExpandNode = async (e: any) => {
+    const node = e.node;
+    if (node && (!node.children || node.children.length === 0)) {
+      const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(node.key)}`);
+      const kids = await r.json();
+      node.children = kids;
+      setNodes([...nodes]);
+    }
+  };
+
+  const pnBody = (n: any) => {
+    const pn = n?.data?.pn || "";
+    return (
+      <Link className="tt-pnlink" to={`/ui/part/${encodeURIComponent(pn)}`}>
+        {pn}
+      </Link>
+    );
+  };
+
+  const linksBody = (n: any) => {
+    const pn = n?.data?.pn || "";
+    return (
+      <a href={`/ui/part/${encodeURIComponent(pn)}`} target="_blank" rel="noreferrer">
+        View
+      </a>
+    );
+  };
+
+  const onSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setSearch(v);
+    setTtFilters((f) =>
+      normalizeFilters({
+        ...f,
+        pn: { value: v, matchMode: FilterMatchMode.CUSTOM },
+        desc: { value: v, matchMode: FilterMatchMode.CUSTOM },
       })
-      const j = await res.json()
-      setRows(j.data || [])
-      setTotal(j.totalRecords || 0)
-      setLoading(false)
-    })()
-  }, [lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters)])
+    );
+  };
 
   return (
     <div className="p-3">
-      <DataTable value={rows}
-        header={<div className="p-2">Parts</div>}
-        lazy paginator totalRecords={totalRecords} rows={lazy.rows} first={lazy.first}
+      <div className="p-inputgroup mb-3">
+        <span className="p-inputgroup-addon">Search</span>
+        <input
+          type="text"
+          className="p-inputtext p-component"
+          placeholder="Partnumber or description"
+          value={search}
+          onChange={onSearchChange}
+        />
+      </div>
+      <TreeTable
+        value={nodes}
         loading={loading}
-        sortField={lazy.sortField} sortOrder={lazy.sortOrder}
-        onPage={(e) => setLazy(s => ({...s, first: e.first, rows: e.rows}))}
-        onSort={(e) =>
-           setLazy(s => ({
-             ...s,
-             sortField: e.sortField || 'part_number',
-             sortOrder: (e.sortOrder === -1 ? -1 : 1) as 1 | -1
-           }))
-         }
-        onFilter={(e) => setLazy(s => ({...s, first: 0, filters: e.filters}))}
-        filterDisplay="row" removableSort rowsPerPageOptions={[10,25,50,100]}
-        stripedRows responsiveLayout="scroll"
+        expandedKeys={expanded}
+        onToggle={(e) => setExpanded(e.value)}
+        onExpand={onExpandNode}
+        filters={ttFilters}
+        onFilter={onTTFilter}
+        filterDisplay="row"
+        showGridlines
+        scrollable
+        scrollHeight="70vh"
       >
-        <Column field="part_number" header="Part Number" sortable filter showFilterMenu={false}
-        filterMatchMode="contains" filterMatchModeOptions={["contains"]}
-        body={(p) => <a href={`/ui/part/${encodeURIComponent(p.part_number)}`}>{p.part_number}</a>} />
-
-
-        <Column field="description" header="Description" sortable filter showFilterMenu={false}
-                filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
-
-        <Column field="category" header="Category" sortable filter showFilterMenu={false}
-                filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
-
-      </DataTable>
+        <Column
+          field="pn"
+          header="Partnumber"
+          body={pnBody}
+          sortable
+          filter
+          filterMatchMode="custom"
+          filterFunction={(value, flt) => containsAllTerms(value, flt)}
+          showFilterMenu={false}
+          filterPlaceholder="Filter PN"
+        />
+        <Column
+          field="desc"
+          header="Description"
+          sortable
+          filter
+          filterMatchMode="custom"
+          filterFunction={(value, flt) => containsAllTerms(value, flt)}
+          showFilterMenu={false}
+          filterPlaceholder="Filter description"
+        />
+        <Column
+          field="process"
+          header="Processes"
+          sortable
+          filter
+          filterMatchMode="custom"
+          filterFunction={(value, flt) => containsAllTerms(value, flt)}
+          showFilterMenu={false}
+          filterPlaceholder="Filter process"
+        />
+        <Column
+          field="rev"
+          header="Revision"
+          sortable
+          filter
+          filterMatchMode="custom"
+          filterFunction={(value, flt) => containsAllTerms(value, flt)}
+          showFilterMenu={false}
+          filterPlaceholder="Rev"
+          style={{ width: 120 }}
+        />
+        <Column
+          field="material"
+          header="Material"
+          sortable
+          filter
+          filterMatchMode="custom"
+          filterFunction={(value, flt) => containsAllTerms(value, flt)}
+          showFilterMenu={false}
+          filterPlaceholder="Filter material"
+        />
+        <Column
+          field="finish"
+          header="Finish"
+          sortable
+          filter
+          filterMatchMode="custom"
+          filterFunction={(value, flt) => containsAllTerms(value, flt)}
+          showFilterMenu={false}
+          filterPlaceholder="Filter finish"
+        />
+        <Column header="Links" body={linksBody} style={{ width: 120 }} />
+      </TreeTable>
     </div>
-  )
+  );
 }
