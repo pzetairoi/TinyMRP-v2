@@ -49,6 +49,7 @@ def bom_tree():
     rev = request.args.get("rev")  # keep None vs ""
     parent = (request.args.get("parent") or "").strip()
     parent_rev = request.args.get("parent_rev")
+    parent_rev = request.args.get("parent_rev")
 
     if pn:
         # Build root node for specific revision if provided; else latest

@@ -5,10 +5,13 @@ from .models.auth import User, Role
 
 
 
+from flask_wtf import CSRFProtect   # CSRF protection for forms
+csrf = CSRFProtect()  # Initialize CSRF protection
+
 from flask import render_template # For rendering templates
 from flask_wtf.csrf import CSRFError # CSRF error handling
 
-from .extensions import csrf, init_mongo # CSRF and MongoDB init
+from .extensions import csrf, init_mongo # Import CSRF and MongoDB init
 
 
 
@@ -117,8 +120,9 @@ def create_app(config_object=None):
         return render_template("csrf_error.html", reason=e.description), 400
     app.register_error_handler(CSRFError, handle_csrf_error)
     
-    # CSRF already initialized above
+    # CSRF
     app.config.setdefault("WTF_CSRF_ENABLED", True)
+    csrf.init_app(app)
 
     # Mongo
     app.config.setdefault("MONGODB_ALIAS", "tinymrp-v2")
