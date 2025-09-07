@@ -18,6 +18,7 @@ from .extensions import csrf, init_mongo # Import CSRF and MongoDB init
 security = None
 
 import os
+import secrets
 import json as _json
 
 
@@ -85,10 +86,22 @@ def create_app(config_object=None):
     app.config.setdefault("SECURITY_LOGOUT_METHODS", ["POST"])  # explicit
     app.config.setdefault("SECURITY_POST_LOGOUT_VIEW", "/login")  # where to go after logout
     
-    #Simple files config
-    app.config["FILE_ROOT_LOCAL"] = (os.getenv("FILE_ROOT_LOCAL") or "").strip()
-    app.config["FILE_ROOT_HTTP"]  = (os.getenv("FILE_ROOT_HTTP")  or "").strip()
+    # Simple files config (centralized)
+    # One local root inside the container/host mount, one URL prefix served by nginx.
+    files_local_root = (os.getenv("FILES_LOCAL_ROOT") or os.getenv("FILE_ROOT_LOCAL") or "").strip()
+    files_url_prefix = (os.getenv("FILES_URL_PREFIX") or os.getenv("FILE_ROOT_HTTP")  or "").strip()
+    files_upstream   = (os.getenv("FILES_UPSTREAM_BASE") or "").strip()
+
+    # Canonical keys
+    app.config["FILES_LOCAL_ROOT"]   = files_local_root
+    app.config["FILES_URL_PREFIX"]   = files_url_prefix
+    app.config["FILES_UPSTREAM_BASE"] = files_upstream
     app.config["FILE_HASH_MAX_BYTES"] = int(os.getenv("FILE_HASH_MAX_BYTES") or "0")
+
+    # Backward-compatible aliases used elsewhere in the codebase
+    # (prefer the canonical FILES_* keys in new code)
+    app.config["FILE_ROOT_LOCAL"] = files_local_root
+    app.config["FILE_ROOT_HTTP"]  = files_url_prefix
 
     #print("FILES: local=", app.config["FILE_ROOT_LOCAL"], "http=", app.config["FILE_ROOT_HTTP"])
 

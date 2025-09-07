@@ -71,6 +71,15 @@ flask --app run.py user grant-admin --email you@example.com
 docker compose up -d
 ```
 
+Unified config: copy `.env.example` to `.env` and adjust only these:
+
+- `DELIVERABLES_DIR` – your host folder for deliverables (single path to set)
+- `HTTP_PORT` – external port exposed by nginx (single port to set)
+- optional: `FILES_UPSTREAM_BASE` – URL of an external file server to proxy
+
+The app container reads `FILES_LOCAL_ROOT=/data/deliverables` and nginx serves
+them at `FILES_URL_PREFIX` (default `/deliverables`) automatically.
+
 2) Create a user via the Flask CLI in the **app** container:
 
 ```bash

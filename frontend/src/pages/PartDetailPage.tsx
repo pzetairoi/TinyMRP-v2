@@ -161,7 +161,7 @@ export default function PartDetailPage() {
 
 // in PartDetailPage.tsx (replace your bestUrl)
 function bestUrl(f: FileRow): string {
-  const base = (import.meta as any).env?.VITE_FILES_BASE_URL || "/extfiles/Deliverables";
+  const base = (import.meta as any).env?.VITE_FILES_BASE_URL || "/extfiles/deliverables";
 
   // 1) Preferred: rel_path -> same-origin {base}/rel_path
   if (f.rel_path) {
@@ -169,12 +169,12 @@ function bestUrl(f: FileRow): string {
     return `${base}/${rp}`.replace(/([^:]\/)\/+/g, "$1");
   }
 
-  // 2) Rewrite absolute URLs that contain /Deliverables/ -> same-origin
+  // 2) Rewrite absolute URLs that contain /deliverables/ -> same-origin
   const direct = f.url || f.http_url || (Array.isArray(f.urls) ? f.urls[0] : "");
   if (direct) {
     try {
       const u = new URL(direct, window.location.origin);
-      const m = u.pathname.match(/\/Deliverables\/(.+)$/);
+      const m = u.pathname.match(/\/deliverables\/(.+)$/);
       if (m) return `${base}/${m[1]}`.replace(/([^:]\/)\/+/g, "$1");
       // allow same-origin direct urls
       if (u.origin === window.location.origin) return u.toString();

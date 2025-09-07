@@ -2,7 +2,7 @@
 #  docker  default 
 FILE_ROOT_LOCAL=/data/deliverables
 MONGO_URI=mongodb://mongo:27017/tinymrp-v2
-FILE_ROOT_HTTP=/Deliverables
+FILE_ROOT_HTTP=/deliverables
 
 
 # The manifest path inside the image
@@ -17,13 +17,13 @@ MONGO_DB=tinymrp-v2
 
 # Point this to your host path containing folders: png, pdf, dxf, step, edr, 3mf, datasheet, thumbs
 # Windows example:
-DELIVERABLES_DIR=C:\CADEXPORT
+DELIVERABLES_DIR=Z:/
 # Linux example:
-# DELIVERABLES_DIR=/mnt/Deliverables
+# DELIVERABLES_DIR=/mnt/deliverables
 
 # The app reads either FILE_ROOTS or FILE_ROOTS_JSON
-FILE_ROOTS={"local":"/data/deliverables","http":"/Deliverables"}
-FILE_ROOTS_JSON={"local":"/data/deliverables","http":"/Deliverables"}
+FILE_ROOTS={"local":"/data/deliverables","http":"/deliverables"}
+FILE_ROOTS_JSON={"local":"/data/deliverables","http":"/deliverables"}
 
 
 

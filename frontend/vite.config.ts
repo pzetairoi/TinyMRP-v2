@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ command }) => {
   const isBuild = command === 'build'
+  const backend = process.env.VITE_BACKEND_URL || 'http://localhost:5000'
   return {
     plugins: [react()],
     base: isBuild ? '/static/parts-ui/' : '/',
@@ -18,9 +19,9 @@ export default defineConfig(({ command }) => {
     server: {
       port: 5173, strictPort: true,
       proxy: {
-        '/api':      { target: 'http://localhost:5000', changeOrigin: true },
-        '/extfiles': { target: 'http://localhost:5000', changeOrigin: true },
-        '/Deliverables': { target: 'http://localhost:5000', changeOrigin: true }, // optional
+        '/api':        { target: backend, changeOrigin: true },
+        '/extfiles':   { target: backend, changeOrigin: true },
+        '/deliverables': { target: backend, changeOrigin: true }, // optional
       },
     },
     preview: { port: 5174, strictPort: true },

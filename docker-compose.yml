@@ -19,20 +19,17 @@ services:
       context: .
       dockerfile: docker/app/Dockerfile
     restart: unless-stopped
-    # env_file:
-    #    - .dockerenv
     environment:
-      # These defaults are safe—your .env can override anything
+      # These defaults are safe–your .env can override anything
       FLASK_ENV: production
       SECRET_KEY: ${SECRET_KEY:-change-me}
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/${MONGO_DB:-tinymrp-v2}}
-      # Your code reads FILE_ROOTS / FILE_ROOTS_JSON; we set both.
-      FILE_ROOTS: ${FILE_ROOTS:-{"local":"/data/deliverables","http":"/Deliverables"}}
-      FILE_ROOTS_JSON: ${FILE_ROOTS_JSON:-{"local":"/data/deliverables","http":"/Deliverables"}}
-      # Vite manifest path (your app already looks here)
-      VITE_MANIFEST: /app/app/static/parts-ui/.vite/manifest.json
-      FILE_ROOT_HTTP: /Deliverables
-      DELIVERABLES_DIR: C:/CADEXPORT
+      # Unified files configuration
+      FILES_LOCAL_ROOT: /data/deliverables
+      FILES_URL_PREFIX: ${FILES_URL_PREFIX:-/deliverables}
+      # Optional: enable HTTP proxy to an external file server
+      # FILES_UPSTREAM_BASE: ${FILES_UPSTREAM_BASE}
+      DELIVERABLES_DIR: Z:/
     depends_on:
       - mongo
     volumes:
@@ -42,7 +39,7 @@ services:
         target: /data/deliverables
         read_only: true
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:5000/"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -57,7 +54,7 @@ services:
     volumes:
       # NGINX config
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # Serve Deliverables directly from NGINX too
+      # Serve deliverables directly from NGINX too
       - type: bind
         source: ${DELIVERABLES_DIR}
         target: /data/deliverables

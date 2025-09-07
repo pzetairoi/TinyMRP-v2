@@ -52,7 +52,8 @@ def part_images():
         # 2) Fallback to fileserve token using rel_path
         if getattr(d, "rel_path", None) and local_root:
             abs_path = os.path.normpath(os.path.join(local_root, d.rel_path.replace("/", os.sep)))
-            token = base64.b64encode(abs_path.encode("utf-8")).decode("ascii")
+            # Use URL-safe base64 to be safe in URLs
+            token = base64.urlsafe_b64encode(abs_path.encode("utf-8")).decode("ascii")
             urls.append(url_for("fileserve.view", token=token))
 
         rows.append({"urls": urls, "revision": d.revision})
