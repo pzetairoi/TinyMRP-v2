@@ -210,13 +210,32 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 if not Part.objects(part_number=pn).first():
                     Part(part_number=pn, description="", uom="EA", attrs={"seed": seed_tag}).save()
                     created_parts += 1
-            existing = BOMLink.objects(parent_pn=parent_pn, child_pn=child_pn).first()
+            # resolve current revisions (latest for each PN)
+            prt_parent = Part.objects(part_number=parent_pn).order_by("-updated_at").first()
+            prt_child  = Part.objects(part_number=child_pn).order_by("-updated_at").first()
+            parent_rev = (prt_parent.revision if prt_parent else "") or ""
+            child_rev  = (prt_child.revision if prt_child else "") or ""
+
+            # upsert by PN(+REV if supported)
+            query = dict(parent_pn=parent_pn, child_pn=child_pn)
+            if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
+                query.update(parent_rev=parent_rev, child_rev=child_rev)
+            existing = BOMLink.objects(**query).first()
             if existing:
                 existing.qty = qty
                 existing.uom = existing.uom or "EA"
+                if hasattr(existing, "parent_rev"):
+                    existing.parent_rev = parent_rev
+                if hasattr(existing, "child_rev"):
+                    existing.child_rev = child_rev
                 existing.save()
             else:
-                BOMLink(parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom="EA").save()
+                kwargs = dict(parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom="EA")
+                if "parent_rev" in BOMLink._fields:
+                    kwargs["parent_rev"] = parent_rev
+                if "child_rev" in BOMLink._fields:
+                    kwargs["child_rev"] = child_rev
+                BOMLink(**kwargs).save()
                 created_links += 1
                 
     # 3) Discover and register artifacts for all parts 

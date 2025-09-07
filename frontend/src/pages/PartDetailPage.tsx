@@ -653,7 +653,18 @@ function bestUrl(f: FileRow): string {
       .filter((x, i, arr) => x && arr.indexOf(x) === i);
   }, [part]);
 
+  const isPurchased = useMemo(() => {
+    const a = part?.attrs || {}
+    return processes.includes('purchase') || Boolean(a.oem || a.oem_partnumber)
+  }, [processes, part])
+
   // ---------- Render ----------
+  const [tabIndex, setTabIndex] = useState(0)
+  // If there is no drawing preview image but there is a PDF, we still
+  // consider that we have a drawing. Otherwise, hide the Drawing tab and
+  // default to All attributes.
+  const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
+
   return (
     <div className="container-xxl py-3">
       {/* Title */}
@@ -669,9 +680,9 @@ function bestUrl(f: FileRow): string {
       <div className="row g-3">
         {/* LEFT */}
         <div className="col-lg-4">
-          <div className="pd-card">
+            <div className="pd-card">
             <div className="pd-hero">
-              <ImageStrip pn={pn} rev={rev || ""} mode="preview" />
+              <ImageStrip pn={pn} rev={rev || ""} mode="preview" limit={1} fit />
             </div>
 
             {/* quick info */}
@@ -704,6 +715,15 @@ function bestUrl(f: FileRow): string {
                     )}
                   </td>
                 </tr>
+                {isPurchased && (
+                  <tr>
+                    <th className="pd-th">OEM:</th>
+                    <td>
+                      {(part?.attrs?.oem || '-')}
+                      {part?.attrs?.oem_partnumber ? ` · ${part?.attrs?.oem_partnumber}` : ''}
+                    </td>
+                  </tr>
+                )}
                 <tr>
                   <th className="pd-th">Material:</th>
                   <td>
@@ -724,8 +744,16 @@ function bestUrl(f: FileRow): string {
               </tbody>
             </table>
 
-            {/* file buttons */}
+            {/* file buttons + external link */}
             <div className="pd-files mt-2">
+              {(() => {
+                const href = (part?.attrs?.link || part?.attrs?.oem_internet || '').toString().trim()
+                return href ? (
+                  <a className="btn btn-outline-primary btn-sm pd-file-btn" href={href} target="_blank" rel="noreferrer">
+                    Link
+                  </a>
+                ) : null
+              })()}
               {firstLinks.edr && (
                 <a
                   className="btn btn-info btn-sm pd-file-btn"
@@ -797,7 +825,10 @@ function bestUrl(f: FileRow): string {
         {/* RIGHT */}
         <div className="col-lg-8 pd-right-wrap">
           <div className="pd-right-top">
-          <TabView>
+          <TabView activeIndex={tabIndex} onTabChange={(e: any) => setTabIndex(e.index)}>
+            
+
+            {hasDrawing && (
             <TabPanel header="Drawing">
               {pdfHref ? (
                 <>
@@ -808,16 +839,22 @@ function bestUrl(f: FileRow): string {
                     className="pd-drawing-link"
                     title="Open PDF drawing"
                   >
-                    <ImageStrip pn={pn} rev={rev || ""} mode="drawing" />
+                    <ImageStrip pn={pn} rev={rev || ""} mode="drawing" limit={1} fit />
                   </a>
                 </>
               ) : (
-                <ImageStrip pn={pn} rev={rev || ""} mode="drawing" />
+                <div className="pd-drawing-link">
+                  <ImageStrip pn={pn} rev={rev || ""} mode="drawing" limit={1} fit />
+                </div>
               )}
             </TabPanel>
+            )}
+            
+
+            
 
             {/* NEW: 3D Preview tab using 3MF */}
-            <TabPanel header="3D Preview">
+            {/* 3D moved to end */} {false && (<TabPanel header="3D Preview">
               {threeMfUrl ? (
                 <Suspense fallback={<div className="p-3">Loading 3D viewer…</div>}>
                   <ThreeMFViewer url={threeMfUrl} height={520} />
@@ -825,7 +862,7 @@ function bestUrl(f: FileRow): string {
               ) : (
                 <div className="p-3 text-muted">No 3D file found for this part (3MF).</div>
               )}
-            </TabPanel>
+            </TabPanel>)}
 
             <TabPanel header="All attributes">
               {attrs.length === 0 ? (
@@ -844,6 +881,18 @@ function bestUrl(f: FileRow): string {
               )}
             </TabPanel>
 
+            {/* 3D Preview tab at the end */}
+            <TabPanel header="3D Preview">
+              {threeMfUrl ? (
+                <Suspense fallback={<div className="p-3">Loading 3D viewer...</div>}>
+                  <ThreeMFViewer url={threeMfUrl} height={520} />
+                </Suspense>
+              ) : (
+                <div className="p-3 text-muted">No 3D file found for this part (3MF).</div>
+              )}
+            </TabPanel>
+
+            
             <TabPanel header="Doc Packs">
               <div className="text-muted small">
                 (Hook up to your reporting/binder endpoints later – this is just a placeholder panel.)
