@@ -76,7 +76,7 @@ def parts_lazy():
             "thumb_urls": thumb_urls_for(pn, rev),
         })
         
-    # debug print removed
+    print(out)
 
     return jsonify({"data": out, "totalRecords": filtered})
 

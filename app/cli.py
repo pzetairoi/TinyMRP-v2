@@ -468,13 +468,31 @@ def attrs_backfill():
     click.echo({"updated": fixed})
 
 
-## Duplicate attrs group removed (consolidated above)
+@click.group()
+def attrs():
+    """Attribute utils"""
+
+@attrs.command("backfill")
+@with_appcontext
+def attrs_backfill():
+    count = 0
+    for p in Part.objects():
+        norm = harvest_part_attrs(p)
+        # Save only if we would change stored attrs or mirrors
+        changed = (norm != (p.attrs or {})) \
+            or (p.description != norm.get("description","")) \
+            or (p.revision != norm.get("revision","")) \
+            or (p.category != norm.get("category",""))
+        if changed:
+            merge_save_part_attrs(p, norm)
+            count += 1
+    click.echo({"updated": count})
 
 
 
 def init_app(app):
     # ... your existing CLI registrations ...
-    # attrs group registered above
+    app.cli.add_command(attrs)
     app.cli.add_command(thumbs)
     app.cli.add_command(importcmd, "import")
     app.cli.add_command(files)
