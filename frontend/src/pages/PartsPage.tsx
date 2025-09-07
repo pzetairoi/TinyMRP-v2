@@ -5,7 +5,7 @@ import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
 import { Link } from 'react-router-dom'
 
-type Part = { part_number: string; description: string; category: string }
+type Part = { part_number: string; description: string; category: string; revision?: string }
 
 export default function PartsPage() {
   const [rows, setRows] = useState<Part[]>([])
@@ -55,7 +55,11 @@ export default function PartsPage() {
       >
         <Column field="part_number" header="Part Number" sortable filter showFilterMenu={false}
         filterMatchMode="contains" filterMatchModeOptions={["contains"]}
-        body={(p) => <a href={`/ui/part/${encodeURIComponent(p.part_number)}`}>{p.part_number}</a>} />
+        body={(p) => {
+          const rev = (p as Part).revision || ''
+          const qs = rev !== undefined ? `?rev=${encodeURIComponent(rev)}` : ''
+          return <a href={`/ui/part/${encodeURIComponent(p.part_number)}${qs}`}>{p.part_number}</a>
+        }} />
 
 
         <Column field="description" header="Description" sortable filter showFilterMenu={false}

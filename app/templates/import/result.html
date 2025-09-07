@@ -11,7 +11,21 @@
     <dt class="col-sm-3">Links created</dt><dd class="col-sm-9">{{ result.links_created }}</dd>
     <dt class="col-sm-3">Links skipped</dt><dd class="col-sm-9">{{ result.links_skipped }}</dd>
     <dt class="col-sm-3">Parts with properties</dt><dd class="col-sm-9">{{ result.parts_with_props }}</dd>
+    <dt class="col-sm-3">Artifacts added</dt><dd class="col-sm-9">{{ result.artifacts_added }}</dd>
+    <dt class="col-sm-3">Thumbnails generated</dt><dd class="col-sm-9">{{ result.thumbnails_generated or result.thumbnails_built or 0 }}</dd>
   </dl>
+
+  {% if result.artifacts_found_by_type %}
+  <h5 class="mt-3">Files Found By Type</h5>
+  <table class="table table-sm w-auto">
+    <thead><tr><th>Type</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for k, v in result.artifacts_found_by_type.items() %}
+      <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
   {% if result.root %}
     <a class="btn btn-outline-secondary" href="/ui/bom/{{ result.root|urlencode }}">Open BOM UI</a>
   {% endif %}

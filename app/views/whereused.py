@@ -7,8 +7,12 @@ from app.services.attrs import harvest_part_attrs
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
-def _rows_for_child_pn(pn: str):
-    """Return where-used rows for a child part number, tolerant of both link schemas."""
+def _rows_for_child_pn(pn: str, child_rev: str | None = None):
+    """Return where-used rows for a child part number, tolerant of both link schemas.
+
+    child_rev is accepted for consistency with the rest of the PN+REV-aware API.
+    Current BOMLink schema does not encode child revision, so this value is informational.
+    """
     # Fetch links where this PN is the child
     if "child_pn" in BOMLink._fields:
         links = BOMLink.objects(child_pn=pn)
@@ -18,24 +22,31 @@ def _rows_for_child_pn(pn: str):
 
     rows = []
     for l in links:
+        # Resolve parent PN
         if "parent_pn" in BOMLink._fields:
             parent_pn = getattr(l, "parent_pn", None)
-            parent_part = Part.objects(part_number=parent_pn).first()
         else:
-            parent_part = getattr(l, "parent", None)
-            parent_pn = getattr(parent_part, "part_number", None)
+            parent_obj = getattr(l, "parent", None)
+            parent_pn = getattr(parent_obj, "part_number", None)
 
         if not parent_pn:
             continue
 
+        # Always prefer the latest known revision of the parent for attrs/desc
+        parent_part = Part.objects(part_number=parent_pn).order_by("-updated_at").first()
         attrs = harvest_part_attrs(parent_part) if parent_part else {}
+        parent_rev = attrs.get("revision", "")
+
         rows.append({
             "parent_pn": parent_pn,
             "parent_desc": attrs.get("description", "") or getattr(parent_part, "description", "") or "",
             "qty": getattr(l, "qty", None),
             "uom": getattr(l, "uom", "") or "",
             "alt_group": getattr(l, "alt_group", "") or "",
-            "parent_thumb_urls": thumb_urls_for(parent_pn, (attrs.get("revision") or None)),
+            "parent_thumb_urls": thumb_urls_for(parent_pn, (parent_rev or None)),
+            "parent_rev": parent_rev,
+            "child_pn": pn,
+            "child_rev": (child_rev or ""),
         })
     return rows
 
@@ -43,13 +54,14 @@ def _rows_for_child_pn(pn: str):
 def whereused_lazy():
     p = request.get_json(silent=True) or {}
     pn = (p.get("pn") or "").strip()
+    rev = p.get("rev")  # keep None vs ""
     first = int(p.get("first") or 0)
     rows_per_page = int(p.get("rows") or 25)
     sort_field = (p.get("sortField") or "parent_pn")
     sort_order = int(p.get("sortOrder") or 1)
     filters = p.get("filters") or {}
 
-    rows = _rows_for_child_pn(pn)
+    rows = _rows_for_child_pn(pn, rev)
 
     # filters (contains)
     def contains(val, needle):

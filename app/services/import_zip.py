@@ -5,6 +5,7 @@ from mongoengine.queryset.visitor import Q
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs_gen import generate_thumbs_for_parts
+from collections import defaultdict
 
 # Import necessary services for file scanning and upserting
 from app.services.filescan import discover_part_files, upsert_part_files
@@ -136,25 +137,26 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     part_props: Dict[str, Dict[str, Any]] = {}
     if flat_name:
         flat_txt = z.read(flat_name).decode("utf-8", errors="replace")
+        
         itemcounter=0
         for d in _parse_flatbom(flat_txt):
             norm = _normalize_part(d)
+            
             pn = norm["part_number"]
             rev=norm.get("revision") or ""
-            
-            ##print("normalized part", pn, rev, norm)
-            if pn and rev:
+                        
+            if pn:
                 part_props[str(itemcounter)] = norm
                 itemcounter+=1
 
+    
     # Upsert parts
     for itemref, norm in part_props.items():
         ##print( "upserting part", itemref, norm)
         pn=norm["part_number"]
         rev=norm.get("revision") or ""        
         attrs=norm["attrs"] or {}
-
-        
+    
         p = Part.objects(part_number=pn, revision=rev).first()
 
         
@@ -170,7 +172,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         
 
         # attrs = p.attrs or {}
-        ##print("attributes", attrs)
+        # print("attributes", attrs)
         attrs, processes = process_attributes(attrs)
         ##print("attributes", attrs)
         ##print("processes", processes)
@@ -182,7 +184,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         attrs["seed"] = seed_tag
         # attrs = normalize_props(attrs)
         ##print("#############################")
-        ##print("attributes", attrs)
+    
         
         
         
@@ -220,6 +222,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     # 3) Discover and register artifacts for all parts 
 
     artifact_inserts = 0
+    artifacts_found_by_type = defaultdict(int)
     seen = set()
    #print("part_props", part_props)
     for item, norm in part_props.items():
@@ -232,7 +235,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         seen.add(key)
 
         found = discover_part_files(pn, rev)
-       #print(found)
+        
         
         recs = []
         for (group, is_dwg), meta in found.items():
@@ -241,7 +244,8 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             rec["ext_group"] = group  # e.g. 'png','pdf','dxf','step','edr','3mf','datasheet'
             rec["is_dwg"] = bool(is_dwg)
             recs.append(rec)
-            print
+            # aggregate counters
+            artifacts_found_by_type[str(group or "unknown")] += 1
 
        #print("upserting", len(recs), "artifacts for", pn, rev)
         artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
@@ -249,9 +253,9 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     
     thumbs = generate_thumbs_for_parts(seen)
     
-
-
-
+    
+    
+    
     # root guess for convenience (top item in TREEBOM)
     root_pn = None
     if tree_name:
@@ -272,5 +276,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         "links_skipped": skipped_links,
         "parts_with_props": len(part_props),
         "artifacts_added": artifact_inserts,
-        "thumbnails_built": thumbs
+        "artifacts_found_by_type": dict(sorted(artifacts_found_by_type.items())),
+        "thumbnails_built": thumbs,
+        "thumbnails_generated": thumbs
     }

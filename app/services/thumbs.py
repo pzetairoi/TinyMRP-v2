@@ -1,23 +1,60 @@
 import base64
 from typing import List, Optional
+import os
 from flask import current_app
 from app.models.artifact import PartFile
 
 def _token_for(path: str) -> str:
     return base64.urlsafe_b64encode((path or "").encode("utf-8")).decode("ascii")
 
+def _root_local() -> str:
+    return (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
+
+def _abs(path_rel: str) -> str:
+    return os.path.join(_root_local(), (path_rel or "").replace("/", os.sep))
+
 def _urls_for(pn: str, rev: str, *, is_dwg: bool):
-    rows = PartFile.objects(part_number=pn, revision=rev, ext_group="png", is_dwg=is_dwg)
+    """Return best-first URLs for preview/drawing PNGs, preferring thumbnails.
+
+    Order: HTTP thumbnail -> HTTP original -> tokenized local (thumb/original).
+    """
+    rows = PartFile.objects(part_number__iexact=pn, revision__iexact=rev, ext_group="png", is_dwg=is_dwg)
     if not rows:
         return []
     pf = rows.first()
-    # return preferred http_url first, you already have a /files/view token fallback elsewhere if needed
-    out = []
-    if pf.http_url:
+
+    http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
+    out: list[str] = []
+
+    # 1) HTTP thumbnail if available
+    if http_base and getattr(pf, "thumb_rel_path", None):
+        out.append(f"{http_base}/{pf.thumb_rel_path}")
+
+    # 2) HTTP original if available
+    if http_base and getattr(pf, "rel_path", None):
+        out.append(f"{http_base}/{pf.rel_path}")
+
+    # 3) Pre-built http_url saved by scanner, if present
+    if getattr(pf, "http_url", None):
         out.append(pf.http_url)
-    # (optional) fallback: tokenized local
-    out.append(f"/files/view/{pf.rel_path.encode('utf-8').hex()}")  # keep your existing token if you have one
-    return out
+
+    # 4) Tokenized local (thumb first, then original)
+    if getattr(pf, "thumb_rel_path", None):
+        out.append(f"/files/view/{_token_for(_abs(pf.thumb_rel_path))}")
+    if getattr(pf, "rel_path", None):
+        out.append(f"/files/view/{_token_for(_abs(pf.rel_path))}")
+    elif getattr(pf, "path", None):
+        p = pf.path if os.path.isabs(pf.path) else _abs(pf.path)
+        out.append(f"/files/view/{_token_for(p)}")
+
+    # Deduplicate while preserving order
+    seen = set()
+    dedup = []
+    for u in out:
+        if u and u not in seen:
+            seen.add(u)
+            dedup.append(u)
+    return dedup
 
 def preview_png_urls_for(pn: str, rev: str | None):
     return _urls_for(pn, (rev or ""), is_dwg=False)
@@ -37,8 +74,12 @@ def _urls_for_doc(d: PartFile, http_base: str) -> List[str]:
         urls.append(f"{http_base}/{d.thumb_rel_path}")
     if http_base and d.rel_path:
         urls.append(f"{http_base}/{d.rel_path}")
-    # fallback to tokenized local file
-    urls.append(f"/files/view/{_token_for(d.path)}")
+    # fallback to tokenized local file using absolute path resolution
+    if d.rel_path:
+        urls.append(f"/files/view/{_token_for(_abs(d.rel_path))}")
+    elif d.path:
+        p = d.path if os.path.isabs(d.path) else _abs(d.path)
+        urls.append(f"/files/view/{_token_for(p)}")
     return urls
 
 def drawing_urls_for(pn: str, rev_pref: Optional[str]) -> List[str]:
@@ -48,7 +89,7 @@ def drawing_urls_for(pn: str, rev_pref: Optional[str]) -> List[str]:
     Returns best-first URL list: HTTP thumbnail -> HTTP original -> token fallback.
     """
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
-    q = (PartFile.objects(part_number=pn, ext_group="png")
+    q = (PartFile.objects(part_number__iexact=pn, ext_group="png")
          .only("path", "rel_path", "thumb_rel_path", "revision", "mtime")
          .order_by("-mtime", "path"))
     docs = list(q)
@@ -57,7 +98,7 @@ def drawing_urls_for(pn: str, rev_pref: Optional[str]) -> List[str]:
         return thumb_urls_for(pn, rev_pref)
 
     def is_dwg(d: PartFile) -> bool:
-        return "_DWG" in ((d.rel_path or "").upper())
+        return "_DWG" in ((d.rel_path or d.path or "").upper())
 
     dwg_docs = [d for d in docs if is_dwg(d)]
 

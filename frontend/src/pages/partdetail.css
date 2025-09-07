@@ -99,6 +99,23 @@
   filter: drop-shadow(0 0 1px rgba(0,0,0,.2));
 }
 
+/* Right-side split: tabs on top, Used-in fixed at bottom */
+.pd-right-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+.pd-right-top {
+  flex: 1 1 auto;
+  min-height: 300px;
+}
+.pd-usedin {
+  flex: 0 0 auto;
+  max-height: 35vh;            /* keep bottom area visible */
+  overflow: auto;
+}
+
 
 .tt-pncell {
   display: inline-flex;
@@ -175,4 +192,44 @@
   max-width: 100%;
   height: auto;
   display: block;
+}
+
+
+
+/* Expander always left, no extra padding */
+.pd-tt .tt-expander .p-treetable-toggler {
+  margin: 0 !important;
+  padding: 0 !important;
+  left: 0 !important;
+}
+
+/* Thumbnail */
+.pd-tt .tt-thumb {
+  max-height: 32px;
+  max-width: 48px;
+  object-fit: contain;
+}
+
+/* Level guide slot */
+.pd-tt .tt-levelcell {
+  display: inline-block;
+  height: 1.75rem;
+}
+
+/* PN link style */
+.pd-tt .tt-pnlink {
+  text-decoration: none;
+}
+
+/* Chip-like file buttons */
+.pd-file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem;
+}
+.pd-file-chip {
+  padding: .15rem .45rem;
+  font-size: .8rem;
+  line-height: 1.1;
+  white-space: nowrap;
 }

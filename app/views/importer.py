@@ -20,7 +20,11 @@ def upload_post():
         return redirect(url_for("importer.upload_form"))
     fn = secure_filename(f.filename)
     result = import_bom_zip(f.read(), fn, seed_tag="upload")
-    flash(f"Imported {result['zip']} · root={result['root']} · parts+{result['parts_created']} links+{result['links_created']}", "success")
+    thumbs = result.get('thumbnails_generated') or result.get('thumbnails_built') or 0
+    flash(
+        f"Imported {result['zip']} · root={result['root']} · parts+{result['parts_created']} links+{result['links_created']} · thumbs={thumbs}",
+        "success",
+    )
     return render_template("import/result.html", result=result)
 
 # Optional: JSON API endpoint for programmatic uploads
@@ -33,3 +37,4 @@ def upload_api():
     fn = secure_filename(f.filename)
     result = import_bom_zip(f.read(), fn, seed_tag="upload-api")
     return jsonify(result)
+

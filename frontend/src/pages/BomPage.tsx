@@ -37,6 +37,8 @@ export default function BomPage() {
   // also exists in window.__INITIAL__.pn; we fall back gracefully.
   const route = useParams()
   const pn = route.pn || (window as any).__INITIAL__?.pn || ''
+  const sp = new URLSearchParams(window.location.search)
+  const rev = sp.get('rev') || ((window as any).__INITIAL__?.rev ?? '')
 
   // --- BOM Tree ---
   const [nodes, setNodes] = useState<TreeNode[]>([])
@@ -55,7 +57,7 @@ export default function BomPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}`)
+        const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || '')}`)
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         const root: TreeNode[] = await r.json()
         if (!cancelled) setNodes(root)
@@ -67,7 +69,7 @@ export default function BomPage() {
     return () => {
       cancelled = true
     }
-  }, [pn])
+  }, [pn, rev])
 
   // Helper to immutably set children for a node key
   function setNodeChildren(tree: TreeNode[], key: string, children: TreeNode[]): TreeNode[] {
@@ -82,9 +84,22 @@ export default function BomPage() {
     })
   }
 
+  function findNode(tree: TreeNode[], key: string): TreeNode | undefined {
+    for (const n of tree) {
+      if (String(n.key) === String(key)) return n
+      if (n.children && n.children.length) {
+        const hit = findNode(n.children as TreeNode[], key)
+        if (hit) return hit
+      }
+    }
+    return undefined
+  }
+
   async function loadChildrenFor(key: string) {
     try {
-      const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}`)
+      const parent = findNode(nodes, key)
+      const prev = (parent as any)?.data?.rev || ''
+      const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&parent_rev=${encodeURIComponent(prev)}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const kids: TreeNode[] = await r.json()
       setNodes((prev) => setNodeChildren(prev, key, kids))
@@ -119,7 +134,7 @@ export default function BomPage() {
         const r = await fetch('/api/whereused_lazy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pn, ...lazy }),
+          body: JSON.stringify({ pn, rev, ...lazy }),
         })
         if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`)
         const j = await r.json()
@@ -140,7 +155,7 @@ export default function BomPage() {
     return () => {
       cancelled = true
     }
-  }, [pn, lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters)])
+  }, [pn, rev, lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters)])
 
   function ImageThumb({ urls }: { urls?: string[] }) {
   if (!urls || !urls.length) return <div style={{ width: 64, height: 40, background: '#f2f2f2', borderRadius: 8 }} />
@@ -162,7 +177,7 @@ export default function BomPage() {
       <h5 className="mb-2">BOM · {pn}</h5>
 
       {/* Imágenes del PN (usa última revisión si no se especifica) */}
-      <ImageStrip pn={pn} />
+      <ImageStrip pn={pn} rev={rev || ''} />
 
 {/* BOM TreeTable */}
 
@@ -200,7 +215,8 @@ export default function BomPage() {
       sortable
       body={(node: any) => {
         const cpn = node?.data?.pn || ''
-        return <a href={`/ui/part/${encodeURIComponent(cpn)}`}>{cpn}</a>
+        const crev = (node?.data?.rev || '')
+        return <a href={`/ui/part/${encodeURIComponent(cpn)}?rev=${encodeURIComponent(crev)}`}>{cpn}</a>
       }}
       style={{ width: 240 }}
     />

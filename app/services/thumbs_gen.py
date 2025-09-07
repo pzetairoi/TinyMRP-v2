@@ -72,10 +72,12 @@ def generate_thumbs_for_artifacts(docs: Iterable[PartFile]) -> int:
     for d in docs:
         if (d.ext_group or "").lower() != "png":
             continue
-        if not d.rel_path or not d.path:
+        # Compute absolute source path from rel_path (preferred). Fallback to path.
+        if not d.rel_path and not d.path:
             continue
-        src_abs = d.path
-        rel = d.rel_path
+        rel = d.rel_path or d.path
+        # If stored path is absolute, keep it; otherwise resolve against FILE_ROOT_LOCAL
+        src_abs = d.path if (d.path and os.path.isabs(d.path)) else _abs(rel)
         thumb_rel = _thumb_rel_for(rel)  # thumbs/png/...
         thumb_abs = _abs(thumb_rel)
         if _needs_rebuild(src_abs, thumb_abs):
@@ -117,9 +119,9 @@ def generate_thumbs_for_parts(part_numbers: Iterable[Tuple[str, str]] | Iterable
             pairs.append((str(item), None))
     total = 0
     for pn, rev in pairs:
-        q = {"part_number": pn, "ext_group": "png"}
+        q = {"part_number__iexact": pn, "ext_group": "png"}
         if rev is not None:
-            q["revision"] = rev
+            q["revision__iexact"] = rev
         docs = PartFile.objects(**q)
         total += generate_thumbs_for_artifacts(docs)
     return total

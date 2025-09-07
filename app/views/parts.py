@@ -75,6 +75,8 @@ def parts_lazy():
             # 👇 always include thumbnail candidates
             "thumb_urls": thumb_urls_for(pn, rev),
         })
+        
+    print(out)
 
     return jsonify({"data": out, "totalRecords": filtered})
 
@@ -84,7 +86,12 @@ def parts_lazy():
 @bp.get("/part_detail")
 def part_detail():
     pn = (request.args.get("pn") or "").strip()
-    p = Part.objects(part_number=pn).first()
+    # Respect explicit ?rev= if provided; otherwise fall back to latest for PN
+    if "rev" in request.args:
+        rev = request.args.get("rev") or ""
+        p = Part.objects(part_number=pn, revision=rev).first()
+    else:
+        p = Part.objects(part_number=pn).order_by("-updated_at").first()
     if not p:
         return jsonify({"error": "not found"}), 404
 
@@ -113,11 +120,11 @@ def part_detail():
         return f"/files/view/{urlsafe_b64encode((f.path or '').encode()).decode()}"
 
     files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": []}
-    for f in PartFile.objects(part_number=p.part_number).only("ext_group","rel_path","path").order_by("ext_group","rel_path"):
+    for f in PartFile.objects(part_number__iexact=p.part_number, revision__iexact=p.revision).only("ext_group","rel_path","path").order_by("ext_group","rel_path"):
         if f.ext_group in files:
             files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path})
 
-    wu_rows = _rows_for_child_pn(p.part_number)
+    wu_rows = _rows_for_child_pn(p.part_number, p.revision)
 
 
     return jsonify({
