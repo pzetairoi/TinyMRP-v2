@@ -7,7 +7,9 @@ DB_ALIAS = "tinymrp-v2"
 
 class BOMLink(Document):
     parent_pn   = StringField(required=True)
+    parent_rev  = StringField(default="")  # new: parent revision
     child_pn    = StringField(required=True)
+    child_rev   = StringField(default="")  # new: child revision
     qty         = FloatField(default=1.0)
     uom         = StringField(default="EA")
     refdes      = ListField(StringField())
@@ -20,14 +22,21 @@ class BOMLink(Document):
 
     meta = {
         "collection": "bom",
-        "indexes": ["parent_pn", "child_pn", ("parent_pn", "child_pn")],
+        "indexes": [
+            "parent_pn",
+            "child_pn",
+            ("parent_pn", "child_pn"),
+            ("parent_pn", "parent_rev", "child_pn", "child_rev"),
+        ],
         "db_alias": DB_ALIAS
     }
 
     @property
     def parent(self):
-        return Part.objects(part_number=self.parent_pn).first()
+        return Part.objects(part_number=self.parent_pn, revision=(self.parent_rev or "")).first() \
+            or Part.objects(part_number=self.parent_pn).order_by("-updated_at").first()
 
     @property
     def child(self):
-        return Part.objects(part_number=self.child_pn).first()
+        return Part.objects(part_number=self.child_pn, revision=(self.child_rev or "")).first() \
+            or Part.objects(part_number=self.child_pn).order_by("-updated_at").first()

@@ -86,10 +86,15 @@ def parts_lazy():
 @bp.get("/part_detail")
 def part_detail():
     pn = (request.args.get("pn") or "").strip()
-    # Respect explicit ?rev= if provided; otherwise fall back to latest for PN
+    # Respect explicit ?rev= if provided; otherwise fall back to latest for PN.
+    # If a specific rev is requested but not found, gracefully fall back to the
+    # latest existing revision for that PN to avoid hard 404s from mismatched links.
+    p = None
     if "rev" in request.args:
         rev = request.args.get("rev") or ""
         p = Part.objects(part_number=pn, revision=rev).first()
+        if not p:
+            p = Part.objects(part_number=pn).order_by("-updated_at").first()
     else:
         p = Part.objects(part_number=pn).order_by("-updated_at").first()
     if not p:

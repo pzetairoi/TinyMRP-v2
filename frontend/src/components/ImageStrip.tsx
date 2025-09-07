@@ -2,7 +2,15 @@
 import { useEffect, useState } from "react"
 type ApiRow = { urls: string[] }
 
-export default function ImageStrip({ pn, rev = '', mode = 'preview' }:{ pn:string; rev?: string; mode?: 'preview'|'drawing' }) {
+type Props = {
+  pn: string
+  rev?: string
+  mode?: 'preview' | 'drawing'
+  limit?: number         // render first N only when provided
+  fit?: boolean          // when true, image fills parent (hero use)
+}
+
+export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit = false }: Props) {
   const [rows, setRows] = useState<ApiRow[]>([])
   useEffect(() => {
     let cancelled = false
@@ -17,20 +25,27 @@ export default function ImageStrip({ pn, rev = '', mode = 'preview' }:{ pn:strin
   }, [pn, rev, mode])
 
   if (!rows.length) return null
+  const list = typeof limit === 'number' ? rows.slice(0, Math.max(0, limit)) : rows
+  const wrapStyle = fit
+    ? { display:'block', width:'100%', height:'100%' }
+    : { display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }
   return (
-    <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:16}}>
-      {rows.map((row, i) => <FallbackImg key={i} urls={row.urls} />)}
+    <div style={wrapStyle as any}>
+      {list.map((row, i) => <FallbackImg key={i} urls={row.urls} fit={fit} />)}
     </div>
   )
 }
 
-function FallbackImg({ urls }:{ urls:string[] }) {
+function FallbackImg({ urls, fit }:{ urls:string[]; fit?: boolean }) {
   const [idx, setIdx] = useState(0)
+  const baseStyle = fit
+    ? { height:'100%', width:'100%', objectFit:'contain', display:'block', background:'white' }
+    : { maxHeight:160, maxWidth:240, objectFit:'contain', border:'1px solid rgba(0,0,0,.08)', borderRadius:8, padding:6, background:'white' }
   return (
     <img
       src={urls[idx]}
       onError={()=> idx < urls.length-1 && setIdx(idx+1)}
-      style={{ maxHeight:160, maxWidth:240, objectFit:'contain', border:'1px solid rgba(0,0,0,.08)', borderRadius:8, padding:6, background:'white' }}
+      style={baseStyle as any}
       alt=""
     />
   )

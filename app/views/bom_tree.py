@@ -7,20 +7,27 @@ from app.services.attrs import harvest_part_attrs
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
-def _has_children(pn: str) -> bool:
+def _has_children(pn: str, rev: str | None = None) -> bool:
     if "parent_pn" in BOMLink._fields:
+        if rev is not None and "parent_rev" in BOMLink._fields:
+            return BOMLink.objects(parent_pn=pn, parent_rev=(rev or "")).limit(1).count() > 0
         return BOMLink.objects(parent_pn=pn).limit(1).count() > 0
     p = Part.objects(part_number=pn).only("id").first()
     if not p:
         return False
     return BOMLink.objects(parent=p).limit(1).count() > 0
 
-def _node(pn: str, link=None):
-    p = Part.objects(part_number=pn).first()
+def _node(pn: str, link=None, rev: str | None = None):
+    # Prefer specific revision when provided, else pick latest by updated_at
+    if rev is not None:
+        p = Part.objects(part_number=pn, revision=rev).first() or \
+            Part.objects(part_number=pn).order_by("-updated_at").first()
+    else:
+        p = Part.objects(part_number=pn).order_by("-updated_at").first()
     attrs = harvest_part_attrs(p) if p else {}
     return {
         "key": pn,
-        "leaf": not _has_children(pn),
+        "leaf": not _has_children(pn, attrs.get("revision")),
         "data": {
             "pn": pn,
             "desc": attrs.get("description",""),
@@ -39,26 +46,37 @@ def _node(pn: str, link=None):
 @bp.get("/bom_tree")
 def bom_tree():
     pn = (request.args.get("pn") or "").strip()
-    print("request",request.args)
+    rev = request.args.get("rev")  # keep None vs ""
     parent = (request.args.get("parent") or "").strip()
+    parent_rev = request.args.get("parent_rev")
+    parent_rev = request.args.get("parent_rev")
 
     if pn:
-        p = Part.objects(part_number=pn).first()
+        # Build root node for specific revision if provided; else latest
+        if rev is not None:
+            p = Part.objects(part_number=pn, revision=(rev or "")).first() or \
+                Part.objects(part_number=pn).order_by("-updated_at").first()
+        else:
+            p = Part.objects(part_number=pn).order_by("-updated_at").first()
         if not p:
             return jsonify([])
-        root = _node(pn)
+        root = _node(p.part_number, rev=(p.revision or None))
         root["children"] = []   # lazy
         return jsonify([root])
  
     if parent:
         # children
         if "parent_pn" in BOMLink._fields:
-            links = BOMLink.objects(parent_pn=parent).only("child_pn","qty","uom","alt_group")
+            if parent_rev is not None and "parent_rev" in BOMLink._fields:
+                links = BOMLink.objects(parent_pn=parent, parent_rev=(parent_rev or "")).only("child_pn","qty","uom","alt_group","child_rev")
+            else:
+                links = BOMLink.objects(parent_pn=parent).only("child_pn","qty","uom","alt_group","child_rev")
             kids = []
             for l in links:
                 child_pn = getattr(l, "child_pn", None)
                 if child_pn and child_pn != parent:
-                    kids.append(_node(child_pn, l))
+                    c_rev = getattr(l, "child_rev", None) if hasattr(l, "child_rev") else None
+                    kids.append(_node(child_pn, l, rev=c_rev))
             return jsonify(kids)
         else:
             pp = Part.objects(part_number=parent).only("id").first()

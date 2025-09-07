@@ -18,7 +18,7 @@
   overflow: hidden;
   margin-bottom: 8px;
 }
-.pd-hero img { max-height: 230px; width: auto; object-fit: contain; }
+.pd-hero img { height: 100%; width: 100%; object-fit: contain; }
 
 .pd-th { width: 28%; white-space: nowrap; }
 
@@ -192,6 +192,16 @@
   max-width: 100%;
   height: auto;
   display: block;
+}
+
+/* Make drawing preview fill its area, similar to 3D height */
+.pd-drawing-link {
+  height: 520px; /* match 3D preview height */
+}
+.pd-drawing-link img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 
