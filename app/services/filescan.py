@@ -8,15 +8,15 @@ from flask import current_app
 from app.models.artifact import PartFile
 
 def _roots():
-    """Return (local_root, http_base) from config FILE_ROOTS = [{"local": "...", "http": "..."}]."""
-
-    local_root= (os.getenv("FILE_ROOT_LOCAL") or "").strip()
-    http_root=(os.getenv("FILE_ROOT_HTTP")  or "").strip()
-    #print(local_root,http_root)
-    # We only support the first root in the simplified setup
+    """Return (local_root, http_base) from unified app config.
+    Reads canonical FILES_LOCAL_ROOT and FILES_URL_PREFIX, falling back to
+    legacy FILE_ROOT_LOCAL/FILE_ROOT_HTTP if present.
+    """
+    cfg = current_app.config
+    local_root = (cfg.get("FILES_LOCAL_ROOT") or cfg.get("FILE_ROOT_LOCAL") or "").strip()
+    http_root  = (cfg.get("FILES_URL_PREFIX") or cfg.get("FILE_ROOT_HTTP")  or "").strip()
     if not local_root and not http_root:
         return None, None
-   
     return local_root, http_root
 
 def _expectations_for(pn: str, rev: str) -> List[Tuple[str, str, bool]]:

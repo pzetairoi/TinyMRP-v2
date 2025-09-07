@@ -62,3 +62,25 @@ def users_edit(user_id):
     roles = Role.objects().order_by("name")
     return render_template("admin/users_edit.html", user=u, roles=roles)
 
+
+@bp.route("/purge-parts", methods=["GET", "POST"])
+@roles_required("admin")
+def purge_parts():
+    """Dangerous action: delete all Parts, BOM links, and PartFiles.
+    Requires admin and explicit POST with CSRF.
+    """
+    if request.method == "POST":
+        # Import here to avoid circulars at import time
+        from ..models.part import Part
+        from ..models.bom import BOMLink
+        from ..models.artifact import PartFile
+
+        n_files = PartFile.objects.delete()
+        n_bom   = BOMLink.objects.delete()
+        n_parts = Part.objects.delete()
+
+        flash(f"Deleted parts={n_parts}, bom_links={n_bom}, part_files={n_files}", "success")
+        return redirect(url_for("admin.users_list"))
+
+    return render_template("admin/purge_parts.html")
+

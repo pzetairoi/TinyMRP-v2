@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  # Expose Mongo to localhost for Flask dev
+  mongo:
+    ports:
+      - "27017:27017"
+
+  # Use a dev nginx that proxies to local Flask and serves Deliverables
+  nginx:
+    # Remove dependency on app when running dev
+    depends_on: {}
+    volumes:
+      - ./docker/nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - type: bind
+        source: ${DELIVERABLES_DIR}
+        target: /data/deliverables
+        read_only: true
+
