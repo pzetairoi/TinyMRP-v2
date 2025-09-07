@@ -39,6 +39,7 @@ def _node(pn: str, link=None):
 @bp.get("/bom_tree")
 def bom_tree():
     pn = (request.args.get("pn") or "").strip()
+    print("request",request.args)
     parent = (request.args.get("parent") or "").strip()
 
     if pn:
@@ -48,7 +49,7 @@ def bom_tree():
         root = _node(pn)
         root["children"] = []   # lazy
         return jsonify([root])
-
+ 
     if parent:
         # children
         if "parent_pn" in BOMLink._fields:

@@ -27,7 +27,7 @@ def part_images():
 
     rev = _rev_for(pn, rev)
 
-    qs = PartFile.objects(part_number=pn, revision=rev, ext_group="png")
+    qs = PartFile.objects(part_number__iexact=pn, revision__iexact=rev, ext_group="png")
     for d in qs:
         print("dpartnumber",d.part_number)
         print("rev ",d.revision)

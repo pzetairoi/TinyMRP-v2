@@ -26,15 +26,22 @@ def _expectations_for(pn: str, rev: str) -> List[Tuple[str, str, bool]]:
       - normal preview: {base}.png
       - drawing screenshot: {base}_DWG.png
     """
-   #print("expect",pn,rev)
-    # expects files all capitalized PN, with _REV_ (even if rev is empty)
-    base = f"{pn.upper()}_REV_{rev or ''}"
-   #print("base",base)
-    wants = []
-    # png - preview
-    wants.append(("png",  f"{base}.png", False))
-    # png - drawing screen
-    wants.append(("png",  f"{base}_DWG.png", True))
+    # Build candidate basenames in multiple case variants to be robust
+    # against filename capitalization differences.
+    rev_str = (rev or "")
+    base_upper = f"{pn.upper()}_REV_{rev_str.upper()}" if rev_str else f"{pn.upper()}_REV_"
+    base_raw   = f"{pn}_REV_{rev_str}" if rev is not None else f"{pn}_REV_"
+
+    # Also consider variant without the _REV_ segment when revision is empty.
+    base_no_rev_upper = pn.upper()
+    base_no_rev_raw   = pn
+
+    wants: List[Tuple[str, str, bool]] = []
+    # png - preview (multiple candidates)
+    for b in (base_upper, base_raw) + ((base_no_rev_upper, base_no_rev_raw) if not rev_str else ()):  # type: ignore
+        wants.append(("png",  f"{b}.png", False))
+        # png - drawing screen
+        wants.append(("png",  f"{b}_DWG.png", True))
     # others (one-per-extension)
     for grp, exts in [
         ("pdf",  ("pdf",)),
@@ -47,7 +54,8 @@ def _expectations_for(pn: str, rev: str) -> List[Tuple[str, str, bool]]:
         # store exactly one file per ext_group -> we’ll accept any of these concrete exts
         # filename is still strictly base + "." + ext (no _DWG here)
         for ext in exts:
-            wants.append((grp, f"{base}.{ext}", False))
+            for b in (base_upper, base_raw) + ((base_no_rev_upper, base_no_rev_raw) if not rev_str else ()):  # type: ignore
+                wants.append((grp, f"{b}.{ext}", False))
     return wants
 
 def _find_case_insensitive(local_root: Path, rel: str) -> Path | None:

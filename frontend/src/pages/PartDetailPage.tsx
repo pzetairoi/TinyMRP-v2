@@ -51,6 +51,7 @@ type WURow = {
   uom: string;
   alt_group: string;
   parent_thumb_urls?: string[];
+  parent_rev?: string;
 };
 
 // threeMF viewer (lazy load)
@@ -89,6 +90,8 @@ function groupFiles(files: FileRow[]) {
 export default function PartDetailPage() {
   const route = useParams();
   const pn = route.pn || (window as any).__INITIAL__?.pn || "";
+  const sp = new URLSearchParams(window.location.search);
+  const rev = sp.get("rev") || ((window as any).__INITIAL__?.rev ?? "");
 
   const [part, setPart] = useState<Part | null>(null);
   const [files, setFiles] = useState<FileRow[]>([]);
@@ -281,7 +284,7 @@ function bestUrl(f: FileRow): string {
     const pn = n?.data?.pn || "";
     return (
       <span className="tt-pncell">
-        <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(pn)}`}>
+        <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(pn)}?rev=${encodeURIComponent(n?.data?.rev || "")}`}>
           {pn}
         </a>
       </span>
@@ -294,7 +297,7 @@ function bestUrl(f: FileRow): string {
     (async () => {
       setLoading(true);
       try {
-        const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(pn)}`);
+        const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`);
         if (!r.ok) throw new Error(await r.text());
         const j = await r.json();
         if (canceled) return;
@@ -361,7 +364,7 @@ function bestUrl(f: FileRow): string {
     return () => {
       canceled = true;
     };
-  }, [pn]);
+  }, [pn, rev]);
 
   // ---------- Process metadata ----------
   type ProcMeta = { color: string; icon: string };
@@ -389,7 +392,7 @@ function bestUrl(f: FileRow): string {
     (async () => {
       try {
         const r = await fetch(
-          `/api/bom_tree?pn=${encodeURIComponent(pn)}&withThumb=1`
+          `/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&withThumb=1`
         );
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const root: TreeNode[] = asArr(await r.json());
@@ -402,10 +405,11 @@ function bestUrl(f: FileRow): string {
         }
 
         const rk = String(root[0].key ?? root[0].data?.pn ?? pn);
+        const rootRev = (root[0] as any)?.data?.rev || "";
         setRootKey(rk);
 
         const r2 = await fetch(
-          `/api/bom_tree?parent=${encodeURIComponent(rk)}&withThumb=1`
+          `/api/bom_tree?parent=${encodeURIComponent(rk)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`
         );
         if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
         let kids: TreeNode[] = asArr(await r2.json());
@@ -427,7 +431,7 @@ function bestUrl(f: FileRow): string {
     return () => {
       cancelled = true;
     };
-  }, [pn]);
+  }, [pn, rev]);
 
   // ---------- Load BOM (lazy children) ----------
   function setNodeChildren(
@@ -461,8 +465,10 @@ function bestUrl(f: FileRow): string {
     const key = String(e?.node?.key || "");
     if (!key) return;
     try {
+      const parentNode = findNode(bomNodes, key);
+      const parentRev = (parentNode as any)?.data?.rev || "";
       const r = await fetch(
-        `/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`
+        `/api/bom_tree?parent=${encodeURIComponent(key)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       let kids: TreeNode[] = asArr(await r.json());
@@ -497,8 +503,10 @@ function bestUrl(f: FileRow): string {
       // If we don't have children yet, try to fetch them
       if (!node.children || (node.children as TreeNode[]).length === 0) {
         try {
+          const parentNode2 = findNode(nextTree, key);
+          const parentRev2 = (parentNode2 as any)?.data?.rev || "";
           const r = await fetch(
-            `/api/bom_tree?parent=${encodeURIComponent(key)}&withThumb=1`
+            `/api/bom_tree?parent=${encodeURIComponent(key)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`
           );
           if (r.ok) {
             let kids: TreeNode[] = asArr(await r.json());
@@ -663,7 +671,7 @@ function bestUrl(f: FileRow): string {
         <div className="col-lg-4">
           <div className="pd-card">
             <div className="pd-hero">
-              <ImageStrip pn={pn} mode="preview" />
+              <ImageStrip pn={pn} rev={rev || ""} mode="preview" />
             </div>
 
             {/* quick info */}
@@ -787,7 +795,8 @@ function bestUrl(f: FileRow): string {
         </div>
 
         {/* RIGHT */}
-        <div className="col-lg-8">
+        <div className="col-lg-8 pd-right-wrap">
+          <div className="pd-right-top">
           <TabView>
             <TabPanel header="Drawing">
               {pdfHref ? (
@@ -799,11 +808,11 @@ function bestUrl(f: FileRow): string {
                     className="pd-drawing-link"
                     title="Open PDF drawing"
                   >
-                    <ImageStrip pn={pn} mode="drawing" />
+                    <ImageStrip pn={pn} rev={rev || ""} mode="drawing" />
                   </a>
                 </>
               ) : (
-                <ImageStrip pn={pn} mode="drawing" />
+                <ImageStrip pn={pn} rev={rev || ""} mode="drawing" />
               )}
             </TabPanel>
 
@@ -841,14 +850,15 @@ function bestUrl(f: FileRow): string {
               </div>
             </TabPanel>
           </TabView>
+          </div>
 
-          {/* Used in */}
-          <div className="mt-4">
+          {/* Used in (always visible under tabs) */}
+          <div className="pd-usedin pd-card">
             <h6 className="mb-2">Used in</h6>
             <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll">
               <Column
                 header=""
-                body={(row) => <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />}
+                body={(row: WURow) => <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />}
                 style={{ width: 56 }}
               />
               <Column
@@ -856,13 +866,12 @@ function bestUrl(f: FileRow): string {
                 header="Parent PN"
                 sortable
                 body={(r: WURow) => (
-                  <Link to={`/ui/part/${encodeURIComponent(r.parent_pn)}`}>{r.parent_pn}</Link>
+                  <Link to={`/ui/part/${encodeURIComponent(r.parent_pn)}?rev=${encodeURIComponent(r.parent_rev || "")}`}>{r.parent_pn}</Link>
                 )}
               />
+              <Column field="parent_rev" header="Rev" sortable style={{ width: 100 }} />
               <Column field="parent_desc" header="Description" sortable />
-              <Column field="qty" header="Qty" sortable />
-              <Column field="uom" header="UoM" sortable />
-              <Column field="alt_group" header="Alt Group" sortable />
+              <Column field="qty" header="Qty" sortable style={{ width: 100 }} />
             </DataTable>
           </div>
         </div>

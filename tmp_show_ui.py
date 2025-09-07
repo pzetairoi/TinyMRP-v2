@@ -1,6 +1,6 @@
 # app/views/ui.py
 import json, os
-from flask import Blueprint, render_template, abort, current_app, request
+from flask import Blueprint, render_template, abort, current_app
 
 bp = Blueprint("ui", __name__, url_prefix="/ui")
 
@@ -47,26 +47,12 @@ def bom_ui(pn):
     assets = vite_assets()
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
-    # revision-aware initial state for React app
-    rev = (request.args.get("rev") or "").strip()
-    return render_template(
-        "ui/react_shell.html",
-        title=f"BOM · {pn}{(' · REV ' + rev) if rev else ''}",
-        assets=assets,
-        initial={"pn": pn, "rev": rev},
-    )
+    return render_template("ui/react_shell.html", title=f"BOM · {pn}", assets=assets, initial={"pn": pn})
 
 @bp.get("/part/<path:pn>")
 def part_ui(pn):
     assets = vite_assets()
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
-    # revision-aware initial state for React app
-    rev = (request.args.get("rev") or "").strip()
-    return render_template(
-        "ui/react_shell.html",
-        title=f"Part · {pn}{(' · REV ' + rev) if rev else ''}",
-        assets=assets,
-        initial={"pn": pn, "rev": rev},
-    )
+    return render_template("ui/react_shell.html", title=f"Part · {pn}", assets=assets, initial={"pn": pn})
 

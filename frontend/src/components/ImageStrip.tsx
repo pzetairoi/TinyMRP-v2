@@ -2,18 +2,19 @@
 import { useEffect, useState } from "react"
 type ApiRow = { urls: string[] }
 
-export default function ImageStrip({ pn, mode = 'preview' }:{ pn:string; mode?: 'preview'|'drawing' }) {
+export default function ImageStrip({ pn, rev = '', mode = 'preview' }:{ pn:string; rev?: string; mode?: 'preview'|'drawing' }) {
   const [rows, setRows] = useState<ApiRow[]>([])
   useEffect(() => {
     let cancelled = false
     ;(async ()=>{
       const qs = new URLSearchParams({ pn, mode })  // <--- tell backend which set we want
+      if (rev !== undefined) qs.set('rev', rev)
       const r = await fetch(`/api/part_images?${qs.toString()}`)
       const j = (r.ok ? await r.json() : []) as ApiRow[]
       if (!cancelled) setRows(Array.isArray(j) ? j : [])
     })()
     return ()=>{cancelled=true}
-  }, [pn, mode])
+  }, [pn, rev, mode])
 
   if (!rows.length) return null
   return (
