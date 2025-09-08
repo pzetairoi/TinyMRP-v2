@@ -42,6 +42,7 @@ ALIASES: Dict[str, str] = {
     "folder": "folder",
     "link": "link",
     "oem_internet": "link",
+    "oem_link": "link",            # accept OEM link variant
     "mass": "mass",
     "weight": "mass",
     "material": "material",
