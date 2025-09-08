@@ -1011,7 +1011,8 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     row_gap = 3.0
     entries = []  # (k_lines, v_lines, height)
     for k, v in kv:
-        kl = _wrap_words(f"{k}:", "Helvetica-Bold", 8.8, label_w)
+        # Allow breaking long label tokens as well so very long field names can wrap
+        kl = _wrap_break(f"{k}:", "Helvetica-Bold", 8.8, label_w)
         vl = _wrap_break(str(v), "Helvetica", 8.6, value_w)
         h = max(len(kl), len(vl)) * line_h + row_gap
         entries.append((kl, vl, h))
