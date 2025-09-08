@@ -1,0 +1,17 @@
+[Unit]
+Description=TinyMRP v2 Gunicorn Service
+After=network.target
+
+[Service]
+Type=simple
+User=tinymrp
+Group=tinymrp
+WorkingDirectory=/opt/tinymrp_v2
+EnvironmentFile=/etc/tinymrp/.env
+ExecStart=/opt/tinymrp_venv/bin/gunicorn -k gthread --threads 4 -w 2 -b 127.0.0.1:8000 app.wsgi:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

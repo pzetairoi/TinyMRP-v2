@@ -5,6 +5,8 @@
   <div id="root"></div>
   <script>
     window.__INITIAL__ = {{ (initial or {})|tojson }};
+    // Provide runtime files base URL if server configured it
+    window.__FILES_BASE_URL = "{{ files_base|default('') }}";
   </script>
   <script type="module" crossorigin src="{{ assets.js }}"></script>
 {% endblock %}

@@ -42,6 +42,7 @@ def part_images():
         pass
 
     local_root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
+    http_base = (current_app.config.get("FILE_ROOT_HTTP") or current_app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
     rows = []
     for d in qs.order_by("-mtime_iso"):
         urls: list[str] = []
@@ -49,12 +50,24 @@ def part_images():
         if getattr(d, "http_url", None):
             urls.append(d.http_url)
 
-        # 2) Fallback to fileserve token using rel_path
+        # 2) Build HTTP URL from configured prefix if rel_path exists
+        if getattr(d, "rel_path", None) and http_base:
+            urls.append(f"{http_base}/{d.rel_path}")
+
+        # 3) Fallback to fileserve token using rel_path
         if getattr(d, "rel_path", None) and local_root:
             abs_path = os.path.normpath(os.path.join(local_root, d.rel_path.replace("/", os.sep)))
             # Use URL-safe base64 to be safe in URLs
             token = base64.urlsafe_b64encode(abs_path.encode("utf-8")).decode("ascii")
             urls.append(url_for("fileserve.view", token=token))
 
-        rows.append({"urls": urls, "revision": d.revision})
+        # de-duplicate while preserving order
+        seen = set()
+        dedup = []
+        for u in urls:
+            if u and u not in seen:
+                seen.add(u)
+                dedup.append(u)
+
+        rows.append({"urls": dedup, "revision": d.revision})
     return jsonify(rows)

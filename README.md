@@ -80,17 +80,81 @@ Unified config: copy `.env.example` to `.env` and adjust only these:
 The app container reads `FILES_LOCAL_ROOT=/data/deliverables` and nginx serves
 them at `FILES_URL_PREFIX` (default `/deliverables`) automatically.
 
-2) Create a user via the Flask CLI in the **app** container:
+2) Default admin auto-seed (first run)
+
+- On first startup, if the database has no users, the container seeds standard roles
+  and creates a default admin user:
+  - email: `admin@admin.com`
+  - password: `admin`
+
+- You can override these via env vars in your `.env` (or shell) before building/up:
+  - `DEFAULT_ADMIN_EMAIL=you@example.com`
+  - `DEFAULT_ADMIN_PASSWORD=yourStrongPassword`
+
+- Change the password immediately after login in a real deployment.
+
+### Local Dev (python run.py) with nginx static files
+
+- Copy `.env.dev.example` to `.env.dev` and set:
+  - `MONGO_URI=mongodb://localhost:27017/tinymrp-v2`
+  - `FILES_LOCAL_ROOT=C:/CADEXPORT/Deliverables` (Windows) or `/srv/deliverables` (Unix)
+  - Recommended (no CORS):
+    - `FILES_URL_PREFIX=/deliverables`
+    - `FILES_UPSTREAM_BASE=http://localhost:5001`
+  - Alternative (direct URL; requires CORS headers on nginx):
+    - `FILES_URL_PREFIX=http://localhost:5001/Deliverables`
+
+- Start a tiny nginx to serve Deliverables (PowerShell):
+  - `docker run --rm -d --name tinymrp-nginx-static -p 5001:80 -v "${PWD}/docker/nginx/nginx.static.conf:/etc/nginx/nginx.conf:ro" -v "${env:FILES_LOCAL_ROOT}:/data/deliverables:ro" nginx:1.27-alpine`
+
+- Run Flask locally:
+  - `powershell -Command "$env:ENV_FILE='.env.dev'; python run.py"`
+
+Visit http://localhost:5000 (app) and http://localhost:5001/Deliverables (files).
+
+Alternatively, use the included dev compose override:
+
+- `docker compose -f docker-compose.dev.yml --env-file .env.dev up -d nginx`
+- Run Flask with `ENV_FILE=.env.dev python run.py`
+
+### Ubuntu Server (no containers)
+
+1) Install system deps: `sudo apt-get update && sudo apt-get install -y python3-venv nginx`.
+
+2) Deploy app:
+   - `sudo adduser --system --group tinymrp`
+   - `sudo mkdir -p /opt/tinymrp_v2 /srv/tinymrp/deliverables /etc/tinymrp`
+   - `sudo chown -R tinymrp:tinymrp /opt/tinymrp_v2 /srv/tinymrp/deliverables`
+   - `git clone <your repo> /opt/tinymrp_v2`
+   - `python3 -m venv /opt/tinymrp_venv && /opt/tinymrp_venv/bin/pip install -r /opt/tinymrp_v2/requirements.txt`
+   - `sudo cp .env.server.example /etc/tinymrp/.env && sudo chmod 600 /etc/tinymrp/.env`
+
+3) Gunicorn service:
+   - `sudo cp deploy/tinymrp.service /etc/systemd/system/tinymrp.service`
+   - Edit paths in that file if needed (WorkingDirectory, ExecStart)
+   - `sudo systemctl daemon-reload && sudo systemctl enable --now tinymrp`
+
+4) Nginx site:
+   - `sudo cp deploy/nginx.server.conf /etc/nginx/sites-available/tinymrp`
+   - `sudo ln -s /etc/nginx/sites-available/tinymrp /etc/nginx/sites-enabled/`
+   - `sudo nginx -t && sudo systemctl reload nginx`
+
+Now Deliverables are under `/srv/tinymrp/deliverables` (change in `.env` and nginx alias if needed).
+
+2) Manual seeding via Flask CLI (optional)
 
 ```bash
-# You will be prompted for name/email/password
-docker compose exec app flask --app run.py user create
-```
-
-3) Grant that user **admin**:
+If you prefer to seed manually or need to re-run the steps, use:
 
 ```bash
-docker compose exec app flask --app run.py user grant-admin --email you@example.com
+# Seed standard roles
+docker compose exec app flask --app run.py user seed-roles
+
+# Create a user (non-interactive example)
+docker compose exec app flask --app run.py user create --email admin@admin.com --password admin
+
+# Grant admin role to that user
+docker compose exec app flask --app run.py user grant-admin --email admin@admin.com
 ```
 
 You can now log in with that email and password.

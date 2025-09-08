@@ -55,14 +55,19 @@ def create_app(config_object=None):
         app.config.from_object(config_object)
 
     try:
-        from dotenv import load_dotenv; load_dotenv()
-        print("Loaded .env file successfully")
-        print(f".env loaded? SECRET_KEY set: {bool(os.getenv('SECRET_KEY'))}; "
-        f"MONGO_URI present: {bool(os.getenv('MONGO_URI'))}")
-        print("App SECRET_KEY prefix:", str(os.getenv('SECRET_KEY'))[:8])
-
+        from dotenv import load_dotenv
+        # Allow selecting a specific env file (e.g. .env.dev, .env.docker)
+        env_file = os.getenv("ENV_FILE")
+        if env_file and os.path.exists(env_file):
+            load_dotenv(env_file)
+            print("Loaded env file:", env_file)
+        else:
+            load_dotenv()
+            print("Loaded default .env (if present)")
+        print(f"Env check: SECRET_KEY set? {bool(os.getenv('SECRET_KEY'))}; "
+              f"MONGO_URI present? {bool(os.getenv('MONGO_URI'))}")
     except Exception:
-        print("ddid not work loading .env file, continuing without it")
+        print("did not work loading env file(s), continuing without them")
         pass
     
         
@@ -189,7 +194,13 @@ def create_app(config_object=None):
 
 
 
- 
+
+
+    # Make files_base available in all templates for the frontend runtime
+    @app.context_processor
+    def inject_files_base():
+        fb = (app.config.get("FILE_ROOT_HTTP") or app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
+        return dict(files_base=fb)
 
     from .cli import init_app as init_cli
     init_cli(app)
