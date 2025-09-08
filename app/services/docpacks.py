@@ -678,7 +678,11 @@ def _visual_list_pdf(flat: List[Tuple[str,str,float]], root_pn: Optional[str] = 
 
 
 def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
-    """Generate a single-page PDF cover with PN/REV, description, centered image, and a properties table at the bottom."""
+    """Generate a single-page PDF cover with PN/REV, description, centered image, and a properties table at the bottom.
+
+    All textual data is fully visible: description, main properties, and bottom table wrap across multiple lines as needed.
+    The image area flexes to fill the remaining space between the header text and the bottom table.
+    """
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import A4
@@ -707,32 +711,27 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     if not png_path:
         png_path = _static_image_path('tinylogo.png')
 
-    # Layout
+    # Layout constants
     W, H = A4
     margin = 18*mm
-    head_h = 35*mm
-    table_h = 80*mm  # more room for bottom table
-    img_y0 = margin + table_h
-    img_h = max(40*mm, H - (margin + head_h + table_h) - 10*mm)
+    gap = 8*mm
+    img_min_h = H/4.0
     img_w = W - 2*margin
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
 
-    # Header: PN REV (big) then description
+    # Header: PN/REV
     title = f"{root_pn}  REV {root_rev or ''}".strip()
     c.setFont("Helvetica-Bold", 24)
-    tw = stringWidth(title, "Helvetica-Bold", 24)
     c.drawString(margin, H - margin - 8*mm, title)
-    # Description
+
+    # Description (wrap fully)
     y = H - margin - 16*mm
     if desc:
         c.setFont("Helvetica", 13)
-        # Wrap description to available width
         avail_w = W - 2*margin
-        words = desc.split()
-        lines = []
-        cur = ''
+        words = desc.split(); lines=[]; cur=''
         for w in words:
             t = (cur + ' ' + w).strip()
             if stringWidth(t, "Helvetica", 13) <= avail_w:
@@ -741,15 +740,13 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
                 if cur:
                     lines.append(cur)
                 cur = w
-                if len(lines) >= 3:
-                    break
-        if cur and len(lines) < 3:
+        if cur:
             lines.append(cur)
         for ln in lines:
             c.drawString(margin, y, ln)
             y -= 6*mm
 
-    # Main properties right below description (compact)
+    # Main properties (wrap fully)
     main_keys = ["approvedby", "material", "processes", "finish", "mass", "oem", "oem_partnumber", "link"]
     def _val(k):
         v = attrs.get(k, "") if attrs else ""
@@ -762,37 +759,33 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
         if not v:
             continue
         label = k.replace('_',' ').title() if k != 'oem_partnumber' else 'OEM Partnumber'
-        line = f"{label}: {v}"
-        if stringWidth(line, "Helvetica", 10) > (W - 2*margin):
-            # trim
-            while line and stringWidth(line + '…', "Helvetica", 10) > (W - 2*margin):
-                line = line[:-1]
-            line = line + '…'
-        c.drawString(margin, y, line)
-        y -= 5.2*mm
+        text = f"{label}: {v}"
+        avail = W - 2*margin
+        words = text.split(); cur=''; lines=[]
+        for w in words:
+            t = (cur + ' ' + w).strip()
+            if stringWidth(t, "Helvetica", 10) <= avail:
+                cur = t
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+        for ln in lines:
+            c.drawString(margin, y, ln)
+            y -= 5.2*mm
 
-    # Image: centered within the image box
-    if png_path and os.path.isfile(png_path):
-        try:
-            c.drawImage(png_path, margin, img_y0, width=img_w, height=img_h, preserveAspectRatio=True, anchor='sw', mask='auto')
-        except Exception:
-            pass
-    else:
-        _draw_svg_or_png(c, margin, img_y0, img_w, img_h, 'tinylogo.svg', 'tinylogo.png')
-
-    # Properties table (bottom area, several columns)
-    # Prepare key/value pairs, excluding title fields
+    # Build bottom table content
     def labelize(k: str) -> str:
         if not k:
             return ''
         s = str(k).replace('_', ' ').strip()
-        # simple title-case but keep common acronyms
         s = ' '.join([('OEM' if w.lower()=="oem" else ('UOM' if w.lower()=="uom" else w.capitalize())) for w in s.split()])
         return s
 
     kv = []
     if attrs:
-        # Compose processes text if present
         a = dict(attrs)
         if isinstance(a.get('processes'), list):
             a['processes'] = ", ".join([str(x) for x in a.get('processes') if x])
@@ -806,63 +799,120 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     col_count = 3 if len(kv) >= 12 else (2 if len(kv) >= 6 else 1)
     avail_w = W - 2*margin
     col_w = avail_w / max(1, col_count)
-    row_h = 8.0*mm  # allow wrapping of labels
-    x0 = margin
-    y0 = margin + row_h * int(min(12, max(6, (table_h/row_h))))  # ensure we stay within table_h
-    # draw from bottom up
-    c.setFont("Helvetica", 8.8)
-    rows_per_col = int((table_h - 6)/row_h)
-    rows_per_col = max(1, rows_per_col)
-    # helpers for wrapping and measuring
-    def _wrap_text(text: str, font_name: str, font_size: float, max_w: float, max_lines: int = 2) -> list[str]:
-        words = (text or '').split()
-        lines = []
-        cur = ''
+    pad = 4.0
+    label_w = min(120.0, col_w * 0.32)
+    value_w = max(20.0, col_w - label_w - pad - 2.0)
+
+    def _wrap(text: str, font: str, size: float, max_w: float) -> list[str]:
+        words = (text or '').split(); lines=[]; cur=''
         for w in words:
             t = (cur + ' ' + w).strip()
-            if stringWidth(t, font_name, font_size) <= max_w:
+            if stringWidth(t, font, size) <= max_w:
                 cur = t
             else:
                 if cur:
                     lines.append(cur)
                 cur = w
-                if len(lines) >= (max_lines - 1):
-                    break
-        if cur and len(lines) < max_lines:
+        if cur:
             lines.append(cur)
         return lines
 
-    label_maxw = max(60.0, col_w * 0.42)  # points
-    pad = 6.0
-    for idx, (k, v) in enumerate(kv[: rows_per_col * col_count]):
-        col = idx // rows_per_col
-        row = idx % rows_per_col
-        x = x0 + col * col_w
-        y = margin + table_h - (row+1) * row_h
-        # key (wrap within label area) and value to the right
+    # prepare entries with computed heights
+    line_h = 9.0
+    entries = []  # (k_lines, v_lines, height)
+    for k, v in kv:
+        kl = _wrap(f"{k}:", "Helvetica-Bold", 8.8, label_w)
+        vl = _wrap(str(v), "Helvetica", 8.6, value_w)
+        h = max(len(kl), len(vl)) * line_h + 2
+        entries.append((kl, vl, h))
+
+    # distribute across columns (round-robin) and measure total height
+    cols: List[List[Tuple[list, list, float]]] = [[] for _ in range(max(1, col_count))]
+    heights = [0.0 for _ in range(max(1, col_count))]
+    ci = 0
+    for e in entries:
+        cols[ci].append(e)
+        heights[ci] += e[2]
+        ci = (ci + 1) % len(cols)
+
+    table_h = max(heights) if entries else 0.0
+    img_y0 = margin + table_h + gap
+    img_h = max(0.0, (y - gap) - img_y0)
+    if img_h < img_min_h:
+        # allow table to consume more space and reduce image if needed
+        img_h = max(0.0, img_min_h if (y - gap) - (margin + gap) >= img_min_h else (y - gap) - (margin + gap))
+        img_y0 = max(margin + gap, (y - gap) - img_h)
+
+    # Draw image (cropped like thumbnails) if any height available
+    if img_h > 0:
+        drew = False
         try:
-            c.setFont("Helvetica-Bold", 8.8)
-            k_lines = _wrap_text(f"{k}:", "Helvetica-Bold", 8.8, label_maxw, max_lines=2)
-            # draw label lines stacked upward within the row
-            ly = y
-            for li in k_lines:
-                c.drawString(x, ly, li)
-                ly -= (row_h/2.2)
+            from PIL import Image, ImageOps, ImageFilter
+            from reportlab.lib.utils import ImageReader
+
+            def _crop_like_thumb(path: str):
+                im = Image.open(path)
+                base_rgb = im.convert("RGB")
+                inv = ImageOps.invert(base_rgb.convert("L"))
+                mask = inv.point(lambda p: 255 if p > 0 else 0, mode='1').convert('L')
+                mask = mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+                mask = mask.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
+                rgba = base_rgb.convert("RGBA")
+                rgba.putalpha(mask)
+                bbox = mask.getbbox()
+                if bbox:
+                    x0, y0, x1, y1 = bbox
+                    if (x1-x0) * (y1-y0) > 8000:
+                        rgba = rgba.crop(bbox)
+                return rgba
+
+            if png_path and os.path.isfile(png_path):
+                try:
+                    proc = _crop_like_thumb(png_path)
+                    iw, ih = proc.size
+                    if iw > 0 and ih > 0:
+                        sx = img_w / float(iw)
+                        sy = img_h / float(ih)
+                        s = min(sx, sy)
+                        rw = max(1.0, iw * s)
+                        rh = max(1.0, ih * s)
+                        dx = margin + (img_w - rw)/2.0
+                        dy = img_y0 + (img_h - rh)/2.0
+                        c.drawImage(ImageReader(proc), dx, dy, width=rw, height=rh, preserveAspectRatio=True, anchor='sw', mask='auto')
+                        drew = True
+                except Exception:
+                    pass
         except Exception:
             pass
-        # value trimmed to available width
-        try:
-            c.setFont("Helvetica", 8.6)
-            vx = x + label_maxw + pad
-            vmaxw = col_w - (label_maxw + pad) - 4
-            val = v
-            if stringWidth(val, "Helvetica", 8.6) > vmaxw:
-                while val and stringWidth(val + '…', "Helvetica", 8.6) > vmaxw:
-                    val = val[:-1]
-                val = (val + '…') if val else ''
-            c.drawString(vx, y, val)
-        except Exception:
-            pass
+        if not drew:
+            _draw_svg_or_png(c, margin, img_y0, img_w, img_h, 'tinylogo.svg', 'tinylogo.png')
+
+    # Draw table from bottom up
+    try:
+        for idx, col in enumerate(cols):
+            x = margin + idx * col_w
+            yb = margin + table_h
+            for k_lines, v_lines, h in col:
+                yb -= h
+                c.setFont("Helvetica-Bold", 8.8)
+                ly = yb + h - line_h
+                for li in k_lines:
+                    c.drawString(x, ly, li)
+                    ly -= line_h
+                c.setFont("Helvetica", 8.6)
+                vx = x + label_w + pad
+                vy = yb + h - line_h
+                for li in v_lines:
+                    # ensure defensive wrapping if font metrics differ
+                    if stringWidth(li, "Helvetica", 8.6) > value_w:
+                        t = li
+                        while t and stringWidth(t, "Helvetica", 8.6) > value_w:
+                            t = t[:-1]
+                        li = t
+                    c.drawString(vx, vy, li)
+                    vy -= line_h
+    except Exception:
+        pass
 
     c.save()
     return buf.getvalue()
@@ -1089,7 +1139,10 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         body_bytes, body_starts = _merge_pdfs(pdf_paths)
 
         # Build index in two passes to account for its own page count, include Visual Summary entry, dot leaders, and metadata
+        # Skip index entirely if no harvested PDFs were found
         try:
+            if not pdf_paths:
+                raise RuntimeError("no_body_pdfs")
             from reportlab.pdfgen import canvas
             from reportlab.lib.pagesizes import A4
             from reportlab.lib.units import mm
