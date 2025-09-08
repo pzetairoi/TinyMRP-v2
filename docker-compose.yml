@@ -40,7 +40,7 @@ services:
       - type: bind
         source: ${DELIVERABLES_DIR}
         target: /data/deliverables
-        read_only: true
+        # Must be writable so the app can generate thumbnails under /data/deliverables/thumbs
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
       interval: 15s
