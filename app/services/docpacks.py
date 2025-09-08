@@ -1464,15 +1464,15 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     c.drawRightString(right_x, y, page_s)
                     y -= 6*mm
 
+                # Visual Summary entry first (always before father/children)
+                if vis_pdf:
+                    vis_start = cover_pages + assumed_idx_pages + 1
+                    _entry("Visual Summary", vis_start)
                 # Body entries: base name without extension (father then children)
                 pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0)
                 for pth, start in zip(pdf_paths, body_starts):
                     base = os.path.splitext(os.path.basename(pth))[0]
                     _entry(base, pre_body_offset + start)
-                # Visual Summary entry (if present) placed after body list
-                if vis_pdf:
-                    vis_start = cover_pages + assumed_idx_pages + 1
-                    _entry("Visual Summary", vis_start)
                 c.save()
                 return idx_io.getvalue()
 
