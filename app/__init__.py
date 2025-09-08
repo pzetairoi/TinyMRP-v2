@@ -192,6 +192,15 @@ def create_app(config_object=None):
     from .files_proxy import files_proxy
     app.register_blueprint(files_proxy)
 
+    # Doc packs API
+    from app.views.docpacks import bp as docpacks_bp
+    app.register_blueprint(docpacks_bp)
+    # This is an API endpoint hit from the SPA; exempt from CSRF
+    try:
+        csrf.exempt(docpacks_bp)
+    except Exception:
+        pass
+
 
 
 

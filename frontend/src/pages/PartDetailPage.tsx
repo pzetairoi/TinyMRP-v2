@@ -1,5 +1,5 @@
 // frontend/src/pages/PartDetailPage.tsx
-import React, { useEffect, useMemo, useState, Suspense } from "react";
+import React, { useEffect, useMemo, useState, Suspense, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
@@ -102,6 +102,32 @@ export default function PartDetailPage() {
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
   const [images, setImages] = useState<string[]>([]);
+
+  // Doc Packs state
+  type DocOpts = { file_types: string[]; processes: string[] };
+  const [docOpts, setDocOpts] = useState<DocOpts>({ file_types: [], processes: [] });
+  const [docLoading, setDocLoading] = useState(false);
+  const [docProgress, setDocProgress] = useState(0);
+  const progressTimer = useRef<number | null>(null);
+  const [depth, setDepth] = useState<'top'|'full'>('full');
+  const [classified, setClassified] = useState<'hide'|'show'|'only'>('show');
+  const [processMode, setProcessMode] = useState<'all'|'selected'>('all');
+  const [selProcesses, setSelProcesses] = useState<Set<string>>(new Set());
+  const [selTypes, setSelTypes] = useState<Set<string>>(new Set());
+  const [wantSelectedFiles, setWantSelectedFiles] = useState(false);
+  const [wantExcel, setWantExcel] = useState(false);
+  const [wantBinder, setWantBinder] = useState(false);
+  const [wantVisual, setWantVisual] = useState(false);
+  const [binderAddIndex, setBinderAddIndex] = useState(true);
+  const [binderAddDatasheets, setBinderAddDatasheets] = useState(false);
+  const [binderPageNumbers, setBinderPageNumbers] = useState(true);
+  const [stampQuote, setStampQuote] = useState(false);
+  const [stampConfidential, setStampConfidential] = useState(false);
+  const [stampApproved, setStampApproved] = useState(false);
+  const [stampWip, setStampWip] = useState(false);
+  const [stampInprog, setStampInprog] = useState(false);
+  const [includeConsumed, setIncludeConsumed] = useState(false); // Hide consumed by default
+  const [fabricationPack, setFabricationPack] = useState(false);
 
   // BOM Tree
   const [bomNodes, setBomNodes] = useState<TreeNode[]>([]);
@@ -366,6 +392,25 @@ function bestUrl(f: FileRow): string {
       canceled = true;
     };
   }, [pn, rev]);
+
+  // Load DocPack options when pn/rev/depth changes
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch(`/api/docpacks/options?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&depth=${depth}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (cancelled) return;
+        const file_types = Array.isArray(j.file_types) ? j.file_types : [];
+        const processes = Array.isArray(j.processes) ? j.processes : [];
+        setDocOpts({ file_types, processes });
+        if (selTypes.size === 0 && file_types.length) setSelTypes(new Set(file_types));
+        if (selProcesses.size === 0 && processes.length) setSelProcesses(new Set(processes));
+      } catch {}
+    })();
+    return () => { cancelled = true };
+  }, [pn, rev, depth]);
 
   // ---------- Process metadata ----------
   type ProcMeta = { color: string; icon: string };
@@ -895,8 +940,215 @@ function bestUrl(f: FileRow): string {
 
             
             <TabPanel header="Doc Packs">
-              <div className="text-muted small">
-                (Hook up to your reporting/binder endpoints later – this is just a placeholder panel.)
+
+              <div className="pd-card p-3 mt-3">
+                <h6 className="mb-3">BOM and output options</h6>
+
+                <div className="row g-3">
+                  <div className="col-md-6">
+                    <div className="mb-3">
+                      <div className="fw-semibold small">Depth of compilation</div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="depth" id="depthTop" checked={depth==='top'} onChange={()=>setDepth('top')} />
+                        <label className="form-check-label" htmlFor="depthTop">Top Level only</label>
+                      </div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="depth" id="depthFull" checked={depth==='full'} onChange={()=>setDepth('full')} />
+                        <label className="form-check-label" htmlFor="depthFull">Full BOM</label>
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="fw-semibold small">Consumed components</div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="consumed" id="cHide" checked={!includeConsumed} onChange={()=>setIncludeConsumed(false)} />
+                        <label className="form-check-label" htmlFor="cHide">Hide consumed</label>
+                      </div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="consumed" id="cShow" checked={includeConsumed} onChange={()=>setIncludeConsumed(true)} />
+                        <label className="form-check-label" htmlFor="cShow">Show consumed</label>
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="fw-semibold small">Classified components</div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="classified" id="clsHide" checked={classified==='hide'} onChange={()=>setClassified('hide')} />
+                        <label className="form-check-label" htmlFor="clsHide">Hide classified</label>
+                      </div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="classified" id="clsShow" checked={classified==='show'} onChange={()=>setClassified('show')} />
+                        <label className="form-check-label" htmlFor="clsShow">Show classified</label>
+                      </div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="classified" id="clsOnly" checked={classified==='only'} onChange={()=>setClassified('only')} />
+                        <label className="form-check-label" htmlFor="clsOnly">Only Classified</label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="col-md-6">
+                    <div className="mb-3">
+                      <div className="fw-semibold small">Filter Process</div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="procMode" id="procSel" checked={processMode==='selected'} onChange={()=>setProcessMode('selected')} />
+                        <label className="form-check-label" htmlFor="procSel">Only selected</label>
+                      </div>
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="procMode" id="procAll" checked={processMode==='all'} onChange={()=>setProcessMode('all')} />
+                        <label className="form-check-label" htmlFor="procAll">All</label>
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="fw-semibold small">Doc Packs</div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual List</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docExcel" checked={wantExcel} onChange={(e)=>setWantExcel(e.target.checked)} /><label className="form-check-label" htmlFor="docExcel">Excel BOM</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docFab" checked={fabricationPack} onChange={(e)=>{
+                        const on=e.target.checked; setFabricationPack(on);
+                        if(on){ setProcessMode('selected'); setSelProcesses(new Set(['lasercut','welding','machine'])); setSelTypes(new Set(['dxf','step','pdf'])); setWantSelectedFiles(true); }
+                      }} /><label className="form-check-label" htmlFor="docFab">Fabrication Pack</label></div>
+                    </div>
+
+                    {wantBinder && (
+                      <div className="mb-3">
+                        <div className="fw-semibold small">PDF binder options</div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bIdx" checked={binderAddIndex} onChange={(e)=>setBinderAddIndex(e.target.checked)} /><label className="form-check-label" htmlFor="bIdx">Add index</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bData" checked={binderAddDatasheets} onChange={(e)=>setBinderAddDatasheets(e.target.checked)} /><label className="form-check-label" htmlFor="bData">Add datasheets</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bNums" checked={binderPageNumbers} onChange={(e)=>setBinderPageNumbers(e.target.checked)} /><label className="form-check-label" htmlFor="bNums">Add page numbers</label></div>
+                        <div className="form-check mt-2"><input className="form-check-input" type="checkbox" id="sQuote" checked={stampQuote} onChange={(e)=>setStampQuote(e.target.checked)} /><label className="form-check-label" htmlFor="sQuote">For quotation stamp</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="sConf" checked={stampConfidential} onChange={(e)=>setStampConfidential(e.target.checked)} /><label className="form-check-label" htmlFor="sConf">Confidential stamp</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="sAppr" checked={stampApproved} onChange={(e)=>setStampApproved(e.target.checked)} /><label className="form-check-label" htmlFor="sAppr">Approval stamp</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="sWip" checked={stampWip} onChange={(e)=>setStampWip(e.target.checked)} /><label className="form-check-label" htmlFor="sWip">In WIP stamp</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="sProg" checked={stampInprog} onChange={(e)=>setStampInprog(e.target.checked)} /><label className="form-check-label" htmlFor="sProg">In progress/Not approved</label></div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="accordion my-3" id="docpacksAcc">
+                  <div className="accordion-item">
+                    <h2 className="accordion-header" id="headingFiles">
+                      <button className="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFiles">File filter</button>
+                    </h2>
+                    <div id="collapseFiles" className="accordion-collapse collapse">
+                      <div className="accordion-body">
+                        <div className="row g-2">
+                          {docOpts.file_types.map((t) => (
+                            <div key={t} className="col-6 col-md-3">
+                              <div className="form-check">
+                                <input className="form-check-input" type="checkbox" id={`ft_${t}`} checked={selTypes.has(t)} onChange={(e)=>{
+                                  const next = new Set(selTypes); if(e.target.checked) next.add(t); else next.delete(t); setSelTypes(next);
+                                }} />
+                                <label className="form-check-label" htmlFor={`ft_${t}`}>{t}</label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-2">
+                          <button className="btn btn-sm btn-outline-secondary me-2" onClick={()=>setSelTypes(new Set(docOpts.file_types))}>Select all</button>
+                          <button className="btn btn-sm btn-outline-secondary" onClick={()=>setSelTypes(new Set())}>Select none</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="accordion-item mt-2">
+                    <h2 className="accordion-header" id="headingProc">
+                      <button className="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseProc">Process filter (only selected will be output)</button>
+                    </h2>
+                    <div id="collapseProc" className="accordion-collapse collapse">
+                      <div className="accordion-body">
+                        <div className="row g-2">
+                          {docOpts.processes.map((p) => (
+                            <div key={p} className="col-6 col-md-3">
+                              <div className="form-check">
+                                <input className="form-check-input" type="checkbox" id={`pr_${p}`} checked={selProcesses.has(p)} onChange={(e)=>{
+                                  const next = new Set(selProcesses); if(e.target.checked) next.add(p); else next.delete(p); setSelProcesses(next);
+                                }} />
+                                <label className="form-check-label" htmlFor={`pr_${p}`}>{p}</label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-2">
+                          <button className="btn btn-sm btn-outline-secondary me-2" onClick={()=>setSelProcesses(new Set(docOpts.processes))}>Select all</button>
+                          <button className="btn btn-sm btn-outline-secondary" onClick={()=>setSelProcesses(new Set())}>Select none</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <button className="btn btn-primary" disabled={docLoading} onClick={async ()=>{
+                    setDocLoading(true);
+                    // kick off a friendly progress indicator (indeterminate → up to 85%)
+                    setDocProgress(10);
+                    if (progressTimer.current) { window.clearInterval(progressTimer.current); }
+                    progressTimer.current = window.setInterval(() => {
+                      setDocProgress((p) => {
+                        if (p >= 85) return p;
+                        const step = Math.max(1, Math.round((85 - p) * 0.08));
+                        return Math.min(85, p + step);
+                      });
+                    }, 700);
+                    try{
+                      const body:any = {
+                        pn, rev,
+                        depth,
+                        include_consumed: includeConsumed,
+                        classified,
+                        process_mode: processMode,
+                        processes: processMode==='selected' ? Array.from(selProcesses) : [],
+                        file_types: Array.from(selTypes),
+                        selected_files: wantSelectedFiles,
+                        excel_bom: wantExcel,
+                        pdf_binder: wantBinder,
+                        visual_list: wantVisual,
+                        fabrication_pack: fabricationPack,
+                        binder_add_index: binderAddIndex,
+                        binder_add_datasheets: binderAddDatasheets,
+                        binder_page_numbers: binderPageNumbers,
+                        stamp_quote: stampQuote,
+                        stamp_confidential: stampConfidential,
+                        stamp_approved: stampApproved,
+                        stamp_wip: stampWip,
+                        stamp_inprogress: stampInprog,
+                      };
+                      const resp = await fetch('/api/docpacks/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                      if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                      const blob = await resp.blob();
+                      const disp = resp.headers.get('Content-Disposition') || '';
+                      const m = disp.match(/filename=\"?([^\";]+)\"?/i);
+                      const filename = (m? m[1] : `${pn}_docpack.zip`).replace(/\s+/g,'_');
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+                      // finish progress
+                      setDocProgress(100);
+                      setTimeout(() => setDocProgress(0), 800);
+                    }catch(err){
+                      console.error(err);
+                      setDocProgress(0);
+                    }
+                    finally{
+                      setDocLoading(false);
+                      if (progressTimer.current) { window.clearInterval(progressTimer.current); progressTimer.current = null; }
+                    }
+                  }}>{docLoading? `Building... ${docProgress}%` : 'Submit'}</button>
+                  {docLoading && (
+                    <div className="mt-2" aria-live="polite">
+                      <div className="progress" style={{height: 8}}>
+                        <div className="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={docProgress} style={{width: `${Math.max(5, docProgress)}%`}} />
+                      </div>
+                      <div className="small text-muted mt-1">
+                        Preparing {wantSelectedFiles? 'selected files' : ''}{wantExcel? (wantSelectedFiles? ', Excel BOM' : 'Excel BOM') : ''}{wantVisual? ((wantExcel||wantSelectedFiles)? ', Visual List' : 'Visual List') : ''}{wantBinder? ((wantVisual||wantExcel||wantSelectedFiles)? ', Binder' : 'Binder') : ''}...
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </TabPanel>
           </TabView>
