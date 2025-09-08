@@ -482,7 +482,12 @@ def _draw_svg_or_png(c, x, y, w, h, svg_name: str, png_fallback: str):
             pass
 
 
-def _visual_list_pdf(flat: List[Tuple[str,str,float]], root_pn: Optional[str] = None, root_rev: Optional[str] = None) -> Optional[bytes]:
+def _visual_list_pdf(
+    flat: List[Tuple[str,str,float]],
+    root_pn: Optional[str] = None,
+    root_rev: Optional[str] = None,
+    page_map: Optional[Dict[Tuple[str,str], int]] = None,
+) -> Optional[bytes]:
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import A4
@@ -493,16 +498,33 @@ def _visual_list_pdf(flat: List[Tuple[str,str,float]], root_pn: Optional[str] = 
         return None
     root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
     # Build rows with: pn, rev, qty, imgpath
+    # Ensure root appears first (alone) and children sorted by partnumber
     rows: List[Tuple[str,str,float,str|None]] = []
-    for pn, rev, qty in flat:
+    # Prepare children items, excluding the root if present
+    items = list(flat or [])
+    if root_pn:
+        items = [t for t in items if not (str(t[0]).strip().lower() == str(root_pn).strip().lower() and _norm_rev(t[1]) == _norm_rev(root_rev))]
+    # Sort children by partnumber then revision
+    items.sort(key=lambda t: (str(t[0]) or "", _norm_rev(t[1]) or ""))
+
+    # Helper to find image path for a pn/rev
+    def _img_for(pn: str, rev: str) -> Optional[str]:
         q = PartFile.objects(part_number__iexact=pn, revision__iexact=(rev or ""), ext_group="png", is_dwg=False).order_by("-mtime_iso")
-        path = None
         pf = q.first()
         if pf:
-            path = pf.path if os.path.isabs(pf.path) else os.path.join(root, pf.rel_path.replace("/", os.sep))
-            if not os.path.isfile(path):
-                path = None
-        rows.append((pn, rev or "", qty, path))
+            pth = pf.path if os.path.isabs(pf.path) else os.path.join(root, pf.rel_path.replace("/", os.sep))
+            if os.path.isfile(pth):
+                return pth
+        return None
+
+    # Root entry first if provided
+    root_entry: Optional[Tuple[str,str,float,Optional[str]]] = None
+    if root_pn:
+        root_entry = (root_pn, _norm_rev(root_rev or ""), 1.0, _img_for(root_pn, _norm_rev(root_rev or "")))
+
+    # Child rows
+    for pn, rev, qty in items:
+        rows.append((pn, rev or "", qty, _img_for(pn, rev or "")))
 
     # Layout close to legacy BoxyGrid (3 columns on A4 portrait)
     box_w = 58*mm
@@ -604,6 +626,21 @@ def _visual_list_pdf(flat: List[Tuple[str,str,float]], root_pn: Optional[str] = 
             c.setFillGray(0.1)  # restore default dark text color
         except Exception:
             pass
+        # Binder page reference (optional): show below quantity if provided
+        try:
+            if page_map is not None:
+                key = (pn, _norm_rev(rev))
+                pg = page_map.get(key)
+                if pg is not None:
+                    from reportlab.pdfbase.pdfmetrics import stringWidth
+                    s = f"p. {pg}"
+                    c.setFont("Helvetica", 8.5)
+                    c.setFillGray(0.4)
+                    tw = stringWidth(s, "Helvetica", 8.5)
+                    c.drawString(x + box_w - 4*mm - tw, hl_y - 12, s)
+                    c.setFillGray(0.1)
+        except Exception:
+            pass
         # Description at bottom-left of box (avoid image/QR overlap)
         if not desc and pdoc is not None:
             try:
@@ -665,13 +702,113 @@ def _visual_list_pdf(flat: List[Tuple[str,str,float]], root_pn: Optional[str] = 
         except Exception:
             pass
 
+    # Special root cell: render alone on the first row (spanning all columns)
+    if root_entry is not None:
+        try:
+            pn, rev, qty, ip = root_entry
+            # compute a full-width box occupying the first grid row height
+            r_x = x0
+            r_y = y0 - (box_h + gap)
+            r_w = min(W - 2*margin, cols * (box_w + gap) - gap)
+            r_h = box_h
+            # base box
+            c.setStrokeGray(0.8); c.setLineWidth(0.7)
+            c.setFillColorRGB(1,1,1)
+            c.rect(r_x, r_y, r_w, r_h, stroke=1, fill=1)
+            # image area on left, wider than normal
+            ix_x = r_x + 3*mm
+            ix_y = r_y + 8*mm
+            ix_w = 40*mm
+            ix_h = r_h - 16*mm
+            if ip and os.path.isfile(ip):
+                try:
+                    c.drawImage(ip, ix_x, ix_y, width=ix_w, height=ix_h, preserveAspectRatio=True, anchor='sw', mask='auto')
+                except Exception:
+                    _draw_svg_or_png(c, ix_x, ix_y, ix_w, ix_h, 'tinylogo.svg', 'tinylogo.png')
+            else:
+                _draw_svg_or_png(c, ix_x, ix_y, ix_w, ix_h, 'tinylogo.svg', 'tinylogo.png')
+            # text header
+            hl_x = r_x + ix_w + 6*mm
+            hl_y = r_y + r_h - 6*mm
+            c.setFillGray(0.1)
+            c.setFont("Helvetica-Bold", 12.5)
+            c.drawString(hl_x, hl_y, f"{pn}")
+            c.setFont("Helvetica", 10.0); c.setFillGray(0.25)
+            c.drawString(hl_x, hl_y - 12, f"REV: {rev}")
+            # qty at top-right in bold red
+            try:
+                from reportlab.pdfbase.pdfmetrics import stringWidth
+                qty_str = f"x{qty:g}" if isinstance(qty, float) else f"x{qty}"
+                c.setFont("Helvetica-Bold", 12.5)
+                c.setFillColorRGB(0.82, 0.0, 0.0)
+                tw = stringWidth(qty_str, "Helvetica-Bold", 12.5)
+                c.drawString(r_x + r_w - 4*mm - tw, hl_y, qty_str)
+                c.setFillGray(0.1)
+                # binder page below qty if available
+                if page_map is not None:
+                    key = (pn, _norm_rev(rev))
+                    pg = page_map.get(key)
+                    if pg is not None:
+                        s = f"p. {pg}"
+                        c.setFont("Helvetica", 9.0); c.setFillGray(0.4)
+                        tw2 = stringWidth(s, "Helvetica", 9.0)
+                        c.drawString(r_x + r_w - 4*mm - tw2, hl_y - 12, s)
+                        c.setFillGray(0.1)
+            except Exception:
+                pass
+            # description (from part)
+            try:
+                pdoc = _part_by(pn, rev)
+                desc = (getattr(pdoc, 'description', '') or '')
+            except Exception:
+                desc = ''
+            if desc:
+                try:
+                    from reportlab.pdfbase.pdfmetrics import stringWidth
+                    d_x = hl_x
+                    d_y1 = r_y + 8*mm
+                    max_w = r_x + r_w - d_x - 4*mm
+                    c.setFillGray(0.35); c.setFont("Helvetica", 9.0)
+                    words = desc.split(); cur='';
+                    while words:
+                        t = (cur + ' ' + words[0]).strip()
+                        if stringWidth(t, "Helvetica", 9.0) <= max_w:
+                            cur = t; words.pop(0)
+                        else:
+                            if cur:
+                                c.drawString(d_x, d_y1, cur); d_y1 += 10
+                                cur=''
+                            else:
+                                c.drawString(d_x, d_y1, words.pop(0)); d_y1 += 10
+                    if cur:
+                        c.drawString(d_x, d_y1, cur)
+                except Exception:
+                    pass
+            # QR bottom-right
+            try:
+                qr_url = _part_detail_url(pn, rev)
+                qr = qrcode.QRCode(border=0, box_size=2)
+                qr.add_data(qr_url)
+                qr.make(fit=True)
+                qimg = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                from reportlab.lib.utils import ImageReader
+                qbuf = io.BytesIO(); qimg.save(qbuf, format='PNG'); qbuf.seek(0)
+                qr_size = 18*mm
+                c.drawImage(ImageReader(qbuf), r_x + r_w - qr_size - 4*mm, r_y + 4*mm, width=qr_size, height=qr_size, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    # Draw children; offset grid index to skip first row reserved by root
+    start_ix = cols if root_entry is not None else 0
     for i, (pn, rev, qty, ip) in enumerate(rows):
         try:
             pdoc = _part_by(pn, rev)
             desc = (getattr(pdoc, 'description', '') or '')
         except Exception:
             desc = ''
-        draw_cell(i, pn, rev, qty, ip, desc)
+        draw_cell(start_ix + i, pn, rev, qty, ip, desc)
 
     c.save()
     return buf.getvalue()
@@ -799,16 +936,21 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     col_count = 3 if len(kv) >= 12 else (2 if len(kv) >= 6 else 1)
     avail_w = W - 2*margin
     col_w = avail_w / max(1, col_count)
-    pad = 4.0
-    label_w = min(120.0, col_w * 0.32)
-    value_w = max(20.0, col_w - label_w - pad - 2.0)
+    # Padding and widths tuned for readability: ensure a sensible minimum label width
+    pad = 8.0
+    label_w = max(80.0, min(160.0, col_w * 0.40))
+    value_w = max(40.0, col_w - label_w - pad - 2.0)
 
-    def _wrap(text: str, font: str, size: float, max_w: float) -> list[str]:
-        words = (text or '').split(); lines=[]; cur=''
+    def _wrap_words(text: str, font: str, size: float, max_w: float) -> List[str]:
+        # Word-wrap only; do not break tokens (for labels)
+        from reportlab.pdfbase.pdfmetrics import stringWidth as _sw
+        words = (text or '').split()
+        lines: List[str] = []
+        cur = ''
         for w in words:
-            t = (cur + ' ' + w).strip()
-            if stringWidth(t, font, size) <= max_w:
-                cur = t
+            trial = (cur + ' ' + w).strip()
+            if _sw(trial, font, size) <= max_w:
+                cur = trial
             else:
                 if cur:
                     lines.append(cur)
@@ -817,23 +959,81 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
             lines.append(cur)
         return lines
 
+    def _wrap_break(text: str, font: str, size: float, max_w: float) -> List[str]:
+        # Greedy wrap that preserves order and breaks long tokens if needed.
+        # Do not introduce spaces between chunks of the same original token.
+        from reportlab.pdfbase.pdfmetrics import stringWidth as _sw
+        def _break_token(tok: str) -> List[str]:
+            out: List[str] = []
+            s = tok
+            while s:
+                i = 1
+                while i <= len(s) and _sw(s[:i], font, size) <= max_w:
+                    i += 1
+                if i == 1:
+                    out.append(s[0])
+                    s = s[1:]
+                else:
+                    out.append(s[:i-1])
+                    s = s[i-1:]
+            return out
+        words = (text or '').split()
+        # Build a sequence of (piece, joiner) where joiner is '' for broken pieces and ' ' for word gaps
+        seq: List[tuple[str, str]] = []
+        for w in words:
+            if _sw(w, font, size) <= max_w:
+                seq.append((w, ' ' if seq else ''))
+            else:
+                parts = _break_token(w)
+                for j, p in enumerate(parts):
+                    # For first part of a word, use ' ' as joiner if it isn't the first element overall
+                    # For subsequent parts, no joiner so we don't inject spaces inside tokens
+                    joiner = (' ' if (j == 0 and seq) else '')
+                    seq.append((p, joiner))
+        # Greedily pack pieces into lines using provided joiners
+        lines: List[str] = []
+        cur = ''
+        for piece, joiner in seq:
+            trial = (cur + joiner + piece) if cur else piece
+            if _sw(trial, font, size) <= max_w:
+                cur = trial
+            else:
+                if cur:
+                    lines.append(cur)
+                # When starting a new line, drop the joiner (line start has no preceding separator)
+                cur = piece
+        if cur:
+            lines.append(cur)
+        return lines
+
     # prepare entries with computed heights
-    line_h = 9.0
+    line_h = 10.0
+    row_gap = 3.0
     entries = []  # (k_lines, v_lines, height)
     for k, v in kv:
-        kl = _wrap(f"{k}:", "Helvetica-Bold", 8.8, label_w)
-        vl = _wrap(str(v), "Helvetica", 8.6, value_w)
-        h = max(len(kl), len(vl)) * line_h + 2
+        kl = _wrap_words(f"{k}:", "Helvetica-Bold", 8.8, label_w)
+        vl = _wrap_break(str(v), "Helvetica", 8.6, value_w)
+        h = max(len(kl), len(vl)) * line_h + row_gap
         entries.append((kl, vl, h))
 
-    # distribute across columns (round-robin) and measure total height
-    cols: List[List[Tuple[list, list, float]]] = [[] for _ in range(max(1, col_count))]
-    heights = [0.0 for _ in range(max(1, col_count))]
-    ci = 0
+    # Distribute sequentially into columns to preserve order, balancing by target height
+    ncols = max(1, col_count)
+    total_h = sum(h for _, _, h in entries) or 0.0
+    target_h = (total_h / ncols) if ncols > 0 else total_h
+    cols: List[List[Tuple[list, list, float]]] = []
+    heights: List[float] = []
+    cur: List[Tuple[list, list, float]] = []
+    cur_h = 0.0
     for e in entries:
-        cols[ci].append(e)
-        heights[ci] += e[2]
-        ci = (ci + 1) % len(cols)
+        if heights.__len__() < (ncols - 1) and cur_h > 0 and (cur_h + e[2]) > target_h:
+            cols.append(cur); heights.append(cur_h)
+            cur = [e]; cur_h = e[2]
+        else:
+            cur.append(e); cur_h += e[2]
+    cols.append(cur); heights.append(cur_h)
+    # pad to ncols
+    while len(cols) < ncols:
+        cols.append([]); heights.append(0.0)
 
     table_h = max(heights) if entries else 0.0
     img_y0 = margin + table_h + gap
@@ -887,30 +1087,27 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
         if not drew:
             _draw_svg_or_png(c, margin, img_y0, img_w, img_h, 'tinylogo.svg', 'tinylogo.png')
 
-    # Draw table from bottom up
+    # Draw table from top to bottom per column to preserve item order
     try:
         for idx, col in enumerate(cols):
             x = margin + idx * col_w
-            yb = margin + table_h
+            y_top = margin + table_h
+            y = y_top - line_h
             for k_lines, v_lines, h in col:
-                yb -= h
+                # top-aligned label and value blocks
                 c.setFont("Helvetica-Bold", 8.8)
-                ly = yb + h - line_h
+                ly = y
                 for li in k_lines:
                     c.drawString(x, ly, li)
                     ly -= line_h
                 c.setFont("Helvetica", 8.6)
                 vx = x + label_w + pad
-                vy = yb + h - line_h
+                vy = y
                 for li in v_lines:
-                    # ensure defensive wrapping if font metrics differ
-                    if stringWidth(li, "Helvetica", 8.6) > value_w:
-                        t = li
-                        while t and stringWidth(t, "Helvetica", 8.6) > value_w:
-                            t = t[:-1]
-                        li = t
                     c.drawString(vx, vy, li)
                     vy -= line_h
+                # advance cursor by full row height
+                y -= (max(len(k_lines), len(v_lines)) * line_h + row_gap)
     except Exception:
         pass
 
@@ -1084,7 +1281,27 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # Visual list PDF
     vis_pages = 0
     if opts.want_visual_list:
-        vis_pdf = _visual_list_pdf(filtered_flat, opts.root_pn, opts.root_rev)
+        # For binder visual list, always use full-BOM aggregated quantities
+        vis_full = _flatten_bom(
+            opts.root_pn,
+            opts.root_rev,
+            full=True,
+            include_consumed=bool(opts.include_consumed),
+            terminal_processes=["welding","purchase","machine"],
+        )
+        # Apply same classification/process filters as for the binder
+        vis_filtered: List[Tuple[str,str,float]] = []
+        for pn, rev, qty in vis_full:
+            p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
+            if not p:
+                continue
+            if not _passes_classified_filter(p, opts.classified_filter):
+                continue
+            if not _passes_process_filter(p, opts.processes, opts.process_mode):
+                continue
+            vis_filtered.append((pn, rev, qty))
+        # Standalone visual list: omit root special placement
+        vis_pdf = _visual_list_pdf(vis_filtered, None, None)
         if vis_pdf:
             if want_zip:
                 z.writestr("VisualList.pdf", vis_pdf)
@@ -1095,16 +1312,20 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # PDF binder (with index & page numbers)
     if opts.want_pdf_binder:
         # Gather PDFs independent of UI file filter (always include PDFs if present)
-        # Build unique (pn,rev) list including the root
-        pairs: List[Tuple[str, str]] = []
-        seen_pairs = set()
-        for pn, rev, _ in filtered_flat + [(opts.root_pn, opts.root_rev or "", 1.0)]:
+        # Build unique (pn,rev) list ordered: root first, then children by partnumber
+        uniq_children: Dict[Tuple[str,str], None] = {}
+        for pn, rev, _ in filtered_flat:
             key = (pn, _norm_rev(rev))
-            if key not in seen_pairs:
-                seen_pairs.add(key)
-                pairs.append(key)
+            uniq_children[key] = None
+        root_key = (opts.root_pn, _norm_rev(opts.root_rev or ""))
+        if root_key in uniq_children:
+            uniq_children.pop(root_key, None)
+        ordered_children = sorted(list(uniq_children.keys()), key=lambda t: (t[0] or "", t[1] or ""))
+        pairs: List[Tuple[str,str]] = [root_key] + ordered_children
 
         root_dir = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
+        # Keep mapping to part for page numbers
+        pdf_items: List[Tuple[str,str,str]] = []  # (pn, rev, abs_path)
         pdf_paths: List[str] = []
         try:
             for pn, rev in pairs:
@@ -1112,7 +1333,10 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 if rev is not None:
                     q = q.filter(revision__iexact=(rev or ""))
                 # pull all PDFs; later we may filter out datasheets if not requested
-                for f in q.filter(ext__iexact="pdf"):
+                files = [f for f in q.filter(ext__iexact="pdf")]
+                # deterministic order of files per part
+                files.sort(key=lambda f: os.path.basename(f.rel_path or f.path or "").lower())
+                for f in files:
                     if not getattr(f, 'rel_path', None) and not getattr(f, 'path', None):
                         continue
                     if (getattr(f, 'ext_group', '') or '').lower() == 'datasheet' and not bool(getattr(opts, 'binder_add_datasheets', False)):
@@ -1121,6 +1345,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     abs_path = f.path if os.path.isabs(f.path) else os.path.join(root_dir, rp.replace("/", os.sep))
                     if os.path.isfile(abs_path):
                         pdf_paths.append(abs_path)
+                        pdf_items.append((pn, _norm_rev(rev), abs_path))
         except Exception:
             pass
 
@@ -1131,7 +1356,26 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             preface_bytes.append(("Cover.pdf", cover))
         vis_pdf = None
         if opts.want_visual_list:
-            vis_pdf = _visual_list_pdf(filtered_flat, opts.root_pn, opts.root_rev)
+            # Use full-BOM aggregated quantities and sort children by PN
+            vis_full = _flatten_bom(
+                opts.root_pn,
+                opts.root_rev,
+                full=True,
+                include_consumed=bool(opts.include_consumed),
+                terminal_processes=["welding","purchase","machine"],
+            )
+            vis_filtered: List[Tuple[str,str,float]] = []
+            for pn, rev, qty in vis_full:
+                p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
+                if not p:
+                    continue
+                if not _passes_classified_filter(p, opts.classified_filter):
+                    continue
+                if not _passes_process_filter(p, opts.processes, opts.process_mode):
+                    continue
+                vis_filtered.append((pn, rev, qty))
+            # sort here via _visual_list_pdf which also enforces root first
+            vis_pdf = _visual_list_pdf(vis_filtered, opts.root_pn, opts.root_rev)
             if vis_pdf:
                 preface_bytes.append(("VisualList.pdf", vis_pdf))
 
@@ -1219,15 +1463,15 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     c.drawRightString(right_x, y, page_s)
                     y -= 6*mm
 
-                # Visual summary entry (if present), starts after cover + index
-                if vis_pdf:
-                    vis_start = cover_pages + assumed_idx_pages + 1
-                    _entry("Visual Summary", vis_start)
-                # Body entries: base name without extension
+                # Body entries: base name without extension (father then children)
                 pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0)
                 for pth, start in zip(pdf_paths, body_starts):
                     base = os.path.splitext(os.path.basename(pth))[0]
                     _entry(base, pre_body_offset + start)
+                # Visual Summary entry (if present) placed after body list
+                if vis_pdf:
+                    vis_start = cover_pages + assumed_idx_pages + 1
+                    _entry("Visual Summary", vis_start)
                 c.save()
                 return idx_io.getvalue()
 
@@ -1241,6 +1485,62 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             preface_bytes.insert(insert_pos, ("Index.pdf", idx_b2))
         except Exception:
             pass
+
+        # If we have body PDFs, compute part -> first page map and rebuild VisualList with page numbers
+        if pdf_paths and opts.want_visual_list:
+            try:
+                # Compute cover/index/visual page counts now that index is finalized
+                from PyPDF2 import PdfReader
+                cover_pages = 0
+                vis_pages = 0
+                index_pages = 0
+                for name, b in preface_bytes:
+                    lc = name.lower()
+                    if lc.startswith('cover'):
+                        cover_pages += len(PdfReader(io.BytesIO(b)).pages)
+                    elif lc.startswith('index'):
+                        index_pages += len(PdfReader(io.BytesIO(b)).pages)
+                    elif lc.startswith('visual'):
+                        vis_pages += len(PdfReader(io.BytesIO(b)).pages)
+                pre_body_offset = cover_pages + index_pages + vis_pages
+                # Map absolute path -> start page
+                start_by_path = {p: s for p, s in zip(pdf_paths, body_starts)}
+                # For each part, pick earliest starting page among its PDFs
+                first_page: Dict[Tuple[str,str], int] = {}
+                for pn, rev, ap in pdf_items:
+                    sp = start_by_path.get(ap)
+                    if sp is None:
+                        continue
+                    key = (pn, rev)
+                    val = pre_body_offset + int(sp)
+                    if key not in first_page or val < first_page[key]:
+                        first_page[key] = val
+                # Rebuild visual list with page numbers (ensure full-BOM aggregated quantities)
+                vis_full2 = _flatten_bom(
+                    opts.root_pn,
+                    opts.root_rev,
+                    full=True,
+                    include_consumed=bool(opts.include_consumed),
+                    terminal_processes=["welding","purchase","machine"],
+                )
+                vis_filtered2: List[Tuple[str,str,float]] = []
+                for pn, rev, qty in vis_full2:
+                    p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
+                    if not p:
+                        continue
+                    if not _passes_classified_filter(p, opts.classified_filter):
+                        continue
+                    if not _passes_process_filter(p, opts.processes, opts.process_mode):
+                        continue
+                    vis_filtered2.append((pn, rev, qty))
+                vis_pdf2 = _visual_list_pdf(vis_filtered2, opts.root_pn, opts.root_rev, page_map=first_page)
+                # Replace existing VisualList in preface_bytes
+                for i, (nm, _) in enumerate(preface_bytes):
+                    if nm.lower().startswith('visual'):
+                        preface_bytes[i] = (nm, vis_pdf2)
+                        break
+            except Exception:
+                pass
 
         # Merge final binder: preface (cover + index + visual list) + body
         all_segments: List[bytes] = [b for _, b in preface_bytes]
