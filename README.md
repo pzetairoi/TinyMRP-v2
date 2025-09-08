@@ -1,225 +1,179 @@
 # TinyMRP v2
 
-**Lean, MongoDB-backed MRP starter** focused on Bills of Materials (BOM), work orders, and a simple parts browser.  
-This is a from-scratch rebuild of TinyMRP with modern auth and a Mongo-first data model for tree-shaped BOMs.
+Lean, MongoDB‑backed MRP starter focused on Bills of Materials (BOM), parts browser, and document packs (PDF binders, Excel BOM, visual lists).
 
-> Original project: [pzetairoi/TinyMRP](https://github.com/pzetairoi/TinyMRP) — “Lean inventory and MRP system based on python.”  
-> This v2 modernizes the stack and removes the SQLite/Excel config used in the legacy app. :contentReference[oaicite:1]{index=1}
+Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB + React/Vite), drops the legacy SQLite/Excel config, and adds modern auth and file handling.
 
 ---
 
-## What’s in v2 (today)
+## Features
 
-- **Auth**: Flask-Security (login, roles, permissions), Argon2 hashing
-- **Admin**: Users list/create, roles & permissions editor
-- **Parts browser** (BOM-centric): DataTables (Bootstrap 5) with global  per-column filters; server-side querying in MongoDB
-- **Clean UI**: Bootstrap 5 base layout  public landing page
-- **Dev-first**: Conda env, `.env` config, CSRF everywhere
-
-Roadmap: password reset, BOM tree explorer, work orders, MRP run.
+- Auth and Roles: Flask‑Security‑Too, Argon2 hashing, role/permission editor.
+- Parts & BOM APIs: MongoEngine models, server‑side filters, where‑used.
+- Files & Thumbnails: file discovery, preview/drawing PNGs, 3MF viewer assets.
+- Document Packs:
+  - PDF binder with cover page, index (with dot leaders), and Visual Summary listed first.
+  - Automatic page numbers; optional watermarks (quote, classified, approved, WIP).
+  - Include/exclude datasheets; configurable stamps.
+  - Excel BOM (openpyxl) with thumbnails, hyperlinks, and attribute columns.
+- React UI (Vite build) for part detail and visual list pages.
 
 ---
 
 ## Tech Stack
 
-- **Backend**: Python 3.12, Flask 3.x, MongoEngine 0.29.x (on PyMongo 4.x)
-- **Auth**: Flask-Security-Too 5.6.x
-- **DB**: MongoDB 6/7 (Atlas or local)
-- **Frontend**: Bootstrap 5.3, DataTables 2.x  jQuery 3.7
-- **Dev**: Conda (Windows/macOS/Linux), `python-dotenv`
+- Backend: Python 3.12, Flask 3.x, MongoEngine 0.29.x, PyMongo 4.x.
+- DB: MongoDB 6/7 (local or Atlas).
+- Frontend: React 19, Vite 7, PrimeReact, ThreeJS (3MF viewer).
+- Dev: `python-dotenv`, Docker Compose, optional Nginx for static deliverables.
 
 ---
 
-## Quick start (Windows with Conda)
+## Configuration
+
+Create a `.env` (or select one via `ENV_FILE`) with at least:
+
+- `SECRET_KEY`: Flask secret.
+- `SECURITY_PASSWORD_SALT`: salt for Flask‑Security.
+- `MONGO_URI`: e.g. `mongodb://localhost:27017/tinymrp-v2`.
+- File roots (canonical keys, see `app/__init__.py`):
+  - `FILES_LOCAL_ROOT`: absolute path where deliverables are stored (host/container).
+  - `FILES_URL_PREFIX`: URL prefix used by the app to serve files (e.g. `/deliverables` or `http://localhost:5001/Deliverables`).
+  - Optional `FILES_UPSTREAM_BASE`: upstream file server base URL if proxying.
+- Optional:
+  - `FILE_HASH_MAX_BYTES`: compute/verify file hashes up to this size (0 to disable).
+  - `VITE_BACKEND_URL`: dev proxy target for Vite (`frontend/vite.config.ts`).
+
+Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
+
+---
+
+## Quick Start (local dev)
+
+PowerShell snippet (from `handycommands.txt`):
 
 ```powershell
-# 1) Clone
-git clone https://github.com/<you>/<your-new-repo>.git tinymrp_v2
-cd tinymrp_v2
+# 1) Serve deliverables through a tiny nginx
+$env:FILES_LOCAL_ROOT = "C:/CADEXPORT"
+docker run --rm -d --name tinymrp-nginx-static -p 5001:80 `
+  -v "${PWD}/docker/nginx/nginx.static.conf:/etc/nginx/nginx.conf:ro" `
+  -v "${env:FILES_LOCAL_ROOT}:/data/deliverables:ro" nginx:1.27-alpine
 
-# 2) Environment
-conda create -n tinymrp-v2 python=3.12 pip -y
-conda activate tinymrp-v2
+# 2) Run the app with the dev env file
+$env:ENV_FILE = '.env.dev.example'
+python run.py
 
-# 3) Install
-pip install -r requirements.txt
+# 3) Seed roles and create an admin
+flask --app run.py user seed-roles
+flask --app run.py user create --email admin@admin.com --password admin
+flask --app run.py user grant-admin --email admin@admin.com
 
-# 4) Configure (.env in project root)
-# generate secrets: python -c "import secrets;print(secrets.token_urlsafe(32))"
-# copy/paste your values:
-# SECRET_KEY=...
-# SECURITY_PASSWORD_SALT=...
-# MONGO_URI=mongodb://localhost:27017/tinymrp_v2
-
-# 5) Run
-python run.py   # visit http://127.0.0.1:5000
-
-# 6) Create first user (then grant yourself admin)
-flask --app run.py user create
-flask --app run.py user grant-admin --email you@example.com
+# 4) Build the frontend (writes to app/static/parts-ui)
+cd frontend
+npm install
+npm run build
 ```
-
-
-
-## When you start with a fresh MongoDB, there are **no users yet**, so you won’t be able to log in until you seed one.
-
-### Using Docker (recommended)
-
-1) Make sure the stack is running:
-
-```bash
-docker compose up -d
-```
-
-Unified config: copy `.env.example` to `.env` and adjust only these:
-
-- `DELIVERABLES_DIR` – your host folder for deliverables (single path to set)
-- `HTTP_PORT` – external port exposed by nginx (single port to set)
-- optional: `FILES_UPSTREAM_BASE` – URL of an external file server to proxy
-
-The app container reads `FILES_LOCAL_ROOT=/data/deliverables` and nginx serves
-them at `FILES_URL_PREFIX` (default `/deliverables`) automatically.
-
-2) Default admin auto-seed (first run)
-
-- On first startup, if the database has no users, the container seeds standard roles
-  and creates a default admin user:
-  - email: `admin@admin.com`
-  - password: `admin`
-
-- You can override these via env vars in your `.env` (or shell) before building/up:
-  - `DEFAULT_ADMIN_EMAIL=you@example.com`
-  - `DEFAULT_ADMIN_PASSWORD=yourStrongPassword`
-
-- Change the password immediately after login in a real deployment.
-
-### Local Dev (python run.py) with nginx static files
-
-- Copy `.env.dev.example` to `.env.dev` and set:
-  - `MONGO_URI=mongodb://localhost:27017/tinymrp-v2`
-  - `FILES_LOCAL_ROOT=C:/CADEXPORT/Deliverables` (Windows) or `/srv/deliverables` (Unix)
-  - Recommended (no CORS):
-    - `FILES_URL_PREFIX=/deliverables`
-    - `FILES_UPSTREAM_BASE=http://localhost:5001`
-  - Alternative (direct URL; requires CORS headers on nginx):
-    - `FILES_URL_PREFIX=http://localhost:5001/Deliverables`
-
-- Start a tiny nginx to serve Deliverables (PowerShell):
-  - `docker run --rm -d --name tinymrp-nginx-static -p 5001:80 -v "${PWD}/docker/nginx/nginx.static.conf:/etc/nginx/nginx.conf:ro" -v "${env:FILES_LOCAL_ROOT}:/data/deliverables:ro" nginx:1.27-alpine`
-
-- Run Flask locally:
-  - `powershell -Command "$env:ENV_FILE='.env.dev'; python run.py"`
 
 Visit http://localhost:5000 (app) and http://localhost:5001/Deliverables (files).
 
-Alternatively, use the included dev compose override:
+---
 
-- `docker compose -f docker-compose.dev.yml --env-file .env.dev up -d nginx`
-- Run Flask with `ENV_FILE=.env.dev python run.py`
-
-### Ubuntu Server (no containers)
-
-1) Install system deps: `sudo apt-get update && sudo apt-get install -y python3-venv nginx`.
-
-2) Deploy app:
-   - `sudo adduser --system --group tinymrp`
-   - `sudo mkdir -p /opt/tinymrp_v2 /srv/tinymrp/deliverables /etc/tinymrp`
-   - `sudo chown -R tinymrp:tinymrp /opt/tinymrp_v2 /srv/tinymrp/deliverables`
-   - `git clone <your repo> /opt/tinymrp_v2`
-   - `python3 -m venv /opt/tinymrp_venv && /opt/tinymrp_venv/bin/pip install -r /opt/tinymrp_v2/requirements.txt`
-   - `sudo cp .env.server.example /etc/tinymrp/.env && sudo chmod 600 /etc/tinymrp/.env`
-
-3) Gunicorn service:
-   - `sudo cp deploy/tinymrp.service /etc/systemd/system/tinymrp.service`
-   - Edit paths in that file if needed (WorkingDirectory, ExecStart)
-   - `sudo systemctl daemon-reload && sudo systemctl enable --now tinymrp`
-
-4) Nginx site:
-   - `sudo cp deploy/nginx.server.conf /etc/nginx/sites-available/tinymrp`
-   - `sudo ln -s /etc/nginx/sites-available/tinymrp /etc/nginx/sites-enabled/`
-   - `sudo nginx -t && sudo systemctl reload nginx`
-
-Now Deliverables are under `/srv/tinymrp/deliverables` (change in `.env` and nginx alias if needed).
-
-2) Manual seeding via Flask CLI (optional)
+## Docker Compose
 
 ```bash
-If you prefer to seed manually or need to re-run the steps, use:
+docker compose up --build
+```
+
+Useful snippets (from `handycommands.txt`):
 
 ```bash
-# Seed standard roles
+docker compose up -d
 docker compose exec app flask --app run.py user seed-roles
-
-# Create a user (non-interactive example)
 docker compose exec app flask --app run.py user create --email admin@admin.com --password admin
-
-# Grant admin role to that user
 docker compose exec app flask --app run.py user grant-admin --email admin@admin.com
+
+# Recreate just the app container
+docker compose up -d --force-recreate app
 ```
 
-You can now log in with that email and password.
+---
 
-> If your shell cannot find `flask` in the container for any reason, use the fallback method below.
+## Frontend (React/Vite)
 
-### Fallback: create an admin via a short Python snippet
+- Build outputs to `app/static/parts-ui` (manifest included). The Flask routes under `/ui/*` read this manifest to inject JS/CSS.
+- Dev server: `npm run dev` and set `VITE_BACKEND_URL=http://localhost:5000` to proxy API requests.
 
-This works both **inside Docker** and on a **local dev environment**.
+Main UI routes:
 
-**Docker:**
-```bash
-docker compose exec -T app python - <<'PY'
-from app import create_app
-app = create_app()
-with app.app_context():
-    from app.models.user import User
-    email = "admin@example.com"
-    name = "Admin"
-    password = "changeme"
-    u = User.objects(email=email).first()
-    if not u:
-        u = User(email=email, name=name, is_active=True)
-    if hasattr(u, "set_password"):
-        u.set_password(password)
-    else:
-        u.password = password  # adjust if your model differs
-    # Grant admin role/flag (adjust to your model)
-    try:
-        u.roles = ["admin"]
-    except Exception:
-        setattr(u, "is_admin", True)
-    u.save()
-print("Admin user created/updated:", email)
-PY
+- `/ui/parts` — React shell for browsing parts.
+- `/ui/part/<pn>?rev=<rev>` — part detail; links from PDF binder and Excel BOM.
+- `/ui/bom/<pn>?rev=<rev>` — BOM view (when enabled in the current build).
+
+---
+
+## Document Packs API (PDF/Excel)
+
+Endpoints:
+
+- `GET /api/docpacks/options?pn=PN&rev=REV&depth=full|top` → available `file_types` and canonical `processes`.
+- `POST /api/docpacks/build` → Generates a ZIP or a single PDF depending on options.
+
+Example payload:
+
+```json
+{
+  "pn": "ASM-1001", "rev": "A",
+  "depth": "full",
+  "include_consumed": false,
+  "classified": "show",
+  "processes": ["welding", "machine"],
+  "process_mode": "all",
+  "file_types": ["pdf", "datasheet"],
+  "excel_bom": true,
+  "selected_files": true,
+  "pdf_binder": true,
+  "visual_list": true,
+  "binder_add_index": true,
+  "binder_add_datasheets": false,
+  "binder_page_numbers": true,
+  "stamp_quote": false, "stamp_confidential": false, "stamp_approved": false,
+  "stamp_wip": false, "stamp_inprogress": false
+}
 ```
 
-**Local (without Docker):**
-```bash
-python - <<'PY'
-from app import create_app
-app = create_app()
-with app.app_context():
-    from app.models.user import User
-    email = "admin@example.com"
-    name = "Admin"
-    password = "changeme"
-    u = User.objects(email=email).first()
-    if not u:
-        u = User(email=email, name=name, is_active=True)
-    if hasattr(u, "set_password"):
-        u.set_password(password)
-    else:
-        u.password = password  # adjust if your model differs
-    # Grant admin role/flag (adjust to your model)
-    try:
-        u.roles = ["admin"]
-    except Exception:
-        setattr(u, "is_admin", True)
-    u.save()
-print("Admin user created/updated:", email)
-PY
-```
+Behavior highlights:
 
-> **Notes**
-> - If your `User` model uses a different admin field (e.g. `role`, `is_admin`, `permissions`), tweak that part accordingly.
-> - You can list users (if a CLI exists) with:  
->   `docker compose exec app flask --app run.py user list`
+- Visual Summary is listed first in the index, then the root (father) and children.
+- Cover page is page 1 (page numbers overlaid skip the cover when enabled).
+- Excel BOM includes thumbnails, hyperlinks to the app, and normalized attributes.
+
+---
+
+## CLI Utilities
+
+User management:
+
+- `flask --app run.py user seed-roles`
+- `flask --app run.py user create --email <email> --password <pw>`
+- `flask --app run.py user grant-admin --email <email>`
+
+Data helpers (see `app/cli.py`):
+
+- Demo data: `flask --app run.py user seed-parts`, `flask --app run.py user seed-bom`.
+- Importer: `flask --app run.py importcmd zip --file <path>.zip`.
+- File discovery: `flask --app run.py files scan-one --pn PN --rev REV`.
+
+---
+
+## Notes & Tips
+
+- CSRF is enabled; some API blueprints are explicitly exempted where required for SPA calls.
+- Files config uses canonical keys `FILES_LOCAL_ROOT`, `FILES_URL_PREFIX`, `FILES_UPSTREAM_BASE`. Backward‑compatible aliases `FILE_ROOT_LOCAL` and `FILE_ROOT_HTTP` remain for older code paths.
+- Frontend build artifacts are written to `app/static/parts-ui` by `npm run build` from the `frontend` directory.
+
+---
+
+## License
+
+This repository inherits the spirit of the original TinyMRP project. Add your license here if distributing.
+
