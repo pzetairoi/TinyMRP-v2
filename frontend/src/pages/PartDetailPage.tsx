@@ -161,7 +161,8 @@ export default function PartDetailPage() {
 
 // in PartDetailPage.tsx (replace your bestUrl)
 function bestUrl(f: FileRow): string {
-  const base = (import.meta as any).env?.VITE_FILES_BASE_URL || "/extfiles/deliverables";
+  const runtimeBase = (window as any).__FILES_BASE_URL as string | undefined;
+  const base = runtimeBase || (import.meta as any).env?.VITE_FILES_BASE_URL || "/extfiles/deliverables";
 
   // 1) Preferred: rel_path -> same-origin {base}/rel_path
   if (f.rel_path) {

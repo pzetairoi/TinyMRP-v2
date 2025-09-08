@@ -30,6 +30,9 @@ services:
       # Optional: enable HTTP proxy to an external file server
       # FILES_UPSTREAM_BASE: ${FILES_UPSTREAM_BASE}
       DELIVERABLES_DIR: Z:/
+      # Auto-seed default admin when DB is empty
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@admin.com}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-admin}
     depends_on:
       - mongo
     volumes:

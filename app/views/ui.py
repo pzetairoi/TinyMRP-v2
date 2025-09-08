@@ -40,7 +40,8 @@ def parts_ui():
     assets = vite_assets()
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
-    return render_template("ui/react_shell.html", title="Parts", assets=assets, initial={})
+    files_base = (current_app.config.get("FILE_ROOT_HTTP") or current_app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
+    return render_template("ui/react_shell.html", title="Parts", assets=assets, initial={}, files_base=files_base)
 
 @bp.get("/bom/<path:pn>")
 def bom_ui(pn):
@@ -69,4 +70,3 @@ def part_ui(pn):
         assets=assets,
         initial={"pn": pn, "rev": rev},
     )
-

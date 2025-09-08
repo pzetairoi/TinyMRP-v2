@@ -50,5 +50,9 @@ USER appuser
 
 EXPOSE 8000
 
+# Add lightweight entrypoint to seed default roles/user on first boot
+RUN chmod +x docker/app/entrypoint.sh || true
+ENTRYPOINT ["/bin/sh", "/app/docker/app/entrypoint.sh"]
+
 # Your run.py must expose a module-level `app = create_app()`
 CMD ["gunicorn","-k","gthread","--threads","4","-w","2","-b","0.0.0.0:8000","app.wsgi:app"]
