@@ -3,7 +3,7 @@ import io, os, tempfile, zipfile
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple, Set
 
-from flask import current_app
+from flask import current_app, request
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
@@ -176,15 +176,77 @@ def _excel_bom_bytes(flat: List[Tuple[str,str,float]]) -> bytes:
     return out.getvalue()
 
 
-def _visual_list_pdf(flat: List[Tuple[str,str,float]]) -> Optional[bytes]:
+def _part_detail_url(pn: str, rev: str) -> str:
+    try:
+        root = (request.url_root or "").rstrip("/")  # prefers outer URL
+    except Exception:
+        root = ""
+    if not root:
+        root = (current_app.config.get("VITE_BACKEND_URL") or "http://localhost:5000").rstrip("/")
+    return f"{root}/ui/part/{pn}?rev={rev}"
+
+
+def _pil_to_rl_image(pil_img, width=None, height=None):
+    from reportlab.lib.utils import ImageReader
+    return ImageReader(pil_img)
+
+
+def _process_color_map() -> Dict[str, Tuple[float,float,float]]:
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    out: Dict[str, Tuple[float,float,float]] = {}
+    for k, v in meta.items():
+        if k.startswith("_"): continue
+        try:
+            r, g, b = [int(x.strip()) for x in (v.get("color") or "").split(",")[:3]]
+            out[k.lower()] = (max(0,min(r,255))/255.0, max(0,min(g,255))/255.0, max(0,min(b,255))/255.0)
+        except Exception:
+            pass
+    return out
+
+
+def _static_image_path(*names: str) -> Optional[str]:
+    base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static', 'images'))
+    for n in names:
+        p = os.path.join(base, n)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def _draw_svg_or_png(c, x, y, w, h, svg_name: str, png_fallback: str):
+    svg_path = _static_image_path(svg_name)
+    if svg_path:
+        try:
+            from svglib.svglib import svg2rlg
+            from reportlab.graphics import renderPDF
+            drawing = svg2rlg(svg_path)
+            sx = w / float(drawing.width or 1)
+            sy = h / float(drawing.height or 1)
+            s = min(sx, sy)
+            c.saveState(); c.translate(x, y); c.scale(s, s)
+            renderPDF.draw(drawing, c, 0, 0)
+            c.restoreState(); return
+        except Exception:
+            pass
+    png = _static_image_path(png_fallback)
+    if png:
+        try:
+            c.drawImage(png, x, y, width=w, height=h, preserveAspectRatio=True, anchor='sw', mask='auto')
+        except Exception:
+            pass
+
+
+def _visual_list_pdf(flat: List[Tuple[str,str,float]], root_pn: Optional[str] = None, root_rev: Optional[str] = None) -> Optional[bytes]:
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
+        import qrcode
+        from PIL import Image as PILImage
     except Exception:
         return None
     root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
-    # Map (pn,rev)->first preview PNG
+    # Build rows with: pn, rev, qty, imgpath
     rows: List[Tuple[str,str,float,str|None]] = []
     for pn, rev, qty in flat:
         q = PartFile.objects(part_number__iexact=pn, revision__iexact=(rev or ""), ext_group="png", is_dwg=False).order_by("-mtime_iso")
@@ -196,36 +258,176 @@ def _visual_list_pdf(flat: List[Tuple[str,str,float]]) -> Optional[bytes]:
                 path = None
         rows.append((pn, rev or "", qty, path))
 
+    # Layout close to legacy BoxyGrid (3 columns on A4 portrait)
+    box_w = 58*mm
+    box_h = 46*mm
+    gap = 6*mm
+    margin = 14*mm
+    W, H = A4
+    cols = max(1, int((W - 2*margin + gap) // (box_w + gap)))
+    # Aim for exactly 3 columns if space permits
+    cols = min(max(cols, 3), 4)
+    x0 = margin
+    y0 = H - margin
+
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
-    W, H = A4
-    margin = 15*mm
-    x_img = margin
-    x_txt = x_img + 35*mm
-    y = H - margin
-    row_h = 32*mm
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(margin, H - margin + 2*mm, "Visual List")
-    c.setFont("Helvetica", 10)
-    for pn, rev, qty, imgpath in rows:
-        y -= row_h
-        if y < margin + 20*mm:
-            c.showPage(); y = H - margin
-            c.setFont("Helvetica-Bold", 14)
-            c.drawString(margin, H - margin + 2*mm, "Visual List")
-            c.setFont("Helvetica", 10)
-            y -= row_h
-        # thumb
+    # Title with root PN/REV and description, plus logos
+    root_desc = ''
+    if root_pn:
+        try:
+            rpdoc = _part_by(root_pn, root_rev or "")
+            root_desc = getattr(rpdoc, 'description', '') or ''
+        except Exception:
+            pass
+    def header():
+        title = (f"{root_pn or ''} REV {root_rev or ''}").strip()
+        c.setFont("Helvetica-Bold", 18)
+        if title:
+            c.drawCentredString(W/2, H - margin + 6*mm, title)
+        if root_desc:
+            c.setFont("Helvetica", 12)
+            c.drawCentredString(W/2, H - margin - 1*mm, root_desc[:150])
+        # top-left logo (10mm)
+        _draw_svg_or_png(c, margin-8*mm, H - margin + 0.5*mm, 10*mm, 10*mm, 'logo.svg', 'tinylogo.png')
+        # bottom center footer
+        _draw_svg_or_png(c, W/2 - 8*mm, margin/3, 16*mm, 6*mm, 'tinyfooter.svg', 'tinyfooter.png')
+
+    header()
+
+    proc_colors = _process_color_map()
+    rows_per_page = max(1, int((H - 2*margin + gap) // (box_h + gap)))
+    cur_page = 0
+
+    def draw_cell(ix: int, pn: str, rev: str, qty: float, imgpath: Optional[str], desc: str = ""):
+        nonlocal cur_page
+        page_no = ix // (cols * rows_per_page)
+        if page_no != cur_page:
+            c.showPage(); header(); cur_page = page_no
+        pos = ix % (cols * rows_per_page)
+        col = pos % cols
+        row_in_page = pos // cols
+        # compute origin of the cell (top-left)
+        x = x0 + col * (box_w + gap)
+        y = y0 - (row_in_page + 1) * (box_h + gap)
+        # base box
+        c.setStrokeGray(0.8); c.setLineWidth(0.7)
+        c.setFillColorRGB(1,1,1)
+        c.rect(x, y, box_w, box_h, stroke=1, fill=1)
+        # process colored rings inside the border
+        pdoc = _part_by(pn, rev)
+        procs = _part_processes(pdoc)
+        inset = 0.8*mm
+        for i, p in enumerate(procs):
+            col = proc_colors.get(p.lower())
+            if not col: continue
+            off = (i+1) * inset
+            c.setStrokeColorRGB(*col); c.setLineWidth(2)
+            c.rect(x+off, y+off, box_w-2*off, box_h-2*off, stroke=1, fill=0)
+        # geometry: reserve top header (PN/REV/QTY) and bottom (desc + QR)
+        top_space = 18*mm
+        bottom_space = 18*mm
+        # image area (left side), vertically between top_space and bottom_space
+        ix_x = x + 3*mm
+        ix_y = y + bottom_space
+        ix_w = 30*mm
+        ix_h = box_h - (top_space + bottom_space)
         if imgpath:
             try:
-                c.drawImage(imgpath, x_img, y, width=30*mm, height=30*mm, preserveAspectRatio=True, anchor='sw', mask='auto')
+                c.drawImage(imgpath, ix_x, ix_y, width=ix_w, height=ix_h, preserveAspectRatio=True, anchor='sw', mask='auto')
             except Exception:
                 pass
-        # text
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(x_txt, y + 24*mm, f"{pn}  REV {rev}")
-        c.setFont("Helvetica", 10)
-        c.drawString(x_txt, y + 18*mm, f"Qty: {qty}")
+        else:
+            _draw_svg_or_png(c, ix_x, ix_y, ix_w, ix_h, 'tinylogo.svg', 'tinylogo.png')
+        # text area
+        # Top-left header: PN and REV (left-justified)
+        hl_x = x + 4*mm
+        hl_y = y + box_h - 6*mm
+        c.setFillGray(0.1)
+        c.setFont("Helvetica-Bold", 11.5)
+        c.drawString(hl_x, hl_y, f"{pn}")
+        c.setFont("Helvetica", 9.5); c.setFillGray(0.25)
+        c.drawString(hl_x, hl_y - 12, f"REV: {rev}")
+        # Qty at top-right in bold red, same size as PN
+        try:
+            from reportlab.pdfbase.pdfmetrics import stringWidth
+            qty_str = f"x{qty:g}" if isinstance(qty, float) else f"x{qty}"
+            c.setFont("Helvetica-Bold", 11.5)
+            c.setFillColorRGB(0.82, 0.0, 0.0)
+            tw = stringWidth(qty_str, "Helvetica-Bold", 11.5)
+            c.drawString(x + box_w - 4*mm - tw, hl_y, qty_str)
+            c.setFillGray(0.1)  # restore default dark text color
+        except Exception:
+            pass
+        # Description at bottom-left of box (avoid image/QR overlap)
+        if not desc and pdoc is not None:
+            try:
+                desc = (getattr(pdoc, 'attrs', {}) or {}).get('description') or ''
+            except Exception:
+                desc = ''
+        if desc:
+            d_x = x + 4*mm
+            d_y1 = y + 8*mm   # first line above bottom
+            line_h = 9.5
+            right_reserved = 18*mm + 6*mm  # QR + margin
+            max_w = max(20*mm, (x + box_w) - d_x - right_reserved)
+            try:
+                from reportlab.pdfbase.pdfmetrics import stringWidth
+                c.setFillGray(0.35); c.setFont("Helvetica", 8.8)
+                words = desc.split(); lines=[]; cur=''
+                for w in words:
+                    t=(cur+' '+w).strip()
+                    if stringWidth(t, "Helvetica", 8.8) <= max_w: cur=t
+                    else:
+                        if cur: lines.append(cur); cur=w
+                        if len(lines)>=2: break
+                if cur and len(lines)<2: lines.append(cur)
+                # draw from bottom upwards to keep inside area
+                if len(lines)>=1:
+                    c.drawString(d_x, d_y1, lines[0])
+                if len(lines)>=2:
+                    c.drawString(d_x, d_y1 + line_h, lines[1])
+            except Exception:
+                pass
+        # QR code (links to part detail) — draw last to ensure it sits on top
+        try:
+            qr_url = _part_detail_url(pn, rev)
+            qr = qrcode.QRCode(border=0, box_size=2)
+            qr.add_data(qr_url)
+            qr.make(fit=True)
+            qimg = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+            from reportlab.lib.utils import ImageReader
+            qbuf = io.BytesIO(); qimg.save(qbuf, format='PNG'); qbuf.seek(0)
+            qr_size = 18*mm
+            c.drawImage(ImageReader(qbuf), x + box_w - qr_size - 4*mm, y + 4*mm, width=qr_size, height=qr_size, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+
+        # Approval status icon (above the QR)
+        try:
+            approved = False
+            if pdoc is not None:
+                a = (getattr(pdoc, 'attrs', {}) or {})
+                approved = bool((a.get('approvedby') or a.get('approved_by') or '').strip())
+            icon_w = 12*mm
+            icon_h = 10*mm
+            icon_x = x + box_w - icon_w - 4*mm
+            icon_y = y + 4*mm + qr_size + 2*mm
+            if approved:
+                _draw_svg_or_png(c, icon_x, icon_y, icon_w, icon_h, 'approved.svg', 'approved.png')
+            else:
+                _draw_svg_or_png(c, icon_x, icon_y, icon_w, icon_h, 'notapproved.svg', 'notapproved.png')
+        except Exception:
+            pass
+
+    for i, (pn, rev, qty, ip) in enumerate(rows):
+        try:
+            pdoc = _part_by(pn, rev)
+            desc = (getattr(pdoc, 'description', '') or '')
+        except Exception:
+            desc = ''
+        draw_cell(i, pn, rev, qty, ip, desc)
+
     c.save()
     return buf.getvalue()
 
@@ -387,7 +589,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # Visual list PDF
     vis_pages = 0
     if opts.want_visual_list:
-        vis_pdf = _visual_list_pdf(filtered_flat)
+        vis_pdf = _visual_list_pdf(filtered_flat, opts.root_pn, opts.root_rev)
         if vis_pdf:
             if want_zip:
                 z.writestr("VisualList.pdf", vis_pdf)
@@ -413,7 +615,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         # optional VisualList and Index as preface
         preface_bytes: List[Tuple[str, bytes]] = []
         if opts.want_visual_list:
-            vis_pdf = _visual_list_pdf(filtered_flat)
+            vis_pdf = _visual_list_pdf(filtered_flat, opts.root_pn, opts.root_rev)
             if vis_pdf:
                 preface_bytes.append(("VisualList.pdf", vis_pdf))
         # first merge docs to measure page counts

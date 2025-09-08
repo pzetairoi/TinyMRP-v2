@@ -13,7 +13,7 @@ flask --app run.py user seed-roles
 flask --app run.py user create --email admin@admin.com --password admin
 flask --app run.py user grant-admin --email admin@admin.com
 
-
+ 
 #Update the frontend build
 npm run build  
 
