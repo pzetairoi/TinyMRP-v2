@@ -3,15 +3,109 @@
 {% block content %}
 <div class="container py-4">
   <h4 class="mb-3">Import BOM (ZIP)</h4>
-  <form action="{{ url_for('importer.upload_post') }}" method="post" enctype="multipart/form-data">
+  <form id="importForm" action="{{ url_for('importer.upload_post') }}" method="post" enctype="multipart/form-data">
     <div class="mb-3">
       <label class="form-label">Choose ZIP file</label>
-      <input class="form-control" type="file" name="file" accept=".zip" required>
+      <input id="fileZip" class="form-control" type="file" name="file" accept=".zip" required>
     </div>
-    <button class="btn btn-primary">Upload & Import</button>
+    <button id="btnImport" type="button" class="btn btn-primary">Upload & Import</button>
+    <button id="btnFallback" type="submit" class="btn btn-outline-secondary ms-2">Fallback submit</button>
   </form>
+  <div id="progressWrap" class="mt-3 d-none">
+    <div class="progress" style="height: 10px;">
+      <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width: 0%"></div>
+    </div>
+    <div id="progressText" class="small text-muted mt-2">Waiting to start…</div>
+  </div>
+
+  <div id="importResult" class="mt-4 d-none">
+    <h6>Import result</h6>
+    <div id="importSummary" class="small"></div>
+  </div>
   <p class="text-muted mt-3">
     Expected ZIP contents: <code>*_FLATBOM.txt</code> (lines of dictionaries) and <code>*_TREEBOM.txt</code> (tab-separated tree).
   </p>
 </div>
+{% block extra_scripts %}
+{{ super() }}
+<script>
+(function(){
+  const form = document.getElementById('importForm');
+  const fileInput = document.getElementById('fileZip');
+  const btn = document.getElementById('btnImport');
+  const btnFallback = document.getElementById('btnFallback');
+  const wrap = document.getElementById('progressWrap');
+  const bar = document.getElementById('progressBar');
+  const txt = document.getElementById('progressText');
+  const res = document.getElementById('importResult');
+  const sum = document.getElementById('importSummary');
+  let timer = null;
+
+  function setProgress(pct, label){
+    bar.style.width = Math.max(1, Math.min(100, pct)) + '%';
+    bar.setAttribute('aria-valuenow', Math.floor(pct));
+    if (label) txt.textContent = label;
+  }
+
+  function startIndeterminate(from){
+    let p = from;
+    if (timer) clearInterval(timer);
+    timer = setInterval(()=>{
+      if (p < 90) p += Math.max(1, Math.round((90 - p) * 0.08));
+      setProgress(p, 'Processing import…');
+    }, 700);
+  }
+
+  btn.addEventListener('click', function(){
+    const f = fileInput.files && fileInput.files[0];
+    if (!f){ alert('Please choose a ZIP file first.'); return; }
+    // UI state
+    btn.disabled = true; btnFallback.disabled = true; fileInput.disabled = true;
+    wrap.classList.remove('d-none'); res.classList.add('d-none'); sum.innerHTML='';
+    setProgress(2, 'Starting upload…');
+
+    const fd = new FormData(); fd.append('file', f, f.name);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '{{ url_for('importer.upload_api') }}');
+    xhr.responseType = 'json';
+
+    xhr.upload.onprogress = function(e){
+      if (e.lengthComputable){
+        const pct = Math.min(95, Math.round((e.loaded / e.total) * 80));
+        setProgress(pct, `Uploading… ${pct}%`);
+      }
+    };
+    xhr.onload = function(){
+      if (timer) { clearInterval(timer); timer = null; }
+      const ok = (xhr.status >= 200 && xhr.status < 300);
+      const data = xhr.response || {};
+      if (!ok || data.error){
+        setProgress(100, `Failed: ${data.error || ('HTTP '+xhr.status)}`);
+      } else {
+        setProgress(100, 'Done');
+        res.classList.remove('d-none');
+        const thumbs = data.thumbnails_generated || data.thumbnails_built || 0;
+        sum.innerHTML = `ZIP: <code>${data.zip || ''}</code><br>`+
+                        `Root: <code>${data.root || ''}</code><br>`+
+                        `Parts created: <b>${data.parts_created || 0}</b>, updated: <b>${data.parts_updated || 0}</b><br>`+
+                        `Links created: <b>${data.links_created || 0}</b>, skipped: <b>${data.links_skipped || 0}</b><br>`+
+                        `Artifacts added: <b>${data.artifacts_added || 0}</b>, thumbnails: <b>${thumbs}</b>`;
+      }
+      btn.disabled = false; btnFallback.disabled = false; fileInput.disabled = false;
+    };
+    xhr.onerror = function(){
+      if (timer) { clearInterval(timer); timer = null; }
+      setProgress(100, 'Network error');
+      btn.disabled = false; btnFallback.disabled = false; fileInput.disabled = false;
+    };
+
+    xhr.send(fd);
+    xhr.upload.onloadend = function(){
+      const cur = parseInt(bar.getAttribute('aria-valuenow')||'70',10);
+      startIndeterminate(Math.min(85, cur));
+    };
+  });
+})();
+</script>
+{% endblock %}
 {% endblock %}
