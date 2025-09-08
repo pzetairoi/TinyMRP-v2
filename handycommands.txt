@@ -28,3 +28,5 @@ docker compose exec app flask --app run.py user seed-roles
 docker compose exec app flask --app run.py user create --email admin@admin.com --password admin
 docker compose exec app flask --app run.py user grant-admin --email admin@admin.com
 
+# Just to recreate the app
+docker compose up -d --force-recreate app
