@@ -961,7 +961,7 @@ function bestUrl(f: FileRow): string {
                     <div className="mb-3">
                       <div className="fw-semibold small">Consumed components</div>
                       <div className="form-check">
-                        <input className="form-check-input" type="radio" name="consumed" id="cHide" checked={!includeConsumed} onChange={()=>setIncludeConsumed(false)} />
+                        <input className="form-check-input" type="radio" name="consumed" id="cHide" checked={!includeConsumed} onChange={()=>setIncludeConsumed(true)} />
                         <label className="form-check-label" htmlFor="cHide">Hide consumed</label>
                       </div>
                       <div className="form-check">
@@ -1340,3 +1340,4 @@ function bestUrl(f: FileRow): string {
     </div>
   );
 }
+

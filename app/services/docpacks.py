@@ -148,29 +148,269 @@ def _collect_files(pn_rev_qty: Iterable[Tuple[str,str,float]], file_types: Optio
     return out
 
 
-def _excel_bom_bytes(flat: List[Tuple[str,str,float]]) -> bytes:
+def _bom_occurrences(
+    root_pn: str,
+    root_rev: Optional[str],
+    *,
+    include_consumed: bool = True,
+    terminal_processes: Optional[Iterable[str]] = None,
+) -> Dict[Tuple[str,str], List[Tuple[int, float]]]:
+    """Return mapping (pn,rev) -> list of (level, qty_at_that_level).
+    Level starts at 1 for immediate children of the root.
+    Applies the same consumed/terminal filtering as the visual list/BOM flatten.
+    """
+    occ: Dict[Tuple[str,str], List[Tuple[int,float]]] = {}
+    terminals: Set[str] = set([str(x).strip().lower() for x in (terminal_processes or [])])
+
+    def children(pn: str, rev: Optional[str]):
+        rev = _norm_rev(rev)
+        if "parent_rev" in BOMLink._fields:
+            if rev is not None:
+                return BOMLink.objects(parent_pn=pn, parent_rev=rev)
+        return BOMLink.objects(parent_pn=pn)
+
+    stack: List[Tuple[str,str,int,float]] = []
+    for l in children(root_pn, root_rev):
+        stack.append((l.child_pn, getattr(l, "child_rev", "") or "", 1, float(getattr(l, "qty", 1.0) or 1.0)))
+
+    while stack:
+        pn, rev, level, q = stack.pop()
+        key = (pn, _norm_rev(rev))
+        occ.setdefault(key, []).append((level, q))
+        if not include_consumed:
+            pdoc = _part_by(pn, rev)
+            procs = set(_part_processes(pdoc))
+            if terminals and (procs & terminals):
+                # stop at consumed parts
+                continue
+        for l in children(pn, rev):
+            cq = float(getattr(l, "qty", 1.0) or 1.0) * q
+            stack.append((l.child_pn, getattr(l, "child_rev", "") or "", level+1, cq))
+    return occ
+
+
+def _excel_bom_bytes(
+    root_pn: str,
+    root_rev: Optional[str],
+    flat: List[Tuple[str,str,float]],
+    occ: Dict[Tuple[str,str], List[Tuple[int,float]]]
+) -> bytes:
     try:
         import openpyxl
         from openpyxl.utils import get_column_letter
+        from openpyxl.drawing.image import Image as XLImage
+        from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
+        from openpyxl.styles import Alignment, Font, PatternFill
+        import json as _json
+        import datetime as _dt
     except Exception:
         # Fallback: CSV in memory
         import csv
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["Part Number","Revision","Qty"]) 
+        w.writerow(["Part Number","Revision","Qty","Levels","Level Qtys"]) 
         for pn, rev, qty in flat:
-            w.writerow([pn, rev, qty])
+            lvls = ", ".join(str(l) for l,_ in occ.get((pn,_norm_rev(rev)), []))
+            lq   = ", ".join(f"{q:g}" for _,q in occ.get((pn,_norm_rev(rev)), []))
+            w.writerow([pn, rev, qty, lvls, lq])
         return buf.getvalue().encode("utf-8")
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "BOM"
-    ws.append(["Part Number","Revision","Qty"]) 
+    ws.title = f"BOM_{(root_pn or 'root')[:20]}"
+
+    # Determine union of attribute keys
+    attr_keys: Set[str] = set()
+    parts_cache: Dict[Tuple[str,str], Optional[Part]] = {}
+    for pn, rev, _ in flat:
+        key = (pn, _norm_rev(rev))
+        if key not in parts_cache:
+            parts_cache[key] = _part_by(pn, rev)
+        p = parts_cache[key]
+        if p and isinstance(getattr(p, 'attrs', None), dict):
+            for k in p.attrs.keys():
+                if not k: continue
+                attr_keys.add(str(k))
+    # Primary columns enforced (exact names per request)
+    qty_col = 'total qty (full BOM)'
+    header_main = [
+        'thumbnail',
+        'partnumber','revision','description','approvedby','material','process','finish','mass',
+        'link','oem','oem partnumber',
+        qty_col,'level','level qty'
+    ]
+    # Remove any attribute keys that collide with primary names (case-insensitive)
+    ignore = set([h.lower() for h in header_main] + ['oem_partnumber','oem partnumber'])
+    header_attrs = sorted([k for k in attr_keys if k and k.lower() not in ignore])
+    header = header_main + header_attrs
+    ws.append(header)
+    ws.freeze_panes = 'A2'
+
+    # Column widths
+    widths = {
+        'thumbnail': 14,
+        'partnumber': 26,
+        'revision': 10,
+        qty_col: 14,
+        'level': 10,
+        'level qty': 14,
+        'description': 40,
+        'approvedby': 18,
+        'material': 18,
+        'process': 18,
+        'thickness': 12,
+        'finish': 16,
+        'mass': 12,
+        'link': 30,
+        'oem': 18,
+        'oem partnumber': 22,
+    }
+    for i, col in enumerate(header, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = widths.get(col, 16)
+
+    # Map header name -> column index for robust addressing
+    header_index: Dict[str, int] = { name: idx+1 for idx, name in enumerate(header) }
+
+    # Helper to find preview PNG path
+    file_root = (current_app.config.get('FILE_ROOT_LOCAL') or '').rstrip('/\\')
+    fallback_logo = _static_image_path('tinylogo.png')
+    def preview_png_path(pn: str, rev: str) -> Optional[str]:
+        q = PartFile.objects(part_number__iexact=pn, revision__iexact=_norm_rev(rev), ext_group='png', is_dwg=False).order_by('-mtime_iso')
+        pf = q.first()
+        if pf:
+            pth = pf.path if os.path.isabs(pf.path) else os.path.join(file_root, pf.rel_path.replace('/', os.sep))
+            if os.path.isfile(pth):
+                return pth
+        return fallback_logo
+
+    # helper to coerce any value into an Excel-friendly scalar
+    def _cell(v):
+        if v is None:
+            return ""
+        if isinstance(v, (list, tuple, set)):
+            return ", ".join(str(x) for x in v)
+        # allow datetime/date as-is
+        try:
+            import datetime as __dt
+            if isinstance(v, (__dt.date, __dt.datetime)):
+                return v
+        except Exception:
+            pass
+        if isinstance(v, dict):
+            try:
+                return _json.dumps(v, ensure_ascii=False)
+            except Exception:
+                return str(v)
+        # keep numbers/bools
+        if isinstance(v, (int, float, bool)):
+            return v
+        return str(v)
+
+    # Write rows
+    row_idx = 1
     for pn, rev, qty in flat:
-        ws.append([pn, rev, qty])
-    # basic column widths
-    for i, w in enumerate([24,10,8], start=1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+        row_idx += 1
+        key = (pn, _norm_rev(rev))
+        p = parts_cache.get(key)
+        attrs = (getattr(p, 'attrs', {}) or {}) if p else {}
+        levels_list = [l for l,_ in occ.get(key, [])]
+        qtys_list = [q for _,q in occ.get(key, [])]
+        # processes as comma-separated
+        proc_list = []
+        if p and isinstance(getattr(p, 'processes', None), list):
+            proc_list = [str(x) for x in p.processes if x]
+        elif isinstance(attrs.get('processes'), list):
+            proc_list = [str(x) for x in attrs.get('processes') if x]
+        else:
+            for k in ('process','process2','secondprocess','process3','thirdprocess'):
+                if attrs.get(k): proc_list.append(str(attrs.get(k)))
+
+        values = {
+            'thumbnail': '',
+            'partnumber': pn,
+            'revision': _norm_rev(rev),
+            'description': getattr(p, 'description', '') or attrs.get('description','') or '',
+            'approvedby': attrs.get('approvedby','') or attrs.get('approved_by',''),
+            'material': attrs.get('material',''),
+            'process': ", ".join(proc_list),
+            'finish': attrs.get('finish',''),
+            'mass': attrs.get('mass','') or attrs.get('weight',''),
+            'link': attrs.get('link','') or attrs.get('oem_internet',''),
+            'oem': attrs.get('oem','') or attrs.get('manufacturer',''),
+            'oem partnumber': attrs.get('oem_partnumber','') or attrs.get('mfr_part',''),
+            qty_col: qty,
+            'level': ", ".join(str(x) for x in levels_list),
+            'level qty': ", ".join(f"{x:g}" for x in qtys_list),
+        }
+        # Merge all attributes at the end, blanks when missing
+        for k in header_attrs:
+            values[k] = attrs.get(k, '')
+        row = [_cell(values.get(k, '')) for k in header]
+        ws.append(row)
+        # Adjust row height for thumbnail
+        ws.row_dimensions[row_idx].height = 56
+        # Add image if we have a path
+        img_path = preview_png_path(pn, _norm_rev(rev))
+        if img_path and os.path.isfile(img_path):
+            try:
+                img = XLImage(img_path)
+                img.height = 48
+                img.width = 48
+                # Anchor to the 'thumbnail' cell (A{row}) using TwoCellAnchor so it moves/sizes with cell
+                # openpyxl uses 0-based indices for AnchorMarker
+                r0 = row_idx - 1
+                img.anchor = TwoCellAnchor(
+                    _from=AnchorMarker(col=0, colOff=5_000, row=r0, rowOff=5_000),
+                    to=AnchorMarker(col=0, colOff=500_000, row=r0+1, rowOff=0),
+                    editAs='twoCell'
+                )
+                ws.add_image(img)
+            except Exception:
+                pass
+        # Hyperlink partnumber to the app part-detail page
+        try:
+            app_url = _part_detail_url(pn, _norm_rev(rev))
+            pn_col = header_index.get('partnumber') or (header.index('partnumber') + 1)
+            pcell = ws.cell(row=row_idx, column=pn_col)
+            pcell.hyperlink = app_url
+            pcell.font = Font(color='0000EE', underline='single')
+        except Exception:
+            pass
+
+        # Hyperlink on link column if URL present (external only)
+        try:
+            raw = (values.get('link') or '').strip()
+            if raw:
+                url = raw
+                if not (url.startswith('http://') or url.startswith('https://')):
+                    url = 'http://' + url
+                # Force the link into column J (10)
+                lcell = ws.cell(row=row_idx, column=10)
+                # HYPERLINK formula for compatibility
+                disp = raw
+                lcell.value = f'=HYPERLINK("{url}","{disp}")'
+                try:
+                    lcell.hyperlink = url
+                except Exception:
+                    pass
+                lcell.font = Font(color='0000EE', underline='single')
+        except Exception:
+            pass
+
+    # Header style & autofilter
+    bold = Font(b=True)
+    center = Alignment(horizontal='center')
+    main_fill = PatternFill(fill_type='solid', fgColor='000000')
+    main_font = Font(b=True, color='FFFFFF')
+    for col_idx in range(1, len(header)+1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = bold
+        cell.alignment = center
+        if col_idx <= len(header_main):
+            cell.fill = main_fill
+            cell.font = main_font
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(header))}{row_idx}"
+
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
@@ -571,7 +811,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
     # Excel BOM
     if opts.want_excel_bom:
-        xlsx = _excel_bom_bytes(filtered_flat)
+        occ_map = _bom_occurrences(opts.root_pn, opts.root_rev, include_consumed=bool(opts.include_consumed), terminal_processes=["welding","purchase","machine"])
+        xlsx = _excel_bom_bytes(opts.root_pn, opts.root_rev, filtered_flat, occ_map)
         z.writestr("BOM.xlsx", xlsx)
 
     # Selected files
