@@ -41,8 +41,9 @@ RUN if [ -f requirements.txt ]; then \
 
 # Put built frontend where your app expects it:
 #   app/static/parts-ui/.vite/manifest.json
+# Vite is configured to output to /app/static/parts-ui in the fe stage
 RUN mkdir -p app/static/parts-ui
-COPY --from=fe /fe/dist/ app/static/parts-ui/
+COPY --from=fe /app/static/parts-ui/ app/static/parts-ui/
 
 # Drop privileges (optional)
 RUN useradd -ms /bin/bash appuser
