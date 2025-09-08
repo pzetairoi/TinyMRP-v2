@@ -98,6 +98,87 @@ docker compose up -d --force-recreate app
 
 ---
 
+## Production Deployment (Ubuntu + Docker)
+
+This repo includes a ready-to-run Docker Compose stack (`mongo`, `app`, `nginx`). Follow these steps on a fresh Ubuntu server.
+
+1) Install Docker + Compose plugin
+
+```bash
+sudo apt-get update && sudo apt-get install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release; echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+2) Get the repo onto the server
+
+```bash
+sudo mkdir -p /opt && cd /opt
+sudo git clone <your-repo-url> tinymrp_v2
+cd /opt/tinymrp_v2
+```
+
+3) Prepare the Deliverables folder (host path)
+
+```bash
+sudo mkdir -p /srv/tinymrp/deliverables
+# For testing, ensure the container can write thumbnails here
+sudo chmod 0777 /srv/tinymrp/deliverables
+# (optional tighter) sudo chown -R 1000:1000 /srv/tinymrp/deliverables
+```
+
+4) Configure environment (.env)
+
+Edit `.env` and set at minimum:
+
+- `DELIVERABLES_DIR=/srv/tinymrp/deliverables` (Linux absolute path)
+- `HTTP_PORT=80` (or another free port if 80 is taken)
+- Optional first-run admin seed: `DEFAULT_ADMIN_EMAIL`, `DEFAULT_ADMIN_PASSWORD`.
+
+5) Build and start
+
+```bash
+sudo docker compose up -d --build
+docker compose ps
+```
+
+6) Test
+
+- App: `http://YOUR_SERVER_IP/` (or `http://YOUR_SERVER_IP:<HTTP_PORT>`)
+- Files: `http://YOUR_SERVER_IP/deliverables/`
+- First login: `admin@admin.com / admin` (or your `DEFAULT_ADMIN_*`).
+
+### Mappings & Paths (repo-specific)
+
+- Port mapping:
+  - `docker-compose.yml` → `nginx.ports`: host `${HTTP_PORT}` → container `80`.
+  - Set `HTTP_PORT` in `.env`.
+- Deliverables bind mount:
+  - `.env` → `DELIVERABLES_DIR=/srv/tinymrp/deliverables`.
+  - `docker-compose.yml` mounts `${DELIVERABLES_DIR}` to `/data/deliverables` in both `app` and `nginx`.
+- App file roots and URL prefix:
+  - `docker-compose.yml` sets `FILES_LOCAL_ROOT=/data/deliverables` and `FILES_URL_PREFIX=/deliverables` for the app.
+  - Backend reads these in `app/__init__.py` and also exposes legacy aliases `FILE_ROOT_LOCAL`/`FILE_ROOT_HTTP` for internal services.
+- Nginx static paths:
+  - `docker/nginx/nginx.conf` serves both `/deliverables/` and `/Deliverables/` via `alias /data/deliverables/`.
+- Frontend file base:
+  - `frontend/.env.production` uses `VITE_FILES_BASE_URL=/deliverables`; UI normalizes links accordingly.
+
+### First-Run Seeding
+
+On first boot, if the database has no users, the app auto-creates roles and a default admin using `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` (or falls back to `admin@admin.com` / `admin`).
+
+### Troubleshooting Quick Checks
+
+- Port busy → change `.env: HTTP_PORT` and `docker compose up -d`.
+- App 502 → `docker compose logs -f app` and `docker compose logs -f nginx`.
+- Files 404 → verify host folder path and mounts: `docker compose exec app sh -lc 'ls -la /data/deliverables'`.
+- Thumbnails not writing → relax perms on `/srv/tinymrp/deliverables` during testing.
+
+---
+
 ## Frontend (React/Vite)
 
 - Build outputs to `app/static/parts-ui` (manifest included). The Flask routes under `/ui/*` read this manifest to inject JS/CSS.
@@ -176,4 +257,3 @@ Data helpers (see `app/cli.py`):
 ## License
 
 This repository inherits the spirit of the original TinyMRP project. Add your license here if distributing.
-
