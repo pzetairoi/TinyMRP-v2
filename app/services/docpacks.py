@@ -7,6 +7,7 @@ from flask import current_app, request
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
+from app.services.attrs import harvest_part_attrs, ALIASES
 
 
 @dataclass
@@ -219,7 +220,7 @@ def _excel_bom_bytes(
     ws = wb.active
     ws.title = f"BOM_{(root_pn or 'root')[:20]}"
 
-    # Determine union of attribute keys
+    # Determine union of attribute keys (canonicalized using ALIASES on existing keys only)
     attr_keys: Set[str] = set()
     parts_cache: Dict[Tuple[str,str], Optional[Part]] = {}
     for pn, rev, _ in flat:
@@ -228,9 +229,13 @@ def _excel_bom_bytes(
             parts_cache[key] = _part_by(pn, rev)
         p = parts_cache[key]
         if p and isinstance(getattr(p, 'attrs', None), dict):
-            for k in p.attrs.keys():
-                if not k: continue
-                attr_keys.add(str(k))
+            for k in (p.attrs or {}).keys():
+                if not k:
+                    continue
+                kl = str(k).strip().lower()
+                canon = ALIASES.get(kl, kl)
+                if canon:
+                    attr_keys.add(str(canon))
     # Primary columns enforced (exact names per request)
     qty_col = 'total qty (full BOM)'
     header_main = [
@@ -312,7 +317,8 @@ def _excel_bom_bytes(
         row_idx += 1
         key = (pn, _norm_rev(rev))
         p = parts_cache.get(key)
-        attrs = (getattr(p, 'attrs', {}) or {}) if p else {}
+        # Normalize attributes to handle mixed-case and aliases (e.g., Link/LINK/oem_link -> link)
+        attrs = harvest_part_attrs(p) if p else {}
         levels_list = [l for l,_ in occ.get(key, [])]
         qtys_list = [q for _,q in occ.get(key, [])]
         # processes as comma-separated
@@ -334,10 +340,10 @@ def _excel_bom_bytes(
             'material': attrs.get('material',''),
             'process': ", ".join(proc_list),
             'finish': attrs.get('finish',''),
-            'mass': attrs.get('mass','') or attrs.get('weight',''),
-            'link': attrs.get('link','') or attrs.get('oem_internet',''),
+            'mass': attrs.get('mass',''),
+            'link': attrs.get('link',''),
             'oem': attrs.get('oem','') or attrs.get('manufacturer',''),
-            'oem partnumber': attrs.get('oem_partnumber','') or attrs.get('mfr_part',''),
+            'oem partnumber': attrs.get('oem_partnumber',''),
             qty_col: qty,
             'level': ", ".join(str(x) for x in levels_list),
             'level qty': ", ".join(f"{x:g}" for x in qtys_list),
