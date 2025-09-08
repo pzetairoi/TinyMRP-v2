@@ -2,7 +2,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from typing import Iterable, Tuple
-from PIL import Image
+from PIL import Image, ImageOps, ImageFilter
 from flask import current_app
 from app.models.artifact import PartFile
 
@@ -48,16 +48,57 @@ def _gen_one(src_abs: str, dst_abs: str):
     fmt = _fmt()
     maxw, maxh = _max_size()
     _ensure_dir(os.path.dirname(dst_abs))
+
+    def _crop_and_background_pil(im: Image.Image) -> Image.Image:
+        """
+        Approximate OLD/tinylib/imageprocess.cropandbackground using Pillow:
+        - Build a mask of non-white pixels (any value > 0 after inverted grayscale)
+        - Morphologically close then open with 3x3 to smooth small holes
+        - Set alpha to this mask (transparent background)
+        - Crop to bounding box if sufficiently large
+        """
+        # Work on RGB base
+        base_rgb = im.convert("RGB")
+        # Invert grayscale so non-white becomes >0
+        inv = ImageOps.invert(base_rgb.convert("L"))
+        # Threshold at >0
+        mask = inv.point(lambda p: 255 if p > 5 else 0, mode='1').convert('L')
+        # Close (dilate then erode) and Open (erode then dilate) with 3x3
+        mask = mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
+        mask = mask.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
+
+        # Compose RGBA with computed alpha
+        rgba = base_rgb.convert("RGBA")
+        rgba.putalpha(mask)
+
+        # Crop if area is big enough (match old heuristic ~8000 px)
+        bbox = mask.getbbox()
+        if bbox:
+            x0, y0, x1, y1 = bbox
+            w, h = (x1 - x0), (y1 - y0)
+            if w * h > 8000:
+                rgba = rgba.crop(bbox)
+        return rgba
+
     with Image.open(src_abs) as im:
-        im = im.convert("RGBA") if fmt == "PNG" else im.convert("RGB")
-        im.thumbnail((maxw, maxh))   # preserves aspect ratio
+        # Apply crop + transparent background first, then scale
+        processed = _crop_and_background_pil(im)
+        processed.thumbnail((maxw, maxh))   # preserves aspect ratio
+
+        # Prepare save params and mode per format
         save_kwargs = {}
         if fmt in ("JPEG", "JPG"):
+            # Flatten onto white for formats without alpha
+            bg = Image.new("RGB", processed.size, (255, 255, 255))
+            bg.paste(processed, mask=processed.split()[-1])  # use alpha channel
+            out_im = bg
             save_kwargs["quality"] = int(current_app.config.get("THUMB_QUALITY") or 88)
             save_kwargs["optimize"] = True
-        if fmt == "PNG":
+        else:
+            out_im = processed
             save_kwargs["optimize"] = True
-        im.save(dst_abs, fmt, **save_kwargs)
+
+        out_im.save(dst_abs, fmt, **save_kwargs)
 
 def generate_thumbs_for_artifacts(docs: Iterable[PartFile]) -> int:
     """
