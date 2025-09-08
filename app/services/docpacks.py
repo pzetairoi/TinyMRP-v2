@@ -537,7 +537,6 @@ def _visual_list_pdf(flat: List[Tuple[str,str,float]], root_pn: Optional[str] = 
         # top-left logo (10mm)
         _draw_svg_or_png(c, margin-8*mm, H - margin + 0.5*mm, 10*mm, 10*mm, 'logo.svg', 'tinylogo.png')
         # bottom center footer
-        _draw_svg_or_png(c, W/2 - 8*mm, margin/3, 16*mm, 6*mm, 'tinyfooter.svg', 'tinyfooter.png')
 
     header()
 
@@ -678,7 +677,198 @@ def _visual_list_pdf(flat: List[Tuple[str,str,float]], root_pn: Optional[str] = 
     return buf.getvalue()
 
 
-def _overlay_numbers_and_stamps(pdf_bytes: bytes, stamps: List[str]) -> bytes:
+def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
+    """Generate a single-page PDF cover with PN/REV, description, centered image, and a properties table at the bottom."""
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+    except Exception:
+        return None
+
+    # Resolve part and attributes
+    pdoc = _part_by(root_pn, root_rev or "")
+    attrs = harvest_part_attrs(pdoc) if pdoc else {}
+    desc = (getattr(pdoc, 'description', '') or attrs.get('description') or '') if pdoc else ''
+
+    # Image selection (PNG preview or fallback logo)
+    root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
+    png_path = None
+    try:
+        q = PartFile.objects(part_number__iexact=root_pn, revision__iexact=(root_rev or ""), ext_group="png", is_dwg=False).order_by("-mtime_iso")
+        pf = q.first()
+        if pf:
+            pth = pf.path if os.path.isabs(pf.path) else os.path.join(root, pf.rel_path.replace("/", os.sep))
+            if os.path.isfile(pth):
+                png_path = pth
+    except Exception:
+        pass
+    if not png_path:
+        png_path = _static_image_path('tinylogo.png')
+
+    # Layout
+    W, H = A4
+    margin = 18*mm
+    head_h = 35*mm
+    table_h = 80*mm  # more room for bottom table
+    img_y0 = margin + table_h
+    img_h = max(40*mm, H - (margin + head_h + table_h) - 10*mm)
+    img_w = W - 2*margin
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+
+    # Header: PN REV (big) then description
+    title = f"{root_pn}  REV {root_rev or ''}".strip()
+    c.setFont("Helvetica-Bold", 24)
+    tw = stringWidth(title, "Helvetica-Bold", 24)
+    c.drawString(margin, H - margin - 8*mm, title)
+    # Description
+    y = H - margin - 16*mm
+    if desc:
+        c.setFont("Helvetica", 13)
+        # Wrap description to available width
+        avail_w = W - 2*margin
+        words = desc.split()
+        lines = []
+        cur = ''
+        for w in words:
+            t = (cur + ' ' + w).strip()
+            if stringWidth(t, "Helvetica", 13) <= avail_w:
+                cur = t
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+                if len(lines) >= 3:
+                    break
+        if cur and len(lines) < 3:
+            lines.append(cur)
+        for ln in lines:
+            c.drawString(margin, y, ln)
+            y -= 6*mm
+
+    # Main properties right below description (compact)
+    main_keys = ["approvedby", "material", "processes", "finish", "mass", "oem", "oem_partnumber", "link"]
+    def _val(k):
+        v = attrs.get(k, "") if attrs else ""
+        if k == "processes" and isinstance(v, list):
+            v = ", ".join([str(x) for x in v if x])
+        return v
+    c.setFont("Helvetica", 10)
+    for k in main_keys:
+        v = _val(k)
+        if not v:
+            continue
+        label = k.replace('_',' ').title() if k != 'oem_partnumber' else 'OEM Partnumber'
+        line = f"{label}: {v}"
+        if stringWidth(line, "Helvetica", 10) > (W - 2*margin):
+            # trim
+            while line and stringWidth(line + '…', "Helvetica", 10) > (W - 2*margin):
+                line = line[:-1]
+            line = line + '…'
+        c.drawString(margin, y, line)
+        y -= 5.2*mm
+
+    # Image: centered within the image box
+    if png_path and os.path.isfile(png_path):
+        try:
+            c.drawImage(png_path, margin, img_y0, width=img_w, height=img_h, preserveAspectRatio=True, anchor='sw', mask='auto')
+        except Exception:
+            pass
+    else:
+        _draw_svg_or_png(c, margin, img_y0, img_w, img_h, 'tinylogo.svg', 'tinylogo.png')
+
+    # Properties table (bottom area, several columns)
+    # Prepare key/value pairs, excluding title fields
+    def labelize(k: str) -> str:
+        if not k:
+            return ''
+        s = str(k).replace('_', ' ').strip()
+        # simple title-case but keep common acronyms
+        s = ' '.join([('OEM' if w.lower()=="oem" else ('UOM' if w.lower()=="uom" else w.capitalize())) for w in s.split()])
+        return s
+
+    kv = []
+    if attrs:
+        # Compose processes text if present
+        a = dict(attrs)
+        if isinstance(a.get('processes'), list):
+            a['processes'] = ", ".join([str(x) for x in a.get('processes') if x])
+        for k, v in sorted(a.items()):
+            if k in ("partnumber", "revision", "description"):
+                continue
+            if v in (None, ""):
+                continue
+            kv.append((labelize(k), str(v)))
+
+    col_count = 3 if len(kv) >= 12 else (2 if len(kv) >= 6 else 1)
+    avail_w = W - 2*margin
+    col_w = avail_w / max(1, col_count)
+    row_h = 8.0*mm  # allow wrapping of labels
+    x0 = margin
+    y0 = margin + row_h * int(min(12, max(6, (table_h/row_h))))  # ensure we stay within table_h
+    # draw from bottom up
+    c.setFont("Helvetica", 8.8)
+    rows_per_col = int((table_h - 6)/row_h)
+    rows_per_col = max(1, rows_per_col)
+    # helpers for wrapping and measuring
+    def _wrap_text(text: str, font_name: str, font_size: float, max_w: float, max_lines: int = 2) -> list[str]:
+        words = (text or '').split()
+        lines = []
+        cur = ''
+        for w in words:
+            t = (cur + ' ' + w).strip()
+            if stringWidth(t, font_name, font_size) <= max_w:
+                cur = t
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+                if len(lines) >= (max_lines - 1):
+                    break
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+        return lines
+
+    label_maxw = max(60.0, col_w * 0.42)  # points
+    pad = 6.0
+    for idx, (k, v) in enumerate(kv[: rows_per_col * col_count]):
+        col = idx // rows_per_col
+        row = idx % rows_per_col
+        x = x0 + col * col_w
+        y = margin + table_h - (row+1) * row_h
+        # key (wrap within label area) and value to the right
+        try:
+            c.setFont("Helvetica-Bold", 8.8)
+            k_lines = _wrap_text(f"{k}:", "Helvetica-Bold", 8.8, label_maxw, max_lines=2)
+            # draw label lines stacked upward within the row
+            ly = y
+            for li in k_lines:
+                c.drawString(x, ly, li)
+                ly -= (row_h/2.2)
+        except Exception:
+            pass
+        # value trimmed to available width
+        try:
+            c.setFont("Helvetica", 8.6)
+            vx = x + label_maxw + pad
+            vmaxw = col_w - (label_maxw + pad) - 4
+            val = v
+            if stringWidth(val, "Helvetica", 8.6) > vmaxw:
+                while val and stringWidth(val + '…', "Helvetica", 8.6) > vmaxw:
+                    val = val[:-1]
+                val = (val + '…') if val else ''
+            c.drawString(vx, y, val)
+        except Exception:
+            pass
+
+    c.save()
+    return buf.getvalue()
+
+
+def _overlay_numbers_and_stamps(pdf_bytes: bytes, stamps: List[str], *, skip_first_page: bool = False) -> bytes:
     try:
         from reportlab.pdfgen import canvas
         from PyPDF2 import PdfReader, PdfWriter
@@ -710,10 +900,18 @@ def _overlay_numbers_and_stamps(pdf_bytes: bytes, stamps: List[str]) -> bytes:
         # build overlay for this page
         obuf = io.BytesIO()
         c = canvas.Canvas(obuf, pagesize=(W, H))
-        # page number bottom-right
-        c.setFont("Helvetica-Bold", 9)
-        c.setFillGray(0.2)
-        c.drawRightString(W - 20, 18, f"{i} / {total}")
+        # tiny footer bottom-center (logo/marker) on every page
+        try:
+            # 16mm x 6mm centered
+            from reportlab.lib.units import mm
+            _draw_svg_or_png(c, W/2 - 8*mm, 10, 16*mm, 6*mm, 'tinyfooter.svg', 'tinyfooter.png')
+        except Exception:
+            pass
+        # page number bottom-right (skip on cover page if requested)
+        if not (skip_first_page and i == 1):
+            c.setFont("Helvetica-Bold", 9)
+            c.setFillGray(0.2)
+            c.drawRightString(W - 20, 18, f"{i} / {total}")
         # stamps (semi-transparent)
         try:
             for key, spath in sel_paths:
@@ -846,87 +1044,180 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
     # PDF binder (with index & page numbers)
     if opts.want_pdf_binder:
-        # prepare list of PDFs
-        binder_groups = set([g.lower() for g in (opts.file_types or [])])
-        binder_files = [f for f in chosen_files if (f.ext or "").lower()=="pdf"]
-        if opts.binder_add_datasheets:
-            binder_files += [f for f in chosen_files if (f.ext_group or "").lower()=="datasheet" and (f.ext or "").lower()=="pdf"]
-        # absolute paths
-        root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
-        pdf_paths = []
-        for f in binder_files:
-            rp = f.rel_path.replace("\\","/") if f.rel_path else os.path.basename(f.path)
-            abs_path = f.path if os.path.isabs(f.path) else os.path.join(root, rp.replace("/", os.sep))
-            if os.path.isfile(abs_path):
-                pdf_paths.append(abs_path)
-        # optional VisualList and Index as preface
+        # Gather PDFs independent of UI file filter (always include PDFs if present)
+        # Build unique (pn,rev) list including the root
+        pairs: List[Tuple[str, str]] = []
+        seen_pairs = set()
+        for pn, rev, _ in filtered_flat + [(opts.root_pn, opts.root_rev or "", 1.0)]:
+            key = (pn, _norm_rev(rev))
+            if key not in seen_pairs:
+                seen_pairs.add(key)
+                pairs.append(key)
+
+        root_dir = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
+        pdf_paths: List[str] = []
+        try:
+            for pn, rev in pairs:
+                q = PartFile.objects(part_number__iexact=pn)
+                if rev is not None:
+                    q = q.filter(revision__iexact=(rev or ""))
+                # pull all PDFs; later we may filter out datasheets if not requested
+                for f in q.filter(ext__iexact="pdf"):
+                    if not getattr(f, 'rel_path', None) and not getattr(f, 'path', None):
+                        continue
+                    if (getattr(f, 'ext_group', '') or '').lower() == 'datasheet' and not bool(getattr(opts, 'binder_add_datasheets', False)):
+                        continue
+                    rp = f.rel_path.replace("\\","/") if f.rel_path else os.path.basename(f.path)
+                    abs_path = f.path if os.path.isabs(f.path) else os.path.join(root_dir, rp.replace("/", os.sep))
+                    if os.path.isfile(abs_path):
+                        pdf_paths.append(abs_path)
+        except Exception:
+            pass
+
+        # Preface: Cover page, Index (always), and optional VisualList
         preface_bytes: List[Tuple[str, bytes]] = []
+        cover = _cover_page_pdf(opts.root_pn, opts.root_rev)
+        if cover:
+            preface_bytes.append(("Cover.pdf", cover))
+        vis_pdf = None
         if opts.want_visual_list:
             vis_pdf = _visual_list_pdf(filtered_flat, opts.root_pn, opts.root_rev)
             if vis_pdf:
                 preface_bytes.append(("VisualList.pdf", vis_pdf))
-        # first merge docs to measure page counts
+
+        # Merge body first to measure page counts
         body_bytes, body_starts = _merge_pdfs(pdf_paths)
-        # Count preface pages (visual list, etc.) to offset index numbers
-        preface_pages = 0
+
+        # Build index in two passes to account for its own page count, include Visual Summary entry, dot leaders, and metadata
         try:
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.units import mm
+            from reportlab.pdfbase.pdfmetrics import stringWidth
             from PyPDF2 import PdfReader
-            for _, b in preface_bytes:
-                preface_pages += len(PdfReader(io.BytesIO(b)).pages)
+
+            # preface counts excluding index (cover + optional visual)
+            cover_pages = 0
+            vis_pages = 0
+            for name, b in preface_bytes:
+                if name.lower().startswith("cover"):
+                    cover_pages += len(PdfReader(io.BytesIO(b)).pages)
+                if name.lower().startswith("visual"):
+                    vis_pages += len(PdfReader(io.BytesIO(b)).pages)
+
+            # Helper to build the index PDF with an assumed index page count
+            def _build_index(assumed_idx_pages: int) -> bytes:
+                idx_io = io.BytesIO()
+                c = canvas.Canvas(idx_io, pagesize=A4)
+                W, H = A4
+                left_x = 20*mm
+                right_x = W - 20*mm
+                y = H - 20*mm
+                # Title
+                c.setFont("Helvetica-Bold", 18)
+                c.drawString(left_x, y, "Index")
+                y -= 8*mm
+                # Binder metadata
+                c.setFont("Helvetica", 10)
+                try:
+                    import datetime as _dt
+                    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    now = ""
+                pdoc = _part_by(opts.root_pn, opts.root_rev or "")
+                desc = (getattr(pdoc, 'description', '') or '') if pdoc else ''
+                c.drawString(left_x, y, f"Generated: {now}"); y -= 6*mm
+                c.drawString(left_x, y, f"Part: {opts.root_pn}    Rev: {opts.root_rev or ''}"); y -= 6*mm
+                if desc:
+                    # wrap description
+                    avail_w = right_x - left_x
+                    words = desc.split(); cur='';
+                    while words and y > (H/2):
+                        t = (cur + ' ' + words[0]).strip()
+                        if stringWidth(t, "Helvetica", 10) <= avail_w:
+                            cur = t; words.pop(0)
+                        else:
+                            if cur:
+                                c.drawString(left_x, y, f"Description: {cur}")
+                                y -= 6*mm; cur=''
+                            else:
+                                # extremely long word, truncate
+                                c.drawString(left_x, y, f"Description: {t[:60]}…"); y-=6*mm; words.pop(0)
+                                break
+                    if cur and y > (H/2):
+                        c.drawString(left_x, y, f"Description: {cur}"); y -= 6*mm
+                y -= 2*mm
+                # Entries
+                c.setFont("Helvetica", 10)
+                dot_w = stringWidth('.', 'Helvetica', 10)
+                def _entry(name: str, page_no: int):
+                    nonlocal y
+                    if y < 20*mm:
+                        c.showPage(); y = H - 20*mm; c.setFont("Helvetica", 10)
+                    label = name
+                    left_w = stringWidth(label, 'Helvetica', 10)
+                    page_s = str(page_no)
+                    right_w = stringWidth(page_s, 'Helvetica', 10)
+                    dots_area = max(0, right_x - (left_x + left_w) - right_w - 6)
+                    n_dots = int(dots_area / max(dot_w, 0.1))
+                    c.drawString(left_x, y, label)
+                    if n_dots > 0:
+                        c.drawString(left_x + left_w + 3, y, '.' * n_dots)
+                    c.drawRightString(right_x, y, page_s)
+                    y -= 6*mm
+
+                # Visual summary entry (if present), starts after cover + index
+                if vis_pdf:
+                    vis_start = cover_pages + assumed_idx_pages + 1
+                    _entry("Visual Summary", vis_start)
+                # Body entries: base name without extension
+                pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0)
+                for pth, start in zip(pdf_paths, body_starts):
+                    base = os.path.splitext(os.path.basename(pth))[0]
+                    _entry(base, pre_body_offset + start)
+                c.save()
+                return idx_io.getvalue()
+
+            # First pass (assume 1 page), then measure and rebuild
+            idx_b1 = _build_index(assumed_idx_pages=1)
+            idx_pages = len(PdfReader(io.BytesIO(idx_b1)).pages)
+            idx_b2 = _build_index(assumed_idx_pages=idx_pages)
+
+            # Place index after cover
+            insert_pos = 1 if cover else 0
+            preface_bytes.insert(insert_pos, ("Index.pdf", idx_b2))
         except Exception:
             pass
-        # build index PDF using body_starts (+ preface)
-        if opts.binder_add_index:
-            try:
-                from reportlab.pdfgen import canvas
-                from reportlab.lib.pagesizes import A4
-                from reportlab.lib.units import mm
-                idx_buf = io.BytesIO()
-                c = canvas.Canvas(idx_buf, pagesize=A4)
-                W,H = A4
-                c.setFont("Helvetica-Bold", 16)
-                c.drawString(20*mm, H-20*mm, "Index")
-                c.setFont("Helvetica", 10)
-                y = H-30*mm
-                for pth, start in zip(pdf_paths, body_starts):
-                    base = os.path.basename(pth)
-                    c.drawString(20*mm, y, base)
-                    c.drawRightString(W-20*mm, y, str(start + preface_pages))
-                    y -= 6*mm
-                    if y < 20*mm:
-                        c.showPage(); y = H-20*mm
-                c.save()
-                preface_bytes.insert(0, ("Index.pdf", idx_buf.getvalue()))
-            except Exception:
-                pass
-        # Merge final binder: preface (visual list + index) + body
+
+        # Merge final binder: preface (cover + index + visual list) + body
         all_segments: List[bytes] = [b for _, b in preface_bytes]
         if body_bytes:
             all_segments.append(body_bytes)
         final_pdf: bytes = b""
         if all_segments:
-            # merge segments
             seg_paths = []
             tmpdir = tempfile.mkdtemp()
             try:
                 for i, b in enumerate(all_segments):
                     p = os.path.join(tmpdir, f"seg_{i}.pdf")
-                    with open(p, 'wb') as fh: fh.write(b)
+                    with open(p, 'wb') as fh:
+                        fh.write(b)
                     seg_paths.append(p)
                 merged_pdf, _ = _merge_pdfs(seg_paths)
                 final_pdf = merged_pdf or b""
             finally:
                 pass
-        # page numbers + stamps overlay
-        if opts.binder_page_numbers or any([opts.stamp_quote, opts.stamp_confidential, opts.stamp_approved, opts.stamp_wip, opts.stamp_inprogress]):
-            stamps = []
-            if opts.stamp_quote: stamps.append('quote')
-            if opts.stamp_confidential: stamps.append('classified')
-            if opts.stamp_approved: stamps.append('approved')
-            if opts.stamp_wip: stamps.append('wip')
-            if opts.stamp_inprogress: stamps.append('inprogress')
-            if final_pdf:
-                final_pdf = _overlay_numbers_and_stamps(final_pdf, stamps)
+
+        # Always apply page numbers (skip cover page); include stamps if requested
+        stamps = []
+        if opts.stamp_quote: stamps.append('quote')
+        if opts.stamp_confidential: stamps.append('classified')
+        if opts.stamp_approved: stamps.append('approved')
+        if opts.stamp_wip: stamps.append('wip')
+        if opts.stamp_inprogress: stamps.append('inprogress')
+        if final_pdf:
+            final_pdf = _overlay_numbers_and_stamps(final_pdf, stamps, skip_first_page=bool(cover))
+
         if final_pdf:
             if want_zip:
                 z.writestr("Binder.pdf", final_pdf)
