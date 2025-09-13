@@ -5,6 +5,8 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs import preview_png_urls_for
 from app.services.attrs import harvest_part_attrs
+from flask_login import current_user
+from app.services.acl import allowed_parts_for
 from app.services.acl import require_items_view
 from app.services.audit import log_action
 
@@ -65,6 +67,15 @@ def bom_tree():
             p = Part.objects(part_number=pn).order_by("-updated_at").first()
         if not p:
             return jsonify([])
+        # ACL: root must be allowed if enforcement active
+        try:
+            allowed = allowed_parts_for(current_user)
+            if isinstance(allowed, set):
+                key = (p.part_number, p.revision or "")
+                if key not in allowed:
+                    return jsonify([]), 403
+        except Exception:
+            pass
         root = _node(p.part_number, rev=(p.revision or None))
         root["children"] = []   # lazy
         try:
@@ -85,6 +96,15 @@ def bom_tree():
                 child_pn = getattr(l, "child_pn", None)
                 if child_pn and child_pn != parent:
                     c_rev = getattr(l, "child_rev", None) if hasattr(l, "child_rev") else None
+                    # ACL filter per child if enforced
+                    try:
+                        allowed = allowed_parts_for(current_user)
+                        if isinstance(allowed, set):
+                            key = (child_pn, (c_rev or ""))
+                            if key not in allowed:
+                                continue
+                    except Exception:
+                        pass
                     kids.append(_node(child_pn, l, rev=c_rev))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}:{(parent_rev or '')}")
@@ -101,6 +121,14 @@ def bom_tree():
                 c = getattr(l, "child", None)
                 child_pn = getattr(c, "part_number", None) if c else None
                 if child_pn and child_pn != parent:
+                    try:
+                        allowed = allowed_parts_for(current_user)
+                        if isinstance(allowed, set):
+                            # best effort: allow if any rev of child is permitted
+                            if not any(apn == child_pn for apn, _ in allowed):
+                                continue
+                    except Exception:
+                        pass
                     kids.append(_node(child_pn, l))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}")

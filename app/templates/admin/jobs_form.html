@@ -1,0 +1,94 @@
+{% extends "security/base.html" %}
+{% block title %}{{ 'Edit job' if job else 'New job' }} — Admin{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-10 col-lg-9">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h5 mb-3">{{ 'Edit job' if job else 'New job' }}</h1>
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Job number</label>
+              <input class="form-control" type="text" name="job_number" value="{{ job.job_number if job else '' }}" required>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label">Description</label>
+              <input class="form-control" type="text" name="description" value="{{ job.description if job else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-6">
+              <label class="form-label">Participants (users)</label>
+              <div class="row row-cols-2 g-2">
+                {% set assigned = (job.participants | map(attribute='id') | map('string') | list) if job else [] %}
+                {% for u in users %}
+                <div class="col">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="participants" id="u-{{ u.id }}" value="{{ u.id }}" {% if job and (u.id|string) in assigned %}checked{% endif %}>
+                    <label class="form-check-label" for="u-{{ u.id }}">{{ u.email }}</label>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Vendors (suppliers)</label>
+              <div class="row row-cols-2 g-2">
+                {% set vend = (job.vendors | map(attribute='id') | map('string') | list) if job else [] %}
+                {% for s in suppliers %}
+                <div class="col">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="vendors" id="s-{{ s.id }}" value="{{ s.id }}" {% if job and (s.id|string) in vend %}checked{% endif %}>
+                    <label class="form-check-label" for="s-{{ s.id }}">{{ s.name }}</label>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Customer</label>
+              <select class="form-select" name="customer">
+                <option value="">—</option>
+                {% for c in customers %}
+                <option value="{{ c.id }}" {% if job and job.customer and c.id==job.customer.id %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label">Job BOM (one per line: PN,REV,qty). Lines beginning with # are ignored.</label>
+            <div class="d-flex justify-content-end mb-2">
+              <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForJob()">Add part(s)</button>
+            </div>
+            <textarea id="bom_text" class="form-control" name="bom_text" rows="6">{{ bom_text if bom_text is defined else '' }}</textarea>
+          </div>
+
+          <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+  function openPartPickerForJob(){
+    window.open('/ui/parts?pick=1', 'partpicker', 'width=1100,height=720');
+  }
+  window.addEventListener('message', function(ev){
+    try{
+      const data = ev.data || {};
+      if(data.type === 'pick-parts' && Array.isArray(data.items)){
+        const ta = document.getElementById('bom_text');
+        const lines = data.items.map(it => `${it.pn},${it.rev||''},1`).join('\n');
+        ta.value = (ta.value ? (ta.value + '\n') : '') + lines;
+        ta.dispatchEvent(new Event('input'));
+      }
+    }catch(e){}
+  });
+</script>
+{% endblock %}

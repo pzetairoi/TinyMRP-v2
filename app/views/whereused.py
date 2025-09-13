@@ -7,6 +7,8 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs import thumb_urls_for
 from app.services.attrs import harvest_part_attrs
+from flask_login import login_required, current_user
+from app.services.acl import require_items_view, allowed_parts_for
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
@@ -86,6 +88,13 @@ def whereused_lazy():
     elif sort_field == "qty":
         rows.sort(key=lambda r: (r.get("qty") or 0), reverse=reverse)
 
+    # ACL: filter rows by whether parent is allowed (if enforced)
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set):
+            rows = [r for r in rows if (r.get("parent_pn"), (r.get("parent_rev") or "")) in allowed]
+    except Exception:
+        pass
     total = len(rows)
     page = rows[first:first+rows_per_page]
     try:

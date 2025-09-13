@@ -1,0 +1,99 @@
+{% extends "security/base.html" %}
+{% block title %}{{ 'Edit order' if order else 'New order' }} — Admin{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-10 col-lg-9">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h5 mb-3">{{ 'Edit order' if order else 'New order' }}</h1>
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">Order number</label>
+              <input class="form-control" type="text" name="order_number" value="{{ order.order_number if order else '' }}" required>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label">Description</label>
+              <input class="form-control" type="text" name="description" value="{{ order.description if order else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-4">
+              <label class="form-label">Type</label>
+              <select class="form-select" name="kind">
+                {% set k = order.kind if order else 'purchase' %}
+                <option value="purchase" {% if k=='purchase' %}selected{% endif %}>Purchase</option>
+                <option value="work" {% if k=='work' %}selected{% endif %}>Work</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Job</label>
+              <select class="form-select" name="job">
+                <option value="">—</option>
+                {% for j in jobs %}
+                <option value="{{ j.id }}" {% if order and order.job and j.id==order.job.id %}selected{% endif %}>{{ j.job_number }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Supplier</label>
+              <select class="form-select" name="supplier">
+                <option value="">—</option>
+                {% for s in suppliers %}
+                <option value="{{ s.id }}" {% if order and order.supplier and s.id==order.supplier.id %}selected{% endif %}>{{ s.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-6">
+              <label class="form-label">Customer</label>
+              <select class="form-select" name="customer">
+                <option value="">—</option>
+                {% for c in customers %}
+                <option value="{{ c.id }}" {% if order and order.customer and c.id==order.customer.id %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Status</label>
+              <input class="form-control" type="text" name="status" value="{{ order.status if order else 'open' }}" disabled>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label">Lines (PN,REV,qty,uom,note per line; # comments)</label>
+            <div class="d-flex justify-content-end mb-2">
+              <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForOrder()">Add part(s)</button>
+            </div>
+            <textarea id="order_lines" class="form-control" name="lines" rows="8">{{ lines if lines is defined else '' }}</textarea>
+          </div>
+
+          <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+  function openPartPickerForOrder(){
+    window.open('/ui/parts?pick=1', 'partpicker', 'width=1100,height=720');
+  }
+  window.addEventListener('message', function(ev){
+    try{
+      const data = ev.data || {};
+      if(data.type === 'pick-parts' && Array.isArray(data.items)){
+        const ta = document.getElementById('order_lines');
+        const lines = data.items.map(it => `${it.pn},${it.rev||''},1,EA,`).join('\n');
+        ta.value = (ta.value ? (ta.value + '\n') : '') + lines;
+        ta.dispatchEvent(new Event('input'));
+      }
+    }catch(e){}
+  });
+</script>
+{% endblock %}

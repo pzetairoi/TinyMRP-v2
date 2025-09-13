@@ -1,6 +1,6 @@
 # app/views/parts.py
 from flask import Blueprint, request, jsonify, current_app
-from flask_login import login_required
+from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
 import re
 from base64 import urlsafe_b64encode
@@ -14,7 +14,7 @@ from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
-from app.services.acl import require_items_view
+from app.services.acl import require_items_view, allowed_parts_for
 from app.services.audit import log_action
 
 
@@ -24,61 +24,90 @@ bp = Blueprint("parts_api", __name__, url_prefix="/api")
 @login_required
 @require_items_view
 @bp.route("/parts_lazy", methods=["GET", "POST"])
-@csrf.exempt 
+@csrf.exempt
 def parts_lazy():
     body = request.get_json(force=True, silent=True) or {}
     first = int(body.get("first", 0))
     rows = int(body.get("rows", 25))
     sort_field = (body.get("sortField") or "part_number")
     sort_order = int(body.get("sortOrder", 1))  # 1 asc, -1 desc
-    order_by = f"-{sort_field}" if sort_order == -1 else sort_field
     filters = body.get("filters", {})
 
-    ALLOWED = {"part_number", "description", "category"}
+    # Sorting support including attrs
+    sort_map = {
+        "material": "attrs__material",
+        "finish":   "attrs__finish",
+        "mass":     "attrs__mass",
+        "revision": "revision",
+        "category": "category",
+        "description": "description",
+        "part_number": "part_number",
+    }
+    ALLOWED = set(sort_map.keys())
     if sort_field not in ALLOWED:
         sort_field = "part_number"
-    order_by = f"-{sort_field}" if sort_order == -1 else sort_field
+    mapped = sort_map.get(sort_field, sort_field)
+    order_by = f"-{mapped}" if sort_order == -1 else mapped
 
-    def add_filter(q: Q, field: str):
-        f = filters.get(field) or {}
+    def _terms(s: str):
+        return [t for t in re.split(r"\s+", (s or "").strip().lower()) if t]
+
+    def add_filter(q: Q, key: str, *fields):
+        f = filters.get(key) or {}
         val = (f.get("value") or "").strip()
-        mode = (f.get("matchMode") or "contains")
         if not val:
             return q
-        suffix = {
-            "contains": "icontains",
-            "equals": "iexact",
-            "startsWith": "istartswith",
-            "endsWith": "iendswith",
-        }.get(mode, "icontains")
-        return q & Q(**{f"{field}__{suffix}": val})
+        for t in _terms(val):
+            or_q = Q()
+            for fld in fields:
+                or_q = or_q | Q(**{f"{fld}__icontains": t})
+            q = q & or_q
+        return q
 
     q = Q()
-    for fld in ("part_number","revision", "description","revision", "category"):
-        q = add_filter(q, fld)
+    # field filters
+    q = add_filter(q, "part_number", "part_number")
+    q = add_filter(q, "revision", "revision")
+    q = add_filter(q, "description", "description")
+    q = add_filter(q, "category", "category")
+    # attribute filters
+    q = add_filter(q, "material", "attrs__material")
+    q = add_filter(q, "finish",   "attrs__finish")
+    # process list/attrs
+    q = add_filter(q, "process", "processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes")
+    # global filter across common fields
+    g = (filters.get("global") or {}).get("value")
+    if g:
+        for t in _terms(str(g)):
+            orq = (
+                Q(part_number__icontains=t) | Q(revision__icontains=t) | Q(description__icontains=t)
+                | Q(category__icontains=t) | Q(attrs__material__icontains=t) | Q(attrs__finish__icontains=t)
+                | Q(processes__icontains=t)
+            )
+            q = q & orq
 
     qs = Part.objects(q)
     filtered = qs.count()
 
-    docs = qs.order_by(order_by).only("part_number","revision", "description", "category").skip(first).limit(rows)
-    data = [{"part_number": p.part_number,
-             "revision": p.revision or "", 
-             "description": p.description or "",
-             "category": p.category or ""} for p in docs]
-    
+    docs = qs.order_by(order_by).only("part_number","revision","description","category","attrs","processes").skip(first).limit(rows)
+
     out = []
-    for p in data:  # p is your Part doc
-        pn = p["part_number"]
-        rev = (p["revision"] or None)  # pass None so helper prefers "" then latest
+    for p in docs:
+        attrs = harvest_part_attrs(p)
+        pn = p.part_number
+        rev = p.revision or ""
         out.append({
             "part_number": pn,
-            "description": p["description"],
-            "category": p["category"],
             "revision": rev,
-            # 👇 always include thumbnail candidates
-            "thumb_urls": thumb_urls_for(pn, rev),
+            "description": attrs.get("description") or p.description or "",
+            "category": attrs.get("category") or p.category or "",
+            "material": attrs.get("material",""),
+            "finish": attrs.get("finish",""),
+            "mass": attrs.get("mass",""),
+            "processes": normalize_processes(attrs, current_app.config.get("PROCESS_META", {})),
+            "thumb_urls": thumb_urls_for(pn, rev or None),
         })
-        
+
     try:
         log_action("parts.list", resource_type="parts", resource=f"first={first},rows={rows}")
     except Exception:
@@ -107,6 +136,20 @@ def part_detail():
         p = Part.objects(part_number=pn).order_by("-updated_at").first()
     if not p:
         return jsonify({"error": "not found"}), 404
+
+    # ACL enforcement: if enabled and user is not admin, ensure PN/REV is allowed
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set):
+            key = (p.part_number, p.revision or "")
+            if key not in allowed:
+                try:
+                    log_action("part.view.deny", resource_type="part", resource=f"{key[0]}:{key[1]}")
+                except Exception:
+                    pass
+                return jsonify({"error": "forbidden"}), 403
+    except Exception:
+        pass
 
     attrs = harvest_part_attrs(p)
     
@@ -167,3 +210,4 @@ def part_detail():
         "files": files,
         "whereused": wu_rows,          # ← add this
     })
+

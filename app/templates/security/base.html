@@ -53,51 +53,48 @@
                    href="{{ url_for('main.app_home') }}">App</a>
               </li>
               
+              <li class="nav-item"><a class="nav-link" href="/ui/parts">Parts</a></li>
               <li class="nav-item"><a class="nav-link" href="{{ url_for('importer.upload_form') }}">Import BOM</a></li>
 
-
-              <li class="nav-item"><a class="nav-link" href="/ui/parts">Parts</a></li>
-
-
-              {# Examples of feature groups you likely had in your old navbar. 
-                 If an endpoint doesn't exist yet, leave the link as '#' or comment it out. #}
+              {% if has_perm('jobs.view') or has_perm('jobs.manage') %}
               <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="navItems" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                  Items
-                </a>
-                <ul class="dropdown-menu" aria-labelledby="navItems">
-                  <li><a class="dropdown-item" href="#">Browse Items</a></li>
-                  <li><a class="dropdown-item" href="#">New Item</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="#">BOM Explorer</a></li>
+                <a class="nav-link dropdown-toggle" href="#" id="navJobs" role="button" data-bs-toggle="dropdown" aria-expanded="false">Jobs</a>
+                <ul class="dropdown-menu" aria-labelledby="navJobs">
+                  {% if has_perm('jobs.view') %}<li><a class="dropdown-item" href="{{ url_for('admin_jobs.jobs_list') }}">All Jobs</a></li>{% endif %}
+                  {% if has_perm('jobs.manage') %}<li><a class="dropdown-item" href="{{ url_for('admin_jobs.jobs_new') }}">New Job</a></li>{% endif %}
                 </ul>
               </li>
+              {% endif %}
 
+              {% if has_perm('orders.view') or has_perm('orders.manage') %}
               <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="navWO" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                  Work Orders
-                </a>
-                <ul class="dropdown-menu" aria-labelledby="navWO">
-                  <li><a class="dropdown-item" href="#">Open Orders</a></li>
-                  <li><a class="dropdown-item" href="#">Create Order</a></li>
-                  <li><a class="dropdown-item" href="#">Close Order</a></li>
+                <a class="nav-link dropdown-toggle" href="#" id="navOrders" role="button" data-bs-toggle="dropdown" aria-expanded="false">Orders</a>
+                <ul class="dropdown-menu" aria-labelledby="navOrders">
+                  {% if has_perm('orders.view') %}<li><a class="dropdown-item" href="{{ url_for('admin_orders.orders_list') }}">All Orders</a></li>{% endif %}
+                  {% if has_perm('orders.manage') %}<li><a class="dropdown-item" href="{{ url_for('admin_orders.orders_new') }}">New Order</a></li>{% endif %}
                 </ul>
               </li>
+              {% endif %}
 
+              {% if has_perm('suppliers.view') or has_perm('suppliers.manage') %}
               <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="navInv" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                  Inventory
-                </a>
-                <ul class="dropdown-menu" aria-labelledby="navInv">
-                  <li><a class="dropdown-item" href="#">Receive</a></li>
-                  <li><a class="dropdown-item" href="#">Issue</a></li>
-                  <li><a class="dropdown-item" href="#">Adjust</a></li>
+                <a class="nav-link dropdown-toggle" href="#" id="navSupp" role="button" data-bs-toggle="dropdown" aria-expanded="false">Suppliers</a>
+                <ul class="dropdown-menu" aria-labelledby="navSupp">
+                  {% if has_perm('suppliers.view') %}<li><a class="dropdown-item" href="{{ url_for('admin_suppliers.suppliers_list') }}">All Suppliers</a></li>{% endif %}
+                  {% if has_perm('suppliers.manage') %}<li><a class="dropdown-item" href="{{ url_for('admin_suppliers.suppliers_new') }}">New Supplier</a></li>{% endif %}
                 </ul>
               </li>
+              {% endif %}
 
-              <li class="nav-item">
-                <a class="nav-link" href="#">Reports</a>
+              {% if has_perm('customers.view') or has_perm('customers.manage') %}
+              <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle" href="#" id="navCust" role="button" data-bs-toggle="dropdown" aria-expanded="false">Customers</a>
+                <ul class="dropdown-menu" aria-labelledby="navCust">
+                  {% if has_perm('customers.view') %}<li><a class="dropdown-item" href="{{ url_for('admin_customers.customers_list') }}">All Customers</a></li>{% endif %}
+                  {% if has_perm('customers.manage') %}<li><a class="dropdown-item" href="{{ url_for('admin_customers.customers_new') }}">New Customer</a></li>{% endif %}
+                </ul>
               </li>
+              {% endif %}
             {% endif %}
           </ul>
 
@@ -110,11 +107,25 @@
                   Admin
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navAdmin">
+                  <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Dashboard</a></li>
+                  <li><hr class="dropdown-divider"></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
                   <li><hr class="dropdown-divider"></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_jobs.jobs_list') }}">Jobs</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_jobs.jobs_new') }}">New Job</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_suppliers.suppliers_new') }}">New Supplier</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_customers.customers_list') }}">Customers</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_customers.customers_new') }}">New Customer</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_orders.orders_list') }}">Orders</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_orders.orders_new') }}">New Order</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a></li>
                   <li><a class="dropdown-item text-danger" href="{{ url_for('admin.purge_parts') }}">Purge Parts Data</a></li>
-                  <li><a class="dropdown-item" href="#">Settings</a></li>
                 </ul>
               </li>
             {% endif %}

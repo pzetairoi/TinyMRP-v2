@@ -1,10 +1,11 @@
 from __future__ import annotations
 from flask import Blueprint, request, send_file, jsonify
-from flask_login import login_required
+from flask_login import login_required, current_user
 from io import BytesIO
 from typing import List
 
 from app.services.docpacks import DocPackOptions, build_docpack
+from app.services.acl import allowed_parts_for
 from app.services.acl import require_items_view
 from app.services.audit import log_action
 
@@ -27,6 +28,13 @@ def options():
     if not pn:
         return jsonify({"error":"missing pn"}), 400
 
+    # ACL: enforce root access
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and (pn, (rev or "")) not in allowed:
+            return jsonify({"error":"forbidden"}), 403
+    except Exception:
+        pass
     flat = _flatten_bom(pn, rev, full=(depth != "top"))
     # include the root itself for artifacts
     flat.append((pn, rev or "", 1.0))
@@ -114,6 +122,13 @@ def build():
         current_app.logger.warning("/api/docpacks/build missing pn. payload=%s form=%s args=%s", payload, dict(data), dict(args))
         return jsonify({"error": "Missing parameter 'pn' (also accepted: part_number, partnumber, root_pn)"}), 400
 
+    # ACL: enforce root access
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and (opts.root_pn, (opts.root_rev or "")) not in allowed:
+            return jsonify({"error":"forbidden"}), 403
+    except Exception:
+        pass
     name, data, mime = build_docpack(opts)
     try:
         log_action(
