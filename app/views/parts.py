@@ -14,12 +14,15 @@ from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
+from app.services.acl import require_items_view
+from app.services.audit import log_action
 
 
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
 @login_required
+@require_items_view
 @bp.route("/parts_lazy", methods=["GET", "POST"])
 @csrf.exempt 
 def parts_lazy():
@@ -76,7 +79,10 @@ def parts_lazy():
             "thumb_urls": thumb_urls_for(pn, rev),
         })
         
-    print(out)
+    try:
+        log_action("parts.list", resource_type="parts", resource=f"first={first},rows={rows}")
+    except Exception:
+        pass
 
     return jsonify({"data": out, "totalRecords": filtered})
 
@@ -84,6 +90,8 @@ def parts_lazy():
 
 
 @bp.get("/part_detail")
+@login_required
+@require_items_view
 def part_detail():
     pn = (request.args.get("pn") or "").strip()
     # Respect explicit ?rev= if provided; otherwise fall back to latest for PN.
@@ -131,6 +139,16 @@ def part_detail():
 
     wu_rows = _rows_for_child_pn(p.part_number, p.revision)
 
+
+    # Audit log: part detail viewed
+    try:
+        log_action(
+            action="part.view",
+            resource_type="part",
+            resource=f"{p.part_number}:{p.revision or ''}",
+        )
+    except Exception:
+        pass
 
     return jsonify({
         "part": {

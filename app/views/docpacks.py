@@ -1,14 +1,19 @@
 from __future__ import annotations
 from flask import Blueprint, request, send_file, jsonify
+from flask_login import login_required
 from io import BytesIO
 from typing import List
 
 from app.services.docpacks import DocPackOptions, build_docpack
+from app.services.acl import require_items_view
+from app.services.audit import log_action
 
 bp = Blueprint("docpacks_api", __name__, url_prefix="/api/docpacks")
 
 
 @bp.get("/options")
+@login_required
+@require_items_view
 def options():
     from app.models.part import Part
     from app.models.bom import BOMLink
@@ -40,12 +45,19 @@ def options():
     meta = current_app.config.get("PROCESS_META", {})
     procs = [k for k in meta.keys() if not k.startswith("_")]
 
+    try:
+        # pn/rev already parsed above
+        log_action("docpack.options", resource_type="docpack", resource=f"{pn}:{rev or ''}")
+    except Exception:
+        pass
     return jsonify({
         "file_types": sorted(groups),
         "processes": sorted(procs),
     })
 
 @bp.post("/build")
+@login_required
+@require_items_view
 def build():
     # Accept JSON, form, or querystring inputs (robust for manual calls)
     payload = request.get_json(silent=True) or {}
@@ -103,5 +115,21 @@ def build():
         return jsonify({"error": "Missing parameter 'pn' (also accepted: part_number, partnumber, root_pn)"}), 400
 
     name, data, mime = build_docpack(opts)
+    try:
+        log_action(
+            "docpack.build",
+            resource_type="docpack",
+            resource=f"{opts.root_pn}:{(opts.root_rev or '')}",
+            meta={
+                "depth": opts.depth,
+                "types": ",".join(opts.file_types or []),
+                "process_mode": opts.process_mode,
+                "excel": bool(opts.want_excel_bom),
+                "binder": bool(opts.want_pdf_binder),
+                "visual": bool(opts.want_visual_list),
+            },
+        )
+    except Exception:
+        pass
     bio = BytesIO(data)
     return send_file(bio, mimetype=mime, as_attachment=True, download_name=name)

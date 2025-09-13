@@ -4,9 +4,15 @@ from flask import abort
 from mongoengine.errors import DoesNotExist, ValidationError
 from flask_security import roles_required
 from flask_security.utils import hash_password
+from app.services.audit import log_action
 from ..models.auth import User, Role
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+@bp.get("/")
+@roles_required("admin")
+def admin_index():
+    return render_template("admin/index.html")
 
 @bp.route("/users")
 @roles_required("admin")
@@ -33,6 +39,10 @@ def users_create():
         if role_ids:
             u.roles = list(Role.objects(id__in=role_ids))
         u.save()
+        try:
+            log_action("admin.user.create", resource_type="user", resource=email)
+        except Exception:
+            pass
         flash("User created.", "success")
         return redirect(url_for("admin.users_list"))
     roles = Role.objects().order_by("name")
@@ -55,7 +65,28 @@ def users_edit(user_id):
         except ValidationError:
             # if any id is malformed, ignore them (or flash an error if you prefer)
             u.roles = list(Role.objects(id__in=[rid for rid in role_ids if len(rid) == 24]))
+
+        # Optional password reset
+        new_pw = (request.form.get("new_password") or "").strip()
+        new_pw2 = (request.form.get("confirm_password") or "").strip()
+        if new_pw or new_pw2:
+            if not new_pw:
+                flash("New password cannot be empty.", "error");
+                return redirect(url_for("admin.users_edit", user_id=user_id))
+            if new_pw != new_pw2:
+                flash("Password confirmation does not match.", "error");
+                return redirect(url_for("admin.users_edit", user_id=user_id))
+            u.password = hash_password(new_pw)
+            try:
+                log_action("admin.user.password", resource_type="user", resource=str(u.email))
+            except Exception:
+                pass
+
         u.save()
+        try:
+            log_action("admin.user.edit_roles", resource_type="user", resource=str(u.email))
+        except Exception:
+            pass
         flash("User updated.", "success")
         return redirect(url_for("admin.users_list"))
 
@@ -79,6 +110,10 @@ def purge_parts():
         n_bom   = BOMLink.objects.delete()
         n_parts = Part.objects.delete()
 
+        try:
+            log_action("admin.purge_parts", resource_type="system", resource=f"parts={n_parts},bom={n_bom},files={n_files}")
+        except Exception:
+            pass
         flash(f"Deleted parts={n_parts}, bom_links={n_bom}, part_files={n_files}", "success")
         return redirect(url_for("admin.users_list"))
 

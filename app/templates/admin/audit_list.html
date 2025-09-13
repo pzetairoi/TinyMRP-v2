@@ -1,0 +1,54 @@
+{% extends "security/base.html" %}
+{% block title %}Audit Log — Admin{% endblock %}
+{% block content %}
+<div class="container my-4">
+  <h1 class="h4 mb-3">Audit Log</h1>\n  <p class="text-muted">DB alias: {{ alias }} | URI: {{ uri }} | ping: {{ "ok" if ping_ok else "fail" }}</p>\n  <p class="text-muted">Total entries: {{ total }}</p>
+  <form method="get" class="row g-2 align-items-center mb-3">
+    <div class="col-auto">
+      <input class="form-control" type="text" name="q" placeholder="Search email, action, resource, IP" value="{{ q or '' }}">
+    </div>
+    <div class="col-auto">
+      <input class="form-control" type="number" name="limit" min="1" max="1000" value="{{ limit or 200 }}" title="Max rows">
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-primary" type="submit">Filter</button>
+    </div>
+  </form>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-striped align-middle">
+      <thead>
+        <tr>
+          <th style="white-space:nowrap">Time (UTC)</th>
+          <th>Email</th>
+          <th>Roles</th>
+          <th>Action</th>
+          <th>Resource</th>
+          <th>IP</th>
+          <th>User-Agent</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in logs %}
+        <tr>
+          <td style="white-space:nowrap">{{ e.ts.strftime('%Y-%m-%d %H:%M:%S') if e.ts else '' }}</td>
+          <td>{{ e.email }}</td>
+          <td>{{ e.roles }}</td>
+          <td>{{ e.action }}</td>
+          <td style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.resource }}">{{ e.resource }}</td>
+          <td>{{ e.ip }}</td>
+          <td style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.ua }}">{{ e.ua }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">No entries.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+
+
+<form method='post' action='{{ url_for('admin_audit.audit_test') }}' class='mt-3'><input type='hidden' name='csrf_token' value='{{ csrf_token() }}'><button class='btn btn-outline-secondary btn-sm' type='submit'>Insert Test Audit Entry</button></form>
+

@@ -1,5 +1,5 @@
 from flask import Flask
-from mongoengine import connect
+from mongoengine import connect, get_connection
 from flask_security import Security, MongoEngineUserDatastore
 from .models.auth import User, Role
 
@@ -59,7 +59,8 @@ def create_app(config_object=None):
         # Allow selecting a specific env file (e.g. .env.dev, .env.docker)
         env_file = os.getenv("ENV_FILE")
         if env_file and os.path.exists(env_file):
-            load_dotenv(env_file)
+            # When an explicit ENV_FILE is provided, let it override existing env vars
+            load_dotenv(env_file, override=True)
             print("Loaded env file:", env_file)
         else:
             load_dotenv()
@@ -126,7 +127,12 @@ def create_app(config_object=None):
         app.config["SECRET_KEY"] = secrets.token_urlsafe(32)
 
     # Plain MongoEngine connect – capture the connection object
-    db_conn = connect(host=app.config["MONGO_URI"])
+    app.config.setdefault("MONGODB_ALIAS", "tinymrp-v2")
+    init_mongo(app)
+    try:
+        db_conn = get_connection(alias=app.config.get("MONGODB_ALIAS", "tinymrp-v2"))
+    except Exception:
+        db_conn = connect(host=app.config["MONGO_URI"], alias=app.config.get("MONGODB_ALIAS", "tinymrp-v2"))
 
     # IMPORTANT: pass (db_connection, User, Role)
     datastore = MongoEngineUserDatastore(db_conn, User, Role)
@@ -142,9 +148,7 @@ def create_app(config_object=None):
     app.config.setdefault("WTF_CSRF_ENABLED", True)
     csrf.init_app(app)
 
-    # Mongo
-    app.config.setdefault("MONGODB_ALIAS", "tinymrp-v2")
-    init_mongo(app)
+    # Mongo initialized earlier
     
     # Load manifest ONCE at startup
     _load_vite_manifest(app)
@@ -159,6 +163,10 @@ def create_app(config_object=None):
     
     from .views.admin_roles import bp as admin_roles_bp
     app.register_blueprint(admin_roles_bp)
+    
+    # Admin audit log
+    from .views.admin_audit import bp as admin_audit_bp
+    app.register_blueprint(admin_audit_bp)
     
 
     # register blueprints for ui

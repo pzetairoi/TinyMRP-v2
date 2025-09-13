@@ -1,9 +1,12 @@
 # app/views/bom_tree.py
 from flask import Blueprint, request, jsonify
+from flask_login import login_required
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs import preview_png_urls_for
 from app.services.attrs import harvest_part_attrs
+from app.services.acl import require_items_view
+from app.services.audit import log_action
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
@@ -44,6 +47,8 @@ def _node(pn: str, link=None, rev: str | None = None):
     }
 
 @bp.get("/bom_tree")
+@login_required
+@require_items_view
 def bom_tree():
     pn = (request.args.get("pn") or "").strip()
     rev = request.args.get("rev")  # keep None vs ""
@@ -62,6 +67,10 @@ def bom_tree():
             return jsonify([])
         root = _node(p.part_number, rev=(p.revision or None))
         root["children"] = []   # lazy
+        try:
+            log_action("bom.view", resource_type="bom", resource=f"root:{p.part_number}:{p.revision or ''}")
+        except Exception:
+            pass
         return jsonify([root])
  
     if parent:
@@ -77,6 +86,10 @@ def bom_tree():
                 if child_pn and child_pn != parent:
                     c_rev = getattr(l, "child_rev", None) if hasattr(l, "child_rev") else None
                     kids.append(_node(child_pn, l, rev=c_rev))
+            try:
+                log_action("bom.view", resource_type="bom", resource=f"children:{parent}:{(parent_rev or '')}")
+            except Exception:
+                pass
             return jsonify(kids)
         else:
             pp = Part.objects(part_number=parent).only("id").first()
@@ -89,6 +102,10 @@ def bom_tree():
                 child_pn = getattr(c, "part_number", None) if c else None
                 if child_pn and child_pn != parent:
                     kids.append(_node(child_pn, l))
+            try:
+                log_action("bom.view", resource_type="bom", resource=f"children:{parent}")
+            except Exception:
+                pass
             return jsonify(kids)
 
     return jsonify([])

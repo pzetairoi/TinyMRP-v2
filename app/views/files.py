@@ -1,5 +1,8 @@
 # app/views/files.py
 from flask import Blueprint, request, jsonify, current_app, url_for
+from flask_login import login_required
+from app.services.acl import require_items_view
+from app.services.audit import log_action
 import os, base64
 from app.models.part import Part
 from app.models.artifact import PartFile
@@ -17,6 +20,8 @@ def _rev_for(pn: str, qs_rev: str | None) -> str:
     return (p.revision or "") if p else ""
 
 @bp.get("/part_images")
+@login_required
+@require_items_view
 def part_images():
     pn   = (request.args.get("pn") or "").strip()
     mode = (request.args.get("mode") or "preview").strip().lower()  # preview|drawing|all
@@ -70,4 +75,8 @@ def part_images():
                 dedup.append(u)
 
         rows.append({"urls": dedup, "revision": d.revision})
+    try:
+        log_action("file.list", resource_type="file", resource=f"{pn}:{rev}")
+    except Exception:
+        pass
     return jsonify(rows)
