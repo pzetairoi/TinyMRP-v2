@@ -56,9 +56,20 @@ def seed_roles():
         if not r: r = Role(name=name)
         r.description = desc; r.permissions = perms; r.save()
     upsert("admin", "Full access", PERMISSIONS)
-    upsert("planner", "Plan and run MRP", ["items.view","bom.view","workorders.view","mrp.run","reports.view"])
-    upsert("operator", "Execute work orders", ["workorders.view","workorders.edit","workorders.close","inventory.issue","inventory.receive"])
-    upsert("viewer", "Read-only", ["items.view","bom.view","workorders.view","reports.view"])
+    upsert("planner", "Plan and run MRP", [
+        "items.view","bom.view","mrp.run","reports.view",
+        "jobs.view","jobs.manage","orders.view","orders.manage",
+        "suppliers.view","customers.view"
+    ])
+    upsert("operator", "Execute work orders", [
+        "workorders.view","workorders.edit","workorders.close",
+        "inventory.issue","inventory.receive",
+        "items.view","bom.view"
+    ])
+    upsert("viewer", "Read-only", [
+        "items.view","bom.view","workorders.view","reports.view",
+        "jobs.view","orders.view","suppliers.view","customers.view"
+    ])
     click.echo("Seeded roles.")
 
 @user.command("seed-parts")
@@ -550,6 +561,97 @@ def init_app(app):
         click.echo({"alias": alias, "uri": uri, "ping": ok, "error": err})
 
     app.cli.add_command(audit)
+
+    # ---- Business demo seeding (jobs, suppliers, customers, orders) ----
+    import click
+
+    @click.group()
+    def biz():
+        """Business data utilities (jobs/suppliers/customers/orders)."""
+
+    @biz.command("seed")
+    @with_appcontext
+    def biz_seed():
+        """Seed sample suppliers, customers, a job with BOM, and a purchase order."""
+        from app.models.supplier import Supplier
+        from app.models.customer import Customer
+        from app.models.job import Job, JobBOMLine
+        from app.models.order import Order, OrderLine
+        from app.models.auth import User, Role
+
+        def _upsert_supplier(name, **kw):
+            s = Supplier.objects(name=name).first() or Supplier(name=name)
+            for k,v in kw.items(): setattr(s, k, v)
+            s.save(); return s
+        def _upsert_customer(name, **kw):
+            c = Customer.objects(name=name).first() or Customer(name=name)
+            for k,v in kw.items(): setattr(c, k, v)
+            c.save(); return c
+        def _find_admin_user():
+            try:
+                r = Role.objects(name="admin").first()
+                if r:
+                    u = User.objects(roles=r).first()
+                    return u
+            except Exception:
+                pass
+            return User.objects().first()
+
+        acme = _upsert_supplier("ACME Fabrication", contact="A. Smith", email="contact@acmefab.test", processes=["welding","laser"])
+        mworks = _upsert_supplier("MetalWorks Ltd", contact="B. Jones", email="sales@metalworks.test", processes=["machine"]) 
+        contoso = _upsert_customer("Contoso", contact="C. Adams", email="projects@contoso.test")
+        fabrikam = _upsert_customer("Fabrikam", contact="D. Baker", email="ops@fabrikam.test")
+
+        demo_user = _find_admin_user()
+        if demo_user and demo_user not in (acme.users or []):
+            acme.users.append(demo_user); acme.save()
+        if demo_user and demo_user not in (contoso.users or []):
+            contoso.users.append(demo_user); contoso.save()
+
+        job = Job.objects(job_number="JOB-1001").first()
+        if not job:
+            job = Job(job_number="JOB-1001", description="Demo Project", customer=contoso)
+            if demo_user:
+                job.participants = [demo_user]
+            job.vendors = [acme]
+            job.bom = [
+                JobBOMLine(pn="ASM-1001", rev="A", qty=1.0),
+                JobBOMLine(pn="CMP-2002", rev="B", qty=2.0),
+            ]
+            job.save()
+
+        po = Order.objects(order_number="PO-1001").first()
+        if not po:
+            po = Order(order_number="PO-1001", description="Initial buy", kind="purchase",
+                       job=job, supplier=acme, customer=contoso,
+                       lines=[
+                           OrderLine(pn="CMP-2002", rev="B", qty=10, uom="EA", note="Wave 1"),
+                           OrderLine(pn="MAT-3003", rev="A", qty=5, uom="SHT", note="Stock-up"),
+                       ])
+            po.save()
+
+        click.echo({
+            "suppliers": [s.name for s in Supplier.objects().only("name")],
+            "customers": [c.name for c in Customer.objects().only("name")],
+            "jobs": [j.job_number for j in Job.objects().only("job_number")],
+            "orders": [o.order_number for o in Order.objects().only("order_number")],
+        })
+
+    @biz.command("clear")
+    @with_appcontext
+    def biz_clear():
+        """Delete all Jobs, Orders, Suppliers, Customers (dangerous)."""
+        from app.models.order import Order
+        from app.models.job import Job
+        from app.models.supplier import Supplier
+        from app.models.customer import Customer
+        n_orders = Order.objects.delete()
+        n_jobs = Job.objects.delete()
+        n_sup = Supplier.objects.delete()
+        n_cust = Customer.objects.delete()
+        click.echo({"orders": n_orders, "jobs": n_jobs, "suppliers": n_sup, "customers": n_cust})
+
+    app.cli.add_command(biz)
 
 
 

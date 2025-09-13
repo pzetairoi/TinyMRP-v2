@@ -8,14 +8,24 @@ from ..models.auth import Role
 bp = Blueprint("admin_roles", __name__, url_prefix="/admin/roles")
 
 PERMISSIONS = [
-  "users.manage", "roles.manage",
+  # Core admin
+  "users.manage", "roles.manage", "settings.manage",
+
+  # Items/BOM (existing)
   "items.view", "items.edit",
   "bom.view", "bom.edit",
+
+  # Jobs / Suppliers / Customers / Orders (new granular perms)
+  "jobs.view", "jobs.manage",
+  "suppliers.view", "suppliers.manage",
+  "customers.view", "customers.manage",
+  "orders.view", "orders.manage",
+
+  # Work orders / inventory / reports / mrp (placeholders)
   "workorders.view", "workorders.edit", "workorders.close",
   "inventory.issue", "inventory.receive",
   "mrp.run",
   "reports.view",
-  "settings.manage",
 ]
 
 @bp.route("/")

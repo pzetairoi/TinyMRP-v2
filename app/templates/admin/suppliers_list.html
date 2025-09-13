@@ -1,0 +1,28 @@
+{% extends "security/base.html" %}
+{% block title %}Suppliers — Admin{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 m-0">Suppliers</h1>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Jobs</a>
+    <a class="btn btn-primary" href="{{ url_for('admin_suppliers.suppliers_new') }}">New supplier</a>
+  </div>
+</div>
+<div class="table-responsive bg-white border rounded-3 shadow-sm">
+  <table class="table align-middle mb-0">
+    <thead><tr><th>Name</th><th>Contact</th><th>Email</th><th>Users</th><th>Actions</th></tr></thead>
+    <tbody>
+      {% for s in suppliers %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td>{{ s.contact or '-' }}</td>
+        <td>{{ s.email or '-' }}</td>
+        <td>{{ (s.users | map(attribute='email') | join(', ')) or '-' }}</td>
+        <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=s.id) }}">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+

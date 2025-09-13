@@ -164,6 +164,18 @@ def create_app(config_object=None):
     from .views.admin_roles import bp as admin_roles_bp
     app.register_blueprint(admin_roles_bp)
     
+    from .views.admin_jobs import bp as admin_jobs_bp
+    app.register_blueprint(admin_jobs_bp)
+
+    from .views.admin_suppliers import bp as admin_suppliers_bp
+    app.register_blueprint(admin_suppliers_bp)
+
+    from .views.admin_customers import bp as admin_customers_bp
+    app.register_blueprint(admin_customers_bp)
+
+    from .views.admin_orders import bp as admin_orders_bp
+    app.register_blueprint(admin_orders_bp)
+    
     # Admin audit log
     from .views.admin_audit import bp as admin_audit_bp
     app.register_blueprint(admin_audit_bp)
@@ -217,9 +229,29 @@ def create_app(config_object=None):
     @app.context_processor
     def inject_files_base():
         fb = (app.config.get("FILE_ROOT_HTTP") or app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
-        return dict(files_base=fb)
+        # expose a has_perm helper for templates
+        try:
+            from app.services.acl import user_has_permission
+            def has_perm(p: str) -> bool:
+                try:
+                    from flask_login import current_user
+                    # Admin sees everything
+                    for r in (getattr(current_user, 'roles', []) or []):
+                        if getattr(r, 'name', '') == 'admin':
+                            return True
+                    return user_has_permission(current_user, p)
+                except Exception:
+                    return False
+        except Exception:
+            def has_perm(p: str) -> bool:
+                return False
+        return dict(files_base=fb, has_perm=has_perm)
 
     from .cli import init_app as init_cli
     init_cli(app)
     
+    # ACL default (overridable via env)
+    app.config.setdefault("ACL_ENFORCED", True)
+    
     return app
+

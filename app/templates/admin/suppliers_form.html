@@ -1,0 +1,60 @@
+{% extends "security/base.html" %}
+{% block title %}{{ 'Edit supplier' if supplier else 'New supplier' }} — Admin{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-8 col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h5 mb-3">{{ 'Edit supplier' if supplier else 'New supplier' }}</h1>
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="mb-3">
+            <label class="form-label">Name</label>
+            <input class="form-control" type="text" name="name" value="{{ supplier.name if supplier else '' }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description</label>
+            <input class="form-control" type="text" name="description" value="{{ supplier.description if supplier else '' }}">
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label">Contact</label>
+              <input class="form-control" type="text" name="contact" value="{{ supplier.contact if supplier else '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Phone</label>
+              <input class="form-control" type="text" name="phone" value="{{ supplier.phone if supplier else '' }}">
+            </div>
+          </div>
+          <div class="row g-3 mt-2">
+            <div class="col-md-6">
+              <label class="form-label">Email</label>
+              <input class="form-control" type="email" name="email" value="{{ supplier.email if supplier else '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Processes (comma-separated)</label>
+              <input class="form-control" type="text" name="processes" value="{{ (supplier.processes | join(', ')) if supplier else '' }}">
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="form-label">Linked users</label>
+            <div class="row row-cols-2 g-2">
+              {% set linked = (supplier.users | map(attribute='id') | map('string') | list) if supplier else [] %}
+              {% for u in users %}
+              <div class="col">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="users" id="u-{{ u.id }}" value="{{ u.id }}" {% if supplier and (u.id|string) in linked %}checked{% endif %}>
+                  <label class="form-check-label" for="u-{{ u.id }}">{{ u.email }}</label>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

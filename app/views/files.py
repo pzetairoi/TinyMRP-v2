@@ -1,7 +1,7 @@
 # app/views/files.py
 from flask import Blueprint, request, jsonify, current_app, url_for
-from flask_login import login_required
-from app.services.acl import require_items_view
+from flask_login import login_required, current_user
+from app.services.acl import require_items_view, allowed_parts_for
 from app.services.audit import log_action
 import os, base64
 from app.models.part import Part
@@ -32,12 +32,15 @@ def part_images():
 
     rev = _rev_for(pn, rev)
 
+    # ACL: enforce root access for PN/REV
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and (pn, (rev or "")) not in allowed:
+            return jsonify([]), 403
+    except Exception:
+        pass
+
     qs = PartFile.objects(part_number__iexact=pn, revision__iexact=rev, ext_group="png")
-    for d in qs:
-        print("dpartnumber",d.part_number)
-        print("rev ",d.revision)
-        print("ext group ",d.ext_group)
-        print("is dwg",d.is_dwg)
     if mode == "preview":
         qs = qs.filter(is_dwg=False)
     elif mode == "drawing":

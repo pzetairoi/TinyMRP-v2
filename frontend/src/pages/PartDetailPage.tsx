@@ -98,6 +98,7 @@ export default function PartDetailPage() {
   const [children, setChildren] = useState<ChildRow[]>([]);
   const [wu, setWU] = useState<WURow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
 
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
@@ -325,6 +326,7 @@ function bestUrl(f: FileRow): string {
       setLoading(true);
       try {
         const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`);
+        if (r.status === 403) { if (!canceled) { setForbidden(true); } return; }
         if (!r.ok) throw new Error(await r.text());
         const j = await r.json();
         if (canceled) return;
@@ -399,6 +401,7 @@ function bestUrl(f: FileRow): string {
     (async () => {
       try {
         const r = await fetch(`/api/docpacks/options?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&depth=${depth}`);
+        if (r.status === 403) { if (!cancelled) setForbidden(true); return; }
         if (!r.ok) return;
         const j = await r.json();
         if (cancelled) return;
@@ -440,6 +443,7 @@ function bestUrl(f: FileRow): string {
         const r = await fetch(
           `/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&withThumb=1`
         );
+        if (r.status === 403) { if (!cancelled) setForbidden(true); return; }
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const root: TreeNode[] = asArr(await r.json());
         if (cancelled) return;
@@ -516,6 +520,7 @@ function bestUrl(f: FileRow): string {
       const r = await fetch(
         `/api/bom_tree?parent=${encodeURIComponent(key)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`
       );
+      if (r.status === 403) { setForbidden(true); return; }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       let kids: TreeNode[] = asArr(await r.json());
 

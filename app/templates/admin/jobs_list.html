@@ -1,0 +1,33 @@
+{% extends "security/base.html" %}
+{% block title %}Jobs — Admin{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 m-0">Jobs</h1>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>
+    <a class="btn btn-primary" href="{{ url_for('admin_jobs.jobs_new') }}">New job</a>
+  </div>
+  
+</div>
+<div class="table-responsive bg-white border rounded-3 shadow-sm">
+  <table class="table align-middle mb-0">
+    <thead><tr><th>Job</th><th>Description</th><th>Customer</th><th>Participants</th><th>Vendors</th><th>Actions</th></tr></thead>
+    <tbody>
+      {% for j in jobs %}
+      <tr>
+        <td>{{ j.job_number }}</td>
+        <td>{{ j.description or '-' }}</td>
+        <td>{{ j.customer.name if j.customer else '-' }}</td>
+        <td>{{ (j.participants | map(attribute='email') | join(', ')) or '-' }}</td>
+        <td>{{ (j.vendors | map(attribute='name') | join(', ')) or '-' }}</td>
+        <td>
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">Edit</a>
+          <a class="btn btn-sm btn-outline-primary ms-2" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  
+</div>
+{% endblock %}
