@@ -500,5 +500,56 @@ def init_app(app):
     app.cli.add_command(data)
     app.cli.add_command(attrs)
 
+    # Audit diagnostics group
+    import click
+    from app.models.audit import AuditLog
+    from mongoengine import get_connection
+    from flask import current_app
+
+    @click.group()
+    def audit():
+        """Audit log diagnostics"""
+
+    @audit.command("write-test")
+    @with_appcontext
+    def audit_write_test():
+        """Write a test audit entry and print its id."""
+        from app.services.audit import log_action
+        inserted = log_action("cli.audit.test", resource_type="system", resource="cli")
+        # best effort: if not returned, fetch most recent
+        if not inserted:
+            doc = AuditLog.objects(action="cli.audit.test").order_by("-ts").first()
+            inserted = str(getattr(doc, 'id', 'unknown')) if doc else 'unknown'
+        click.echo({"inserted_id": inserted})
+
+    @audit.command("count")
+    @with_appcontext
+    def audit_count():
+        click.echo({"audit_logs": AuditLog.objects.count()})
+
+    @audit.command("tail")
+    @click.option("--n", default=5, help="How many entries to show")
+    @with_appcontext
+    def audit_tail(n):
+        rows = AuditLog.objects.order_by("-ts").limit(max(1, min(n, 100)))
+        out = [dict(ts=str(r.ts), email=r.email, action=r.action, resource=r.resource) for r in rows]
+        click.echo(out)
+
+    @audit.command("diag")
+    @with_appcontext
+    def audit_diag():
+        alias = current_app.config.get("MONGODB_ALIAS", "tinymrp-v2")
+        uri = current_app.config.get("MONGO_URI")
+        ok = True
+        err = None
+        try:
+            client = get_connection(alias=alias)
+            client.admin.command('ping')
+        except Exception as e:
+            ok = False; err = str(e)
+        click.echo({"alias": alias, "uri": uri, "ping": ok, "error": err})
+
+    app.cli.add_command(audit)
+
 
 

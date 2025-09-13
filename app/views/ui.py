@@ -1,6 +1,7 @@
 # app/views/ui.py
 import json, os
 from flask import Blueprint, render_template, abort, current_app, request
+from flask_login import login_required
 
 bp = Blueprint("ui", __name__, url_prefix="/ui")
 
@@ -36,6 +37,7 @@ def vite_assets():
     return {"js": js_url, "css": css_url}
 
 @bp.get("/parts")
+@login_required
 def parts_ui():
     assets = vite_assets()
     if not assets["js"]:
@@ -44,6 +46,7 @@ def parts_ui():
     return render_template("ui/react_shell.html", title="Parts", assets=assets, initial={}, files_base=files_base)
 
 @bp.get("/bom/<path:pn>")
+@login_required
 def bom_ui(pn):
     assets = vite_assets()
     if not assets["js"]:
@@ -58,6 +61,7 @@ def bom_ui(pn):
     )
 
 @bp.get("/part/<path:pn>")
+@login_required
 def part_ui(pn):
     assets = vite_assets()
     if not assets["js"]:

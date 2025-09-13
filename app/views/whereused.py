@@ -1,5 +1,8 @@
 # app/views/whereused.py
 from flask import Blueprint, request, jsonify
+from flask_login import login_required
+from app.services.acl import require_items_view
+from app.services.audit import log_action
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs import thumb_urls_for
@@ -51,6 +54,8 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None):
     return rows
 
 @bp.post("/whereused_lazy")
+@login_required
+@require_items_view
 def whereused_lazy():
     p = request.get_json(silent=True) or {}
     pn = (p.get("pn") or "").strip()
@@ -83,4 +88,8 @@ def whereused_lazy():
 
     total = len(rows)
     page = rows[first:first+rows_per_page]
+    try:
+        log_action("whereused.view", resource_type="whereused", resource=f"{pn}:{rev or ''}")
+    except Exception:
+        pass
     return jsonify({"data": page, "totalRecords": total})

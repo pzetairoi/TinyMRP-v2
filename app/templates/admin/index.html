@@ -1,0 +1,49 @@
+{% extends "security/base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block content %}
+<div class="container my-4">
+  <h1 class="h4 mb-4">Admin Dashboard</h1>
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h5 class="card-title">Users</h5>
+          <p class="card-text text-muted">Manage users and their roles.</p>
+          <a class="btn btn-primary" href="{{ url_for('admin.users_list') }}">Open Users</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h5 class="card-title">Roles</h5>
+          <p class="card-text text-muted">Create roles and assign permissions.</p>
+          <a class="btn btn-primary" href="{{ url_for('admin_roles.roles_list') }}">Open Roles</a>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h5 class="card-title">Audit Log</h5>
+          <p class="card-text text-muted">Review user access and operations.</p>
+          <a class="btn btn-primary" href="{{ url_for('admin_audit.audit_list') }}">Open Audit Log</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h5 class="card-title">Maintenance</h5>
+          <p class="card-text text-muted">Dangerous operations.</p>
+          <a class="btn btn-outline-danger" href="{{ url_for('admin.purge_parts') }}">Purge Parts</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
