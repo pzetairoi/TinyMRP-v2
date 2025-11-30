@@ -54,6 +54,14 @@ type WURow = {
   parent_rev?: string;
 };
 
+type VersionRow = {
+  id?: string;
+  part_number: string;
+  revision: string;
+  description: string;
+  thumb_urls?: string[];
+};
+
 // threeMF viewer (lazy load)
 const ThreeMFViewer = React.lazy(() => import("../components/ThreeMFViewer"));
 
@@ -97,6 +105,7 @@ export default function PartDetailPage() {
   const [files, setFiles] = useState<FileRow[]>([]);
   const [children, setChildren] = useState<ChildRow[]>([]);
   const [wu, setWU] = useState<WURow[]>([]);
+  const [versions, setVersions] = useState<VersionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
 
@@ -376,6 +385,7 @@ function bestUrl(f: FileRow): string {
         setWU(asArr<WURow>(j.whereused));
         setDrawingUrls(asArr<string>(j.drawing_urls));
         setImages(asArr<string>(j.images));
+        setVersions(asArr<VersionRow>(j.other_versions));
       } catch (e) {
         console.error("part_detail failed", e);
         if (!canceled) {
@@ -1156,6 +1166,17 @@ function bestUrl(f: FileRow): string {
                 </div>
               </div>
             </TabPanel>
+
+          <TabPanel header="Other versions">
+            <DataTable value={versions} dataKey="id" responsiveLayout="scroll" stripedRows>
+              <Column header="" body={(r: VersionRow) => r.thumb_urls?.[0] ? <img src={r.thumb_urls[0]} alt="" style={{maxHeight:32,maxWidth:48,objectFit:"contain",border:"1px solid #eee",borderRadius:6,padding:2,background:"#fff"}} /> : null} style={{width:60}} />
+              <Column field="part_number" header="Part Number" body={(r: VersionRow) => <a href={`/ui/part/${encodeURIComponent(r.part_number)}?rev=${encodeURIComponent(r.revision||"")}`}>{r.part_number}</a>} sortable />
+              <Column field="revision" header="Rev" sortable />
+              <Column field="description" header="Description" sortable />
+            </DataTable>
+          </TabPanel>
+
+
           </TabView>
           </div>
 

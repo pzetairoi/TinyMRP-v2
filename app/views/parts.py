@@ -5,7 +5,6 @@ from mongoengine.queryset.visitor import Q
 import re
 from base64 import urlsafe_b64encode
 
-# Import necessary models and services
 from app.models.part import Part
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
@@ -17,9 +16,8 @@ from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
 from app.services.acl import require_items_view, allowed_parts_for
 from app.services.audit import log_action
 
-
-
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
+
 
 @login_required
 @require_items_view
@@ -33,18 +31,17 @@ def parts_lazy():
     sort_order = int(body.get("sortOrder", 1))  # 1 asc, -1 desc
     filters = body.get("filters", {})
 
-    # Sorting support including attrs
     sort_map = {
         "material": "attrs__material",
-        "finish":   "attrs__finish",
-        "mass":     "attrs__mass",
+        "finish": "attrs__finish",
+        "mass": "attrs__mass",
         "revision": "revision",
         "category": "category",
         "description": "description",
         "part_number": "part_number",
     }
-    ALLOWED = set(sort_map.keys())
-    if sort_field not in ALLOWED:
+    allowed = set(sort_map.keys())
+    if sort_field not in allowed:
         sort_field = "part_number"
     mapped = sort_map.get(sort_field, sort_field)
     order_by = f"-{mapped}" if sort_order == -1 else mapped
@@ -65,50 +62,56 @@ def parts_lazy():
         return q
 
     q = Q()
-    # field filters
     q = add_filter(q, "part_number", "part_number")
     q = add_filter(q, "revision", "revision")
     q = add_filter(q, "description", "description")
     q = add_filter(q, "category", "category")
-    # attribute filters
     q = add_filter(q, "material", "attrs__material")
-    q = add_filter(q, "finish",   "attrs__finish")
-    # process list/attrs (accept legacy key "processes" from older UI bundles)
+    q = add_filter(q, "finish", "attrs__finish")
     proc_key = "process" if "process" in filters else "processes"
     q = add_filter(q, proc_key, "processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes")
-    # global filter across common fields
     g = (filters.get("global") or {}).get("value")
     if g:
         for t in _terms(str(g)):
             orq = (
-                Q(part_number__icontains=t) | Q(revision__icontains=t) | Q(description__icontains=t)
-                | Q(category__icontains=t) | Q(attrs__material__icontains=t) | Q(attrs__finish__icontains=t)
+                Q(part_number__icontains=t)
+                | Q(revision__icontains=t)
+                | Q(description__icontains=t)
+                | Q(category__icontains=t)
+                | Q(attrs__material__icontains=t)
+                | Q(attrs__finish__icontains=t)
                 | Q(processes__icontains=t)
             )
             q = q & orq
 
     qs = Part.objects(q)
     filtered = qs.count()
-
-    docs = qs.order_by(order_by).only("part_number","revision","description","category","attrs","processes").skip(first).limit(rows)
+    docs = (
+        qs.order_by(order_by)
+        .only("part_number", "revision", "description", "category", "attrs", "processes")
+        .skip(first)
+        .limit(rows)
+    )
 
     out = []
     for p in docs:
         attrs = harvest_part_attrs(p)
         pn = p.part_number
         rev = p.revision or ""
-        out.append({
-            "id": f"{pn}::{rev}",
-            "part_number": pn,
-            "revision": rev,
-            "description": attrs.get("description") or p.description or "",
-            "category": attrs.get("category") or p.category or "",
-            "material": attrs.get("material",""),
-            "finish": attrs.get("finish",""),
-            "mass": attrs.get("mass",""),
-            "processes": normalize_processes(attrs, current_app.config.get("PROCESS_META", {})),
-            "thumb_urls": thumb_urls_for(pn, rev or None),
-        })
+        out.append(
+            {
+                "id": f"{pn}::{rev}",
+                "part_number": pn,
+                "revision": rev,
+                "description": attrs.get("description") or p.description or "",
+                "category": attrs.get("category") or p.category or "",
+                "material": attrs.get("material", ""),
+                "finish": attrs.get("finish", ""),
+                "mass": attrs.get("mass", ""),
+                "processes": normalize_processes(attrs, current_app.config.get("PROCESS_META", {})),
+                "thumb_urls": thumb_urls_for(pn, rev or None),
+            }
+        )
 
     try:
         log_action("parts.list", resource_type="parts", resource=f"first={first},rows={rows}")
@@ -118,16 +121,11 @@ def parts_lazy():
     return jsonify({"data": out, "totalRecords": filtered})
 
 
-
-
 @bp.get("/part_detail")
 @login_required
 @require_items_view
 def part_detail():
     pn = (request.args.get("pn") or "").strip()
-    # Respect explicit ?rev= if provided; otherwise fall back to latest for PN.
-    # If a specific rev is requested but not found, gracefully fall back to the
-    # latest existing revision for that PN to avoid hard 404s from mismatched links.
     p = None
     if "rev" in request.args:
         rev = request.args.get("rev") or ""
@@ -139,7 +137,6 @@ def part_detail():
     if not p:
         return jsonify({"error": "not found"}), 404
 
-    # ACL enforcement: if enabled and user is not admin, ensure PN/REV is allowed
     try:
         allowed = allowed_parts_for(current_user)
         if isinstance(allowed, set):
@@ -154,38 +151,48 @@ def part_detail():
         pass
 
     attrs = harvest_part_attrs(p)
-    
     meta = current_app.config.get("PROCESS_META", {})
     proc_list = normalize_processes(attrs, meta)
 
-
-
-
-    
-    material = attrs.get("material","")
-    finish   = attrs.get("finish","")
-    mass     = attrs.get("mass","")
-    processes= ", ".join(attrs.get("processes", [])) or attrs.get("process","")
-
-    
     preview_urls = preview_png_urls_for(p.part_number, p.revision)
     drawing_urls = drawing_png_urls_for(p.part_number, p.revision)
 
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
+
     def to_url(f: PartFile):
         if http_base and f.rel_path:
             return f"{http_base}/{f.rel_path}"
         return f"/files/view/{urlsafe_b64encode((f.path or '').encode()).decode()}"
 
     files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": []}
-    for f in PartFile.objects(part_number__iexact=p.part_number, revision__iexact=p.revision).only("ext_group","rel_path","path").order_by("ext_group","rel_path"):
+    for f in (
+        PartFile.objects(part_number__iexact=p.part_number, revision__iexact=p.revision)
+        .only("ext_group", "rel_path", "path")
+        .order_by("ext_group", "rel_path")
+    ):
         if f.ext_group in files:
             files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path})
 
     wu_rows = _rows_for_child_pn(p.part_number, p.revision)
 
+    other_versions = []
+    for op in (
+        Part.objects(part_number=pn)
+        .only("part_number", "revision", "description", "category", "attrs", "updated_at")
+        .order_by("-updated_at")
+    ):
+        attrs_v = harvest_part_attrs(op)
+        rev_v = attrs_v.get("revision", "") or op.revision or ""
+        other_versions.append(
+            {
+                "id": f"{pn}::{rev_v}",
+                "part_number": pn,
+                "revision": rev_v,
+                "description": attrs_v.get("description") or op.description or "",
+                "thumb_urls": thumb_urls_for(pn, rev_v or None),
+            }
+        )
 
-    # Audit log: part detail viewed
     try:
         log_action(
             action="part.view",
@@ -195,21 +202,23 @@ def part_detail():
     except Exception:
         pass
 
-    return jsonify({
-        "part": {
-            "part_number": p.part_number,
-            "description": attrs.get("description",""),
-            "revision": attrs.get("revision",""),
-            "category": attrs.get("category",""),
-            "material": attrs.get("material",""),
-            "finish": attrs.get("finish",""),
-            "mass": attrs.get("mass",""),
-            "processes": proc_list,
-            "attributes": attrs,
-        },
-        "images": preview_urls,  # non-DWG
-        "drawing_urls": drawing_urls,  # only *_DWG.png
-        "files": files,
-        "whereused": wu_rows,          # ← add this
-    })
-
+    return jsonify(
+        {
+            "part": {
+                "part_number": p.part_number,
+                "description": attrs.get("description", ""),
+                "revision": attrs.get("revision", ""),
+                "category": attrs.get("category", ""),
+                "material": attrs.get("material", ""),
+                "finish": attrs.get("finish", ""),
+                "mass": attrs.get("mass", ""),
+                "processes": proc_list,
+                "attributes": attrs,
+            },
+            "images": preview_urls,
+            "drawing_urls": drawing_urls,
+            "files": files,
+            "whereused": wu_rows,
+            "other_versions": other_versions,
+        }
+    )

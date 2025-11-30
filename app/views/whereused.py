@@ -13,45 +13,57 @@ from app.services.acl import require_items_view, allowed_parts_for
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
 def _rows_for_child_pn(pn: str, child_rev: str | None = None):
-    """Return where-used rows for a child part number, tolerant of both link schemas.
-
-    child_rev is accepted for consistency with the rest of the PN+REV-aware API.
-    Current BOMLink schema does not encode child revision, so this value is informational.
-    """
+    """Return where-used rows for a child part number, keeping revisions accurate."""
     # Fetch links where this PN is the child
     if "child_pn" in BOMLink._fields:
-        links = BOMLink.objects(child_pn=pn)
+        query = BOMLink.objects(child_pn=pn)
+        if child_rev is not None and "child_rev" in BOMLink._fields:
+            query = query.filter(child_rev=(child_rev or ""))
+        links = query
     else:
         child_part = Part.objects(part_number=pn).only("id").first()
         links = BOMLink.objects(child=child_part)
 
     rows = []
+    seen = set()
     for l in links:
-        # Resolve parent PN
+        # Resolve parent PN / REV
         if "parent_pn" in BOMLink._fields:
             parent_pn = getattr(l, "parent_pn", None)
+            parent_rev = getattr(l, "parent_rev", "") if hasattr(l, "parent_rev") else ""
+            effective_child_rev = getattr(l, "child_rev", "") if hasattr(l, "child_rev") else (child_rev or "")
         else:
             parent_obj = getattr(l, "parent", None)
             parent_pn = getattr(parent_obj, "part_number", None)
+            parent_rev = getattr(parent_obj, "revision", "") if parent_obj else ""
+            effective_child_rev = child_rev or ""
 
         if not parent_pn:
             continue
 
-        # Always prefer the latest known revision of the parent for attrs/desc
-        parent_part = Part.objects(part_number=parent_pn).order_by("-updated_at").first()
+        # Keep distinct rows per PN/REV combination
+        key = (parent_pn, parent_rev or "", effective_child_rev or "")
+        if key in seen:
+            continue
+        seen.add(key)
+
+        # Prefer the exact revision from the link; fall back to latest if missing
+        parent_part = Part.objects(part_number=parent_pn, revision=(parent_rev or "")).first() or \
+                      Part.objects(part_number=parent_pn).order_by("-updated_at").first()
         attrs = harvest_part_attrs(parent_part) if parent_part else {}
-        parent_rev = attrs.get("revision", "")
+        resolved_parent_rev = attrs.get("revision", "") or parent_rev or ""
 
         rows.append({
+            "id": f"{parent_pn}::{resolved_parent_rev}::{pn}::{effective_child_rev}",
             "parent_pn": parent_pn,
             "parent_desc": attrs.get("description", "") or getattr(parent_part, "description", "") or "",
             "qty": getattr(l, "qty", None),
             "uom": getattr(l, "uom", "") or "",
             "alt_group": getattr(l, "alt_group", "") or "",
-            "parent_thumb_urls": thumb_urls_for(parent_pn, (parent_rev or None)),
-            "parent_rev": parent_rev,
+            "parent_thumb_urls": thumb_urls_for(parent_pn, (resolved_parent_rev or None)),
+            "parent_rev": resolved_parent_rev,
             "child_pn": pn,
-            "child_rev": (child_rev or ""),
+            "child_rev": (effective_child_rev or ""),
         })
     return rows
 
