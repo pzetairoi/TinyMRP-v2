@@ -57,6 +57,8 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     } catch(e){ setLoading('Error'); }
   }
+  // expose refresh and listen for external refresh events
+  window._jobBomRefresh = refresh;
+  window.addEventListener('job-bom-refresh', refresh);
   refresh();
 });
-

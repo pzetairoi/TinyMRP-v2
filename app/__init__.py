@@ -175,7 +175,11 @@ def create_app(config_object=None):
 
     from .views.admin_orders import bp as admin_orders_bp
     app.register_blueprint(admin_orders_bp)
-    
+
+    # Tools pages (templates, Excel BOM builder)
+    from .views.tools import bp as tools_bp
+    app.register_blueprint(tools_bp)
+
     # Admin audit log
     from .views.admin_audit import bp as admin_audit_bp
     app.register_blueprint(admin_audit_bp)

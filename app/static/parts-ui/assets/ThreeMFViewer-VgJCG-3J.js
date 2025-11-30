@@ -1,4 +1,4 @@
-import{r as Or,j as Br}from"./index-CGD2JZ50.js";/**
+import{r as Or,j as Br}from"./index-sVcjFGj7.js";/**
  * @license
  * Copyright 2010-2025 Three.js Authors
  * SPDX-License-Identifier: MIT
