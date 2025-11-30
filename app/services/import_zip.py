@@ -1,6 +1,7 @@
 # app/services/import_zip.py
 import ast, io, zipfile, re
 from typing import Dict, Any, List, Tuple, Iterable
+from mongoengine import NotUniqueError
 from mongoengine.queryset.visitor import Q
 from app.models.part import Part
 from app.models.bom import BOMLink
@@ -68,13 +69,13 @@ def _normalize_part(d: Dict[str, Any]) -> Dict[str, Any]:
         "attrs": d,  # store full original dict
     }
 
-def _parse_treebom(txt: str) -> List[Tuple[str, str, float]]:
+def _parse_treebom(txt: str) -> List[Tuple[str, str, str, str, float]]:
     """
     TREEBOM is a tab-separated table with headers:
       ITEM NO. | PART NUMBER | Revision | QTY.
     Item numbers like 1, 1.2, 1.2.3 denote hierarchy.
 
-    Returns a list of (parent_pn, child_pn, qty).
+    Returns a list of (parent_pn, parent_rev, child_pn, child_rev, qty).
     """
     lines = txt.splitlines()
     rows = []
@@ -90,29 +91,31 @@ def _parse_treebom(txt: str) -> List[Tuple[str, str, float]]:
         qty = parts[3].strip()
         rows.append({"item_no": item_no, "part_number": part_number, "revision": revision, "qty": qty})
 
-    # Map item_no → pn (base) then build links
-    item_to_pn: Dict[str, str] = {}
+    # Map item_no -> (pn, revision) then build links
+    item_to_part: Dict[str, Tuple[str, str]] = {}
     for r in rows:
         pn = _base_pn(r["part_number"])
-        item_to_pn[r["item_no"]] = pn
+        rev = (r.get("revision") or "").strip()
+        item_to_part[r["item_no"]] = (pn, rev)
 
-    links: List[Tuple[str, str, float]] = []
+    links: List[Tuple[str, str, str, str, float]] = []
     for r in rows:
         item = r["item_no"]
-        child_pn = item_to_pn.get(item, "")
-        if not child_pn or item == "1":
+        child_entry = item_to_part.get(item)
+        if not child_entry or item == "1":
             continue
+        child_pn, child_rev = child_entry
         # find nearest ancestor with a PN
         parent_item = item.rsplit(".", 1)[0] if "." in item else ""
-        while parent_item and not item_to_pn.get(parent_item):
+        while parent_item and not item_to_part.get(parent_item):
             parent_item = parent_item.rsplit(".", 1)[0] if "." in parent_item else ""
         if not parent_item:
             continue
-        parent_pn = item_to_pn[parent_item]
+        parent_pn, parent_rev = item_to_part[parent_item]
         if not parent_pn or parent_pn == child_pn:
             continue
         qty = _safe_qty(r["qty"])
-        links.append((parent_pn, child_pn, qty))
+        links.append((parent_pn, parent_rev, child_pn, child_rev, qty))
     return links
 
 def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -> Dict[str, Any]:
@@ -134,11 +137,10 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     skipped_artifacts = 0
 
     # 1) Parts from FLATBOM
-    part_props: Dict[str, Dict[str, Any]] = {}
+    part_props: Dict[Tuple[str, str], Dict[str, Any]] = {}
     if flat_name:
         flat_txt = z.read(flat_name).decode("utf-8", errors="replace")
         
-        itemcounter=0
         for d in _parse_flatbom(flat_txt):
             norm = _normalize_part(d)
             
@@ -146,16 +148,17 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             rev=norm.get("revision") or ""
                         
             if pn:
-                part_props[str(itemcounter)] = norm
-                itemcounter+=1
+                key = (pn, rev)
+                # keep first occurrence to avoid duplicate inserts on repeated rows
+                if key not in part_props:
+                    part_props[key] = norm
 
     
     # Upsert parts
-    for itemref, norm in part_props.items():
-        ##print( "upserting part", itemref, norm)
-        pn=norm["part_number"]
-        rev=norm.get("revision") or ""        
-        attrs=norm["attrs"] or {}
+    for (pn, rev), norm in part_props.items():
+        ##print( "upserting part", pn, rev, norm)
+        rev = rev or ""
+        attrs = norm["attrs"] or {}
     
         p = Part.objects(part_number=pn, revision=rev).first()
 
@@ -194,47 +197,65 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             p.processes = processes
         
         
-        p.save()
+        try:
+            p.save()
+        except NotUniqueError:
+            # Another process may have inserted the same part_number/revision; re-fetch and update
+            existing = Part.objects(part_number=pn, revision=rev).first()
+            if not existing:
+                raise
+            existing.description = norm["description"]
+            existing.category = norm["category"]
+            existing.uom = norm["uom"]
+            existing.attrs = attrs
+            if processes:
+                existing.processes = processes
+            existing.save()
 
 
     # 2) Links from TREEBOM
     if tree_name:
         tree_txt = z.read(tree_name).decode("utf-8", errors="replace")
         links = _parse_treebom(tree_txt)
-        for parent_pn, child_pn, qty in links:
+        for parent_pn, parent_rev, child_pn, child_rev, qty in links:
             if not parent_pn or not child_pn:
                 skipped_links += 1
                 continue
             # ensure parts exist (create shells if missing)
-            for pn in (parent_pn, child_pn):
-                if not Part.objects(part_number=pn).first():
-                    Part(part_number=pn, description="", uom="EA", attrs={"seed": seed_tag}).save()
+            for pn, rev in ((parent_pn, parent_rev), (child_pn, child_rev)):
+                rev = (rev or "").strip()
+                if not Part.objects(part_number=pn, revision=rev).first():
+                    Part(part_number=pn, revision=rev, description="", uom="EA", attrs={"seed": seed_tag}).save()
                     created_parts += 1
-            # resolve current revisions (latest for each PN)
-            prt_parent = Part.objects(part_number=parent_pn).order_by("-updated_at").first()
-            prt_child  = Part.objects(part_number=child_pn).order_by("-updated_at").first()
-            parent_rev = (prt_parent.revision if prt_parent else "") or ""
-            child_rev  = (prt_child.revision if prt_child else "") or ""
+            # resolve revisions, prefer explicit TREEBOM rev then fall back to latest
+            resolved_parent_rev = (parent_rev or "").strip()
+            resolved_child_rev  = (child_rev or "").strip()
+            if not resolved_parent_rev:
+                prt_parent = Part.objects(part_number=parent_pn).order_by("-updated_at").first()
+                resolved_parent_rev = (prt_parent.revision if prt_parent else "") or ""
+            if not resolved_child_rev:
+                prt_child  = Part.objects(part_number=child_pn).order_by("-updated_at").first()
+                resolved_child_rev  = (prt_child.revision if prt_child else "") or ""
 
             # upsert by PN(+REV if supported)
             query = dict(parent_pn=parent_pn, child_pn=child_pn)
             if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
-                query.update(parent_rev=parent_rev, child_rev=child_rev)
+                query.update(parent_rev=resolved_parent_rev, child_rev=resolved_child_rev)
             existing = BOMLink.objects(**query).first()
             if existing:
                 existing.qty = qty
                 existing.uom = existing.uom or "EA"
                 if hasattr(existing, "parent_rev"):
-                    existing.parent_rev = parent_rev
+                    existing.parent_rev = resolved_parent_rev
                 if hasattr(existing, "child_rev"):
-                    existing.child_rev = child_rev
+                    existing.child_rev = resolved_child_rev
                 existing.save()
             else:
                 kwargs = dict(parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom="EA")
                 if "parent_rev" in BOMLink._fields:
-                    kwargs["parent_rev"] = parent_rev
+                    kwargs["parent_rev"] = resolved_parent_rev
                 if "child_rev" in BOMLink._fields:
-                    kwargs["child_rev"] = child_rev
+                    kwargs["child_rev"] = resolved_child_rev
                 BOMLink(**kwargs).save()
                 created_links += 1
                 

@@ -98,12 +98,12 @@
 
                 
                 <map name="homemap">
-                    <area shape="poly" coords="67,390,35,345,22,285,78,295,100,342"  href="{{ url_for('main.app_home') }}"> 
-                    <area shape="poly" coords="18,220,84,209,104,165,65,107,27,165 " href="{{ url_for('main.app_home') }}"> 
-                    <area shape="poly" coords="102,63,158,34, 222,19,209,87,165,104," href="{{ url_for('main.app_home') }}"> 
-                    <area shape="poly" coords="279,18,344,34,395,65,338,104,295,87 " href="{{ url_for('main.app_home') }}"> 
-                    <area shape="poly" coords="439,107,473,165,478,220,419,210,398,162 " href="{{ url_for('main.app_home') }}"> 
-                    <area shape="poly" coords="485,280,473,337,473,393,401,340,420,295 " href="{{ url_for('main.app_home') }}"> 
+                    <area shape="poly" coords="67,390,35,345,22,285,78,295,100,342"  href="{{ url_for('admin_jobs.jobs_list') }}"> 
+                    <area shape="poly" coords="18,220,84,209,104,165,65,107,27,165 " href="{{ url_for('admin_orders.orders_list') }}"> 
+                    <area shape="poly" coords="102,63,158,34, 222,19,209,87,165,104," href="{{ url_for('admin_suppliers.suppliers_list') }}"> 
+                    <area shape="poly" coords="279,18,344,34,395,65,338,104,295,87 " href="/ui/parts"> 
+                    <area shape="poly" coords="439,107,473,165,478,220,419,210,398,162 " href="{{ url_for('tools.tools_index') }}"> 
+                    <area shape="poly" coords="485,280,473,337,473,393,401,340,420,295 " href="{{ url_for('admin_customers.customers_list') }}"> 
                 </map>
 
             </div>
@@ -114,3 +114,4 @@
     <div class="text-center" style="color: #000080ff;">Copyright (c) 2024 TinyMRP Ltd.</div>
 </div>
 {% endblock %}
+

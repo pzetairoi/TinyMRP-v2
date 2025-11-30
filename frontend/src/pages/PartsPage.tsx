@@ -5,7 +5,7 @@ import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
 import { Link } from 'react-router-dom'
 
-type Part = { part_number: string; description: string; category: string; revision?: string; material?: string; finish?: string; mass?: string | number; processes?: string[]; thumb_urls?: string[] }
+type Part = { id?: string; part_number: string; description: string; category: string; revision?: string; material?: string; finish?: string; mass?: string | number; processes?: string[]; thumb_urls?: string[] }
 
 export default function PartsPage() {
   const sp = new URLSearchParams(window.location.search)
@@ -71,7 +71,7 @@ export default function PartsPage() {
         header={header}
         lazy paginator totalRecords={totalRecords} rows={lazy.rows} first={lazy.first}
         loading={loading}
-        dataKey="part_number"
+        dataKey="id"
         selectionMode={pickMode ? undefined : undefined}
         selection={selection}
         onSelectionChange={(e) => setSelection(e.value as Part[])}
@@ -115,7 +115,7 @@ export default function PartsPage() {
                 filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
         <Column field="finish" header="Finish" sortable filter showFilterMenu={false}
                 filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
-        <Column field="processes" header="Process" sortable filter fieldType="text" showFilterMenu={false}
+        <Column field="processes" filterField="process" header="Process" sortable filter fieldType="text" showFilterMenu={false}
                 body={(p) => (p as Part).processes?.join(', ') || ''}
                 filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
 

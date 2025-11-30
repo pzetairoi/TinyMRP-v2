@@ -52,6 +52,8 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     } catch(e) { setLoading('Error'); }
   }
+  // expose refresh and listen for external refresh events
+  window._orderLinesRefresh = refresh;
+  window.addEventListener('order-lines-refresh', refresh);
   refresh();
 });
-

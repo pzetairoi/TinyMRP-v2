@@ -73,8 +73,9 @@ def parts_lazy():
     # attribute filters
     q = add_filter(q, "material", "attrs__material")
     q = add_filter(q, "finish",   "attrs__finish")
-    # process list/attrs
-    q = add_filter(q, "process", "processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes")
+    # process list/attrs (accept legacy key "processes" from older UI bundles)
+    proc_key = "process" if "process" in filters else "processes"
+    q = add_filter(q, proc_key, "processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes")
     # global filter across common fields
     g = (filters.get("global") or {}).get("value")
     if g:
@@ -97,6 +98,7 @@ def parts_lazy():
         pn = p.part_number
         rev = p.revision or ""
         out.append({
+            "id": f"{pn}::{rev}",
             "part_number": pn,
             "revision": rev,
             "description": attrs.get("description") or p.description or "",
