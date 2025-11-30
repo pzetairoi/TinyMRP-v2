@@ -10,15 +10,17 @@ type Part = { id?: string; part_number: string; description: string; category: s
 export default function PartsPage() {
   const sp = new URLSearchParams(window.location.search)
   const pickMode = sp.get('pick') === '1' || sp.get('pick') === 'true'
+  const initialQ = sp.get('q') || ''
 
   const [rows, setRows] = useState<Part[]>([])
+  const [search, setSearch] = useState(initialQ)
   const [loading, setLoading] = useState(false)
   const [totalRecords, setTotal] = useState(0)
   const [selection, setSelection] = useState<Part[]>([])
   const [lazy, setLazy] = useState({
     first: 0, rows: 25, sortField: 'part_number', sortOrder: 1 as 1|-1,
     filters: {
-      global:      { value: '', matchMode: FilterMatchMode.CONTAINS },
+      global:      { value: initialQ, matchMode: FilterMatchMode.CONTAINS },
       part_number: { value: '', matchMode: FilterMatchMode.CONTAINS },
       revision:    { value: '', matchMode: FilterMatchMode.CONTAINS },
       description: { value: '', matchMode: FilterMatchMode.CONTAINS },
@@ -54,8 +56,29 @@ export default function PartsPage() {
   }
 
   const header = useMemo(() => (
-    <div className="d-flex align-items-center justify-content-between p-2">
-      <div>Parts</div>
+    <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 p-2">
+      <div className="d-flex align-items-center gap-2">
+        <div>Parts</div>
+        <input
+          className="form-control form-control-sm"
+          style={{ minWidth: 220 }}
+          type="search"
+          placeholder="Search PN or description"
+          value={search}
+          onChange={(e) => {
+            const val = e.target.value
+            setSearch(val)
+            setLazy((s) => ({
+              ...s,
+              first: 0,
+              filters: {
+                ...s.filters,
+                global: { ...(s.filters as any)?.global, value: val },
+              } as DataTableFilterMeta,
+            }))
+          }}
+        />
+      </div>
       {pickMode && (
         <div className="d-flex gap-2">
           <button className="btn btn-sm btn-primary" onClick={onAddSelected} disabled={!selection.length}>Add Selected</button>
@@ -63,7 +86,7 @@ export default function PartsPage() {
         </div>
       )}
     </div>
-  ), [pickMode, selection])
+  ), [pickMode, selection, search])
 
   return (
     <div className="p-3">
