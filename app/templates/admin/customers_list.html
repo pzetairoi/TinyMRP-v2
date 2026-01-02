@@ -18,11 +18,16 @@
         <td>{{ c.contact or '-' }}</td>
         <td>{{ c.email or '-' }}</td>
         <td>{{ (c.users | map(attribute='email') | join(', ')) or '-' }}</td>
-        <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_customers.customers_edit', cust_id=c.id) }}">Edit</a></td>
+        <td class="d-flex gap-1">
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_customers.customers_edit', cust_id=c.id) }}">Edit</a>
+          <form method="post" action="{{ url_for('admin_customers.customers_delete', cust_id=c.id) }}" onsubmit="return confirm('Delete this customer?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 {% endblock %}
-

@@ -14,15 +14,20 @@
       <tr>
         <td>{{ o.order_number }}</td>
         <td>{{ o.kind }}</td>
-        <td>{{ o.job.job_number if o.job else '-' }}</td>
-        <td>{{ o.supplier.name if o.supplier else '-' }}</td>
-        <td>{{ o.customer.name if o.customer else '-' }}</td>
+        <td>{{ o.job }}</td>
+        <td>{{ o.supplier }}</td>
+        <td>{{ o.customer }}</td>
         <td>{{ o.status }}</td>
-        <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">Edit</a></td>
+        <td class="d-flex gap-1">
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">Edit</a>
+          <form method="post" action="{{ url_for('admin_orders.orders_delete', order_id=o.id) }}" onsubmit="return confirm('Delete this order?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 {% endblock %}
-

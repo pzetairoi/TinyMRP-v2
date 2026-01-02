@@ -23,7 +23,43 @@ def orders_list():
         except Exception:
             pass
     orders = qs.order_by("-created_at")
-    return render_template("admin/orders_list.html", orders=orders)
+    safe_orders = []
+    for o in orders:
+        try:
+            job_number = o.job.job_number if o.job else "-"
+        except Exception:
+            job_number = "-"
+        try:
+            supplier_name = o.supplier.name if o.supplier else "-"
+        except Exception:
+            supplier_name = "-"
+        try:
+            customer_name = o.customer.name if o.customer else "-"
+        except Exception:
+            customer_name = "-"
+        safe_orders.append(
+            {
+                "id": o.id,
+                "order_number": o.order_number,
+                "kind": o.kind,
+                "job": job_number,
+                "supplier": supplier_name,
+                "customer": customer_name,
+                "status": o.status,
+            }
+        )
+    return render_template("admin/orders_list.html", orders=safe_orders)
+
+@bp.post("/<order_id>/delete")
+@permissions_required("orders.manage")
+def orders_delete(order_id):
+    try:
+        o = Order.objects.get(id=order_id)
+        o.delete()
+        flash("Order deleted.", "success")
+    except Exception:
+        flash("Delete failed.", "error")
+    return redirect(url_for("admin_orders.orders_list"))
 
 
 def _parse_lines(text: str):
@@ -82,6 +118,12 @@ def orders_edit(order_id):
         o = Order.objects.get(id=order_id)
     except (DoesNotExist, ValidationError):
         abort(404)
+    # Guard broken references to avoid deref crashes
+    for attr in ("job", "supplier", "customer"):
+        try:
+            _ = getattr(o, attr).id if getattr(o, attr) else None
+        except Exception:
+            setattr(o, attr, None)
     if request.method == "POST":
         o.order_number = (request.form.get("order_number") or o.order_number).strip()
         o.description = (request.form.get("description") or "").strip()

@@ -1,8 +1,8 @@
 {% extends "security/base.html" %}
-{% block title %}{{ 'Edit order' if order else 'New order' }} — Admin{% endblock %}
+{% block title %}{{ 'Edit order' if order else 'New order' }} - Admin{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-10 col-lg-9">
+<div class="row">
+  <div class="col-12">
     <div class="card shadow-sm">
       <div class="card-body p-4">
         <h1 class="h5 mb-3">{{ 'Edit order' if order else 'New order' }}</h1>
@@ -31,16 +31,17 @@
             <div class="col-md-4">
               <label class="form-label">Job</label>
               <select class="form-select" name="job">
-                <option value="">—</option>
+                <option value="">-</option>
                 {% for j in jobs %}
                 <option value="{{ j.id }}" {% if order and order.job and j.id==order.job.id %}selected{% endif %}>{{ j.job_number }}</option>
                 {% endfor %}
               </select>
+              {% if order and order.job %}<div class="small mt-1"><a href="{{ url_for('admin_jobs.jobs_edit', job_id=order.job.id) }}">Open job</a></div>{% endif %}
             </div>
             <div class="col-md-4">
               <label class="form-label">Supplier</label>
               <select class="form-select" name="supplier">
-                <option value="">—</option>
+                <option value="">-</option>
                 {% for s in suppliers %}
                 <option value="{{ s.id }}" {% if order and order.supplier and s.id==order.supplier.id %}selected{% endif %}>{{ s.name }}</option>
                 {% endfor %}
@@ -52,7 +53,7 @@
             <div class="col-md-6">
               <label class="form-label">Customer</label>
               <select class="form-select" name="customer">
-                <option value="">—</option>
+                <option value="">-</option>
                 {% for c in customers %}
                 <option value="{{ c.id }}" {% if order and order.customer and c.id==order.customer.id %}selected{% endif %}>{{ c.name }}</option>
                 {% endfor %}
@@ -65,11 +66,35 @@
           </div>
 
           <div class="mt-3">
-            <label class="form-label">Lines (PN,REV,qty,uom,note per line; # comments)</label>
-            <div class="d-flex justify-content-end mb-2">
-              <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForOrder()">Add part(s)</button>
+            <label class="form-label">Order Lines</label>
+            <div class="d-flex flex-column flex-md-row align-items-md-center gap-2 mb-2">
+              <div class="d-flex flex-wrap gap-2">
+                <input id="ol-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
+                <input id="ol-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
+                <input id="ol-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
+                <input id="ol-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty ≥">
+                <input id="ol-filter-qty-max" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty ≤">
+              </div>
+              <button class="btn btn-sm btn-outline-primary ms-md-auto" type="button" onclick="openPartPickerForOrder()">Add part(s)</button>
             </div>
-            <textarea id="order_lines" class="form-control" name="lines" rows="8">{{ lines if lines is defined else '' }}</textarea>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle table-striped" id="order-table">
+                <thead>
+                  <tr>
+                    <th style="width:64px;">Thumb</th>
+                    <th style="width:24%;">Part Number</th>
+                    <th>Description</th>
+                    <th style="width:12%;">Rev</th>
+                    <th style="width:12%;">Qty</th>
+                    <th style="width:10%;">UoM</th>
+                    <th style="width:15%;">Note</th>
+                    <th style="width:18%;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <textarea id="order_lines" class="form-control d-none" name="lines" rows="8">{{ lines if lines is defined else '' }}</textarea>
           </div>
 
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
@@ -81,19 +106,192 @@
 {% endblock %}
 {% block extra_scripts %}
 <script>
-  function openPartPickerForOrder(){
-    window.open('/ui/parts?pick=1', 'partpicker', 'width=1100,height=720');
+  let orderRows = [];
+  let replaceIdx = null;
+  const thumbCache = {};
+
+  function parseOrderLines(txt){
+    const out = [];
+    for(const raw of (txt || '').split(/\r?\n/)){
+      const line = raw.trim();
+      if(!line || line.startsWith('#')) continue;
+      const parts = line.split(',').map(s => s.trim());
+      if(!parts[0]) continue;
+      out.push({
+        pn: parts[0],
+        rev: parts[1] || '',
+        qty: Math.max(1, Math.round(parseFloat(parts[2]) || 1)),
+        uom: parts[3] || 'EA',
+        note: parts.slice(4).join(',') || '',
+        thumb: '',
+        desc: ''
+      });
+    }
+    return out;
   }
+
+  function syncOrderTextarea(){
+    const ta = document.getElementById('order_lines');
+    ta.value = orderRows.map(r => `${r.pn},${r.rev || ''},${r.qty || 1},${r.uom || 'EA'},${r.note || ''}`).join('\\n');
+  }
+
+  function orderFilters(){
+    return {
+      pn: (document.getElementById('ol-filter-pn')?.value || '').toLowerCase(),
+      rev: (document.getElementById('ol-filter-rev')?.value || '').toLowerCase(),
+      desc: (document.getElementById('ol-filter-desc')?.value || '').toLowerCase(),
+      qtyMin: parseFloat(document.getElementById('ol-filter-qty-min')?.value || '') || null,
+      qtyMax: parseFloat(document.getElementById('ol-filter-qty-max')?.value || '') || null,
+    };
+  }
+
+  function renderOrderTable(){
+    const tbody = document.querySelector('#order-table tbody');
+    if(!tbody) return;
+    tbody.innerHTML = '';
+    const f = orderFilters();
+    orderRows.forEach((row, idx) => {
+      if(f.pn && !row.pn.toLowerCase().includes(f.pn)) return;
+      if(f.rev && !String(row.rev||'').toLowerCase().includes(f.rev)) return;
+      if(f.desc && !String(row.desc||'').toLowerCase().includes(f.desc)) return;
+      if(f.qtyMin !== null && (row.qty || 0) < f.qtyMin) return;
+      if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="width:64px;">
+          ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : '<div class="bg-light border rounded" style="height:48px;width:64px;"></div>'}
+        </td>
+        <td>${row.pn}</td>
+        <td>${row.desc || ''}</td>
+        <td>${row.rev || ''}</td>
+        <td style="max-width:120px;">
+          <input type="number" step="1" min="0" class="form-control form-control-sm ol-qty" value="${row.qty || 1}" data-idx="${idx}">
+        </td>
+        <td style="max-width:100px;">
+          <input type="text" class="form-control form-control-sm ol-uom" value="${row.uom || 'EA'}" data-idx="${idx}">
+        </td>
+        <td>
+          <input type="text" class="form-control form-control-sm ol-note" value="${row.note || ''}" data-idx="${idx}">
+        </td>
+        <td>
+          <div class="d-flex gap-1">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-action="replace" data-idx="${idx}">Replace</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove" data-idx="${idx}">Remove</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+      ensureThumbOrder(idx);
+    });
+  }
+
+  function attachOrderHandlers(){
+    const tbody = document.querySelector('#order-table tbody');
+    if(!tbody) return;
+    tbody.addEventListener('input', (ev) => {
+      const t = ev.target;
+      const idx = parseInt(t.getAttribute('data-idx'), 10);
+      if(Number.isNaN(idx) || !orderRows[idx]) return;
+      if(t.classList.contains('ol-qty')){
+        orderRows[idx].qty = Math.max(1, Math.round(parseFloat(t.value) || 1));
+      } else if(t.classList.contains('ol-uom')){
+        orderRows[idx].uom = t.value || 'EA';
+      } else if(t.classList.contains('ol-note')){
+        orderRows[idx].note = t.value || '';
+      }
+      syncOrderTextarea();
+    });
+    tbody.addEventListener('click', (ev) => {
+      const rem = ev.target.closest('button[data-action="remove"]');
+      if(rem){
+        const idx = parseInt(rem.getAttribute('data-idx'), 10);
+        if(!Number.isNaN(idx)){
+          orderRows.splice(idx, 1);
+          syncOrderTextarea();
+          renderOrderTable();
+        }
+        return;
+      }
+      const rep = ev.target.closest('button[data-action="replace"]');
+      if(rep){
+        replaceIdx = parseInt(rep.getAttribute('data-idx'), 10);
+        openPartPickerForOrder();
+      }
+    });
+    ['ol-filter-pn','ol-filter-rev','ol-filter-desc','ol-filter-qty-min','ol-filter-qty-max'].forEach(id=>{
+      document.getElementById(id)?.addEventListener('input', renderOrderTable);
+    });
+  }
+
+  function openPartPickerForOrder(){
+    var jobSelect = document.querySelector('select[name="job"]');
+    var job = jobSelect && jobSelect.value ? jobSelect.value : '';
+    var url = job ? '/ui/parts?pick=1&job=' + encodeURIComponent(job) : '/ui/parts?pick=1';
+    window.open(url, 'partpicker', 'width=1100,height=720');
+  }
+
   window.addEventListener('message', function(ev){
     try{
       const data = ev.data || {};
       if(data.type === 'pick-parts' && Array.isArray(data.items)){
-        const ta = document.getElementById('order_lines');
-        const lines = data.items.map(it => `${it.pn},${it.rev||''},1,EA,`).join('\n');
-        ta.value = (ta.value ? (ta.value + '\n') : '') + lines;
-        ta.dispatchEvent(new Event('input'));
+        if(replaceIdx !== null && orderRows[replaceIdx]){
+          const it = data.items[0];
+          orderRows[replaceIdx] = {
+            pn: it.pn, rev: it.rev || '', qty: Math.max(1, Math.round(it.qty || orderRows[replaceIdx].qty || 1)),
+            uom: orderRows[replaceIdx].uom || 'EA', note: orderRows[replaceIdx].note || '',
+            thumb: '', desc: it.desc || ''
+          };
+          replaceIdx = null;
+        } else {
+          data.items.forEach(it => {
+            orderRows.push({ pn: it.pn, rev: it.rev || '', qty: Math.max(1, Math.round(it.qty || 1)), uom: 'EA', note: '', thumb: '', desc: it.desc || '' });
+          });
+        }
+        syncOrderTextarea();
+        renderOrderTable();
       }
     }catch(e){}
   });
+
+  document.addEventListener('DOMContentLoaded', function(){
+    const ta = document.getElementById('order_lines');
+    orderRows = parseOrderLines(ta ? ta.value : '');
+    syncOrderTextarea();
+    renderOrderTable();
+    attachOrderHandlers();
+  });
+
+  async function ensureThumbOrder(idx){
+    const row = orderRows[idx];
+    if(!row || row.thumb) return;
+    const key = `${row.pn}::${row.rev||''}`;
+    if(thumbCache[key] === null) return;
+    if(thumbCache[key]){ row.thumb = thumbCache[key]; return; }
+    try{
+      const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(row.pn)}&rev=${encodeURIComponent(row.rev||'')}`);
+      if(!r.ok) { thumbCache[key] = null; return; }
+      const j = await r.json();
+      row.desc = (j.part && (j.part.description || '')) || row.desc || '';
+      const urls = Array.isArray(j.images) ? j.images : [];
+      const thumb = urls[0] || '';
+      if(thumb){
+        thumbCache[key] = thumb;
+        row.thumb = thumb;
+        renderOrderTable();
+      }else{
+        thumbCache[key] = null;
+      }
+    }catch(e){
+      thumbCache[key] = null;
+    }
+  }
 </script>
 {% endblock %}
+      const thumb = urls[0] || '';
+      if(thumb){
+        thumbCache[key] = thumb;
+        row.thumb = thumb;
+        renderOrderTable();
+      }else{
+        thumbCache[key] = null;
+      }

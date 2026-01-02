@@ -15,6 +15,17 @@ def suppliers_list():
     sups = Supplier.objects().order_by("name")
     return render_template("admin/suppliers_list.html", suppliers=sups)
 
+@bp.post("/<sup_id>/delete")
+@permissions_required("suppliers.manage")
+def suppliers_delete(sup_id):
+    try:
+        s = Supplier.objects.get(id=sup_id)
+        s.delete()
+        flash("Supplier deleted.", "success")
+    except Exception:
+        flash("Delete failed.", "error")
+    return redirect(url_for("admin_suppliers.suppliers_list"))
+
 
 @bp.route("/new", methods=["GET","POST"])
 @permissions_required("suppliers.manage")

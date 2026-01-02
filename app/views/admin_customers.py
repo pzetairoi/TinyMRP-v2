@@ -15,6 +15,17 @@ def customers_list():
     cs = Customer.objects().order_by("name")
     return render_template("admin/customers_list.html", customers=cs)
 
+@bp.post("/<cust_id>/delete")
+@permissions_required("customers.manage")
+def customers_delete(cust_id):
+    try:
+        c = Customer.objects.get(id=cust_id)
+        c.delete()
+        flash("Customer deleted.", "success")
+    except Exception:
+        flash("Delete failed.", "error")
+    return redirect(url_for("admin_customers.customers_list"))
+
 
 @bp.route("/new", methods=["GET","POST"])
 @permissions_required("customers.manage")
