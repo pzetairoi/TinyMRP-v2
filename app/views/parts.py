@@ -6,6 +6,7 @@ import re
 from base64 import urlsafe_b64encode
 
 from app.models.part import Part
+from app.models.job import Job
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
 from app.services.attrs import harvest_part_attrs
@@ -83,6 +84,16 @@ def parts_lazy():
                 | Q(processes__icontains=t)
             )
             q = q & orq
+
+    # Optional job filter: limit to BOM parts for that job unless explicitly bypassed
+    job_id = body.get("job") or request.args.get("job")
+    job_filter_enabled = bool(job_id) and str(body.get("job_only", "true")).lower() != "false"
+    if job_filter_enabled and job_id:
+        job = Job.objects(id=job_id).first()
+        if job and job.bom:
+            pn_list = list({(l.pn or "").strip() for l in job.bom if (l.pn or "").strip()})
+            if pn_list:
+                q = q & Q(part_number__in=pn_list)
 
     qs = Part.objects(q)
     filtered = qs.count()

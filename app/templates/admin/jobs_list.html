@@ -17,12 +17,16 @@
       <tr>
         <td>{{ j.job_number }}</td>
         <td>{{ j.description or '-' }}</td>
-        <td>{{ j.customer.name if j.customer else '-' }}</td>
-        <td>{{ (j.participants | map(attribute='email') | join(', ')) or '-' }}</td>
-        <td>{{ (j.vendors | map(attribute='name') | join(', ')) or '-' }}</td>
-        <td>
+        <td>{{ j.customer_name }}</td>
+        <td>{{ j.participants }}</td>
+        <td>{{ j.vendors }}</td>
+        <td class="d-flex gap-1">
           <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">Edit</a>
-          <a class="btn btn-sm btn-outline-primary ms-2" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
+          <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=j.id) }}" onsubmit="return confirm('Delete this job?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+          </form>
         </td>
       </tr>
       {% endfor %}

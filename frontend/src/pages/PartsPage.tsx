@@ -11,12 +11,16 @@ export default function PartsPage() {
   const sp = new URLSearchParams(window.location.search)
   const pickMode = sp.get('pick') === '1' || sp.get('pick') === 'true'
   const initialQ = sp.get('q') || ''
+  const jobId = sp.get('job') || ''
+  const jobOnlyDefault = !!jobId
 
   const [rows, setRows] = useState<Part[]>([])
   const [search, setSearch] = useState(initialQ)
   const [loading, setLoading] = useState(false)
   const [totalRecords, setTotal] = useState(0)
   const [selection, setSelection] = useState<Part[]>([])
+  const [qtyById, setQtyById] = useState<Record<string, number>>({})
+  const [jobOnly, setJobOnly] = useState(jobOnlyDefault)
   const [lazy, setLazy] = useState({
     first: 0, rows: 25, sortField: 'part_number', sortOrder: 1 as 1|-1,
     filters: {
@@ -34,20 +38,29 @@ export default function PartsPage() {
   useEffect(() => {
     (async () => {
       setLoading(true)
+      const payload: any = { ...lazy }
+      if (jobId && jobOnly) {
+        payload.job = jobId
+        payload.job_only = true
+      }
       const res = await fetch('/api/parts_lazy', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(lazy)
+        body: JSON.stringify(payload)
       })
       const j = await res.json()
       setRows(j.data || [])
       setTotal(j.totalRecords || 0)
       setLoading(false)
     })()
-  }, [lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters)])
+  }, [lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters), jobId, jobOnly])
 
   function onAddSelected() {
     try {
-      const items = (selection || []).map((p) => ({ pn: p.part_number, rev: p.revision || '' }))
+      const items = (selection || []).map((p) => {
+        const id = `${p.part_number}::${p.revision || ''}`
+        const qty = Math.max(1, Math.round(qtyById[id] || 1))
+        return { pn: p.part_number, rev: p.revision || '', qty, desc: p.description || '' }
+      })
       if (items.length && (window as any).opener && typeof (window as any).opener.postMessage === 'function') {
         ;(window as any).opener.postMessage({ type: 'pick-parts', items }, '*')
       }
@@ -78,6 +91,12 @@ export default function PartsPage() {
             }))
           }}
         />
+        {pickMode && jobId && (
+          <div className="form-check ms-2">
+            <input className="form-check-input" type="checkbox" id="jobOnly" checked={jobOnly} onChange={(e) => setJobOnly(e.target.checked)} />
+            <label className="form-check-label" htmlFor="jobOnly">Job parts only</label>
+          </div>
+        )}
       </div>
       {pickMode && (
         <div className="d-flex gap-2">
@@ -95,9 +114,19 @@ export default function PartsPage() {
         lazy paginator totalRecords={totalRecords} rows={lazy.rows} first={lazy.first}
         loading={loading}
         dataKey="id"
-        selectionMode={pickMode ? undefined : undefined}
         selection={selection}
-        onSelectionChange={(e) => setSelection(e.value as Part[])}
+        onSelectionChange={(e) => {
+          const next = e.value as Part[]
+          setSelection(next)
+          setQtyById((prev) => {
+            const updated = { ...prev }
+            next.forEach((p) => {
+              const id = p.id || `${p.part_number}::${p.revision || ''}`
+              if (updated[id] === undefined) updated[id] = 1
+            })
+            return updated
+          })
+        }}
         sortField={lazy.sortField} sortOrder={lazy.sortOrder}
         onPage={(e) => setLazy(s => ({...s, first: e.first, rows: e.rows}))}
         onSort={(e) =>
@@ -113,6 +142,35 @@ export default function PartsPage() {
       >
         {pickMode && (
         <Column selectionMode="multiple" style={{ width: 48 }} />)}
+        {pickMode && (
+        <Column header="Qty" body={(p: any) => {
+          const id = (p.id as string) || `${p.part_number}::${p.revision || ''}`
+          const val = qtyById[id] ?? 1
+          return (
+            <div className="d-flex align-items-center gap-1" onClick={(e)=>e.stopPropagation()} onMouseDown={(e)=>e.stopPropagation()}>
+              <button type="button" className="btn btn-sm btn-outline-secondary" style={{padding:'0 6px'}} onClick={(e) => {e.preventDefault(); const v=Math.max(1, val-1); setQtyById(prev=>({...prev,[id]:v}))}}>−</button>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="form-control form-control-sm text-end"
+                style={{ width: 70 }}
+                value={val}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  e.stopPropagation()
+                  const v = Math.max(1, Math.round(parseFloat(e.target.value) || 1))
+                  setQtyById((prev) => ({ ...prev, [id]: v }))
+                }}
+              />
+              <button type="button" className="btn btn-sm btn-outline-secondary" style={{padding:'0 6px'}} onClick={(e) => {e.preventDefault(); const v=Math.max(1, val+1); setQtyById(prev=>({...prev,[id]:v}))}}>+</button>
+            </div>
+          )
+        }} style={{ width: 140 }} />)}
 
         <Column header="" body={(p: any) => {
           const urls = (p as Part).thumb_urls || []

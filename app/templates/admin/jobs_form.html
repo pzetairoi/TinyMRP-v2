@@ -1,8 +1,8 @@
 {% extends "security/base.html" %}
 {% block title %}{{ 'Edit job' if job else 'New job' }} — Admin{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-10 col-lg-9">
+<div class="row">
+  <div class="col-12">
     <div class="card shadow-sm">
       <div class="card-body p-4">
         <h1 class="h5 mb-3">{{ 'Edit job' if job else 'New job' }}</h1>
@@ -60,14 +60,153 @@
           </div>
 
           <div class="mt-3">
-            <label class="form-label">Job BOM (one per line: PN,REV,qty). Lines beginning with # are ignored.</label>
-            <div class="d-flex justify-content-end mb-2">
-              <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForJob()">Add part(s)</button>
+            <label class="form-label">Job BOM</label>
+            <div class="d-flex flex-column flex-md-row align-items-md-center gap-2 mb-2">
+              <div class="d-flex flex-wrap gap-2">
+                <input id="bom-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
+                <input id="bom-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
+                <input id="bom-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
+                <input id="bom-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty ≥">
+                <input id="bom-filter-qty-max" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty ≤">
+              </div>
+              <button class="btn btn-sm btn-outline-primary ms-md-auto" type="button" onclick="openPartPickerForJob()">Add part(s)</button>
             </div>
-            <textarea id="bom_text" class="form-control" name="bom_text" rows="6">{{ bom_text if bom_text is defined else '' }}</textarea>
+            <div class="table-responsive">
+            <table class="table table-sm align-middle table-striped" id="bom-table">
+              <thead>
+                <tr>
+                  <th style="width: 64px;">Thumb</th>
+                  <th style="width: 30%;">Part Number</th>
+                  <th>Description</th>
+                  <th style="width: 20%;">Rev</th>
+                  <th style="width: 20%;">Qty</th>
+                  <th style="width: 20%;">Actions</th>
+                </tr>
+              </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <textarea id="bom_text" class="form-control d-none" name="bom_text" rows="6">{{ bom_text if bom_text is defined else '' }}</textarea>
           </div>
 
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
+        {% if orders %}
+          <div class="mt-4">
+            <h2 class="h6 mb-2">Related Orders</h2>
+            <div class="table-responsive">
+              <table class="table table-sm table-striped align-middle">
+                <thead>
+                  <tr>
+                    <th>Order #</th>
+                    <th>Kind</th>
+                    <th>Status</th>
+                    <th>Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for o in orders %}
+                  <tr>
+                    <td><a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a></td>
+                    <td>{{ o.kind }}</td>
+                    <td>{{ o.status }}</td>
+                    <td>{{ o.updated_at.strftime('%Y-%m-%d %H:%M') if o.updated_at else '' }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% endif %}
+        {% if ordered_parts %}
+          <div class="mt-4">
+            <h2 class="h6 mb-2">Parts in Orders</h2>
+            <div class="table-responsive">
+              <table class="table table-sm table-striped align-middle">
+                <thead>
+                  <tr>
+                    <th style="width:64px;">Thumb</th>
+                    <th>Part Number</th>
+                    <th>Description</th>
+                    <th style="width:12%;">Rev</th>
+                    <th style="width:12%;">Required</th>
+                    <th style="width:12%;">Ordered</th>
+                    <th style="width:12%;">Remaining</th>
+                    <th style="width:20%;">Orders</th>
+                    <th style="width:15%;">Suppliers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in ordered_parts %}
+                  <tr>
+                    <td><div class="bg-light border rounded" style="height:48px;width:64px;"></div></td>
+                    <td><a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a></td>
+                    <td>{{ p.desc }}</td>
+                    <td>{{ p.rev }}</td>
+                    <td>{{ '%.2f' % p.required if p.required is number else p.required }}</td>
+                    <td>{{ '%.2f' % p.ordered if p.ordered is number else p.ordered }}</td>
+                    <td>{{ '%.2f' % p.remaining if p.remaining is number else p.remaining }}</td>
+                    <td>
+                      {% for o in p.orders %}
+                        <div><a href="{{ o.href }}">{{ o.order_number }}</a></div>
+                      {% endfor %}
+                    </td>
+                    <td>
+                      {% for o in p.orders %}
+                        <div>{{ o.supplier }}</div>
+                      {% endfor %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% endif %}
+        {% if remaining_parts %}
+          <div class="mt-3">
+            <h2 class="h6 mb-2">Parts Not Yet Ordered</h2>
+            <div class="table-responsive">
+              <table class="table table-sm table-striped align-middle">
+                <thead>
+                  <tr>
+                    <th style="width:64px;">Thumb</th>
+                    <th>Part Number</th>
+                    <th>Description</th>
+                    <th style="width:12%;">Rev</th>
+                    <th style="width:12%;">Required</th>
+                    <th style="width:12%;">Ordered</th>
+                    <th style="width:12%;">Remaining</th>
+                    <th style="width:20%;">Orders</th>
+                    <th style="width:15%;">Suppliers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in remaining_parts %}
+                  <tr>
+                    <td><div class="bg-light border rounded" style="height:48px;width:64px;"></div></td>
+                    <td><a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a></td>
+                    <td>{{ p.desc }}</td>
+                    <td>{{ p.rev }}</td>
+                    <td>{{ '%.2f' % p.required if p.required is number else p.required }}</td>
+                    <td>{{ '%.2f' % p.ordered if p.ordered is number else p.ordered }}</td>
+                    <td>{{ '%.2f' % p.remaining if p.remaining is number else p.remaining }}</td>
+                    <td>
+                      {% for o in p.orders %}
+                        <div><a href="{{ o.href }}">{{ o.order_number }}</a></div>
+                      {% endfor %}
+                    </td>
+                    <td>
+                      {% for o in p.orders %}
+                        <div>{{ o.supplier }}</div>
+                      {% endfor %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% endif %}
         </form>
       </div>
     </div>
@@ -76,19 +215,180 @@
 {% endblock %}
 {% block extra_scripts %}
 <script>
+  let bomRows = [];
+  let replaceIdx = null;
+  const thumbCache = {};
+
+  function parseBomText(txt){
+    const out = [];
+    for(const raw of (txt || '').split(/\r?\n/)){
+      const line = raw.trim();
+      if(!line || line.startsWith('#')) continue;
+      const parts = line.split(',').map(s => s.trim());
+      if(!parts[0]) continue;
+      out.push({
+        pn: parts[0],
+        rev: parts[1] || '',
+        qty: Math.max(1, Math.round(parseFloat(parts[2]) || 1)),
+        thumb: '',
+        desc: ''
+      });
+    }
+    return mergeBomRows(out);
+  }
+
+  function mergeBomRows(rows){
+    const map = new Map();
+    for(const r of rows){
+      const key = `${(r.pn||'').toLowerCase()}::${r.rev||''}`;
+      const cur = map.get(key);
+      if(cur){
+        cur.qty = Math.max(1, Math.round((cur.qty||0) + (r.qty||0)));
+        cur.desc = cur.desc || r.desc || '';
+      }else{
+        map.set(key, {...r, qty: Math.max(1, Math.round(r.qty||1))});
+      }
+    }
+    return Array.from(map.values());
+  }
+  function syncTextarea(){
+    const ta = document.getElementById('bom_text');
+    ta.value = bomRows.map(r => `${r.pn},${r.rev || ''},${r.qty || 1}`).join('\n');
+  }
+
+  function currentFilters(){
+    return {
+      pn: (document.getElementById('bom-filter-pn')?.value || '').toLowerCase(),
+      rev: (document.getElementById('bom-filter-rev')?.value || '').toLowerCase(),
+      desc: (document.getElementById('bom-filter-desc')?.value || '').toLowerCase(),
+      qtyMin: parseFloat(document.getElementById('bom-filter-qty-min')?.value || '') || null,
+      qtyMax: parseFloat(document.getElementById('bom-filter-qty-max')?.value || '') || null,
+    };
+  }
+
+  function renderBomTable(){
+    const tbody = document.querySelector('#bom-table tbody');
+    if(!tbody) return;
+    tbody.innerHTML = '';
+    const f = currentFilters();
+    bomRows.forEach((row, idx) => {
+      if(f.pn && !row.pn.toLowerCase().includes(f.pn)) return;
+      if(f.rev && !String(row.rev||'').toLowerCase().includes(f.rev)) return;
+      if(f.desc && !String(row.desc||'').toLowerCase().includes(f.desc)) return;
+      if(f.qtyMin !== null && (row.qty || 0) < f.qtyMin) return;
+      if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="width:64px;">
+          ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : '<div class="bg-light border rounded" style="height:48px;width:64px;"></div>'}
+        </td>
+        <td>${row.pn}</td>
+        <td>${row.desc || ''}</td>
+        <td>${row.rev || ''}</td>
+        <td style="max-width:120px;">
+          <input type="number" step="1" min="0" class="form-control form-control-sm bom-qty" value="${row.qty || 1}" data-idx="${idx}">
+        </td>
+        <td>
+          <div class="d-flex gap-1">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-action="replace" data-idx="${idx}">Replace</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove" data-idx="${idx}">Remove</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+      ensureThumb(idx);
+    });
+  }
+
+  function attachBomHandlers(){
+    const tbody = document.querySelector('#bom-table tbody');
+    if(!tbody) return;
+    tbody.addEventListener('input', (ev) => {
+      const t = ev.target;
+      if(t.classList.contains('bom-qty')){
+        const idx = parseInt(t.getAttribute('data-idx'), 10);
+        if(!Number.isNaN(idx) && bomRows[idx]){
+          bomRows[idx].qty = parseFloat(t.value) || 1;
+          syncTextarea();
+        }
+      }
+    });
+    tbody.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button[data-action="remove"]');
+      if(btn){
+        const idx = parseInt(btn.getAttribute('data-idx'), 10);
+        if(!Number.isNaN(idx)){
+          bomRows.splice(idx, 1);
+          syncTextarea();
+          renderBomTable();
+        }
+        return;
+      }
+      const rep = ev.target.closest('button[data-action="replace"]');
+      if(rep){
+        replaceIdx = parseInt(rep.getAttribute('data-idx'), 10);
+        openPartPickerForJob();
+      }
+    });
+    ['bom-filter-pn','bom-filter-rev','bom-filter-desc','bom-filter-qty-min','bom-filter-qty-max'].forEach(id=>{
+      document.getElementById(id)?.addEventListener('input', renderBomTable);
+    });
+  }
+
   function openPartPickerForJob(){
-    window.open('/ui/parts?pick=1', 'partpicker', 'width=1100,height=720');
+    const url = '/ui/parts?pick=1';
+    window.open(url, 'partpicker', 'width=1100,height=720');
   }
   window.addEventListener('message', function(ev){
     try{
       const data = ev.data || {};
       if(data.type === 'pick-parts' && Array.isArray(data.items)){
-        const ta = document.getElementById('bom_text');
-        const lines = data.items.map(it => `${it.pn},${it.rev||''},1`).join('\n');
-        ta.value = (ta.value ? (ta.value + '\n') : '') + lines;
-        ta.dispatchEvent(new Event('input'));
+        if(replaceIdx !== null && bomRows[replaceIdx]){
+          const it = data.items[0];
+          bomRows[replaceIdx] = { pn: it.pn, rev: it.rev || '', qty: Math.max(1, Math.round(it.qty || bomRows[replaceIdx].qty || 1)), thumb: '', desc: it.desc || '' };
+          replaceIdx = null;
+        } else {
+          data.items.forEach(it => {
+            bomRows.push({ pn: it.pn, rev: it.rev || '', qty: Math.max(1, Math.round(it.qty || 1)), thumb: '', desc: it.desc || '' });
+          });
+        }
+        syncTextarea();
+        renderBomTable();
       }
     }catch(e){}
   });
+
+  document.addEventListener('DOMContentLoaded', function(){
+    const ta = document.getElementById('bom_text');
+    bomRows = parseBomText(ta ? ta.value : '');
+    syncTextarea();
+    renderBomTable();
+    attachBomHandlers();
+  });
+
+  async function ensureThumb(idx){
+    const row = bomRows[idx];
+    if(!row || row.thumb) return;
+    const key = `${row.pn}::${row.rev||''}`;
+    if(thumbCache[key] === null) return;
+    if(thumbCache[key]){ row.thumb = thumbCache[key]; return; }
+    try{
+      const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(row.pn)}&rev=${encodeURIComponent(row.rev||'')}`);
+      if(!r.ok) { thumbCache[key] = null; return; }
+      const j = await r.json();
+      row.desc = (j.part && (j.part.description || '')) || row.desc || '';
+      const urls = Array.isArray(j.images) ? j.images : [];
+      const thumb = urls[0] || '';
+      if(thumb){
+        thumbCache[key] = thumb;
+        row.thumb = thumb;
+        renderBomTable();
+      }else{
+        thumbCache[key] = null;
+      }
+    }catch(e){
+      thumbCache[key] = null;
+    }
+  }
 </script>
 {% endblock %}
