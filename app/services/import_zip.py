@@ -352,6 +352,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     
     # root guess for convenience (top item in TREEBOM)
     root_pn = None
+    root_rev = ""
     if tree_name:
         txt = z.read(tree_name).decode("utf-8", errors="replace")
         for line in txt.splitlines():
@@ -360,10 +361,19 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 if cols[0].strip() == "1":
                     root_pn = _base_pn(cols[1].strip())
                 break
+    if root_pn:
+        for (pn, rev), _norm in part_props.items():
+            if pn == root_pn:
+                if rev:
+                    root_rev = rev
+                    break
+                if not root_rev:
+                    root_rev = rev or ""
 
     return {
         "zip": filename,
         "root": root_pn,
+        "root_revision": root_rev,
         "parts_created": created_parts,
         "parts_updated": updated_parts,
         "links_created": created_links,
