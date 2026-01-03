@@ -1,6 +1,6 @@
 # app/services/import_zip.py
 import ast, io, zipfile, re
-from typing import Dict, Any, List, Tuple, Iterable
+from typing import Dict, Any, List, Tuple, Iterable, Set
 from mongoengine import NotUniqueError
 from mongoengine.queryset.visitor import Q
 from app.models.part import Part
@@ -118,6 +118,44 @@ def _parse_treebom(txt: str) -> List[Tuple[str, str, str, str, float]]:
         links.append((parent_pn, parent_rev, child_pn, child_rev, qty))
     return links
 
+def _ensure_part_exists(pn: str, rev: str, seed_tag: str) -> bool:
+    pn = _base_pn(str(pn)).strip()
+    rev = (rev or "").strip()
+    if not pn:
+        return False
+    if Part.objects(part_number=pn, revision=rev).first():
+        return False
+    try:
+        Part(part_number=pn, revision=rev, description="", uom="EA", attrs={"seed": seed_tag}).save()
+        return True
+    except NotUniqueError:
+        return False
+
+def _find_existing_link(parent_pn: str, parent_rev: str, child_pn: str, child_rev: str,
+                        resolved_parent_rev: str, resolved_child_rev: str):
+    query = dict(parent_pn=parent_pn, child_pn=child_pn)
+    if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
+        query.update(parent_rev=resolved_parent_rev, child_rev=resolved_child_rev)
+    existing_links = list(BOMLink.objects(**query))
+
+    if not existing_links and (parent_rev or child_rev):
+        alt_query = dict(parent_pn=parent_pn, child_pn=child_pn)
+        if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
+            alt_query.update(parent_rev=(parent_rev or "").strip(), child_rev=(child_rev or "").strip())
+        existing_links = list(BOMLink.objects(**alt_query))
+
+    if not existing_links and (not parent_rev and not child_rev) and (resolved_parent_rev or resolved_child_rev):
+        blank_query = dict(parent_pn=parent_pn, child_pn=child_pn)
+        if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
+            blank_query.update(parent_rev="", child_rev="")
+        existing_links = list(BOMLink.objects(**blank_query))
+
+    if not existing_links:
+        return None, []
+
+    existing_links.sort(key=lambda link: link.updated_at or link.id, reverse=True)
+    return existing_links[0], existing_links[1:]
+
 def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -> Dict[str, Any]:
     """
     Main entry: import a single ZIP file.
@@ -135,6 +173,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     skipped_links = 0
     found_artifacts = 0
     skipped_artifacts = 0
+    tree_parts: Set[Tuple[str, str]] = set()
 
     # 1) Parts from FLATBOM
     part_props: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -221,15 +260,17 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             if not parent_pn or not child_pn:
                 skipped_links += 1
                 continue
+            tree_parts.add((parent_pn, (parent_rev or "").strip()))
+            tree_parts.add((child_pn, (child_rev or "").strip()))
             # ensure parts exist (create shells if missing)
             for pn, rev in ((parent_pn, parent_rev), (child_pn, child_rev)):
-                rev = (rev or "").strip()
-                if not Part.objects(part_number=pn, revision=rev).first():
-                    Part(part_number=pn, revision=rev, description="", uom="EA", attrs={"seed": seed_tag}).save()
+                if _ensure_part_exists(pn, rev, seed_tag):
                     created_parts += 1
             # resolve revisions, prefer explicit TREEBOM rev then fall back to latest
-            resolved_parent_rev = (parent_rev or "").strip()
-            resolved_child_rev  = (child_rev or "").strip()
+            raw_parent_rev = (parent_rev or "").strip()
+            raw_child_rev = (child_rev or "").strip()
+            resolved_parent_rev = raw_parent_rev
+            resolved_child_rev = raw_child_rev
             if not resolved_parent_rev:
                 prt_parent = Part.objects(part_number=parent_pn).order_by("-updated_at").first()
                 resolved_parent_rev = (prt_parent.revision if prt_parent else "") or ""
@@ -237,11 +278,13 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 prt_child  = Part.objects(part_number=child_pn).order_by("-updated_at").first()
                 resolved_child_rev  = (prt_child.revision if prt_child else "") or ""
 
-            # upsert by PN(+REV if supported)
-            query = dict(parent_pn=parent_pn, child_pn=child_pn)
-            if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
-                query.update(parent_rev=resolved_parent_rev, child_rev=resolved_child_rev)
-            existing = BOMLink.objects(**query).first()
+            existing, duplicates = _find_existing_link(
+                parent_pn, raw_parent_rev, child_pn, raw_child_rev,
+                resolved_parent_rev, resolved_child_rev)
+            if duplicates:
+                for dup in duplicates:
+                    dup.delete()
+
             if existing:
                 existing.qty = qty
                 existing.uom = existing.uom or "EA"
@@ -259,7 +302,18 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 BOMLink(**kwargs).save()
                 created_links += 1
                 
-    # 3) Discover and register artifacts for all parts 
+    # 3) Discover and register artifacts for all parts
+    for pn, rev in tree_parts:
+        key = (pn, rev)
+        if key not in part_props:
+            part_props[key] = {
+                "part_number": pn,
+                "description": "",
+                "category": "",
+                "uom": "EA",
+                "revision": rev,
+                "attrs": {"seed": seed_tag},
+            }
 
     artifact_inserts = 0
     artifacts_found_by_type = defaultdict(int)

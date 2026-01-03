@@ -1,6 +1,6 @@
 # TinyMRP v2
 
-Lean, MongoDB‑backed MRP starter focused on Bills of Materials (BOM), parts browser, and document packs (PDF binders, Excel BOM, visual lists).
+Lean, MongoDB-backed MRP starter focused on Bills of Materials (BOM), parts browser, and document packs (PDF binders, Excel BOM, visual lists).
 
 Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB + React/Vite), drops the legacy SQLite/Excel config, and adds modern auth and file handling.
 
@@ -8,8 +8,8 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
 
 ## Features
 
-- Auth and Roles: Flask‑Security‑Too, Argon2 hashing, role/permission editor.
-- Parts & BOM APIs: MongoEngine models, server‑side filters, where‑used.
+- Auth and Roles: Flask-Security-Too, Argon2 hashing, role/permission editor.
+- Parts & BOM APIs: MongoEngine models, server-side filters, where-used.
 - Files & Thumbnails: file discovery, preview/drawing PNGs, 3MF viewer assets.
 - Document Packs:
   - PDF binder with cover page, index (with dot leaders), and Visual Summary listed first.
@@ -34,7 +34,7 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
 Create a `.env` (or select one via `ENV_FILE`) with at least:
 
 - `SECRET_KEY`: Flask secret.
-- `SECURITY_PASSWORD_SALT`: salt for Flask‑Security.
+- `SECURITY_PASSWORD_SALT`: salt for Flask-Security.
 - `MONGO_URI`: e.g. `mongodb://localhost:27017/tinymrp-v2`.
 - File roots (canonical keys, see `app/__init__.py`):
   - `FILES_LOCAL_ROOT`: absolute path where deliverables are stored (host/container).
@@ -45,6 +45,61 @@ Create a `.env` (or select one via `ENV_FILE`) with at least:
   - `VITE_BACKEND_URL`: dev proxy target for Vite (`frontend/vite.config.ts`).
 
 Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
+
+---
+
+## SolidWorks Add-in
+
+Add-in project lives in `solidworks-addin/`.
+
+### Requirements
+
+- SolidWorks installed (API redistributables in `$(ProgramFiles)\SOLIDWORKS Corp\SOLIDWORKS\api\redist`)
+- .NET Framework 4.8
+- Inno Setup (only if you want to build the installer)
+
+### Build
+
+```powershell
+dotnet msbuild solidworks-addin\TinyMRP.SolidWorksAddin.sln /p:Configuration=Release /p:Platform=x64
+```
+
+Output DLL:
+
+`solidworks-addin/TinyMRP.SolidWorksAddin/bin/x64/Release/net48/TinyMRP.SolidWorksAddin.dll`
+
+### Register / Unregister (manual)
+
+```powershell
+# Register
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /codebase /tlb
+
+# Unregister
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /unregister
+```
+
+### Installer
+
+The Inno Setup script is in `solidworks-addin/installer.iss`. It copies the build output and runs RegAsm.
+
+### Configuration
+
+- Primary config file: `TinyMRP_config.txt` next to the add-in DLL.
+- If the install folder is not writable, the add-in saves to:
+  `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
+- Relative paths in the config are resolved from the add-in directory.
+- Templates live under `solidworks-addin/TinyMRP.SolidWorksAddin/Templates/`.
+
+### UI and Outputs
+
+- Task pane tabs: Publish, BOM, Configuration.
+- Publish exports deliverables under `DeliverablesFolder`.
+- BOM exports `*_FLATBOM.txt` and `*_TREEBOM.txt`, then zips them into `BOM_Folder\bom`.
+- Child documents opened during export are closed automatically; only the root stays open.
+
+### Icons
+
+The add-in and task pane icons are generated from `solidworks-addin/TinyMRP.SolidWorksAddin/Assets/logo.png`.
 
 ---
 
@@ -153,10 +208,10 @@ docker compose ps
 ### Mappings & Paths (repo-specific)
 
 - Port mapping:
-  - `docker-compose.yml` → `nginx.ports`: host `${HTTP_PORT}` → container `80`.
+  - `docker-compose.yml` -> `nginx.ports`: host `${HTTP_PORT}` -> container `80`.
   - Set `HTTP_PORT` in `.env`.
 - Deliverables bind mount:
-  - `.env` → `DELIVERABLES_DIR=/srv/tinymrp/deliverables`.
+  - `.env` -> `DELIVERABLES_DIR=/srv/tinymrp/deliverables`.
   - `docker-compose.yml` mounts `${DELIVERABLES_DIR}` to `/data/deliverables` in both `app` and `nginx`.
 - App file roots and URL prefix:
   - `docker-compose.yml` sets `FILES_LOCAL_ROOT=/data/deliverables` and `FILES_URL_PREFIX=/deliverables` for the app.
@@ -172,10 +227,10 @@ On first boot, if the database has no users, the app auto-creates roles and a de
 
 ### Troubleshooting Quick Checks
 
-- Port busy → change `.env: HTTP_PORT` and `docker compose up -d`.
-- App 502 → `docker compose logs -f app` and `docker compose logs -f nginx`.
-- Files 404 → verify host folder path and mounts: `docker compose exec app sh -lc 'ls -la /data/deliverables'`.
-- Thumbnails not writing → relax perms on `/srv/tinymrp/deliverables` during testing.
+- Port busy - change `.env: HTTP_PORT` and `docker compose up -d`.
+- App 502 - `docker compose logs -f app` and `docker compose logs -f nginx`.
+- Files 404 - verify host folder path and mounts: `docker compose exec app sh -lc 'ls -la /data/deliverables'`.
+- Thumbnails not writing - relax perms on `/srv/tinymrp/deliverables` during testing.
 
 ---
 
@@ -186,9 +241,9 @@ On first boot, if the database has no users, the app auto-creates roles and a de
 
 Main UI routes:
 
-- `/ui/parts` — React shell for browsing parts.
-- `/ui/part/<pn>?rev=<rev>` — part detail; links from PDF binder and Excel BOM.
-- `/ui/bom/<pn>?rev=<rev>` — BOM view (when enabled in the current build).
+- `/ui/parts` - React shell for browsing parts.
+- `/ui/part/<pn>?rev=<rev>` - part detail; links from PDF binder and Excel BOM.
+- `/ui/bom/<pn>?rev=<rev>` - BOM view (when enabled in the current build).
 
 ---
 
@@ -196,8 +251,8 @@ Main UI routes:
 
 Endpoints:
 
-- `GET /api/docpacks/options?pn=PN&rev=REV&depth=full|top` → available `file_types` and canonical `processes`.
-- `POST /api/docpacks/build` → Generates a ZIP or a single PDF depending on options.
+- `GET /api/docpacks/options?pn=PN&rev=REV&depth=full|top` - available `file_types` and canonical `processes`.
+- `POST /api/docpacks/build` - Generates a ZIP or a single PDF depending on options.
 
 Example payload:
 
@@ -249,7 +304,7 @@ Data helpers (see `app/cli.py`):
 ## Notes & Tips
 
 - CSRF is enabled; some API blueprints are explicitly exempted where required for SPA calls.
-- Files config uses canonical keys `FILES_LOCAL_ROOT`, `FILES_URL_PREFIX`, `FILES_UPSTREAM_BASE`. Backward‑compatible aliases `FILE_ROOT_LOCAL` and `FILE_ROOT_HTTP` remain for older code paths.
+- Files config uses canonical keys `FILES_LOCAL_ROOT`, `FILES_URL_PREFIX`, `FILES_UPSTREAM_BASE`. Backward-compatible aliases `FILE_ROOT_LOCAL` and `FILE_ROOT_HTTP` remain for older code paths.
 - Frontend build artifacts are written to `app/static/parts-ui` by `npm run build` from the `frontend` directory.
 
 ---

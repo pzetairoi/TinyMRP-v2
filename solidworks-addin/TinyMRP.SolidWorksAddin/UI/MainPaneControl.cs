@@ -1,489 +1,671 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using SolidWorks.Interop.sldworks;
-using TinyMRP.SolidWorksAddin.Models;
+using TinyMRP.SolidWorksAddin;
 using TinyMRP.SolidWorksAddin.Services;
 
 namespace TinyMRP.SolidWorksAddin.UI
 {
     [ComVisible(true)]
-    [ProgId("TinyMRP.SolidWorksAddin.UI.MainPaneControl")]
+    [Guid("7F24E7B5-2E52-4E46-9B39-6E1C5A3E6D12")]
+    [ProgId(TaskPaneProgId)]
+    [ClassInterface(ClassInterfaceType.AutoDispatch)]
     public class MainPaneControl : UserControl
     {
-        private TinyMrpClient? _client;
-        private SolidWorksExportService? _exporter;
-        private ISldWorks? _swApp;
+        public const string TaskPaneProgId = "TinyMRP.SolidWorksAddin.UI.MainPaneControl";
 
-        private TextBox txtBaseUrl = new();
-        private TextBox txtFilesRoot = new();
-        private TextBox txtFilesUrl = new();
-        private TextBox txtEmail = new();
-        private TextBox txtPassword = new() { UseSystemPasswordChar = true };
-        private Label lblStatus = new() { AutoSize = true, ForeColor = Color.Teal };
-        private TextBox txtPn = new();
-        private TextBox txtRev = new();
-        private CheckedListBox lstFileTypes = new() { CheckOnClick = true, Height = 90 };
-        private CheckedListBox lstProcesses = new() { CheckOnClick = true, Height = 90 };
-        private CheckBox chkTopLevel = new() { Text = "Top level only" };
-        private CheckBox chkOverwrite = new() { Text = "Overwrite" };
-        private CheckBox chkExcel = new() { Text = "Excel BOM", Checked = true };
-        private CheckBox chkBinder = new() { Text = "PDF binder" };
-        private CheckBox chkVisual = new() { Text = "Visual list" };
-        private CheckBox chkSelected = new() { Text = "Selected files" };
-        private CheckBox chkFabPack = new() { Text = "Fabrication pack" };
-        private CheckBox chkIncludeConsumed = new() { Text = "Include consumed" };
-        private CheckBox chkBinderIndex = new() { Text = "Binder index" };
-        private CheckBox chkBinderDatasheets = new() { Text = "Datasheets" };
-        private CheckBox chkBinderPages = new() { Text = "Page numbers", Checked = true };
-        private CheckBox chkStampQuote = new() { Text = "Quote" };
-        private CheckBox chkStampConf = new() { Text = "Confidential" };
-        private CheckBox chkStampApproved = new() { Text = "Approved" };
-        private CheckBox chkStampWip = new() { Text = "WIP" };
-        private CheckBox chkStampProgress = new() { Text = "In progress" };
-        private ListBox lstModels = new();
-        private ListBox lstDrawings = new();
-        private ListView lvLog = new() { View = View.Details, FullRowSelect = true, Height = 120, Dock = DockStyle.Fill };
-        private Button btnLogin = new() { Text = "Login" };
-        private Button btnRefreshOptions = new() { Text = "Cargar tipos" };
-        private Button btnReservePn = new() { Text = "Reservar PN" };
-        private Button btnBom = new() { Text = "BOM" };
-        private Button btnFreeze = new() { Text = "Freeze" };
-        private Button btnUnfreeze = new() { Text = "Unfreeze" };
+        private readonly TabControl _tabs = new TabControl { Dock = DockStyle.Fill };
+
+        private TextBox _deliverablesFolderText;
+        private TextBox _bomFolderText;
+        private TextBox _weblinkText;
+        private TextBox _bomTemplateText;
+        private TextBox _blankTemplateText;
+        private CheckBox _removeModifiedNotesCheck;
+        private CheckBox _topLevelOnlyCheck;
+        private CheckBox _overwriteCheck;
+        private CheckBox _pngModelCheck;
+        private CheckBox _stepCheck;
+        private CheckBox _edrCheck;
+        private CheckBox _threeMfCheck;
+        private CheckBox _pngDrawingCheck;
+        private CheckBox _pdfCheck;
+        private CheckBox _edrDrawingCheck;
+        private TextBox _logBox;
+        private Label _configPathLabel;
 
         public MainPaneControl()
         {
             Dock = DockStyle.Fill;
+            BackColor = SystemColors.Control;
             AutoScroll = true;
-            BuildLayout();
-        }
+            MinimumSize = new Size(280, 320);
 
-        public void Initialize(TinyMrpClient client, SolidWorksExportService exporter, ISldWorks swApp)
-        {
-            _client = client;
-            _exporter = exporter;
-            _swApp = swApp;
-            LoadState();
-        }
+            var header = new Label
+            {
+                Text = "TinyMRP",
+                Font = new Font("Segoe UI", 11F, FontStyle.Bold, GraphicsUnit.Point),
+                AutoSize = true,
+                Padding = new Padding(4, 4, 4, 0)
+            };
 
-        private void BuildLayout()
-        {
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 1,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(6),
+                RowCount = 2,
+                Padding = new Padding(6)
             };
-
-            root.Controls.Add(BuildAuthPanel());
-            root.Controls.Add(BuildPnPanel());
-            root.Controls.Add(BuildListPanel());
-            root.Controls.Add(BuildDocPackPanel());
-            root.Controls.Add(BuildButtonsPanel());
-            root.Controls.Add(BuildLogPanel());
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            root.Controls.Add(header, 0, 0);
+            root.Controls.Add(_tabs, 0, 1);
 
             Controls.Add(root);
+
+            BuildTabs();
+            ApplyConfig(AddinContext.Config);
         }
 
-        private Control BuildAuthPanel()
+        private void BuildTabs()
         {
-            var gb = new GroupBox { Text = "TinyMRP", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8) };
-            var layout = new TableLayoutPanel { ColumnCount = 2, Dock = DockStyle.Fill, AutoSize = true };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
-
-            layout.Controls.Add(new Label { Text = "Base URL", AutoSize = true }, 0, 0);
-            layout.Controls.Add(txtBaseUrl, 1, 0);
-            layout.Controls.Add(new Label { Text = "FILES_LOCAL_ROOT", AutoSize = true }, 0, 1);
-            layout.Controls.Add(txtFilesRoot, 1, 1);
-            layout.Controls.Add(new Label { Text = "FILES_URL_PREFIX", AutoSize = true }, 0, 2);
-            layout.Controls.Add(txtFilesUrl, 1, 2);
-            layout.Controls.Add(new Label { Text = "Email", AutoSize = true }, 0, 3);
-            layout.Controls.Add(txtEmail, 1, 3);
-            layout.Controls.Add(new Label { Text = "Password", AutoSize = true }, 0, 4);
-            layout.Controls.Add(txtPassword, 1, 4);
-            layout.Controls.Add(btnLogin, 1, 5);
-            layout.Controls.Add(lblStatus, 1, 6);
-
-            btnLogin.Click += async (_, __) => await LoginAsync();
-
-            gb.Controls.Add(layout);
-            return gb;
+            _tabs.TabPages.Add(BuildPublishTab());
+            _tabs.TabPages.Add(BuildBomTab());
+            _tabs.TabPages.Add(BuildConfigTab());
         }
 
-        private Control BuildPnPanel()
+        private TabPage BuildPublishTab()
         {
-            var gb = new GroupBox { Text = "MODELS / DRAWINGS", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8) };
-            var layout = new TableLayoutPanel { ColumnCount = 4, Dock = DockStyle.Fill, AutoSize = true };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            var page = CreateTabPage("Publish");
+            var panel = CreateTabPanel();
+            page.Controls.Add(panel);
 
-            layout.Controls.Add(new Label { Text = "PN", AutoSize = true }, 0, 0);
-            layout.Controls.Add(txtPn, 1, 0);
-            layout.Controls.Add(new Label { Text = "REV", AutoSize = true }, 2, 0);
-            layout.Controls.Add(txtRev, 3, 0);
+            var modelChecks = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            _pngModelCheck = new CheckBox { Text = "PNG" };
+            _stepCheck = new CheckBox { Text = "STEP" };
+            _edrCheck = new CheckBox { Text = "eDrawings" };
+            _threeMfCheck = new CheckBox { Text = "3MF" };
+            modelChecks.Controls.Add(_pngModelCheck);
+            modelChecks.Controls.Add(_stepCheck);
+            modelChecks.Controls.Add(_edrCheck);
+            modelChecks.Controls.Add(_threeMfCheck);
 
-            layout.Controls.Add(new Label { Text = "MODELS", AutoSize = true }, 0, 1);
-            layout.Controls.Add(new Label { Text = "DRAWINGS", AutoSize = true }, 2, 1);
+            var drawingChecks = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            _pngDrawingCheck = new CheckBox { Text = "PNG drawing" };
+            _pdfCheck = new CheckBox { Text = "PDF" };
+            _edrDrawingCheck = new CheckBox { Text = "eDrawings drawing" };
+            drawingChecks.Controls.Add(_pngDrawingCheck);
+            drawingChecks.Controls.Add(_pdfCheck);
+            drawingChecks.Controls.Add(_edrDrawingCheck);
 
-            lstModels.Height = 90;
-            lstDrawings.Height = 90;
-            layout.Controls.Add(lstModels, 0, 2);
-            layout.SetColumnSpan(lstModels, 2);
-            layout.Controls.Add(lstDrawings, 2, 2);
-            layout.SetColumnSpan(lstDrawings, 2);
+            var deliverablesLayout = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                RowCount = 1,
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
+            };
+            deliverablesLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            deliverablesLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            deliverablesLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            var btnAddModel = new Button { Text = "Add active", AutoSize = true };
-            btnAddModel.Click += (_, __) => AddActiveToList(lstModels);
-            var btnAddDrawing = new Button { Text = "Add active", AutoSize = true };
-            btnAddDrawing.Click += (_, __) => AddActiveToList(lstDrawings);
-            var btnRemoveModel = new Button { Text = "Remove", AutoSize = true };
-            btnRemoveModel.Click += (_, __) => RemoveSelected(lstModels);
-            var btnRemoveDrawing = new Button { Text = "Remove", AutoSize = true };
-            btnRemoveDrawing.Click += (_, __) => RemoveSelected(lstDrawings);
+            var modelsBox = CreateGroupBox("Models", modelChecks);
+            modelsBox.AutoSize = false;
+            modelsBox.Dock = DockStyle.Fill;
+            modelsBox.MinimumSize = new Size(160, 200);
 
-            layout.Controls.Add(btnAddModel, 0, 3);
-            layout.Controls.Add(btnRemoveModel, 1, 3);
-            layout.Controls.Add(btnAddDrawing, 2, 3);
-            layout.Controls.Add(btnRemoveDrawing, 3, 3);
+            var drawingsBox = CreateGroupBox("Drawings", drawingChecks);
+            drawingsBox.AutoSize = false;
+            drawingsBox.Dock = DockStyle.Fill;
+            drawingsBox.MinimumSize = new Size(160, 200);
 
-            gb.Controls.Add(layout);
-            return gb;
+            deliverablesLayout.Controls.Add(modelsBox, 0, 0);
+            deliverablesLayout.Controls.Add(drawingsBox, 1, 0);
+            deliverablesLayout.MinimumSize = new Size(0, 200);
+            AddSection(panel, CreateGroupBox("Deliverables", deliverablesLayout));
+
+            var optionsPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill
+            };
+            _overwriteCheck = new CheckBox { Text = "Overwrite files" };
+            _topLevelOnlyCheck = new CheckBox { Text = "Top level only" };
+            optionsPanel.Controls.Add(_overwriteCheck);
+            optionsPanel.Controls.Add(_topLevelOnlyCheck);
+            AddSection(panel, CreateGroupBox("Options", optionsPanel));
+
+            var paths = CreateFormLayout();
+            _deliverablesFolderText = new TextBox { Width = 200 };
+            AddField(paths, "Deliverables folder", CreateFolderPicker(_deliverablesFolderText, OnBrowseDeliverables));
+            AddSection(panel, CreateGroupBox("Paths", paths));
+
+            var actions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill
+            };
+            var btnSelectAll = new Button { Text = "Select all", AutoSize = true };
+            btnSelectAll.Click += (_, __) => SetDeliverableChecks(true);
+            var btnDeselectAll = new Button { Text = "Deselect", AutoSize = true };
+            btnDeselectAll.Click += (_, __) => SetDeliverableChecks(false);
+            var btnCreate = new Button { Text = "Create files", AutoSize = true };
+            btnCreate.Click += OnCreateFiles;
+            actions.Controls.Add(btnSelectAll);
+            actions.Controls.Add(btnDeselectAll);
+            actions.Controls.Add(btnCreate);
+            AddSection(panel, CreateGroupBox("Actions", actions));
+
+            _logBox = new TextBox
+            {
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                Dock = DockStyle.Fill
+            };
+            _logBox.MinimumSize = new Size(0, 120);
+            var logGroup = CreateGroupBox("Log", _logBox);
+            logGroup.AutoSize = false;
+            logGroup.Height = 170;
+            AddSection(panel, logGroup);
+
+            return page;
         }
 
-        private Control BuildListPanel()
+        private TabPage BuildBomTab()
         {
-            var gb = new GroupBox { Text = "Salida", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8) };
-            var layout = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
-            layout.Controls.Add(chkOverwrite);
-            layout.Controls.Add(chkTopLevel);
-            layout.Controls.Add(chkIncludeConsumed);
-            var btnOpen = new Button { Text = "Abrir carpeta", AutoSize = true };
-            btnOpen.Click += (_, __) => OpenFolder(txtFilesRoot.Text.Trim());
-            layout.Controls.Add(btnOpen);
-            gb.Controls.Add(layout);
-            return gb;
+            var page = CreateTabPage("BOM");
+            var panel = CreateTabPanel();
+            page.Controls.Add(panel);
+
+            var paths = CreateFormLayout();
+            _bomFolderText = new TextBox { Width = 200 };
+            AddField(paths, "BOM folder", CreateFolderPicker(_bomFolderText, OnBrowseBomFolder));
+            AddSection(panel, CreateGroupBox("BOM output", paths));
+
+            var actions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill
+            };
+            var btnBom = new Button { Text = "Process BOM", AutoSize = true };
+            btnBom.Click += OnProcessBom;
+            var btnFreeze = new Button { Text = "Freeze model", AutoSize = true };
+            btnFreeze.Click += (_, __) => OnFreeze(true);
+            var btnUnfreeze = new Button { Text = "Unfreeze model", AutoSize = true };
+            btnUnfreeze.Click += (_, __) => OnFreeze(false);
+
+            actions.Controls.Add(btnBom);
+            actions.Controls.Add(btnFreeze);
+            actions.Controls.Add(btnUnfreeze);
+            AddSection(panel, CreateGroupBox("Actions", actions));
+
+            return page;
         }
 
-        private Control BuildDocPackPanel()
+        private TabPage BuildConfigTab()
         {
-            var gb = new GroupBox { Text = "DocPack", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8) };
-            var layout = new TableLayoutPanel { ColumnCount = 2, Dock = DockStyle.Fill, AutoSize = true };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            var page = CreateTabPage("Configuration");
+            var panel = CreateTabPanel();
+            page.Controls.Add(panel);
 
-            layout.Controls.Add(new Label { Text = "Tipos de archivo", AutoSize = true }, 0, 0);
-            layout.Controls.Add(new Label { Text = "Procesos", AutoSize = true }, 1, 0);
-            layout.Controls.Add(lstFileTypes, 0, 1);
-            layout.Controls.Add(lstProcesses, 1, 1);
+            var templates = CreateFormLayout();
+            _blankTemplateText = new TextBox { Width = 200 };
+            AddField(templates, "DXF template", CreateFilePicker(_blankTemplateText, OnBrowseBlankTemplate));
+            _bomTemplateText = new TextBox { Width = 200 };
+            AddField(templates, "BOM template", CreateFilePicker(_bomTemplateText, OnBrowseBomTemplate));
+            AddSection(panel, CreateGroupBox("Templates", templates));
 
-            var optionsPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = true };
-            optionsPanel.Controls.Add(chkExcel);
-            optionsPanel.Controls.Add(chkBinder);
-            optionsPanel.Controls.Add(chkVisual);
-            optionsPanel.Controls.Add(chkSelected);
-            optionsPanel.Controls.Add(chkFabPack);
-            optionsPanel.Controls.Add(chkBinderIndex);
-            optionsPanel.Controls.Add(chkBinderDatasheets);
-            optionsPanel.Controls.Add(chkBinderPages);
-            optionsPanel.Controls.Add(chkStampQuote);
-            optionsPanel.Controls.Add(chkStampConf);
-            optionsPanel.Controls.Add(chkStampApproved);
-            optionsPanel.Controls.Add(chkStampWip);
-            optionsPanel.Controls.Add(chkStampProgress);
+            var web = CreateFormLayout();
+            _weblinkText = new TextBox { Width = 200 };
+            var openWeb = new Button { Text = "Open", AutoSize = true };
+            openWeb.Click += OnOpenWeb;
+            AddField(web, "Web", CreateInlineField(_weblinkText, openWeb));
+            AddSection(panel, CreateGroupBox("Server", web));
 
-            layout.Controls.Add(optionsPanel, 0, 2);
-            layout.SetColumnSpan(optionsPanel, 2);
+            _removeModifiedNotesCheck = new CheckBox { Text = "Remove modified notes" };
+            AddSection(panel, CreateGroupBox("Options", _removeModifiedNotesCheck));
 
-            btnRefreshOptions.Click += async (_, __) => await RefreshOptionsAsync();
-            btnReservePn.Click += async (_, __) => await ReservePnAsync();
+            var configActions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            var btnSave = new Button { Text = "Save configuration", AutoSize = true };
+            btnSave.Click += OnSaveConfig;
+            _configPathLabel = new Label { AutoSize = true };
+            configActions.Controls.Add(btnSave);
+            configActions.Controls.Add(_configPathLabel);
+            AddSection(panel, CreateGroupBox("Config", configActions));
 
-            var actionPanel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = true };
-            actionPanel.Controls.Add(btnRefreshOptions);
-            actionPanel.Controls.Add(btnReservePn);
-            layout.Controls.Add(actionPanel, 0, 3);
-            layout.SetColumnSpan(actionPanel, 2);
-
-            gb.Controls.Add(layout);
-            return gb;
+            return page;
         }
 
-        private Control BuildButtonsPanel()
+        private void ApplyConfig(TinyMrpConfig config)
         {
-            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4) };
-            btnBom.Click += async (_, __) => await RunDocPackAsync();
-            btnFreeze.Click += (_, __) => DoFreeze(true);
-            btnUnfreeze.Click += (_, __) => DoFreeze(false);
-            panel.Controls.Add(btnBom);
-            panel.Controls.Add(btnFreeze);
-            panel.Controls.Add(btnUnfreeze);
-            return panel;
+            if (config == null)
+            {
+                return;
+            }
+
+            if (_deliverablesFolderText != null)
+            {
+                _deliverablesFolderText.Text = config.DeliverablesFolder;
+            }
+
+            if (_bomFolderText != null)
+            {
+                _bomFolderText.Text = config.BomFolder;
+            }
+
+            if (_weblinkText != null)
+            {
+                _weblinkText.Text = config.WebLink;
+            }
+
+            if (_bomTemplateText != null)
+            {
+                _bomTemplateText.Text = config.BomTemplatePath;
+            }
+
+            if (_blankTemplateText != null)
+            {
+                _blankTemplateText.Text = config.BlankTemplatePath;
+            }
+
+            if (_removeModifiedNotesCheck != null)
+            {
+                _removeModifiedNotesCheck.Checked = config.RemoveModifiedNotes;
+            }
+
+            if (_configPathLabel != null)
+            {
+            _configPathLabel.Text = "Config: " + config.ConfigPath;
+            }
         }
 
-        private Control BuildLogPanel()
+        private PublishOptions BuildOptions()
         {
-            lvLog.Columns.Add("Acción", 140);
-            lvLog.Columns.Add("Detalle", 320);
-            lvLog.MultiSelect = false;
-            lvLog.DoubleClick += (s, e) => OpenSelectedLog();
+            UpdateConfigFromUi();
 
-            var panel = new GroupBox { Text = "Eventos", Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6) };
-            panel.Controls.Add(lvLog);
-            return panel;
+            var options = new PublishOptions
+            {
+                DeliverablesFolder = _deliverablesFolderText != null ? _deliverablesFolderText.Text : string.Empty,
+                BomFolder = _bomFolderText != null ? _bomFolderText.Text : string.Empty,
+                ExportPngModel = _pngModelCheck != null && _pngModelCheck.Checked,
+                ExportStep = _stepCheck != null && _stepCheck.Checked,
+                ExportEdrawing = _edrCheck != null && _edrCheck.Checked,
+                Export3mf = _threeMfCheck != null && _threeMfCheck.Checked,
+                ExportPngDrawing = _pngDrawingCheck != null && _pngDrawingCheck.Checked,
+                ExportPdf = _pdfCheck != null && _pdfCheck.Checked,
+                ExportEdrawingDrawing = _edrDrawingCheck != null && _edrDrawingCheck.Checked,
+                OverwriteFiles = _overwriteCheck != null && _overwriteCheck.Checked,
+                TopLevelOnly = _topLevelOnlyCheck != null && _topLevelOnlyCheck.Checked
+            };
+
+            return options;
         }
 
-        private async Task LoginAsync()
+        private void UpdateConfigFromUi()
         {
-            if (_client == null)
+            TinyMrpConfig config = AddinContext.Config;
+            if (config == null)
+            {
+                return;
+            }
+
+            if (_deliverablesFolderText != null)
+            {
+                config.DeliverablesFolder = _deliverablesFolderText.Text;
+            }
+
+            if (_bomFolderText != null)
+            {
+                config.BomFolder = _bomFolderText.Text;
+            }
+
+            if (_weblinkText != null)
+            {
+                config.WebLink = _weblinkText.Text;
+            }
+
+            if (_bomTemplateText != null)
+            {
+                config.BomTemplatePath = _bomTemplateText.Text;
+            }
+
+            if (_blankTemplateText != null)
+            {
+                config.BlankTemplatePath = _blankTemplateText.Text;
+            }
+
+            if (_removeModifiedNotesCheck != null)
+            {
+                config.RemoveModifiedNotes = _removeModifiedNotesCheck.Checked;
+            }
+
+            config.ResolvePaths();
+        }
+
+        private void OnCreateFiles(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                MessageBox.Show("Publisher is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            PublishOptions options = BuildOptions();
+            publisher.ProcessFiles(options, Log);
+        }
+
+        private void OnProcessBom(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                MessageBox.Show("Publisher is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            PublishOptions options = BuildOptions();
+            publisher.ProcessBom(options, Log);
+        }
+
+        private void OnFreeze(bool freeze)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                MessageBox.Show("Publisher is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            publisher.FreezeDesign(freeze, Log);
+        }
+
+        private void OnSaveConfig(object sender, EventArgs e)
+        {
+            TinyMrpConfig config = AddinContext.Config;
+            if (config == null)
+            {
+                MessageBox.Show("Config is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                UpdateConfigFromUi();
+                config.Save();
+                if (_configPathLabel != null)
+                {
+                    _configPathLabel.Text = "Config: " + config.ConfigPath;
+                }
+                MessageBox.Show("Config saved.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to save config: " + ex.Message, "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void OnOpenWeb(object sender, EventArgs e)
+        {
+            string url = _weblinkText != null ? _weblinkText.Text : string.Empty;
+            if (string.IsNullOrWhiteSpace(url))
             {
                 return;
             }
 
             try
             {
-                lblStatus.Text = "Autenticando...";
-                var result = await _client.LoginAsync(txtEmail.Text.Trim(), txtPassword.Text, default);
-                lblStatus.Text = result.Message;
-                _client.PersistSettings(txtFilesRoot.Text.Trim(), txtFilesUrl.Text.Trim());
+                string launchUrl = url.Trim();
+                if (!launchUrl.Contains("://"))
+                {
+                    launchUrl = "http://" + launchUrl;
+                }
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = launchUrl,
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
-                lblStatus.Text = ex.Message;
+                MessageBox.Show("Failed to open web link: " + ex.Message, "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
-        private async Task RefreshOptionsAsync()
+        private void OnBrowseDeliverables(object sender, EventArgs e)
         {
-            if (_client == null)
+            string folder = BrowseFolder(_deliverablesFolderText != null ? _deliverablesFolderText.Text : string.Empty);
+            if (!string.IsNullOrWhiteSpace(folder) && _deliverablesFolderText != null)
+            {
+                _deliverablesFolderText.Text = folder;
+            }
+        }
+
+        private void OnBrowseBomFolder(object sender, EventArgs e)
+        {
+            string folder = BrowseFolder(_bomFolderText != null ? _bomFolderText.Text : string.Empty);
+            if (!string.IsNullOrWhiteSpace(folder) && _bomFolderText != null)
+            {
+                _bomFolderText.Text = folder;
+            }
+        }
+
+        private void OnBrowseBlankTemplate(object sender, EventArgs e)
+        {
+            string path = BrowseFile("Select blank template", "SolidWorks template (*.slddrt)|*.slddrt");
+            if (!string.IsNullOrWhiteSpace(path) && _blankTemplateText != null)
+            {
+                _blankTemplateText.Text = path;
+            }
+        }
+
+        private void OnBrowseBomTemplate(object sender, EventArgs e)
+        {
+            string path = BrowseFile("Select BOM template", "BOM template (*.sldbomtbt)|*.sldbomtbt");
+            if (!string.IsNullOrWhiteSpace(path) && _bomTemplateText != null)
+            {
+                _bomTemplateText.Text = path;
+            }
+        }
+
+        private string BrowseFolder(string initialPath)
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                if (!string.IsNullOrWhiteSpace(initialPath))
+                {
+                    dialog.SelectedPath = initialPath;
+                }
+
+                DialogResult result = dialog.ShowDialog();
+                return result == DialogResult.OK ? dialog.SelectedPath : string.Empty;
+            }
+        }
+
+        private string BrowseFile(string title, string filter)
+        {
+            using (var dialog = new OpenFileDialog())
+            {
+                dialog.Title = title;
+                dialog.Filter = filter;
+                dialog.CheckFileExists = true;
+
+                DialogResult result = dialog.ShowDialog();
+                return result == DialogResult.OK ? dialog.FileName : string.Empty;
+            }
+        }
+
+        private void SetDeliverableChecks(bool value)
+        {
+            if (_pngModelCheck != null) _pngModelCheck.Checked = value;
+            if (_stepCheck != null) _stepCheck.Checked = value;
+            if (_edrCheck != null) _edrCheck.Checked = value;
+            if (_threeMfCheck != null) _threeMfCheck.Checked = value;
+            if (_pngDrawingCheck != null) _pngDrawingCheck.Checked = value;
+            if (_pdfCheck != null) _pdfCheck.Checked = value;
+            if (_edrDrawingCheck != null) _edrDrawingCheck.Checked = value;
+        }
+
+        private void Log(string message)
+        {
+            if (_logBox == null)
             {
                 return;
             }
 
-            try
+            if (_logBox.InvokeRequired)
             {
-                lblStatus.Text = "Cargando opciones...";
-                var opts = await _client.GetOptionsAsync(txtPn.Text.Trim(), txtRev.Text.Trim(), chkTopLevel.Checked, default);
-                lstFileTypes.Items.Clear();
-                lstProcesses.Items.Clear();
-                if (opts != null)
-                {
-                    foreach (var t in opts.FileTypes)
-                    {
-                        lstFileTypes.Items.Add(t, true);
-                    }
-                    foreach (var p in opts.Processes)
-                    {
-                        lstProcesses.Items.Add(p, false);
-                    }
-                }
-                lblStatus.Text = "Opciones actualizadas";
-            }
-            catch (Exception ex)
-            {
-                lblStatus.Text = ex.Message;
-            }
-        }
-
-        private async Task ReservePnAsync()
-        {
-            if (_client == null || _exporter == null)
-            {
+                _logBox.BeginInvoke(new Action<string>(Log), message);
                 return;
             }
 
-            try
-            {
-                lblStatus.Text = "Reservando PN...";
-                var response = await _client.ReservePnAsync(txtPn.Text.Trim());
-                if (response?.PartNumber != null)
-                {
-                    txtPn.Text = response.PartNumber;
-                }
-                if (!string.IsNullOrWhiteSpace(response?.Revision))
-                {
-                    txtRev.Text = response.Revision;
-                }
-                _exporter.ApplyReservedPn(_exporter.ActiveDocument, txtPn.Text.Trim(), string.IsNullOrWhiteSpace(txtRev.Text) ? null : txtRev.Text.Trim(), true);
-                lblStatus.Text = response?.Message ?? "PN reservado y aplicado";
-                AppendLog("PN", $"Asignado {txtPn.Text} / {txtRev.Text}");
-            }
-            catch (Exception ex)
-            {
-                lblStatus.Text = ex.Message;
-            }
+            _logBox.AppendText(message + Environment.NewLine);
         }
 
-        private async Task RunDocPackAsync()
+        private static TabPage CreateTabPage(string title)
         {
-            if (_client == null)
+            return new TabPage(title)
             {
-                return;
-            }
-
-            var pn = txtPn.Text.Trim();
-            if (string.IsNullOrWhiteSpace(pn))
-            {
-                lblStatus.Text = "PN requerido";
-                return;
-            }
-
-            try
-            {
-                lblStatus.Text = "Generando...";
-                var req = BuildRequest();
-                var result = await _client.BuildDocPackAsync(req, chkOverwrite.Checked, default);
-                if (result == null)
-                {
-                    lblStatus.Text = "Falló la generación";
-                    return;
-                }
-
-                lblStatus.Text = "Listo";
-                AppendLog("DocPack", result.HttpUrl ?? result.LocalPath, result.LocalPath, result.HttpUrl);
-            }
-            catch (Exception ex)
-            {
-                lblStatus.Text = ex.Message;
-            }
-        }
-
-        private DocPackRequest BuildRequest()
-        {
-            var processes = lstProcesses.CheckedItems.Cast<object>().Select(o => o.ToString() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
-            var files = lstFileTypes.CheckedItems.Cast<object>().Select(o => o.ToString() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
-
-            return new DocPackRequest
-            {
-                PartNumber = txtPn.Text.Trim(),
-                Revision = string.IsNullOrWhiteSpace(txtRev.Text) ? null : txtRev.Text.Trim(),
-                Depth = chkTopLevel.Checked ? "top" : "full",
-                IncludeConsumed = chkIncludeConsumed.Checked,
-                Classified = "show",
-                ProcessMode = processes.Any() ? "selected" : "all",
-                Processes = processes,
-                FileTypes = files,
-                ExcelBom = chkExcel.Checked,
-                PdfBinder = chkBinder.Checked,
-                VisualList = chkVisual.Checked,
-                SelectedFiles = chkSelected.Checked,
-                FabricationPack = chkFabPack.Checked,
-                BinderAddIndex = chkBinderIndex.Checked,
-                BinderAddDatasheets = chkBinderDatasheets.Checked,
-                BinderPageNumbers = chkBinderPages.Checked,
-                StampQuote = chkStampQuote.Checked,
-                StampConfidential = chkStampConf.Checked,
-                StampApproved = chkStampApproved.Checked,
-                StampWip = chkStampWip.Checked,
-                StampInProgress = chkStampProgress.Checked
+                BackColor = SystemColors.Control,
+                Padding = new Padding(4)
             };
         }
 
-        private void DoFreeze(bool freeze)
+        private static TableLayoutPanel CreateTabPanel()
         {
-            if (_exporter == null)
+            var panel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoScroll = true,
+                Padding = new Padding(6),
+                ColumnCount = 1,
+                RowCount = 0,
+                GrowStyle = TableLayoutPanelGrowStyle.AddRows
+            };
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            return panel;
+        }
+
+        private static void AddSection(TableLayoutPanel panel, Control control)
+        {
+            if (panel == null || control == null)
             {
                 return;
             }
 
-            var ok = freeze ? _exporter.Freeze(_exporter.ActiveDocument) : _exporter.Unfreeze(_exporter.ActiveDocument);
-            AppendLog(freeze ? "Freeze" : "Unfreeze", ok ? "OK" : "Sin cambios");
+            control.Dock = DockStyle.Top;
+            control.Margin = new Padding(0, 0, 0, 8);
+
+            int row = panel.RowCount;
+            panel.RowCount++;
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.Controls.Add(control, 0, row);
         }
 
-        private void AddActiveToList(ListBox list)
+        private static GroupBox CreateGroupBox(string title, Control content)
         {
-            if (_exporter?.ActiveDocument == null)
+            var box = new GroupBox
             {
-                return;
-            }
-            var doc = _exporter.ActiveDocument;
-            var entry = string.IsNullOrWhiteSpace(doc.GetPathName()) ? doc.GetTitle() : doc.GetPathName();
-            if (!string.IsNullOrWhiteSpace(entry) && !list.Items.Contains(entry))
+                Text = title,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(8)
+            };
+
+            if (content.Dock == DockStyle.None)
             {
-                list.Items.Add(entry);
+                content.Dock = DockStyle.Top;
             }
+            box.Controls.Add(content);
+            return box;
         }
 
-        private static void RemoveSelected(ListBox list)
+        private static TableLayoutPanel CreateFormLayout()
         {
-            if (list.SelectedItem != null)
+            var table = new TableLayoutPanel
             {
-                list.Items.Remove(list.SelectedItem);
-            }
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
+            };
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
+            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));
+            return table;
         }
 
-        private void AppendLog(string action, string detail, string? path = null, string? url = null)
+        private static void AddField(TableLayoutPanel table, string labelText, Control control)
         {
-            var item = new ListViewItem(action);
-            item.SubItems.Add(detail);
-            item.Tag = new LogData { Path = path, Url = url };
-            lvLog.Items.Insert(0, item);
+            int row = table.RowCount;
+            table.RowCount++;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var label = new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left };
+            control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            table.Controls.Add(label, 0, row);
+            table.Controls.Add(control, 1, row);
         }
 
-        private void OpenSelectedLog()
+        private static Control CreateFolderPicker(TextBox target, EventHandler onBrowse)
         {
-            if (lvLog.SelectedItems.Count == 0)
-            {
-                return;
-            }
-
-            if (lvLog.SelectedItems[0].Tag is LogData data)
-            {
-                var target = data.Path ?? data.Url;
-                if (!string.IsNullOrWhiteSpace(target))
-                {
-                    try
-                    {
-                        System.Diagnostics.Process.Start(target);
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
-                }
-            }
+            return CreateInlineField(target, CreateBrowseButton(onBrowse));
         }
 
-        private void LoadState()
+        private static Control CreateFilePicker(TextBox target, EventHandler onBrowse)
         {
-            txtBaseUrl.Text = _client?.BaseUri.ToString() ?? txtBaseUrl.Text;
-            txtFilesRoot.Text = _client?.FilesLocalRoot ?? txtFilesRoot.Text;
-            txtFilesUrl.Text = _client?.FilesUrlPrefix ?? txtFilesUrl.Text;
+            return CreateInlineField(target, CreateBrowseButton(onBrowse));
         }
 
-        private void OpenFolder(string path)
+        private static Control CreateInlineField(TextBox textBox, Control trailingControl)
         {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return;
-            }
-            try
-            {
-                if (!Directory.Exists(path))
-                {
-                    Directory.CreateDirectory(path);
-                }
-                Process.Start(path);
-            }
-            catch
-            {
-                // ignore errors when opening explorer
-            }
+            var panel = new Panel { Dock = DockStyle.Fill, Height = 26 };
+            textBox.Dock = DockStyle.Fill;
+            trailingControl.Dock = DockStyle.Right;
+            panel.Controls.Add(textBox);
+            panel.Controls.Add(trailingControl);
+            return panel;
         }
 
-        private class LogData
+        private static Button CreateBrowseButton(EventHandler onBrowse)
         {
-            public string? Path { get; set; }
-            public string? Url { get; set; }
+            var btn = new Button { Text = "...", Width = 28, Height = 24 };
+            btn.Click += onBrowse;
+            return btn;
         }
     }
 }
