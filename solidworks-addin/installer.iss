@@ -1,6 +1,26 @@
+#define AppVersion "1.0.0"
+#define BuildStamp GetDateTimeString('yyyymmdd_hhnnss', '', '')
+#define OutputDirName "Windows Installer latest"
+#define OutputDirPath AddBackslash(SourcePath) + OutputDirName
+
+#if DirExists(OutputDirPath)
+  #define FindHandle
+  #define FindResult
+  #define OutputMask AddBackslash(OutputDirPath) + "TinyMRP_SolidWorksAddin_*.exe"
+  #sub DeleteOldInstallerOutput
+    #define FoundFile FindGetFileName(FindHandle)
+    #expr DeleteFileNow(AddBackslash(OutputDirPath) + FoundFile)
+  #endsub
+  #for {FindHandle = FindResult = FindFirst(OutputMask, 0); FindResult; FindResult = FindNext(FindHandle)} DeleteOldInstallerOutput
+  #if FindHandle
+    #expr FindClose(FindHandle)
+  #endif
+#endif
+
 [Setup]
 AppName=TinyMRP SolidWorks Add-in
-AppVersion=1.0.0
+AppVersion={#AppVersion}
+OutputDir={#OutputDirName}
 DefaultDirName={pf}\TinyMRP\SolidWorksAddin
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
@@ -8,6 +28,7 @@ WizardStyle=modern
 WizardImageFile=InstallerAssets\wizard.bmp
 WizardSmallImageFile=InstallerAssets\wizard-small.bmp
 SetupIconFile=InstallerAssets\setup.ico
+OutputBaseFilename=TinyMRP_SolidWorksAddin_{#AppVersion}_{#BuildStamp}
 
 #define AddinGuid "D2A7E2A8-54D3-4E39-9E7B-3F35D0A7F3E6"
 #define OldAddinGuid "3C0CB70A-FFDA-4CCB-8B9D-55EA0C2D6536"
