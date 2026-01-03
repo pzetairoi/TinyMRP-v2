@@ -22,6 +22,8 @@ namespace TinyMRP.SolidWorksAddin
         private const string TaskPaneIconFileName = "TinyMRP.TaskPane.bmp";
         private const string AddinIconFileName = "TinyMRP.AddinIcon.bmp";
         private const string LogoRelativePath = "Assets\\logo.png";
+        private const int TaskPaneIconSize = 20;
+        private const int AddinIconSize = 16;
 
         private ISldWorks _swApp;
         private TaskpaneView _taskPane;
@@ -83,7 +85,8 @@ namespace TinyMRP.SolidWorksAddin
 
         private string GetTaskPaneIconPath()
         {
-            if (!string.IsNullOrWhiteSpace(_taskPaneIconPath) && File.Exists(_taskPaneIconPath))
+            if (!string.IsNullOrWhiteSpace(_taskPaneIconPath) &&
+                IsValidIcon(_taskPaneIconPath, TaskPaneIconSize))
             {
                 return _taskPaneIconPath;
             }
@@ -94,22 +97,24 @@ namespace TinyMRP.SolidWorksAddin
             Directory.CreateDirectory(dir);
             _taskPaneIconPath = Path.Combine(dir, TaskPaneIconFileName);
 
-            if (!File.Exists(_taskPaneIconPath))
-            {
-                CreateTaskPaneIcon(_taskPaneIconPath, sourceLogo);
-            }
+            EnsureIcon(_taskPaneIconPath, sourceLogo, TaskPaneIconSize, "T");
 
             return _taskPaneIconPath;
         }
 
-        private static void CreateTaskPaneIcon(string path, string sourceLogoPath)
+        private static void EnsureIcon(string outputPath, string sourceLogoPath, int size, string fallbackText)
         {
-            if (TryCreateIconFromLogo(path, sourceLogoPath))
+            if (IsValidIcon(outputPath, size))
             {
                 return;
             }
 
-            CreateFallbackIcon(path, "T");
+            if (TryCreateIconFromLogo(outputPath, sourceLogoPath, size))
+            {
+                return;
+            }
+
+            CreateFallbackIcon(outputPath, fallbackText, size);
         }
 
         [ComRegisterFunction]
@@ -123,13 +128,7 @@ namespace TinyMRP.SolidWorksAddin
                 string logoPath = Path.Combine(addinDir ?? string.Empty, LogoRelativePath);
                 string addinIconPath = Path.Combine(addinDir ?? string.Empty, AddinIconFileName);
 
-                if (!File.Exists(addinIconPath))
-                {
-                    if (!TryCreateIconFromLogo(addinIconPath, logoPath))
-                    {
-                        CreateFallbackIcon(addinIconPath, "T");
-                    }
-                }
+                EnsureIcon(addinIconPath, logoPath, AddinIconSize, "T");
                 using (var rk = Registry.LocalMachine.CreateSubKey(keyPath))
                 {
                     if (rk != null)
@@ -183,7 +182,7 @@ namespace TinyMRP.SolidWorksAddin
             }
         }
 
-        private static bool TryCreateIconFromLogo(string outputPath, string logoPath)
+        private static bool TryCreateIconFromLogo(string outputPath, string logoPath, int size)
         {
             try
             {
@@ -193,12 +192,12 @@ namespace TinyMRP.SolidWorksAddin
                 }
 
                 using (var source = (Bitmap)Image.FromFile(logoPath))
-                using (var bmp = new Bitmap(32, 32))
+                using (var bmp = new Bitmap(size, size, PixelFormat.Format24bppRgb))
                 using (var g = Graphics.FromImage(bmp))
                 {
                     g.Clear(Color.White);
                     g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                    g.DrawImage(source, new Rectangle(0, 0, 32, 32));
+                    g.DrawImage(source, new Rectangle(0, 0, size, size));
                     bmp.Save(outputPath, ImageFormat.Bmp);
                 }
 
@@ -210,25 +209,45 @@ namespace TinyMRP.SolidWorksAddin
             }
         }
 
-        private static void CreateFallbackIcon(string outputPath, string text)
+        private static void CreateFallbackIcon(string outputPath, string text, int size)
         {
             try
             {
-                using (var bmp = new Bitmap(32, 32))
+                using (var bmp = new Bitmap(size, size, PixelFormat.Format24bppRgb))
                 using (var g = Graphics.FromImage(bmp))
                 using (var bg = new SolidBrush(Color.FromArgb(21, 92, 141)))
                 using (var fg = new SolidBrush(Color.White))
-                using (var font = new Font("Segoe UI", 12, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (var font = new Font("Segoe UI", size > 16 ? 12 : 9, FontStyle.Bold, GraphicsUnit.Pixel))
                 {
                     g.Clear(Color.White);
-                    g.FillRectangle(bg, 0, 0, 32, 32);
-                    g.DrawString(text ?? "T", font, fg, new PointF(9, 6));
+                    g.FillRectangle(bg, 0, 0, size, size);
+                    g.DrawString(text ?? "T", font, fg, new PointF(size * 0.28f, size * 0.2f));
                     bmp.Save(outputPath, ImageFormat.Bmp);
                 }
             }
             catch
             {
                 // ignore icon generation errors
+            }
+        }
+
+        private static bool IsValidIcon(string path, int size)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    return false;
+                }
+
+                using (var bmp = new Bitmap(path))
+                {
+                    return bmp.Width == size && bmp.Height == size;
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
     }

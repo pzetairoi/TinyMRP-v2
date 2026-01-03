@@ -27,6 +27,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private readonly ISldWorks _swApp;
         private readonly TinyMrpConfig _config;
+        private volatile bool _cancelRequested;
 
         public TinyMrpPublisher(ISldWorks swApp, TinyMrpConfig config)
         {
@@ -34,7 +35,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             _config = config;
         }
 
-        public void ProcessFiles(PublishOptions options, Action<string> log)
+        public void ProcessFiles(PublishOptions options, Action<string> log, Action<int, int> progress)
         {
             PublishOptions effective = NormalizeOptions(options);
             if (effective == null)
@@ -44,8 +45,14 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             try
             {
-                TraverseModel(true, string.Empty, effective, log);
+                ResetCancel();
+                TraverseModel(true, string.Empty, effective, log, null, progress);
                 System.Windows.Forms.MessageBox.Show("File creation finished.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -55,7 +62,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        public void ProcessBom(PublishOptions options, Action<string> log)
+        public void ProcessBom(PublishOptions options, Action<string> log, Action<int, int> progress)
         {
             PublishOptions effective = NormalizeOptions(options);
             if (effective == null)
@@ -79,111 +86,147 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
-            string pubFolder = EnsureTrailingSlash(effective.BomFolder);
-            if (string.IsNullOrWhiteSpace(pubFolder))
+            ResetCancel();
+            try
             {
-                System.Windows.Forms.MessageBox.Show("BOM output folder is empty.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
-                return;
+                string pubFolder = EnsureTrailingSlash(effective.BomFolder);
+                if (string.IsNullOrWhiteSpace(pubFolder))
+                {
+                    System.Windows.Forms.MessageBox.Show("BOM output folder is empty.", "TinyMRP",
+                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                    return;
+                }
+
+                Directory.CreateDirectory(pubFolder);
+                string bomFolder = Path.Combine(pubFolder, "bom");
+                Directory.CreateDirectory(bomFolder);
+
+                string exportTag = Path.Combine(bomFolder, GetFileString(swModel, swConf.Name) + "_" +
+                    DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss"));
+                string flatFile = TraverseModel(false, exportTag, effective, log, progress, null);
+                string bomFile = exportTag + "_TREEBOM.txt";
+
+                string modelPath = swModel.GetPathName();
+                if (string.IsNullOrWhiteSpace(modelPath))
+                {
+                    System.Windows.Forms.MessageBox.Show("Active document must be saved before exporting BOM.", "TinyMRP",
+                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                    return;
+                }
+
+                ThrowIfCancelled();
+
+                string template = _swApp.GetUserPreferenceStringValue(
+                    (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly);
+                ModelDoc2 assyDoc = _swApp.NewDocument(template, 0, 0, 0) as ModelDoc2;
+                AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
+                if (assyDoc == null || swAssembly == null)
+                {
+                    System.Windows.Forms.MessageBox.Show("Failed to create temporary assembly.", "TinyMRP",
+                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                    return;
+                }
+
+                try
+                {
+                    _swApp.ActivateDoc(assyDoc.GetTitle());
+                    swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
+                    ModelDoc2 assyModel = _swApp.ActiveDoc as ModelDoc2;
+                    if (assyModel == null)
+                    {
+                        System.Windows.Forms.MessageBox.Show("Failed to activate temporary assembly.", "TinyMRP",
+                            System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
+                    if (assyConfig == null)
+                    {
+                        System.Windows.Forms.MessageBox.Show("Failed to read assembly configuration.", "TinyMRP",
+                            System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    SetUnitPreferences(swModel);
+                    ThrowIfCancelled();
+
+                    int bomX = 69;
+                    int bomY = 69;
+                    BomTableAnnotation bomTable = assyModel.Extension.InsertBomTable3(
+                        _config.BomTemplatePath,
+                        bomX,
+                        bomY,
+                        (int)swBomType_e.swBomType_Indented,
+                        assyConfig.Name,
+                        true,
+                        (int)swNumberingType_e.swNumberingType_Detailed,
+                        true);
+
+                    if (bomTable != null)
+                    {
+                        ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
+                        tableAnn.SaveAsText(bomFile, "\t");
+                    }
+                    else
+                    {
+                        Log(log, "Failed to create BOM table.");
+                    }
+
+                    string zipPath = exportTag + ".zip";
+                    string workFolder = exportTag;
+
+                    Directory.CreateDirectory(workFolder);
+                    MoveFileIfExists(bomFile, Path.Combine(workFolder, Path.GetFileName(bomFile)));
+                    MoveFileIfExists(flatFile, Path.Combine(workFolder, Path.GetFileName(flatFile)));
+
+                    if (File.Exists(zipPath))
+                    {
+                        File.Delete(zipPath);
+                    }
+
+                    ZipFile.CreateFromDirectory(workFolder, zipPath);
+                    TryDeleteDirectory(workFolder);
+                }
+                finally
+                {
+                    if (assyDoc != null)
+                    {
+                        _swApp.CloseDoc(assyDoc.GetTitle());
+                    }
+                }
+
+                System.Windows.Forms.MessageBox.Show("BOM file generation finished.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
-
-            Directory.CreateDirectory(pubFolder);
-            string bomFolder = Path.Combine(pubFolder, "bom");
-            Directory.CreateDirectory(bomFolder);
-
-            string exportTag = Path.Combine(bomFolder, GetFileString(swModel, swConf.Name) + "_" +
-                DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss"));
-            string flatFile = TraverseModel(false, exportTag, effective, log);
-            string bomFile = exportTag + "_TREEBOM.txt";
-
-            string modelPath = swModel.GetPathName();
-            if (string.IsNullOrWhiteSpace(modelPath))
+            catch (OperationCanceledException)
             {
-                System.Windows.Forms.MessageBox.Show("Active document must be saved before exporting BOM.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
-                return;
+                System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
+        }
 
-            string template = _swApp.GetUserPreferenceStringValue(
-                (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly);
-            ModelDoc2 assyDoc = _swApp.NewDocument(template, 0, 0, 0) as ModelDoc2;
-            AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
-            if (assyDoc == null || swAssembly == null)
+        public void NormalizeUnits(Action<string> log)
+        {
+            ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
+            if (swModel == null)
             {
-                System.Windows.Forms.MessageBox.Show("Failed to create temporary assembly.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                System.Windows.Forms.MessageBox.Show("No active document.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
                 return;
             }
 
             try
             {
-                _swApp.ActivateDoc(assyDoc.GetTitle());
-                swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
-                ModelDoc2 assyModel = _swApp.ActiveDoc as ModelDoc2;
-                if (assyModel == null)
-                {
-                    System.Windows.Forms.MessageBox.Show("Failed to activate temporary assembly.", "TinyMRP",
-                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
-                    return;
-                }
-
-                Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
-                if (assyConfig == null)
-                {
-                    System.Windows.Forms.MessageBox.Show("Failed to read assembly configuration.", "TinyMRP",
-                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
-                    return;
-                }
-
                 SetUnitPreferences(swModel);
-
-                int bomX = 69;
-                int bomY = 69;
-                BomTableAnnotation bomTable = assyModel.Extension.InsertBomTable3(
-                    _config.BomTemplatePath,
-                    bomX,
-                    bomY,
-                    (int)swBomType_e.swBomType_Indented,
-                    assyConfig.Name,
-                    true,
-                    (int)swNumberingType_e.swNumberingType_Detailed,
-                    true);
-
-                if (bomTable != null)
-                {
-                    ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
-                    tableAnn.SaveAsText(bomFile, "\t");
-                }
-                else
-                {
-                    Log(log, "Failed to create BOM table.");
-                }
-
-                string zipPath = exportTag + ".zip";
-                string workFolder = exportTag;
-
-                Directory.CreateDirectory(workFolder);
-                MoveFileIfExists(bomFile, Path.Combine(workFolder, Path.GetFileName(bomFile)));
-                MoveFileIfExists(flatFile, Path.Combine(workFolder, Path.GetFileName(flatFile)));
-
-                if (File.Exists(zipPath))
-                {
-                    File.Delete(zipPath);
-                }
-
-                ZipFile.CreateFromDirectory(workFolder, zipPath);
-                TryDeleteDirectory(workFolder);
+                Log(log, "Units normalized.");
+                System.Windows.Forms.MessageBox.Show("Units normalized.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
-            finally
+            catch (Exception ex)
             {
-                if (assyDoc != null)
-                {
-                    _swApp.CloseDoc(assyDoc.GetTitle());
-                }
+                System.Windows.Forms.MessageBox.Show("Failed to normalize units: " + ex.Message, "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
             }
-
-            System.Windows.Forms.MessageBox.Show("BOM file generation finished.", "TinyMRP",
-                System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
         }
 
         public void FreezeDesign(bool freeze, Action<string> log)
@@ -371,7 +414,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             return false;
         }
 
-        private string TraverseModel(bool createFiles, string exportTag, PublishOptions options, Action<string> log)
+        private string TraverseModel(bool createFiles, string exportTag, PublishOptions options, Action<string> log,
+            Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress)
         {
             ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
             if (swModel == null)
@@ -480,14 +524,21 @@ namespace TinyMRP.SolidWorksAddin.Services
                     outputFile = exportTag + "_FLATBOM.txt";
                 }
 
-                WriteFlatBom(outputFile, entries, log);
+                UpdateProgress(flatBomProgress, 0, entries.Count);
+                WriteFlatBom(outputFile, entries, log, flatBomProgress);
+                ThrowIfCancelled();
 
                 if (createFiles)
                 {
+                    UpdateProgress(deliverablesProgress, 0, entries.Count);
+                    int processed = 0;
                     foreach (ModelEntry entry in entries)
                     {
+                        ThrowIfCancelled();
                         ProcessDeliverables(entry, deliverablesFolder, options, log);
                         CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                        processed++;
+                        UpdateProgress(deliverablesProgress, processed, entries.Count);
                     }
                 }
 
@@ -516,11 +567,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme, prevColorScheme);
                 _swApp.SetUserPreferenceIntegerValue(
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, prevViewport);
+
+                CloseNonRootDocs(initialDocs, rootModel, rootTitle);
             }
         }
 
         private void AddModelEntry(ModelDoc2 model, string configName, List<ModelEntry> entries, HashSet<string> seen, bool prepend)
         {
+            ThrowIfCancelled();
             string path = model.GetPathName();
             if (string.IsNullOrWhiteSpace(path))
             {
@@ -564,6 +618,8 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             foreach (object obj in children)
             {
+                ThrowIfCancelled();
+                System.Windows.Forms.Application.DoEvents();
                 Component2 child = obj as Component2;
                 if (child == null)
                 {
@@ -587,12 +643,15 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private void WriteFlatBom(string outputFile, List<ModelEntry> entries, Action<string> log)
+        private void WriteFlatBom(string outputFile, List<ModelEntry> entries, Action<string> log,
+            Action<int, int> progress)
         {
             using (var writer = new StreamWriter(outputFile, false, Encoding.UTF8))
             {
+                int processed = 0;
                 foreach (ModelEntry entry in entries)
                 {
+                    ThrowIfCancelled();
                     try
                     {
                         writer.WriteLine(GetDocDict(entry.Model, entry.ConfigurationName));
@@ -605,6 +664,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                                           SanitizeString(BomPartNumber(entryConf, entry.Model)) + "'}";
                         writer.WriteLine(fallback);
                     }
+
+                    processed++;
+                    UpdateProgress(progress, processed, entries.Count);
                 }
             }
         }
@@ -613,6 +675,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         {
             ModelDoc2 model = entry.Model;
             string confName = entry.ConfigurationName;
+            ThrowIfCancelled();
 
             try
             {
@@ -1597,6 +1660,32 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (log != null)
             {
                 log(message);
+            }
+        }
+
+        private void UpdateProgress(Action<int, int> progress, int current, int total)
+        {
+            if (progress != null)
+            {
+                progress(current, total);
+            }
+        }
+
+        public void RequestCancel()
+        {
+            _cancelRequested = true;
+        }
+
+        private void ResetCancel()
+        {
+            _cancelRequested = false;
+        }
+
+        private void ThrowIfCancelled()
+        {
+            if (_cancelRequested)
+            {
+                throw new OperationCanceledException();
             }
         }
 
