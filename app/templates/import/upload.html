@@ -9,18 +9,38 @@
       <input id="fileZip" class="form-control" type="file" name="file" accept=".zip" required>
     </div>
     <button id="btnImport" type="button" class="btn btn-primary">Upload & Import</button>
-    <button id="btnFallback" type="submit" class="btn btn-outline-secondary ms-2">Fallback submit</button>
   </form>
   <div id="progressWrap" class="mt-3 d-none">
     <div class="progress" style="height: 10px;">
       <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width: 0%"></div>
     </div>
-    <div id="progressText" class="small text-muted mt-2">Waiting to start…</div>
+    <div id="progressText" class="small text-muted mt-2">Waiting to start...</div>
   </div>
 
-  <div id="importResult" class="mt-4 d-none">
-    <h6>Import result</h6>
-    <div id="importSummary" class="small"></div>
+  <div id="importResult" class="mt-4">
+    <h6>Import details</h6>
+    <div class="small">
+      ZIP: <code id="sumZip">-</code><br>
+      Root: <code id="sumRoot">-</code>
+      <a id="openBomLink" class="ms-2 d-none" href="#" target="_blank" rel="noopener">Open part details</a><br>
+      Parts created: <b id="sumPartsCreated">-</b>, updated: <b id="sumPartsUpdated">-</b><br>
+      Links created: <b id="sumLinksCreated">-</b>, skipped: <b id="sumLinksSkipped">-</b><br>
+      Parts with properties: <b id="sumPartsWithProps">-</b><br>
+      Artifacts added: <b id="sumArtifactsAdded">-</b>, thumbnails: <b id="sumThumbs">-</b>
+    </div>
+    <div id="filesByTypeWrap" class="mt-3 d-none">
+      <h6 class="mb-2">Files found by type</h6>
+      <table class="table table-sm w-auto mb-0">
+        <thead><tr><th>Type</th><th>Count</th></tr></thead>
+        <tbody id="filesByTypeBody"></tbody>
+      </table>
+    </div>
+    <div id="rootPreviewWrap" class="mt-3">
+      <div id="rootPreviewStatus" class="text-muted small">Preview will appear after import.</div>
+      <a id="rootPreviewLink" class="d-inline-block d-none" href="#" target="_blank" rel="noopener">
+        <img id="rootPreviewImg" class="img-fluid border rounded" alt="Root preview" style="max-width:40vw;">
+      </a>
+    </div>
   </div>
   <p class="text-muted mt-3">
     Expected ZIP contents: <code>*_FLATBOM.txt</code> (lines of dictionaries) and <code>*_TREEBOM.txt</code> (tab-separated tree).
@@ -33,12 +53,25 @@
   const form = document.getElementById('importForm');
   const fileInput = document.getElementById('fileZip');
   const btn = document.getElementById('btnImport');
-  const btnFallback = document.getElementById('btnFallback');
   const wrap = document.getElementById('progressWrap');
   const bar = document.getElementById('progressBar');
   const txt = document.getElementById('progressText');
   const res = document.getElementById('importResult');
-  const sum = document.getElementById('importSummary');
+  const sumZip = document.getElementById('sumZip');
+  const sumRoot = document.getElementById('sumRoot');
+  const sumPartsCreated = document.getElementById('sumPartsCreated');
+  const sumPartsUpdated = document.getElementById('sumPartsUpdated');
+  const sumLinksCreated = document.getElementById('sumLinksCreated');
+  const sumLinksSkipped = document.getElementById('sumLinksSkipped');
+  const sumPartsWithProps = document.getElementById('sumPartsWithProps');
+  const sumArtifactsAdded = document.getElementById('sumArtifactsAdded');
+  const sumThumbs = document.getElementById('sumThumbs');
+  const openBomLink = document.getElementById('openBomLink');
+  const filesByTypeWrap = document.getElementById('filesByTypeWrap');
+  const filesByTypeBody = document.getElementById('filesByTypeBody');
+  const rootPreviewStatus = document.getElementById('rootPreviewStatus');
+  const rootPreviewLink = document.getElementById('rootPreviewLink');
+  const rootPreviewImg = document.getElementById('rootPreviewImg');
   let timer = null;
 
   function setProgress(pct, label){
@@ -52,17 +85,60 @@
     if (timer) clearInterval(timer);
     timer = setInterval(()=>{
       if (p < 90) p += Math.max(1, Math.round((90 - p) * 0.08));
-      setProgress(p, 'Processing import…');
+      setProgress(p, 'Processing import...');
     }, 700);
+  }
+
+  function resetSummary(fileName){
+    sumZip.textContent = fileName || '-';
+    sumRoot.textContent = '-';
+    sumPartsCreated.textContent = '...';
+    sumPartsUpdated.textContent = '...';
+    sumLinksCreated.textContent = '...';
+    sumLinksSkipped.textContent = '...';
+    sumPartsWithProps.textContent = '...';
+    sumArtifactsAdded.textContent = '...';
+    sumThumbs.textContent = '...';
+    if (openBomLink) openBomLink.classList.add('d-none');
+    filesByTypeWrap.classList.add('d-none');
+    filesByTypeBody.innerHTML = '';
+    rootPreviewStatus.textContent = 'Preview will appear after import.';
+    rootPreviewLink.classList.add('d-none');
+    rootPreviewImg.removeAttribute('src');
+  }
+
+  function loadRootPreview(rootPn){
+    if (!rootPn) {
+      rootPreviewStatus.textContent = 'No root part reported.';
+      return;
+    }
+    rootPreviewStatus.textContent = 'Loading preview...';
+    fetch(`/api/part_images?pn=${encodeURIComponent(rootPn)}&mode=preview`)
+      .then(r => r.ok ? r.json() : Promise.reject(r))
+      .then(rows => {
+        const urls = Array.isArray(rows) && rows.length ? rows[0].urls : [];
+        const url = urls && urls.length ? urls[0] : '';
+        if (url) {
+          rootPreviewImg.src = url;
+          rootPreviewLink.classList.remove('d-none');
+          rootPreviewStatus.textContent = '';
+        } else {
+          rootPreviewStatus.textContent = 'No preview image found for the root part.';
+        }
+      })
+      .catch(() => {
+        rootPreviewStatus.textContent = 'Failed to load preview image.';
+      });
   }
 
   btn.addEventListener('click', function(){
     const f = fileInput.files && fileInput.files[0];
     if (!f){ alert('Please choose a ZIP file first.'); return; }
     // UI state
-    btn.disabled = true; btnFallback.disabled = true; fileInput.disabled = true;
-    wrap.classList.remove('d-none'); res.classList.add('d-none'); sum.innerHTML='';
-    setProgress(2, 'Starting upload…');
+    btn.disabled = true; fileInput.disabled = true;
+    wrap.classList.remove('d-none'); res.classList.remove('d-none');
+    resetSummary(f.name);
+    setProgress(2, 'Starting upload...');
 
     const fd = new FormData(); fd.append('file', f, f.name);
     const xhr = new XMLHttpRequest();
@@ -72,7 +148,7 @@
     xhr.upload.onprogress = function(e){
       if (e.lengthComputable){
         const pct = Math.min(95, Math.round((e.loaded / e.total) * 80));
-        setProgress(pct, `Uploading… ${pct}%`);
+        setProgress(pct, `Uploading... ${pct}%`);
       }
     };
     xhr.onload = function(){
@@ -83,20 +159,52 @@
         setProgress(100, `Failed: ${data.error || ('HTTP '+xhr.status)}`);
       } else {
         setProgress(100, 'Done');
-        res.classList.remove('d-none');
         const thumbs = data.thumbnails_generated || data.thumbnails_built || 0;
-        sum.innerHTML = `ZIP: <code>${data.zip || ''}</code><br>`+
-                        `Root: <code>${data.root || ''}</code><br>`+
-                        `Parts created: <b>${data.parts_created || 0}</b>, updated: <b>${data.parts_updated || 0}</b><br>`+
-                        `Links created: <b>${data.links_created || 0}</b>, skipped: <b>${data.links_skipped || 0}</b><br>`+
-                        `Artifacts added: <b>${data.artifacts_added || 0}</b>, thumbnails: <b>${thumbs}</b>`;
+        sumZip.textContent = data.zip || '';
+        sumRoot.textContent = data.root || '';
+        sumPartsCreated.textContent = data.parts_created || 0;
+        sumPartsUpdated.textContent = data.parts_updated || 0;
+        sumLinksCreated.textContent = data.links_created || 0;
+        sumLinksSkipped.textContent = data.links_skipped || 0;
+        sumPartsWithProps.textContent = data.parts_with_props || 0;
+        sumArtifactsAdded.textContent = data.artifacts_added || 0;
+        sumThumbs.textContent = thumbs;
+
+        if (data.root) {
+          const rev = data.root_revision || '';
+          const partHref = `/ui/part/${encodeURIComponent(data.root)}?rev=${encodeURIComponent(rev)}`;
+          if (openBomLink) {
+            openBomLink.href = partHref;
+            openBomLink.classList.remove('d-none');
+          }
+          if (rootPreviewLink) {
+            rootPreviewLink.href = partHref;
+          }
+        }
+
+        if (data.artifacts_found_by_type) {
+          filesByTypeBody.innerHTML = '';
+          Object.keys(data.artifacts_found_by_type).sort().forEach(key => {
+            const tr = document.createElement('tr');
+            const tdType = document.createElement('td');
+            tdType.textContent = key;
+            const tdCount = document.createElement('td');
+            tdCount.textContent = data.artifacts_found_by_type[key];
+            tr.appendChild(tdType);
+            tr.appendChild(tdCount);
+            filesByTypeBody.appendChild(tr);
+          });
+          filesByTypeWrap.classList.remove('d-none');
+        }
+
+        loadRootPreview(data.root || '');
       }
-      btn.disabled = false; btnFallback.disabled = false; fileInput.disabled = false;
+      btn.disabled = false; fileInput.disabled = false;
     };
     xhr.onerror = function(){
       if (timer) { clearInterval(timer); timer = null; }
       setProgress(100, 'Network error');
-      btn.disabled = false; btnFallback.disabled = false; fileInput.disabled = false;
+      btn.disabled = false; fileInput.disabled = false;
     };
 
     xhr.send(fd);
@@ -104,6 +212,11 @@
       const cur = parseInt(bar.getAttribute('aria-valuenow')||'70',10);
       startIndeterminate(Math.min(85, cur));
     };
+  });
+
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    btn.click();
   });
 })();
 </script>

@@ -8,7 +8,7 @@ bp = Blueprint("importer", __name__, url_prefix="/import")
 
 @bp.get("/")
 def upload_form():
-    # Simple Jinja page with a file input – extends your base, so navbar shows.
+    # Simple Jinja page with a file input - extends base so navbar shows.
     return render_template("import/upload.html")
 
 @bp.post("/")
@@ -22,7 +22,7 @@ def upload_post():
     result = import_bom_zip(f.read(), fn, seed_tag="upload")
     thumbs = result.get('thumbnails_generated') or result.get('thumbnails_built') or 0
     flash(
-        f"Imported {result['zip']} · root={result['root']} · parts+{result['parts_created']} links+{result['links_created']} · thumbs={thumbs}",
+        f"Imported {result['zip']} - root={result['root']} - parts+{result['parts_created']} links+{result['links_created']} - thumbs={thumbs}",
         "success",
     )
     return render_template("import/result.html", result=result)
@@ -37,4 +37,3 @@ def upload_api():
     fn = secure_filename(f.filename)
     result = import_bom_zip(f.read(), fn, seed_tag="upload-api")
     return jsonify(result)
-
