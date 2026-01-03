@@ -173,19 +173,24 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
 
                     string zipPath = exportTag + ".zip";
-                    string workFolder = exportTag;
+                    string zipFolderName = Path.GetFileName(exportTag);
+                    string zipRoot = Path.Combine(
+                        Path.GetDirectoryName(exportTag) ?? pubFolder,
+                        zipFolderName + "_zip");
+                    string innerFolder = Path.Combine(zipRoot, zipFolderName);
 
-                    Directory.CreateDirectory(workFolder);
-                    MoveFileIfExists(bomFile, Path.Combine(workFolder, Path.GetFileName(bomFile)));
-                    MoveFileIfExists(flatFile, Path.Combine(workFolder, Path.GetFileName(flatFile)));
+                    TryDeleteDirectory(zipRoot);
+                    Directory.CreateDirectory(innerFolder);
+                    MoveFileIfExists(bomFile, Path.Combine(innerFolder, Path.GetFileName(bomFile)));
+                    MoveFileIfExists(flatFile, Path.Combine(innerFolder, Path.GetFileName(flatFile)));
 
                     if (File.Exists(zipPath))
                     {
                         File.Delete(zipPath);
                     }
 
-                    ZipFile.CreateFromDirectory(workFolder, zipPath);
-                    TryDeleteDirectory(workFolder);
+                    ZipFile.CreateFromDirectory(zipRoot, zipPath);
+                    TryDeleteDirectory(zipRoot);
                 }
                 finally
                 {
