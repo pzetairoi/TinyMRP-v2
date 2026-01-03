@@ -19,7 +19,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         private readonly TabControl _tabs = new TabControl { Dock = DockStyle.Fill };
 
         private TextBox _deliverablesFolderText;
-        private TextBox _bomFolderText;
         private TextBox _weblinkText;
         private TextBox _bomTemplateText;
         private TextBox _blankTemplateText;
@@ -33,7 +32,12 @@ namespace TinyMRP.SolidWorksAddin.UI
         private CheckBox _pngDrawingCheck;
         private CheckBox _pdfCheck;
         private CheckBox _edrDrawingCheck;
-        private TextBox _logBox;
+        private ProgressBar _publishProgressBar;
+        private Label _publishProgressLabel;
+        private ProgressBar _bomProgressBar;
+        private Label _bomProgressLabel;
+        private Label _actionStatusLabel;
+        private Button _cancelButton;
         private Label _configPathLabel;
 
         public MainPaneControl()
@@ -71,14 +75,14 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         private void BuildTabs()
         {
-            _tabs.TabPages.Add(BuildPublishTab());
-            _tabs.TabPages.Add(BuildBomTab());
+            _tabs.TabPages.Add(BuildPublishBomTab());
+            _tabs.TabPages.Add(BuildToolsTab());
             _tabs.TabPages.Add(BuildConfigTab());
         }
 
-        private TabPage BuildPublishTab()
+        private TabPage BuildPublishBomTab()
         {
-            var page = CreateTabPage("Publish");
+            var page = CreateTabPage("Publish/BOM");
             var panel = CreateTabPanel();
             page.Controls.Add(panel);
 
@@ -154,10 +158,26 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var paths = CreateFormLayout();
             _deliverablesFolderText = new TextBox { Width = 200 };
-            AddField(paths, "Deliverables folder", CreateFolderPicker(_deliverablesFolderText, OnBrowseDeliverables));
-            AddSection(panel, CreateGroupBox("Paths", paths));
+            AddField(paths, "Output folder", CreateFolderPicker(_deliverablesFolderText, OnBrowseDeliverables));
+            var pathNote = new Label
+            {
+                Text = "Used for deliverables and BOM output.",
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Padding = new Padding(0, 4, 0, 0)
+            };
+            var pathWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            pathWrap.Controls.Add(paths);
+            pathWrap.Controls.Add(pathNote);
+            AddSection(panel, CreateGroupBox("Paths", pathWrap));
 
-            var actions = new FlowLayoutPanel
+            var publishActions = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight,
                 AutoSize = true,
@@ -170,39 +190,12 @@ namespace TinyMRP.SolidWorksAddin.UI
             btnDeselectAll.Click += (_, __) => SetDeliverableChecks(false);
             var btnCreate = new Button { Text = "Create files", AutoSize = true };
             btnCreate.Click += OnCreateFiles;
-            actions.Controls.Add(btnSelectAll);
-            actions.Controls.Add(btnDeselectAll);
-            actions.Controls.Add(btnCreate);
-            AddSection(panel, CreateGroupBox("Actions", actions));
+            publishActions.Controls.Add(btnSelectAll);
+            publishActions.Controls.Add(btnDeselectAll);
+            publishActions.Controls.Add(btnCreate);
+            AddSection(panel, CreateGroupBox("Publish actions", publishActions));
 
-            _logBox = new TextBox
-            {
-                Multiline = true,
-                ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical,
-                Dock = DockStyle.Fill
-            };
-            _logBox.MinimumSize = new Size(0, 120);
-            var logGroup = CreateGroupBox("Log", _logBox);
-            logGroup.AutoSize = false;
-            logGroup.Height = 170;
-            AddSection(panel, logGroup);
-
-            return page;
-        }
-
-        private TabPage BuildBomTab()
-        {
-            var page = CreateTabPage("BOM");
-            var panel = CreateTabPanel();
-            page.Controls.Add(panel);
-
-            var paths = CreateFormLayout();
-            _bomFolderText = new TextBox { Width = 200 };
-            AddField(paths, "BOM folder", CreateFolderPicker(_bomFolderText, OnBrowseBomFolder));
-            AddSection(panel, CreateGroupBox("BOM output", paths));
-
-            var actions = new FlowLayoutPanel
+            var bomActions = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight,
                 AutoSize = true,
@@ -211,19 +204,74 @@ namespace TinyMRP.SolidWorksAddin.UI
             };
             var btnBom = new Button { Text = "Process BOM", AutoSize = true };
             btnBom.Click += OnProcessBom;
-            var btnFreeze = new Button { Text = "Freeze model", AutoSize = true };
-            btnFreeze.Click += (_, __) => OnFreeze(true);
-            var btnUnfreeze = new Button { Text = "Unfreeze model", AutoSize = true };
-            btnUnfreeze.Click += (_, __) => OnFreeze(false);
 
-            actions.Controls.Add(btnBom);
-            actions.Controls.Add(btnFreeze);
-            actions.Controls.Add(btnUnfreeze);
-            AddSection(panel, CreateGroupBox("Actions", actions));
+            bomActions.Controls.Add(btnBom);
+            AddSection(panel, CreateGroupBox("BOM actions", bomActions));
+
+            var progressLayout = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Fill
+            };
+            progressLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            progressLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+
+            _publishProgressBar = new ProgressBar { Minimum = 0, Maximum = 100, Dock = DockStyle.Fill, Height = 18 };
+            _publishProgressLabel = new Label { AutoSize = true, Text = "Create files: idle" };
+            AddProgressRow(progressLayout, "Create files", _publishProgressBar, _publishProgressLabel);
+
+            _bomProgressBar = new ProgressBar { Minimum = 0, Maximum = 100, Dock = DockStyle.Fill, Height = 18 };
+            _bomProgressLabel = new Label { AutoSize = true, Text = "Process BOM: idle" };
+            AddProgressRow(progressLayout, "Process BOM", _bomProgressBar, _bomProgressLabel);
+
+            _actionStatusLabel = new Label { AutoSize = true, Text = "" };
+            _cancelButton = new Button { Text = "Cancel current task", AutoSize = true };
+            _cancelButton.Click += OnCancelCurrentTask;
+            var progressWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            progressWrap.Controls.Add(progressLayout);
+            progressWrap.Controls.Add(_actionStatusLabel);
+            progressWrap.Controls.Add(_cancelButton);
+            AddSection(panel, CreateGroupBox("Progress", progressWrap));
 
             return page;
         }
 
+        private TabPage BuildToolsTab()
+        {
+            var page = CreateTabPage("Tools");
+            var panel = CreateTabPanel();
+            page.Controls.Add(panel);
+
+            var modelActions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill
+            };
+
+            var btnFreeze = new Button { Text = "Freeze model", AutoSize = true };
+            btnFreeze.Click += (_, __) => OnFreeze(true);
+            var btnUnfreeze = new Button { Text = "Unfreeze model", AutoSize = true };
+            btnUnfreeze.Click += (_, __) => OnFreeze(false);
+            var btnNormalize = new Button { Text = "Normalize units", AutoSize = true };
+            btnNormalize.Click += OnNormalizeUnits;
+
+            modelActions.Controls.Add(btnFreeze);
+            modelActions.Controls.Add(btnUnfreeze);
+            modelActions.Controls.Add(btnNormalize);
+            AddSection(panel, CreateGroupBox("Model utilities", modelActions));
+
+            return page;
+        }
         private TabPage BuildConfigTab()
         {
             var page = CreateTabPage("Configuration");
@@ -273,12 +321,12 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             if (_deliverablesFolderText != null)
             {
-                _deliverablesFolderText.Text = config.DeliverablesFolder;
-            }
-
-            if (_bomFolderText != null)
-            {
-                _bomFolderText.Text = config.BomFolder;
+                string folder = config.DeliverablesFolder;
+                if (string.IsNullOrWhiteSpace(folder))
+                {
+                    folder = config.BomFolder;
+                }
+                _deliverablesFolderText.Text = folder;
             }
 
             if (_weblinkText != null)
@@ -303,7 +351,7 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             if (_configPathLabel != null)
             {
-            _configPathLabel.Text = "Config: " + config.ConfigPath;
+                _configPathLabel.Text = "Config: " + config.ConfigPath;
             }
         }
 
@@ -314,7 +362,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             var options = new PublishOptions
             {
                 DeliverablesFolder = _deliverablesFolderText != null ? _deliverablesFolderText.Text : string.Empty,
-                BomFolder = _bomFolderText != null ? _bomFolderText.Text : string.Empty,
+                BomFolder = _deliverablesFolderText != null ? _deliverablesFolderText.Text : string.Empty,
                 ExportPngModel = _pngModelCheck != null && _pngModelCheck.Checked,
                 ExportStep = _stepCheck != null && _stepCheck.Checked,
                 ExportEdrawing = _edrCheck != null && _edrCheck.Checked,
@@ -342,10 +390,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 config.DeliverablesFolder = _deliverablesFolderText.Text;
             }
 
-            if (_bomFolderText != null)
-            {
-                config.BomFolder = _bomFolderText.Text;
-            }
+            config.BomFolder = config.DeliverablesFolder;
 
             if (_weblinkText != null)
             {
@@ -381,7 +426,10 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             PublishOptions options = BuildOptions();
-            publisher.ProcessFiles(options, Log);
+            ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
+            SetStatus("Creating files...");
+            publisher.ProcessFiles(options, Log, UpdatePublishProgress);
+            SetStatus("Done.");
         }
 
         private void OnProcessBom(object sender, EventArgs e)
@@ -395,7 +443,22 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             PublishOptions options = BuildOptions();
-            publisher.ProcessBom(options, Log);
+            ResetProgress(_bomProgressBar, _bomProgressLabel, "Process BOM");
+            SetStatus("Processing BOM...");
+            publisher.ProcessBom(options, Log, UpdateBomProgress);
+            SetStatus("Done.");
+        }
+
+        private void OnCancelCurrentTask(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                return;
+            }
+
+            publisher.RequestCancel();
+            SetStatus("Cancel requested...");
         }
 
         private void OnFreeze(bool freeze)
@@ -408,7 +471,24 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            SetStatus(freeze ? "Freezing model..." : "Unfreezing model...");
             publisher.FreezeDesign(freeze, Log);
+            SetStatus("Done.");
+        }
+
+        private void OnNormalizeUnits(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                MessageBox.Show("Publisher is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            SetStatus("Normalizing units...");
+            publisher.NormalizeUnits(Log);
+            SetStatus("Done.");
         }
 
         private void OnSaveConfig(object sender, EventArgs e)
@@ -477,15 +557,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
         }
 
-        private void OnBrowseBomFolder(object sender, EventArgs e)
-        {
-            string folder = BrowseFolder(_bomFolderText != null ? _bomFolderText.Text : string.Empty);
-            if (!string.IsNullOrWhiteSpace(folder) && _bomFolderText != null)
-            {
-                _bomFolderText.Text = folder;
-            }
-        }
-
         private void OnBrowseBlankTemplate(object sender, EventArgs e)
         {
             string path = BrowseFile("Select blank template", "SolidWorks template (*.slddrt)|*.slddrt");
@@ -544,18 +615,63 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         private void Log(string message)
         {
-            if (_logBox == null)
+            SetStatus(message);
+        }
+
+        private void ResetProgress(ProgressBar bar, Label label, string actionName)
+        {
+            UpdateProgress(bar, label, actionName, 0, 0);
+        }
+
+        private void UpdatePublishProgress(int current, int total)
+        {
+            UpdateProgress(_publishProgressBar, _publishProgressLabel, "Create files", current, total);
+        }
+
+        private void UpdateBomProgress(int current, int total)
+        {
+            UpdateProgress(_bomProgressBar, _bomProgressLabel, "Process BOM", current, total);
+        }
+
+        private void UpdateProgress(ProgressBar bar, Label label, string actionName, int current, int total)
+        {
+            if (bar == null || label == null)
             {
                 return;
             }
 
-            if (_logBox.InvokeRequired)
+            if (bar.InvokeRequired || label.InvokeRequired)
             {
-                _logBox.BeginInvoke(new Action<string>(Log), message);
+                BeginInvoke(new Action<ProgressBar, Label, string, int, int>(UpdateProgress),
+                    bar, label, actionName, current, total);
                 return;
             }
 
-            _logBox.AppendText(message + Environment.NewLine);
+            int pct = total > 0 ? (int)Math.Round((double)current / total * 100) : 0;
+            if (pct < 0) pct = 0;
+            if (pct > 100) pct = 100;
+
+            bar.Value = pct;
+            label.Text = total > 0
+                ? string.Format("{0}: {1} / {2}", actionName, current, total)
+                : actionName + ": idle";
+            Application.DoEvents();
+        }
+
+        private void SetStatus(string message)
+        {
+            if (_actionStatusLabel == null)
+            {
+                return;
+            }
+
+            if (_actionStatusLabel.InvokeRequired)
+            {
+                _actionStatusLabel.BeginInvoke(new Action<string>(SetStatus), message);
+                return;
+            }
+
+            _actionStatusLabel.Text = message ?? string.Empty;
         }
 
         private static TabPage CreateTabPage(string title)
@@ -614,6 +730,33 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
             box.Controls.Add(content);
             return box;
+        }
+
+        private static void AddProgressRow(TableLayoutPanel table, string labelText, ProgressBar bar, Label valueLabel)
+        {
+            int row = table.RowCount;
+            table.RowCount++;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var label = new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left };
+
+            var panel = new TableLayoutPanel
+            {
+                ColumnCount = 1,
+                RowCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Fill
+            };
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            bar.Dock = DockStyle.Fill;
+            valueLabel.Dock = DockStyle.Fill;
+            panel.Controls.Add(bar, 0, 0);
+            panel.Controls.Add(valueLabel, 0, 1);
+
+            table.Controls.Add(label, 0, row);
+            table.Controls.Add(panel, 1, row);
         }
 
         private static TableLayoutPanel CreateFormLayout()
