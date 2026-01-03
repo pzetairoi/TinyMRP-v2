@@ -2,6 +2,6 @@ BlankTemplatePath=Templates\TinyMRP_BLANKSHEET_TEMPLATE.slddrt
 REMOVE_MODIFIED_NOTES=True
 FILTER_ANY=*
 BOMtemplate=Templates\TinyMRP_BOM_TEMPLATE.sldbomtbt
-weblink=192.168.0.161
+weblink=localhost:5000
 BOM_Folder=Output
 deliverables_folder=Output

@@ -61,7 +61,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             BomTemplatePath = "Templates\\TinyMRP_BOM_TEMPLATE.sldbomtbt";
             RemoveModifiedNotes = true;
             FilterAny = "*";
-            WebLink = "192.168.0.161";
+            WebLink = "localhost:5000";
             BomFolder = "Output";
             DeliverablesFolder = "Output";
         }

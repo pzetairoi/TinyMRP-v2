@@ -207,19 +207,44 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         public void NormalizeUnits(Action<string> log)
         {
-            ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
-            if (swModel == null)
-            {
-                System.Windows.Forms.MessageBox.Show("No active document.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
-                return;
-            }
+            NormalizeUnits(log, null);
+        }
+
+        public void NormalizeUnits(Action<string> log, Action<int, int> progress)
+        {
+            ModelDoc2 rootModel = null;
+            string rootTitle = string.Empty;
+            HashSet<string> initialDocs = null;
 
             try
             {
-                SetUnitPreferences(swModel);
+                ResetCancel();
+                var entries = GetEntriesForActiveDoc(true, out rootModel, out rootTitle, out initialDocs);
+                UpdateProgress(progress, 0, entries.Count);
+
+                int processed = 0;
+                foreach (ModelEntry entry in entries)
+                {
+                    ThrowIfCancelled();
+                    System.Windows.Forms.Application.DoEvents();
+                    SetUnitPreferences(entry.Model);
+                    if (!string.IsNullOrWhiteSpace(entry.Model.GetPathName()))
+                    {
+                        entry.Model.Save2(true);
+                    }
+
+                    processed++;
+                    UpdateProgress(progress, processed, entries.Count);
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                }
+
                 Log(log, "Units normalized.");
                 System.Windows.Forms.MessageBox.Show("Units normalized.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -227,27 +252,73 @@ namespace TinyMRP.SolidWorksAddin.Services
                 System.Windows.Forms.MessageBox.Show("Failed to normalize units: " + ex.Message, "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
             }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(rootTitle))
+                {
+                    _swApp.ActivateDoc(rootTitle);
+                }
+
+                CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+            }
         }
 
         public void FreezeDesign(bool freeze, Action<string> log)
         {
-            ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
-            if (swModel == null)
-            {
-                System.Windows.Forms.MessageBox.Show("No active document.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
-                return;
-            }
+            FreezeDesign(freeze, log, null);
+        }
+
+        public void FreezeDesign(bool freeze, Action<string> log, Action<int, int> progress)
+        {
+            ModelDoc2 rootModel = null;
+            string rootTitle = string.Empty;
+            HashSet<string> initialDocs = null;
 
             try
             {
-                FreezeDesignInternal(swModel, freeze);
-                swModel.Save2(true);
+                ResetCancel();
+                var entries = GetEntriesForActiveDoc(true, out rootModel, out rootTitle, out initialDocs);
+                UpdateProgress(progress, 0, entries.Count);
+
+                int processed = 0;
+                foreach (ModelEntry entry in entries)
+                {
+                    ThrowIfCancelled();
+                    System.Windows.Forms.Application.DoEvents();
+
+                    int docType = entry.Model.GetType();
+                    if (docType == (int)swDocumentTypes_e.swDocPART)
+                    {
+                        bool closeAfter = !ReferenceEquals(entry.Model, rootModel);
+                        FreezePart(entry.Model, freeze, closeAfter);
+                    }
+
+                    processed++;
+                    UpdateProgress(progress, processed, entries.Count);
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                }
+
+                System.Windows.Forms.MessageBox.Show(freeze ? "Freeze finished." : "Unfreeze finished.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 System.Windows.Forms.MessageBox.Show("Freeze failed: " + ex.Message, "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(rootTitle))
+                {
+                    _swApp.ActivateDoc(rootTitle);
+                }
+
+                CloseNonRootDocs(initialDocs, rootModel, rootTitle);
             }
         }
 
@@ -306,6 +377,11 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private void FreezePart(ModelDoc2 model, bool freeze)
         {
+            FreezePart(model, freeze, true);
+        }
+
+        private void FreezePart(ModelDoc2 model, bool freeze, bool closeAfter)
+        {
             PartDoc part = model as PartDoc;
             if (part == null)
             {
@@ -356,7 +432,10 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             model.Save2(true);
-            _swApp.CloseDoc(model.GetTitle());
+            if (closeAfter)
+            {
+                _swApp.CloseDoc(model.GetTitle());
+            }
         }
 
         private void FreezeTraverseModel(ModelDoc2 assemblyModel, bool freeze)
@@ -570,6 +649,60 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 CloseNonRootDocs(initialDocs, rootModel, rootTitle);
             }
+        }
+
+        private List<ModelEntry> GetEntriesForActiveDoc(bool includeChildren, out ModelDoc2 rootModel,
+            out string rootTitle, out HashSet<string> initialDocs)
+        {
+            ThrowIfCancelled();
+
+            ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
+            if (swModel == null)
+            {
+                throw new InvalidOperationException("No active document.");
+            }
+
+            Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
+            if (swConf == null)
+            {
+                throw new InvalidOperationException("No active configuration.");
+            }
+
+            int modelType = swModel.GetType();
+            if (modelType == (int)swDocumentTypes_e.swDocDRAWING)
+            {
+                DrawingDoc swDraw = swModel as DrawingDoc;
+                DrawingReference reference;
+                if (TryGetDrawingReference(swDraw, out reference) && reference.Model != null)
+                {
+                    swModel = reference.Model;
+                    swConf = reference.Configuration;
+                    modelType = swModel.GetType();
+                    _swApp.ActivateDoc(swModel.GetTitle());
+                }
+            }
+
+            rootModel = swModel;
+            rootTitle = swModel.GetTitle();
+            initialDocs = GetOpenDocumentIds();
+
+            var entries = new List<ModelEntry>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            AddModelEntry(swModel, swConf.Name, entries, seen, false);
+
+            if (includeChildren && modelType == (int)swDocumentTypes_e.swDocASSEMBLY)
+            {
+                AssemblyDoc assy = swModel as AssemblyDoc;
+                if (assy != null)
+                {
+                    assy.ResolveAllLightWeightComponents(true);
+                }
+
+                Component2 root = swConf.GetRootComponent() as Component2;
+                TraverseComponents(root, entries, seen);
+            }
+
+            return entries;
         }
 
         private void AddModelEntry(ModelDoc2 model, string configName, List<ModelEntry> entries, HashSet<string> seen, bool prepend)
@@ -1722,6 +1855,10 @@ namespace TinyMRP.SolidWorksAddin.Services
         private void CloseNonRootDocs(HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle)
         {
             if (rootModel == null)
+            {
+                return;
+            }
+            if (initialDocs == null)
             {
                 return;
             }
