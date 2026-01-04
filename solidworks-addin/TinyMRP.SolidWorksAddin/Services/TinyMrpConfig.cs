@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace TinyMRP.SolidWorksAddin.Services
 {
@@ -17,6 +19,10 @@ namespace TinyMRP.SolidWorksAddin.Services
         public string DeliverablesFolder { get; set; }
         public string NumberingSchemeId { get; set; }
         public string NumberingContextDefaults { get; set; }
+        public string PartNumberProperty { get; set; }
+        public string RevisionProperty { get; set; }
+        public string DisplayCodeProperty { get; set; }
+        public string NumberingApplyMode { get; set; }
         public string AddinDirectory { get; private set; }
         public string ConfigPath { get; private set; }
 
@@ -25,8 +31,9 @@ namespace TinyMRP.SolidWorksAddin.Services
             var config = new TinyMrpConfig();
             config.AddinDirectory = addinDirectory;
             string addinConfigPath = Path.Combine(addinDirectory, "TinyMRP_config.txt");
+            string machineConfigPath = config.GetMachineConfigPath();
             string userConfigPath = config.GetUserConfigPath();
-            config.ConfigPath = File.Exists(userConfigPath) ? userConfigPath : addinConfigPath;
+            config.ConfigPath = SelectConfigPath(machineConfigPath, addinConfigPath, userConfigPath);
             config.SetDefaults();
 
             if (File.Exists(config.ConfigPath))
@@ -72,6 +79,10 @@ namespace TinyMRP.SolidWorksAddin.Services
             DeliverablesFolder = "Output";
             NumberingSchemeId = string.Empty;
             NumberingContextDefaults = "type=PART;family=;subfamily=;project=;site=";
+            PartNumberProperty = "PartNumber";
+            RevisionProperty = "Revision";
+            DisplayCodeProperty = "DisplayCode";
+            NumberingApplyMode = "active_config";
         }
 
         private void Apply(string key, string value)
@@ -97,7 +108,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     BackendUrl = value;
                     break;
                 case "AuthToken":
-                    AuthToken = value;
+                    AuthToken = UnprotectToken(value);
                     break;
                 case "BOM_Folder":
                     BomFolder = value;
@@ -110,6 +121,18 @@ namespace TinyMRP.SolidWorksAddin.Services
                     break;
                 case "NumberingContextDefaults":
                     NumberingContextDefaults = value;
+                    break;
+                case "PartNumberProperty":
+                    PartNumberProperty = value;
+                    break;
+                case "RevisionProperty":
+                    RevisionProperty = value;
+                    break;
+                case "DisplayCodeProperty":
+                    DisplayCodeProperty = value;
+                    break;
+                case "NumberingApplyMode":
+                    NumberingApplyMode = value;
                     break;
             }
         }
@@ -139,6 +162,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         public void Save()
         {
+            string protectedToken = ProtectToken(AuthToken);
             var lines = new List<string>
             {
                 "BlankTemplatePath=" + GetPathForConfig(BlankTemplatePath),
@@ -147,11 +171,15 @@ namespace TinyMRP.SolidWorksAddin.Services
                 "BOMtemplate=" + GetPathForConfig(BomTemplatePath),
                 "weblink=" + (WebLink ?? string.Empty),
                 "BackendUrl=" + (BackendUrl ?? string.Empty),
-                "AuthToken=" + (AuthToken ?? string.Empty),
+                "AuthToken=" + (protectedToken ?? string.Empty),
                 "BOM_Folder=" + GetPathForConfig(BomFolder),
                 "deliverables_folder=" + GetPathForConfig(DeliverablesFolder),
                 "NumberingSchemeId=" + (NumberingSchemeId ?? string.Empty),
                 "NumberingContextDefaults=" + (NumberingContextDefaults ?? string.Empty),
+                "PartNumberProperty=" + (PartNumberProperty ?? "PartNumber"),
+                "RevisionProperty=" + (RevisionProperty ?? "Revision"),
+                "DisplayCodeProperty=" + (DisplayCodeProperty ?? "DisplayCode"),
+                "NumberingApplyMode=" + (NumberingApplyMode ?? "active_config"),
             };
 
             try
@@ -182,6 +210,75 @@ namespace TinyMRP.SolidWorksAddin.Services
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "TinyMRP");
             return Path.Combine(baseDir, "TinyMRP_config.txt");
+        }
+
+        private string GetMachineConfigPath()
+        {
+            string baseDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "TinyMRP");
+            return Path.Combine(baseDir, "TinyMRP_config.txt");
+        }
+
+        private static string SelectConfigPath(string machinePath, string addinPath, string userPath)
+        {
+            if (File.Exists(machinePath))
+            {
+                return machinePath;
+            }
+            if (File.Exists(addinPath))
+            {
+                return addinPath;
+            }
+            if (File.Exists(userPath))
+            {
+                return userPath;
+            }
+            return machinePath;
+        }
+
+        private string ProtectToken(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(token);
+                byte[] protectedBytes = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
+                return "enc:" + Convert.ToBase64String(protectedBytes);
+            }
+            catch
+            {
+                return token;
+            }
+        }
+
+        private string UnprotectToken(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            if (!value.StartsWith("enc:", StringComparison.OrdinalIgnoreCase))
+            {
+                return value;
+            }
+
+            try
+            {
+                string payload = value.Substring(4);
+                byte[] data = Convert.FromBase64String(payload);
+                byte[] unprotected = ProtectedData.Unprotect(data, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(unprotected);
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private string GetPathForConfig(string path)

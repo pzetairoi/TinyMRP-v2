@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from flask import Blueprint, request, jsonify
-from flask_security import auth_required, current_user
+from flask_security import current_user
 from mongoengine.errors import NotUniqueError, DoesNotExist, ValidationError
 
 from app.extensions import csrf
 from app.models.numbering import NumberingScheme
 from app.services.acl import user_has_permission
+from app.services.api_auth import api_auth_required, get_request_user
 from app.services.numbering import (
     normalize_scheme_payload,
     validate_scheme_definition,
@@ -54,10 +55,11 @@ def _json_error(code: str, message: str, details=None, status: int = 400):
 
 
 @bp.get("/schemes")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def list_schemes():
-    if _can_manage(current_user):
+    user = get_request_user()
+    if _can_manage(user):
         queryset = NumberingScheme.objects()
     else:
         queryset = NumberingScheme.objects(is_active=True)
@@ -66,13 +68,20 @@ def list_schemes():
 
 
 @bp.post("/schemes")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def create_scheme():
-    if not _can_manage(current_user):
+    user = get_request_user()
+    if not _can_manage(user):
         return _json_error("forbidden", "Not authorized.", status=403)
     payload = request.get_json(force=True, silent=True) or {}
-    scheme_data, errors = normalize_scheme_payload(payload, getattr(current_user, "email", None), None, require_name=True)
+    scheme_data, errors = normalize_scheme_payload(
+        payload,
+        getattr(user, "email", None),
+        None,
+        require_name=True,
+        allow_admin_flags=True,
+    )
     v_errors, v_warnings, example = validate_scheme_definition(scheme_data)
     errors.extend(v_errors)
     if errors:
@@ -92,23 +101,25 @@ def create_scheme():
 
 
 @bp.get("/schemes/<scheme_id>")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def get_scheme(scheme_id: str):
     try:
         scheme = NumberingScheme.objects.get(id=scheme_id)
     except (DoesNotExist, ValidationError):
         return _json_error("not_found", "Scheme not found.", status=404)
-    if not scheme.is_active and not _can_manage(current_user):
+    user = get_request_user()
+    if not scheme.is_active and not _can_manage(user):
         return _json_error("inactive", "Scheme is inactive.", status=403)
     return jsonify({"ok": True, "scheme": scheme_to_dict(scheme)})
 
 
 @bp.put("/schemes/<scheme_id>")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def update_scheme(scheme_id: str):
-    if not _can_manage(current_user):
+    user = get_request_user()
+    if not _can_manage(user):
         return _json_error("forbidden", "Not authorized.", status=403)
     try:
         scheme = NumberingScheme.objects.get(id=scheme_id)
@@ -116,15 +127,22 @@ def update_scheme(scheme_id: str):
         return _json_error("not_found", "Scheme not found.", status=404)
 
     payload = request.get_json(force=True, silent=True) or {}
-    scheme_data, errors = normalize_scheme_payload(payload, getattr(current_user, "email", None), scheme, require_name=True)
+    scheme_data, errors = normalize_scheme_payload(
+        payload,
+        getattr(user, "email", None),
+        scheme,
+        require_name=True,
+        allow_admin_flags=True,
+    )
     v_errors, v_warnings, example = validate_scheme_definition(scheme_data)
     errors.extend(v_errors)
     if errors:
         return _json_error("validation_failed", "Scheme validation failed.", errors, status=400)
 
     for key in (
-        "name", "description", "is_active", "pattern_segments", "separator", "scope_mode",
-        "scope_keys", "seq", "revision", "validation_rules", "audit",
+        "name", "description", "is_active", "is_preset", "is_recommended", "visibility",
+        "pattern_segments", "separator", "scope_mode", "scope_keys",
+        "seq", "revision", "validation_rules", "audit",
     ):
         setattr(scheme, key, scheme_data[key])
 
@@ -142,10 +160,11 @@ def update_scheme(scheme_id: str):
 
 
 @bp.delete("/schemes/<scheme_id>")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def delete_scheme(scheme_id: str):
-    if not _can_manage(current_user):
+    user = get_request_user()
+    if not _can_manage(user):
         return _json_error("forbidden", "Not authorized.", status=403)
     try:
         scheme = NumberingScheme.objects.get(id=scheme_id)
@@ -157,13 +176,20 @@ def delete_scheme(scheme_id: str):
 
 
 @bp.post("/schemes/validate")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def validate_scheme():
-    if not _can_manage(current_user):
+    user = get_request_user()
+    if not _can_manage(user):
         return _json_error("forbidden", "Not authorized.", status=403)
     payload = request.get_json(force=True, silent=True) or {}
-    scheme_data, errors = normalize_scheme_payload(payload, getattr(current_user, "email", None), None, require_name=False)
+    scheme_data, errors = normalize_scheme_payload(
+        payload,
+        getattr(user, "email", None),
+        None,
+        require_name=False,
+        allow_admin_flags=_can_manage(user),
+    )
     v_errors, v_warnings, example = validate_scheme_definition(scheme_data, payload.get("context"))
     errors.extend(v_errors)
     if errors:
@@ -177,7 +203,7 @@ def validate_scheme():
 
 
 @bp.post("/preview")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def preview():
     payload = request.get_json(force=True, silent=True) or {}
@@ -198,7 +224,7 @@ def preview():
 
 
 @bp.post("/allocate")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def allocate():
     payload = request.get_json(force=True, silent=True) or {}
@@ -223,7 +249,7 @@ def allocate():
         bool(create_part_if_missing),
         action,
         existing_part_number,
-        getattr(current_user, "email", None),
+        getattr(get_request_user(), "email", None),
         cad_ref,
     )
     if errors:
@@ -232,7 +258,7 @@ def allocate():
 
 
 @bp.post("/parts/<part_number>/revise")
-@auth_required()
+@api_auth_required
 @csrf.exempt
 def revise_part(part_number: str):
     payload = request.get_json(force=True, silent=True) or {}
@@ -274,13 +300,14 @@ def revise_part(part_number: str):
     cloned.attrs["revision"] = new_rev
     cloned.save()
 
+    user = get_request_user()
     PartRevisionHistory(
         part_id=cloned,
         part_number=cloned.part_number,
         revision=new_rev,
         status="WIP",
         change_note=str(payload.get("change_note") or "Revision via API"),
-        created_by=getattr(current_user, "email", None) or "",
+        created_by=getattr(user, "email", None) or "",
     ).save()
 
     return jsonify({"ok": True, "part_number": cloned.part_number, "revision": new_rev})

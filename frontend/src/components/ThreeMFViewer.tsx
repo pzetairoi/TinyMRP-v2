@@ -204,8 +204,6 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480 }) => {
     renderer.setClearColor(0xffffff, 1);
     if ("outputColorSpace" in renderer) {
       (renderer as any).outputColorSpace = THREE.SRGBColorSpace;
-    } else {
-      (renderer as any).outputEncoding = THREE.sRGBEncoding;
     }
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);

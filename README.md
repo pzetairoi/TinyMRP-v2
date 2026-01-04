@@ -82,15 +82,30 @@ Output DLL:
 ### Installer
 
 The Inno Setup script is in `solidworks-addin/installer.iss`. It copies the build output and runs RegAsm.
+Silent install example:
+
+```powershell
+TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://localhost:5000" /AUTHTOKEN="tmrp_xxx"
+```
+
+### Add-in Quick Start + Tokens
+
+- Web dashboard:
+  - `/ui/addin/settings` for Quick Start + Advanced defaults.
+  - `/ui/addin/tokens` to create/revoke API tokens (shown once).
+  - `/ui/admin/addin` for admins (token revoke + scheme preset flags).
+- Add-in Configuration tab has **Quick Start** (presets + minimal inputs) and **Advanced** (full defaults).
+- The add-in authenticates with a Bearer token stored in `AuthToken`.
 
 ### Configuration
 
-- Primary config file: `TinyMRP_config.txt` next to the add-in DLL.
-- If the install folder is not writable, the add-in saves to:
-  `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
+- Primary config file: `%PROGRAMDATA%\TinyMRP\TinyMRP_config.txt`.
+- Read order: ProgramData → install folder → `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
+- If ProgramData is not writable, the add-in falls back to LocalAppData.
 - Relative paths in the config are resolved from the add-in directory.
 - Templates live under `solidworks-addin/TinyMRP.SolidWorksAddin/Templates/`.
-- Numbering settings live in `BackendUrl`, `AuthToken`, `NumberingSchemeId`, and `NumberingContextDefaults`.
+- Numbering settings live in `BackendUrl`, `AuthToken`, `NumberingSchemeId`, `NumberingContextDefaults`.
+- Property map and apply mode live in `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty`, `NumberingApplyMode`.
 
 ### UI and Outputs
 
@@ -130,6 +145,9 @@ Global settings:
 
 ### Endpoints
 
+- `GET /api/auth/check` (Bearer token)
+- `GET /api/me/tokens`, `POST /api/me/tokens`, `DELETE /api/me/tokens/<id>`
+- `GET /api/me/settings`, `PUT /api/me/settings`
 - `GET /api/numbering/schemes`
 - `POST /api/numbering/schemes`
 - `GET /api/numbering/schemes/<id>`
@@ -149,6 +167,7 @@ Global settings:
 
 - The add-in loads schemes from `BackendUrl` (or `weblink`) and saves the selected scheme id in `TinyMRP_config.txt`.
 - Allocation writes custom properties: `PartNumber`, `Revision`, `DisplayCode`, and `TinyMRP_SchemeId`.
+- Property names can be customized via `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty`.
 - Parts remain unique on `(part_number, revision)` to preserve existing data flows; `display_code` provides `PN-REV`.
 
 ---
@@ -180,6 +199,50 @@ npm run build
 ```
 
 Visit http://localhost:5000 (app) and http://localhost:5001/Deliverables (files).
+
+---
+
+## Tests & Smoke Checks
+
+Backend tests:
+
+```powershell
+python -m pytest -q
+```
+
+Frontend build:
+
+```powershell
+cd frontend
+npm install
+npm run build
+```
+
+API smoke test (requires a valid Bearer token):
+
+```powershell
+$env:BACKEND_URL = "http://localhost:5000"
+$env:TOKEN = "<your_api_token>"
+python scripts/smoke_api.py
+```
+
+Installer logic check:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\verify_installer_config_logic.ps1
+```
+
+Add-in build:
+
+```powershell
+dotnet msbuild solidworks-addin\TinyMRP.SolidWorksAddin.sln /p:Configuration=Release /p:Platform=x64
+```
+
+Installer build (Inno Setup):
+
+```powershell
+iscc solidworks-addin\installer.iss
+```
 
 ---
 

@@ -30,9 +30,9 @@ Output DLL:
 
 ## Configuration
 
-- Primary config file: `TinyMRP_config.txt` next to the add-in DLL.
-- If the install folder is not writable, the add-in saves to:
-  `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
+- Primary config file: `%PROGRAMDATA%\TinyMRP\TinyMRP_config.txt`.
+- Read order: ProgramData → install folder → `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
+- If ProgramData is not writable, the add-in falls back to LocalAppData.
 - Relative paths in the config are resolved from the add-in directory.
 
 Key settings in `TinyMRP_config.txt`:
@@ -44,13 +44,15 @@ Key settings in `TinyMRP_config.txt`:
 - `AuthToken` - optional bearer token for API calls
 - `NumberingSchemeId` - default scheme to select
 - `NumberingContextDefaults` - default context fields for numbering
+- `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty` - custom property names
+- `NumberingApplyMode` - default apply mode (active_config|all_configs|selected_configs)
 
 ## Task pane tabs
 
 - Publish/BOM: export deliverables, run BOM, progress + cancel.
 - Tools: freeze/unfreeze, normalize units, hide reference geometry.
 - Numbering: scheme selection, segment builder, preview and allocate PN+REV.
-- Configuration: templates, paths, server settings.
+- Configuration: Quick Start + Advanced settings, templates, paths, server settings.
 
 ## Numbering workflow (quick)
 
@@ -59,6 +61,13 @@ Key settings in `TinyMRP_config.txt`:
 3. Validate and **Save scheme** (requires admin/manager or `numbering.manage`).
 4. Enter context fields and click **Preview next**.
 5. Click **Allocate PN+REV** and choose where to apply it.
+
+## Add-in Quick Start
+
+1. Create an API token in the web UI (`/ui/addin/tokens`).
+2. Open the Configuration tab → **Quick Start**.
+3. Paste Backend URL + Auth token, then **Test connection**.
+4. Pick a preset scheme, enter minimal context, and **Save settings**.
 
 The add-in writes custom properties:
 

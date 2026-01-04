@@ -14,18 +14,25 @@ namespace TinyMRP.SolidWorksAddin.Services
             string partNumber,
             string revision,
             string displayCode,
-            string schemeId)
+            string schemeId,
+            string partNumberProperty,
+            string revisionProperty,
+            string displayCodeProperty)
         {
             if (model == null)
             {
                 return;
             }
 
+            string partProp = string.IsNullOrWhiteSpace(partNumberProperty) ? "PartNumber" : partNumberProperty;
+            string revProp = string.IsNullOrWhiteSpace(revisionProperty) ? "Revision" : revisionProperty;
+            string displayProp = string.IsNullOrWhiteSpace(displayCodeProperty) ? "DisplayCode" : displayCodeProperty;
+
             if (includeDocumentProperties)
             {
-                SetCustomProperty(model, string.Empty, "PartNumber", partNumber);
-                SetCustomProperty(model, string.Empty, "Revision", revision);
-                SetCustomProperty(model, string.Empty, "DisplayCode", displayCode);
+                SetCustomProperty(model, string.Empty, partProp, partNumber);
+                SetCustomProperty(model, string.Empty, revProp, revision);
+                SetCustomProperty(model, string.Empty, displayProp, displayCode);
                 if (!string.IsNullOrWhiteSpace(schemeId))
                 {
                     SetCustomProperty(model, string.Empty, "TinyMRP_SchemeId", schemeId);
@@ -43,9 +50,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     continue;
                 }
-                SetCustomProperty(model, configName, "PartNumber", partNumber);
-                SetCustomProperty(model, configName, "Revision", revision);
-                SetCustomProperty(model, configName, "DisplayCode", displayCode);
+                SetCustomProperty(model, configName, partProp, partNumber);
+                SetCustomProperty(model, configName, revProp, revision);
+                SetCustomProperty(model, configName, displayProp, displayCode);
                 if (!string.IsNullOrWhiteSpace(schemeId))
                 {
                     SetCustomProperty(model, configName, "TinyMRP_SchemeId", schemeId);
