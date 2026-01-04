@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
@@ -11,6 +12,9 @@ namespace TinyMRP.SolidWorksAddin.Services
 {
     internal sealed class TinyMrpPublisher
     {
+        // Flip these to true when diagnosing hide-features issues.
+        private static readonly bool EnableHideDebugLog = false;
+        private static readonly bool EnableHideStatusLog = false;
         private sealed class ModelEntry
         {
             public ModelDoc2 Model;
@@ -78,13 +82,45 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
+            string startTitle = swModel.GetTitle();
+            HashSet<string> initialDocs = GetOpenDocumentIds();
             Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
+            int modelType = swModel.GetType();
+
+            if (modelType == (int)swDocumentTypes_e.swDocDRAWING)
+            {
+                DrawingDoc swDraw = swModel as DrawingDoc;
+                DrawingReference reference;
+                if (TryGetDrawingReference(swDraw, out reference) && reference.Model != null &&
+                    reference.Configuration != null)
+                {
+                    swModel = reference.Model;
+                    swConf = reference.Configuration;
+                    modelType = swModel.GetType();
+                    _swApp.ActivateDoc(swModel.GetTitle());
+                }
+                else
+                {
+                    System.Windows.Forms.MessageBox.Show("No reference model found in the drawing.", "TinyMRP",
+                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                    return;
+                }
+            }
+
             if (swConf == null)
             {
                 System.Windows.Forms.MessageBox.Show("No active configuration.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
                 return;
             }
+
+            if (!string.IsNullOrWhiteSpace(swConf.Name))
+            {
+                swModel.ShowConfiguration2(swConf.Name);
+            }
+
+            ModelDoc2 rootModel = swModel;
+            string rootTitle = swModel.GetTitle();
 
             ResetCancel();
             try
@@ -208,6 +244,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                 System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
+            finally
+            {
+                CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
+                RestoreStartDocument(startTitle);
+            }
         }
 
         public void NormalizeUnits(Action<string> log)
@@ -220,11 +262,12 @@ namespace TinyMRP.SolidWorksAddin.Services
             ModelDoc2 rootModel = null;
             string rootTitle = string.Empty;
             HashSet<string> initialDocs = null;
+            string startTitle = string.Empty;
 
             try
             {
                 ResetCancel();
-                var entries = GetEntriesForActiveDoc(true, out rootModel, out rootTitle, out initialDocs);
+                var entries = GetEntriesForActiveDoc(true, out rootModel, out rootTitle, out initialDocs, out startTitle);
                 UpdateProgress(progress, 0, entries.Count);
 
                 int processed = 0;
@@ -259,12 +302,142 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             finally
             {
-                if (!string.IsNullOrWhiteSpace(rootTitle))
+                CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
+                RestoreStartDocument(startTitle);
+            }
+        }
+
+        public void HideFeatures(HideFeaturesOptions options, Action<string> log, Action<int, int> progress)
+        {
+            if (options == null || options.FeatureMask == HideFeatureTypeFlags.None)
+            {
+                System.Windows.Forms.MessageBox.Show("No feature types selected.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                return;
+            }
+
+            ModelDoc2 rootModel = null;
+            string rootTitle = string.Empty;
+            string startTitle = string.Empty;
+            HashSet<string> initialDocs = null;
+            string rootConfigName = string.Empty;
+            string debugLogPath = EnableHideDebugLog
+                ? Path.Combine(Path.GetTempPath(), "TinyMRP_hide_features.log")
+                : string.Empty;
+
+            try
+            {
+                ResetCancel();
+                LogHideDebug(debugLogPath, "Start hide features.");
+                var entries = GetEntriesForActiveDoc(true, out rootModel, out rootTitle, out initialDocs, out startTitle);
+                if (entries.Count == 0)
                 {
-                    _swApp.ActivateDoc(rootTitle);
+                    System.Windows.Forms.MessageBox.Show("No model entries to process.", "TinyMRP",
+                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                    return;
                 }
 
+                Configuration rootConfig = rootModel.GetActiveConfiguration() as Configuration;
+                if (rootConfig != null)
+                {
+                    rootConfigName = rootConfig.Name;
+                }
+
+                int total = CalculateHideTotal(entries, options.AllConfigurations);
+                UpdateProgress(progress, 0, total);
+
+                int processed = 0;
+                foreach (ModelEntry entry in entries)
+                {
+                    ThrowIfCancelled();
+                    System.Windows.Forms.Application.DoEvents();
+
+                    if (entry == null || entry.Model == null)
+                    {
+                        continue;
+                    }
+
+                    int docType = entry.Model.GetType();
+                    if (docType != (int)swDocumentTypes_e.swDocPART &&
+                        docType != (int)swDocumentTypes_e.swDocASSEMBLY)
+                    {
+                        continue;
+                    }
+
+                    string modelLabel = OnlyFile(entry.Model.GetPathName());
+                    if (string.IsNullOrWhiteSpace(modelLabel))
+                    {
+                        modelLabel = entry.Model.GetTitle();
+                    }
+
+                    string[] configs = BuildConfigList(entry.Model, options.AllConfigurations, entry.ConfigurationName);
+                    foreach (string configName in configs)
+                    {
+                        ThrowIfCancelled();
+                        System.Windows.Forms.Application.DoEvents();
+
+                        _swApp.ActivateDoc(entry.Model.GetTitle());
+                        if (!string.IsNullOrWhiteSpace(configName))
+                        {
+                            entry.Model.ShowConfiguration2(configName);
+                        }
+
+                        LogHideDebug(debugLogPath, "Processing " + modelLabel + " [" + configName + "]");
+                        if (EnableHideStatusLog)
+                        {
+                            Log(log, "Hide features: " + modelLabel + " [" + configName + "]");
+                        }
+                        try
+                        {
+                            HideFeaturesInModel(entry.Model, options.FeatureMask, debugLogPath);
+                            if (options.HideEnvelopes && docType == (int)swDocumentTypes_e.swDocASSEMBLY)
+                            {
+                                HideEnvelopeComponents(entry.Model, debugLogPath);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LogHideDebug(debugLogPath, "Failed " + modelLabel + ": " + ex.Message);
+                            if (EnableHideStatusLog)
+                            {
+                                Log(log, "Hide features failed: " + modelLabel + " (" + ex.Message + ")");
+                            }
+                        }
+
+                        processed++;
+                        UpdateProgress(progress, processed, total);
+                    }
+
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                }
+
+                if (!string.IsNullOrWhiteSpace(rootConfigName))
+                {
+                    rootModel.ShowConfiguration2(rootConfigName);
+                }
+
+                LogHideDebug(debugLogPath, "Hide features finished.");
+                System.Windows.Forms.MessageBox.Show("Hide features finished.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                LogHideDebug(debugLogPath, "Hide features cancelled.");
+                System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                LogHideDebug(debugLogPath, "Hide features error: " + ex.Message);
+                System.Windows.Forms.MessageBox.Show("Hide features failed: " + ex.Message, "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+            }
+            finally
+            {
                 CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
+                RestoreStartDocument(startTitle);
             }
         }
 
@@ -278,11 +451,12 @@ namespace TinyMRP.SolidWorksAddin.Services
             ModelDoc2 rootModel = null;
             string rootTitle = string.Empty;
             HashSet<string> initialDocs = null;
+            string startTitle = string.Empty;
 
             try
             {
                 ResetCancel();
-                var entries = GetEntriesForActiveDoc(true, out rootModel, out rootTitle, out initialDocs);
+                var entries = GetEntriesForActiveDoc(true, out rootModel, out rootTitle, out initialDocs, out startTitle);
                 UpdateProgress(progress, 0, entries.Count);
 
                 int processed = 0;
@@ -318,12 +492,9 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             finally
             {
-                if (!string.IsNullOrWhiteSpace(rootTitle))
-                {
-                    _swApp.ActivateDoc(rootTitle);
-                }
-
                 CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
+                RestoreStartDocument(startTitle);
             }
         }
 
@@ -498,6 +669,482 @@ namespace TinyMRP.SolidWorksAddin.Services
             return false;
         }
 
+        private bool TryGetActiveModel(out ModelDoc2 model, out Configuration config, out string startTitle)
+        {
+            model = _swApp.ActiveDoc as ModelDoc2;
+            config = null;
+            startTitle = string.Empty;
+            if (model == null)
+            {
+                return false;
+            }
+
+            startTitle = model.GetTitle();
+            config = model.GetActiveConfiguration() as Configuration;
+
+            if (model.GetType() == (int)swDocumentTypes_e.swDocDRAWING)
+            {
+                DrawingDoc draw = model as DrawingDoc;
+                DrawingReference reference;
+                if (TryGetDrawingReference(draw, out reference) && reference.Model != null)
+                {
+                    model = reference.Model;
+                    config = reference.Configuration;
+                    _swApp.ActivateDoc(model.GetTitle());
+                }
+            }
+
+            return config != null;
+        }
+
+        private string[] BuildConfigList(ModelDoc2 model, bool allConfigs, string fallback)
+        {
+            if (model == null)
+            {
+                return new[] { fallback ?? string.Empty };
+            }
+
+            if (allConfigs)
+            {
+                string[] configs = ToStringArray(model.GetConfigurationNames());
+                if (configs != null && configs.Length > 0)
+                {
+                    return configs;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(fallback))
+            {
+                return new[] { fallback };
+            }
+
+            Configuration activeConfig = model.GetActiveConfiguration() as Configuration;
+            if (activeConfig != null && !string.IsNullOrWhiteSpace(activeConfig.Name))
+            {
+                return new[] { activeConfig.Name };
+            }
+
+            return new[] { string.Empty };
+        }
+
+        private int CalculateHideTotal(List<ModelEntry> entries, bool allConfigs)
+        {
+            if (entries == null || entries.Count == 0)
+            {
+                return 1;
+            }
+
+            int total = 0;
+            foreach (ModelEntry entry in entries)
+            {
+                if (entry == null || entry.Model == null)
+                {
+                    continue;
+                }
+
+                int docType = entry.Model.GetType();
+                if (docType != (int)swDocumentTypes_e.swDocPART &&
+                    docType != (int)swDocumentTypes_e.swDocASSEMBLY)
+                {
+                    continue;
+                }
+
+                string[] configs = BuildConfigList(entry.Model, allConfigs, entry.ConfigurationName);
+                total += configs.Length > 0 ? configs.Length : 1;
+            }
+
+            return total > 0 ? total : 1;
+        }
+
+        private void HideFeaturesInModel(ModelDoc2 model, HideFeatureTypeFlags mask, string debugPath)
+        {
+            if (model == null)
+            {
+                return;
+            }
+
+            LogHideDebug(debugPath, "Collect features in " + model.GetTitle());
+
+            ModelView view = model.ActiveView as ModelView;
+            bool prevGraphics = view != null && view.EnableGraphicsUpdate;
+            if (view != null)
+            {
+                view.EnableGraphicsUpdate = false;
+            }
+
+            if (model.FeatureManager != null)
+            {
+                model.FeatureManager.EnableFeatureTree = false;
+            }
+
+            var features = new List<Feature>();
+            Feature first = model.FirstFeature() as Feature;
+            CollectFeatures(first, mask, features, debugPath);
+            LogHideDebug(debugPath, "Collected " + features.Count + " features in " + model.GetTitle());
+            BlankFeatures(model, features, debugPath);
+
+            if (model.FeatureManager != null)
+            {
+                model.FeatureManager.EnableFeatureTree = true;
+            }
+
+            if (view != null)
+            {
+                view.EnableGraphicsUpdate = prevGraphics;
+            }
+
+            if (!string.IsNullOrWhiteSpace(model.GetPathName()))
+            {
+                model.Save2(true);
+            }
+        }
+
+        private void HideEnvelopeComponents(ModelDoc2 model, string debugPath)
+        {
+            if (model == null || model.GetType() != (int)swDocumentTypes_e.swDocASSEMBLY)
+            {
+                return;
+            }
+
+            Configuration conf = model.GetActiveConfiguration() as Configuration;
+            Component2 root = conf != null ? conf.GetRootComponent() as Component2 : null;
+            if (root == null)
+            {
+                return;
+            }
+
+            HideEnvelopeComponentsRecursive(root, debugPath);
+        }
+
+        private void HideEnvelopeComponentsRecursive(Component2 parent, string debugPath)
+        {
+            if (parent == null)
+            {
+                return;
+            }
+
+            object[] children = parent.GetChildren() as object[];
+            if (children == null)
+            {
+                return;
+            }
+
+            foreach (object obj in children)
+            {
+                ThrowIfCancelled();
+                System.Windows.Forms.Application.DoEvents();
+
+                Component2 child = obj as Component2;
+                if (child == null || child.IsSuppressed())
+                {
+                    continue;
+                }
+
+                bool isEnvelope = IsEnvelopeComponent(child);
+                if (isEnvelope)
+                {
+                    bool hidden = TryHideComponent(child);
+                    LogHideDebug(debugPath, "Hide envelope " + child.Name2 + " -> " + hidden);
+                }
+
+                HideEnvelopeComponentsRecursive(child, debugPath);
+            }
+        }
+
+        private bool IsEnvelopeComponent(Component2 comp)
+        {
+            if (comp == null)
+            {
+                return false;
+            }
+
+            object target = comp;
+            Type type = target.GetType();
+
+            object result = TryInvokeMember(type, target, "IsEnvelope", BindingFlags.GetProperty | BindingFlags.InvokeMethod);
+            if (result is bool)
+            {
+                return (bool)result;
+            }
+
+            if (result is int)
+            {
+                return (int)result != 0;
+            }
+
+            return false;
+        }
+
+        private bool TryHideComponent(Component2 comp)
+        {
+            if (comp == null)
+            {
+                return false;
+            }
+
+            object target = comp;
+            Type type = target.GetType();
+
+            if (TrySetMember(type, target, "Visible", false) ||
+                TrySetMember(type, target, "Visible", 0))
+            {
+                return true;
+            }
+
+            if (TryInvokeVoidMember(type, target, "SetVisible", false) ||
+                TryInvokeVoidMember(type, target, "SetVisible", 0))
+            {
+                return true;
+            }
+
+            if (TryInvokeVoidMember(type, target, "SetVisibility", 0))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private object TryInvokeMember(Type type, object target, string name, BindingFlags flags, params object[] args)
+        {
+            try
+            {
+                return type.InvokeMember(name, flags | BindingFlags.Instance | BindingFlags.Public, null, target, args);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private bool TryInvokeVoidMember(Type type, object target, string name, params object[] args)
+        {
+            try
+            {
+                type.InvokeMember(name, BindingFlags.InvokeMethod | BindingFlags.Instance | BindingFlags.Public,
+                    null, target, args);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TrySetMember(Type type, object target, string name, object value)
+        {
+            try
+            {
+                type.InvokeMember(name, BindingFlags.SetProperty | BindingFlags.Instance | BindingFlags.Public,
+                    null, target, new[] { value });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void CollectFeatures(Feature feature, HideFeatureTypeFlags mask, List<Feature> result, string debugPath)
+        {
+            Feature current = feature;
+            while (current != null)
+            {
+                try
+                {
+                    if (ShouldHideFeature(current, mask))
+                    {
+                        LogHideDebug(debugPath, "Queue feature " + SafeFeatureLabel(current));
+                        result.Add(current);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogHideDebug(debugPath, "Feature check failed: " + ex.Message);
+                }
+
+                Feature next = null;
+                try
+                {
+                    next = current.GetNextFeature() as Feature;
+                }
+                catch (Exception ex)
+                {
+                    LogHideDebug(debugPath, "GetNextFeature failed: " + ex.Message);
+                    next = null;
+                }
+
+                current = next;
+            }
+        }
+
+        private bool ShouldHideFeature(Feature feature, HideFeatureTypeFlags mask)
+        {
+            if (feature == null)
+            {
+                return false;
+            }
+
+            int visible = feature.Visible;
+            if (visible != (int)swVisibilityState_e.swVisibilityStateShown &&
+                visible != (int)swVisibilityState_e.swVisibilityStateUnknown)
+            {
+                return false;
+            }
+
+            string typeName = feature.GetTypeName();
+            HideFeatureTypeFlags typeFlag = MapFeatureType(typeName);
+            return typeFlag != HideFeatureTypeFlags.None && (mask & typeFlag) == typeFlag;
+        }
+
+        private HideFeatureTypeFlags MapFeatureType(string typeName)
+        {
+            switch (typeName)
+            {
+                case "OriginProfileFeature":
+                    return HideFeatureTypeFlags.Origin;
+                case "RefPlane":
+                    return HideFeatureTypeFlags.RefPlane;
+                case "RefAxis":
+                    return HideFeatureTypeFlags.RefAxis;
+                case "RefPoint":
+                    return HideFeatureTypeFlags.RefPoint;
+                case "CoordSys":
+                    return HideFeatureTypeFlags.CoordSys;
+                case "ProfileFeature":
+                    return HideFeatureTypeFlags.Sketch2D;
+                case "3DProfileFeature":
+                    return HideFeatureTypeFlags.Sketch3D;
+                case "3DSplineCurve":
+                    return HideFeatureTypeFlags.Spline3D;
+                case "CompositeCurve":
+                    return HideFeatureTypeFlags.CompositeCurve;
+                case "Helix":
+                    return HideFeatureTypeFlags.Helix;
+                default:
+                    return HideFeatureTypeFlags.None;
+            }
+        }
+
+        private void BlankFeatures(ModelDoc2 model, List<Feature> features, string debugPath)
+        {
+            if (model == null || features == null || features.Count == 0)
+            {
+                return;
+            }
+
+            int count = 0;
+            bool append = false;
+
+            foreach (Feature feat in features)
+            {
+                if (feat == null)
+                {
+                    continue;
+                }
+
+                LogHideDebug(debugPath, "Select feature " + SafeFeatureLabel(feat));
+                bool selected = false;
+                try
+                {
+                    selected = feat.Select2(append, 0);
+                }
+                catch
+                {
+                    selected = false;
+                }
+
+                if (!selected)
+                {
+                    append = false;
+                    continue;
+                }
+
+                count++;
+                append = true;
+
+                if (count % 25 == 0)
+                {
+                    LogHideDebug(debugPath, "Blank batch at " + count);
+                    try
+                    {
+                        model.BlankRefGeom();
+                        model.BlankSketch();
+                    }
+                    catch (Exception ex)
+                    {
+                        LogHideDebug(debugPath, "Blank batch failed: " + ex.Message);
+                    }
+                    append = false;
+                }
+            }
+
+            LogHideDebug(debugPath, "Blank final at " + count);
+            try
+            {
+                model.BlankRefGeom();
+                model.BlankSketch();
+            }
+            catch (Exception ex)
+            {
+                LogHideDebug(debugPath, "Blank final failed: " + ex.Message);
+            }
+
+            if (features.Count > 0)
+            {
+                Feature first = features[0];
+                try
+                {
+                    first.Select2(false, 0);
+                    first.DeSelect();
+                }
+                catch (Exception ex)
+                {
+                    LogHideDebug(debugPath, "Deselect failed: " + ex.Message);
+                }
+            }
+        }
+
+        private string SafeFeatureLabel(Feature feature)
+        {
+            if (feature == null)
+            {
+                return "<null>";
+            }
+
+            string name = string.Empty;
+            try
+            {
+                name = feature.Name;
+            }
+            catch
+            {
+                name = string.Empty;
+            }
+
+            string type = string.Empty;
+            try
+            {
+                type = feature.GetTypeName();
+            }
+            catch
+            {
+                type = string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = "<unnamed>";
+            }
+
+            if (string.IsNullOrWhiteSpace(type))
+            {
+                type = "<unknown>";
+            }
+
+            return name + " [" + type + "]";
+        }
+
         private string TraverseModel(bool createFiles, string exportTag, PublishOptions options, Action<string> log,
             Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress)
         {
@@ -507,12 +1154,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                 throw new InvalidOperationException("No active document.");
             }
 
-            Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
-            if (swConf == null)
-            {
-                throw new InvalidOperationException("No active configuration.");
-            }
+            string startTitle = swModel.GetTitle();
+            HashSet<string> initialDocs = GetOpenDocumentIds();
 
+            Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
             int modelType = swModel.GetType();
             if (modelType == (int)swDocumentTypes_e.swDocDRAWING)
             {
@@ -525,6 +1170,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                     modelType = swModel.GetType();
                     _swApp.ActivateDoc(swModel.GetTitle());
                 }
+            }
+
+            if (swConf == null)
+            {
+                throw new InvalidOperationException("No active configuration.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(swConf.Name))
+            {
+                swModel.ShowConfiguration2(swConf.Name);
             }
 
             string pubFolder = EnsureTrailingSlash(options.BomFolder);
@@ -556,7 +1211,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             ModelDoc2 rootModel = swModel;
             string rootTitle = swModel.GetTitle();
-            HashSet<string> initialDocs = GetOpenDocumentIds();
 
             try
             {
@@ -630,11 +1284,6 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             finally
             {
-                if (!string.IsNullOrWhiteSpace(rootTitle))
-                {
-                    _swApp.ActivateDoc(rootTitle);
-                }
-
                 if (swModel.FeatureManager != null)
                 {
                     swModel.FeatureManager.EnableFeatureTree = true;
@@ -653,11 +1302,13 @@ namespace TinyMRP.SolidWorksAddin.Services
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, prevViewport);
 
                 CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
+                RestoreStartDocument(startTitle);
             }
         }
 
         private List<ModelEntry> GetEntriesForActiveDoc(bool includeChildren, out ModelDoc2 rootModel,
-            out string rootTitle, out HashSet<string> initialDocs)
+            out string rootTitle, out HashSet<string> initialDocs, out string startTitle)
         {
             ThrowIfCancelled();
 
@@ -667,12 +1318,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                 throw new InvalidOperationException("No active document.");
             }
 
-            Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
-            if (swConf == null)
-            {
-                throw new InvalidOperationException("No active configuration.");
-            }
+            startTitle = swModel.GetTitle();
+            initialDocs = GetOpenDocumentIds();
 
+            Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
             int modelType = swModel.GetType();
             if (modelType == (int)swDocumentTypes_e.swDocDRAWING)
             {
@@ -687,9 +1336,18 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
             }
 
+            if (swConf == null)
+            {
+                throw new InvalidOperationException("No active configuration.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(swConf.Name))
+            {
+                swModel.ShowConfiguration2(swConf.Name);
+            }
+
             rootModel = swModel;
             rootTitle = swModel.GetTitle();
-            initialDocs = GetOpenDocumentIds();
 
             var entries = new List<ModelEntry>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1801,6 +2459,23 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private void LogHideDebug(string path, string message)
+        {
+            if (!EnableHideDebugLog || string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            try
+            {
+                File.AppendAllText(path, DateTime.Now.ToString("s") + " " + message + System.Environment.NewLine);
+            }
+            catch
+            {
+                // ignore logging errors
+            }
+        }
+
         private void UpdateProgress(Action<int, int> progress, int current, int total)
         {
             if (progress != null)
@@ -1912,6 +2587,49 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     // ignore close errors
                 }
+            }
+        }
+
+        private void RestoreStartDocument(string startTitle)
+        {
+            if (!string.IsNullOrWhiteSpace(startTitle))
+            {
+                _swApp.ActivateDoc(startTitle);
+            }
+        }
+
+        private void CloseModelIfNotInitiallyOpen(HashSet<string> initialDocs, ModelDoc2 model, string startTitle)
+        {
+            if (model == null || initialDocs == null)
+            {
+                return;
+            }
+
+            string id = GetDocumentId(model);
+            if (!string.IsNullOrWhiteSpace(id) && initialDocs.Contains(id))
+            {
+                return;
+            }
+
+            string title = model.GetTitle();
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(startTitle) &&
+                string.Equals(title, startTitle, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            try
+            {
+                _swApp.CloseDoc(title);
+            }
+            catch
+            {
+                // ignore close errors
             }
         }
 
