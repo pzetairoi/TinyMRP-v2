@@ -114,6 +114,7 @@ def parts_lazy():
                 "id": f"{pn}::{rev}",
                 "part_number": pn,
                 "revision": rev,
+                "display_code": p.display_code,
                 "description": attrs.get("description") or p.description or "",
                 "category": attrs.get("category") or p.category or "",
                 "material": attrs.get("material", ""),
@@ -199,6 +200,7 @@ def part_detail():
                 "id": f"{pn}::{rev_v}",
                 "part_number": pn,
                 "revision": rev_v,
+                "display_code": f"{pn}-{rev_v}" if rev_v else pn,
                 "description": attrs_v.get("description") or op.description or "",
                 "thumb_urls": thumb_urls_for(pn, rev_v or None),
             }
@@ -219,6 +221,7 @@ def part_detail():
                 "part_number": p.part_number,
                 "description": attrs.get("description", ""),
                 "revision": attrs.get("revision", ""),
+                "display_code": p.display_code,
                 "category": attrs.get("category", ""),
                 "material": attrs.get("material", ""),
                 "finish": attrs.get("finish", ""),

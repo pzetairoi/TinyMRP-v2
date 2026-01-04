@@ -11,6 +11,7 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
 - Auth and Roles: Flask-Security-Too, Argon2 hashing, role/permission editor.
 - Parts & BOM APIs: MongoEngine models, server-side filters, where-used.
 - Files & Thumbnails: file discovery, preview/drawing PNGs, 3MF viewer assets.
+- Part numbering: server-side numbering schemes, revision policies, and history.
 - Document Packs:
   - PDF binder with cover page, index (with dot leaders), and Visual Summary listed first.
   - Automatic page numbers; optional watermarks (quote, classified, approved, WIP).
@@ -89,17 +90,66 @@ The Inno Setup script is in `solidworks-addin/installer.iss`. It copies the buil
   `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
 - Relative paths in the config are resolved from the add-in directory.
 - Templates live under `solidworks-addin/TinyMRP.SolidWorksAddin/Templates/`.
+- Numbering settings live in `BackendUrl`, `AuthToken`, `NumberingSchemeId`, and `NumberingContextDefaults`.
 
 ### UI and Outputs
 
-- Task pane tabs: Publish, BOM, Configuration.
+- Task pane tabs: Publish/BOM, Tools, Numbering, Configuration.
 - Publish exports deliverables under `DeliverablesFolder`.
 - BOM exports `*_FLATBOM.txt` and `*_TREEBOM.txt`, then zips them into `BOM_Folder\bom`.
 - Child documents opened during export are closed automatically; only the root stays open.
+- Numbering tab previews and allocates `PartNumber` + `Revision` via `/api/numbering/*`, then writes custom properties.
 
 ### Icons
 
 The add-in and task pane icons are generated from `solidworks-addin/TinyMRP.SolidWorksAddin/Assets/logo.png`.
+
+---
+
+## Part Numbering API
+
+Numbering schemes are managed server-side and consumed by the SolidWorks add-in.
+
+### Scheme format
+
+Schemes are built from ordered segments (no regex input):
+
+- `literal`: `{ "kind": "literal", "value": "ASM" }`
+- `field`: `{ "kind": "field", "field": "type|family|subfamily|project|site", "casing": "upper|lower|none", "pad_left": 2, "pad_char": "0" }`
+- `seq`: `{ "kind": "seq", "padding": 6, "base": 10 }`
+- `date`: `{ "kind": "date", "fmt": "YYYY|YY|MM|YYYYMM" }`
+
+Global settings:
+
+- `separator` (default `-`)
+- `scope_mode`: `global|by_type|by_project|by_family|custom_keys`
+- `scope_keys`: list used with `custom_keys`
+- `seq`: `{ padding, base, start_at, reset_policy }`
+- `revision`: `{ policy: alpha|numeric|none, start }`
+- `validation_rules`: `{ max_length, allowed_charset, require_seq_segment }`
+
+### Endpoints
+
+- `GET /api/numbering/schemes`
+- `POST /api/numbering/schemes`
+- `GET /api/numbering/schemes/<id>`
+- `PUT /api/numbering/schemes/<id>`
+- `DELETE /api/numbering/schemes/<id>` (soft disable)
+- `POST /api/numbering/schemes/validate`
+- `POST /api/numbering/preview`
+- `POST /api/numbering/allocate`
+- `POST /api/numbering/parts/<part_number>/revise`
+
+### Auth / permissions
+
+- Scheme create/update requires admin/manager or `numbering.manage`.
+- Preview and allocate are available to authenticated users.
+
+### SolidWorks add-in usage
+
+- The add-in loads schemes from `BackendUrl` (or `weblink`) and saves the selected scheme id in `TinyMRP_config.txt`.
+- Allocation writes custom properties: `PartNumber`, `Revision`, `DisplayCode`, and `TinyMRP_SchemeId`.
+- Parts remain unique on `(part_number, revision)` to preserve existing data flows; `display_code` provides `PN-REV`.
 
 ---
 

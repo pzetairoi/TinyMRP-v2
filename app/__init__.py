@@ -211,6 +211,13 @@ def create_app(config_object=None):
     
     from app.views.processmeta import bp as processmeta_bp
     app.register_blueprint(processmeta_bp)
+
+    from app.views.numbering import bp as numbering_bp
+    app.register_blueprint(numbering_bp)
+    try:
+        csrf.exempt(numbering_bp)
+    except Exception:
+        pass
     
     # File proxy (for HTTP file roots)
     from .files_proxy import files_proxy

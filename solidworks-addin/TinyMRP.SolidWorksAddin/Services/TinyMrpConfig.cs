@@ -11,8 +11,12 @@ namespace TinyMRP.SolidWorksAddin.Services
         public string FilterAny { get; set; }
         public string BomTemplatePath { get; set; }
         public string WebLink { get; set; }
+        public string BackendUrl { get; set; }
+        public string AuthToken { get; set; }
         public string BomFolder { get; set; }
         public string DeliverablesFolder { get; set; }
+        public string NumberingSchemeId { get; set; }
+        public string NumberingContextDefaults { get; set; }
         public string AddinDirectory { get; private set; }
         public string ConfigPath { get; private set; }
 
@@ -62,8 +66,12 @@ namespace TinyMRP.SolidWorksAddin.Services
             RemoveModifiedNotes = true;
             FilterAny = "*";
             WebLink = "localhost:5000";
+            BackendUrl = "http://localhost:5000";
+            AuthToken = string.Empty;
             BomFolder = "Output";
             DeliverablesFolder = "Output";
+            NumberingSchemeId = string.Empty;
+            NumberingContextDefaults = "type=PART;family=;subfamily=;project=;site=";
         }
 
         private void Apply(string key, string value)
@@ -85,11 +93,23 @@ namespace TinyMRP.SolidWorksAddin.Services
                 case "weblink":
                     WebLink = value;
                     break;
+                case "BackendUrl":
+                    BackendUrl = value;
+                    break;
+                case "AuthToken":
+                    AuthToken = value;
+                    break;
                 case "BOM_Folder":
                     BomFolder = value;
                     break;
                 case "deliverables_folder":
                     DeliverablesFolder = value;
+                    break;
+                case "NumberingSchemeId":
+                    NumberingSchemeId = value;
+                    break;
+                case "NumberingContextDefaults":
+                    NumberingContextDefaults = value;
                     break;
             }
         }
@@ -126,8 +146,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                 "FILTER_ANY=" + (FilterAny ?? string.Empty),
                 "BOMtemplate=" + GetPathForConfig(BomTemplatePath),
                 "weblink=" + (WebLink ?? string.Empty),
+                "BackendUrl=" + (BackendUrl ?? string.Empty),
+                "AuthToken=" + (AuthToken ?? string.Empty),
                 "BOM_Folder=" + GetPathForConfig(BomFolder),
-                "deliverables_folder=" + GetPathForConfig(DeliverablesFolder)
+                "deliverables_folder=" + GetPathForConfig(DeliverablesFolder),
+                "NumberingSchemeId=" + (NumberingSchemeId ?? string.Empty),
+                "NumberingContextDefaults=" + (NumberingContextDefaults ?? string.Empty),
             };
 
             try

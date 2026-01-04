@@ -3,5 +3,9 @@ REMOVE_MODIFIED_NOTES=True
 FILTER_ANY=*
 BOMtemplate=Templates\TinyMRP_BOM_TEMPLATE.sldbomtbt
 weblink=localhost:5000
+BackendUrl=http://localhost:5000
+AuthToken=
 BOM_Folder=Output
 deliverables_folder=Output
+NumberingSchemeId=
+NumberingContextDefaults=type=PART;family=;subfamily=;project=;site=
