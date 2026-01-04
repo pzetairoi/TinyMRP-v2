@@ -44,6 +44,18 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Button _toolsCancelButton;
         private string _toolsActionName = "Tools";
         private Label _configPathLabel;
+        private CheckBox _hideAllConfigsCheck;
+        private CheckBox _hideOriginCheck;
+        private CheckBox _hidePlaneCheck;
+        private CheckBox _hideAxisCheck;
+        private CheckBox _hidePointCheck;
+        private CheckBox _hideCoordSysCheck;
+        private CheckBox _hideSketch2DCheck;
+        private CheckBox _hideSketch3DCheck;
+        private CheckBox _hideSpline3DCheck;
+        private CheckBox _hideCompositeCurveCheck;
+        private CheckBox _hideHelixCheck;
+        private CheckBox _hideEnvelopeCheck;
 
         public MainPaneControl()
         {
@@ -253,6 +265,99 @@ namespace TinyMRP.SolidWorksAddin.UI
             modelActions.Controls.Add(btnUnfreeze);
             modelActions.Controls.Add(btnNormalize);
             AddSection(panel, CreateGroupBox("Model utilities", modelActions));
+
+            var hideOptionsLayout = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 4, 0, 2)
+            };
+            hideOptionsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            hideOptionsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+
+            var hideRefPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            _hideOriginCheck = new CheckBox { Text = "Origin" };
+            _hidePlaneCheck = new CheckBox { Text = "Reference planes" };
+            _hideAxisCheck = new CheckBox { Text = "Reference axes" };
+            _hidePointCheck = new CheckBox { Text = "Reference points" };
+            _hideCoordSysCheck = new CheckBox { Text = "Coordinate systems" };
+            hideRefPanel.Controls.Add(_hideOriginCheck);
+            hideRefPanel.Controls.Add(_hidePlaneCheck);
+            hideRefPanel.Controls.Add(_hideAxisCheck);
+            hideRefPanel.Controls.Add(_hidePointCheck);
+            hideRefPanel.Controls.Add(_hideCoordSysCheck);
+
+            var hideSketchPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            _hideSketch2DCheck = new CheckBox { Text = "2D sketches" };
+            _hideSketch3DCheck = new CheckBox { Text = "3D sketches" };
+            _hideSpline3DCheck = new CheckBox { Text = "3D spline curves" };
+            _hideCompositeCurveCheck = new CheckBox { Text = "Composite curves" };
+            _hideHelixCheck = new CheckBox { Text = "Helix" };
+            hideSketchPanel.Controls.Add(_hideSketch2DCheck);
+            hideSketchPanel.Controls.Add(_hideSketch3DCheck);
+            hideSketchPanel.Controls.Add(_hideSpline3DCheck);
+            hideSketchPanel.Controls.Add(_hideCompositeCurveCheck);
+            hideSketchPanel.Controls.Add(_hideHelixCheck);
+
+            hideOptionsLayout.Controls.Add(hideRefPanel, 0, 0);
+            hideOptionsLayout.Controls.Add(hideSketchPanel, 1, 0);
+
+            var hideActions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 2, 0, 0)
+            };
+            _hideAllConfigsCheck = new CheckBox { Text = "All configurations", AutoSize = true };
+            _hideEnvelopeCheck = new CheckBox { Text = "Hide envelope components", AutoSize = true };
+            var btnHideSelectAll = new Button { Text = "Select all", AutoSize = true };
+            btnHideSelectAll.Click += (_, __) => SetHideFeatureChecks(true);
+            var btnHideSelectNone = new Button { Text = "Clear", AutoSize = true };
+            btnHideSelectNone.Click += (_, __) => SetHideFeatureChecks(false);
+            hideActions.Controls.Add(_hideAllConfigsCheck);
+            hideActions.Controls.Add(_hideEnvelopeCheck);
+            hideActions.Controls.Add(btnHideSelectAll);
+            hideActions.Controls.Add(btnHideSelectNone);
+
+            var hideApplyWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill,
+                Padding = new Padding(0, 2, 0, 0)
+            };
+            var btnHideApply = new Button { Text = "Hide selected features", AutoSize = true };
+            btnHideApply.Click += OnHideFeatures;
+            hideApplyWrap.Controls.Add(btnHideApply);
+
+            var hideWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            hideWrap.Controls.Add(hideOptionsLayout);
+            hideWrap.Controls.Add(hideActions);
+            hideWrap.Controls.Add(hideApplyWrap);
+            AddSection(panel, CreateGroupBox("Hide sketches and reference geometry", hideWrap));
 
             var toolsProgressLayout = new TableLayoutPanel
             {
@@ -529,6 +634,42 @@ namespace TinyMRP.SolidWorksAddin.UI
             SetStatus("Done.");
         }
 
+        private void OnHideFeatures(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                MessageBox.Show("Publisher is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            HideFeatureTypeFlags mask = HideFeatureTypeFlags.None;
+            if (_hideOriginCheck != null && _hideOriginCheck.Checked) mask |= HideFeatureTypeFlags.Origin;
+            if (_hidePlaneCheck != null && _hidePlaneCheck.Checked) mask |= HideFeatureTypeFlags.RefPlane;
+            if (_hideAxisCheck != null && _hideAxisCheck.Checked) mask |= HideFeatureTypeFlags.RefAxis;
+            if (_hidePointCheck != null && _hidePointCheck.Checked) mask |= HideFeatureTypeFlags.RefPoint;
+            if (_hideCoordSysCheck != null && _hideCoordSysCheck.Checked) mask |= HideFeatureTypeFlags.CoordSys;
+            if (_hideSketch2DCheck != null && _hideSketch2DCheck.Checked) mask |= HideFeatureTypeFlags.Sketch2D;
+            if (_hideSketch3DCheck != null && _hideSketch3DCheck.Checked) mask |= HideFeatureTypeFlags.Sketch3D;
+            if (_hideSpline3DCheck != null && _hideSpline3DCheck.Checked) mask |= HideFeatureTypeFlags.Spline3D;
+            if (_hideCompositeCurveCheck != null && _hideCompositeCurveCheck.Checked) mask |= HideFeatureTypeFlags.CompositeCurve;
+            if (_hideHelixCheck != null && _hideHelixCheck.Checked) mask |= HideFeatureTypeFlags.Helix;
+
+            var options = new HideFeaturesOptions
+            {
+                FeatureMask = mask,
+                AllConfigurations = _hideAllConfigsCheck != null && _hideAllConfigsCheck.Checked,
+                HideEnvelopes = _hideEnvelopeCheck != null && _hideEnvelopeCheck.Checked
+            };
+
+            _toolsActionName = "Hide features";
+            ResetProgress(_toolsProgressBar, _toolsProgressLabel, _toolsActionName);
+            SetStatus("Hiding features...");
+            publisher.HideFeatures(options, Log, UpdateToolsProgress);
+            SetStatus("Done.");
+        }
+
         private void OnSaveConfig(object sender, EventArgs e)
         {
             TinyMrpConfig config = AddinContext.Config;
@@ -649,6 +790,21 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_pngDrawingCheck != null) _pngDrawingCheck.Checked = value;
             if (_pdfCheck != null) _pdfCheck.Checked = value;
             if (_edrDrawingCheck != null) _edrDrawingCheck.Checked = value;
+        }
+
+        private void SetHideFeatureChecks(bool value)
+        {
+            if (_hideOriginCheck != null) _hideOriginCheck.Checked = value;
+            if (_hidePlaneCheck != null) _hidePlaneCheck.Checked = value;
+            if (_hideAxisCheck != null) _hideAxisCheck.Checked = value;
+            if (_hidePointCheck != null) _hidePointCheck.Checked = value;
+            if (_hideCoordSysCheck != null) _hideCoordSysCheck.Checked = value;
+            if (_hideSketch2DCheck != null) _hideSketch2DCheck.Checked = value;
+            if (_hideSketch3DCheck != null) _hideSketch3DCheck.Checked = value;
+            if (_hideSpline3DCheck != null) _hideSpline3DCheck.Checked = value;
+            if (_hideCompositeCurveCheck != null) _hideCompositeCurveCheck.Checked = value;
+            if (_hideHelixCheck != null) _hideHelixCheck.Checked = value;
+            if (_hideEnvelopeCheck != null) _hideEnvelopeCheck.Checked = value;
         }
 
         private void Log(string message)
