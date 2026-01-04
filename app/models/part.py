@@ -23,6 +23,13 @@ class Part(Document):
         "collection": "parts",
         "indexes": [
             { "fields": ["part_number", "revision"], "unique": True, "name": "unique_part_rev" },
+            { "fields": ["part_number"], "name": "part_number_idx" },
         ],
         "db_alias": DB_ALIAS
     }
+
+    @property
+    def display_code(self) -> str:
+        if self.revision:
+            return f"{self.part_number}-{self.revision}"
+        return self.part_number

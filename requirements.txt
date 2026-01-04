@@ -42,6 +42,7 @@ openpyxl==3.1.5
 PyPDF2==3.0.1
 reportlab==4.2.5
 qrcode[pil]==7.4.2
+pytest==8.2.2
 svglib==1.5.1
 pip-api==0.0.34
 pip-requirements-parser==32.0.1

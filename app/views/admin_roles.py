@@ -26,6 +26,7 @@ PERMISSIONS = [
   "inventory.issue", "inventory.receive",
   "mrp.run",
   "reports.view",
+  "numbering.manage",
 ]
 
 @bp.route("/")

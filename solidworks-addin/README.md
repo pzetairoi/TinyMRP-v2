@@ -1,41 +1,73 @@
 # TinyMRP SolidWorks Add-in
 
-Add-in para SolidWorks que reproduce la UI del macro de TinyMRP (MODELS/DRAWINGS, carpeta de salida, botones BOM/Freeze/Unfreeze y flags "Overwrite"/"Top level only") y conecta con los endpoints de TinyMRP para autenticar, reservar PN y lanzar docpacks.
+Task pane add-in for SolidWorks that handles TinyMRP publish/BOM exports, tools, and part numbering.
 
-## Características
+## Requirements
 
-- **Autenticación persistente** contra TinyMRP con token (`/login?include_auth_token=1`), almacenamiento en `%AppData%/TinyMRP/addin_state.json` y reuso automático en sesiones posteriores.
-- **UI de trabajo** en el task pane: listas de MODELS y DRAWINGS, carpeta de salida basada en `FILES_LOCAL_ROOT`, botones de BOM/Freeze/Unfreeze y banderas `Overwrite`/`Top level only`.
-- **Opciones dinámicas** leídas desde `GET /api/docpacks/options` para poblar tipos de archivo y procesos.
-- **Generación de paquetes** vía `POST /api/docpacks/build`, guardando en `FILES_LOCAL_ROOT` (ej. `C:\CADEXPORT\docpacks`) y mostrando el enlace HTTP armado con `FILES_URL_PREFIX`.
-- **Reserva de PN** contra el nuevo endpoint (configurable, por defecto `/api/pn/reserve`); al recibir el PN se renombra la configuración activa y se actualizan propiedades personalizadas `PN`/`REV` antes de exportar.
+- SolidWorks installed (interop DLLs in `$(ProgramFiles)\SOLIDWORKS Corp\SOLIDWORKS\api\redist`)
+- .NET Framework 4.8
+- Inno Setup (optional, only if you build the installer)
 
-## Estructura
+## Build
 
-- `TinyMRP.SolidWorksAddin.sln` — solución VS.
-- `TinyMRP.SolidWorksAddin.csproj` — proyecto .NET Framework 4.8 con WinForms y referencias a `SolidWorks.Interop.*` (se busca en `$(ProgramFiles)\SOLIDWORKS Corp\SOLIDWORKS\api\redist`).
-- `SwAddin.cs` — clase `ISwAddin` con registro COM, task pane y bootstrap del cliente.
-- `Services/` — `TinyMrpClient` (HTTP, CSRF, tokens, docpacks, reserva de PN), `SolidWorksExportService` (propiedades PN/REV, freeze/unfreeze, renombrado), `TinyMrpTokenStore` (persistencia en disco).
-- `UI/MainPaneControl.cs` — task pane con la UI del macro y los controles de exportación/docpack.
-- `App.config` — valores predeterminados de `TinyMrpBaseUrl`, `FILES_LOCAL_ROOT`, `FILES_URL_PREFIX` y endpoint de reserva.
+```powershell
+dotnet msbuild solidworks-addin\TinyMRP.SolidWorksAddin.sln /p:Configuration=Release /p:Platform=x64
+```
 
-## Configuración
+Output DLL:
 
-1. Ajusta `App.config` con la URL de TinyMRP, `FILES_LOCAL_ROOT` (p. ej. `C:\CADEXPORT`) y `FILES_URL_PREFIX` (p. ej. `http://localhost:5001/Deliverables`).
-2. Asegúrate de que las DLLs de SolidWorks interop estén en `$(ProgramFiles)\SOLIDWORKS Corp\SOLIDWORKS\api\redist` o modifica la propiedad `SolidWorksApiDir` en el `.csproj`.
-3. Compila en **x64** y registra el add-in (`regasm /codebase TinyMRP.SolidWorksAddin.dll`) si SolidWorks no lo registra automáticamente.
+`solidworks-addin/TinyMRP.SolidWorksAddin/bin/x64/Release/net48/TinyMRP.SolidWorksAddin.dll`
 
-## Uso
+## Register / Unregister (manual)
 
-1. Carga el add-in en SolidWorks y abre el task pane "TinyMRP".
-2. Introduce tus credenciales de TinyMRP y pulsa **Login**.
-3. Usa **Reservar PN** para obtener un PN/REV; el add-in renombra la configuración activa y actualiza propiedades personalizadas.
-4. Selecciona tipos de archivo/procesos (cargados desde `/api/docpacks/options`) y activa las banderas deseadas (`Overwrite`, `Top level only`, Excel BOM, PDF binder, etc.).
-5. Pulsa **BOM** para invocar `/api/docpacks/build`; el archivo se guarda en `FILES_LOCAL_ROOT\docpacks` y el panel muestra el enlace HTTP usando `FILES_URL_PREFIX`.
-6. Usa **Freeze/Unfreeze** para alternar el estado de solo lectura del documento activo.
+```powershell
+# Register
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /codebase /tlb
 
-## Notas
+# Unregister
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /unregister
+```
 
-- El token de autenticación y las rutas se guardan en `%AppData%/TinyMRP/addin_state.json` para reutilizar la sesión.
-- Las llamadas POST incluyen cabeceras CSRF (`X-CSRFToken`) usando el token de la página de login.
-- El endpoint de reserva de PN es configurable mediante `ReservePnEndpoint` en `App.config`.
+## Configuration
+
+- Primary config file: `TinyMRP_config.txt` next to the add-in DLL.
+- If the install folder is not writable, the add-in saves to:
+  `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
+- Relative paths in the config are resolved from the add-in directory.
+
+Key settings in `TinyMRP_config.txt`:
+
+- `BlankTemplatePath`, `BOMtemplate` - template paths
+- `deliverables_folder`, `BOM_Folder` - output folder (same path used for deliverables + BOM)
+- `weblink` - base URL for the TinyMRP web UI
+- `BackendUrl` - API base URL (defaults to `weblink`)
+- `AuthToken` - optional bearer token for API calls
+- `NumberingSchemeId` - default scheme to select
+- `NumberingContextDefaults` - default context fields for numbering
+
+## Task pane tabs
+
+- Publish/BOM: export deliverables, run BOM, progress + cancel.
+- Tools: freeze/unfreeze, normalize units, hide reference geometry.
+- Numbering: scheme selection, segment builder, preview and allocate PN+REV.
+- Configuration: templates, paths, server settings.
+
+## Numbering workflow (quick)
+
+1. Open the Numbering tab and click **Refresh** to load schemes.
+2. Select an existing scheme or build one with presets and segments.
+3. Validate and **Save scheme** (requires admin/manager or `numbering.manage`).
+4. Enter context fields and click **Preview next**.
+5. Click **Allocate PN+REV** and choose where to apply it.
+
+The add-in writes custom properties:
+
+- `PartNumber`
+- `Revision`
+- `DisplayCode`
+- `TinyMRP_SchemeId` (optional)
+
+## Permissions
+
+- Managing schemes requires admin/manager or permission `numbering.manage`.
+- Preview/allocate is available to authenticated users.
