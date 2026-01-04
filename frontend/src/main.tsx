@@ -6,6 +6,9 @@ import App from './App'
 import PartDetailPage from './pages/PartDetailPage'
 import PartsPage from './pages/PartsPage'
 import BomPage from './pages/BomPage'
+import AddinSettingsPage from './pages/AddinSettingsPage'
+import ApiTokensPage from './pages/ApiTokensPage'
+import AdminAddinPage from './pages/AdminAddinPage'
 
 // PrimeReact CSS
 import 'primereact/resources/themes/lara-light-blue/theme.css'
@@ -21,6 +24,9 @@ const router = createBrowserRouter([
       { path: '/ui/parts', element: <PartsPage /> },
       { path: '/ui/bom/:pn', element: <BomPage /> },
       { path: '/ui/part/:pn', element: <PartDetailPage /> },
+      { path: '/ui/addin/settings', element: <AddinSettingsPage /> },
+      { path: '/ui/addin/tokens', element: <ApiTokensPage /> },
+      { path: '/ui/admin/addin', element: <AdminAddinPage /> },
       // fallback: send unknown paths to Parts
       { path: '*', element: <PartsPage /> },
     ],

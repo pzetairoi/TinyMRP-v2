@@ -9,3 +9,7 @@ BOM_Folder=Output
 deliverables_folder=Output
 NumberingSchemeId=
 NumberingContextDefaults=type=PART;family=;subfamily=;project=;site=
+PartNumberProperty=PartNumber
+RevisionProperty=Revision
+DisplayCodeProperty=DisplayCode
+NumberingApplyMode=active_config

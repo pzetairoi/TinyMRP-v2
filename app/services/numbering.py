@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Tuple
 import re
 
 from pymongo import ReturnDocument
+from mongoengine.errors import NotUniqueError
 
 from app.models.numbering import NumberingCounter, NumberingScheme
 from app.models.part import Part
@@ -42,6 +43,7 @@ def normalize_scheme_payload(
     user_email: str | None,
     existing: NumberingScheme | None,
     require_name: bool = True,
+    allow_admin_flags: bool = False,
 ) -> Tuple[Dict[str, Any], List[str]]:
     errors: List[str] = []
     data = dict(payload or {})
@@ -55,6 +57,17 @@ def normalize_scheme_payload(
     if is_active is None:
         is_active = existing.is_active if existing is not None else True
     is_active = bool(is_active)
+
+    is_preset = existing.is_preset if existing is not None else False
+    is_recommended = existing.is_recommended if existing is not None else False
+    visibility = existing.visibility if existing is not None else "advanced_only"
+    if allow_admin_flags:
+        if "is_preset" in data:
+            is_preset = bool(data.get("is_preset"))
+        if "is_recommended" in data:
+            is_recommended = bool(data.get("is_recommended"))
+        if "visibility" in data:
+            visibility = str(data.get("visibility") or visibility)
 
     separator = str(data.get("separator") or (existing.separator if existing else "-"))
     scope_mode = str(data.get("scope_mode") or (existing.scope_mode if existing else "global")).strip()
@@ -100,6 +113,9 @@ def normalize_scheme_payload(
         "name": name,
         "description": description,
         "is_active": is_active,
+        "is_preset": is_preset,
+        "is_recommended": is_recommended,
+        "visibility": visibility,
         "pattern_segments": pattern_segments,
         "separator": separator,
         "scope_mode": scope_mode,
@@ -467,6 +483,9 @@ def scheme_to_dict(scheme: NumberingScheme) -> Dict[str, Any]:
         "name": scheme.name,
         "description": scheme.description or "",
         "is_active": bool(scheme.is_active),
+        "is_preset": bool(getattr(scheme, "is_preset", False)),
+        "is_recommended": bool(getattr(scheme, "is_recommended", False)),
+        "visibility": getattr(scheme, "visibility", "advanced_only"),
         "pattern_segments": scheme.pattern_segments or [],
         "separator": scheme.separator or "-",
         "scope_mode": scheme.scope_mode or "global",
@@ -481,7 +500,7 @@ def scheme_to_dict(scheme: NumberingScheme) -> Dict[str, Any]:
 def peek_next_sequence(counter_key: str, start_at: int) -> int:
     counter = NumberingCounter.objects(counter_key=counter_key).first()
     if counter and counter.next_value:
-        return int(counter.next_value)
+        return max(int(counter.next_value), int(start_at))
     return max(int(start_at), 1)
 
 
@@ -489,20 +508,29 @@ def consume_sequence(counter_key: str, start_at: int) -> int:
     coll = NumberingCounter._get_collection()
     now = datetime.utcnow()
     start_at = max(int(start_at), 1)
-    update = {
-        "$inc": {"next_value": 1},
-        "$set": {"updated_at": now},
-        "$setOnInsert": {"next_value": start_at},
-    }
+
+    try:
+        NumberingCounter(counter_key=counter_key, next_value=start_at + 1, updated_at=now).save()
+        return start_at
+    except NotUniqueError:
+        pass
+
     doc = coll.find_one_and_update(
         {"counter_key": counter_key},
-        update,
-        upsert=True,
+        {"$inc": {"next_value": 1}, "$set": {"updated_at": now}},
         return_document=ReturnDocument.AFTER,
     )
     if not doc or "next_value" not in doc:
         return start_at
-    return int(doc["next_value"]) - 1
+    stored_next = int(doc["next_value"])
+    allocated = stored_next - 1
+    if allocated < start_at:
+        coll.update_one(
+            {"counter_key": counter_key},
+            {"$set": {"next_value": start_at + 1, "updated_at": now}},
+        )
+        return start_at
+    return allocated
 
 
 def build_display_code(part_number: str, revision: str) -> str:

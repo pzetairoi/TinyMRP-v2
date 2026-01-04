@@ -10,6 +10,9 @@ namespace TinyMRP.SolidWorksAddin.Services
         public string Name { get; set; }
         public string Description { get; set; }
         public bool IsActive { get; set; }
+        public bool IsPreset { get; set; }
+        public bool IsRecommended { get; set; }
+        public string Visibility { get; set; }
         public string Separator { get; set; }
         public string ScopeMode { get; set; }
         public List<string> ScopeKeys { get; set; } = new List<string>();
@@ -30,6 +33,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                 ["name"] = Name ?? string.Empty,
                 ["description"] = Description ?? string.Empty,
                 ["is_active"] = IsActive,
+                ["is_preset"] = IsPreset,
+                ["is_recommended"] = IsRecommended,
+                ["visibility"] = Visibility ?? "advanced_only",
                 ["separator"] = Separator ?? "-",
                 ["scope_mode"] = ScopeMode ?? "global",
                 ["scope_keys"] = ScopeKeys ?? new List<string>(),
@@ -55,6 +61,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                 Name = NumberingJson.GetString(data, "name"),
                 Description = NumberingJson.GetString(data, "description"),
                 IsActive = NumberingJson.GetBool(data, "is_active", true),
+                IsPreset = NumberingJson.GetBool(data, "is_preset", false),
+                IsRecommended = NumberingJson.GetBool(data, "is_recommended", false),
+                Visibility = NumberingJson.GetString(data, "visibility") ?? "advanced_only",
                 Separator = NumberingJson.GetString(data, "separator") ?? "-",
                 ScopeMode = NumberingJson.GetString(data, "scope_mode") ?? "global",
                 ScopeKeys = NumberingJson.GetStringList(data, "scope_keys"),
@@ -254,6 +263,63 @@ namespace TinyMRP.SolidWorksAddin.Services
                 AllowedCharset = NumberingJson.GetString(data, "allowed_charset") ?? "A-Z0-9-",
                 RequireSeqSegment = NumberingJson.GetBool(data, "require_seq_segment", true),
             };
+        }
+    }
+
+    internal sealed class UserSettingsDefinition
+    {
+        public string DefaultSchemeId { get; set; }
+        public Dictionary<string, string> DefaultContext { get; set; } = new Dictionary<string, string>();
+        public Dictionary<string, string> PropertyMap { get; set; } = new Dictionary<string, string>();
+        public string ApplyMode { get; set; } = "active_config";
+        public bool ShowAdvanced { get; set; }
+
+        public static UserSettingsDefinition FromDict(Dictionary<string, object> data)
+        {
+            var settings = new UserSettingsDefinition
+            {
+                DefaultSchemeId = NumberingJson.GetString(data, "default_scheme_id"),
+                ApplyMode = NumberingJson.GetString(data, "apply_mode") ?? "active_config",
+            };
+
+            Dictionary<string, object> context = NumberingJson.GetDict(data, "default_context");
+            if (context != null)
+            {
+                foreach (var pair in context)
+                {
+                    settings.DefaultContext[pair.Key] = pair.Value != null ? pair.Value.ToString() : string.Empty;
+                }
+            }
+
+            Dictionary<string, object> map = NumberingJson.GetDict(data, "sw_property_map");
+            if (map != null)
+            {
+                foreach (var pair in map)
+                {
+                    settings.PropertyMap[pair.Key] = pair.Value != null ? pair.Value.ToString() : string.Empty;
+                }
+            }
+
+            Dictionary<string, object> prefs = NumberingJson.GetDict(data, "ui_preferences");
+            settings.ShowAdvanced = prefs != null && NumberingJson.GetBool(prefs, "show_advanced", false);
+
+            return settings;
+        }
+
+        public Dictionary<string, object> ToPayload()
+        {
+            var payload = new Dictionary<string, object>
+            {
+                ["default_scheme_id"] = DefaultSchemeId ?? string.Empty,
+                ["default_context"] = DefaultContext ?? new Dictionary<string, string>(),
+                ["sw_property_map"] = PropertyMap ?? new Dictionary<string, string>(),
+                ["apply_mode"] = ApplyMode ?? "active_config",
+                ["ui_preferences"] = new Dictionary<string, object>
+                {
+                    ["show_advanced"] = ShowAdvanced
+                }
+            };
+            return payload;
         }
     }
 

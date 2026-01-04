@@ -8,6 +8,7 @@ from app.services.numbering import (
     revision_for_existing,
     validate_scheme_definition,
 )
+from concurrent.futures import ThreadPoolExecutor
 
 
 def test_validate_requires_seq_segment():
@@ -83,3 +84,37 @@ def test_reset_bucket_behavior():
     by_project, errors = bucket_for_reset_policy("by_project", {"project": "alpha"}, now)
     assert not errors
     assert by_project == "ALPHA"
+
+
+def test_concurrent_allocate_unique():
+    scheme = NumberingScheme(
+        name="ConcurrentSeq",
+        pattern_segments=[
+            {"kind": "field", "field": "type", "casing": "upper"},
+            {"kind": "seq", "padding": 3, "base": 10},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+
+    def alloc():
+        result, errors = allocate_number(
+            scheme,
+            {"type": "asm"},
+            create_part_if_missing=False,
+            requested_revision_action="new_part",
+            existing_part_number=None,
+            user_email=None,
+            cad_ref=None,
+        )
+        assert not errors
+        return result["part_number"]
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(lambda _: alloc(), range(10)))
+
+    assert len(results) == len(set(results))

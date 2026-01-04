@@ -1,0 +1,25 @@
+from datetime import datetime
+from mongoengine import Document, StringField, DateTimeField, ReferenceField
+from app.models.auth import User
+
+DB_ALIAS = "tinymrp-v2"
+
+
+class ApiToken(Document):
+    user_id = ReferenceField(User, required=True)
+    token_hash = StringField(required=True, unique=True)
+    label = StringField(default="")
+    created_at = DateTimeField(default=datetime.utcnow)
+    last_used_at = DateTimeField()
+    revoked_at = DateTimeField()
+    expires_at = DateTimeField()
+
+    meta = {
+        "collection": "api_tokens",
+        "indexes": [
+            {"fields": ["token_hash"], "unique": True, "name": "unique_token_hash"},
+            "user_id",
+            "created_at",
+        ],
+        "db_alias": DB_ALIAS,
+    }

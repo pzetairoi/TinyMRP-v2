@@ -1,6 +1,7 @@
 #define AppVersion "1.0.0"
 #define BuildStamp GetDateTimeString('yyyymmdd_hhnnss', '', '')
 #define OutputDirName "Windows Installer latest"
+#define ConfigFileName "TinyMRP_config.txt"
 #define OutputDirPath AddBackslash(SourcePath) + OutputDirName
 
 #if DirExists(OutputDirPath)
@@ -81,6 +82,68 @@ begin
   Result := ExpandConstant('{userdocs}\TinyMRP\Output');
 end;
 
+function GetMachineConfigPath: string;
+begin
+  Result := ExpandConstant('{commonappdata}\TinyMRP\{#ConfigFileName}');
+end;
+
+function GetUserConfigPath: string;
+begin
+  Result := ExpandConstant('{localappdata}\TinyMRP\{#ConfigFileName}');
+end;
+
+function FindExistingConfigPath(const InstallDir: string): string;
+var
+  InstallConfig: string;
+begin
+  if FileExists(GetMachineConfigPath) then
+    Result := GetMachineConfigPath
+  else
+  begin
+    if InstallDir <> '' then
+    begin
+      InstallConfig := AddBackslash(InstallDir) + '{#ConfigFileName}';
+      if FileExists(InstallConfig) then
+      begin
+        Result := InstallConfig;
+        Exit;
+      end;
+    end;
+    if FileExists(GetUserConfigPath) then
+      Result := GetUserConfigPath
+    else
+      Result := '';
+  end;
+end;
+
+function ReadConfigValue(const Path, Key, DefaultValue: string): string;
+var
+  Lines: TArrayOfString;
+  I, P: Integer;
+  Line, K, V: string;
+begin
+  Result := DefaultValue;
+  if (Path = '') or (not LoadStringsFromFile(Path, Lines)) then
+    Exit;
+
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Trim(Lines[I]);
+    if (Line = '') or (Copy(Line, 1, 1) = '#') or (Copy(Line, 1, 1) = ';') then
+      Continue;
+    P := Pos('=', Line);
+    if P <= 0 then
+      Continue;
+    K := Trim(Copy(Line, 1, P - 1));
+    V := Trim(Copy(Line, P + 1, MaxInt));
+    if CompareText(K, Key) = 0 then
+    begin
+      Result := V;
+      Exit;
+    end;
+  end;
+end;
+
 procedure ShowRegistrationError;
 var
   RegAsmPath: string;
@@ -107,36 +170,85 @@ end;
 var
   OutputPage: TInputDirWizardPage;
   ConfigPage: TInputQueryWizardPage;
+  OverrideSettingsCheck: TNewCheckBox;
+  ClearTokenCheck: TNewCheckBox;
+  ExistingConfigPath: string;
+  ExistingConfigLoaded: Boolean;
   DefaultBlankTemplate: string;
   DefaultBomTemplate: string;
 
+procedure OverrideSettingsCheckClick(Sender: TObject); forward;
+
 procedure InitializeWizard();
 begin
+  ExistingConfigPath := FindExistingConfigPath('');
+  ExistingConfigLoaded := False;
+
   OutputPage := CreateInputDirPage(wpSelectDir,
     'Export output folder', 'Select the output folder',
     'Choose the folder where export files will be stored.', False, '');
   OutputPage.Add('Output folder:');
-  OutputPage.Values[0] := DefaultOutputFolder;
+  OutputPage.Values[0] := ReadConfigValue(ExistingConfigPath, 'deliverables_folder', DefaultOutputFolder);
 
   ConfigPage := CreateInputQueryPage(OutputPage.ID,
     'TinyMRP configuration', 'Templates and server',
-    'Set the default templates and web server address.');
+    'Set the default templates and server connection.');
   ConfigPage.Add('Blank template (.slddrt):', False);
   ConfigPage.Add('BOM template (.sldbomtbt):', False);
-  ConfigPage.Add('Web server:', False);
+  ConfigPage.Add('Backend URL:', False);
+  ConfigPage.Add('Auth token (optional):', True);
 
   DefaultBlankTemplate := GetDefaultTemplatePath('Templates\TinyMRP_BLANKSHEET_TEMPLATE.slddrt');
   DefaultBomTemplate := GetDefaultTemplatePath('Templates\TinyMRP_BOM_TEMPLATE.sldbomtbt');
-  ConfigPage.Values[0] := DefaultBlankTemplate;
-  ConfigPage.Values[1] := DefaultBomTemplate;
-  ConfigPage.Values[2] := 'localhost:5000';
+  ConfigPage.Values[0] := ReadConfigValue(ExistingConfigPath, 'BlankTemplatePath', DefaultBlankTemplate);
+  ConfigPage.Values[1] := ReadConfigValue(ExistingConfigPath, 'BOMtemplate', DefaultBomTemplate);
+  ConfigPage.Values[2] := ReadConfigValue(ExistingConfigPath, 'BackendUrl', ReadConfigValue(ExistingConfigPath, 'weblink', 'http://localhost:5000'));
+  ConfigPage.Values[3] := '';
+
+  if ExpandConstant('{param:BACKENDURL|}') <> '' then
+    ConfigPage.Values[2] := ExpandConstant('{param:BACKENDURL|}');
+  if ExpandConstant('{param:AUTHTOKEN|}') <> '' then
+    ConfigPage.Values[3] := ExpandConstant('{param:AUTHTOKEN|}');
+
+  OverrideSettingsCheck := TNewCheckBox.Create(ConfigPage);
+  OverrideSettingsCheck.Parent := ConfigPage.Surface;
+  OverrideSettingsCheck.Caption := 'Override existing TinyMRP settings';
+  OverrideSettingsCheck.Checked := (ExistingConfigPath = '') or (ExpandConstant('{param:BACKENDURL|}') <> '') or (ExpandConstant('{param:AUTHTOKEN|}') <> '');
+  OverrideSettingsCheck.Left := 0;
+  OverrideSettingsCheck.Top := ConfigPage.Edits[3].Top + ConfigPage.Edits[3].Height + ScaleY(8);
+  OverrideSettingsCheck.Width := ConfigPage.SurfaceWidth;
+
+  ClearTokenCheck := TNewCheckBox.Create(ConfigPage);
+  ClearTokenCheck.Parent := ConfigPage.Surface;
+  ClearTokenCheck.Caption := 'Clear existing auth token';
+  ClearTokenCheck.Checked := False;
+  ClearTokenCheck.Enabled := OverrideSettingsCheck.Checked;
+  ClearTokenCheck.Left := 0;
+  ClearTokenCheck.Top := OverrideSettingsCheck.Top + OverrideSettingsCheck.Height + ScaleY(4);
+  ClearTokenCheck.Width := ConfigPage.SurfaceWidth;
+  OverrideSettingsCheck.OnClick := @OverrideSettingsCheckClick;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
 var
   NewBlank: string;
   NewBom: string;
+  NewExistingConfig: string;
 begin
+  if (CurPageID = OutputPage.ID) and (not ExistingConfigLoaded) then
+  begin
+    NewExistingConfig := FindExistingConfigPath(WizardDirValue);
+    if (NewExistingConfig <> '') and (CompareText(NewExistingConfig, ExistingConfigPath) <> 0) then
+    begin
+      ExistingConfigPath := NewExistingConfig;
+      OutputPage.Values[0] := ReadConfigValue(ExistingConfigPath, 'deliverables_folder', DefaultOutputFolder);
+      ConfigPage.Values[0] := ReadConfigValue(ExistingConfigPath, 'BlankTemplatePath', DefaultBlankTemplate);
+      ConfigPage.Values[1] := ReadConfigValue(ExistingConfigPath, 'BOMtemplate', DefaultBomTemplate);
+      ConfigPage.Values[2] := ReadConfigValue(ExistingConfigPath, 'BackendUrl', ReadConfigValue(ExistingConfigPath, 'weblink', 'http://localhost:5000'));
+    end;
+    ExistingConfigLoaded := True;
+  end;
+
   if CurPageID = ConfigPage.ID then
   begin
     NewBlank := GetDefaultTemplatePath('Templates\TinyMRP_BLANKSHEET_TEMPLATE.slddrt');
@@ -152,6 +264,12 @@ begin
   end;
 end;
 
+procedure OverrideSettingsCheckClick(Sender: TObject);
+begin
+  if ClearTokenCheck <> nil then
+    ClearTokenCheck.Enabled := OverrideSettingsCheck.Checked;
+end;
+
 procedure WriteConfigFile;
 var
   ConfigPath: string;
@@ -159,29 +277,86 @@ var
   BlankTemplate: string;
   BomTemplate: string;
   WebLink: string;
+  BackendUrl: string;
+  AuthToken: string;
+  ExistingOutput: string;
+  ExistingBlank: string;
+  ExistingBom: string;
+  ExistingWeb: string;
+  ExistingBackend: string;
+  ExistingToken: string;
+  ExistingSchemeId: string;
+  ExistingContextDefaults: string;
   Lines: string;
 begin
+  ExistingOutput := ReadConfigValue(ExistingConfigPath, 'deliverables_folder', '');
+  ExistingBlank := ReadConfigValue(ExistingConfigPath, 'BlankTemplatePath', '');
+  ExistingBom := ReadConfigValue(ExistingConfigPath, 'BOMtemplate', '');
+  ExistingWeb := ReadConfigValue(ExistingConfigPath, 'weblink', '');
+  ExistingBackend := ReadConfigValue(ExistingConfigPath, 'BackendUrl', '');
+  ExistingToken := ReadConfigValue(ExistingConfigPath, 'AuthToken', '');
+  ExistingSchemeId := ReadConfigValue(ExistingConfigPath, 'NumberingSchemeId', '');
+  ExistingContextDefaults := ReadConfigValue(ExistingConfigPath, 'NumberingContextDefaults', 'type=PART;family=;subfamily=;project=;site=');
+
+  if (ExistingConfigPath <> '') and (OverrideSettingsCheck <> nil) and (not OverrideSettingsCheck.Checked) then
+    Exit;
+
   OutputFolder := OutputPage.Values[0];
+  if OutputFolder = '' then
+    OutputFolder := ExistingOutput;
   if OutputFolder = '' then
     OutputFolder := DefaultOutputFolder;
 
   ForceDirectories(OutputFolder);
 
   BlankTemplate := ConfigPage.Values[0];
+  if BlankTemplate = '' then
+    BlankTemplate := ExistingBlank;
+  if BlankTemplate = '' then
+    BlankTemplate := DefaultBlankTemplate;
   BomTemplate := ConfigPage.Values[1];
-  WebLink := Trim(ConfigPage.Values[2]);
-  if WebLink = '' then
-    WebLink := 'localhost:5000';
+  if BomTemplate = '' then
+    BomTemplate := ExistingBom;
+  if BomTemplate = '' then
+    BomTemplate := DefaultBomTemplate;
 
-  ConfigPath := ExpandConstant('{app}\TinyMRP_config.txt');
+  BackendUrl := Trim(ConfigPage.Values[2]);
+  if BackendUrl = '' then
+    BackendUrl := ExistingBackend;
+  if BackendUrl = '' then
+    BackendUrl := 'http://localhost:5000';
+
+  AuthToken := Trim(ConfigPage.Values[3]);
+  if (AuthToken = '') then
+  begin
+    if (ClearTokenCheck <> nil) and ClearTokenCheck.Checked then
+      AuthToken := ''
+    else
+      AuthToken := ExistingToken;
+  end;
+
+  WebLink := BackendUrl;
+  if WebLink = '' then
+    WebLink := ExistingWeb;
+
+  ConfigPath := GetMachineConfigPath;
+  ForceDirectories(ExtractFileDir(ConfigPath));
   Lines :=
     'BlankTemplatePath=' + MakeRelativeToApp(BlankTemplate) + #13#10 +
     'REMOVE_MODIFIED_NOTES=True' + #13#10 +
     'FILTER_ANY=*' + #13#10 +
     'BOMtemplate=' + MakeRelativeToApp(BomTemplate) + #13#10 +
     'weblink=' + WebLink + #13#10 +
+    'BackendUrl=' + BackendUrl + #13#10 +
+    'AuthToken=' + AuthToken + #13#10 +
     'BOM_Folder=' + MakeRelativeToApp(OutputFolder) + #13#10 +
-    'deliverables_folder=' + MakeRelativeToApp(OutputFolder) + #13#10;
+    'deliverables_folder=' + MakeRelativeToApp(OutputFolder) + #13#10 +
+    'NumberingSchemeId=' + ExistingSchemeId + #13#10 +
+    'NumberingContextDefaults=' + ExistingContextDefaults + #13#10 +
+    'PartNumberProperty=PartNumber' + #13#10 +
+    'RevisionProperty=Revision' + #13#10 +
+    'DisplayCodeProperty=DisplayCode' + #13#10 +
+    'NumberingApplyMode=active_config' + #13#10;
 
   SaveStringToFile(ConfigPath, Lines, False);
 end;

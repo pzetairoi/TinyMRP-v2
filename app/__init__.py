@@ -149,6 +149,11 @@ def create_app(config_object=None):
     csrf.init_app(app)
 
     # Mongo initialized earlier
+    try:
+        from app.services.numbering_presets import ensure_presets
+        ensure_presets()
+    except Exception:
+        pass
     
     # Load manifest ONCE at startup
     _load_vite_manifest(app)
@@ -216,6 +221,20 @@ def create_app(config_object=None):
     app.register_blueprint(numbering_bp)
     try:
         csrf.exempt(numbering_bp)
+    except Exception:
+        pass
+
+    from app.views.me import bp as me_bp
+    app.register_blueprint(me_bp)
+    try:
+        csrf.exempt(me_bp)
+    except Exception:
+        pass
+
+    from app.views.auth_api import bp as auth_api_bp
+    app.register_blueprint(auth_api_bp)
+    try:
+        csrf.exempt(auth_api_bp)
     except Exception:
         pass
     

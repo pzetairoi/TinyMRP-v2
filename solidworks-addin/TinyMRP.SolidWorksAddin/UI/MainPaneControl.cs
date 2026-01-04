@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
@@ -61,6 +62,54 @@ namespace TinyMRP.SolidWorksAddin.UI
         private CheckBox _hideEnvelopeCheck;
         private TextBox _backendUrlText;
         private TextBox _authTokenText;
+        private TextBox _quickBackendUrlText;
+        private TextBox _quickAuthTokenText;
+        private ComboBox _quickSchemeCombo;
+        private Button _quickRefreshSchemesButton;
+        private TextBox _quickContextTypeText;
+        private TextBox _quickContextFamilyText;
+        private TextBox _quickContextSubfamilyText;
+        private TextBox _quickContextProjectText;
+        private TextBox _quickContextSiteText;
+        private ComboBox _quickApplyModeCombo;
+        private TextBox _quickPartNumberPropText;
+        private TextBox _quickRevisionPropText;
+        private TextBox _quickDisplayCodePropText;
+        private Label _quickPreviewLabel;
+        private Button _quickDiagnosticsButton;
+        private Button _numberingPreviewButton;
+        private Button _numberingAllocateButton;
+        private Button _numberingAllocateRenameButton;
+        private ComboBox _numberingPresetCombo;
+        private Button _numberingPresetRefreshButton;
+        private TextBox _numberingContextTypeText;
+        private TextBox _numberingContextFamilyText;
+        private TextBox _numberingContextSubfamilyText;
+        private TextBox _numberingContextProjectText;
+        private TextBox _numberingContextSiteText;
+        private TextBox _numberingPreviewPartText;
+        private TextBox _numberingPreviewRevisionText;
+        private TextBox _numberingPreviewDisplayText;
+        private Label _numberingStatusLabel;
+        private CheckBox _renameAutoCheck;
+        private ComboBox _renameModeCombo;
+        private CheckBox _renameAppendRevisionCheck;
+        private CheckBox _renameKeepBackupCheck;
+        private CheckBox _renameChildrenCheck;
+        private Button _renameDryRunButton;
+        private TextBox _numberingPartNumberPropText;
+        private TextBox _numberingRevisionPropText;
+        private TextBox _numberingDisplayCodePropText;
+        private ComboBox _advancedSchemeCombo;
+        private ComboBox _advancedApplyModeCombo;
+        private TextBox _advancedContextJsonText;
+        private TextBox _partNumberPropText;
+        private TextBox _revisionPropText;
+        private TextBox _displayCodePropText;
+        private bool _syncingConfigFields;
+        private bool _syncingContextFields;
+        private readonly Dictionary<string, Control[]> _quickContextRows = new Dictionary<string, Control[]>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Control[]> _numberingContextRows = new Dictionary<string, Control[]>(StringComparer.OrdinalIgnoreCase);
         private ComboBox _schemeCombo;
         private Button _schemeRefreshButton;
         private TextBox _schemeNameText;
@@ -442,11 +491,110 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             return page;
         }
+
         private TabPage BuildNumberingTab()
         {
             var page = CreateTabPage("Numbering");
             var panel = CreateTabPanel();
             page.Controls.Add(panel);
+
+            var commandStrip = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill
+            };
+            _numberingPreviewButton = CreateCommandButton("Preview Next", OnNumberingPreview);
+            _numberingAllocateButton = CreateCommandButton("Allocate & Apply", OnNumberingAllocate);
+            _numberingAllocateRenameButton = CreateCommandButton("Allocate + Apply + Rename", OnNumberingAllocateRename);
+            commandStrip.Controls.Add(_numberingPreviewButton);
+            commandStrip.Controls.Add(_numberingAllocateButton);
+            commandStrip.Controls.Add(_numberingAllocateRenameButton);
+            AddSection(panel, commandStrip);
+
+            var quickLayout = CreateFormLayout();
+            quickLayout.Dock = DockStyle.Fill;
+            _numberingPresetCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            _numberingPresetCombo.SelectedIndexChanged += OnNumberingPresetSelected;
+            _numberingPresetRefreshButton = new Button { Text = "Refresh", AutoSize = true };
+            _numberingPresetRefreshButton.Click += OnRefreshSchemes;
+            AddField(quickLayout, "Numbering preset", CreateInlineField(_numberingPresetCombo, _numberingPresetRefreshButton));
+
+            var quickContextLayout = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Fill
+            };
+            quickContextLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
+            quickContextLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));
+            _numberingContextTypeText = new TextBox { Width = 200 };
+            AddContextRow(quickContextLayout, "Type", _numberingContextTypeText, "type", _numberingContextRows);
+            _numberingContextFamilyText = new TextBox { Width = 200 };
+            AddContextRow(quickContextLayout, "Family", _numberingContextFamilyText, "family", _numberingContextRows);
+            _numberingContextSubfamilyText = new TextBox { Width = 200 };
+            AddContextRow(quickContextLayout, "Subfamily", _numberingContextSubfamilyText, "subfamily", _numberingContextRows);
+            _numberingContextProjectText = new TextBox { Width = 200 };
+            AddContextRow(quickContextLayout, "Project", _numberingContextProjectText, "project", _numberingContextRows);
+            _numberingContextSiteText = new TextBox { Width = 200 };
+            AddContextRow(quickContextLayout, "Site", _numberingContextSiteText, "site", _numberingContextRows);
+
+            var previewBox = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Fill,
+                MinimumSize = new Size(260, 0)
+            };
+            previewBox.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
+            previewBox.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));
+            _numberingPreviewPartText = CreateReadOnlyPreview();
+            AddField(previewBox, "Part number", _numberingPreviewPartText);
+            _numberingPreviewRevisionText = CreateReadOnlyPreview();
+            AddField(previewBox, "Revision", _numberingPreviewRevisionText);
+            _numberingPreviewDisplayText = CreateReadOnlyPreview();
+            AddField(previewBox, "Display code", _numberingPreviewDisplayText);
+
+            _numberingStatusLabel = new Label
+            {
+                AutoSize = true,
+                Text = "Ready.",
+                ForeColor = SystemColors.GrayText,
+                Padding = new Padding(0, 4, 0, 0)
+            };
+
+            var quickWrap = CreateStackPanel();
+            AddStackRow(quickWrap, quickLayout);
+            AddStackRow(quickWrap, quickContextLayout);
+            AddStackRow(quickWrap, CreateGroupBox("Preview", previewBox));
+            AddStackRow(quickWrap, _numberingStatusLabel);
+            AddSection(panel, CreateGroupBox("Quick setup", quickWrap));
+
+            var renameWrap = CreateStackPanel();
+            _renameAutoCheck = new CheckBox { Text = "Auto-rename file after allocation", AutoSize = true };
+            _renameModeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            _renameModeCombo.Items.AddRange(new object[] { "Safe (recommended)", "Rename only if not referenced" });
+            _renameAppendRevisionCheck = new CheckBox { Text = "Append revision to filename", AutoSize = true };
+            _renameKeepBackupCheck = new CheckBox { Text = "Keep original file as backup", AutoSize = true, Checked = true };
+            AddStackRow(renameWrap, _renameAutoCheck);
+            AddStackRow(renameWrap, _renameModeCombo);
+            AddStackRow(renameWrap, _renameAppendRevisionCheck);
+            AddStackRow(renameWrap, _renameKeepBackupCheck);
+            AddSection(panel, CreateGroupBox("Rename options", renameWrap));
+
+            var advancedContent = BuildNumberingAdvancedPanel();
+            AddSection(panel, CreateCollapsibleSection("Advanced", advancedContent, false));
+
+            InitializeNumberingDefaults();
+            return page;
+        }
+
+        private Control BuildNumberingAdvancedPanel()
+        {
+            var panel = CreateStackPanel();
 
             var schemeLayout = CreateFormLayout();
             _schemeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
@@ -462,6 +610,134 @@ namespace TinyMRP.SolidWorksAddin.UI
             _schemeActiveCheck = new CheckBox { Text = "Active", AutoSize = true };
             AddField(schemeLayout, "Status", _schemeActiveCheck);
             AddSection(panel, CreateGroupBox("Scheme", schemeLayout));
+
+            var contextLayout = CreateFormLayout();
+            _contextTypeText = new TextBox { Width = 140 };
+            AddField(contextLayout, "Type", _contextTypeText);
+            _contextFamilyText = new TextBox { Width = 140 };
+            AddField(contextLayout, "Family", _contextFamilyText);
+            _contextSubfamilyText = new TextBox { Width = 140 };
+            AddField(contextLayout, "Subfamily", _contextSubfamilyText);
+            _contextProjectText = new TextBox { Width = 140 };
+            AddField(contextLayout, "Project", _contextProjectText);
+            _contextSiteText = new TextBox { Width = 140 };
+            AddField(contextLayout, "Site", _contextSiteText);
+            AddSection(panel, CreateGroupBox("Context", contextLayout));
+
+            var mapLayout = CreateFormLayout();
+            _numberingPartNumberPropText = new TextBox { Width = 200 };
+            AddField(mapLayout, "Part number property", _numberingPartNumberPropText);
+            _numberingRevisionPropText = new TextBox { Width = 200 };
+            AddField(mapLayout, "Revision property", _numberingRevisionPropText);
+            _numberingDisplayCodePropText = new TextBox { Width = 200 };
+            AddField(mapLayout, "Display code property", _numberingDisplayCodePropText);
+            AddSection(panel, CreateGroupBox("Property mapping", mapLayout));
+
+            var previewActions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill
+            };
+            var btnPreview = new Button { Text = "Preview (advanced)", AutoSize = true };
+            btnPreview.Click += OnPreviewNext;
+            _previewResultLabel = new Label { AutoSize = true, Text = "" };
+            var btnSaveDefaults = new Button { Text = "Save defaults", AutoSize = true };
+            btnSaveDefaults.Click += OnSaveNumberingDefaults;
+            previewActions.Controls.Add(btnPreview);
+            previewActions.Controls.Add(btnSaveDefaults);
+            previewActions.Controls.Add(_previewResultLabel);
+            AddSection(panel, CreateGroupBox("Advanced preview", previewActions));
+
+            var allocateLayout = CreateFormLayout();
+            _revisionActionCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180 };
+            _revisionActionCombo.Items.AddRange(new object[] { "new_part", "revise_existing", "keep_existing" });
+            AddField(allocateLayout, "Revision action", _revisionActionCombo);
+            _existingPartNumberText = new TextBox { Width = 160 };
+            AddField(allocateLayout, "Existing PN", _existingPartNumberText);
+            _applyScopeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
+            _applyScopeCombo.Items.AddRange(new object[] { "Active configuration", "All configurations", "Selected configurations" });
+            AddField(allocateLayout, "Apply to", _applyScopeCombo);
+            _applyDocPropsCheck = new CheckBox { Text = "Also document properties", AutoSize = true };
+            AddField(allocateLayout, "Document props", _applyDocPropsCheck);
+            _createPartCheck = new CheckBox { Text = "Create/update part on server", AutoSize = true };
+            AddField(allocateLayout, "Server record", _createPartCheck);
+
+            var allocateActions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill
+            };
+            var btnAllocate = new Button { Text = "Allocate (advanced)", AutoSize = true };
+            btnAllocate.Click += OnAllocateNumber;
+            _allocateResultLabel = new Label { AutoSize = true, Text = "" };
+            allocateActions.Controls.Add(btnAllocate);
+            allocateActions.Controls.Add(_allocateResultLabel);
+
+            var allocateWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            allocateWrap.Controls.Add(allocateLayout);
+            allocateWrap.Controls.Add(allocateActions);
+            AddSection(panel, CreateGroupBox("Advanced allocation", allocateWrap));
+
+            var renameAdvancedWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            _renameChildrenCheck = new CheckBox { Text = "Rename children in assemblies", AutoSize = true };
+            _renameDryRunButton = new Button { Text = "Dry run rename", AutoSize = true };
+            _renameDryRunButton.Click += OnRenameDryRun;
+            renameAdvancedWrap.Controls.Add(_renameChildrenCheck);
+            renameAdvancedWrap.Controls.Add(_renameDryRunButton);
+            AddSection(panel, CreateGroupBox("Rename (advanced)", renameAdvancedWrap));
+
+            var configListWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            _configListBox = new CheckedListBox { Height = 120, Dock = DockStyle.Fill };
+            var configButtons = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true
+            };
+            _loadConfigsButton = new Button { Text = "Load configurations", AutoSize = true };
+            _loadConfigsButton.Click += OnLoadConfigurations;
+            var btnConfigAll = new Button { Text = "Select all", AutoSize = true };
+            btnConfigAll.Click += (_, __) => SetConfigSelection(true);
+            var btnConfigClear = new Button { Text = "Clear", AutoSize = true };
+            btnConfigClear.Click += (_, __) => SetConfigSelection(false);
+            configButtons.Controls.Add(_loadConfigsButton);
+            configButtons.Controls.Add(btnConfigAll);
+            configButtons.Controls.Add(btnConfigClear);
+            configListWrap.Controls.Add(_configListBox);
+            configListWrap.Controls.Add(configButtons);
+            AddSection(panel, CreateGroupBox("Configurations", configListWrap));
+
+            var schemeEditor = BuildSchemeEditorPanel();
+            AddSection(panel, CreateCollapsibleSection("Scheme builder", schemeEditor, false));
+
+            return panel;
+        }
+
+        private Control BuildSchemeEditorPanel()
+        {
+            var panel = CreateStackPanel();
 
             var presetPanel = new FlowLayoutPanel
             {
@@ -498,12 +774,13 @@ namespace TinyMRP.SolidWorksAddin.UI
                 ColumnCount = 2,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Fill
+                Dock = DockStyle.Fill,
+                MinimumSize = new Size(240, 0)
             };
             segmentListLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             segmentListLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-            _segmentsList = new ListBox { Height = 140, Dock = DockStyle.Fill };
+            _segmentsList = new ListBox { Height = 140, Dock = DockStyle.Fill, MinimumSize = new Size(200, 120) };
             _segmentsList.SelectedIndexChanged += OnSegmentSelected;
             var segmentButtons = new FlowLayoutPanel
             {
@@ -625,116 +902,136 @@ namespace TinyMRP.SolidWorksAddin.UI
             schemeActions.Controls.Add(_validationResultLabel);
             AddSection(panel, CreateGroupBox("Scheme actions", schemeActions));
 
-            var contextLayout = CreateFormLayout();
-            _contextTypeText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Type", _contextTypeText);
-            _contextFamilyText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Family", _contextFamilyText);
-            _contextSubfamilyText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Subfamily", _contextSubfamilyText);
-            _contextProjectText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Project", _contextProjectText);
-            _contextSiteText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Site", _contextSiteText);
+            return panel;
+        }
 
-            var previewActions = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true,
-                WrapContents = true,
-                Dock = DockStyle.Fill
-            };
-            var btnPreview = new Button { Text = "Preview next", AutoSize = true };
-            btnPreview.Click += OnPreviewNext;
-            _previewResultLabel = new Label { AutoSize = true, Text = "" };
-            var btnSaveDefaults = new Button { Text = "Save defaults", AutoSize = true };
-            btnSaveDefaults.Click += OnSaveNumberingDefaults;
-            previewActions.Controls.Add(btnPreview);
-            previewActions.Controls.Add(btnSaveDefaults);
-            previewActions.Controls.Add(_previewResultLabel);
+        private TabPage BuildConfigTab()
+        {
+            var page = CreateTabPage("Configuration");
+            var tabs = new TabControl { Dock = DockStyle.Fill };
+            tabs.TabPages.Add(BuildConfigQuickStartTab());
+            tabs.TabPages.Add(BuildConfigAdvancedTab());
+            page.Controls.Add(tabs);
+            return page;
+        }
 
-            var previewWrap = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                AutoSize = true,
-                WrapContents = false,
-                Dock = DockStyle.Fill
-            };
-            previewWrap.Controls.Add(contextLayout);
-            previewWrap.Controls.Add(previewActions);
-            AddSection(panel, CreateGroupBox("Context + preview", previewWrap));
+        private TabPage BuildConfigQuickStartTab()
+        {
+            var page = CreateTabPage("Quick Start");
+            var panel = CreateTabPanel();
+            page.Controls.Add(panel);
 
-            var allocateLayout = CreateFormLayout();
-            _revisionActionCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180 };
-            _revisionActionCombo.Items.AddRange(new object[] { "new_part", "revise_existing", "keep_existing" });
-            AddField(allocateLayout, "Revision action", _revisionActionCombo);
-            _existingPartNumberText = new TextBox { Width = 160 };
-            AddField(allocateLayout, "Existing PN", _existingPartNumberText);
-            _applyScopeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
-            _applyScopeCombo.Items.AddRange(new object[] { "Active configuration", "All configurations", "Selected configurations" });
-            AddField(allocateLayout, "Apply to", _applyScopeCombo);
-            _applyDocPropsCheck = new CheckBox { Text = "Also document properties", AutoSize = true };
-            AddField(allocateLayout, "Document props", _applyDocPropsCheck);
-            _createPartCheck = new CheckBox { Text = "Create/update part on server", AutoSize = true };
-            AddField(allocateLayout, "Server record", _createPartCheck);
+            var connectionLayout = CreateFormLayout();
+            _quickBackendUrlText = new TextBox { Width = 220 };
+            AddField(connectionLayout, "Backend URL", _quickBackendUrlText);
+            _quickAuthTokenText = new TextBox { Width = 220, UseSystemPasswordChar = true };
+            AddField(connectionLayout, "Auth token", _quickAuthTokenText);
 
-            var allocateActions = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true,
-                WrapContents = true,
-                Dock = DockStyle.Fill
-            };
-            var btnAllocate = new Button { Text = "Allocate PN+REV", AutoSize = true };
-            btnAllocate.Click += OnAllocateNumber;
-            _allocateResultLabel = new Label { AutoSize = true, Text = "" };
-            allocateActions.Controls.Add(btnAllocate);
-            allocateActions.Controls.Add(_allocateResultLabel);
-
-            var allocateWrap = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                AutoSize = true,
-                WrapContents = false,
-                Dock = DockStyle.Fill
-            };
-            allocateWrap.Controls.Add(allocateLayout);
-            allocateWrap.Controls.Add(allocateActions);
-            AddSection(panel, CreateGroupBox("Allocate", allocateWrap));
-
-            var configListWrap = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                AutoSize = true,
-                WrapContents = false,
-                Dock = DockStyle.Fill
-            };
-            _configListBox = new CheckedListBox { Height = 120, Dock = DockStyle.Fill };
-            var configButtons = new FlowLayoutPanel
+            var connectionActions = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight,
                 AutoSize = true,
                 WrapContents = true
             };
-            _loadConfigsButton = new Button { Text = "Load configurations", AutoSize = true };
-            _loadConfigsButton.Click += OnLoadConfigurations;
-            var btnConfigAll = new Button { Text = "Select all", AutoSize = true };
-            btnConfigAll.Click += (_, __) => SetConfigSelection(true);
-            var btnConfigClear = new Button { Text = "Clear", AutoSize = true };
-            btnConfigClear.Click += (_, __) => SetConfigSelection(false);
-            configButtons.Controls.Add(_loadConfigsButton);
-            configButtons.Controls.Add(btnConfigAll);
-            configButtons.Controls.Add(btnConfigClear);
-            configListWrap.Controls.Add(_configListBox);
-            configListWrap.Controls.Add(configButtons);
-            AddSection(panel, CreateGroupBox("Configurations", configListWrap));
+            var btnTest = new Button { Text = "Test connection", AutoSize = true };
+            btnTest.Click += OnQuickTestConnection;
+            _quickDiagnosticsButton = new Button { Text = "Diagnostics", AutoSize = true };
+            _quickDiagnosticsButton.Click += OnQuickDiagnostics;
+            connectionActions.Controls.Add(btnTest);
+            connectionActions.Controls.Add(_quickDiagnosticsButton);
 
-            InitializeNumberingDefaults();
+            var connectionWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            connectionWrap.Controls.Add(connectionLayout);
+            connectionWrap.Controls.Add(connectionActions);
+            AddSection(panel, CreateGroupBox("Connection", connectionWrap));
+
+            var schemeLayout = CreateFormLayout();
+            _quickSchemeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            _quickRefreshSchemesButton = new Button { Text = "Refresh", AutoSize = true };
+            _quickRefreshSchemesButton.Click += OnQuickRefreshSchemes;
+            AddField(schemeLayout, "Preset scheme", CreateInlineField(_quickSchemeCombo, _quickRefreshSchemesButton));
+            AddSection(panel, CreateGroupBox("Preset scheme", schemeLayout));
+
+            var contextLayout = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink
+            };
+            contextLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
+            contextLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));
+
+            _quickContextTypeText = new TextBox { Width = 200 };
+            AddQuickContextRow(contextLayout, "Type", _quickContextTypeText, "type");
+            _quickContextFamilyText = new TextBox { Width = 200 };
+            AddQuickContextRow(contextLayout, "Family", _quickContextFamilyText, "family");
+            _quickContextSubfamilyText = new TextBox { Width = 200 };
+            AddQuickContextRow(contextLayout, "Subfamily", _quickContextSubfamilyText, "subfamily");
+            _quickContextProjectText = new TextBox { Width = 200 };
+            AddQuickContextRow(contextLayout, "Project", _quickContextProjectText, "project");
+            _quickContextSiteText = new TextBox { Width = 200 };
+            AddQuickContextRow(contextLayout, "Site", _quickContextSiteText, "site");
+            AddSection(panel, CreateGroupBox("Context", contextLayout));
+
+            var mapLayout = CreateFormLayout();
+            _quickPartNumberPropText = new TextBox { Width = 200 };
+            AddField(mapLayout, "Part number property", _quickPartNumberPropText);
+            _quickRevisionPropText = new TextBox { Width = 200 };
+            AddField(mapLayout, "Revision property", _quickRevisionPropText);
+            _quickDisplayCodePropText = new TextBox { Width = 200 };
+            AddField(mapLayout, "Display code property", _quickDisplayCodePropText);
+            AddSection(panel, CreateGroupBox("Property mapping", mapLayout));
+
+            var applyLayout = CreateFormLayout();
+            _quickApplyModeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            _quickApplyModeCombo.Items.AddRange(new object[] { "Active configuration", "All configurations", "Selected configurations" });
+            AddField(applyLayout, "Apply mode", _quickApplyModeCombo);
+            AddSection(panel, CreateGroupBox("Apply mode", applyLayout));
+
+            var actions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true
+            };
+            var btnDefaults = new Button { Text = "Apply server defaults", AutoSize = true };
+            btnDefaults.Click += OnQuickApplyDefaults;
+            var btnSave = new Button { Text = "Save settings", AutoSize = true };
+            btnSave.Click += OnQuickSaveSettings;
+            var btnPreview = new Button { Text = "Preview next", AutoSize = true };
+            btnPreview.Click += OnQuickPreview;
+            var btnGoNumbering = new Button { Text = "Go to Numbering", AutoSize = true };
+            btnGoNumbering.Click += OnQuickGoToNumbering;
+            actions.Controls.Add(btnDefaults);
+            actions.Controls.Add(btnSave);
+            actions.Controls.Add(btnPreview);
+            actions.Controls.Add(btnGoNumbering);
+
+            _quickPreviewLabel = new Label { AutoSize = true, Text = "" };
+            var actionWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            actionWrap.Controls.Add(actions);
+            actionWrap.Controls.Add(_quickPreviewLabel);
+            AddSection(panel, CreateGroupBox("Actions", actionWrap));
+
+            WireQuickStartSyncEvents();
             return page;
         }
-        private TabPage BuildConfigTab()
+
+        private TabPage BuildConfigAdvancedTab()
         {
-            var page = CreateTabPage("Configuration");
+            var page = CreateTabPage("Advanced");
             var panel = CreateTabPanel();
             page.Controls.Add(panel);
 
@@ -793,6 +1090,22 @@ namespace TinyMRP.SolidWorksAddin.UI
             serverWrap.Controls.Add(serverNote);
             AddSection(panel, CreateGroupBox("Server", serverWrap));
 
+            var defaultsLayout = CreateFormLayout();
+            _advancedSchemeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            AddField(defaultsLayout, "Default scheme", _advancedSchemeCombo);
+            _advancedApplyModeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            _advancedApplyModeCombo.Items.AddRange(new object[] { "Active configuration", "All configurations", "Selected configurations" });
+            AddField(defaultsLayout, "Apply mode", _advancedApplyModeCombo);
+            _partNumberPropText = new TextBox { Width = 200 };
+            AddField(defaultsLayout, "Part number property", _partNumberPropText);
+            _revisionPropText = new TextBox { Width = 200 };
+            AddField(defaultsLayout, "Revision property", _revisionPropText);
+            _displayCodePropText = new TextBox { Width = 200 };
+            AddField(defaultsLayout, "Display code property", _displayCodePropText);
+            _advancedContextJsonText = new TextBox { Width = 200, Multiline = true, Height = 80, ScrollBars = ScrollBars.Vertical };
+            AddField(defaultsLayout, "Context JSON", _advancedContextJsonText);
+            AddSection(panel, CreateGroupBox("Server defaults", defaultsLayout));
+
             _removeModifiedNotesCheck = new CheckBox { Text = "Remove modified notes" };
             AddSection(panel, CreateGroupBox("Options", _removeModifiedNotesCheck));
 
@@ -803,14 +1116,485 @@ namespace TinyMRP.SolidWorksAddin.UI
                 WrapContents = false,
                 Dock = DockStyle.Fill
             };
-            var btnSave = new Button { Text = "Save configuration", AutoSize = true };
-            btnSave.Click += OnSaveConfig;
+            var btnSaveLocal = new Button { Text = "Save local config", AutoSize = true };
+            btnSaveLocal.Click += OnSaveConfig;
+            var btnSaveServer = new Button { Text = "Save server settings", AutoSize = true };
+            btnSaveServer.Click += OnAdvancedSaveSettings;
             _configPathLabel = new Label { AutoSize = true };
-            configActions.Controls.Add(btnSave);
+            configActions.Controls.Add(btnSaveLocal);
+            configActions.Controls.Add(btnSaveServer);
             configActions.Controls.Add(_configPathLabel);
             AddSection(panel, CreateGroupBox("Config", configActions));
 
+            WireAdvancedSyncEvents();
             return page;
+        }
+
+        private void AddQuickContextRow(TableLayoutPanel table, string labelText, TextBox textBox, string key)
+        {
+            AddContextRow(table, labelText, textBox, key, _quickContextRows);
+        }
+
+        private void AddContextRow(TableLayoutPanel table, string labelText, TextBox textBox, string key, Dictionary<string, Control[]> rowMap)
+        {
+            if (table == null || textBox == null || rowMap == null)
+            {
+                return;
+            }
+
+            int row = table.RowCount;
+            table.RowCount++;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var label = new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left };
+            textBox.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+            table.Controls.Add(label, 0, row);
+            table.Controls.Add(textBox, 1, row);
+            rowMap[key] = new[] { (Control)label, textBox };
+        }
+
+        private void WireQuickStartSyncEvents()
+        {
+            if (_quickBackendUrlText != null)
+            {
+                _quickBackendUrlText.TextChanged += (_, __) => SyncText(_quickBackendUrlText, _backendUrlText);
+            }
+            if (_quickAuthTokenText != null)
+            {
+                _quickAuthTokenText.TextChanged += (_, __) => SyncText(_quickAuthTokenText, _authTokenText);
+            }
+            if (_quickPartNumberPropText != null)
+            {
+                _quickPartNumberPropText.TextChanged += (_, __) => SyncText(_quickPartNumberPropText, _partNumberPropText);
+                _quickPartNumberPropText.TextChanged += (_, __) => SyncText(_quickPartNumberPropText, _numberingPartNumberPropText);
+            }
+            if (_quickRevisionPropText != null)
+            {
+                _quickRevisionPropText.TextChanged += (_, __) => SyncText(_quickRevisionPropText, _revisionPropText);
+                _quickRevisionPropText.TextChanged += (_, __) => SyncText(_quickRevisionPropText, _numberingRevisionPropText);
+            }
+            if (_quickDisplayCodePropText != null)
+            {
+                _quickDisplayCodePropText.TextChanged += (_, __) => SyncText(_quickDisplayCodePropText, _displayCodePropText);
+                _quickDisplayCodePropText.TextChanged += (_, __) => SyncText(_quickDisplayCodePropText, _numberingDisplayCodePropText);
+            }
+            if (_quickApplyModeCombo != null)
+            {
+                _quickApplyModeCombo.SelectedIndexChanged += (_, __) =>
+                {
+                    SyncCombo(_quickApplyModeCombo, _advancedApplyModeCombo);
+                    SelectApplyModeCombo(_applyScopeCombo, ApplyModeFromCombo(_quickApplyModeCombo));
+                };
+            }
+            if (_quickSchemeCombo != null)
+            {
+                _quickSchemeCombo.SelectedIndexChanged += OnQuickSchemeSelected;
+            }
+            if (_quickContextTypeText != null)
+            {
+                _quickContextTypeText.TextChanged += (_, __) => SyncContextField(_quickContextTypeText, _contextTypeText);
+                _quickContextTypeText.TextChanged += (_, __) => SyncContextField(_quickContextTypeText, _numberingContextTypeText);
+            }
+            if (_quickContextFamilyText != null)
+            {
+                _quickContextFamilyText.TextChanged += (_, __) => SyncContextField(_quickContextFamilyText, _contextFamilyText);
+                _quickContextFamilyText.TextChanged += (_, __) => SyncContextField(_quickContextFamilyText, _numberingContextFamilyText);
+            }
+            if (_quickContextSubfamilyText != null)
+            {
+                _quickContextSubfamilyText.TextChanged += (_, __) => SyncContextField(_quickContextSubfamilyText, _contextSubfamilyText);
+                _quickContextSubfamilyText.TextChanged += (_, __) => SyncContextField(_quickContextSubfamilyText, _numberingContextSubfamilyText);
+            }
+            if (_quickContextProjectText != null)
+            {
+                _quickContextProjectText.TextChanged += (_, __) => SyncContextField(_quickContextProjectText, _contextProjectText);
+                _quickContextProjectText.TextChanged += (_, __) => SyncContextField(_quickContextProjectText, _numberingContextProjectText);
+            }
+            if (_quickContextSiteText != null)
+            {
+                _quickContextSiteText.TextChanged += (_, __) => SyncContextField(_quickContextSiteText, _contextSiteText);
+                _quickContextSiteText.TextChanged += (_, __) => SyncContextField(_quickContextSiteText, _numberingContextSiteText);
+            }
+        }
+
+        private void WireAdvancedSyncEvents()
+        {
+            if (_backendUrlText != null)
+            {
+                _backendUrlText.TextChanged += (_, __) => SyncText(_backendUrlText, _quickBackendUrlText);
+            }
+            if (_authTokenText != null)
+            {
+                _authTokenText.TextChanged += (_, __) => SyncText(_authTokenText, _quickAuthTokenText);
+            }
+            if (_partNumberPropText != null)
+            {
+                _partNumberPropText.TextChanged += (_, __) => SyncText(_partNumberPropText, _quickPartNumberPropText);
+                _partNumberPropText.TextChanged += (_, __) => SyncText(_partNumberPropText, _numberingPartNumberPropText);
+            }
+            if (_numberingPartNumberPropText != null)
+            {
+                _numberingPartNumberPropText.TextChanged += (_, __) => SyncText(_numberingPartNumberPropText, _partNumberPropText);
+            }
+            if (_revisionPropText != null)
+            {
+                _revisionPropText.TextChanged += (_, __) => SyncText(_revisionPropText, _quickRevisionPropText);
+                _revisionPropText.TextChanged += (_, __) => SyncText(_revisionPropText, _numberingRevisionPropText);
+            }
+            if (_numberingRevisionPropText != null)
+            {
+                _numberingRevisionPropText.TextChanged += (_, __) => SyncText(_numberingRevisionPropText, _revisionPropText);
+            }
+            if (_displayCodePropText != null)
+            {
+                _displayCodePropText.TextChanged += (_, __) => SyncText(_displayCodePropText, _quickDisplayCodePropText);
+                _displayCodePropText.TextChanged += (_, __) => SyncText(_displayCodePropText, _numberingDisplayCodePropText);
+            }
+            if (_numberingDisplayCodePropText != null)
+            {
+                _numberingDisplayCodePropText.TextChanged += (_, __) => SyncText(_numberingDisplayCodePropText, _displayCodePropText);
+            }
+            if (_advancedApplyModeCombo != null)
+            {
+                _advancedApplyModeCombo.SelectedIndexChanged += (_, __) =>
+                {
+                    SyncCombo(_advancedApplyModeCombo, _quickApplyModeCombo);
+                    SelectApplyModeCombo(_applyScopeCombo, ApplyModeFromCombo(_advancedApplyModeCombo));
+                };
+            }
+            if (_advancedSchemeCombo != null)
+            {
+                _advancedSchemeCombo.SelectedIndexChanged += (_, __) => SyncSchemeSelection(_advancedSchemeCombo, _quickSchemeCombo);
+                _advancedSchemeCombo.SelectedIndexChanged += (_, __) => SyncSchemeSelection(_advancedSchemeCombo, _numberingPresetCombo);
+            }
+        }
+
+        private void SyncText(TextBox source, TextBox target)
+        {
+            if (source == null || target == null || _syncingConfigFields)
+            {
+                return;
+            }
+
+            try
+            {
+                _syncingConfigFields = true;
+                target.Text = source.Text;
+            }
+            finally
+            {
+                _syncingConfigFields = false;
+            }
+        }
+
+        private void SyncCombo(ComboBox source, ComboBox target)
+        {
+            if (source == null || target == null || _syncingConfigFields)
+            {
+                return;
+            }
+
+            try
+            {
+                _syncingConfigFields = true;
+                target.SelectedIndex = source.SelectedIndex;
+            }
+            finally
+            {
+                _syncingConfigFields = false;
+            }
+        }
+
+        private void SyncContextField(TextBox source, TextBox target)
+        {
+            if (source == null || target == null || _syncingContextFields)
+            {
+                return;
+            }
+
+            try
+            {
+                _syncingContextFields = true;
+                target.Text = source.Text;
+            }
+            finally
+            {
+                _syncingContextFields = false;
+            }
+        }
+
+        private void SyncSchemeSelection(ComboBox source, ComboBox target)
+        {
+            if (source == null || target == null || _syncingConfigFields)
+            {
+                return;
+            }
+
+            NumberingSchemeDefinition scheme = source.SelectedItem as NumberingSchemeDefinition;
+            if (scheme == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _syncingConfigFields = true;
+                SelectComboItem(target, scheme.Id);
+                if (_schemeCombo != null)
+                {
+                    SelectComboItem(_schemeCombo, scheme.Id);
+                }
+            }
+            finally
+            {
+                _syncingConfigFields = false;
+            }
+        }
+
+        private void OnQuickSchemeSelected(object sender, EventArgs e)
+        {
+            NumberingSchemeDefinition scheme = _quickSchemeCombo != null
+                ? _quickSchemeCombo.SelectedItem as NumberingSchemeDefinition
+                : null;
+            UpdateQuickContextVisibility(scheme);
+            if (scheme != null)
+            {
+                SyncSchemeSelection(_quickSchemeCombo, _advancedSchemeCombo);
+                SyncSchemeSelection(_quickSchemeCombo, _numberingPresetCombo);
+            }
+        }
+
+        private void UpdateQuickContextVisibility(NumberingSchemeDefinition scheme)
+        {
+            UpdateContextVisibility(_quickContextRows, scheme);
+            UpdateContextVisibility(_numberingContextRows, scheme);
+        }
+
+        private void UpdateContextVisibility(Dictionary<string, Control[]> rows, NumberingSchemeDefinition scheme)
+        {
+            if (rows == null || rows.Count == 0)
+            {
+                return;
+            }
+
+            var required = GetRequiredContextKeys(scheme);
+            foreach (var pair in rows)
+            {
+                bool visible = required.Count == 0 || required.Contains(pair.Key);
+                foreach (Control control in pair.Value)
+                {
+                    if (control != null)
+                    {
+                        control.Visible = visible;
+                    }
+                }
+            }
+        }
+
+        private HashSet<string> GetRequiredContextKeys(NumberingSchemeDefinition scheme)
+        {
+            var required = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (scheme == null)
+            {
+                return required;
+            }
+
+            foreach (NumberingSegmentDefinition segment in scheme.PatternSegments)
+            {
+                if (segment != null && string.Equals(segment.Kind, "field", StringComparison.OrdinalIgnoreCase))
+                {
+                    string field = segment.Field;
+                    if (!string.IsNullOrWhiteSpace(field))
+                    {
+                        required.Add(field.Trim());
+                    }
+                }
+            }
+
+            string scope = scheme.ScopeMode ?? string.Empty;
+            if (scope.Equals("by_type", StringComparison.OrdinalIgnoreCase))
+            {
+                required.Add("type");
+            }
+            else if (scope.Equals("by_family", StringComparison.OrdinalIgnoreCase))
+            {
+                required.Add("family");
+            }
+            else if (scope.Equals("by_project", StringComparison.OrdinalIgnoreCase))
+            {
+                required.Add("project");
+            }
+            else if (scope.Equals("custom_keys", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (string key in scheme.ScopeKeys)
+                {
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        required.Add(key.Trim());
+                    }
+                }
+            }
+
+            return required;
+        }
+
+        private string GetPreferredText(TextBox primary, TextBox fallback)
+        {
+            return GetPreferredText(primary, fallback, string.Empty);
+        }
+
+        private string GetPreferredText(TextBox primary, TextBox fallback, string fallbackValue)
+        {
+            if (primary != null)
+            {
+                string value = primary.Text != null ? primary.Text.Trim() : string.Empty;
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
+            if (fallback != null)
+            {
+                string value = fallback.Text != null ? fallback.Text.Trim() : string.Empty;
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value;
+                }
+            }
+            return fallbackValue ?? string.Empty;
+        }
+
+        private string GetContextValue(TextBox primary, TextBox fallback)
+        {
+            if (primary != null)
+            {
+                return primary.Text != null ? primary.Text.Trim() : string.Empty;
+            }
+            if (fallback != null)
+            {
+                return fallback.Text != null ? fallback.Text.Trim() : string.Empty;
+            }
+            return string.Empty;
+        }
+
+        private void SelectApplyModeCombo(ComboBox combo, string applyMode)
+        {
+            if (combo == null)
+            {
+                return;
+            }
+            string label = ApplyModeToLabel(applyMode);
+            SelectComboItem(combo, label);
+        }
+
+        private string ApplyModeFromCombo(ComboBox combo)
+        {
+            return LabelToApplyMode(GetComboText(combo));
+        }
+
+        private string ApplyModeToLabel(string applyMode)
+        {
+            string mode = (applyMode ?? string.Empty).Trim().ToLowerInvariant();
+            if (mode == "all_configs")
+            {
+                return "All configurations";
+            }
+            if (mode == "selected_configs")
+            {
+                return "Selected configurations";
+            }
+            return "Active configuration";
+        }
+
+        private string LabelToApplyMode(string label)
+        {
+            if (label == null)
+            {
+                return "active_config";
+            }
+            if (label.StartsWith("All", StringComparison.OrdinalIgnoreCase))
+            {
+                return "all_configs";
+            }
+            if (label.StartsWith("Selected", StringComparison.OrdinalIgnoreCase))
+            {
+                return "selected_configs";
+            }
+            return "active_config";
+        }
+
+        private string GetDefaultSchemeId()
+        {
+            string numbering = GetSchemeIdFromCombo(_numberingPresetCombo);
+            if (!string.IsNullOrWhiteSpace(numbering))
+            {
+                return numbering;
+            }
+            string quick = GetSchemeIdFromCombo(_quickSchemeCombo);
+            if (!string.IsNullOrWhiteSpace(quick))
+            {
+                return quick;
+            }
+            string advanced = GetSchemeIdFromCombo(_advancedSchemeCombo);
+            if (!string.IsNullOrWhiteSpace(advanced))
+            {
+                return advanced;
+            }
+            return GetSelectedSchemeId();
+        }
+
+        private string GetSchemeIdFromCombo(ComboBox combo)
+        {
+            NumberingSchemeDefinition scheme = combo != null ? combo.SelectedItem as NumberingSchemeDefinition : null;
+            if (scheme != null && !string.IsNullOrWhiteSpace(scheme.Id))
+            {
+                return scheme.Id;
+            }
+            if (combo != null && combo.Tag is string tagValue)
+            {
+                return tagValue;
+            }
+            return string.Empty;
+        }
+
+        private string ContextToJson(Dictionary<string, string> context)
+        {
+            var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            return serializer.Serialize(context ?? new Dictionary<string, string>());
+        }
+
+        private bool TryParseContextJson(string json, out Dictionary<string, string> context, out string error)
+        {
+            context = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            error = null;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return true;
+            }
+
+            try
+            {
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                var parsed = serializer.DeserializeObject(json) as Dictionary<string, object>;
+                if (parsed == null)
+                {
+                    error = "Context JSON must be an object.";
+                    return false;
+                }
+                foreach (var pair in parsed)
+                {
+                    if (pair.Key == null)
+                    {
+                        continue;
+                    }
+                    context[pair.Key] = pair.Value != null ? pair.Value.ToString() : string.Empty;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
         }
 
         private void ApplyConfig(TinyMrpConfig config)
@@ -839,10 +1623,18 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 _backendUrlText.Text = string.IsNullOrWhiteSpace(config.BackendUrl) ? config.WebLink : config.BackendUrl;
             }
+            if (_quickBackendUrlText != null)
+            {
+                _quickBackendUrlText.Text = string.IsNullOrWhiteSpace(config.BackendUrl) ? config.WebLink : config.BackendUrl;
+            }
 
             if (_authTokenText != null)
             {
                 _authTokenText.Text = config.AuthToken ?? string.Empty;
+            }
+            if (_quickAuthTokenText != null)
+            {
+                _quickAuthTokenText.Text = config.AuthToken ?? string.Empty;
             }
 
             if (_bomTemplateText != null)
@@ -910,14 +1702,14 @@ namespace TinyMRP.SolidWorksAddin.UI
                 config.WebLink = _weblinkText.Text;
             }
 
-            if (_backendUrlText != null)
+            if (_quickBackendUrlText != null || _backendUrlText != null)
             {
-                config.BackendUrl = _backendUrlText.Text;
+                config.BackendUrl = GetPreferredText(_quickBackendUrlText, _backendUrlText);
             }
 
-            if (_authTokenText != null)
+            if (_quickAuthTokenText != null || _authTokenText != null)
             {
-                config.AuthToken = _authTokenText.Text;
+                config.AuthToken = GetPreferredText(_quickAuthTokenText, _authTokenText);
             }
 
             if (_bomTemplateText != null)
@@ -935,13 +1727,17 @@ namespace TinyMRP.SolidWorksAddin.UI
                 config.RemoveModifiedNotes = _removeModifiedNotesCheck.Checked;
             }
 
-            string schemeId = GetSelectedSchemeId();
+            string schemeId = GetDefaultSchemeId();
             if (!string.IsNullOrWhiteSpace(schemeId))
             {
                 config.NumberingSchemeId = schemeId;
             }
 
             config.NumberingContextDefaults = BuildContextDefaultsString();
+            config.PartNumberProperty = GetPreferredText(_quickPartNumberPropText, _partNumberPropText, "PartNumber");
+            config.RevisionProperty = GetPreferredText(_quickRevisionPropText, _revisionPropText, "Revision");
+            config.DisplayCodeProperty = GetPreferredText(_quickDisplayCodePropText, _displayCodePropText, "DisplayCode");
+            config.NumberingApplyMode = ApplyModeFromCombo(_quickApplyModeCombo ?? _advancedApplyModeCombo);
             config.ResolvePaths();
         }
 
@@ -1088,6 +1884,609 @@ namespace TinyMRP.SolidWorksAddin.UI
                 MessageBox.Show("Failed to save config: " + ex.Message, "TinyMRP",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private void OnQuickTestConnection(object sender, EventArgs e)
+        {
+            TinyMrpConfig config = AddinContext.Config;
+            if (config == null)
+            {
+                MessageBox.Show("Config is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            UpdateConfigFromUi();
+            _numberingClient = null;
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ApiResponse response = client.AuthCheck();
+            if (!response.Ok)
+            {
+                ShowApiError("Connection failed.", response);
+                return;
+            }
+
+            Dictionary<string, object> userDict = NumberingJson.GetDict(response.Data, "user");
+            string email = userDict != null ? NumberingJson.GetString(userDict, "email") : string.Empty;
+            MessageBox.Show("Connection OK" + (string.IsNullOrWhiteSpace(email) ? "" : " (" + email + ")") + ".",
+                "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void OnQuickDiagnostics(object sender, EventArgs e)
+        {
+            UpdateConfigFromUi();
+            _numberingClient = null;
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            var details = new List<string>();
+            TinyMrpConfig config = AddinContext.Config;
+            details.Add("Backend URL: " + (config != null ? config.BackendUrl : ""));
+            details.Add("Config path: " + (config != null ? config.ConfigPath : ""));
+
+            ApiResponse auth = client.AuthCheck();
+            details.Add("Auth check: " + (auth.Ok ? "OK" : "Failed"));
+
+            ApiResponse schemesResp = client.ListSchemes(out List<NumberingSchemeDefinition> schemes);
+            details.Add("Schemes: " + (schemesResp.Ok ? schemes.Count.ToString() : "Failed"));
+
+            ApiResponse settingsResp = client.GetUserSettings(out UserSettingsDefinition settings);
+            details.Add("Settings: " + (settingsResp.Ok ? "OK" : "Failed"));
+
+            string schemeId = GetSchemeIdFromCombo(_quickSchemeCombo);
+            if (settings != null && string.IsNullOrWhiteSpace(schemeId))
+            {
+                schemeId = settings.DefaultSchemeId;
+            }
+
+            if (!string.IsNullOrWhiteSpace(schemeId))
+            {
+                var context = BuildContextFromQuickStart();
+                ApiResponse preview = client.Preview(schemeId, context);
+                details.Add("Preview: " + (preview.Ok ? "OK" : "Failed"));
+            }
+
+            string detailText = string.Join(System.Environment.NewLine, details.ToArray());
+            AddinLogger.Write("Diagnostics\n" + detailText);
+            ShowMessageWithDetails("Diagnostics", "Diagnostics completed.", detailText);
+        }
+
+        private void OnQuickRefreshSchemes(object sender, EventArgs e)
+        {
+            UpdateConfigFromUi();
+            _numberingClient = null;
+            OnRefreshSchemes(sender, e);
+        }
+
+        private void OnQuickApplyDefaults(object sender, EventArgs e)
+        {
+            UpdateConfigFromUi();
+            _numberingClient = null;
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ApiResponse response = client.GetUserSettings(out UserSettingsDefinition settings);
+            if (!response.Ok)
+            {
+                ShowApiError("Failed to load settings.", response);
+                return;
+            }
+
+            ApplyUserSettings(settings);
+            MessageBox.Show("Server defaults loaded.", "TinyMRP",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void OnQuickSaveSettings(object sender, EventArgs e)
+        {
+            TinyMrpConfig config = AddinContext.Config;
+            if (config == null)
+            {
+                MessageBox.Show("Config is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            UpdateConfigFromUi();
+            try
+            {
+                config.Save();
+                if (_configPathLabel != null)
+                {
+                    _configPathLabel.Text = "Config: " + config.ConfigPath;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to save config: " + ex.Message, "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            UserSettingsDefinition settings = BuildUserSettingsFromQuickStart();
+            if (settings == null)
+            {
+                return;
+            }
+
+            _numberingClient = null;
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ApiResponse response = client.SaveUserSettings(settings);
+            if (!response.Ok)
+            {
+                ShowApiError("Failed to save settings.", response);
+                return;
+            }
+
+            MessageBox.Show("Settings saved.", "TinyMRP",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void OnAdvancedSaveSettings(object sender, EventArgs e)
+        {
+            UserSettingsDefinition settings = BuildUserSettingsFromAdvanced();
+            if (settings == null)
+            {
+                return;
+            }
+
+            ApplyUserSettings(settings);
+            _numberingClient = null;
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ApiResponse response = client.SaveUserSettings(settings);
+            if (!response.Ok)
+            {
+                ShowApiError("Failed to save settings.", response);
+                return;
+            }
+
+            MessageBox.Show("Server settings saved.", "TinyMRP",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void OnQuickPreview(object sender, EventArgs e)
+        {
+            string schemeId = GetSchemeIdFromCombo(_quickSchemeCombo);
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                MessageBox.Show("Select a preset scheme.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ApiResponse response = client.Preview(schemeId, BuildContextFromQuickStart());
+            if (!response.Ok)
+            {
+                ShowApiError("Preview failed.", response);
+                return;
+            }
+
+            string partNumber = NumberingJson.GetString(response.Data, "candidate_part_number") ?? string.Empty;
+            string revision = NumberingJson.GetString(response.Data, "candidate_revision") ?? string.Empty;
+            string display = NumberingJson.GetString(response.Data, "display_code_candidate") ?? string.Empty;
+            if (_quickPreviewLabel != null)
+            {
+                _quickPreviewLabel.Text = string.Format("Preview: {0} {1} {2}",
+                    partNumber,
+                    string.IsNullOrWhiteSpace(revision) ? "" : "Rev " + revision,
+                    string.IsNullOrWhiteSpace(display) ? "" : "(" + display + ")");
+            }
+        }
+
+        private void OnQuickGoToNumbering(object sender, EventArgs e)
+        {
+            if (_tabs != null && _tabs.TabPages.Count > 2)
+            {
+                _tabs.SelectedIndex = 2;
+            }
+        }
+
+
+        private void OnNumberingPresetSelected(object sender, EventArgs e)
+        {
+            NumberingSchemeDefinition scheme = _numberingPresetCombo != null
+                ? _numberingPresetCombo.SelectedItem as NumberingSchemeDefinition
+                : null;
+            UpdateQuickContextVisibility(scheme);
+            if (scheme != null)
+            {
+                SyncSchemeSelection(_numberingPresetCombo, _quickSchemeCombo);
+                SyncSchemeSelection(_numberingPresetCombo, _advancedSchemeCombo);
+            }
+        }
+
+        private void OnNumberingPreview(object sender, EventArgs e)
+        {
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string schemeId = GetSchemeIdFromCombo(_numberingPresetCombo);
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                schemeId = GetDefaultSchemeId();
+            }
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
+                return;
+            }
+
+            ApiResponse response = client.Preview(schemeId, BuildContextFromNumberingQuick());
+            if (!response.Ok)
+            {
+                ShowApiError("Preview failed.", response);
+                SetNumberingStatus("Preview failed.", Color.Maroon);
+                return;
+            }
+
+            string partNumber = NumberingJson.GetString(response.Data, "candidate_part_number");
+            string revision = NumberingJson.GetString(response.Data, "candidate_revision");
+            string display = NumberingJson.GetString(response.Data, "display_code_candidate");
+            if (string.IsNullOrWhiteSpace(display))
+            {
+                display = BuildDisplayCode(partNumber, revision);
+            }
+            UpdateQuickPreviewFields(partNumber, revision, display);
+            SetNumberingStatus("Preview ready.", Color.DarkGreen);
+        }
+
+        private void OnNumberingAllocate(object sender, EventArgs e)
+        {
+            RunAllocateWorkflow(false);
+        }
+
+        private void OnNumberingAllocateRename(object sender, EventArgs e)
+        {
+            RunAllocateWorkflow(true);
+        }
+
+        private void RunAllocateWorkflow(bool forceRename)
+        {
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string schemeId = GetSchemeIdFromCombo(_numberingPresetCombo);
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                schemeId = GetDefaultSchemeId();
+            }
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
+                return;
+            }
+
+            ISldWorks app = AddinContext.SldWorks;
+            if (app == null)
+            {
+                MessageBox.Show("SolidWorks is not available.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ActiveModelInfo info;
+            string error;
+            if (!SolidWorksDocumentHelper.TryGetActiveModel(app, out info, out error))
+            {
+                MessageBox.Show(error, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ApiResponse response = client.Allocate(
+                schemeId,
+                BuildContextFromNumberingQuick(),
+                "new_part",
+                string.Empty,
+                true,
+                BuildCadRef(info));
+
+            if (!response.Ok)
+            {
+                ShowApiError("Allocation failed.", response);
+                SetNumberingStatus("Allocation failed.", Color.Maroon);
+                return;
+            }
+
+            string partNumber = NumberingJson.GetString(response.Data, "part_number");
+            string revision = NumberingJson.GetString(response.Data, "revision");
+            string display = NumberingJson.GetString(response.Data, "display_code");
+            if (string.IsNullOrWhiteSpace(display))
+            {
+                display = BuildDisplayCode(partNumber, revision);
+            }
+
+            if (string.IsNullOrWhiteSpace(partNumber))
+            {
+                SetNumberingStatus("Allocation returned no part number.", Color.Maroon);
+                return;
+            }
+
+            UpdateQuickPreviewFields(partNumber, revision, display);
+
+            if (!ApplyNumberingToModelQuick(info, partNumber, revision, display, schemeId))
+            {
+                SetNumberingStatus("Failed to apply properties.", Color.Maroon);
+                return;
+            }
+
+            SetNumberingStatus("Allocated and applied.", Color.DarkGreen);
+            TryRenameAfterAllocation(info, partNumber, revision, forceRename);
+        }
+
+        private void UpdateQuickPreviewFields(string partNumber, string revision, string display)
+        {
+            if (_numberingPreviewPartText != null)
+            {
+                _numberingPreviewPartText.Text = partNumber ?? string.Empty;
+            }
+            if (_numberingPreviewRevisionText != null)
+            {
+                _numberingPreviewRevisionText.Text = revision ?? string.Empty;
+            }
+            if (_numberingPreviewDisplayText != null)
+            {
+                _numberingPreviewDisplayText.Text = display ?? string.Empty;
+            }
+        }
+
+        private void SetNumberingStatus(string message, Color color)
+        {
+            if (_numberingStatusLabel == null)
+            {
+                return;
+            }
+
+            _numberingStatusLabel.Text = message ?? string.Empty;
+            _numberingStatusLabel.ForeColor = color;
+        }
+
+        private bool ApplyNumberingToModelQuick(ActiveModelInfo info, string partNumber, string revision, string displayCode, string schemeId)
+        {
+            if (info == null || info.Model == null)
+            {
+                return false;
+            }
+
+            var configs = new List<string>();
+            if (!string.IsNullOrWhiteSpace(info.ActiveConfiguration))
+            {
+                configs.Add(info.ActiveConfiguration);
+            }
+
+            string partProp = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
+            string revProp = AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision";
+            string displayProp = AddinContext.Config != null ? AddinContext.Config.DisplayCodeProperty : "DisplayCode";
+
+            SolidWorksPropertyWriter.ApplyNumbering(
+                info.Model,
+                configs,
+                true,
+                partNumber,
+                revision,
+                displayCode,
+                schemeId,
+                partProp,
+                revProp,
+                displayProp);
+
+            if (info.StartedFromDrawing)
+            {
+                ISldWorks app = AddinContext.SldWorks;
+                if (app != null)
+                {
+                    app.ActivateDoc(info.StartTitle);
+                }
+            }
+
+            return true;
+        }
+
+        private RenameOptions BuildRenameOptions()
+        {
+            var options = new RenameOptions
+            {
+                Mode = GetRenameMode(),
+                AppendRevision = _renameAppendRevisionCheck != null && _renameAppendRevisionCheck.Checked,
+                KeepBackup = _renameKeepBackupCheck == null || _renameKeepBackupCheck.Checked,
+                RenameChildren = _renameChildrenCheck != null && _renameChildrenCheck.Checked
+            };
+            return options;
+        }
+
+        private RenameMode GetRenameMode()
+        {
+            string mode = _renameModeCombo != null && _renameModeCombo.SelectedItem is string text
+                ? text
+                : string.Empty;
+            if (mode.StartsWith("Rename", StringComparison.OrdinalIgnoreCase))
+            {
+                return RenameMode.RenameIfNotReferenced;
+            }
+            return RenameMode.Safe;
+        }
+
+        private void TryRenameAfterAllocation(ActiveModelInfo info, string partNumber, string revision, bool forceRename)
+        {
+            bool autoRename = _renameAutoCheck != null && _renameAutoCheck.Checked;
+            if (!forceRename && !autoRename)
+            {
+                return;
+            }
+
+            var options = BuildRenameOptions();
+            var service = new SolidWorksRenameService();
+            RenameResult result = service.TryRename(info.Model, partNumber, revision, options);
+            AddinLogger.Write("Rename result: " + result.Message);
+
+            if (!result.Ok)
+            {
+                SetNumberingStatus(result.Message, Color.Maroon);
+                return;
+            }
+
+            if (options.RenameChildren)
+            {
+                AssemblyDoc assembly = info.Model as AssemblyDoc;
+                if (assembly != null)
+                {
+                    RenameAssemblyChildren(assembly, options);
+                }
+            }
+
+            if (info.StartedFromDrawing)
+            {
+                ISldWorks app = AddinContext.SldWorks;
+                if (app != null)
+                {
+                    app.ActivateDoc(info.StartTitle);
+                }
+            }
+
+            SetNumberingStatus(result.Message, Color.DarkGreen);
+        }
+
+        private void RenameAssemblyChildren(AssemblyDoc assembly, RenameOptions options)
+        {
+            if (assembly == null)
+            {
+                return;
+            }
+
+            object[] components = assembly.GetComponents(false) as object[];
+            if (components == null || components.Length == 0)
+            {
+                return;
+            }
+
+            string partProp = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
+            string revProp = AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision";
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var service = new SolidWorksRenameService();
+
+            foreach (object item in components)
+            {
+                Component2 component = item as Component2;
+                if (component == null || component.IsSuppressed())
+                {
+                    continue;
+                }
+
+                string path = component.GetPathName();
+                if (string.IsNullOrWhiteSpace(path) || !seen.Add(path))
+                {
+                    continue;
+                }
+
+                ModelDoc2 model = component.GetModelDoc2() as ModelDoc2;
+                if (model == null)
+                {
+                    continue;
+                }
+
+                string configName = component.ReferencedConfiguration;
+                string pn = GetCustomProperty(model, configName, partProp);
+                if (string.IsNullOrWhiteSpace(pn))
+                {
+                    continue;
+                }
+                string rev = GetCustomProperty(model, configName, revProp);
+
+                RenameResult childResult = service.TryRename(model, pn, rev, options);
+                AddinLogger.Write("Rename child " + path + ": " + childResult.Message);
+            }
+        }
+
+        private void OnRenameDryRun(object sender, EventArgs e)
+        {
+            ISldWorks app = AddinContext.SldWorks;
+            if (app == null)
+            {
+                MessageBox.Show("SolidWorks is not available.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ActiveModelInfo info;
+            string error;
+            if (!SolidWorksDocumentHelper.TryGetActiveModel(app, out info, out error))
+            {
+                MessageBox.Show(error, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string partNumber = _numberingPreviewPartText != null ? _numberingPreviewPartText.Text.Trim() : string.Empty;
+            string revision = _numberingPreviewRevisionText != null ? _numberingPreviewRevisionText.Text.Trim() : string.Empty;
+            if (string.IsNullOrWhiteSpace(partNumber))
+            {
+                partNumber = GetCustomProperty(info.Model, info.ActiveConfiguration, AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber");
+            }
+            if (string.IsNullOrWhiteSpace(revision))
+            {
+                revision = GetCustomProperty(info.Model, info.ActiveConfiguration, AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision");
+            }
+
+            var options = BuildRenameOptions();
+            var service = new SolidWorksRenameService();
+            RenameResult preview = service.PreviewRename(info.Model, partNumber, revision, options);
+            if (!preview.Ok)
+            {
+                MessageBox.Show(preview.Message, "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string details = "Current: " + preview.CurrentPath + System.Environment.NewLine +
+                            "Proposed: " + preview.TargetPath;
+            MessageBox.Show(details, "Rename dry run", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void OnOpenWeb(object sender, EventArgs e)
@@ -1274,6 +2673,21 @@ namespace TinyMRP.SolidWorksAddin.UI
                 _applyScopeCombo.SelectedIndex = 0;
             }
 
+            if (_quickApplyModeCombo != null && _quickApplyModeCombo.SelectedIndex < 0)
+            {
+                _quickApplyModeCombo.SelectedIndex = 0;
+            }
+
+            if (_advancedApplyModeCombo != null && _advancedApplyModeCombo.SelectedIndex < 0)
+            {
+                _advancedApplyModeCombo.SelectedIndex = 0;
+            }
+
+            if (_renameModeCombo != null && _renameModeCombo.SelectedIndex < 0)
+            {
+                _renameModeCombo.SelectedIndex = 0;
+            }
+
             if (_applyDocPropsCheck != null && !_applyDocPropsCheck.Checked)
             {
                 _applyDocPropsCheck.Checked = true;
@@ -1308,11 +2722,82 @@ namespace TinyMRP.SolidWorksAddin.UI
             SetContextField(_contextSubfamilyText, defaults, "subfamily");
             SetContextField(_contextProjectText, defaults, "project");
             SetContextField(_contextSiteText, defaults, "site");
+            SetContextField(_quickContextTypeText, defaults, "type");
+            SetContextField(_quickContextFamilyText, defaults, "family");
+            SetContextField(_quickContextSubfamilyText, defaults, "subfamily");
+            SetContextField(_quickContextProjectText, defaults, "project");
+            SetContextField(_quickContextSiteText, defaults, "site");
+            SetContextField(_numberingContextTypeText, defaults, "type");
+            SetContextField(_numberingContextFamilyText, defaults, "family");
+            SetContextField(_numberingContextSubfamilyText, defaults, "subfamily");
+            SetContextField(_numberingContextProjectText, defaults, "project");
+            SetContextField(_numberingContextSiteText, defaults, "site");
 
             if (_schemeCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
             {
                 _schemeCombo.Tag = config.NumberingSchemeId;
                 SelectComboItem(_schemeCombo, config.NumberingSchemeId);
+            }
+            if (_quickSchemeCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
+            {
+                _quickSchemeCombo.Tag = config.NumberingSchemeId;
+                SelectComboItem(_quickSchemeCombo, config.NumberingSchemeId);
+            }
+            if (_numberingPresetCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
+            {
+                _numberingPresetCombo.Tag = config.NumberingSchemeId;
+                SelectComboItem(_numberingPresetCombo, config.NumberingSchemeId);
+            }
+            if (_advancedSchemeCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
+            {
+                _advancedSchemeCombo.Tag = config.NumberingSchemeId;
+                SelectComboItem(_advancedSchemeCombo, config.NumberingSchemeId);
+            }
+
+            if (_quickPartNumberPropText != null)
+            {
+                _quickPartNumberPropText.Text = config.PartNumberProperty ?? "PartNumber";
+            }
+            if (_quickRevisionPropText != null)
+            {
+                _quickRevisionPropText.Text = config.RevisionProperty ?? "Revision";
+            }
+            if (_quickDisplayCodePropText != null)
+            {
+                _quickDisplayCodePropText.Text = config.DisplayCodeProperty ?? "DisplayCode";
+            }
+            if (_partNumberPropText != null)
+            {
+                _partNumberPropText.Text = config.PartNumberProperty ?? "PartNumber";
+            }
+            if (_revisionPropText != null)
+            {
+                _revisionPropText.Text = config.RevisionProperty ?? "Revision";
+            }
+            if (_displayCodePropText != null)
+            {
+                _displayCodePropText.Text = config.DisplayCodeProperty ?? "DisplayCode";
+            }
+            if (_numberingPartNumberPropText != null)
+            {
+                _numberingPartNumberPropText.Text = config.PartNumberProperty ?? "PartNumber";
+            }
+            if (_numberingRevisionPropText != null)
+            {
+                _numberingRevisionPropText.Text = config.RevisionProperty ?? "Revision";
+            }
+            if (_numberingDisplayCodePropText != null)
+            {
+                _numberingDisplayCodePropText.Text = config.DisplayCodeProperty ?? "DisplayCode";
+            }
+
+            SelectApplyModeCombo(_quickApplyModeCombo, config.NumberingApplyMode);
+            SelectApplyModeCombo(_advancedApplyModeCombo, config.NumberingApplyMode);
+            SelectApplyModeCombo(_applyScopeCombo, config.NumberingApplyMode);
+
+            if (_advancedContextJsonText != null)
+            {
+                _advancedContextJsonText.Text = ContextToJson(defaults);
             }
 
             if (_existingPartNumberText != null && string.IsNullOrWhiteSpace(_existingPartNumberText.Text))
@@ -1322,6 +2807,14 @@ namespace TinyMRP.SolidWorksAddin.UI
                 {
                     _existingPartNumberText.Text = partNumber;
                 }
+            }
+
+            UpdateQuickContextVisibility(_numberingPresetCombo != null
+                ? _numberingPresetCombo.SelectedItem as NumberingSchemeDefinition
+                : (_quickSchemeCombo != null ? _quickSchemeCombo.SelectedItem as NumberingSchemeDefinition : null));
+            if (_renameModeCombo != null && _renameModeCombo.SelectedIndex < 0)
+            {
+                _renameModeCombo.SelectedIndex = 0;
             }
         }
 
@@ -1380,31 +2873,126 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             _loadedSchemes.Clear();
             _loadedSchemes.AddRange(schemes);
+            PopulateSchemeCombo(_schemeCombo, _loadedSchemes, true);
+            PopulateSchemeCombo(_advancedSchemeCombo, _loadedSchemes, false);
+            PopulateQuickSchemeCombo();
+        }
 
-            if (_schemeCombo != null)
+        private void PopulateSchemeCombo(ComboBox combo, List<NumberingSchemeDefinition> schemes, bool includeNew)
+        {
+            if (combo == null)
             {
-                _schemeCombo.Items.Clear();
-                _schemeCombo.Items.Add(new NumberingSchemeDefinition { Name = "(new scheme)", IsActive = true });
-                foreach (NumberingSchemeDefinition scheme in _loadedSchemes)
-                {
-                    _schemeCombo.Items.Add(scheme);
-                }
+                return;
+            }
 
-                string preferredId = _schemeCombo.Tag as string;
-                if (string.IsNullOrWhiteSpace(preferredId))
-                {
-                    preferredId = AddinContext.Config != null ? AddinContext.Config.NumberingSchemeId : string.Empty;
-                }
+            combo.Items.Clear();
+            if (includeNew)
+            {
+                combo.Items.Add(new NumberingSchemeDefinition { Name = "(new scheme)", IsActive = true });
+            }
 
-                if (!string.IsNullOrWhiteSpace(preferredId))
+            if (schemes != null)
+            {
+                foreach (NumberingSchemeDefinition scheme in schemes)
                 {
-                    SelectComboItem(_schemeCombo, preferredId);
-                }
-                else if (_schemeCombo.Items.Count > 0)
-                {
-                    _schemeCombo.SelectedIndex = 0;
+                    combo.Items.Add(scheme);
                 }
             }
+
+            string preferredId = combo.Tag as string;
+            if (string.IsNullOrWhiteSpace(preferredId))
+            {
+                preferredId = AddinContext.Config != null ? AddinContext.Config.NumberingSchemeId : string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredId))
+            {
+                SelectComboItem(combo, preferredId);
+            }
+            else if (combo.Items.Count > 0)
+            {
+                combo.SelectedIndex = 0;
+            }
+        }
+
+        private void PopulateQuickSchemeCombo()
+        {
+            if (_quickSchemeCombo == null && _numberingPresetCombo == null)
+            {
+                return;
+            }
+
+            List<NumberingSchemeDefinition> quickSchemes = GetQuickSchemes();
+            PopulatePresetCombo(_quickSchemeCombo, quickSchemes);
+            PopulatePresetCombo(_numberingPresetCombo, quickSchemes);
+
+            UpdateQuickContextVisibility(_numberingPresetCombo != null ? _numberingPresetCombo.SelectedItem as NumberingSchemeDefinition : _quickSchemeCombo.SelectedItem as NumberingSchemeDefinition);
+        }
+
+        private void PopulatePresetCombo(ComboBox combo, List<NumberingSchemeDefinition> quickSchemes)
+        {
+            if (combo == null)
+            {
+                return;
+            }
+
+            combo.Items.Clear();
+            foreach (NumberingSchemeDefinition scheme in quickSchemes)
+            {
+                combo.Items.Add(scheme);
+            }
+
+            string preferredId = combo.Tag as string;
+            if (string.IsNullOrWhiteSpace(preferredId))
+            {
+                preferredId = AddinContext.Config != null ? AddinContext.Config.NumberingSchemeId : string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(preferredId))
+            {
+                SelectComboItem(combo, preferredId);
+            }
+            else
+            {
+                NumberingSchemeDefinition recommended = null;
+                foreach (NumberingSchemeDefinition scheme in quickSchemes)
+                {
+                    if (scheme != null && scheme.IsRecommended)
+                    {
+                        recommended = scheme;
+                        break;
+                    }
+                }
+                if (recommended != null)
+                {
+                    SelectComboItem(combo, recommended.Id);
+                }
+                else if (combo.Items.Count > 0)
+                {
+                    combo.SelectedIndex = 0;
+                }
+            }
+        }
+
+        private List<NumberingSchemeDefinition> GetQuickSchemes()
+        {
+            var output = new List<NumberingSchemeDefinition>();
+            foreach (NumberingSchemeDefinition scheme in _loadedSchemes)
+            {
+                if (scheme == null)
+                {
+                    continue;
+                }
+                if (scheme.IsPreset && !string.Equals(scheme.Visibility, "advanced_only", StringComparison.OrdinalIgnoreCase))
+                {
+                    output.Add(scheme);
+                }
+            }
+            if (output.Count == 0)
+            {
+                output.AddRange(_loadedSchemes);
+            }
+            return output;
         }
 
         private void OnSchemeSelected(object sender, EventArgs e)
@@ -2107,6 +3695,191 @@ namespace TinyMRP.SolidWorksAddin.UI
             return context;
         }
 
+        private Dictionary<string, string> BuildContextFromQuickStart()
+        {
+            var context = new Dictionary<string, string>();
+            AddContextField(_quickContextTypeText, context, "type");
+            AddContextField(_quickContextFamilyText, context, "family");
+            AddContextField(_quickContextSubfamilyText, context, "subfamily");
+            AddContextField(_quickContextProjectText, context, "project");
+            AddContextField(_quickContextSiteText, context, "site");
+            return context;
+        }
+
+        private Dictionary<string, string> BuildContextFromNumberingQuick()
+        {
+            var context = new Dictionary<string, string>();
+            AddContextField(_numberingContextTypeText, context, "type");
+            AddContextField(_numberingContextFamilyText, context, "family");
+            AddContextField(_numberingContextSubfamilyText, context, "subfamily");
+            AddContextField(_numberingContextProjectText, context, "project");
+            AddContextField(_numberingContextSiteText, context, "site");
+            return context;
+        }
+
+        private Dictionary<string, string> BuildPropertyMapFromQuickStart()
+        {
+            var map = new Dictionary<string, string>();
+            map["part_number_prop"] = GetPreferredText(_quickPartNumberPropText, null, "PartNumber");
+            map["revision_prop"] = GetPreferredText(_quickRevisionPropText, null, "Revision");
+            map["display_code_prop"] = GetPreferredText(_quickDisplayCodePropText, null, "DisplayCode");
+            return map;
+        }
+
+        private Dictionary<string, string> BuildPropertyMapFromAdvanced()
+        {
+            var map = new Dictionary<string, string>();
+            map["part_number_prop"] = GetPreferredText(_partNumberPropText, null, "PartNumber");
+            map["revision_prop"] = GetPreferredText(_revisionPropText, null, "Revision");
+            map["display_code_prop"] = GetPreferredText(_displayCodePropText, null, "DisplayCode");
+            return map;
+        }
+
+        private UserSettingsDefinition BuildUserSettingsFromQuickStart()
+        {
+            string schemeId = GetSchemeIdFromCombo(_quickSchemeCombo);
+            var settings = new UserSettingsDefinition
+            {
+                DefaultSchemeId = schemeId,
+                DefaultContext = BuildContextFromQuickStart(),
+                PropertyMap = BuildPropertyMapFromQuickStart(),
+                ApplyMode = ApplyModeFromCombo(_quickApplyModeCombo),
+                ShowAdvanced = false
+            };
+            return settings;
+        }
+
+        private UserSettingsDefinition BuildUserSettingsFromAdvanced()
+        {
+            string schemeId = GetSchemeIdFromCombo(_advancedSchemeCombo);
+            Dictionary<string, string> context;
+            string error;
+            if (!TryParseContextJson(_advancedContextJsonText != null ? _advancedContextJsonText.Text : string.Empty, out context, out error))
+            {
+                MessageBox.Show("Invalid context JSON: " + error, "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return null;
+            }
+
+            var settings = new UserSettingsDefinition
+            {
+                DefaultSchemeId = schemeId,
+                DefaultContext = context,
+                PropertyMap = BuildPropertyMapFromAdvanced(),
+                ApplyMode = ApplyModeFromCombo(_advancedApplyModeCombo),
+                ShowAdvanced = true
+            };
+            return settings;
+        }
+
+        private void ApplyUserSettings(UserSettingsDefinition settings)
+        {
+            if (settings == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.DefaultSchemeId))
+            {
+                if (_quickSchemeCombo != null)
+                {
+                    _quickSchemeCombo.Tag = settings.DefaultSchemeId;
+                    SelectComboItem(_quickSchemeCombo, settings.DefaultSchemeId);
+                }
+                if (_numberingPresetCombo != null)
+                {
+                    _numberingPresetCombo.Tag = settings.DefaultSchemeId;
+                    SelectComboItem(_numberingPresetCombo, settings.DefaultSchemeId);
+                }
+                if (_advancedSchemeCombo != null)
+                {
+                    _advancedSchemeCombo.Tag = settings.DefaultSchemeId;
+                    SelectComboItem(_advancedSchemeCombo, settings.DefaultSchemeId);
+                }
+                if (_schemeCombo != null)
+                {
+                    _schemeCombo.Tag = settings.DefaultSchemeId;
+                    SelectComboItem(_schemeCombo, settings.DefaultSchemeId);
+                }
+            }
+
+            if (settings.DefaultContext != null)
+            {
+                SetContextField(_quickContextTypeText, settings.DefaultContext, "type");
+                SetContextField(_quickContextFamilyText, settings.DefaultContext, "family");
+                SetContextField(_quickContextSubfamilyText, settings.DefaultContext, "subfamily");
+                SetContextField(_quickContextProjectText, settings.DefaultContext, "project");
+                SetContextField(_quickContextSiteText, settings.DefaultContext, "site");
+                SetContextField(_numberingContextTypeText, settings.DefaultContext, "type");
+                SetContextField(_numberingContextFamilyText, settings.DefaultContext, "family");
+                SetContextField(_numberingContextSubfamilyText, settings.DefaultContext, "subfamily");
+                SetContextField(_numberingContextProjectText, settings.DefaultContext, "project");
+                SetContextField(_numberingContextSiteText, settings.DefaultContext, "site");
+
+                SetContextField(_contextTypeText, settings.DefaultContext, "type");
+                SetContextField(_contextFamilyText, settings.DefaultContext, "family");
+                SetContextField(_contextSubfamilyText, settings.DefaultContext, "subfamily");
+                SetContextField(_contextProjectText, settings.DefaultContext, "project");
+                SetContextField(_contextSiteText, settings.DefaultContext, "site");
+
+                if (_advancedContextJsonText != null)
+                {
+                    _advancedContextJsonText.Text = ContextToJson(settings.DefaultContext);
+                }
+            }
+
+            if (settings.PropertyMap != null)
+            {
+                settings.PropertyMap.TryGetValue("part_number_prop", out string partProp);
+                settings.PropertyMap.TryGetValue("revision_prop", out string revProp);
+                settings.PropertyMap.TryGetValue("display_code_prop", out string displayProp);
+
+                if (_quickPartNumberPropText != null) _quickPartNumberPropText.Text = partProp ?? _quickPartNumberPropText.Text;
+                if (_quickRevisionPropText != null) _quickRevisionPropText.Text = revProp ?? _quickRevisionPropText.Text;
+                if (_quickDisplayCodePropText != null) _quickDisplayCodePropText.Text = displayProp ?? _quickDisplayCodePropText.Text;
+                if (_numberingPartNumberPropText != null) _numberingPartNumberPropText.Text = partProp ?? _numberingPartNumberPropText.Text;
+                if (_numberingRevisionPropText != null) _numberingRevisionPropText.Text = revProp ?? _numberingRevisionPropText.Text;
+                if (_numberingDisplayCodePropText != null) _numberingDisplayCodePropText.Text = displayProp ?? _numberingDisplayCodePropText.Text;
+                if (_partNumberPropText != null) _partNumberPropText.Text = partProp ?? _partNumberPropText.Text;
+                if (_revisionPropText != null) _revisionPropText.Text = revProp ?? _revisionPropText.Text;
+                if (_displayCodePropText != null) _displayCodePropText.Text = displayProp ?? _displayCodePropText.Text;
+            }
+
+            SelectApplyModeCombo(_quickApplyModeCombo, settings.ApplyMode);
+            SelectApplyModeCombo(_advancedApplyModeCombo, settings.ApplyMode);
+            SelectApplyModeCombo(_applyScopeCombo, settings.ApplyMode);
+
+            UpdateQuickContextVisibility(_numberingPresetCombo != null
+                ? _numberingPresetCombo.SelectedItem as NumberingSchemeDefinition
+                : (_quickSchemeCombo != null ? _quickSchemeCombo.SelectedItem as NumberingSchemeDefinition : null));
+
+            TinyMrpConfig config = AddinContext.Config;
+            if (config != null)
+            {
+                if (!string.IsNullOrWhiteSpace(settings.DefaultSchemeId))
+                {
+                    config.NumberingSchemeId = settings.DefaultSchemeId;
+                }
+                config.NumberingContextDefaults = BuildContextDefaultsString();
+                if (settings.PropertyMap != null)
+                {
+                    if (settings.PropertyMap.TryGetValue("part_number_prop", out string partProp))
+                    {
+                        config.PartNumberProperty = partProp;
+                    }
+                    if (settings.PropertyMap.TryGetValue("revision_prop", out string revProp))
+                    {
+                        config.RevisionProperty = revProp;
+                    }
+                    if (settings.PropertyMap.TryGetValue("display_code_prop", out string displayProp))
+                    {
+                        config.DisplayCodeProperty = displayProp;
+                    }
+                }
+                config.NumberingApplyMode = settings.ApplyMode ?? config.NumberingApplyMode;
+            }
+        }
+
         private void SetContextField(TextBox textBox, Dictionary<string, string> context, string key)
         {
             if (textBox == null || context == null)
@@ -2138,11 +3911,11 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             return string.Format(
                 "type={0};family={1};subfamily={2};project={3};site={4}",
-                _contextTypeText != null ? _contextTypeText.Text.Trim() : string.Empty,
-                _contextFamilyText != null ? _contextFamilyText.Text.Trim() : string.Empty,
-                _contextSubfamilyText != null ? _contextSubfamilyText.Text.Trim() : string.Empty,
-                _contextProjectText != null ? _contextProjectText.Text.Trim() : string.Empty,
-                _contextSiteText != null ? _contextSiteText.Text.Trim() : string.Empty);
+                GetContextValue(_quickContextTypeText, _contextTypeText),
+                GetContextValue(_quickContextFamilyText, _contextFamilyText),
+                GetContextValue(_quickContextSubfamilyText, _contextSubfamilyText),
+                GetContextValue(_quickContextProjectText, _contextProjectText),
+                GetContextValue(_quickContextSiteText, _contextSiteText));
         }
 
         private Dictionary<string, string> ParseContextDefaults(string data)
@@ -2237,6 +4010,13 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return false;
             }
 
+            string partProp = GetPreferredText(_numberingPartNumberPropText ?? _quickPartNumberPropText, _partNumberPropText,
+                AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber");
+            string revProp = GetPreferredText(_numberingRevisionPropText ?? _quickRevisionPropText, _revisionPropText,
+                AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision");
+            string displayProp = GetPreferredText(_numberingDisplayCodePropText ?? _quickDisplayCodePropText, _displayCodePropText,
+                AddinContext.Config != null ? AddinContext.Config.DisplayCodeProperty : "DisplayCode");
+
             SolidWorksPropertyWriter.ApplyNumbering(
                 info.Model,
                 configs,
@@ -2244,7 +4024,10 @@ namespace TinyMRP.SolidWorksAddin.UI
                 partNumber,
                 revision,
                 displayCode,
-                schemeId);
+                schemeId,
+                partProp,
+                revProp,
+                displayProp);
 
             if (info.StartedFromDrawing)
             {
@@ -2369,10 +4152,15 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return string.Empty;
             }
 
-            string value = GetCustomProperty(info.Model, info.ActiveConfiguration, "PartNumber");
+            string propName = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
+            if (string.IsNullOrWhiteSpace(propName))
+            {
+                propName = "PartNumber";
+            }
+            string value = GetCustomProperty(info.Model, info.ActiveConfiguration, propName);
             if (string.IsNullOrWhiteSpace(value))
             {
-                value = GetCustomProperty(info.Model, string.Empty, "PartNumber");
+                value = GetCustomProperty(info.Model, string.Empty, propName);
             }
 
             if (info.StartedFromDrawing)
@@ -2449,12 +4237,72 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             string message = response.ErrorMessage ?? "Request failed.";
+            string details = string.Empty;
             if (response.ErrorDetails.Count > 0)
             {
-                message += "\n" + string.Join("\n", response.ErrorDetails.ToArray());
+                details = string.Join("\n", response.ErrorDetails.ToArray());
             }
 
-            MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            AddinLogger.Write(title + ": " + message);
+            if (!string.IsNullOrWhiteSpace(details))
+            {
+                AddinLogger.Write(details);
+            }
+            ShowMessageWithDetails(title, message, details);
+        }
+
+        private void ShowMessageWithDetails(string title, string message, string details)
+        {
+            if (string.IsNullOrWhiteSpace(details))
+            {
+                MessageBox.Show(message, title, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            using (var dialog = new Form())
+            using (var copyButton = new Button())
+            using (var closeButton = new Button())
+            using (var textBox = new TextBox())
+            using (var messageLabel = new Label())
+            {
+                dialog.Text = title;
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.Size = new Size(520, 360);
+                dialog.MinimumSize = new Size(420, 300);
+
+                messageLabel.Text = message;
+                messageLabel.Dock = DockStyle.Top;
+                messageLabel.AutoSize = false;
+                messageLabel.Height = 50;
+                messageLabel.Padding = new Padding(10, 10, 10, 0);
+
+                textBox.Multiline = true;
+                textBox.ReadOnly = true;
+                textBox.ScrollBars = ScrollBars.Vertical;
+                textBox.Dock = DockStyle.Fill;
+                textBox.Text = details;
+
+                var buttonPanel = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 44,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(10, 6, 10, 6)
+                };
+                copyButton.Text = "Copy debug details";
+                copyButton.AutoSize = true;
+                copyButton.Click += (_, __) => Clipboard.SetText(details ?? string.Empty);
+                closeButton.Text = "Close";
+                closeButton.AutoSize = true;
+                closeButton.Click += (_, __) => dialog.Close();
+                buttonPanel.Controls.Add(closeButton);
+                buttonPanel.Controls.Add(copyButton);
+
+                dialog.Controls.Add(textBox);
+                dialog.Controls.Add(buttonPanel);
+                dialog.Controls.Add(messageLabel);
+                dialog.ShowDialog(this);
+            }
         }
 
         private void SetDeliverableChecks(bool value)
@@ -2486,6 +4334,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         private void Log(string message)
         {
             SetStatus(message);
+            AddinLogger.Write(message);
         }
 
         private void ResetProgress(ProgressBar bar, Label label, string actionName)
@@ -2580,7 +4429,23 @@ namespace TinyMRP.SolidWorksAddin.UI
             return panel;
         }
 
-        private static void AddSection(TableLayoutPanel panel, Control control)
+        private static TableLayoutPanel CreateStackPanel()
+        {
+            var panel = new TableLayoutPanel
+            {
+                ColumnCount = 1,
+                RowCount = 0,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top,
+                MinimumSize = new Size(240, 0),
+                GrowStyle = TableLayoutPanelGrowStyle.AddRows
+            };
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            return panel;
+        }
+
+        private static void AddStackRow(TableLayoutPanel panel, Control control)
         {
             if (panel == null || control == null)
             {
@@ -2588,6 +4453,23 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             control.Dock = DockStyle.Top;
+            control.Margin = new Padding(0, 0, 0, 6);
+            control.Anchor = AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Top;
+
+            int row = panel.RowCount;
+            panel.RowCount++;
+            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            panel.Controls.Add(control, 0, row);
+        }
+
+        private static void AddSection(TableLayoutPanel panel, Control control)
+        {
+            if (panel == null || control == null)
+            {
+                return;
+            }
+
+            control.Dock = DockStyle.Fill;
             control.Margin = new Padding(0, 0, 0, 8);
 
             int row = panel.RowCount;
@@ -2606,12 +4488,91 @@ namespace TinyMRP.SolidWorksAddin.UI
                 Padding = new Padding(8)
             };
 
-            if (content.Dock == DockStyle.None)
+            if (content.Dock == DockStyle.None || content.Dock == DockStyle.Fill)
             {
                 content.Dock = DockStyle.Top;
             }
             box.Controls.Add(content);
             return box;
+        }
+
+        private static Control CreateCollapsibleSection(string title, Control content, bool expanded)
+        {
+            var container = new Panel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top
+            };
+
+            var header = new Button
+            {
+                Text = (expanded ? "v " : "> ") + title,
+                AutoSize = true,
+                Dock = DockStyle.Top,
+                FlatStyle = FlatStyle.Flat,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Height = 24
+            };
+            header.FlatAppearance.BorderSize = 0;
+
+            var body = new Panel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top,
+                Visible = expanded,
+                Padding = new Padding(6, 4, 6, 4)
+            };
+
+            if (content.Dock == DockStyle.None)
+            {
+                content.Dock = DockStyle.Top;
+            }
+            body.Controls.Add(content);
+
+            header.Click += (_, __) =>
+            {
+                body.Visible = !body.Visible;
+                header.Text = (body.Visible ? "v " : "> ") + title;
+            };
+
+            container.Controls.Add(body);
+            container.Controls.Add(header);
+            return container;
+        }
+
+        private static Button CreateCommandButton(string text, EventHandler onClick)
+        {
+            var btn = new Button
+            {
+                Text = text,
+                AutoSize = true,
+                Height = 32,
+                Padding = new Padding(6, 4, 6, 4),
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold, GraphicsUnit.Point)
+            };
+            if (onClick != null)
+            {
+                btn.Click += onClick;
+            }
+            return btn;
+        }
+
+        private static TextBox CreateReadOnlyPreview()
+        {
+            return new TextBox
+            {
+                ReadOnly = true,
+                TabStop = false,
+                Width = 220,
+                MinimumSize = new Size(220, 24),
+                Height = 24,
+                Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = SystemColors.ControlLight,
+                Text = string.Empty
+            };
         }
 
         private static void AddProgressRow(TableLayoutPanel table, string labelText, ProgressBar bar, Label valueLabel)
@@ -2647,7 +4608,9 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 ColumnCount = 2,
                 AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Fill,
+                MinimumSize = new Size(240, 0)
             };
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
             table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));

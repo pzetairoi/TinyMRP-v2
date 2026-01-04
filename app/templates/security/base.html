@@ -115,6 +115,7 @@
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navAdmin">
                   <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Dashboard</a></li>
+                  <li><a class="dropdown-item" href="/ui/admin/addin">Add-in Admin</a></li>
                   <li><hr class="dropdown-divider"></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
@@ -144,6 +145,8 @@
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navUser">
                   <li><a class="dropdown-item" href="{{ url_for('main.app_home') }}">My Home</a></li>
+                  <li><a class="dropdown-item" href="/ui/addin/settings">Add-in Settings</a></li>
+                  <li><a class="dropdown-item" href="/ui/addin/tokens">API Tokens</a></li>
                   {# later: add profile/change password route here #}
                   <li><hr class="dropdown-divider"></li>
                   <li>

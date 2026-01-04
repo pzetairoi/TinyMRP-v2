@@ -65,6 +65,35 @@ namespace TinyMRP.SolidWorksAddin.Services
             return Send("POST", "/api/numbering/preview", payload);
         }
 
+        public ApiResponse AuthCheck()
+        {
+            return Send("GET", "/api/auth/check", null);
+        }
+
+        public ApiResponse GetUserSettings(out UserSettingsDefinition settings)
+        {
+            settings = null;
+            ApiResponse response = Send("GET", "/api/me/settings", null);
+            if (!response.Ok)
+            {
+                return response;
+            }
+
+            Dictionary<string, object> dict = response.Data;
+            Dictionary<string, object> settingsDict = NumberingJson.GetDict(dict, "settings");
+            if (settingsDict != null)
+            {
+                settings = UserSettingsDefinition.FromDict(settingsDict);
+            }
+            return response;
+        }
+
+        public ApiResponse SaveUserSettings(UserSettingsDefinition settings)
+        {
+            var payload = settings != null ? settings.ToPayload() : new Dictionary<string, object>();
+            return Send("PUT", "/api/me/settings", payload);
+        }
+
         public ApiResponse Allocate(string schemeId, Dictionary<string, string> context, string action, string existingPartNumber, bool createPart, Dictionary<string, object> cadRef)
         {
             var payload = new Dictionary<string, object>
