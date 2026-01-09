@@ -214,18 +214,20 @@ namespace TinyMRP.SolidWorksAddin.Services
                         Path.GetDirectoryName(exportTag) ?? pubFolder,
                         zipFolderName + "_zip");
                     string innerFolder = Path.Combine(zipRoot, zipFolderName);
+                    string bomInZip = Path.Combine(innerFolder, Path.GetFileName(bomFile));
+                    string flatInZip = Path.Combine(innerFolder, Path.GetFileName(flatFile));
 
                     TryDeleteDirectory(zipRoot);
                     Directory.CreateDirectory(innerFolder);
-                    MoveFileIfExists(bomFile, Path.Combine(innerFolder, Path.GetFileName(bomFile)));
-                    MoveFileIfExists(flatFile, Path.Combine(innerFolder, Path.GetFileName(flatFile)));
+                    MoveFileIfExists(bomFile, bomInZip);
+                    MoveFileIfExists(flatFile, flatInZip);
 
                     if (File.Exists(zipPath))
                     {
                         File.Delete(zipPath);
                     }
 
-                    ZipFile.CreateFromDirectory(zipRoot, zipPath);
+                    CreateZipWithFolder(zipPath, zipFolderName, bomInZip, flatInZip);
                     TryDeleteDirectory(zipRoot);
                 }
                 finally
@@ -2499,6 +2501,35 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (_cancelRequested)
             {
                 throw new OperationCanceledException();
+            }
+        }
+
+        private void CreateZipWithFolder(string zipPath, string folderName, params string[] filePaths)
+        {
+            string normalizedFolder = (folderName ?? string.Empty).Trim();
+            normalizedFolder = normalizedFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            using (var stream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, false, Encoding.UTF8))
+            {
+                if (!string.IsNullOrWhiteSpace(normalizedFolder))
+                {
+                    archive.CreateEntry(normalizedFolder + "/");
+                }
+
+                foreach (string filePath in filePaths)
+                {
+                    if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+                    {
+                        continue;
+                    }
+
+                    string entryName = string.IsNullOrWhiteSpace(normalizedFolder)
+                        ? Path.GetFileName(filePath)
+                        : normalizedFolder + "/" + Path.GetFileName(filePath);
+
+                    archive.CreateEntryFromFile(filePath, entryName, CompressionLevel.Optimal);
+                }
             }
         }
 

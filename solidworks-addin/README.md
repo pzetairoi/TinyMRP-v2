@@ -31,7 +31,7 @@ Output DLL:
 ## Configuration
 
 - Primary config file: `%PROGRAMDATA%\TinyMRP\TinyMRP_config.txt`.
-- Read order: ProgramData → install folder → `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
+- Read order: ProgramData -> install folder -> `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`.
 - If ProgramData is not writable, the add-in falls back to LocalAppData.
 - Relative paths in the config are resolved from the add-in directory.
 
@@ -46,6 +46,8 @@ Key settings in `TinyMRP_config.txt`:
 - `NumberingContextDefaults` - default context fields for numbering
 - `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty` - custom property names
 - `NumberingApplyMode` - default apply mode (active_config|all_configs|selected_configs)
+- `AutoAssignGenericNames` - auto-assign for Part1/Assembly1 names (True|False)
+- `AutoAssignAnyNames` - allow auto-assign for any name (dangerous)
 
 ## Task pane tabs
 
@@ -65,7 +67,7 @@ Key settings in `TinyMRP_config.txt`:
 ## Add-in Quick Start
 
 1. Create an API token in the web UI (`/ui/addin/tokens`).
-2. Open the Configuration tab → **Quick Start**.
+2. Open the Configuration tab -> **Quick Start**.
 3. Paste Backend URL + Auth token, then **Test connection**.
 4. Pick a preset scheme, enter minimal context, and **Save settings**.
 

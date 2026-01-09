@@ -23,6 +23,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         public string RevisionProperty { get; set; }
         public string DisplayCodeProperty { get; set; }
         public string NumberingApplyMode { get; set; }
+        public bool AutoAssignGenericNames { get; set; }
+        public bool AutoAssignAnyNames { get; set; }
         public string AddinDirectory { get; private set; }
         public string ConfigPath { get; private set; }
 
@@ -83,6 +85,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             RevisionProperty = "Revision";
             DisplayCodeProperty = "DisplayCode";
             NumberingApplyMode = "active_config";
+            AutoAssignGenericNames = true;
+            AutoAssignAnyNames = false;
         }
 
         private void Apply(string key, string value)
@@ -134,6 +138,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                 case "NumberingApplyMode":
                     NumberingApplyMode = value;
                     break;
+                case "AutoAssignGenericNames":
+                    AutoAssignGenericNames = ParseBool(value, AutoAssignGenericNames);
+                    break;
+                case "AutoAssignAnyNames":
+                    AutoAssignAnyNames = ParseBool(value, AutoAssignAnyNames);
+                    break;
             }
         }
 
@@ -180,6 +190,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 "RevisionProperty=" + (RevisionProperty ?? "Revision"),
                 "DisplayCodeProperty=" + (DisplayCodeProperty ?? "DisplayCode"),
                 "NumberingApplyMode=" + (NumberingApplyMode ?? "active_config"),
+                "AutoAssignGenericNames=" + (AutoAssignGenericNames ? "True" : "False"),
+                "AutoAssignAnyNames=" + (AutoAssignAnyNames ? "True" : "False"),
             };
 
             try
@@ -222,19 +234,76 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private static string SelectConfigPath(string machinePath, string addinPath, string userPath)
         {
-            if (File.Exists(machinePath))
+            bool machineExists = File.Exists(machinePath);
+            bool userExists = File.Exists(userPath);
+            bool addinExists = File.Exists(addinPath);
+
+            if (machineExists)
             {
-                return machinePath;
+                if (CanWriteToPath(machinePath) || !userExists)
+                {
+                    return machinePath;
+                }
             }
-            if (File.Exists(addinPath))
+
+            if (addinExists)
             {
-                return addinPath;
+                if (CanWriteToPath(addinPath) || !userExists)
+                {
+                    return addinPath;
+                }
             }
-            if (File.Exists(userPath))
+
+            if (userExists)
             {
                 return userPath;
             }
+
             return machinePath;
+        }
+
+        private static bool CanWriteToPath(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    using (new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read))
+                    {
+                    }
+                    return true;
+                }
+
+                string dir = Path.GetDirectoryName(path);
+                return CanWriteToDirectory(dir);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool CanWriteToDirectory(string dir)
+        {
+            if (string.IsNullOrWhiteSpace(dir))
+            {
+                return false;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(dir);
+                string probe = Path.Combine(dir, ".tinymrp_write_test");
+                using (new FileStream(probe, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                }
+                File.Delete(probe);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private string ProtectToken(string token)
