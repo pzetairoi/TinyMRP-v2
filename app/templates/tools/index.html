@@ -5,6 +5,27 @@
   <div class="col-lg-4">
     <div class="card shadow-sm mb-3">
       <div class="card-body">
+        <h5 class="card-title">SolidWorks Add-in</h5>
+        <p class="text-muted">Download the latest installer build.</p>
+        {% if addin_files %}
+        <div class="d-grid gap-2 mb-2">
+          <a class="btn btn-sm btn-primary" href="{{ url_for('tools.addin_latest') }}">Download latest</a>
+        </div>
+        <ul class="list-unstyled small mb-0">
+          {% for f in addin_files %}
+          <li>
+            <a href="{{ f.url }}">{{ f.name }}</a>
+            <span class="text-muted">({{ f.modified }})</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted small mb-0">Place installers in <code>solidworks-addin/Windows Installer latest</code> to list them here.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
         <h5 class="card-title">SolidWorks Setup</h5>
         <p class="text-muted">Templates, macros and client configuration.</p>
         {% if files %}
@@ -44,4 +65,3 @@
   </div>
 </div>
 {% endblock %}
-
