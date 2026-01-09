@@ -72,6 +72,10 @@ export default function AddinSettingsPage() {
   const [applyMode, setApplyMode] = useState('active_config')
   const [activeTab, setActiveTab] = useState<'quick' | 'advanced'>('quick')
   const [preview, setPreview] = useState('')
+  const [allocateResult, setAllocateResult] = useState('')
+  const [revisionAction, setRevisionAction] = useState('new_part')
+  const [existingPartNumber, setExistingPartNumber] = useState('')
+  const [createPart, setCreatePart] = useState(true)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -142,6 +146,7 @@ export default function AddinSettingsPage() {
   async function previewNext() {
     setMessage(null)
     setError(null)
+    setAllocateResult('')
     if (!schemeId) {
       setError('Select a scheme first.')
       return
@@ -160,6 +165,43 @@ export default function AddinSettingsPage() {
       )
     } catch (err) {
       setError((err as ApiError).message || 'Preview failed.')
+    }
+  }
+
+  async function allocateNumber() {
+    setMessage(null)
+    setError(null)
+    setAllocateResult('')
+    if (!schemeId) {
+      setError('Select a scheme first.')
+      return
+    }
+    if (revisionAction !== 'new_part' && !existingPartNumber.trim()) {
+      setError('Existing part number is required for revision actions.')
+      return
+    }
+    try {
+      const resp = await apiFetch<{
+        part_number: string
+        revision: string
+        display_code: string
+        counter_key: string
+      }>('/api/numbering/allocate', {
+        method: 'POST',
+        body: JSON.stringify({
+          scheme_id: schemeId,
+          context: cleanContext(context),
+          requested_revision_action: revisionAction,
+          existing_part_number: existingPartNumber.trim(),
+          create_part_if_missing: createPart,
+        }),
+      })
+      const display = [resp.part_number, resp.revision ? `rev ${resp.revision}` : '', resp.display_code || '']
+        .filter(Boolean)
+        .join(' ')
+      setAllocateResult(`Allocated: ${display}`)
+    } catch (err) {
+      setError((err as ApiError).message || 'Allocation failed.')
     }
   }
 
@@ -366,6 +408,48 @@ export default function AddinSettingsPage() {
               Preview Next
             </button>
           </div>
+
+          <hr className="my-4" />
+          <h6>Allocate Part Number</h6>
+          <div className="row g-2">
+            <div className="col-md-4">
+              <label className="form-label small">Revision action</label>
+              <select className="form-select" value={revisionAction} onChange={(e) => setRevisionAction(e.target.value)}>
+                <option value="new_part">new_part</option>
+                <option value="revise_existing">revise_existing</option>
+                <option value="keep_existing">keep_existing</option>
+              </select>
+            </div>
+            <div className="col-md-4">
+              <label className="form-label small">Existing part number</label>
+              <input
+                className="form-control"
+                value={existingPartNumber}
+                onChange={(e) => setExistingPartNumber(e.target.value)}
+                disabled={revisionAction === 'new_part'}
+              />
+            </div>
+            <div className="col-md-4 d-flex align-items-end">
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  checked={createPart}
+                  onChange={(e) => setCreatePart(e.target.checked)}
+                  id="createPartCheck"
+                />
+                <label className="form-check-label" htmlFor="createPartCheck">
+                  Create/update part record
+                </label>
+              </div>
+            </div>
+          </div>
+          <div className="d-flex gap-2 flex-wrap mt-2">
+            <button className="btn btn-outline-primary" onClick={allocateNumber}>
+              Allocate
+            </button>
+          </div>
+          {allocateResult && <div className="mt-3 alert alert-secondary">{allocateResult}</div>}
         </div>
       )}
     </div>

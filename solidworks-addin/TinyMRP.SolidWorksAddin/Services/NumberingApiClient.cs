@@ -55,6 +55,15 @@ namespace TinyMRP.SolidWorksAddin.Services
             return Send("PUT", "/api/numbering/schemes/" + scheme.Id, scheme.ToPayload());
         }
 
+        public ApiResponse DeleteScheme(string schemeId)
+        {
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                return ApiResponse.Failure("missing_scheme", "Scheme id is required.");
+            }
+            return Send("DELETE", "/api/numbering/schemes/" + schemeId, null);
+        }
+
         public ApiResponse Preview(string schemeId, Dictionary<string, string> context)
         {
             var payload = new Dictionary<string, object>

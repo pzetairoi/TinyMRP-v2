@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -97,6 +98,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         private CheckBox _renameKeepBackupCheck;
         private CheckBox _renameChildrenCheck;
         private Button _renameDryRunButton;
+        private CheckBox _autoAssignGenericCheck;
+        private CheckBox _autoAssignAnyNameCheck;
         private TextBox _numberingPartNumberPropText;
         private TextBox _numberingRevisionPropText;
         private TextBox _numberingDisplayCodePropText;
@@ -115,6 +118,9 @@ namespace TinyMRP.SolidWorksAddin.UI
         private TextBox _schemeNameText;
         private TextBox _schemeDescriptionText;
         private CheckBox _schemeActiveCheck;
+        private CheckBox _schemePresetCheck;
+        private CheckBox _schemeRecommendedCheck;
+        private ComboBox _schemeVisibilityCombo;
         private ComboBox _presetCombo;
         private TextBox _separatorText;
         private ComboBox _scopeModeCombo;
@@ -156,6 +162,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         private NumberingApiClient _numberingClient;
         private NumberingSchemeDefinition _currentScheme;
         private readonly List<NumberingSchemeDefinition> _loadedSchemes = new List<NumberingSchemeDefinition>();
+        private readonly HashSet<string> _autoAssignedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public MainPaneControl()
         {
@@ -570,6 +577,13 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddStackRow(quickWrap, quickLayout);
             AddStackRow(quickWrap, quickContextLayout);
             AddStackRow(quickWrap, CreateGroupBox("Preview", previewBox));
+            _autoAssignGenericCheck = new CheckBox
+            {
+                Text = "Auto-assign for Part1/Assembly1 names",
+                AutoSize = true
+            };
+            _autoAssignGenericCheck.CheckedChanged += (_, __) => MaybeAutoAssignNumbering(true);
+            AddStackRow(quickWrap, _autoAssignGenericCheck);
             AddStackRow(quickWrap, _numberingStatusLabel);
             AddSection(panel, CreateGroupBox("Quick setup", quickWrap));
 
@@ -609,6 +623,13 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(schemeLayout, "Description", _schemeDescriptionText);
             _schemeActiveCheck = new CheckBox { Text = "Active", AutoSize = true };
             AddField(schemeLayout, "Status", _schemeActiveCheck);
+            _schemePresetCheck = new CheckBox { Text = "Preset", AutoSize = true };
+            AddField(schemeLayout, "Preset", _schemePresetCheck);
+            _schemeRecommendedCheck = new CheckBox { Text = "Recommended", AutoSize = true };
+            AddField(schemeLayout, "Recommended", _schemeRecommendedCheck);
+            _schemeVisibilityCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
+            _schemeVisibilityCombo.Items.AddRange(new object[] { "quickstart", "advanced_only" });
+            AddField(schemeLayout, "Visibility", _schemeVisibilityCombo);
             AddSection(panel, CreateGroupBox("Scheme", schemeLayout));
 
             var contextLayout = CreateFormLayout();
@@ -696,9 +717,12 @@ namespace TinyMRP.SolidWorksAddin.UI
                 Dock = DockStyle.Fill
             };
             _renameChildrenCheck = new CheckBox { Text = "Rename children in assemblies", AutoSize = true };
+            _autoAssignAnyNameCheck = new CheckBox { Text = "Allow auto-assign for any name (dangerous)", AutoSize = true };
+            _autoAssignAnyNameCheck.CheckedChanged += (_, __) => MaybeAutoAssignNumbering(true);
             _renameDryRunButton = new Button { Text = "Dry run rename", AutoSize = true };
             _renameDryRunButton.Click += OnRenameDryRun;
             renameAdvancedWrap.Controls.Add(_renameChildrenCheck);
+            renameAdvancedWrap.Controls.Add(_autoAssignAnyNameCheck);
             renameAdvancedWrap.Controls.Add(_renameDryRunButton);
             AddSection(panel, CreateGroupBox("Rename (advanced)", renameAdvancedWrap));
 
@@ -896,9 +920,12 @@ namespace TinyMRP.SolidWorksAddin.UI
             btnValidate.Click += OnValidateScheme;
             var btnSaveScheme = new Button { Text = "Save scheme", AutoSize = true };
             btnSaveScheme.Click += OnSaveScheme;
+            var btnDeactivate = new Button { Text = "Deactivate", AutoSize = true };
+            btnDeactivate.Click += OnDeactivateScheme;
             _validationResultLabel = new Label { AutoSize = true, Text = "" };
             schemeActions.Controls.Add(btnValidate);
             schemeActions.Controls.Add(btnSaveScheme);
+            schemeActions.Controls.Add(btnDeactivate);
             schemeActions.Controls.Add(_validationResultLabel);
             AddSection(panel, CreateGroupBox("Scheme actions", schemeActions));
 
@@ -1738,6 +1765,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             config.RevisionProperty = GetPreferredText(_quickRevisionPropText, _revisionPropText, "Revision");
             config.DisplayCodeProperty = GetPreferredText(_quickDisplayCodePropText, _displayCodePropText, "DisplayCode");
             config.NumberingApplyMode = ApplyModeFromCombo(_quickApplyModeCombo ?? _advancedApplyModeCombo);
+            config.AutoAssignGenericNames = _autoAssignGenericCheck != null && _autoAssignGenericCheck.Checked;
+            config.AutoAssignAnyNames = _autoAssignAnyNameCheck != null && _autoAssignAnyNameCheck.Checked;
             config.ResolvePaths();
         }
 
@@ -1909,7 +1938,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             ApiResponse response = client.AuthCheck();
             if (!response.Ok)
             {
-                ShowApiError("Connection failed.", response);
+                HandleApiError("Connection failed.", response, true);
                 return;
             }
 
@@ -1917,6 +1946,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             string email = userDict != null ? NumberingJson.GetString(userDict, "email") : string.Empty;
             MessageBox.Show("Connection OK" + (string.IsNullOrWhiteSpace(email) ? "" : " (" + email + ")") + ".",
                 "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            SetNumberingStatus("Connection OK.", Color.DarkGreen);
         }
 
         private void OnQuickDiagnostics(object sender, EventArgs e)
@@ -2132,6 +2162,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 SyncSchemeSelection(_numberingPresetCombo, _quickSchemeCombo);
                 SyncSchemeSelection(_numberingPresetCombo, _advancedSchemeCombo);
             }
+            MaybeAutoAssignNumbering(false);
         }
 
         private void OnNumberingPreview(object sender, EventArgs e)
@@ -2392,6 +2423,210 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             SetNumberingStatus(result.Message, Color.DarkGreen);
+        }
+
+        private void MaybeAutoAssignNumbering(bool userTriggered)
+        {
+            if (_autoAssignGenericCheck == null || !_autoAssignGenericCheck.Checked)
+            {
+                return;
+            }
+
+            ISldWorks app = AddinContext.SldWorks;
+            if (app == null)
+            {
+                return;
+            }
+
+            ActiveModelInfo info;
+            string error;
+            if (!SolidWorksDocumentHelper.TryGetActiveModel(app, out info, out error))
+            {
+                if (userTriggered)
+                {
+                    SetNumberingStatus(error, Color.Maroon);
+                }
+                return;
+            }
+
+            if (!ShouldAutoAssignForModel(info.Model))
+            {
+                return;
+            }
+
+            string key = GetModelKey(info.Model);
+            if (_autoAssignedModels.Contains(key))
+            {
+                return;
+            }
+
+            string existing = TryReadPartNumberFromModel(info);
+            if (!string.IsNullOrWhiteSpace(existing))
+            {
+                return;
+            }
+
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                SetNumberingStatus("Backend URL is not configured.", Color.Maroon);
+                return;
+            }
+
+            string schemeId = GetSchemeIdFromCombo(_numberingPresetCombo);
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                schemeId = GetDefaultSchemeId();
+            }
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
+                return;
+            }
+
+            ApiResponse response = client.Allocate(
+                schemeId,
+                BuildContextFromNumberingQuick(),
+                "new_part",
+                string.Empty,
+                true,
+                BuildCadRef(info));
+
+            if (!response.Ok)
+            {
+                HandleApiError("Auto-assign failed.", response, false);
+                return;
+            }
+
+            string partNumber = NumberingJson.GetString(response.Data, "part_number");
+            string revision = NumberingJson.GetString(response.Data, "revision");
+            string display = NumberingJson.GetString(response.Data, "display_code");
+            if (string.IsNullOrWhiteSpace(display))
+            {
+                display = BuildDisplayCode(partNumber, revision);
+            }
+
+            if (string.IsNullOrWhiteSpace(partNumber))
+            {
+                SetNumberingStatus("Auto-assign returned no part number.", Color.Maroon);
+                return;
+            }
+
+            UpdateQuickPreviewFields(partNumber, revision, display);
+
+            if (!ApplyNumberingToModelQuick(info, partNumber, revision, display, schemeId))
+            {
+                SetNumberingStatus("Auto-assign failed to apply properties.", Color.Maroon);
+                return;
+            }
+
+            _autoAssignedModels.Add(key);
+            SetNumberingStatus("Auto-assigned part number.", Color.DarkGreen);
+            TryRenameAfterAllocation(info, partNumber, revision, false);
+        }
+
+        private bool ShouldAutoAssignForModel(ModelDoc2 model)
+        {
+            if (model == null)
+            {
+                return false;
+            }
+
+            bool allowAny = _autoAssignAnyNameCheck != null && _autoAssignAnyNameCheck.Checked;
+            if (allowAny)
+            {
+                return true;
+            }
+
+            return IsGenericSolidWorksName(model.GetTitle());
+        }
+
+        private static string GetModelKey(ModelDoc2 model)
+        {
+            if (model == null)
+            {
+                return string.Empty;
+            }
+
+            string path = model.GetPathName();
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                return path;
+            }
+            return model.GetTitle() ?? string.Empty;
+        }
+
+        private static bool IsGenericSolidWorksName(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return false;
+            }
+
+            string name = Path.GetFileNameWithoutExtension(title).Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            return HasNumericSuffix(name, "Part") ||
+                   HasNumericSuffix(name, "Assembly") ||
+                   HasNumericSuffix(name, "Drawing");
+        }
+
+        private static bool HasNumericSuffix(string name, string prefix)
+        {
+            if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string suffix = name.Substring(prefix.Length);
+            if (suffix.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (char ch in suffix)
+            {
+                if (!char.IsDigit(ch))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private string TryReadPartNumberFromModel(ActiveModelInfo info)
+        {
+            if (info == null || info.Model == null)
+            {
+                return string.Empty;
+            }
+
+            string propName = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
+            if (string.IsNullOrWhiteSpace(propName))
+            {
+                propName = "PartNumber";
+            }
+
+            string value = GetCustomProperty(info.Model, info.ActiveConfiguration, propName);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                value = GetCustomProperty(info.Model, string.Empty, propName);
+            }
+
+            if (info.StartedFromDrawing)
+            {
+                ISldWorks app = AddinContext.SldWorks;
+                if (app != null)
+                {
+                    app.ActivateDoc(info.StartTitle);
+                }
+            }
+
+            return value ?? string.Empty;
         }
 
         private void RenameAssemblyChildren(AssemblyDoc assembly, RenameOptions options)
@@ -2705,7 +2940,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (config != null &&
                 (!string.IsNullOrWhiteSpace(config.BackendUrl) || !string.IsNullOrWhiteSpace(config.WebLink)))
             {
-                OnRefreshSchemes(this, EventArgs.Empty);
+                RefreshSchemes(false);
             }
         }
 
@@ -2795,6 +3030,15 @@ namespace TinyMRP.SolidWorksAddin.UI
             SelectApplyModeCombo(_advancedApplyModeCombo, config.NumberingApplyMode);
             SelectApplyModeCombo(_applyScopeCombo, config.NumberingApplyMode);
 
+            if (_autoAssignGenericCheck != null)
+            {
+                _autoAssignGenericCheck.Checked = config.AutoAssignGenericNames;
+            }
+            if (_autoAssignAnyNameCheck != null)
+            {
+                _autoAssignAnyNameCheck.Checked = config.AutoAssignAnyNames;
+            }
+
             if (_advancedContextJsonText != null)
             {
                 _advancedContextJsonText.Text = ContextToJson(defaults);
@@ -2848,26 +3092,39 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         private void OnRefreshSchemes(object sender, EventArgs e)
         {
+            RefreshSchemes(true);
+        }
+
+        private void RefreshSchemes(bool showDialogs)
+        {
             NumberingApiClient client = GetNumberingClient();
             if (client == null)
             {
-                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                SetNumberingStatus("Backend URL is not configured.", Color.Maroon);
+                if (showDialogs)
+                {
+                    MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 return;
             }
 
             TinyMrpConfig config = AddinContext.Config;
             if (config != null && string.IsNullOrWhiteSpace(config.AuthToken))
             {
-                MessageBox.Show("Auth token is missing. Set it in Configuration to load schemes.", "TinyMRP",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                SetNumberingStatus("Auth token is missing. Load schemes in Configuration.", Color.Maroon);
+                if (showDialogs)
+                {
+                    MessageBox.Show("Auth token is missing. Set it in Configuration to load schemes.", "TinyMRP",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 return;
             }
 
             ApiResponse response = client.ListSchemes(out List<NumberingSchemeDefinition> schemes);
             if (!response.Ok)
             {
-                ShowApiError("Failed to load schemes.", response);
+                HandleApiError("Failed to load schemes.", response, showDialogs);
                 return;
             }
 
@@ -2876,6 +3133,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             PopulateSchemeCombo(_schemeCombo, _loadedSchemes, true);
             PopulateSchemeCombo(_advancedSchemeCombo, _loadedSchemes, false);
             PopulateQuickSchemeCombo();
+            SetNumberingStatus("Schemes loaded.", Color.DarkGreen);
+            MaybeAutoAssignNumbering(false);
         }
 
         private void PopulateSchemeCombo(ComboBox combo, List<NumberingSchemeDefinition> schemes, bool includeNew)
@@ -3261,6 +3520,36 @@ namespace TinyMRP.SolidWorksAddin.UI
             OnRefreshSchemes(this, EventArgs.Empty);
         }
 
+        private void OnDeactivateScheme(object sender, EventArgs e)
+        {
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string schemeId = GetSelectedSchemeId();
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                MessageBox.Show("Select a scheme first.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ApiResponse response = client.DeleteScheme(schemeId);
+            if (!response.Ok)
+            {
+                ShowApiError("Failed to deactivate scheme.", response);
+                return;
+            }
+
+            MessageBox.Show("Scheme deactivated.", "TinyMRP",
+                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            OnRefreshSchemes(this, EventArgs.Empty);
+        }
+
         private void OnPreviewNext(object sender, EventArgs e)
         {
             NumberingApiClient client = GetNumberingClient();
@@ -3581,6 +3870,15 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 _schemeActiveCheck.Checked = scheme.IsActive;
             }
+            if (_schemePresetCheck != null)
+            {
+                _schemePresetCheck.Checked = scheme.IsPreset;
+            }
+            if (_schemeRecommendedCheck != null)
+            {
+                _schemeRecommendedCheck.Checked = scheme.IsRecommended;
+            }
+            SelectComboItem(_schemeVisibilityCombo, string.IsNullOrWhiteSpace(scheme.Visibility) ? "advanced_only" : scheme.Visibility);
             if (_separatorText != null)
             {
                 _separatorText.Text = scheme.Separator ?? "-";
@@ -3630,6 +3928,10 @@ namespace TinyMRP.SolidWorksAddin.UI
             scheme.Name = _schemeNameText != null ? _schemeNameText.Text.Trim() : scheme.Name;
             scheme.Description = _schemeDescriptionText != null ? _schemeDescriptionText.Text.Trim() : scheme.Description;
             scheme.IsActive = _schemeActiveCheck != null && _schemeActiveCheck.Checked;
+            scheme.IsPreset = _schemePresetCheck != null && _schemePresetCheck.Checked;
+            scheme.IsRecommended = _schemeRecommendedCheck != null && _schemeRecommendedCheck.Checked;
+            string visibility = GetComboText(_schemeVisibilityCombo);
+            scheme.Visibility = string.IsNullOrWhiteSpace(visibility) ? "advanced_only" : visibility;
             scheme.Separator = _separatorText != null ? _separatorText.Text.Trim() : "-";
             scheme.ScopeMode = GetComboText(_scopeModeCombo);
             scheme.ScopeKeys = ParseScopeKeys(_scopeKeysText != null ? _scopeKeysText.Text : string.Empty);
@@ -4230,9 +4532,18 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         private void ShowApiError(string title, ApiResponse response)
         {
+            HandleApiError(title, response, true);
+        }
+
+        private void HandleApiError(string title, ApiResponse response, bool showDialog)
+        {
             if (response == null)
             {
-                MessageBox.Show(title, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (showDialog)
+                {
+                    MessageBox.Show(title, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                SetNumberingStatus(title, Color.Maroon);
                 return;
             }
 
@@ -4248,7 +4559,12 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 AddinLogger.Write(details);
             }
-            ShowMessageWithDetails(title, message, details);
+
+            SetNumberingStatus(title + " " + message, Color.Maroon);
+            if (showDialog)
+            {
+                ShowMessageWithDetails(title, message, details);
+            }
         }
 
         private void ShowMessageWithDetails(string title, string message, string details)

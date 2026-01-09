@@ -287,6 +287,8 @@ var
   ExistingToken: string;
   ExistingSchemeId: string;
   ExistingContextDefaults: string;
+  ExistingAutoGeneric: string;
+  ExistingAutoAny: string;
   Lines: string;
 begin
   ExistingOutput := ReadConfigValue(ExistingConfigPath, 'deliverables_folder', '');
@@ -297,9 +299,18 @@ begin
   ExistingToken := ReadConfigValue(ExistingConfigPath, 'AuthToken', '');
   ExistingSchemeId := ReadConfigValue(ExistingConfigPath, 'NumberingSchemeId', '');
   ExistingContextDefaults := ReadConfigValue(ExistingConfigPath, 'NumberingContextDefaults', 'type=PART;family=;subfamily=;project=;site=');
+  ExistingAutoGeneric := ReadConfigValue(ExistingConfigPath, 'AutoAssignGenericNames', 'True');
+  ExistingAutoAny := ReadConfigValue(ExistingConfigPath, 'AutoAssignAnyNames', 'False');
 
   if (ExistingConfigPath <> '') and (OverrideSettingsCheck <> nil) and (not OverrideSettingsCheck.Checked) then
+  begin
+    if (CompareText(ExistingConfigPath, GetMachineConfigPath) <> 0) and (not FileExists(GetMachineConfigPath)) then
+    begin
+      ForceDirectories(ExtractFileDir(GetMachineConfigPath));
+      FileCopy(ExistingConfigPath, GetMachineConfigPath, False);
+    end;
     Exit;
+  end;
 
   OutputFolder := OutputPage.Values[0];
   if OutputFolder = '' then
@@ -356,7 +367,9 @@ begin
     'PartNumberProperty=PartNumber' + #13#10 +
     'RevisionProperty=Revision' + #13#10 +
     'DisplayCodeProperty=DisplayCode' + #13#10 +
-    'NumberingApplyMode=active_config' + #13#10;
+    'NumberingApplyMode=active_config' + #13#10 +
+    'AutoAssignGenericNames=' + ExistingAutoGeneric + #13#10 +
+    'AutoAssignAnyNames=' + ExistingAutoAny + #13#10;
 
   SaveStringToFile(ConfigPath, Lines, False);
 end;

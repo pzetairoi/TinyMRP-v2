@@ -13,3 +13,5 @@ PartNumberProperty=PartNumber
 RevisionProperty=Revision
 DisplayCodeProperty=DisplayCode
 NumberingApplyMode=active_config
+AutoAssignGenericNames=True
+AutoAssignAnyNames=False
