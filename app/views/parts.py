@@ -1,5 +1,5 @@
 # app/views/parts.py
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, url_for
 from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
 import re
@@ -7,6 +7,10 @@ from base64 import urlsafe_b64encode
 
 from app.models.part import Part
 from app.models.job import Job
+from app.models.order import Order
+from app.models.bom import BOMLink
+from app.models.customer import Customer
+from app.models.supplier import Supplier
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
 from app.services.attrs import harvest_part_attrs
@@ -14,7 +18,7 @@ from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
-from app.services.acl import require_items_view, allowed_parts_for
+from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed, user_has_permission
 from app.services.audit import log_action
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
@@ -23,6 +27,196 @@ bp = Blueprint("parts_api", __name__, url_prefix="/api")
 def _normalized_revision(p: Part, attrs: dict) -> str:
     rev = (attrs.get("revision") or p.revision or "").strip()
     return rev
+
+
+def _resolve_rev_for_pn(pn: str, rev: str | None) -> str:
+    rev = (rev or "").strip()
+    if rev:
+        return rev
+    p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+    if not p:
+        return ""
+    attrs = harvest_part_attrs(p)
+    return (attrs.get("revision") or p.revision or "").strip()
+
+
+def _parent_candidates(child_pn: str, child_rev: str | None, max_rows: int = 50):
+    q = BOMLink.objects(child_pn=child_pn)
+    if child_rev is not None and "child_rev" in BOMLink._fields:
+        q = q.filter(child_rev=(child_rev or ""))
+        if (child_rev or "").strip() and q.limit(1).count() == 0:
+            q = BOMLink.objects(child_pn=child_pn, child_rev="")
+    parents = []
+    for l in q.limit(max_rows):
+        parent_pn = (getattr(l, "parent_pn", None) or "").strip()
+        if not parent_pn:
+            continue
+        parent_rev = (getattr(l, "parent_rev", "") or "").strip()
+        parents.append((parent_pn, _resolve_rev_for_pn(parent_pn, parent_rev)))
+    return parents
+
+
+def _ancestor_paths(pn: str, rev: str | None, max_depth: int = 6):
+    start = (pn, _resolve_rev_for_pn(pn, rev))
+    queue = [(start, [start])]
+    paths = []
+    while queue:
+        cur, path = queue.pop(0)
+        if len(path) >= max_depth:
+            paths.append(path)
+            continue
+        parents = _parent_candidates(cur[0], cur[1])
+        if not parents:
+            paths.append(path)
+            continue
+        for parent in parents:
+            if parent in path:
+                continue
+            queue.append((parent, path + [parent]))
+    if not paths:
+        paths = [[start]]
+    return paths
+
+
+def _build_used_set(pairs: list[tuple[str, str | None]]):
+    used = set()
+    for pn, rev in pairs:
+        pn_clean = (pn or "").strip()
+        if not pn_clean:
+            continue
+        rev_clean = (rev or "").strip()
+        if rev_clean:
+            used.add((pn_clean.lower(), rev_clean.lower()))
+        else:
+            resolved = _resolve_rev_for_pn(pn_clean, "")
+            if resolved:
+                used.add((pn_clean.lower(), resolved.lower()))
+            used.add((pn_clean.lower(), ""))
+    return used
+
+
+def _match_used(used: set[tuple[str, str]], pn: str, rev: str | None) -> bool:
+    pn_l = (pn or "").strip().lower()
+    rev_l = (rev or "").strip().lower()
+    return (pn_l, rev_l) in used or (pn_l, "") in used
+
+
+def _part_label(pn: str, rev: str | None) -> dict:
+    resolved_rev = _resolve_rev_for_pn(pn, rev)
+    p = Part.objects(part_number__iexact=pn, revision__iexact=resolved_rev).first() \
+        or Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+    attrs = harvest_part_attrs(p) if p else {}
+    desc = attrs.get("description") or (p.description if p else "") or ""
+    return {"pn": pn, "rev": resolved_rev, "desc": desc}
+
+
+def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
+    paths = _ancestor_paths(pn, rev)
+    try:
+        roles = {getattr(r, "name", "") for r in (user.roles or [])}
+    except Exception:
+        roles = set()
+    is_customer_viewer = "customer_viewer" in roles
+    is_supplier_viewer = "supplier_viewer" in roles
+    is_admin = "admin" in roles
+    can_jobs = is_admin or user_has_permission(user, "jobs.view")
+    can_orders = is_admin or user_has_permission(user, "orders.view")
+
+    job_q = Job.objects()
+    if is_customer_viewer:
+        cust_ids = [c.id for c in Customer.objects(users=user).only("id")]
+        job_q = job_q.filter(customer__in=cust_ids) if cust_ids else Job.objects(id__in=[])
+    if not can_jobs:
+        job_q = Job.objects(id__in=[])
+
+    order_q = Order.objects(status__ne="cancelled")
+    if is_supplier_viewer:
+        sup_ids = [s.id for s in Supplier.objects(users=user).only("id")]
+        order_q = order_q.filter(supplier__in=sup_ids) if sup_ids else Order.objects(id__in=[])
+    if not can_orders:
+        order_q = Order.objects(id__in=[])
+
+    rows: list[dict] = []
+    seen = set()
+
+    for job in job_q:
+        used_set = _build_used_set([(l.pn, l.rev) for l in (job.bom or [])])
+        if not used_set:
+            continue
+        for path in paths:
+            top_used = None
+            for anc in reversed(path):
+                if _match_used(used_set, anc[0], anc[1]):
+                    top_used = anc
+                    break
+            if not top_used:
+                continue
+            immediate = top_used if top_used == path[0] else (path[1] if len(path) > 1 else path[0])
+            key = ("job", str(job.id), immediate[0].lower(), immediate[1].lower(), top_used[0].lower(), top_used[1].lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            imm = _part_label(immediate[0], immediate[1])
+            top = _part_label(top_used[0], top_used[1])
+            rows.append(
+                {
+                    "row_key": f"job:{job.id}:{imm['pn']}:{top['pn']}:{top['rev']}",
+                    "source": "job",
+                    "job_id": str(job.id),
+                    "job_number": job.job_number,
+                    "order_id": "",
+                    "order_number": "",
+                    "order_kind": "",
+                    "order_status": "",
+                    "immediate_pn": imm["pn"],
+                    "immediate_rev": imm["rev"],
+                    "immediate_desc": imm["desc"],
+                    "top_pn": top["pn"],
+                    "top_rev": top["rev"],
+                    "top_desc": top["desc"],
+                }
+            )
+
+    for order in order_q:
+        used_set = _build_used_set([(l.pn, l.rev) for l in (order.lines or [])])
+        if not used_set:
+            continue
+        for path in paths:
+            top_used = None
+            for anc in reversed(path):
+                if _match_used(used_set, anc[0], anc[1]):
+                    top_used = anc
+                    break
+            if not top_used:
+                continue
+            immediate = top_used if top_used == path[0] else (path[1] if len(path) > 1 else path[0])
+            key = ("order", str(order.id), immediate[0].lower(), immediate[1].lower(), top_used[0].lower(), top_used[1].lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            imm = _part_label(immediate[0], immediate[1])
+            top = _part_label(top_used[0], top_used[1])
+            rows.append(
+                {
+                    "row_key": f"order:{order.id}:{imm['pn']}:{top['pn']}:{top['rev']}",
+                    "source": "order",
+                    "job_id": str(order.job.id) if order.job else "",
+                    "job_number": order.job.job_number if order.job else "",
+                    "order_id": str(order.id),
+                    "order_number": order.order_number,
+                    "order_kind": order.kind,
+                    "order_status": order.status,
+                    "immediate_pn": imm["pn"],
+                    "immediate_rev": imm["rev"],
+                    "immediate_desc": imm["desc"],
+                    "top_pn": top["pn"],
+                    "top_rev": top["rev"],
+                    "top_desc": top["desc"],
+                }
+            )
+
+    rows.sort(key=lambda r: (r.get("job_number") or "", r.get("order_number") or "", r.get("source")))
+    return rows
 
 
 @login_required
@@ -103,6 +297,22 @@ def parts_lazy():
                     job_q = job_q | Q(part_number__iexact=pn)
                 q = q & job_q
 
+    # ACL filter for restricted viewers
+    allowed = allowed_parts_for(current_user)
+    if isinstance(allowed, set):
+        if not allowed:
+            return jsonify({"data": [], "totalRecords": 0})
+        allowed_q = Q()
+        for pn, rev in allowed:
+            pn_clean = (pn or "").strip()
+            if not pn_clean:
+                continue
+            if rev:
+                allowed_q = allowed_q | Q(part_number__iexact=pn_clean, revision__iexact=rev)
+            else:
+                allowed_q = allowed_q | Q(part_number__iexact=pn_clean)
+        q = q & allowed_q
+
     qs = Part.objects(q)
     filtered = qs.count()
     docs = (
@@ -160,20 +370,12 @@ def part_detail():
 
     try:
         allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set):
-            key = (p.part_number, p.revision or "")
-            if key not in allowed:
-                key_lower = (p.part_number.lower(), (p.revision or "").lower())
-                if any((k[0] or "").lower() == key_lower[0] and (k[1] or "").lower() == key_lower[1] for k in allowed):
-                    key = None
-                else:
-                    key = key
-            if key:
-                try:
-                    log_action("part.view.deny", resource_type="part", resource=f"{key[0]}:{key[1]}")
-                except Exception:
-                    pass
-                return jsonify({"error": "forbidden"}), 403
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            try:
+                log_action("part.view.deny", resource_type="part", resource=f"{p.part_number}:{p.revision or ''}")
+            except Exception:
+                pass
+            return jsonify({"error": "forbidden"}), 403
     except Exception:
         pass
 
@@ -223,6 +425,8 @@ def part_detail():
             }
         )
 
+    jobs_orders = _jobs_orders_summary(p.part_number, norm_rev, current_user)
+
     try:
         log_action(
             action="part.view",
@@ -251,5 +455,6 @@ def part_detail():
             "files": files,
             "whereused": wu_rows,
             "other_versions": other_versions,
+            "jobs_orders": jobs_orders,
         }
     )

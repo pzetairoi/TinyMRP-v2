@@ -20,7 +20,10 @@ def _urls_for(pn: str, rev: str, *, is_dwg: bool):
     """
     rows = PartFile.objects(part_number__iexact=pn, revision__iexact=rev, ext_group="png", is_dwg=is_dwg)
     if not rows:
-        return []
+        # Fallback to any revision if specific match is missing
+        rows = PartFile.objects(part_number__iexact=pn, ext_group="png", is_dwg=is_dwg).order_by("-mtime")
+        if not rows:
+            return []
     pf = rows.first()
 
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")

@@ -5,7 +5,7 @@ from io import BytesIO
 from typing import List
 
 from app.services.docpacks import DocPackOptions, build_docpack
-from app.services.acl import allowed_parts_for
+from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.acl import require_items_view
 from app.services.audit import log_action
 
@@ -31,7 +31,7 @@ def options():
     # ACL: enforce root access
     try:
         allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and (pn, (rev or "")) not in allowed:
+        if isinstance(allowed, set) and not part_is_allowed(allowed, pn, rev or ""):
             return jsonify({"error":"forbidden"}), 403
     except Exception:
         pass
@@ -125,7 +125,7 @@ def build():
     # ACL: enforce root access
     try:
         allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and (opts.root_pn, (opts.root_rev or "")) not in allowed:
+        if isinstance(allowed, set) and not part_is_allowed(allowed, opts.root_pn, opts.root_rev or ""):
             return jsonify({"error":"forbidden"}), 403
     except Exception:
         pass

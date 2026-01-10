@@ -3,7 +3,6 @@ import { DataTable } from 'primereact/datatable'
 import type { DataTableFilterMeta } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
-import { Link } from 'react-router-dom'
 
 type Part = { id?: string; part_number: string; description: string; category: string; revision?: string; material?: string; finish?: string; mass?: string | number; processes?: string[]; thumb_urls?: string[] }
 
@@ -18,7 +17,7 @@ export default function PartsPage() {
   const [search, setSearch] = useState(initialQ)
   const [loading, setLoading] = useState(false)
   const [totalRecords, setTotal] = useState(0)
-  const [selection, setSelection] = useState<Part[]>([])
+  const [selectedByKey, setSelectedByKey] = useState<Record<string, Part>>({})
   const [qtyById, setQtyById] = useState<Record<string, number>>({})
   const [jobOnly, setJobOnly] = useState(jobOnlyDefault)
   const [lazy, setLazy] = useState({
@@ -34,6 +33,24 @@ export default function PartsPage() {
       process:     { value: '', matchMode: FilterMatchMode.CONTAINS },
     } as DataTableFilterMeta
   })
+
+  const keyFor = (p: Part) => `${p.part_number}::${p.revision || ''}`
+
+  useEffect(() => {
+    if (!pickMode) return
+    document.body.classList.add('pick-mode')
+    const nav = document.querySelector('nav.navbar') as HTMLElement | null
+    const prevDisplay = nav ? nav.style.display : ''
+    if (nav) {
+      nav.style.display = 'none'
+    }
+    return () => {
+      document.body.classList.remove('pick-mode')
+      if (nav) {
+        nav.style.display = prevDisplay
+      }
+    }
+  }, [pickMode])
 
   useEffect(() => {
     (async () => {
@@ -56,8 +73,8 @@ export default function PartsPage() {
 
   function onAddSelected() {
     try {
-      const items = (selection || []).map((p) => {
-        const id = `${p.part_number}::${p.revision || ''}`
+      const items = Object.values(selectedByKey).map((p) => {
+        const id = keyFor(p)
         const qty = Math.max(1, Math.round(qtyById[id] || 1))
         return { pn: p.part_number, rev: p.revision || '', qty, desc: p.description || '' }
       })
@@ -69,9 +86,9 @@ export default function PartsPage() {
   }
 
   const header = useMemo(() => (
-    <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 p-2">
+    <div className={`d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 p-2 ${pickMode ? 'pick-header' : ''}`}>
       <div className="d-flex align-items-center gap-2">
-        <div>Parts</div>
+        <div>{pickMode ? 'Select parts' : 'Parts'}</div>
         <input
           className="form-control form-control-sm"
           style={{ minWidth: 220 }}
@@ -100,12 +117,155 @@ export default function PartsPage() {
       </div>
       {pickMode && (
         <div className="d-flex gap-2">
-          <button className="btn btn-sm btn-primary" onClick={onAddSelected} disabled={!selection.length}>Add Selected</button>
+          <button className="btn btn-sm btn-primary" onClick={onAddSelected} disabled={!Object.keys(selectedByKey).length}>Add Selected</button>
           <button className="btn btn-sm btn-outline-secondary" onClick={() => { try { window.close() } catch {} }}>Cancel</button>
         </div>
       )}
     </div>
-  ), [pickMode, selection, search])
+  ), [pickMode, selectedByKey, search, jobOnly])
+
+  if (pickMode) {
+    const page = Math.floor(lazy.first / lazy.rows) + 1
+    const totalPages = Math.max(1, Math.ceil(totalRecords / Math.max(lazy.rows, 1)))
+    const canPrev = lazy.first > 0
+    const canNext = lazy.first + lazy.rows < totalRecords
+    const start = totalRecords ? lazy.first + 1 : 0
+    const end = Math.min(lazy.first + lazy.rows, totalRecords)
+
+    return (
+      <div className="p-3 pick-container">
+        {header}
+        <div className="table-responsive">
+          <table className="table table-sm align-middle table-striped">
+            <thead>
+              <tr>
+                <th style={{ width: 48 }}>Sel</th>
+                <th style={{ width: 140 }}>Qty</th>
+                <th style={{ width: 60 }}></th>
+                <th style={{ width: '12ch' }}>Part Number</th>
+                <th style={{ width: 90 }}>Rev</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && !rows.length && (
+                <tr>
+                  <td colSpan={6} className="text-center text-muted py-4">Loading...</td>
+                </tr>
+              )}
+              {rows.map((p) => {
+                const key = keyFor(p)
+                const checked = !!selectedByKey[key]
+                const val = qtyById[key] ?? 1
+                const urls = p.thumb_urls || []
+                return (
+                  <tr key={key} className="pick-row">
+                    <td>
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const isChecked = e.target.checked
+                          setSelectedByKey((prev) => {
+                            const next = { ...prev }
+                            if (isChecked) {
+                              next[key] = p
+                            } else {
+                              delete next[key]
+                            }
+                            return next
+                          })
+                          if (isChecked) {
+                            setQtyById((prev) => (prev[key] === undefined ? { ...prev, [key]: 1 } : prev))
+                          }
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <div className="d-flex align-items-center gap-1 pick-qty">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          style={{ padding: '0 6px' }}
+                          onClick={() => setQtyById((prev) => ({ ...prev, [key]: Math.max(1, val - 1) }))}
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          inputMode="numeric"
+                          className="form-control form-control-sm text-end"
+                          style={{ width: 70 }}
+                          value={val}
+                          onChange={(e) => {
+                            const v = Math.max(1, Math.round(parseFloat(e.target.value) || 1))
+                            setQtyById((prev) => ({ ...prev, [key]: v }))
+                          }}
+                          onInput={(e: any) => {
+                            const v = Math.max(1, Math.round(parseFloat(e.target.value) || 1))
+                            setQtyById((prev) => ({ ...prev, [key]: v }))
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          style={{ padding: '0 6px' }}
+                          onClick={() => setQtyById((prev) => ({ ...prev, [key]: Math.max(1, val + 1) }))}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </td>
+                    <td>
+                      {urls.length ? (
+                        <img
+                          src={urls[0]}
+                          onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
+                          alt=""
+                          style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain', border: '1px solid #eee', borderRadius: 6, padding: 2, background: '#fff' }}
+                        />
+                      ) : (
+                        <div className="bg-light border rounded" style={{ height: 32, width: 48 }} />
+                      )}
+                    </td>
+                    <td>{p.part_number}</td>
+                    <td>{p.revision || ''}</td>
+                    <td>{p.description || ''}</td>
+                  </tr>
+                )
+              })}
+              {!rows.length && !loading && (
+                <tr>
+                  <td colSpan={6} className="text-center text-muted py-4">No parts found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+          <div className="text-muted small">Showing {start}-{end} of {totalRecords}</div>
+          <div className="d-flex align-items-center gap-2">
+            <select
+              className="form-select form-select-sm"
+              style={{ width: 110 }}
+              value={lazy.rows}
+              onChange={(e) => setLazy((s) => ({ ...s, rows: parseInt(e.target.value, 10) || 25, first: 0 }))}
+            >
+              {[10, 25, 50, 100].map((n) => (
+                <option key={n} value={n}>{n} / page</option>
+              ))}
+            </select>
+            <button className="btn btn-sm btn-outline-secondary" disabled={!canPrev} onClick={() => setLazy((s) => ({ ...s, first: Math.max(0, s.first - s.rows) }))}>Prev</button>
+            <div className="small text-muted">Page {page} / {totalPages}</div>
+            <button className="btn btn-sm btn-outline-secondary" disabled={!canNext} onClick={() => setLazy((s) => ({ ...s, first: s.first + s.rows }))}>Next</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-3">
@@ -114,19 +274,6 @@ export default function PartsPage() {
         lazy paginator totalRecords={totalRecords} rows={lazy.rows} first={lazy.first}
         loading={loading}
         dataKey="id"
-        selection={selection}
-        onSelectionChange={(e) => {
-          const next = e.value as Part[]
-          setSelection(next)
-          setQtyById((prev) => {
-            const updated = { ...prev }
-            next.forEach((p) => {
-              const id = p.id || `${p.part_number}::${p.revision || ''}`
-              if (updated[id] === undefined) updated[id] = 1
-            })
-            return updated
-          })
-        }}
         sortField={lazy.sortField} sortOrder={lazy.sortOrder}
         onPage={(e) => setLazy(s => ({...s, first: e.first, rows: e.rows}))}
         onSort={(e) =>
@@ -139,16 +286,52 @@ export default function PartsPage() {
         onFilter={(e) => setLazy(s => ({...s, first: 0, filters: e.filters}))}
         filterDisplay="row" removableSort rowsPerPageOptions={[10,25,50,100]}
         stripedRows responsiveLayout="scroll"
+        rowClassName={pickMode ? () => 'pick-row' : undefined}
       >
         {pickMode && (
-        <Column selectionMode="multiple" style={{ width: 48 }} />)}
+        <Column header="Sel" body={(p: any) => {
+          const key = `${p.part_number}::${p.revision || ''}`
+          const checked = !!selectedByKey[key]
+          return (
+            <input
+              className="form-check-input"
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => {
+                const isChecked = e.target.checked
+                setSelectedByKey((prev) => {
+                  const next = { ...prev }
+                  if (isChecked) {
+                    next[key] = p as Part
+                  } else {
+                    delete next[key]
+                  }
+                  return next
+                })
+                if (isChecked) {
+                  setQtyById((prev) => (prev[key] === undefined ? { ...prev, [key]: 1 } : prev))
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+            />
+          )
+        }} style={{ width: 48 }} />)}
         {pickMode && (
         <Column header="Qty" body={(p: any) => {
-          const id = (p.id as string) || `${p.part_number}::${p.revision || ''}`
+          const id = `${p.part_number}::${p.revision || ''}`
           const val = qtyById[id] ?? 1
           return (
-            <div className="d-flex align-items-center gap-1" onClick={(e)=>e.stopPropagation()} onMouseDown={(e)=>e.stopPropagation()}>
-              <button type="button" className="btn btn-sm btn-outline-secondary" style={{padding:'0 6px'}} onClick={(e) => {e.preventDefault(); const v=Math.max(1, val-1); setQtyById(prev=>({...prev,[id]:v}))}}>−</button>
+            <div className="d-flex align-items-center gap-1 pick-qty" onClick={(e)=>e.stopPropagation()} onMouseDown={(e)=>e.stopPropagation()} onPointerDown={(e)=>e.stopPropagation()}>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary"
+                style={{padding:'0 6px'}}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {e.preventDefault(); e.stopPropagation(); const v=Math.max(1, val-1); setQtyById(prev=>({...prev,[id]:v}))}}
+              >-</button>
               <input
                 type="number"
                 min={1}
@@ -160,6 +343,7 @@ export default function PartsPage() {
                 value={val}
                 onClick={(e) => e.stopPropagation()}
                 onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
                 onChange={(e) => {
                   e.stopPropagation()
@@ -167,7 +351,14 @@ export default function PartsPage() {
                   setQtyById((prev) => ({ ...prev, [id]: v }))
                 }}
               />
-              <button type="button" className="btn btn-sm btn-outline-secondary" style={{padding:'0 6px'}} onClick={(e) => {e.preventDefault(); const v=Math.max(1, val+1); setQtyById(prev=>({...prev,[id]:v}))}}>+</button>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary"
+                style={{padding:'0 6px'}}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {e.preventDefault(); e.stopPropagation(); const v=Math.max(1, val+1); setQtyById(prev=>({...prev,[id]:v}))}}
+              >+</button>
             </div>
           )
         }} style={{ width: 140 }} />)}
@@ -184,7 +375,9 @@ export default function PartsPage() {
         body={(p) => {
           const rev = (p as Part).revision || ''
           const qs = rev !== undefined ? `?rev=${encodeURIComponent(rev)}` : ''
-          return <a href={`/ui/part/${encodeURIComponent(p.part_number)}${qs}`}>{p.part_number}</a>
+          return pickMode
+            ? <span>{p.part_number}</span>
+            : <a href={`/ui/part/${encodeURIComponent(p.part_number)}${qs}`}>{p.part_number}</a>
         }} />
 
         <Column field="revision" header="Rev" sortable filter showFilterMenu={false} style={{width: 90}}

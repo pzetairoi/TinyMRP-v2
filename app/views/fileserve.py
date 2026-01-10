@@ -2,7 +2,7 @@ import os, base64, mimetypes
 from flask import Blueprint, current_app, send_file, abort
 from flask_login import login_required, current_user
 from app.services.audit import log_action
-from app.services.acl import allowed_parts_for
+from app.services.acl import allowed_parts_for, part_is_allowed
 from app.models.artifact import PartFile
 
 bp = Blueprint("fileserve", __name__, url_prefix="/files")
@@ -47,7 +47,7 @@ def view(token: str):
         pf = PartFile.objects(Q(rel_path=rel_norm) | Q(rel_path__iexact=rel_norm)).first()
         if pf:
             allowed = allowed_parts_for(current_user)
-            if isinstance(allowed, set) and (pf.part_number, (pf.revision or "")) not in allowed:
+            if isinstance(allowed, set) and not part_is_allowed(allowed, pf.part_number, pf.revision or ""):
                 return abort(403)
     except Exception:
         pass
