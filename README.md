@@ -91,7 +91,7 @@ TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://
 ### Add-in Quick Start + Tokens
 
 - Web dashboard:
-  - `/ui/addin/settings` for Quick Start + Advanced defaults.
+  - `/ui/admin/addin` for Quick Start + Advanced defaults.
   - `/ui/addin/tokens` to create/revoke API tokens (shown once).
   - `/ui/admin/addin` for admins (token revoke + scheme preset flags).
 - Add-in Configuration tab has **Quick Start** (presets + minimal inputs) and **Advanced** (full defaults).
