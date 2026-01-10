@@ -80,25 +80,6 @@ def addin_download(filename):
     return send_file(target, as_attachment=True, download_name=os.path.basename(target))
 
 
-@bp.route("/excel_bom", methods=["GET", "POST"])
-def excel_bom():
-    if request.method == 'POST':
-        pn = (request.form.get('pn') or '').strip()
-        rev = (request.form.get('rev') or '').strip()
-        depth = (request.form.get('depth') or 'full').strip().lower()
-        if not pn:
-            return redirect(url_for('tools.excel_bom'))
-        # Proxy to the docpacks builder to create an Excel BOM only
-        from app.services.docpacks import DocPackOptions, build_docpack
-        opts = DocPackOptions(root_pn=pn, root_rev=rev or None, depth=depth,
-                              want_excel_bom=True, want_selected_files=False,
-                              want_pdf_binder=False, want_visual_list=False)
-        name, data, mime = build_docpack(opts)
-        bio = BytesIO(data)
-        return send_file(bio, mimetype=mime, as_attachment=True, download_name=name)
-    return render_template("tools/excel_bom.html")
-
-
 @bp.route("/excelcompile", methods=["GET", "POST"])
 @login_required
 def excel_compile():
