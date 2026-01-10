@@ -97,7 +97,7 @@
           </div>
 
           <div class="mt-3">
-            <label class="form-label">Job BOM</label>
+            <label class="form-label fw-bold">Job BOM</label>
             <div class="table-responsive">
             <table class="table table-sm align-middle table-striped" id="bom-table">
               <thead>
@@ -143,7 +143,7 @@
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
         {% if orders %}
           <div class="mt-4">
-            <h2 class="h6 mb-2">Related Orders</h2>
+            <h2 class="h6 mb-2 fw-bold">Related Orders</h2>
             <div class="table-responsive">
               <table class="table table-sm table-striped align-middle">
                 <thead>
@@ -157,7 +157,13 @@
                 <tbody>
                   {% for o in orders %}
                   <tr>
-                    <td><a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a></td>
+                    <td>
+                      {% if has_perm('orders.manage') %}
+                        <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
+                      {% else %}
+                        {{ o.order_number }}
+                      {% endif %}
+                    </td>
                     <td>{{ o.kind }}</td>
                     <td>{{ o.status }}</td>
                     <td>{{ o.updated_at.strftime('%Y-%m-%d %H:%M') if o.updated_at else '' }}</td>
@@ -170,7 +176,7 @@
         {% endif %}
         {% if ordered_parts %}
           <div class="mt-4">
-            <h2 class="h6 mb-2">Parts in Orders</h2>
+            <h2 class="h6 mb-2 fw-bold">Parts in Orders</h2>
             <div class="table-responsive">
               <table class="table table-sm table-striped align-middle">
                 <thead>
@@ -193,10 +199,16 @@
                       {% if p.thumb %}
                         <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% else %}
-                        <div class="bg-light border rounded" style="height:48px;width:64px;"></div>
+                        <img src="{{ url_for('static', filename='images/logo.png') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% endif %}
                     </td>
-                    <td><a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a></td>
+                    <td>
+                      {% if has_perm('items.view') %}
+                        <a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a>
+                      {% else %}
+                        {{ p.pn }}
+                      {% endif %}
+                    </td>
                     <td>{{ p.desc }}</td>
                     <td>{{ p.rev }}</td>
                     <td>{{ '%.2f' % p.required if p.required is number else p.required }}</td>
@@ -221,7 +233,7 @@
         {% endif %}
         {% if oversupplied_parts %}
           <div class="mt-4">
-            <h2 class="h6 mb-2">Over-Ordered Parts</h2>
+            <h2 class="h6 mb-2 fw-bold">Over-Ordered Parts</h2>
             <div class="table-responsive">
               <table class="table table-sm table-striped align-middle">
                 <thead>
@@ -244,10 +256,16 @@
                       {% if p.thumb %}
                         <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% else %}
-                        <div class="bg-light border rounded" style="height:48px;width:64px;"></div>
+                        <img src="{{ url_for('static', filename='images/logo.png') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% endif %}
                     </td>
-                    <td><a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a></td>
+                    <td>
+                      {% if has_perm('items.view') %}
+                        <a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a>
+                      {% else %}
+                        {{ p.pn }}
+                      {% endif %}
+                    </td>
                     <td>{{ p.desc }}</td>
                     <td>{{ p.rev }}</td>
                     <td>{{ '%.2f' % p.required if p.required is number else p.required }}</td>
@@ -273,7 +291,7 @@
         {% if remaining_parts %}
           <div class="mt-3">
             <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-2 gap-2">
-              <h2 class="h6 mb-0">Parts Not Yet Ordered</h2>
+              <h2 class="h6 mb-0 fw-bold">Parts Not Yet Ordered</h2>
               <div class="d-flex gap-2">
                 <button type="button" class="btn btn-sm btn-primary" onclick="submitRemainingOrder()">Create order from selected</button>
               </div>
@@ -326,10 +344,16 @@
                       {% if p.thumb %}
                         <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% else %}
-                        <div class="bg-light border rounded" style="height:48px;width:64px;"></div>
+                        <img src="{{ url_for('static', filename='images/logo.png') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% endif %}
                     </td>
-                    <td><a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a></td>
+                    <td>
+                      {% if has_perm('items.view') %}
+                        <a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a>
+                      {% else %}
+                        {{ p.pn }}
+                      {% endif %}
+                    </td>
                     <td>{{ p.desc }}</td>
                     <td>{{ p.rev }}</td>
                     <td>{{ '%.2f' % p.required if p.required is number else p.required }}</td>
@@ -369,6 +393,8 @@
   let bomRows = [];
   let replaceIdx = null;
   const thumbCache = {};
+  const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
+  const fallbackLogo = "{{ url_for('static', filename='images/logo.png') }}";
 
   function selectAllOptions(id){
     const el = document.getElementById(id);
@@ -506,10 +532,12 @@
       if(f.qtyMin !== null && (row.qty || 0) < f.qtyMin) return;
       if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
       const tr = document.createElement('tr');
-      const pnLink = row.pn ? `<a href="/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}">${row.pn}</a>` : '';
+      const pnLink = row.pn && canViewParts
+        ? `<a href="/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}">${row.pn}</a>`
+        : (row.pn || '');
       tr.innerHTML = `
         <td style="width:64px;">
-          ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : '<div class="bg-light border rounded" style="height:48px;width:64px;"></div>'}
+          ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : `<img src="${fallbackLogo}" class="img-thumbnail" style="max-height:48px;max-width:64px;">`}
         </td>
         <td>${pnLink}</td>
         <td>${row.desc || ''}</td>

@@ -18,8 +18,9 @@ from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
-from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed, user_has_permission
+from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed, user_has_permission, permissions_required
 from app.services.audit import log_action
+from app.services.parts_delete import delete_part_and_refs
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
@@ -436,6 +437,10 @@ def part_detail():
     except Exception:
         pass
 
+    can_jobs_manage = user_has_permission(current_user, "jobs.manage")
+    can_orders_manage = user_has_permission(current_user, "orders.manage")
+    can_parts_delete = user_has_permission(current_user, "items.edit")
+
     return jsonify(
         {
             "part": {
@@ -456,5 +461,40 @@ def part_detail():
             "whereused": wu_rows,
             "other_versions": other_versions,
             "jobs_orders": jobs_orders,
+            "can_jobs_manage": can_jobs_manage,
+            "can_orders_manage": can_orders_manage,
+            "can_parts_delete": can_parts_delete,
         }
     )
+
+
+@bp.post("/part_delete")
+@login_required
+@permissions_required("items.edit")
+@csrf.exempt
+def part_delete():
+    body = request.get_json(force=True, silent=True) or {}
+    pn = (body.get("pn") or request.form.get("pn") or "").strip()
+    if not pn:
+        return jsonify({"ok": False, "error": "missing pn"}), 400
+    rev = body.get("rev") if "rev" in body else request.form.get("rev")
+    if rev is None:
+        rev = ""
+    rev = (rev or "").strip()
+    target = Part.objects(part_number__iexact=pn, revision__iexact=rev).first()
+    if not target and rev:
+        for cand in Part.objects(part_number__iexact=pn):
+            attrs = harvest_part_attrs(cand)
+            if _normalized_revision(cand, attrs).lower() == rev.lower():
+                target = cand
+                rev = (cand.revision or "").strip()
+                break
+    if not target:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    result = delete_part_and_refs(pn, rev)
+    try:
+        log_action("part.delete", resource_type="part", resource=f"{pn}:{rev}")
+    except Exception:
+        pass
+    return jsonify({"ok": True, **result})

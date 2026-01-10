@@ -98,7 +98,13 @@
       {% if jobs %}
         {% for j in jobs %}
         <tr>
-          <td class="fw-semibold">{{ j.job_number }}</td>
+          <td class="fw-semibold">
+            {% if has_perm('jobs.manage') %}
+              <a href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">{{ j.job_number }}</a>
+            {% else %}
+              {{ j.job_number }}
+            {% endif %}
+          </td>
           <td>{{ j.title or j.description or '-' }}</td>
           <td><span class="badge badge-status status-{{ j.status|default('draft') }}">{{ (j.status or 'draft').replace('_',' ') }}</span></td>
           <td><span class="badge badge-priority priority-{{ j.priority|default('normal') }}">{{ (j.priority or 'normal') }}</span></td>
@@ -125,10 +131,20 @@
             <div class="small text-muted">{{ '%.2f' % received if received is number else received }} / {{ '%.2f' % ordered if ordered is number else ordered }}</div>
             {% endif %}
           </td>
-          <td>{{ j.customer_name }}</td>
+          <td>
+            {% if has_perm('customers.manage') and j.customer_id %}
+              <a href="{{ url_for('admin_customers.customers_edit', cust_id=j.customer_id) }}">{{ j.customer_name }}</a>
+            {% else %}
+              {{ j.customer_name }}
+            {% endif %}
+          </td>
           <td class="d-flex gap-1">
+            {% if has_perm('jobs.manage') %}
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">View</a>
+            {% endif %}
+            {% if has_perm('orders.view') or has_perm('orders.manage') %}
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

@@ -64,12 +64,14 @@ def seed_roles():
     upsert("planner", "Plan and run MRP", [
         "items.view","bom.view","mrp.run","reports.view",
         "jobs.view","jobs.manage","orders.view","orders.manage",
-        "suppliers.view","customers.view"
+        "suppliers.view","customers.view",
+        "tools.view","import.bom"
     ])
     upsert("operator", "Execute work orders", [
         "workorders.view","workorders.edit","workorders.close",
         "inventory.issue","inventory.receive",
-        "items.view","bom.view"
+        "items.view","bom.view",
+        "tools.view","import.bom"
     ])
     upsert("viewer", "Read-only", [
         "items.view","bom.view","workorders.view","reports.view",

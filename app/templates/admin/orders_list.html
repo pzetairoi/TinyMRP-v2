@@ -79,20 +79,46 @@
       {% if orders %}
         {% for o in orders %}
         <tr>
-          <td class="fw-semibold">{{ o.order_number }}</td>
+          <td class="fw-semibold">
+            {% if has_perm('orders.manage') %}
+              <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
+            {% else %}
+              {{ o.order_number }}
+            {% endif %}
+          </td>
           <td>{{ o.kind }}</td>
-          <td>{{ o.job }}</td>
-          <td>{{ o.supplier }}</td>
-          <td>{{ o.customer }}</td>
+          <td>
+            {% if has_perm('jobs.manage') and o.job_id %}
+              <a href="{{ url_for('admin_jobs.jobs_edit', job_id=o.job_id) }}">{{ o.job }}</a>
+            {% else %}
+              {{ o.job }}
+            {% endif %}
+          </td>
+          <td>
+            {% if has_perm('suppliers.manage') and o.supplier_id %}
+              <a href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=o.supplier_id) }}">{{ o.supplier }}</a>
+            {% else %}
+              {{ o.supplier }}
+            {% endif %}
+          </td>
+          <td>
+            {% if has_perm('customers.manage') and o.customer_id %}
+              <a href="{{ url_for('admin_customers.customers_edit', cust_id=o.customer_id) }}">{{ o.customer }}</a>
+            {% else %}
+              {{ o.customer }}
+            {% endif %}
+          </td>
           <td><span class="badge badge-status status-{{ o.status|default('draft') }}">{{ o.status or 'draft' }}</span></td>
           <td>{{ o.order_date.strftime('%Y-%m-%d') if o.order_date else '-' }}</td>
           <td>{{ '%.2f' % o.total if o.total is not none else '-' }}</td>
           <td class="d-flex gap-1">
+            {% if has_perm('orders.manage') %}
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">Edit</a>
             <form method="post" action="{{ url_for('admin_orders.orders_delete', order_id=o.id) }}" onsubmit="return confirm('Delete this order?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

@@ -71,18 +71,26 @@
         {% for c in customers %}
         <tr>
           <td>{{ c.code or '-' }}</td>
-          <td class="fw-semibold">{{ c.name }}</td>
+          <td class="fw-semibold">
+            {% if has_perm('customers.manage') %}
+              <a href="{{ url_for('admin_customers.customers_edit', cust_id=c.id) }}">{{ c.name }}</a>
+            {% else %}
+              {{ c.name }}
+            {% endif %}
+          </td>
           <td><span class="badge badge-status status-{{ c.status|default('active') }}">{{ c.status or 'active' }}</span></td>
           <td>{{ c.customer_type or '-' }}</td>
           <td>{{ c.contact or '-' }}</td>
           <td>{{ c.email or '-' }}</td>
           <td>{{ (c.tags | join(', ')) if c.tags else '-' }}</td>
           <td class="d-flex gap-1">
+            {% if has_perm('customers.manage') %}
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_customers.customers_edit', cust_id=c.id) }}">Edit</a>
             <form method="post" action="{{ url_for('admin_customers.customers_delete', cust_id=c.id) }}" onsubmit="return confirm('Delete this customer?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

@@ -1,18 +1,24 @@
 # app/views/importer.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask_login import login_required
 from werkzeug.utils import secure_filename
 from app.extensions import csrf
 from app.services.import_zip import import_bom_zip
+from app.services.acl import permissions_required
 
 bp = Blueprint("importer", __name__, url_prefix="/import")
 
 @bp.get("/")
+@login_required
+@permissions_required("import.bom")
 def upload_form():
     # Simple Jinja page with a file input - extends base so navbar shows.
     return render_template("import/upload.html")
 
 @bp.post("/")
 @csrf.exempt  # keep it simple; remove if you wire a WTForm with CSRF token
+@login_required
+@permissions_required("import.bom")
 def upload_post():
     f = request.files.get("file")
     if not f or not f.filename:
@@ -30,6 +36,8 @@ def upload_post():
 # Optional: JSON API endpoint for programmatic uploads
 @bp.post("/api")
 @csrf.exempt
+@login_required
+@permissions_required("import.bom")
 def upload_api():
     f = request.files.get("file")
     if not f or not f.filename:

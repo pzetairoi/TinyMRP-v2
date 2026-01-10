@@ -47,8 +47,12 @@
 
             {% if current_user.is_authenticated %}
               <li class="nav-item"><a class="nav-link" href="/ui/parts">Inventory</a></li>
+              {% if has_perm('tools.view') %}
               <li class="nav-item"><a class="nav-link" href="{{ url_for('tools.tools_index') }}">Tools</a></li>
+              {% endif %}
+              {% if has_perm('import.bom') %}
               <li class="nav-item"><a class="nav-link" href="{{ url_for('importer.upload_form') }}">Import BOM</a></li>
+              {% endif %}
 
               {% if has_perm('jobs.view') or has_perm('jobs.manage') %}
               <li class="nav-item dropdown">

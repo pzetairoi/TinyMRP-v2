@@ -126,6 +126,11 @@ export default function PartDetailPage() {
   const [jobsOrders, setJobsOrders] = useState<JobsOrdersRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
+  const [canJobsManage, setCanJobsManage] = useState(false);
+  const [canOrdersManage, setCanOrdersManage] = useState(false);
+  const [canPartsDelete, setCanPartsDelete] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
@@ -325,14 +330,7 @@ function bestUrl(f: FileRow): string {
     const urls: string[] = Array.isArray(node?.data?.thumb_urls)
       ? node.data.thumb_urls
       : [];
-    return urls.length ? (
-      <img
-        src={urls[0]}
-        onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
-        className="tt-thumb"
-        alt=""
-      />
-    ) : null;
+    return <ThumbImg urls={urls} maxH={32} maxW={48} />;
   };
 
   const pnBody = (n: any) => {
@@ -405,6 +403,9 @@ function bestUrl(f: FileRow): string {
         setImages(asArr<string>(j.images));
         setVersions(asArr<VersionRow>(j.other_versions));
         setJobsOrders(asArr<JobsOrdersRow>(j.jobs_orders));
+        setCanJobsManage(!!j.can_jobs_manage);
+        setCanOrdersManage(!!j.can_orders_manage);
+        setCanPartsDelete(!!j.can_parts_delete);
       } catch (e) {
         console.error("part_detail failed", e);
         if (!canceled) {
@@ -746,15 +747,57 @@ function bestUrl(f: FileRow): string {
   // default to All attributes.
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
 
+  async function handleDeletePart() {
+    if (!canPartsDelete || !part) return;
+    const label = `${part.part_number}${part.revision ? "-" + part.revision : ""}`;
+    const ok = window.confirm(`Delete part ${label}? This cannot be undone.`);
+    if (!ok) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const resp = await fetch("/api/part_delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pn: part.part_number, rev: part.revision || "" }),
+      });
+      if (!resp.ok) {
+        const msg = await resp.text();
+        throw new Error(msg || "Delete failed");
+      }
+      window.location.href = "/ui/parts";
+    } catch (err: any) {
+      setDeleteError(err?.message || "Delete failed");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
   return (
     <div className="container-xxl py-3">
       {/* Title */}
       <div className="pb-2 border-bottom mb-3">
-        <h4 className="mb-0">
-          {pn} {part?.revision ? `· REV ${part.revision}` : ""}{" "}
-          {part?.description ? ` – ${part.description}` : ""}
-        </h4>
-        <div className="text-muted small">{part?.category || ""}</div>
+        <div className="d-flex align-items-start justify-content-between gap-3">
+          <div>
+            <h4 className="mb-0">
+              {pn} {part?.revision ? `· REV ${part.revision}` : ""}{" "}
+              {part?.description ? ` – ${part.description}` : ""}
+            </h4>
+            <div className="text-muted small">{part?.category || ""}</div>
+          </div>
+          {canPartsDelete ? (
+            <div className="text-end">
+              <button
+                type="button"
+                className="btn btn-outline-danger btn-sm"
+                onClick={handleDeletePart}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? "Deleting..." : "Delete part"}
+              </button>
+              {deleteError ? <div className="text-danger small mt-1">{deleteError}</div> : null}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {/* Top zone: Left (hero + quick facts) / Right (tabs) */}
@@ -1189,7 +1232,7 @@ function bestUrl(f: FileRow): string {
 
           <TabPanel header="Other versions">
             <DataTable value={versions} dataKey="id" responsiveLayout="scroll" stripedRows>
-              <Column header="" body={(r: VersionRow) => r.thumb_urls?.[0] ? <img src={r.thumb_urls[0]} alt="" style={{maxHeight:32,maxWidth:48,objectFit:"contain",border:"1px solid #eee",borderRadius:6,padding:2,background:"#fff"}} /> : null} style={{width:60}} />
+              <Column header="" body={(r: VersionRow) => <ThumbImg urls={r.thumb_urls || []} maxH={32} maxW={48} />} style={{width:60}} />
               <Column field="part_number" header="Part Number" body={(r: VersionRow) => <a href={`/ui/part/${encodeURIComponent(r.part_number)}?rev=${encodeURIComponent(r.revision||"")}`}>{r.part_number}</a>} sortable />
               <Column field="revision" header="Rev" sortable />
               <Column field="description" header="Description" sortable />
@@ -1208,7 +1251,11 @@ function bestUrl(f: FileRow): string {
                   header="Job"
                   body={(r: JobsOrdersRow) =>
                     r.job_number ? (
-                      <a href={`/admin/jobs/${encodeURIComponent(r.job_id || "")}/edit`}>{r.job_number}</a>
+                      canJobsManage ? (
+                        <a href={`/admin/jobs/${encodeURIComponent(r.job_id || "")}/edit`}>{r.job_number}</a>
+                      ) : (
+                        r.job_number
+                      )
                     ) : (
                       "-"
                     )
@@ -1219,7 +1266,11 @@ function bestUrl(f: FileRow): string {
                   header="Order"
                   body={(r: JobsOrdersRow) =>
                     r.order_number ? (
-                      <a href={`/admin/orders/${encodeURIComponent(r.order_id || "")}/edit`}>{r.order_number}</a>
+                      canOrdersManage ? (
+                        <a href={`/admin/orders/${encodeURIComponent(r.order_id || "")}/edit`}>{r.order_number}</a>
+                      ) : (
+                        r.order_number
+                      )
                     ) : (
                       "-"
                     )
@@ -1289,6 +1340,7 @@ function bestUrl(f: FileRow): string {
       </div>
 
       {/* Components table (Tree) */}
+      {bomNodes.length > 0 ? (
       <div className="mt-4">
         <div className="d-flex align-items-center justify-content-between mb-2">
           <h6 className="mb-0">BOM</h6>
@@ -1429,6 +1481,7 @@ function bestUrl(f: FileRow): string {
           />
         </TreeTable>
       </div>
+      ) : null}
 
       {/* Optional: small image strip under everything */}
       <br />
