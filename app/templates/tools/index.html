@@ -2,63 +2,45 @@
 {% block title %}Tools{% endblock %}
 {% block content %}
 <div class="row">
-  <div class="col-lg-4">
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">SolidWorks Add-in</h5>
-        <p class="text-muted">Download the latest installer build.</p>
-        {% if addin_files %}
-        <div class="d-grid gap-2 mb-2">
-          <a class="btn btn-sm btn-primary" href="{{ url_for('tools.addin_latest') }}">Download latest</a>
-        </div>
-        <ul class="list-unstyled small mb-0">
-          {% for f in addin_files %}
-          <li>
-            <a href="{{ f.url }}">{{ f.name }}</a>
-            <span class="text-muted">({{ f.modified }})</span>
-          </li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <p class="text-muted small mb-0">Place installers in <code>solidworks-addin/Windows Installer latest</code> to list them here.</p>
-        {% endif %}
-      </div>
-    </div>
+  <div class="col-lg-6">
     <div class="card shadow-sm mb-3">
       <div class="card-body">
         <h5 class="card-title">SolidWorks Setup</h5>
-        <p class="text-muted">Templates, macros and client configuration.</p>
-        {% if files %}
-        <ul class="list-unstyled small mb-2">
-          {% for f in files %}
-          <li><a href="{{ f.url }}">{{ f.name }}</a></li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <p class="text-muted small">Place files in <code>app/static/tools</code> to list them here.</p>
-        {% endif %}
+        <p class="text-muted">Installer + SolidWorks property tabs.</p>
+        <div class="mb-3">
+          <div class="fw-semibold small mb-1">Add-in installer</div>
+          {% if addin_files %}
+          <div class="d-grid gap-2 mb-2">
+            <a class="btn btn-sm btn-primary" href="{{ url_for('tools.addin_latest') }}">Download latest</a>
+          </div>
+          <ul class="list-unstyled small mb-0">
+            {% for f in addin_files %}
+            <li>
+              <a href="{{ f.url }}">{{ f.name }}</a>
+              <span class="text-muted">({{ f.modified }})</span>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted small mb-0">Place installers in <code>solidworks-addin/Windows Installer latest</code> to list them here.</p>
+          {% endif %}
+        </div>
+        <div>
+          <div class="fw-semibold small mb-1">Custom tab properties</div>
+          <ul class="list-unstyled small mb-0">
+            <li><a href="{{ url_for('static', filename='misc/tinymrp_part_customtab.prtprp') }}">Custom tab property for SolidWorks (Parts)</a></li>
+            <li><a href="{{ url_for('static', filename='misc/tinymrp_assy_customtab.asmprp') }}">Custom tab property for SolidWorks (Assemblies)</a></li>
+          </ul>
+        </div>
       </div>
     </div>
     <div class="card shadow-sm mb-3">
       <div class="card-body">
         <h5 class="card-title">Excel Compile</h5>
         <p class="text-muted">Upload a compile list and bundle documents.</p>
-        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('tools.excel_compile') }}">Open Compiler</a>
-      </div>
-    </div>
-  </div>
-  <div class="col-lg-8">
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">Shortcuts</h5>
-        <div class="d-flex flex-wrap gap-2">
-          <a class="btn btn-outline-secondary" href="/ui/parts">Parts</a>
-          <a class="btn btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Jobs</a>
-          <a class="btn btn-outline-secondary" href="{{ url_for('admin_orders.orders_list') }}">Orders</a>
-          <a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>
-          <a class="btn btn-outline-secondary" href="{{ url_for('admin_customers.customers_list') }}">Customers</a>
-          <a class="btn btn-outline-secondary" href="{{ url_for('importer.upload_form') }}">Import BOM</a>
-          <a class="btn btn-outline-secondary" href="/ui/bom/ASM-1001">BOM Explorer</a>
+        <div class="d-flex gap-2 flex-wrap">
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('tools.excel_compile') }}">Open Compiler</a>
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('static', filename='misc/excelcompile.xlsx') }}">Template</a>
         </div>
       </div>
     </div>

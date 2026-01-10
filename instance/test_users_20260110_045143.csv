@@ -1,0 +1,21 @@
+email,password,roles
+testuser.none@example.test,2GjGCxrjst_E0D9h,none
+testuser.admin@example.test,kxXoHGlY3sprq1cO,admin
+testuser.operator@example.test,2L9vwf-yR6jUO3jc,operator
+testuser.planner@example.test,bvmTn53GRxZvRF_Y,planner
+testuser.viewer@example.test,n4xXRmKr3DLPR7am,viewer
+testuser.admin-operator@example.test,v0SNgSphXjAyWrq9,"admin,operator"
+testuser.admin-planner@example.test,ipg_9J5Fpfo0YXmU,"admin,planner"
+testuser.admin-viewer@example.test,BWx6ijk4lK7n__0U,"admin,viewer"
+testuser.operator-planner@example.test,25pvXwRQd5rgmN11,"operator,planner"
+testuser.operator-viewer@example.test,Lsn5zaMPe2eNmViQ,"operator,viewer"
+testuser.planner-viewer@example.test,uoRzpl2Ch8598l5b,"planner,viewer"
+testuser.admin-operator-planner@example.test,nzykyTyCtx87c5aN,"admin,operator,planner"
+testuser.admin-operator-viewer@example.test,ttUlvvJJrxmpc0P4,"admin,operator,viewer"
+testuser.admin-planner-viewer@example.test,n_lP3IFw5L95XuQ6,"admin,planner,viewer"
+testuser.operator-planner-viewer@example.test,1MpnsN9X3GGbRDXm,"operator,planner,viewer"
+testuser.admin-operator-planner-viewer@example.test,bZzQG_Z7CYiRWvR0,"admin,operator,planner,viewer"
+
+note,Delete this file after use.
+generated_at,2026-01-10T04:51:44.473415Z
+total_users,16
