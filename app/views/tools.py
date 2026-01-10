@@ -52,6 +52,7 @@ def _addin_installers():
 
 
 @bp.get("/")
+@login_required
 def tools_index():
     files = _static_tools()
     addin_files = _addin_installers()
@@ -59,6 +60,7 @@ def tools_index():
 
 
 @bp.get("/addin/latest")
+@login_required
 def addin_latest():
     addin_files = _addin_installers()
     if not addin_files:
@@ -70,6 +72,7 @@ def addin_latest():
 
 
 @bp.get("/addin/<path:filename>")
+@login_required
 def addin_download(filename):
     root = _addin_root()
     target = os.path.abspath(os.path.join(root, filename))

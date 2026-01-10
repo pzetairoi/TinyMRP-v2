@@ -1,5 +1,10 @@
 import secrets
 import click
+import os
+import itertools
+import re
+import csv
+import datetime as dt
 from flask.cli import with_appcontext
 from flask_security import hash_password
 
@@ -72,6 +77,125 @@ def seed_roles():
     ])
     click.echo("Seeded roles.")
 
+@user.command("seed-combos")
+@click.option("--prefix", default="testuser", show_default=True, help="Email prefix for generated users")
+@click.option("--domain", default="example.test", show_default=True, help="Email domain for generated users")
+@click.option("--password", default=None, help="Optional fixed password for all users")
+@click.option("--max-combos", type=int, default=0, show_default=True, help="0 means no limit")
+@click.option("--attach-biz/--no-attach-biz", default=True, show_default=True, help="Attach users to suppliers/customers/jobs if present")
+@with_appcontext
+def seed_user_combos(prefix, domain, password, max_combos, attach_biz):
+    """Create users for every role combination (powerset)."""
+    roles = list(Role.objects.order_by("name"))
+    if not roles:
+        click.echo("No roles found; run `flask user seed-roles` first.")
+        return
+
+    combos = list(itertools.chain.from_iterable(
+        itertools.combinations(roles, r) for r in range(len(roles) + 1)
+    ))
+    if max_combos and len(combos) > max_combos:
+        combos = combos[:max_combos]
+        click.echo(f"Truncated role combinations to {max_combos} (use --max-combos 0 for all).")
+
+    out_path = None
+    writer = None
+    if password is None:
+        os.makedirs(current_app.instance_path, exist_ok=True)
+        stamp = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        out_path = os.path.join(current_app.instance_path, f"test_users_{stamp}.csv")
+        out_file = open(out_path, "w", newline="", encoding="utf-8")
+        writer = csv.writer(out_file)
+        writer.writerow(["email", "password", "roles"])
+
+    created = 0
+    updated = 0
+    seeded_users = []
+    for idx, combo in enumerate(combos, start=1):
+        role_names = [r.name for r in combo]
+        label = "none" if not role_names else "-".join(role_names)
+        label = re.sub(r"[^a-z0-9-]+", "", label.lower())
+        if len(label) > 32 or not label:
+            label = f"set{idx:03d}"
+        email = f"{prefix}.{label}@{domain}".lower()
+
+        u = User.objects(email=email).first()
+        if not u:
+            u = User(email=email, fs_uniquifier=secrets.token_hex(16))
+            created += 1
+            set_password = True
+        else:
+            updated += 1
+            set_password = bool(password)
+
+        if password is None:
+            raw = secrets.token_urlsafe(12)
+        else:
+            raw = password
+
+        if set_password:
+            u.password = hash_password(raw)
+
+        u.roles = list(combo)
+        u.active = True
+        u.save()
+        seeded_users.append(u)
+
+        if writer and set_password:
+            writer.writerow([email, raw, ",".join(role_names) or "none"])
+
+    if writer:
+        writer.writerow([])
+        writer.writerow(["note", "Delete this file after use."])
+        writer.writerow(["generated_at", dt.datetime.utcnow().isoformat() + "Z"])
+        writer.writerow(["total_users", len(seeded_users)])
+        writer = None
+        out_file.close()
+
+    if attach_biz and seeded_users:
+        try:
+            from app.models.supplier import Supplier
+            from app.models.customer import Customer
+            from app.models.job import Job
+            suppliers = list(Supplier.objects())
+            customers = list(Customer.objects())
+            jobs = list(Job.objects())
+
+            if suppliers:
+                for i, u in enumerate(seeded_users):
+                    s = suppliers[i % len(suppliers)]
+                    if u not in (s.users or []):
+                        s.users.append(u)
+                for s in suppliers:
+                    s.save()
+
+            if customers:
+                for i, u in enumerate(seeded_users):
+                    c = customers[i % len(customers)]
+                    if u not in (c.users or []):
+                        c.users.append(u)
+                for c in customers:
+                    c.save()
+
+            if jobs:
+                for i, u in enumerate(seeded_users):
+                    j = jobs[i % len(jobs)]
+                    if u not in (j.participants or []):
+                        j.participants.append(u)
+                for j in jobs:
+                    j.save()
+
+        except Exception as exc:
+            click.echo(f"Attach to business entities failed: {exc}")
+
+    click.echo({
+        "roles": [r.name for r in roles],
+        "created": created,
+        "updated": updated,
+        "users_total": len(seeded_users),
+        "password_mode": "random" if password is None else "fixed",
+        "password_csv": out_path or "",
+    })
 @user.command("seed-parts")
 @with_appcontext
 def seed_parts():

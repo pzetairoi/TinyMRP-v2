@@ -408,12 +408,26 @@ User management:
 - `flask --app run.py user seed-roles`
 - `flask --app run.py user create --email <email> --password <pw>`
 - `flask --app run.py user grant-admin --email <email>`
+- Role-combo test users (creates every role combination):
+  - `flask --app run.py user seed-combos --prefix testuser --domain example.test`
+  - `flask --app run.py user seed-combos --password Test1234!`
 
 Data helpers (see `app/cli.py`):
 
-- Demo data: `flask --app run.py user seed-parts`, `flask --app run.py user seed-bom`.
+- Demo parts/BOM: `flask --app run.py user seed-parts`, `flask --app run.py user seed-bom`.
+- Large demo dataset (parts + BOM tree):
+  - `flask --app run.py data seed-demo --scale small|medium|large`
+  - `flask --app run.py data clear-demo`
+- Business data (suppliers, customers, jobs, orders):
+  - `flask --app run.py biz seed`
+  - `flask --app run.py biz clear`
 - Importer: `flask --app run.py importcmd zip --file <path>.zip`.
 - File discovery: `flask --app run.py files scan-one --pn PN --rev REV`.
+- Thumbnails:
+  - `flask --app run.py thumbs rebuild-one --pn PN --rev REV`
+  - `flask --app run.py thumbs rebuild-all`
+- Attributes backfill:
+  - `flask --app run.py attrs backfill`
 
 ---
 
