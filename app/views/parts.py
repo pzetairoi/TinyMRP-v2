@@ -20,6 +20,11 @@ from app.services.audit import log_action
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
 
+def _normalized_revision(p: Part, attrs: dict) -> str:
+    rev = (attrs.get("revision") or p.revision or "").strip()
+    return rev
+
+
 @login_required
 @require_items_view
 @bp.route("/parts_lazy", methods=["GET", "POST"])
@@ -93,7 +98,10 @@ def parts_lazy():
         if job and job.bom:
             pn_list = list({(l.pn or "").strip() for l in job.bom if (l.pn or "").strip()})
             if pn_list:
-                q = q & Q(part_number__in=pn_list)
+                job_q = Q()
+                for pn in pn_list:
+                    job_q = job_q | Q(part_number__iexact=pn)
+                q = q & job_q
 
     qs = Part.objects(q)
     filtered = qs.count()
@@ -108,13 +116,14 @@ def parts_lazy():
     for p in docs:
         attrs = harvest_part_attrs(p)
         pn = p.part_number
-        rev = p.revision or ""
+        rev = _normalized_revision(p, attrs)
+        display_code = f"{pn}-{rev}" if rev else pn
         out.append(
             {
                 "id": f"{pn}::{rev}",
                 "part_number": pn,
                 "revision": rev,
-                "display_code": p.display_code,
+                "display_code": display_code,
                 "description": attrs.get("description") or p.description or "",
                 "category": attrs.get("category") or p.category or "",
                 "material": attrs.get("material", ""),
@@ -141,11 +150,11 @@ def part_detail():
     p = None
     if "rev" in request.args:
         rev = request.args.get("rev") or ""
-        p = Part.objects(part_number=pn, revision=rev).first()
+        p = Part.objects(part_number__iexact=pn, revision__iexact=rev).first()
         if not p:
-            p = Part.objects(part_number=pn).order_by("-updated_at").first()
+            p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
     else:
-        p = Part.objects(part_number=pn).order_by("-updated_at").first()
+        p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
     if not p:
         return jsonify({"error": "not found"}), 404
 
@@ -154,6 +163,12 @@ def part_detail():
         if isinstance(allowed, set):
             key = (p.part_number, p.revision or "")
             if key not in allowed:
+                key_lower = (p.part_number.lower(), (p.revision or "").lower())
+                if any((k[0] or "").lower() == key_lower[0] and (k[1] or "").lower() == key_lower[1] for k in allowed):
+                    key = None
+                else:
+                    key = key
+            if key:
                 try:
                     log_action("part.view.deny", resource_type="part", resource=f"{key[0]}:{key[1]}")
                 except Exception:
@@ -163,11 +178,12 @@ def part_detail():
         pass
 
     attrs = harvest_part_attrs(p)
+    norm_rev = _normalized_revision(p, attrs)
     meta = current_app.config.get("PROCESS_META", {})
     proc_list = normalize_processes(attrs, meta)
 
-    preview_urls = preview_png_urls_for(p.part_number, p.revision)
-    drawing_urls = drawing_png_urls_for(p.part_number, p.revision)
+    preview_urls = preview_png_urls_for(p.part_number, norm_rev)
+    drawing_urls = drawing_png_urls_for(p.part_number, norm_rev)
 
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
 
@@ -178,7 +194,7 @@ def part_detail():
 
     files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": []}
     for f in (
-        PartFile.objects(part_number__iexact=p.part_number, revision__iexact=p.revision)
+        PartFile.objects(part_number__iexact=p.part_number, revision__iexact=norm_rev)
         .only("ext_group", "rel_path", "path")
         .order_by("ext_group", "rel_path")
     ):
@@ -188,21 +204,22 @@ def part_detail():
     wu_rows = _rows_for_child_pn(p.part_number, p.revision)
 
     other_versions = []
+    pn_key = p.part_number
     for op in (
-        Part.objects(part_number=pn)
+        Part.objects(part_number__iexact=pn)
         .only("part_number", "revision", "description", "category", "attrs", "updated_at")
         .order_by("-updated_at")
     ):
         attrs_v = harvest_part_attrs(op)
-        rev_v = attrs_v.get("revision", "") or op.revision or ""
+        rev_v = _normalized_revision(op, attrs_v)
         other_versions.append(
             {
-                "id": f"{pn}::{rev_v}",
-                "part_number": pn,
+                "id": f"{pn_key}::{rev_v}",
+                "part_number": pn_key,
                 "revision": rev_v,
-                "display_code": f"{pn}-{rev_v}" if rev_v else pn,
+                "display_code": f"{pn_key}-{rev_v}" if rev_v else pn_key,
                 "description": attrs_v.get("description") or op.description or "",
-                "thumb_urls": thumb_urls_for(pn, rev_v or None),
+                "thumb_urls": thumb_urls_for(pn_key, rev_v or None),
             }
         )
 
@@ -220,8 +237,8 @@ def part_detail():
             "part": {
                 "part_number": p.part_number,
                 "description": attrs.get("description", ""),
-                "revision": attrs.get("revision", ""),
-                "display_code": p.display_code,
+                "revision": norm_rev,
+                "display_code": f"{p.part_number}-{norm_rev}" if norm_rev else p.part_number,
                 "category": attrs.get("category", ""),
                 "material": attrs.get("material", ""),
                 "finish": attrs.get("finish", ""),

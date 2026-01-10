@@ -1,4 +1,4 @@
-{% extends "security/base.html" %}
+﻿{% extends "security/base.html" %}
 {% block title %}{{ 'Edit order' if order else 'New order' }} - Admin{% endblock %}
 {% block content %}
 <div class="row">
@@ -11,7 +11,7 @@
           <div class="row g-3">
             <div class="col-md-4">
               <label class="form-label">Order number</label>
-              <input class="form-control" type="text" name="order_number" value="{{ order.order_number if order else '' }}" required>
+              <input class="form-control" type="text" name="order_number" value="{{ order.order_number if order else '' }}" placeholder="Auto if blank">
             </div>
             <div class="col-md-8">
               <label class="form-label">Description</label>
@@ -20,20 +20,40 @@
           </div>
 
           <div class="row g-3 mt-2">
-            <div class="col-md-4">
+            <div class="col-md-3">
               <label class="form-label">Type</label>
               <select class="form-select" name="kind">
                 {% set k = order.kind if order else 'purchase' %}
                 <option value="purchase" {% if k=='purchase' %}selected{% endif %}>Purchase</option>
-                <option value="work" {% if k=='work' %}selected{% endif %}>Work</option>
+                <option value="sales" {% if k=='sales' %}selected{% endif %}>Sales</option>
               </select>
             </div>
+            <div class="col-md-3">
+              <label class="form-label">Status</label>
+              {% set st = order.status if order else 'draft' %}
+              <select class="form-select" name="status">
+                {% for s in ['draft','submitted','confirmed','in_production','ready_to_ship','shipped','delivered','cancelled'] %}
+                <option value="{{ s }}" {% if st==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Order date</label>
+              <input class="form-control" type="date" name="order_date" value="{{ order.order_date.strftime('%Y-%m-%d') if order and order.order_date else '' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Currency</label>
+              <input class="form-control" type="text" name="currency" value="{{ order.currency if order else 'USD' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
             <div class="col-md-4">
               <label class="form-label">Job</label>
-              <select class="form-select" name="job">
+              <select class="form-select" name="job" id="order-job">
                 <option value="">-</option>
                 {% for j in jobs %}
-                <option value="{{ j.id }}" {% if order and order.job and j.id==order.job.id %}selected{% endif %}>{{ j.job_number }}</option>
+                <option value="{{ j.id }}" data-customer-id="{{ j.customer_id }}" {% if (order and order.job and j.id==order.job.id) or (prefill_job and j.id|string==prefill_job|string) %}selected{% endif %}>{{ j.job_number }}</option>
                 {% endfor %}
               </select>
               {% if order and order.job %}<div class="small mt-1"><a href="{{ url_for('admin_jobs.jobs_edit', job_id=order.job.id) }}">Open job</a></div>{% endif %}
@@ -47,54 +67,122 @@
                 {% endfor %}
               </select>
             </div>
+            <div class="col-md-4">
+              <label class="form-label">Customer</label>
+              <select class="form-select" name="customer" id="order-customer">
+                <option value="">-</option>
+                {% for c in customers %}
+                <option value="{{ c.id }}" {% if (order and order.customer and c.id==order.customer.id) or (prefill_customer and c.id|string==prefill_customer|string) %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text text-muted" id="customer-lock-note" style="display:none;">Customer locked to job.</div>
+            </div>
           </div>
 
           <div class="row g-3 mt-2">
-            <div class="col-md-6">
-              <label class="form-label">Customer</label>
-              <select class="form-select" name="customer">
-                <option value="">-</option>
-                {% for c in customers %}
-                <option value="{{ c.id }}" {% if order and order.customer and c.id==order.customer.id %}selected{% endif %}>{{ c.name }}</option>
-                {% endfor %}
-              </select>
+            <div class="col-md-4">
+              <label class="form-label">Customer PO</label>
+              <input class="form-control" type="text" name="customer_po" value="{{ order.customer_po if order else '' }}">
             </div>
-            <div class="col-md-6">
-              <label class="form-label">Status</label>
-              <input class="form-control" type="text" name="status" value="{{ order.status if order else 'open' }}" disabled>
+            <div class="col-md-4">
+              <label class="form-label">Shipping method</label>
+              <input class="form-control" type="text" name="shipping_method" value="{{ order.shipping_method if order else '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Carrier</label>
+              <input class="form-control" type="text" name="carrier" value="{{ order.carrier if order else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-4">
+              <label class="form-label">Tracking number</label>
+              <input class="form-control" type="text" name="tracking_number" value="{{ order.tracking_number if order else '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Requested delivery</label>
+              <input class="form-control" type="date" name="requested_delivery" value="{{ order.requested_delivery.strftime('%Y-%m-%d') if order and order.requested_delivery else '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Promised delivery</label>
+              <input class="form-control" type="date" name="promised_delivery" value="{{ order.promised_delivery.strftime('%Y-%m-%d') if order and order.promised_delivery else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-4">
+              <label class="form-label">Shipping cost</label>
+              <input class="form-control" type="number" step="0.01" min="0" id="shipping_cost" name="shipping_cost" value="{{ order.shipping_cost if order else 0 }}">
             </div>
           </div>
 
           <div class="mt-3">
             <label class="form-label">Order Lines</label>
-            <div class="d-flex flex-column flex-md-row align-items-md-center gap-2 mb-2">
-              <div class="d-flex flex-wrap gap-2">
-                <input id="ol-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
-                <input id="ol-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
-                <input id="ol-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
-                <input id="ol-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty ≥">
-                <input id="ol-filter-qty-max" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty ≤">
-              </div>
-              <button class="btn btn-sm btn-outline-primary ms-md-auto" type="button" onclick="openPartPickerForOrder()">Add part(s)</button>
-            </div>
             <div class="table-responsive">
               <table class="table table-sm align-middle table-striped" id="order-table">
                 <thead>
                   <tr>
                     <th style="width:64px;">Thumb</th>
-                    <th style="width:24%;">Part Number</th>
-                    <th>Description</th>
+                    <th class="col-part-number" style="width:24%;">Part Number</th>
+                    <th class="col-description">Description</th>
                     <th style="width:12%;">Rev</th>
                     <th style="width:12%;">Qty</th>
                     <th style="width:10%;">UoM</th>
+                    <th style="width:12%;">Unit price</th>
+                    <th style="width:10%;">Disc %</th>
+                    <th style="width:10%;">Tax %</th>
+                    <th style="width:12%;">Line total</th>
                     <th style="width:15%;">Note</th>
                     <th style="width:18%;">Actions</th>
+                  </tr>
+                  <tr class="table-light">
+                    <th></th>
+                    <th>
+                      <input id="ol-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
+                    </th>
+                    <th>
+                      <input id="ol-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
+                    </th>
+                    <th>
+                      <input id="ol-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
+                    </th>
+                    <th>
+                      <div class="d-flex flex-column gap-1">
+                        <input id="ol-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty min">
+                        <input id="ol-filter-qty-max" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty max">
+                      </div>
+                    </th>
+                    <th></th>
+                    <th></th>
+                    <th></th>
+                    <th></th>
+                    <th></th>
+                    <th></th>
+                    <th>
+                      <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForOrder()">Add part(s)</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" onclick="clearOrderFilters()">Clear</button>
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody></tbody>
               </table>
             </div>
             <textarea id="order_lines" class="form-control d-none" name="lines" rows="8">{{ lines if lines is defined else '' }}</textarea>
+          </div>
+
+          <div class="row g-3 mt-3">
+            <div class="col-md-4 ms-auto">
+              <div class="border rounded-3 p-3 bg-light">
+                <div class="d-flex justify-content-between small"><span>Subtotal</span><span id="order-subtotal">{{ '%.2f' % order.subtotal if order and order.subtotal is not none else '0.00' }}</span></div>
+                <div class="d-flex justify-content-between small"><span>Discount</span><span id="order-discount">{{ '%.2f' % order.discount_amount if order and order.discount_amount is not none else '0.00' }}</span></div>
+                <div class="d-flex justify-content-between small"><span>Tax</span><span id="order-tax">{{ '%.2f' % order.tax_amount if order and order.tax_amount is not none else '0.00' }}</span></div>
+                <div class="d-flex justify-content-between small"><span>Shipping</span><span id="order-shipping">{{ '%.2f' % order.shipping_cost if order and order.shipping_cost is not none else '0.00' }}</span></div>
+                <hr class="my-2">
+                <div class="d-flex justify-content-between fw-semibold"><span>Total</span><span id="order-total">{{ '%.2f' % order.total if order and order.total is not none else '0.00' }}</span></div>
+              </div>
+            </div>
           </div>
 
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
@@ -122,7 +210,10 @@
         rev: parts[1] || '',
         qty: Math.max(1, Math.round(parseFloat(parts[2]) || 1)),
         uom: parts[3] || 'EA',
-        note: parts.slice(4).join(',') || '',
+        note: parts[4] || '',
+        unit_price: parseFloat(parts[5]) || 0,
+        discount_pct: parseFloat(parts[6]) || 0,
+        tax_pct: parseFloat(parts[7]) || 0,
         thumb: '',
         desc: ''
       });
@@ -132,7 +223,7 @@
 
   function syncOrderTextarea(){
     const ta = document.getElementById('order_lines');
-    ta.value = orderRows.map(r => `${r.pn},${r.rev || ''},${r.qty || 1},${r.uom || 'EA'},${r.note || ''}`).join('\\n');
+    ta.value = orderRows.map(r => `${r.pn},${r.rev || ''},${r.qty || 1},${r.uom || 'EA'},${r.note || ''},${r.unit_price || 0},${r.discount_pct || 0},${r.tax_pct || 0}`).join('\n');
   }
 
   function orderFilters(){
@@ -143,6 +234,59 @@
       qtyMin: parseFloat(document.getElementById('ol-filter-qty-min')?.value || '') || null,
       qtyMax: parseFloat(document.getElementById('ol-filter-qty-max')?.value || '') || null,
     };
+  }
+
+  function clearOrderFilters(){
+    ['ol-filter-pn','ol-filter-rev','ol-filter-desc','ol-filter-qty-min','ol-filter-qty-max'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) el.value = '';
+    });
+    renderOrderTable();
+  }
+
+  function computeRowTotals(row){
+    const qty = parseFloat(row.qty || 0);
+    const unit = parseFloat(row.unit_price || 0);
+    const discPct = parseFloat(row.discount_pct || 0);
+    const taxPct = parseFloat(row.tax_pct || 0);
+    const base = qty * unit;
+    const discount = base * (discPct / 100);
+    const taxable = Math.max(base - discount, 0);
+    const tax = taxable * (taxPct / 100);
+    return { base, discount, tax, total: taxable + tax };
+  }
+
+  function updateLineTotal(idx){
+    const row = orderRows[idx];
+    if(!row) return;
+    const totals = computeRowTotals(row);
+    const cell = document.querySelector(`.ol-total[data-idx="${idx}"]`);
+    if(cell) cell.textContent = totals.total.toFixed(2);
+  }
+
+  function updateOrderSummary(){
+    let subtotal = 0;
+    let discount = 0;
+    let tax = 0;
+    orderRows.forEach(row => {
+      const t = computeRowTotals(row);
+      subtotal += t.base;
+      discount += t.discount;
+      tax += t.tax;
+    });
+    const shipping = parseFloat(document.getElementById('shipping_cost')?.value || '0') || 0;
+    const total = Math.max(subtotal - discount + tax + shipping, 0);
+    const fmt = (v) => v.toFixed(2);
+    const s = document.getElementById('order-subtotal');
+    const d = document.getElementById('order-discount');
+    const t = document.getElementById('order-tax');
+    const sh = document.getElementById('order-shipping');
+    const tot = document.getElementById('order-total');
+    if(s) s.textContent = fmt(subtotal);
+    if(d) d.textContent = fmt(discount);
+    if(t) t.textContent = fmt(tax);
+    if(sh) sh.textContent = fmt(shipping);
+    if(tot) tot.textContent = fmt(total);
   }
 
   function renderOrderTable(){
@@ -156,6 +300,7 @@
       if(f.desc && !String(row.desc||'').toLowerCase().includes(f.desc)) return;
       if(f.qtyMin !== null && (row.qty || 0) < f.qtyMin) return;
       if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
+      const totals = computeRowTotals(row);
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td style="width:64px;">
@@ -170,6 +315,16 @@
         <td style="max-width:100px;">
           <input type="text" class="form-control form-control-sm ol-uom" value="${row.uom || 'EA'}" data-idx="${idx}">
         </td>
+        <td style="max-width:120px;">
+          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-price" value="${row.unit_price || 0}" data-idx="${idx}">
+        </td>
+        <td style="max-width:90px;">
+          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-disc" value="${row.discount_pct || 0}" data-idx="${idx}">
+        </td>
+        <td style="max-width:90px;">
+          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-tax" value="${row.tax_pct || 0}" data-idx="${idx}">
+        </td>
+        <td class="small text-muted ol-total" data-idx="${idx}">${totals.total.toFixed(2)}</td>
         <td>
           <input type="text" class="form-control form-control-sm ol-note" value="${row.note || ''}" data-idx="${idx}">
         </td>
@@ -183,6 +338,7 @@
       tbody.appendChild(tr);
       ensureThumbOrder(idx);
     });
+    updateOrderSummary();
   }
 
   function attachOrderHandlers(){
@@ -194,12 +350,23 @@
       if(Number.isNaN(idx) || !orderRows[idx]) return;
       if(t.classList.contains('ol-qty')){
         orderRows[idx].qty = Math.max(1, Math.round(parseFloat(t.value) || 1));
+        updateLineTotal(idx);
+      } else if(t.classList.contains('ol-price')){
+        orderRows[idx].unit_price = parseFloat(t.value) || 0;
+        updateLineTotal(idx);
+      } else if(t.classList.contains('ol-disc')){
+        orderRows[idx].discount_pct = parseFloat(t.value) || 0;
+        updateLineTotal(idx);
+      } else if(t.classList.contains('ol-tax')){
+        orderRows[idx].tax_pct = parseFloat(t.value) || 0;
+        updateLineTotal(idx);
       } else if(t.classList.contains('ol-uom')){
         orderRows[idx].uom = t.value || 'EA';
       } else if(t.classList.contains('ol-note')){
         orderRows[idx].note = t.value || '';
       }
       syncOrderTextarea();
+      updateOrderSummary();
     });
     tbody.addEventListener('click', (ev) => {
       const rem = ev.target.closest('button[data-action="remove"]');
@@ -221,6 +388,7 @@
     ['ol-filter-pn','ol-filter-rev','ol-filter-desc','ol-filter-qty-min','ol-filter-qty-max'].forEach(id=>{
       document.getElementById(id)?.addEventListener('input', renderOrderTable);
     });
+    document.getElementById('shipping_cost')?.addEventListener('input', updateOrderSummary);
   }
 
   function openPartPickerForOrder(){
@@ -237,14 +405,32 @@
         if(replaceIdx !== null && orderRows[replaceIdx]){
           const it = data.items[0];
           orderRows[replaceIdx] = {
-            pn: it.pn, rev: it.rev || '', qty: Math.max(1, Math.round(it.qty || orderRows[replaceIdx].qty || 1)),
-            uom: orderRows[replaceIdx].uom || 'EA', note: orderRows[replaceIdx].note || '',
-            thumb: '', desc: it.desc || ''
+            pn: it.pn,
+            rev: it.rev || '',
+            qty: Math.max(1, Math.round(it.qty || orderRows[replaceIdx].qty || 1)),
+            uom: orderRows[replaceIdx].uom || 'EA',
+            note: orderRows[replaceIdx].note || '',
+            unit_price: orderRows[replaceIdx].unit_price || 0,
+            discount_pct: orderRows[replaceIdx].discount_pct || 0,
+            tax_pct: orderRows[replaceIdx].tax_pct || 0,
+            thumb: '',
+            desc: it.desc || ''
           };
           replaceIdx = null;
         } else {
           data.items.forEach(it => {
-            orderRows.push({ pn: it.pn, rev: it.rev || '', qty: Math.max(1, Math.round(it.qty || 1)), uom: 'EA', note: '', thumb: '', desc: it.desc || '' });
+            orderRows.push({
+              pn: it.pn,
+              rev: it.rev || '',
+              qty: Math.max(1, Math.round(it.qty || 1)),
+              uom: 'EA',
+              note: '',
+              unit_price: 0,
+              discount_pct: 0,
+              tax_pct: 0,
+              thumb: '',
+              desc: it.desc || ''
+            });
           });
         }
         syncOrderTextarea();
@@ -253,12 +439,35 @@
     }catch(e){}
   });
 
+  function syncCustomerToJob(){
+    const jobSel = document.getElementById('order-job');
+    const custSel = document.getElementById('order-customer');
+    const note = document.getElementById('customer-lock-note');
+    if(!jobSel || !custSel) return;
+    const opt = jobSel.options[jobSel.selectedIndex];
+    const custId = opt ? opt.getAttribute('data-customer-id') : '';
+    if(custId){
+      custSel.value = custId;
+      custSel.disabled = true;
+      if(note) note.style.display = 'block';
+    }else{
+      custSel.disabled = false;
+      if(note) note.style.display = 'none';
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', function(){
     const ta = document.getElementById('order_lines');
     orderRows = parseOrderLines(ta ? ta.value : '');
     syncOrderTextarea();
     renderOrderTable();
     attachOrderHandlers();
+    updateOrderSummary();
+    const jobSel = document.getElementById('order-job');
+    if(jobSel){
+      jobSel.addEventListener('change', syncCustomerToJob);
+    }
+    syncCustomerToJob();
   });
 
   async function ensureThumbOrder(idx){
@@ -268,18 +477,30 @@
     if(thumbCache[key] === null) return;
     if(thumbCache[key]){ row.thumb = thumbCache[key]; return; }
     try{
-      const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(row.pn)}&rev=${encodeURIComponent(row.rev||'')}`);
+      const base = `/api/part_detail?pn=${encodeURIComponent(row.pn)}`;
+      const r = await fetch(row.rev ? `${base}&rev=${encodeURIComponent(row.rev)}` : base);
       if(!r.ok) { thumbCache[key] = null; return; }
       const j = await r.json();
+      const revFromServer = (j.part && j.part.revision) ? String(j.part.revision) : '';
+      const revChanged = !row.rev && revFromServer;
+      if(revChanged){
+        row.rev = revFromServer;
+        syncOrderTextarea();
+      }
       row.desc = (j.part && (j.part.description || '')) || row.desc || '';
       const urls = Array.isArray(j.images) ? j.images : [];
       const thumb = urls[0] || '';
       if(thumb){
-        thumbCache[key] = thumb;
+        const newKey = `${row.pn}::${row.rev||''}`;
+        thumbCache[newKey] = thumb;
         row.thumb = thumb;
         renderOrderTable();
       }else{
-        thumbCache[key] = null;
+        const newKey = `${row.pn}::${row.rev||''}`;
+        thumbCache[newKey] = null;
+        if(revChanged){
+          renderOrderTable();
+        }
       }
     }catch(e){
       thumbCache[key] = null;
@@ -287,11 +508,3 @@
   }
 </script>
 {% endblock %}
-      const thumb = urls[0] || '';
-      if(thumb){
-        thumbCache[key] = thumb;
-        row.thumb = thumb;
-        renderOrderTable();
-      }else{
-        thumbCache[key] = null;
-      }

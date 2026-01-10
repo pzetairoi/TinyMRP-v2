@@ -2,10 +2,15 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask import abort
 from mongoengine.errors import DoesNotExist, ValidationError
-from flask_security import roles_required
+from flask_security import roles_required, current_user
 from flask_security.utils import hash_password
 from app.services.audit import log_action
 from ..models.auth import User, Role
+from ..models.job import Job
+from ..models.supplier import Supplier
+from ..models.customer import Customer
+from ..models.api_token import ApiToken
+from ..models.user_settings import UserSettings
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -19,6 +24,72 @@ def admin_index():
 def users_list():
     users = User.objects().order_by("-id").limit(200)
     return render_template("admin/users_list.html", users=users)
+
+
+def _cleanup_user_references(u: User):
+    try:
+        Job.objects(participants=u).update(pull__participants=u)
+    except Exception:
+        pass
+    try:
+        Supplier.objects(users=u).update(pull__users=u)
+    except Exception:
+        pass
+    try:
+        Customer.objects(users=u).update(pull__users=u)
+    except Exception:
+        pass
+    try:
+        ApiToken.objects(user_id=u).delete()
+    except Exception:
+        pass
+    try:
+        UserSettings.objects(user_id=u).delete()
+    except Exception:
+        pass
+
+
+@bp.post("/users/bulk-delete")
+@roles_required("admin")
+def users_bulk_delete():
+    ids = request.form.getlist("user_ids")
+    if not ids:
+        flash("No users selected.", "error")
+        return redirect(url_for("admin.users_list"))
+    users = list(User.objects(id__in=ids))
+    deleted = 0
+    skipped_admin = 0
+    skipped_self = 0
+    for u in users:
+        try:
+            if u.has_role("admin"):
+                skipped_admin += 1
+                continue
+        except Exception:
+            pass
+        try:
+            if str(u.id) == str(current_user.id):
+                skipped_self += 1
+                continue
+        except Exception:
+            pass
+        _cleanup_user_references(u)
+        try:
+            u.delete()
+            deleted += 1
+            try:
+                log_action("admin.user.delete", resource_type="user", resource=str(u.email))
+            except Exception:
+                pass
+        except Exception:
+            pass
+    if deleted:
+        flash(f"Deleted {deleted} user(s).", "success")
+    if skipped_admin:
+        flash(f"Skipped {skipped_admin} admin user(s).", "warning")
+    if skipped_self:
+        flash("Skipped your own account.", "warning")
+    return redirect(url_for("admin.users_list"))
 
 @bp.route("/users/new", methods=["GET", "POST"])
 @roles_required("admin")
