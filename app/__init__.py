@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request
 from mongoengine import connect, get_connection
 from flask_security import Security, MongoEngineUserDatastore
 from .models.auth import User, Role
@@ -20,6 +20,7 @@ security = None
 import os
 import secrets
 import json as _json
+from datetime import timedelta
 
 
 
@@ -84,6 +85,17 @@ def create_app(config_object=None):
     app.config.setdefault("SECURITY_REGISTERABLE", False)
     app.config.setdefault("SECURITY_RECOVERABLE", False)
     app.config.setdefault("SECURITY_CONFIRMABLE", False)
+    app.config.setdefault("SESSION_COOKIE_HTTPONLY", True)
+    app.config.setdefault("SESSION_COOKIE_SAMESITE", "Lax")
+    app.config.setdefault("SESSION_COOKIE_SECURE", False)
+    app.config.setdefault("REMEMBER_COOKIE_HTTPONLY", True)
+    app.config.setdefault("REMEMBER_COOKIE_SAMESITE", "Lax")
+    app.config.setdefault("REMEMBER_COOKIE_SECURE", False)
+    app.config.setdefault("PERMANENT_SESSION_LIFETIME", timedelta(minutes=30))
+    app.config.setdefault("SESSION_REFRESH_EACH_REQUEST", True)
+    app.config.setdefault("EXCEL_COMPILE_MAX_BYTES", int(os.getenv("EXCEL_COMPILE_MAX_BYTES") or "10485760"))
+    app.config.setdefault("SECURITY_HEADERS_ENABLED", True)
+    app.config.setdefault("FORCE_HTTPS", False)
     
     app.config["TEMPLATES_AUTO_RELOAD"]=True # Enable auto-reload for templates in development
     
@@ -125,6 +137,10 @@ def create_app(config_object=None):
     # Final safety net for local dev
     if not app.config.get("SECRET_KEY"):
         app.config["SECRET_KEY"] = secrets.token_urlsafe(32)
+    if app.config.get("SECRET_KEY") in ("change-me", "changeme"):
+        print("Warning: SECRET_KEY uses a default value. Set SECRET_KEY in the environment.")
+    if app.config.get("SECURITY_PASSWORD_SALT") in ("change-me-too", "changeme"):
+        print("Warning: SECURITY_PASSWORD_SALT uses a default value. Set SECURITY_PASSWORD_SALT in the environment.")
 
     # Plain MongoEngine connect – capture the connection object
     app.config.setdefault("MONGODB_ALIAS", "tinymrp-v2")
@@ -147,6 +163,52 @@ def create_app(config_object=None):
     # CSRF
     app.config.setdefault("WTF_CSRF_ENABLED", True)
     csrf.init_app(app)
+
+    if bool(app.config.get("FORCE_HTTPS")):
+        app.config["PREFERRED_URL_SCHEME"] = "https"
+        app.config["SESSION_COOKIE_SECURE"] = True
+        app.config["REMEMBER_COOKIE_SECURE"] = True
+
+        @app.before_request
+        def _force_https():
+            try:
+                from flask import request, redirect
+                if not request.is_secure:
+                    url = request.url.replace("http://", "https://", 1)
+                    return redirect(url, code=301)
+            except Exception:
+                return None
+
+    if bool(app.config.get("SECURITY_HEADERS_ENABLED")):
+        @app.after_request
+        def _security_headers(resp):
+            resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+            resp.headers.setdefault("X-Frame-Options", "DENY")
+            resp.headers.setdefault("Referrer-Policy", "no-referrer-when-downgrade")
+            resp.headers.setdefault("X-XSS-Protection", "1; mode=block")
+            resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+            if request.is_secure:
+                resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+            files_prefix = (app.config.get("FILES_URL_PREFIX") or "").strip()
+            img_src = ["'self'", "data:", "blob:", "https:"]
+            connect_src = ["'self'"]
+            if files_prefix:
+                img_src.append(files_prefix)
+                connect_src.append(files_prefix)
+            csp = " ".join([
+                "default-src 'self';",
+                "base-uri 'self';",
+                "object-src 'none';",
+                "frame-ancestors 'none';",
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;",
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;",
+                f"img-src {' '.join(img_src)};",
+                "font-src 'self' data: https://cdn.jsdelivr.net;",
+                f"connect-src {' '.join(connect_src)};",
+            ])
+            resp.headers.setdefault("Content-Security-Policy", csp)
+            return resp
 
     # Mongo initialized earlier
     try:

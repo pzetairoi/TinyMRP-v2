@@ -94,6 +94,11 @@ def excel_compile():
             flash("Only .xlsx files are supported.")
             return render_template("tools/excel_compile.html", upload=False, filepath=None, missing=[])
 
+        max_bytes = int(current_app.config.get("EXCEL_COMPILE_MAX_BYTES") or 0)
+        if max_bytes and request.content_length and request.content_length > max_bytes:
+            flash("File too large for compile.")
+            return render_template("tools/excel_compile.html", upload=False, filepath=None, missing=[])
+
         raw = up.read()
         if not raw:
             flash("Uploaded file was empty.")
