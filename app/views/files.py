@@ -1,7 +1,7 @@
 # app/views/files.py
 from flask import Blueprint, request, jsonify, current_app, url_for
 from flask_login import login_required, current_user
-from app.services.acl import require_items_view, allowed_parts_for
+from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed
 from app.services.audit import log_action
 import os, base64
 from app.models.part import Part
@@ -35,7 +35,7 @@ def part_images():
     # ACL: enforce root access for PN/REV
     try:
         allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and (pn, (rev or "")) not in allowed:
+        if isinstance(allowed, set) and not part_is_allowed(allowed, pn, rev or ""):
             return jsonify([]), 403
     except Exception:
         pass

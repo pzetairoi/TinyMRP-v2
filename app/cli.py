@@ -75,6 +75,12 @@ def seed_roles():
         "items.view","bom.view","workorders.view","reports.view",
         "jobs.view","orders.view","suppliers.view","customers.view"
     ])
+    upsert("customer_viewer", "Customer-linked viewer", [
+        "items.view","bom.view","jobs.view","customers.view"
+    ])
+    upsert("supplier_viewer", "Supplier-linked viewer", [
+        "items.view","bom.view","orders.view","suppliers.view"
+    ])
     click.echo("Seeded roles.")
 
 @user.command("seed-combos")

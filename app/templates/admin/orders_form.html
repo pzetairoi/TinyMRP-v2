@@ -123,7 +123,7 @@
                 <thead>
                   <tr>
                     <th style="width:64px;">Thumb</th>
-                    <th class="col-part-number" style="width:24%;">Part Number</th>
+                    <th class="col-part-number">Part Number</th>
                     <th class="col-description">Description</th>
                     <th style="width:12%;">Rev</th>
                     <th style="width:12%;">Qty</th>
@@ -302,11 +302,12 @@
       if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
       const totals = computeRowTotals(row);
       const tr = document.createElement('tr');
+      const pnLink = row.pn ? `<a href="/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}">${row.pn}</a>` : '';
       tr.innerHTML = `
         <td style="width:64px;">
           ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : '<div class="bg-light border rounded" style="height:48px;width:64px;"></div>'}
         </td>
-        <td>${row.pn}</td>
+        <td>${pnLink}</td>
         <td>${row.desc || ''}</td>
         <td>${row.rev || ''}</td>
         <td style="max-width:120px;">

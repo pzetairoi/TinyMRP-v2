@@ -1,42 +1,46 @@
 #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  min-height: 100vh;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+body {
+  margin: 0;
+  background: #f8f9fa;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+body.pick-mode nav.navbar {
+  display: none !important;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+body.pick-mode main.container {
+  max-width: 100%;
+  margin: 0;
+  padding: 0.75rem;
 }
 
-.card {
-  padding: 2em;
+body.pick-mode .container {
+  max-width: 100% !important;
 }
 
-.read-the-docs {
-  color: #888;
+body.pick-mode .container.py-3 {
+  padding: 0;
+}
+
+body.pick-mode .pick-header {
+  background: #f8f9fa;
+  border-radius: 0.5rem;
+}
+
+body.pick-mode .pick-container {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 0.75rem;
+}
+
+body.pick-mode .pick-row td {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+body.pick-mode .pick-qty {
+  white-space: nowrap;
 }

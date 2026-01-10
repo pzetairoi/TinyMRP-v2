@@ -24,29 +24,6 @@
           </div>
 
           <div class="row g-3 mt-2">
-            <div class="col-md-4">
-              <label class="form-label">Part number</label>
-              <input class="form-control" type="text" name="part_number" value="{{ job.part_number if job else '' }}">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Revision</label>
-              <input class="form-control" type="text" name="part_revision" value="{{ job.part_revision if job else '' }}">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Qty ordered</label>
-              <input class="form-control" type="number" step="1" min="0" name="qty_ordered" value="{{ job.qty_ordered if job else 0 }}">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Qty produced</label>
-              <input class="form-control" type="number" step="1" min="0" name="qty_produced" value="{{ job.qty_produced if job else 0 }}">
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Qty scrapped</label>
-              <input class="form-control" type="number" step="1" min="0" name="qty_scrapped" value="{{ job.qty_scrapped if job else 0 }}">
-            </div>
-          </div>
-
-          <div class="row g-3 mt-2">
             <div class="col-md-3">
               <label class="form-label">Status</label>
               {% set st = job.status if job else 'draft' %}
@@ -76,26 +53,8 @@
           </div>
 
           <div class="row g-3 mt-2">
-            <div class="col-md-4">
-              <label class="form-label">Order reference</label>
-              <input class="form-control" type="text" name="order_number" value="{{ job.order_number if job else '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Estimated hours</label>
-              <input class="form-control" type="number" step="0.1" min="0" name="estimated_hours" value="{{ job.estimated_hours if job and job.estimated_hours is not none else '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Actual hours</label>
-              <input class="form-control" type="number" step="0.1" min="0" name="actual_hours" value="{{ job.actual_hours if job and job.actual_hours is not none else '' }}">
-            </div>
-          </div>
-
-          <div class="row g-3 mt-2">
             <div class="col-md-4 d-flex align-items-end">
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="material_reserved" id="material_reserved" {% if job and job.material_reserved %}checked{% endif %}>
-                <label class="form-check-label" for="material_reserved">Materials reserved</label>
-              </div>
+              <div class="text-muted small">Job-level order references and hours are tracked in BOM and orders.</div>
             </div>
           </div>
 
@@ -138,39 +97,13 @@
           </div>
 
           <div class="mt-3">
-            <label class="form-label">Production stages</label>
-            <div class="d-flex align-items-center gap-2 mb-2">
-              <button type="button" class="btn btn-sm btn-outline-primary" id="stage-add-btn">Add stage</button>
-              <span class="text-muted small">Format: sequence, name, status, assigned, department, est_hours, act_hours</span>
-            </div>
-            <div class="table-responsive">
-              <table class="table table-sm table-striped align-middle" id="stage-table">
-                <thead>
-                  <tr>
-                    <th style="width:80px;">Seq</th>
-                    <th style="width:22%;">Name</th>
-                    <th style="width:16%;">Status</th>
-                    <th style="width:16%;">Assigned</th>
-                    <th style="width:16%;">Dept</th>
-                    <th style="width:10%;">Est hrs</th>
-                    <th style="width:10%;">Act hrs</th>
-                    <th style="width:10%;">Actions</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <textarea id="stages_text" class="form-control d-none" name="stages_text" rows="5">{{ stages_text if stages_text is defined else '' }}</textarea>
-          </div>
-
-          <div class="mt-3">
             <label class="form-label">Job BOM</label>
             <div class="table-responsive">
             <table class="table table-sm align-middle table-striped" id="bom-table">
               <thead>
                 <tr>
                   <th style="width: 64px;">Thumb</th>
-                  <th class="col-part-number" style="width: 30%;">Part Number</th>
+                  <th class="col-part-number">Part Number</th>
                   <th class="col-description">Description</th>
                   <th style="width: 20%;">Rev</th>
                   <th style="width: 20%;">Qty</th>
@@ -269,6 +202,57 @@
                     <td>{{ '%.2f' % p.required if p.required is number else p.required }}</td>
                     <td>{{ '%.2f' % p.ordered if p.ordered is number else p.ordered }}</td>
                     <td>{{ '%.2f' % p.remaining if p.remaining is number else p.remaining }}</td>
+                    <td>
+                      {% for o in p.orders %}
+                        <div><a href="{{ o.href }}">{{ o.order_number }}</a></div>
+                      {% endfor %}
+                    </td>
+                    <td>
+                      {% for o in p.orders %}
+                        <div>{{ o.supplier }}</div>
+                      {% endfor %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% endif %}
+        {% if oversupplied_parts %}
+          <div class="mt-4">
+            <h2 class="h6 mb-2">Over-Ordered Parts</h2>
+            <div class="table-responsive">
+              <table class="table table-sm table-striped align-middle">
+                <thead>
+                  <tr>
+                    <th style="width:64px;">Thumb</th>
+                    <th class="col-part-number">Part Number</th>
+                    <th class="col-description">Description</th>
+                    <th style="width:12%;">Rev</th>
+                    <th style="width:12%;">Required</th>
+                    <th style="width:12%;">Ordered</th>
+                    <th style="width:12%;">Over</th>
+                    <th style="width:20%;">Orders</th>
+                    <th style="width:15%;">Suppliers</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in oversupplied_parts %}
+                  <tr>
+                    <td>
+                      {% if p.thumb %}
+                        <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
+                      {% else %}
+                        <div class="bg-light border rounded" style="height:48px;width:64px;"></div>
+                      {% endif %}
+                    </td>
+                    <td><a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a></td>
+                    <td>{{ p.desc }}</td>
+                    <td>{{ p.rev }}</td>
+                    <td>{{ '%.2f' % p.required if p.required is number else p.required }}</td>
+                    <td>{{ '%.2f' % p.ordered if p.ordered is number else p.ordered }}</td>
+                    <td>{{ '%.2f' % p.over if p.over is number else p.over }}</td>
                     <td>
                       {% for o in p.orders %}
                         <div><a href="{{ o.href }}">{{ o.order_number }}</a></div>
@@ -385,7 +369,6 @@
   let bomRows = [];
   let replaceIdx = null;
   const thumbCache = {};
-  let stageRows = [];
 
   function selectAllOptions(id){
     const el = document.getElementById(id);
@@ -523,11 +506,12 @@
       if(f.qtyMin !== null && (row.qty || 0) < f.qtyMin) return;
       if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
       const tr = document.createElement('tr');
+      const pnLink = row.pn ? `<a href="/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}">${row.pn}</a>` : '';
       tr.innerHTML = `
         <td style="width:64px;">
           ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : '<div class="bg-light border rounded" style="height:48px;width:64px;"></div>'}
         </td>
-        <td>${row.pn}</td>
+        <td>${pnLink}</td>
         <td>${row.desc || ''}</td>
         <td>${row.rev || ''}</td>
         <td style="max-width:120px;">
@@ -609,7 +593,6 @@
     syncTextarea();
     renderBomTable();
     attachBomHandlers();
-    initStages();
     ['remaining-filter-pn','remaining-filter-desc','remaining-filter-rev','remaining-filter-qty-min'].forEach(id=>{
       document.getElementById(id)?.addEventListener('input', applyRemainingFilters);
     });
@@ -653,107 +636,5 @@
     }
   }
 
-  function parseStagesText(txt){
-    const out = [];
-    for(const raw of (txt || '').split(/\r?\n/)){
-      const line = raw.trim();
-      if(!line || line.startsWith('#')) continue;
-      const parts = line.split(',').map(s => s.trim());
-      const seq = parseInt(parts[0], 10) || (out.length + 1);
-      const name = parts[1] || '';
-      if(!name) continue;
-      out.push({
-        sequence: seq,
-        name: name,
-        status: parts[2] || 'pending',
-        assigned: parts[3] || '',
-        dept: parts[4] || '',
-        est: parts[5] || '',
-        act: parts[6] || ''
-      });
-    }
-    return out;
-  }
-
-  function syncStagesText(){
-    const ta = document.getElementById('stages_text');
-    if(!ta) return;
-    ta.value = stageRows.map(r => [
-      r.sequence || 1,
-      r.name || '',
-      r.status || '',
-      r.assigned || '',
-      r.dept || '',
-      r.est || '',
-      r.act || ''
-    ].join(',')).join('\n');
-  }
-
-  function renderStageTable(){
-    const tbody = document.querySelector('#stage-table tbody');
-    if(!tbody) return;
-    tbody.innerHTML = '';
-    stageRows.forEach((row, idx) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><input type="number" class="form-control form-control-sm stage-seq" data-idx="${idx}" value="${row.sequence || 1}"></td>
-        <td><input type="text" class="form-control form-control-sm stage-name" data-idx="${idx}" value="${row.name || ''}"></td>
-        <td>
-          <select class="form-select form-select-sm stage-status" data-idx="${idx}">
-            ${['pending','in_progress','complete','blocked'].map(s => `<option value="${s}" ${row.status===s?'selected':''}>${s.replace('_',' ')}</option>`).join('')}
-          </select>
-        </td>
-        <td><input type="text" class="form-control form-control-sm stage-assigned" data-idx="${idx}" value="${row.assigned || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm stage-dept" data-idx="${idx}" value="${row.dept || ''}"></td>
-        <td><input type="number" step="0.1" class="form-control form-control-sm stage-est" data-idx="${idx}" value="${row.est || ''}"></td>
-        <td><input type="number" step="0.1" class="form-control form-control-sm stage-act" data-idx="${idx}" value="${row.act || ''}"></td>
-        <td><button type="button" class="btn btn-sm btn-outline-danger stage-remove" data-idx="${idx}">Remove</button></td>
-      `;
-      tbody.appendChild(tr);
-    });
-  }
-
-  function attachStageHandlers(){
-    const tbody = document.querySelector('#stage-table tbody');
-    if(!tbody) return;
-    tbody.addEventListener('input', (ev) => {
-      const t = ev.target;
-      const idx = parseInt(t.getAttribute('data-idx'), 10);
-      if(Number.isNaN(idx) || !stageRows[idx]) return;
-      if(t.classList.contains('stage-seq')) stageRows[idx].sequence = parseInt(t.value || '1', 10);
-      if(t.classList.contains('stage-name')) stageRows[idx].name = t.value || '';
-      if(t.classList.contains('stage-status')) stageRows[idx].status = t.value || 'pending';
-      if(t.classList.contains('stage-assigned')) stageRows[idx].assigned = t.value || '';
-      if(t.classList.contains('stage-dept')) stageRows[idx].dept = t.value || '';
-      if(t.classList.contains('stage-est')) stageRows[idx].est = t.value || '';
-      if(t.classList.contains('stage-act')) stageRows[idx].act = t.value || '';
-      syncStagesText();
-    });
-    tbody.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('.stage-remove');
-      if(!btn) return;
-      const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if(Number.isNaN(idx)) return;
-      stageRows.splice(idx, 1);
-      syncStagesText();
-      renderStageTable();
-    });
-  }
-
-  function initStages(){
-    const ta = document.getElementById('stages_text');
-    stageRows = parseStagesText(ta ? ta.value : '');
-    if(stageRows.length === 0){
-      stageRows = [{ sequence: 1, name: 'Stage 1', status: 'pending', assigned: '', dept: '', est: '', act: '' }];
-    }
-    syncStagesText();
-    renderStageTable();
-    attachStageHandlers();
-    document.getElementById('stage-add-btn')?.addEventListener('click', () => {
-      stageRows.push({ sequence: stageRows.length + 1, name: `Stage ${stageRows.length + 1}`, status: 'pending', assigned: '', dept: '', est: '', act: '' });
-      syncStagesText();
-      renderStageTable();
-    });
-  }
 </script>
 {% endblock %}

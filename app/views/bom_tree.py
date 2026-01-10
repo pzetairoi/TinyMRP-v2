@@ -6,7 +6,7 @@ from app.models.bom import BOMLink
 from app.services.thumbs import preview_png_urls_for
 from app.services.attrs import harvest_part_attrs
 from flask_login import current_user
-from app.services.acl import allowed_parts_for
+from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.acl import require_items_view
 from app.services.audit import log_action
 
@@ -70,10 +70,8 @@ def bom_tree():
         # ACL: root must be allowed if enforcement active
         try:
             allowed = allowed_parts_for(current_user)
-            if isinstance(allowed, set):
-                key = (p.part_number, p.revision or "")
-                if key not in allowed:
-                    return jsonify([]), 403
+            if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+                return jsonify([]), 403
         except Exception:
             pass
         root = _node(p.part_number, rev=(p.revision or None))
@@ -99,10 +97,8 @@ def bom_tree():
                     # ACL filter per child if enforced
                     try:
                         allowed = allowed_parts_for(current_user)
-                        if isinstance(allowed, set):
-                            key = (child_pn, (c_rev or ""))
-                            if key not in allowed:
-                                continue
+                        if isinstance(allowed, set) and not part_is_allowed(allowed, child_pn, c_rev or ""):
+                            continue
                     except Exception:
                         pass
                     kids.append(_node(child_pn, l, rev=c_rev))
@@ -123,10 +119,8 @@ def bom_tree():
                 if child_pn and child_pn != parent:
                     try:
                         allowed = allowed_parts_for(current_user)
-                        if isinstance(allowed, set):
-                            # best effort: allow if any rev of child is permitted
-                            if not any(apn == child_pn for apn, _ in allowed):
-                                continue
+                        if isinstance(allowed, set) and not part_is_allowed(allowed, child_pn, ""):
+                            continue
                     except Exception:
                         pass
                     kids.append(_node(child_pn, l))

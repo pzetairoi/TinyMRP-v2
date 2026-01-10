@@ -8,7 +8,7 @@ from app.models.bom import BOMLink
 from app.services.thumbs import thumb_urls_for
 from app.services.attrs import harvest_part_attrs
 from flask_login import login_required, current_user
-from app.services.acl import require_items_view, allowed_parts_for
+from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
@@ -104,7 +104,7 @@ def whereused_lazy():
     try:
         allowed = allowed_parts_for(current_user)
         if isinstance(allowed, set):
-            rows = [r for r in rows if (r.get("parent_pn"), (r.get("parent_rev") or "")) in allowed]
+            rows = [r for r in rows if part_is_allowed(allowed, r.get("parent_pn"), r.get("parent_rev") or "")]
     except Exception:
         pass
     total = len(rows)

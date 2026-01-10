@@ -11,6 +11,7 @@ from app.models.order import Order, OrderLine
 from app.models.job import Job
 from app.models.supplier import Supplier
 from app.models.customer import Customer
+from app.models.part import Part
 from app.services.biz_utils import generate_order_number, calculate_order_totals, consolidate_order_lines
 
 bp = Blueprint("admin_orders", __name__, url_prefix="/admin/orders")
@@ -143,7 +144,7 @@ def _parse_lines(text: str):
         s = raw.strip()
         if not s or s.startswith("#"): continue
         parts = [x.strip() for x in s.split(",")]
-        pn = parts[0] if parts else ""
+        pn = _canonical_pn(parts[0] if parts else "")
         rev = parts[1] if len(parts) > 1 else ""
         qty = 1.0
         if len(parts) > 2:
@@ -183,6 +184,14 @@ def _parse_lines(text: str):
                 tax_pct=tax_pct,
             ))
     return consolidate_order_lines(out)
+
+
+def _canonical_pn(pn: str) -> str:
+    pn = (pn or "").strip()
+    if not pn:
+        return pn
+    p = Part.objects(part_number__iexact=pn).only("part_number").first()
+    return p.part_number if p else pn
 
 
 def _parse_date(value: str | None):
@@ -356,7 +365,7 @@ def orders_from_job(job_id):
     )
     lines = []
     for p in parts:
-        pn = (p.get("pn") or "").strip()
+        pn = _canonical_pn(p.get("pn") or "")
         if not pn:
             continue
         rev = (p.get("rev") or "").strip()
@@ -406,7 +415,7 @@ def _total_ordered_for_job(job: Job, pn: str, rev: str) -> float:
     if not job:
         return 0.0
     tot = 0.0
-    for o in Order.objects(job=job):
+    for o in Order.objects(job=job, status__ne="cancelled"):
         for l in (o.lines or []):
             if (l.pn or '').strip().lower() == (pn or '').lower() and (l.rev or '') == (rev or ''):
                 try:
@@ -448,7 +457,7 @@ def order_lines_json(order_id):
 def order_lines_update(order_id):
     o = Order.objects(id=order_id).first() or abort(404)
     d = request.get_json(silent=True) or {}
-    pn = (d.get('pn') or '').strip(); rev = (d.get('rev') or '')
+    pn = _canonical_pn(d.get('pn') or ''); rev = (d.get('rev') or '')
     try:
         qty = float(d.get('qty') or 1.0)
     except Exception:

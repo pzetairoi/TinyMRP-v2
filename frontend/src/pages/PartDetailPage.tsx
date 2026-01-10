@@ -62,6 +62,23 @@ type VersionRow = {
   thumb_urls?: string[];
 };
 
+type JobsOrdersRow = {
+  row_key?: string;
+  source: "job" | "order";
+  job_id?: string;
+  job_number?: string;
+  order_id?: string;
+  order_number?: string;
+  order_kind?: string;
+  order_status?: string;
+  immediate_pn: string;
+  immediate_rev?: string;
+  immediate_desc?: string;
+  top_pn: string;
+  top_rev?: string;
+  top_desc?: string;
+};
+
 // threeMF viewer (lazy load)
 const ThreeMFViewer = React.lazy(() => import("../components/ThreeMFViewer"));
 
@@ -106,6 +123,7 @@ export default function PartDetailPage() {
   const [children, setChildren] = useState<ChildRow[]>([]);
   const [wu, setWU] = useState<WURow[]>([]);
   const [versions, setVersions] = useState<VersionRow[]>([]);
+  const [jobsOrders, setJobsOrders] = useState<JobsOrdersRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
 
@@ -386,6 +404,7 @@ function bestUrl(f: FileRow): string {
         setDrawingUrls(asArr<string>(j.drawing_urls));
         setImages(asArr<string>(j.images));
         setVersions(asArr<VersionRow>(j.other_versions));
+        setJobsOrders(asArr<JobsOrdersRow>(j.jobs_orders));
       } catch (e) {
         console.error("part_detail failed", e);
         if (!canceled) {
@@ -395,6 +414,7 @@ function bestUrl(f: FileRow): string {
           setWU([]);
           setDrawingUrls([]);
           setImages([]);
+          setJobsOrders([]);
         }
       } finally {
         if (!canceled) setLoading(false);
@@ -1174,6 +1194,69 @@ function bestUrl(f: FileRow): string {
               <Column field="revision" header="Rev" sortable />
               <Column field="description" header="Description" sortable />
             </DataTable>
+          </TabPanel>
+
+          <TabPanel header="Jobs & Orders">
+            {jobsOrders.length ? (
+              <DataTable value={jobsOrders} dataKey="row_key" responsiveLayout="scroll" stripedRows>
+                <Column
+                  header="Source"
+                  body={(r: JobsOrdersRow) => (r.source === "job" ? "Job" : "Order")}
+                  style={{ width: 90 }}
+                />
+                <Column
+                  header="Job"
+                  body={(r: JobsOrdersRow) =>
+                    r.job_number ? (
+                      <a href={`/admin/jobs/${encodeURIComponent(r.job_id || "")}/edit`}>{r.job_number}</a>
+                    ) : (
+                      "-"
+                    )
+                  }
+                  style={{ width: 140 }}
+                />
+                <Column
+                  header="Order"
+                  body={(r: JobsOrdersRow) =>
+                    r.order_number ? (
+                      <a href={`/admin/orders/${encodeURIComponent(r.order_id || "")}/edit`}>{r.order_number}</a>
+                    ) : (
+                      "-"
+                    )
+                  }
+                  style={{ width: 140 }}
+                />
+                <Column
+                  header="Immediate Parent"
+                  body={(r: JobsOrdersRow) => (
+                    <div>
+                      <a href={`/ui/part/${encodeURIComponent(r.immediate_pn)}?rev=${encodeURIComponent(r.immediate_rev || "")}`}>
+                        {r.immediate_pn}
+                      </a>
+                      {r.immediate_desc ? <div className="text-muted small">{r.immediate_desc}</div> : null}
+                    </div>
+                  )}
+                />
+                <Column
+                  header="Top-Level Parent"
+                  body={(r: JobsOrdersRow) => (
+                    <div>
+                      <a href={`/ui/part/${encodeURIComponent(r.top_pn)}?rev=${encodeURIComponent(r.top_rev || "")}`}>
+                        {r.top_pn}
+                      </a>
+                      {r.top_desc ? <div className="text-muted small">{r.top_desc}</div> : null}
+                    </div>
+                  )}
+                />
+                <Column
+                  header="Order Status"
+                  body={(r: JobsOrdersRow) => (r.order_status ? r.order_status : "-")}
+                  style={{ width: 140 }}
+                />
+              </DataTable>
+            ) : (
+              <div className="text-muted small">No jobs or orders found for this part.</div>
+            )}
           </TabPanel>
 
 
