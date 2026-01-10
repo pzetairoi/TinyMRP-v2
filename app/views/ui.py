@@ -62,15 +62,6 @@ def bom_ui(pn):
     )
 
 
-@bp.get("/addin/settings")
-@login_required
-def addin_settings_ui():
-    assets = vite_assets()
-    if not assets["js"]:
-        abort(404, "React build missing. Run `npm run build` in /frontend.")
-    return render_template("ui/react_shell.html", title="Add-in Settings", assets=assets, initial={})
-
-
 @bp.get("/addin/tokens")
 @login_required
 def addin_tokens_ui():
