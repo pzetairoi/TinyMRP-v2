@@ -32,7 +32,7 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
 
 ## Configuration
 
-Create a `.env` (or select one via `ENV_FILE`) with at least:
+Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at least:
 
 - `SECRET_KEY`: Flask secret.
 - `SECURITY_PASSWORD_SALT`: salt for Flask-Security.
@@ -44,6 +44,9 @@ Create a `.env` (or select one via `ENV_FILE`) with at least:
 - Optional:
   - `FILE_HASH_MAX_BYTES`: compute/verify file hashes up to this size (0 to disable).
   - `VITE_BACKEND_URL`: dev proxy target for Vite (`frontend/vite.config.ts`).
+  - `FORCE_HTTPS=true`: enforce HTTPS and set secure cookies.
+  - `SECURITY_HEADERS_ENABLED=true`: send CSP + security headers.
+  - `EXCEL_COMPILE_MAX_BYTES=10485760`: max upload size for Excel Compile.
 
 Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 
@@ -299,7 +302,7 @@ sudo chmod 0777 /srv/tinymrp/deliverables
 
 4) Configure environment (.env)
 
-Edit `.env` and set at minimum:
+Edit your local `.env` and set at minimum:
 
 - `DELIVERABLES_DIR=/srv/tinymrp/deliverables` (Linux absolute path)
 - `HTTP_PORT=80` (or another free port if 80 is taken)
