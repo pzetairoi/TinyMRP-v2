@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Set, Tuple, Iterable
+from typing import Optional, Set, Tuple
 
 from flask import current_app
 from flask_login import current_user
