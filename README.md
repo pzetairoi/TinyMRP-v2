@@ -18,6 +18,7 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
   - Include/exclude datasheets; configurable stamps.
   - Excel BOM (openpyxl) with thumbnails, hyperlinks, and attribute columns.
 - React UI (Vite build) for part detail and visual list pages.
+- Business modules: Jobs, Suppliers, Customers, Orders (admin UI + REST APIs).
 
 ---
 
@@ -172,6 +173,26 @@ Global settings:
 - Allocation writes custom properties: `PartNumber`, `Revision`, `DisplayCode`, and `TinyMRP_SchemeId`.
 - Property names can be customized via `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty`.
 - Parts remain unique on `(part_number, revision)` to preserve existing data flows; `display_code` provides `PN-REV`.
+
+---
+
+## Business Modules (Jobs, Suppliers, Customers, Orders)
+
+Server-rendered admin screens live under:
+
+- `/admin/jobs`
+- `/admin/suppliers`
+- `/admin/customers`
+- `/admin/orders`
+
+REST APIs for integration and automation:
+
+- `GET|POST /api/jobs`, `GET|PUT|DELETE /api/jobs/<job_number>`, `PATCH /api/jobs/<job_number>/status`
+- `GET|POST /api/suppliers`, `GET|PUT /api/suppliers/<code>`, `PATCH /api/suppliers/<code>/status`
+- `GET|POST /api/customers`, `GET|PUT /api/customers/<code>`, `POST /api/customers/<code>/shipping-addresses`
+- `GET|POST /api/orders`, `GET|PUT|DELETE /api/orders/<order_number>`, `PATCH /api/orders/<order_number>/status`
+
+All endpoints require authentication and respect role permissions (`jobs.*`, `suppliers.*`, `customers.*`, `orders.*`).
 
 ---
 

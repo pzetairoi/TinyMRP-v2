@@ -78,17 +78,17 @@ def seed_roles():
     click.echo("Seeded roles.")
 
 @user.command("seed-combos")
-@click.option("--prefix", default="testuser", show_default=True, help="Email prefix for generated users")
-@click.option("--domain", default="example.test", show_default=True, help="Email domain for generated users")
+@click.option("--prefix", default="test", show_default=True, help="Email prefix for generated users")
+@click.option("--domain", default="test.com", show_default=True, help="Email domain for generated users")
 @click.option("--password", default=None, help="Optional fixed password for all users")
 @click.option("--max-combos", type=int, default=0, show_default=True, help="0 means no limit")
 @click.option("--attach-biz/--no-attach-biz", default=True, show_default=True, help="Attach users to suppliers/customers/jobs if present")
 @with_appcontext
 def seed_user_combos(prefix, domain, password, max_combos, attach_biz):
     """Create users for every role combination (powerset)."""
-    roles = list(Role.objects.order_by("name"))
+    roles = [r for r in Role.objects.order_by("name") if (r.name or "").lower() != "admin"]
     if not roles:
-        click.echo("No roles found; run `flask user seed-roles` first.")
+        click.echo("No non-admin roles found; run `flask user seed-roles` first.")
         return
 
     combos = list(itertools.chain.from_iterable(

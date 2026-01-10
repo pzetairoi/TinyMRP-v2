@@ -1,5 +1,5 @@
 {% extends "security/base.html" %}
-{% block title %}Users · Admin{% endblock %}
+{% block title %}Users - Admin{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h1 class="h4 m-0">Users</h1>
@@ -8,21 +8,65 @@
     <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a>
     <a class="btn btn-primary" href="{{ url_for('admin.users_create') }}">New user</a>
   </div>
-  
 </div>
-<div class="table-responsive bg-white border rounded-3 shadow-sm">
-  <table class="table align-middle mb-0">
-    <thead><tr><th>Email</th><th>Active</th><th>Roles</th><th>Created</th></tr></thead>
-    <tbody>
-      {% for u in users %}
-      <tr>
-        <td>{{ u.email }}</td>
-        <td>{{ 'Yes' if u.active else 'No' }}</td>
-        <td>{{ (u.roles | map(attribute='name') | join(', ')) if u.roles else '-' }}</td>
-        <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_edit', user_id=u.id) }}">Edit</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+
+<form method="post" action="{{ url_for('admin.users_bulk_delete') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="d-flex flex-wrap gap-2 mb-2">
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllUsers()">Select all</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectNonAdmin()">Select non-admin</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">Clear</button>
+    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete selected users?');">Delete selected</button>
+    <span class="text-muted small align-self-center ms-1">Admin and current user cannot be deleted.</span>
+  </div>
+  <div class="table-responsive bg-white border rounded-3 shadow-sm">
+    <table class="table align-middle mb-0">
+      <thead>
+        <tr>
+          <th style="width:36px;"></th>
+          <th>Email</th>
+          <th>Active</th>
+          <th>Roles</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if users %}
+          {% for u in users %}
+            {% set role_names = (u.roles | map(attribute='name') | list) if u.roles else [] %}
+            {% set is_admin = 'admin' in role_names %}
+            {% set is_self = current_user and u.id == current_user.id %}
+            <tr>
+              <td>
+                <input class="form-check-input user-select" type="checkbox" name="user_ids" value="{{ u.id }}"
+                  {% if is_admin or is_self %}disabled data-admin="1"{% endif %}>
+              </td>
+              <td>{{ u.email }}</td>
+              <td>{{ 'Yes' if u.active else 'No' }}</td>
+              <td>{{ role_names | join(', ') if role_names else '-' }}</td>
+              <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_edit', user_id=u.id) }}">Edit</a></td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="5" class="text-center text-muted py-4">No users found.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</form>
+<script>
+  function selectAllUsers(){
+    document.querySelectorAll('input.user-select:not(:disabled)').forEach(cb => cb.checked = true);
+  }
+  function selectNonAdmin(){
+    document.querySelectorAll('input.user-select:not(:disabled)').forEach(cb => {
+      cb.checked = cb.getAttribute('data-admin') !== '1';
+    });
+  }
+  function clearSelection(){
+    document.querySelectorAll('input.user-select').forEach(cb => cb.checked = false);
+  }
+</script>
 {% endblock %}

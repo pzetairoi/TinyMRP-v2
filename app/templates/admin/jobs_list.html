@@ -1,37 +1,139 @@
-{% extends "security/base.html" %}
-{% block title %}Jobs — Admin{% endblock %}
+﻿{% extends "security/base.html" %}
+{% block title %}Jobs - Admin{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h4 m-0">Jobs</h1>
-  <div class="d-flex gap-2">
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>
-    <a class="btn btn-primary" href="{{ url_for('admin_jobs.jobs_new') }}">New job</a>
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3">
+  <div>
+    <h1 class="h4 m-0">Jobs</h1>
+    <div class="text-muted small">Work orders and production tracking.</div>
   </div>
-  
+  <div class="d-flex gap-2 mt-2 mt-md-0">
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>
+    <a class="btn btn-primary" href="{{ url_for('admin_jobs.jobs_new') }}">Create job</a>
+  </div>
 </div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="text-muted small">Active jobs</div>
+        <div class="fs-4 fw-semibold">{{ active_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="text-muted small">Overdue jobs</div>
+        <div class="fs-4 fw-semibold text-danger">{{ overdue_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <div class="text-muted small">Completed (7 days)</div>
+        <div class="fs-4 fw-semibold">{{ completed_week }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<form method="get">
 <div class="table-responsive bg-white border rounded-3 shadow-sm">
   <table class="table align-middle mb-0">
-    <thead><tr><th>Job</th><th>Description</th><th>Customer</th><th>Participants</th><th>Vendors</th><th>Actions</th></tr></thead>
-    <tbody>
-      {% for j in jobs %}
+    <thead>
       <tr>
-        <td>{{ j.job_number }}</td>
-        <td>{{ j.description or '-' }}</td>
-        <td>{{ j.customer_name }}</td>
-        <td>{{ j.participants }}</td>
-        <td>{{ j.vendors }}</td>
-        <td class="d-flex gap-1">
-          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">Edit</a>
-          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
-          <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=j.id) }}" onsubmit="return confirm('Delete this job?');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-          </form>
-        </td>
+        <th>Job</th>
+        <th>Title</th>
+        <th class="col-part-number">Part</th>
+        <th>Status</th>
+        <th>Priority</th>
+        <th>Schedule</th>
+        <th>Progress</th>
+        <th>Customer</th>
+        <th>Actions</th>
       </tr>
-      {% endfor %}
+      <tr class="table-light">
+        <th>
+          <input class="form-control form-control-sm" type="search" name="job_q" value="{{ filters.job_q }}" placeholder="Job #">
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="title_q" value="{{ filters.title_q }}" placeholder="Title/desc">
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="part_q" value="{{ filters.part_q }}" placeholder="Part #/rev">
+        </th>
+        <th>
+          <select class="form-select form-select-sm" name="status">
+            <option value="">Any</option>
+            {% for s in ['draft','released','in_progress','on_hold','completed','cancelled'] %}
+            <option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
+            {% endfor %}
+          </select>
+        </th>
+        <th>
+          <select class="form-select form-select-sm" name="priority">
+            <option value="">Any</option>
+            {% for p in ['low','normal','high','urgent'] %}
+            <option value="{{ p }}" {% if filters.priority==p %}selected{% endif %}>{{ p.title() }}</option>
+            {% endfor %}
+          </select>
+        </th>
+        <th>
+          <div class="d-flex flex-column gap-1">
+            <input class="form-control form-control-sm" type="date" name="from" value="{{ filters.from }}" placeholder="From">
+            <input class="form-control form-control-sm" type="date" name="to" value="{{ filters.to }}" placeholder="To">
+          </div>
+        </th>
+        <th class="text-muted small">-</th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="customer_q" value="{{ filters.customer_q }}" placeholder="Customer">
+        </th>
+        <th>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Clear</a>
+          </div>
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if jobs %}
+        {% for j in jobs %}
+        <tr>
+          <td class="fw-semibold">{{ j.job_number }}</td>
+          <td>{{ j.title or j.description or '-' }}</td>
+          <td>{{ j.part_number or '-' }}{% if j.part_revision %} <span class="text-muted">({{ j.part_revision }})</span>{% endif %}</td>
+          <td><span class="badge badge-status status-{{ j.status|default('draft') }}">{{ (j.status or 'draft').replace('_',' ') }}</span></td>
+          <td><span class="badge badge-priority priority-{{ j.priority|default('normal') }}">{{ (j.priority or 'normal') }}</span></td>
+          <td>
+            <div class="small">{{ j.scheduled_start.strftime('%Y-%m-%d') if j.scheduled_start else '-' }}</div>
+            <div class="small text-muted">{{ j.scheduled_end.strftime('%Y-%m-%d') if j.scheduled_end else '' }}</div>
+          </td>
+          <td style="min-width:140px;">
+            {% set ordered = j.qty_ordered or 0 %}
+            {% set produced = j.qty_produced or 0 %}
+            {% set pct = (produced / ordered * 100) if ordered else 0 %}
+            <div class="progress" style="height:8px;">
+              <div class="progress-bar" role="progressbar" style="width: {{ '%.0f' % pct }}%;"></div>
+            </div>
+            <div class="small text-muted">{{ produced }} / {{ ordered }}</div>
+          </td>
+          <td>{{ j.customer_name }}</td>
+          <td class="d-flex gap-1">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">View</a>
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="9" class="text-center text-muted py-4">No jobs found. Create your first job to start tracking production.</td>
+        </tr>
+      {% endif %}
     </tbody>
   </table>
-  
 </div>
+</form>
 {% endblock %}

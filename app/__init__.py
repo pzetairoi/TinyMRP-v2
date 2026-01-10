@@ -299,6 +299,23 @@ def create_app(config_object=None):
         csrf.exempt(auth_api_bp)
     except Exception:
         pass
+
+    # Business APIs (jobs/suppliers/customers/orders)
+    from app.views.api_jobs import bp as jobs_api_bp
+    from app.views.api_suppliers import bp as suppliers_api_bp
+    from app.views.api_customers import bp as customers_api_bp
+    from app.views.api_orders import bp as orders_api_bp
+    app.register_blueprint(jobs_api_bp)
+    app.register_blueprint(suppliers_api_bp)
+    app.register_blueprint(customers_api_bp)
+    app.register_blueprint(orders_api_bp)
+    try:
+        csrf.exempt(jobs_api_bp)
+        csrf.exempt(suppliers_api_bp)
+        csrf.exempt(customers_api_bp)
+        csrf.exempt(orders_api_bp)
+    except Exception:
+        pass
     
     # File proxy (for HTTP file roots)
     from .files_proxy import files_proxy

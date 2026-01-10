@@ -180,6 +180,7 @@ export default function PartsPage() {
         }} style={{ width: 60 }} />
         <Column field="part_number" header="Part Number" sortable filter showFilterMenu={false}
         filterMatchMode="contains" filterMatchModeOptions={["contains"]}
+        style={{ minWidth: '12ch', width: '12ch' }}
         body={(p) => {
           const rev = (p as Part).revision || ''
           const qs = rev !== undefined ? `?rev=${encodeURIComponent(rev)}` : ''
@@ -190,6 +191,7 @@ export default function PartsPage() {
                 filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
 
         <Column field="description" header="Description" sortable filter showFilterMenu={false}
+                style={{ minWidth: '32ch', width: '40%' }}
                 filterMatchMode="contains" filterMatchModeOptions={["contains"]} />
 
         <Column field="material" header="Material" sortable filter showFilterMenu={false}

@@ -1,33 +1,108 @@
-{% extends "security/base.html" %}
-{% block title %}Orders — Admin{% endblock %}
+﻿{% extends "security/base.html" %}
+{% block title %}Orders - Admin{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h4 m-0">Orders</h1>
-  <a class="btn btn-primary" href="{{ url_for('admin_orders.orders_new') }}">New order</a>
-  
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3">
+  <div>
+    <h1 class="h4 m-0">Orders</h1>
+    <div class="text-muted small">Sales and purchase orders.</div>
+  </div>
+  <a class="btn btn-primary mt-2 mt-md-0" href="{{ url_for('admin_orders.orders_new') }}">New order</a>
 </div>
+
+<form method="get">
+{% if request.args.get('job') %}
+  <input type="hidden" name="job" value="{{ request.args.get('job') }}">
+{% endif %}
 <div class="table-responsive bg-white border rounded-3 shadow-sm">
   <table class="table align-middle mb-0">
-    <thead><tr><th>Order #</th><th>Type</th><th>Job</th><th>Supplier</th><th>Customer</th><th>Status</th><th>Actions</th></tr></thead>
-    <tbody>
-      {% for o in orders %}
+    <thead>
       <tr>
-        <td>{{ o.order_number }}</td>
-        <td>{{ o.kind }}</td>
-        <td>{{ o.job }}</td>
-        <td>{{ o.supplier }}</td>
-        <td>{{ o.customer }}</td>
-        <td>{{ o.status }}</td>
-        <td class="d-flex gap-1">
-          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">Edit</a>
-          <form method="post" action="{{ url_for('admin_orders.orders_delete', order_id=o.id) }}" onsubmit="return confirm('Delete this order?');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-          </form>
-        </td>
+        <th>Order #</th>
+        <th>Type</th>
+        <th>Job</th>
+        <th>Supplier</th>
+        <th>Customer</th>
+        <th>Status</th>
+        <th>Order date</th>
+        <th>Total</th>
+        <th>Actions</th>
       </tr>
-      {% endfor %}
+      <tr class="table-light">
+        <th>
+          <input class="form-control form-control-sm" type="search" name="order_q" value="{{ filters.order_q }}" placeholder="Order #">
+        </th>
+        <th>
+          <select class="form-select form-select-sm" name="type">
+            <option value="">Any</option>
+            <option value="purchase" {% if filters.type=='purchase' %}selected{% endif %}>Purchase</option>
+            <option value="sales" {% if filters.type=='sales' %}selected{% endif %}>Sales</option>
+          </select>
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="job_q" value="{{ filters.job_q }}" placeholder="Job #">
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="supplier_q" value="{{ filters.supplier_q }}" placeholder="Supplier">
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="customer_q" value="{{ filters.customer_q }}" placeholder="Customer">
+        </th>
+        <th>
+          <select class="form-select form-select-sm" name="status">
+            <option value="">Any</option>
+            {% for s in ['draft','submitted','confirmed','in_production','ready_to_ship','shipped','delivered','cancelled'] %}
+            <option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
+            {% endfor %}
+          </select>
+        </th>
+        <th>
+          <div class="d-flex flex-column gap-1">
+            <input class="form-control form-control-sm" type="date" name="from" value="{{ filters.from }}">
+            <input class="form-control form-control-sm" type="date" name="to" value="{{ filters.to }}">
+          </div>
+        </th>
+        <th>
+          <div class="d-flex flex-column gap-1">
+            <input class="form-control form-control-sm" type="number" step="0.01" min="0" name="total_min" value="{{ filters.total_min }}" placeholder="Min">
+            <input class="form-control form-control-sm" type="number" step="0.01" min="0" name="total_max" value="{{ filters.total_max }}" placeholder="Max">
+          </div>
+        </th>
+        <th>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_list') }}">Clear</a>
+          </div>
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if orders %}
+        {% for o in orders %}
+        <tr>
+          <td class="fw-semibold">{{ o.order_number }}</td>
+          <td>{{ o.kind }}</td>
+          <td>{{ o.job }}</td>
+          <td>{{ o.supplier }}</td>
+          <td>{{ o.customer }}</td>
+          <td><span class="badge badge-status status-{{ o.status|default('draft') }}">{{ o.status or 'draft' }}</span></td>
+          <td>{{ o.order_date.strftime('%Y-%m-%d') if o.order_date else '-' }}</td>
+          <td>{{ '%.2f' % o.total if o.total is not none else '-' }}</td>
+          <td class="d-flex gap-1">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('admin_orders.orders_delete', order_id=o.id) }}" onsubmit="return confirm('Delete this order?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="9" class="text-center text-muted py-4">No orders found.</td>
+        </tr>
+      {% endif %}
     </tbody>
   </table>
 </div>
+</form>
 {% endblock %}

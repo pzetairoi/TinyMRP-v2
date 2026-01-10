@@ -1,33 +1,93 @@
-{% extends "security/base.html" %}
-{% block title %}Suppliers — Admin{% endblock %}
+﻿{% extends "security/base.html" %}
+{% block title %}Suppliers - Admin{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h4 m-0">Suppliers</h1>
-  <div class="d-flex gap-2">
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3">
+  <div>
+    <h1 class="h4 m-0">Suppliers</h1>
+    <div class="text-muted small">Vendor directory and performance tracking.</div>
+  </div>
+  <div class="d-flex gap-2 mt-2 mt-md-0">
     <a class="btn btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Jobs</a>
     <a class="btn btn-primary" href="{{ url_for('admin_suppliers.suppliers_new') }}">New supplier</a>
   </div>
 </div>
+
+<form method="get">
 <div class="table-responsive bg-white border rounded-3 shadow-sm">
   <table class="table align-middle mb-0">
-    <thead><tr><th>Name</th><th>Contact</th><th>Email</th><th>Users</th><th>Actions</th></tr></thead>
-    <tbody>
-      {% for s in suppliers %}
+    <thead>
       <tr>
-        <td>{{ s.name }}</td>
-        <td>{{ s.contact or '-' }}</td>
-        <td>{{ s.email or '-' }}</td>
-        <td>{{ (s.users | map(attribute='email') | join(', ')) or '-' }}</td>
-        <td class="d-flex gap-1">
-          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=s.id) }}">Edit</a>
-          <form method="post" action="{{ url_for('admin_suppliers.suppliers_delete', sup_id=s.id) }}" onsubmit="return confirm('Delete this supplier?');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-          </form>
-        </td>
+        <th>Code</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Rating</th>
+        <th>Primary contact</th>
+        <th>Email</th>
+        <th>Categories</th>
+        <th>Actions</th>
       </tr>
-      {% endfor %}
+      <tr class="table-light">
+        <th>
+          <input class="form-control form-control-sm" type="search" name="code_q" value="{{ filters.code_q }}" placeholder="Code">
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="name_q" value="{{ filters.name_q }}" placeholder="Name">
+        </th>
+        <th>
+          <select class="form-select form-select-sm" name="status">
+            <option value="">Any</option>
+            {% for s in ['active','inactive','pending','blacklisted'] %}
+            <option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s.title() }}</option>
+            {% endfor %}
+          </select>
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="number" name="rating" min="1" max="5" value="{{ filters.rating }}" placeholder="Rating">
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="contact_q" value="{{ filters.contact_q }}" placeholder="Contact">
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="email_q" value="{{ filters.email_q }}" placeholder="Email">
+        </th>
+        <th>
+          <input class="form-control form-control-sm" type="search" name="category" value="{{ filters.category }}" placeholder="Category">
+        </th>
+        <th>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Clear</a>
+          </div>
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if suppliers %}
+        {% for s in suppliers %}
+        <tr>
+          <td>{{ s.code or '-' }}</td>
+          <td class="fw-semibold">{{ s.name }}</td>
+          <td><span class="badge badge-status status-{{ s.status|default('active') }}">{{ s.status or 'active' }}</span></td>
+          <td>{{ s.rating or '-' }}</td>
+          <td>{{ s.contact or '-' }}</td>
+          <td>{{ s.email or '-' }}</td>
+          <td>{{ (s.categories | join(', ')) if s.categories else '-' }}</td>
+          <td class="d-flex gap-1">
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=s.id) }}">Edit</a>
+            <form method="post" action="{{ url_for('admin_suppliers.suppliers_delete', sup_id=s.id) }}" onsubmit="return confirm('Delete this supplier?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="8" class="text-center text-muted py-4">No suppliers found.</td>
+        </tr>
+      {% endif %}
     </tbody>
   </table>
 </div>
+</form>
 {% endblock %}

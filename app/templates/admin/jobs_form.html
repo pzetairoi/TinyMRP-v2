@@ -1,5 +1,5 @@
-{% extends "security/base.html" %}
-{% block title %}{{ 'Edit job' if job else 'New job' }} — Admin{% endblock %}
+﻿{% extends "security/base.html" %}
+{% block title %}{{ 'Edit job' if job else 'New job' }} - Admin{% endblock %}
 {% block content %}
 <div class="row">
   <div class="col-12">
@@ -11,47 +11,125 @@
           <div class="row g-3">
             <div class="col-md-4">
               <label class="form-label">Job number</label>
-              <input class="form-control" type="text" name="job_number" value="{{ job.job_number if job else '' }}" required>
+              <input class="form-control" type="text" name="job_number" value="{{ job.job_number if job else '' }}" placeholder="Auto on save if blank">
             </div>
-            <div class="col-md-8">
+            <div class="col-md-4">
+              <label class="form-label">Title</label>
+              <input class="form-control" type="text" name="title" value="{{ job.title if job else '' }}" maxlength="200">
+            </div>
+            <div class="col-md-4">
               <label class="form-label">Description</label>
               <input class="form-control" type="text" name="description" value="{{ job.description if job else '' }}">
             </div>
           </div>
 
           <div class="row g-3 mt-2">
+            <div class="col-md-4">
+              <label class="form-label">Part number</label>
+              <input class="form-control" type="text" name="part_number" value="{{ job.part_number if job else '' }}">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Revision</label>
+              <input class="form-control" type="text" name="part_revision" value="{{ job.part_revision if job else '' }}">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Qty ordered</label>
+              <input class="form-control" type="number" step="1" min="0" name="qty_ordered" value="{{ job.qty_ordered if job else 0 }}">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Qty produced</label>
+              <input class="form-control" type="number" step="1" min="0" name="qty_produced" value="{{ job.qty_produced if job else 0 }}">
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Qty scrapped</label>
+              <input class="form-control" type="number" step="1" min="0" name="qty_scrapped" value="{{ job.qty_scrapped if job else 0 }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-3">
+              <label class="form-label">Status</label>
+              {% set st = job.status if job else 'draft' %}
+              <select class="form-select" name="status">
+                {% for s in ['draft','released','in_progress','on_hold','completed','cancelled'] %}
+                <option value="{{ s }}" {% if st==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Priority</label>
+              {% set pr = job.priority if job else 'normal' %}
+              <select class="form-select" name="priority">
+                {% for p in ['low','normal','high','urgent'] %}
+                <option value="{{ p }}" {% if pr==p %}selected{% endif %}>{{ p.title() }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Scheduled start</label>
+              <input class="form-control" type="date" name="scheduled_start" value="{{ job.scheduled_start.strftime('%Y-%m-%d') if job and job.scheduled_start else '' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Scheduled end</label>
+              <input class="form-control" type="date" name="scheduled_end" value="{{ job.scheduled_end.strftime('%Y-%m-%d') if job and job.scheduled_end else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-4">
+              <label class="form-label">Order reference</label>
+              <input class="form-control" type="text" name="order_number" value="{{ job.order_number if job else '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Estimated hours</label>
+              <input class="form-control" type="number" step="0.1" min="0" name="estimated_hours" value="{{ job.estimated_hours if job and job.estimated_hours is not none else '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">Actual hours</label>
+              <input class="form-control" type="number" step="0.1" min="0" name="actual_hours" value="{{ job.actual_hours if job and job.actual_hours is not none else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
+            <div class="col-md-4 d-flex align-items-end">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="material_reserved" id="material_reserved" {% if job and job.material_reserved %}checked{% endif %}>
+                <label class="form-check-label" for="material_reserved">Materials reserved</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="row g-3 mt-2">
             <div class="col-md-6">
               <label class="form-label">Participants (users)</label>
-              <div class="row row-cols-2 g-2">
-                {% set assigned = (job.participants | map(attribute='id') | map('string') | list) if job else [] %}
+              {% set assigned = (job.participants | map(attribute='id') | map('string') | list) if job else [] %}
+              <select class="form-select" name="participants" id="participants" multiple size="6">
                 {% for u in users %}
-                <div class="col">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="participants" id="u-{{ u.id }}" value="{{ u.id }}" {% if job and (u.id|string) in assigned %}checked{% endif %}>
-                    <label class="form-check-label" for="u-{{ u.id }}">{{ u.email }}</label>
-                  </div>
-                </div>
+                <option value="{{ u.id }}" {% if job and (u.id|string) in assigned %}selected{% endif %}>{{ u.email }}</option>
                 {% endfor %}
+              </select>
+              <div class="d-flex gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('participants')">Select all</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('participants')">Clear</button>
               </div>
             </div>
             <div class="col-md-3">
               <label class="form-label">Vendors (suppliers)</label>
-              <div class="row row-cols-2 g-2">
-                {% set vend = (job.vendors | map(attribute='id') | map('string') | list) if job else [] %}
+              {% set vend = (job.vendors | map(attribute='id') | map('string') | list) if job else [] %}
+              <select class="form-select" name="vendors" id="vendors" multiple size="6">
                 {% for s in suppliers %}
-                <div class="col">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="vendors" id="s-{{ s.id }}" value="{{ s.id }}" {% if job and (s.id|string) in vend %}checked{% endif %}>
-                    <label class="form-check-label" for="s-{{ s.id }}">{{ s.name }}</label>
-                  </div>
-                </div>
+                <option value="{{ s.id }}" {% if job and (s.id|string) in vend %}selected{% endif %}>{{ s.name }}</option>
                 {% endfor %}
+              </select>
+              <div class="d-flex gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('vendors')">Select all</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('vendors')">Clear</button>
               </div>
             </div>
             <div class="col-md-3">
               <label class="form-label">Customer</label>
               <select class="form-select" name="customer">
-                <option value="">—</option>
+                <option value="">-</option>
                 {% for c in customers %}
                 <option value="{{ c.id }}" {% if job and job.customer and c.id==job.customer.id %}selected{% endif %}>{{ c.name }}</option>
                 {% endfor %}
@@ -60,27 +138,67 @@
           </div>
 
           <div class="mt-3">
-            <label class="form-label">Job BOM</label>
-            <div class="d-flex flex-column flex-md-row align-items-md-center gap-2 mb-2">
-              <div class="d-flex flex-wrap gap-2">
-                <input id="bom-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
-                <input id="bom-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
-                <input id="bom-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
-                <input id="bom-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty ≥">
-                <input id="bom-filter-qty-max" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty ≤">
-              </div>
-              <button class="btn btn-sm btn-outline-primary ms-md-auto" type="button" onclick="openPartPickerForJob()">Add part(s)</button>
+            <label class="form-label">Production stages</label>
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-primary" id="stage-add-btn">Add stage</button>
+              <span class="text-muted small">Format: sequence, name, status, assigned, department, est_hours, act_hours</span>
             </div>
+            <div class="table-responsive">
+              <table class="table table-sm table-striped align-middle" id="stage-table">
+                <thead>
+                  <tr>
+                    <th style="width:80px;">Seq</th>
+                    <th style="width:22%;">Name</th>
+                    <th style="width:16%;">Status</th>
+                    <th style="width:16%;">Assigned</th>
+                    <th style="width:16%;">Dept</th>
+                    <th style="width:10%;">Est hrs</th>
+                    <th style="width:10%;">Act hrs</th>
+                    <th style="width:10%;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <textarea id="stages_text" class="form-control d-none" name="stages_text" rows="5">{{ stages_text if stages_text is defined else '' }}</textarea>
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label">Job BOM</label>
             <div class="table-responsive">
             <table class="table table-sm align-middle table-striped" id="bom-table">
               <thead>
                 <tr>
                   <th style="width: 64px;">Thumb</th>
-                  <th style="width: 30%;">Part Number</th>
-                  <th>Description</th>
+                  <th class="col-part-number" style="width: 30%;">Part Number</th>
+                  <th class="col-description">Description</th>
                   <th style="width: 20%;">Rev</th>
                   <th style="width: 20%;">Qty</th>
                   <th style="width: 20%;">Actions</th>
+                </tr>
+                <tr class="table-light">
+                  <th></th>
+                  <th>
+                    <input id="bom-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
+                  </th>
+                  <th>
+                    <input id="bom-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
+                  </th>
+                  <th>
+                    <input id="bom-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
+                  </th>
+                  <th>
+                    <div class="d-flex flex-column gap-1">
+                      <input id="bom-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty min">
+                      <input id="bom-filter-qty-max" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty max">
+                    </div>
+                  </th>
+                  <th>
+                    <div class="d-flex gap-1">
+                      <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForJob()">Add part(s)</button>
+                      <button class="btn btn-sm btn-outline-secondary" type="button" onclick="clearBomFilters()">Clear</button>
+                    </div>
+                  </th>
                 </tr>
               </thead>
                 <tbody></tbody>
@@ -125,8 +243,8 @@
                 <thead>
                   <tr>
                     <th style="width:64px;">Thumb</th>
-                    <th>Part Number</th>
-                    <th>Description</th>
+                    <th class="col-part-number">Part Number</th>
+                    <th class="col-description">Description</th>
                     <th style="width:12%;">Rev</th>
                     <th style="width:12%;">Required</th>
                     <th style="width:12%;">Ordered</th>
@@ -138,7 +256,13 @@
                 <tbody>
                   {% for p in ordered_parts %}
                   <tr>
-                    <td><div class="bg-light border rounded" style="height:48px;width:64px;"></div></td>
+                    <td>
+                      {% if p.thumb %}
+                        <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
+                      {% else %}
+                        <div class="bg-light border rounded" style="height:48px;width:64px;"></div>
+                      {% endif %}
+                    </td>
                     <td><a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a></td>
                     <td>{{ p.desc }}</td>
                     <td>{{ p.rev }}</td>
@@ -164,14 +288,20 @@
         {% endif %}
         {% if remaining_parts %}
           <div class="mt-3">
-            <h2 class="h6 mb-2">Parts Not Yet Ordered</h2>
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-2 gap-2">
+              <h2 class="h6 mb-0">Parts Not Yet Ordered</h2>
+              <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-primary" onclick="submitRemainingOrder()">Create order from selected</button>
+              </div>
+            </div>
             <div class="table-responsive">
-              <table class="table table-sm table-striped align-middle">
+              <table class="table table-sm table-striped align-middle" id="remaining-table">
                 <thead>
                   <tr>
+                    <th style="width:36px;">Sel</th>
                     <th style="width:64px;">Thumb</th>
-                    <th>Part Number</th>
-                    <th>Description</th>
+                    <th class="col-part-number">Part Number</th>
+                    <th class="col-description">Description</th>
                     <th style="width:12%;">Rev</th>
                     <th style="width:12%;">Required</th>
                     <th style="width:12%;">Ordered</th>
@@ -179,11 +309,42 @@
                     <th style="width:20%;">Orders</th>
                     <th style="width:15%;">Suppliers</th>
                   </tr>
+                  <tr class="table-light">
+                    <th>
+                      <input class="form-check-input" type="checkbox" id="remaining-select-all" onclick="toggleRemainingSelectAll(this)">
+                    </th>
+                    <th></th>
+                    <th>
+                      <input id="remaining-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
+                    </th>
+                    <th>
+                      <input id="remaining-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
+                    </th>
+                    <th>
+                      <input id="remaining-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
+                    </th>
+                    <th></th>
+                    <th></th>
+                    <th>
+                      <input id="remaining-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Min">
+                    </th>
+                    <th></th>
+                    <th></th>
+                  </tr>
                 </thead>
                 <tbody>
                   {% for p in remaining_parts %}
-                  <tr>
-                    <td><div class="bg-light border rounded" style="height:48px;width:64px;"></div></td>
+                  <tr class="remaining-row" data-pn="{{ p.pn }}" data-desc="{{ p.desc }}" data-rev="{{ p.rev }}" data-remaining="{{ p.remaining }}">
+                    <td>
+                      <input class="form-check-input remaining-select" type="checkbox" data-pn="{{ p.pn }}" data-rev="{{ p.rev }}" data-qty="{{ p.remaining }}" data-desc="{{ p.desc }}">
+                    </td>
+                    <td>
+                      {% if p.thumb %}
+                        <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
+                      {% else %}
+                        <div class="bg-light border rounded" style="height:48px;width:64px;"></div>
+                      {% endif %}
+                    </td>
                     <td><a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a></td>
                     <td>{{ p.desc }}</td>
                     <td>{{ p.rev }}</td>
@@ -208,6 +369,12 @@
           </div>
         {% endif %}
         </form>
+        {% if remaining_parts %}
+        <form id="remaining-order-form" method="post" action="{{ url_for('admin_orders.orders_from_job', job_id=job.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="parts_json" id="remaining-parts-json" value="">
+        </form>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -218,6 +385,19 @@
   let bomRows = [];
   let replaceIdx = null;
   const thumbCache = {};
+  let stageRows = [];
+
+  function selectAllOptions(id){
+    const el = document.getElementById(id);
+    if(!el) return;
+    for(const opt of el.options){ opt.selected = true; }
+  }
+
+  function clearOptions(id){
+    const el = document.getElementById(id);
+    if(!el) return;
+    for(const opt of el.options){ opt.selected = false; }
+  }
 
   function parseBomText(txt){
     const out = [];
@@ -264,6 +444,71 @@
       qtyMin: parseFloat(document.getElementById('bom-filter-qty-min')?.value || '') || null,
       qtyMax: parseFloat(document.getElementById('bom-filter-qty-max')?.value || '') || null,
     };
+  }
+
+  function clearBomFilters(){
+    ['bom-filter-pn','bom-filter-rev','bom-filter-desc','bom-filter-qty-min','bom-filter-qty-max'].forEach(id=>{
+      const el = document.getElementById(id);
+      if(el) el.value = '';
+    });
+    renderBomTable();
+  }
+
+  function remainingFilters(){
+    return {
+      pn: (document.getElementById('remaining-filter-pn')?.value || '').toLowerCase(),
+      desc: (document.getElementById('remaining-filter-desc')?.value || '').toLowerCase(),
+      rev: (document.getElementById('remaining-filter-rev')?.value || '').toLowerCase(),
+      qtyMin: parseFloat(document.getElementById('remaining-filter-qty-min')?.value || '') || null,
+    };
+  }
+
+  function applyRemainingFilters(){
+    const f = remainingFilters();
+    const rows = document.querySelectorAll('#remaining-table tbody tr.remaining-row');
+    rows.forEach(row => {
+      const pn = (row.getAttribute('data-pn') || '').toLowerCase();
+      const desc = (row.getAttribute('data-desc') || '').toLowerCase();
+      const rev = (row.getAttribute('data-rev') || '').toLowerCase();
+      const remaining = parseFloat(row.getAttribute('data-remaining') || '0');
+      if(f.pn && !pn.includes(f.pn)) { row.style.display = 'none'; return; }
+      if(f.desc && !desc.includes(f.desc)) { row.style.display = 'none'; return; }
+      if(f.rev && !rev.includes(f.rev)) { row.style.display = 'none'; return; }
+      if(f.qtyMin !== null && remaining < f.qtyMin) { row.style.display = 'none'; return; }
+      row.style.display = '';
+    });
+    const selAll = document.getElementById('remaining-select-all');
+    if(selAll) selAll.checked = false;
+  }
+
+  function toggleRemainingSelectAll(box){
+    const rows = document.querySelectorAll('#remaining-table tbody tr.remaining-row');
+    rows.forEach(row => {
+      if(row.style.display === 'none') return;
+      const cb = row.querySelector('input.remaining-select');
+      if(cb) cb.checked = box.checked;
+    });
+  }
+
+  function submitRemainingOrder(){
+    const selected = [];
+    document.querySelectorAll('input.remaining-select:checked').forEach(cb => {
+      const pn = cb.getAttribute('data-pn') || '';
+      const rev = cb.getAttribute('data-rev') || '';
+      const desc = cb.getAttribute('data-desc') || '';
+      const qty = parseFloat(cb.getAttribute('data-qty') || '0') || 0;
+      if(pn && qty > 0){
+        selected.push({ pn, rev, qty, desc });
+      }
+    });
+    if(!selected.length){
+      alert('Select at least one part to create an order.');
+      return;
+    }
+    const form = document.getElementById('remaining-order-form');
+    const input = document.getElementById('remaining-parts-json');
+    if(input) input.value = JSON.stringify(selected);
+    if(form) form.submit();
   }
 
   function renderBomTable(){
@@ -364,6 +609,11 @@
     syncTextarea();
     renderBomTable();
     attachBomHandlers();
+    initStages();
+    ['remaining-filter-pn','remaining-filter-desc','remaining-filter-rev','remaining-filter-qty-min'].forEach(id=>{
+      document.getElementById(id)?.addEventListener('input', applyRemainingFilters);
+    });
+    applyRemainingFilters();
   });
 
   async function ensureThumb(idx){
@@ -373,22 +623,137 @@
     if(thumbCache[key] === null) return;
     if(thumbCache[key]){ row.thumb = thumbCache[key]; return; }
     try{
-      const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(row.pn)}&rev=${encodeURIComponent(row.rev||'')}`);
+      const base = `/api/part_detail?pn=${encodeURIComponent(row.pn)}`;
+      const r = await fetch(row.rev ? `${base}&rev=${encodeURIComponent(row.rev)}` : base);
       if(!r.ok) { thumbCache[key] = null; return; }
       const j = await r.json();
+      const revFromServer = (j.part && j.part.revision) ? String(j.part.revision) : '';
+      const revChanged = !row.rev && revFromServer;
+      if(revChanged){
+        row.rev = revFromServer;
+        syncTextarea();
+      }
       row.desc = (j.part && (j.part.description || '')) || row.desc || '';
       const urls = Array.isArray(j.images) ? j.images : [];
       const thumb = urls[0] || '';
       if(thumb){
-        thumbCache[key] = thumb;
+        const newKey = `${row.pn}::${row.rev||''}`;
+        thumbCache[newKey] = thumb;
         row.thumb = thumb;
         renderBomTable();
       }else{
-        thumbCache[key] = null;
+        const newKey = `${row.pn}::${row.rev||''}`;
+        thumbCache[newKey] = null;
+        if(revChanged){
+          renderBomTable();
+        }
       }
     }catch(e){
       thumbCache[key] = null;
     }
+  }
+
+  function parseStagesText(txt){
+    const out = [];
+    for(const raw of (txt || '').split(/\r?\n/)){
+      const line = raw.trim();
+      if(!line || line.startsWith('#')) continue;
+      const parts = line.split(',').map(s => s.trim());
+      const seq = parseInt(parts[0], 10) || (out.length + 1);
+      const name = parts[1] || '';
+      if(!name) continue;
+      out.push({
+        sequence: seq,
+        name: name,
+        status: parts[2] || 'pending',
+        assigned: parts[3] || '',
+        dept: parts[4] || '',
+        est: parts[5] || '',
+        act: parts[6] || ''
+      });
+    }
+    return out;
+  }
+
+  function syncStagesText(){
+    const ta = document.getElementById('stages_text');
+    if(!ta) return;
+    ta.value = stageRows.map(r => [
+      r.sequence || 1,
+      r.name || '',
+      r.status || '',
+      r.assigned || '',
+      r.dept || '',
+      r.est || '',
+      r.act || ''
+    ].join(',')).join('\n');
+  }
+
+  function renderStageTable(){
+    const tbody = document.querySelector('#stage-table tbody');
+    if(!tbody) return;
+    tbody.innerHTML = '';
+    stageRows.forEach((row, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="number" class="form-control form-control-sm stage-seq" data-idx="${idx}" value="${row.sequence || 1}"></td>
+        <td><input type="text" class="form-control form-control-sm stage-name" data-idx="${idx}" value="${row.name || ''}"></td>
+        <td>
+          <select class="form-select form-select-sm stage-status" data-idx="${idx}">
+            ${['pending','in_progress','complete','blocked'].map(s => `<option value="${s}" ${row.status===s?'selected':''}>${s.replace('_',' ')}</option>`).join('')}
+          </select>
+        </td>
+        <td><input type="text" class="form-control form-control-sm stage-assigned" data-idx="${idx}" value="${row.assigned || ''}"></td>
+        <td><input type="text" class="form-control form-control-sm stage-dept" data-idx="${idx}" value="${row.dept || ''}"></td>
+        <td><input type="number" step="0.1" class="form-control form-control-sm stage-est" data-idx="${idx}" value="${row.est || ''}"></td>
+        <td><input type="number" step="0.1" class="form-control form-control-sm stage-act" data-idx="${idx}" value="${row.act || ''}"></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger stage-remove" data-idx="${idx}">Remove</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function attachStageHandlers(){
+    const tbody = document.querySelector('#stage-table tbody');
+    if(!tbody) return;
+    tbody.addEventListener('input', (ev) => {
+      const t = ev.target;
+      const idx = parseInt(t.getAttribute('data-idx'), 10);
+      if(Number.isNaN(idx) || !stageRows[idx]) return;
+      if(t.classList.contains('stage-seq')) stageRows[idx].sequence = parseInt(t.value || '1', 10);
+      if(t.classList.contains('stage-name')) stageRows[idx].name = t.value || '';
+      if(t.classList.contains('stage-status')) stageRows[idx].status = t.value || 'pending';
+      if(t.classList.contains('stage-assigned')) stageRows[idx].assigned = t.value || '';
+      if(t.classList.contains('stage-dept')) stageRows[idx].dept = t.value || '';
+      if(t.classList.contains('stage-est')) stageRows[idx].est = t.value || '';
+      if(t.classList.contains('stage-act')) stageRows[idx].act = t.value || '';
+      syncStagesText();
+    });
+    tbody.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.stage-remove');
+      if(!btn) return;
+      const idx = parseInt(btn.getAttribute('data-idx'), 10);
+      if(Number.isNaN(idx)) return;
+      stageRows.splice(idx, 1);
+      syncStagesText();
+      renderStageTable();
+    });
+  }
+
+  function initStages(){
+    const ta = document.getElementById('stages_text');
+    stageRows = parseStagesText(ta ? ta.value : '');
+    if(stageRows.length === 0){
+      stageRows = [{ sequence: 1, name: 'Stage 1', status: 'pending', assigned: '', dept: '', est: '', act: '' }];
+    }
+    syncStagesText();
+    renderStageTable();
+    attachStageHandlers();
+    document.getElementById('stage-add-btn')?.addEventListener('click', () => {
+      stageRows.push({ sequence: stageRows.length + 1, name: `Stage ${stageRows.length + 1}`, status: 'pending', assigned: '', dept: '', est: '', act: '' });
+      syncStagesText();
+      renderStageTable();
+    });
   }
 </script>
 {% endblock %}
