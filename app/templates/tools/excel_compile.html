@@ -1,0 +1,47 @@
+{% extends "security/base.html" %}
+{% block title %}Excel Compile{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-8 col-lg-6">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h1 class="h5 mb-3">Excel Compile</h1>
+
+        {% if upload %}
+          <p class="text-success mb-3">Upload and compile successful.</p>
+          <a class="btn btn-primary mb-3" href="{{ url_for('tools.excel_compile_download', filename=filepath) }}">
+            Download compiled documentation
+          </a>
+
+          {% if missing %}
+            <div class="alert alert-warning mt-3">
+              <div class="fw-semibold mb-1">Missing parts</div>
+              <ul class="mb-0">
+                {% for row in missing %}
+                  <li>{{ row.part_number }}{% if row.revision %} ({{ row.revision }}){% endif %}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+        {% else %}
+          <p class="text-muted">Download the template and upload a completed sheet.</p>
+          <p class="mb-3">
+            <a href="{{ url_for('static', filename='misc/excelcompile.xlsx') }}">Template download</a>
+          </p>
+          <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+              <input class="form-control" type="file" name="file" accept=".xlsx" required>
+            </div>
+            <div class="d-flex gap-2">
+              <button class="btn btn-primary" type="submit">Upload Excel</button>
+              <a class="btn btn-outline-secondary" href="{{ url_for('tools.tools_index') }}">Back</a>
+            </div>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
