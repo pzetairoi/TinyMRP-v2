@@ -8,7 +8,9 @@
   </div>
   <div class="d-flex gap-2 mt-2 mt-md-0">
     <a class="btn btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Jobs</a>
+    {% if has_perm('suppliers.manage') %}
     <a class="btn btn-primary" href="{{ url_for('admin_suppliers.suppliers_new') }}">New supplier</a>
+    {% endif %}
   </div>
 </div>
 
@@ -69,6 +71,8 @@
           <td class="fw-semibold">
             {% if has_perm('suppliers.manage') %}
               <a href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=s.id) }}">{{ s.name }}</a>
+            {% elif has_perm('suppliers.view') %}
+              <a href="{{ url_for('admin_suppliers.suppliers_view', sup_id=s.id) }}">{{ s.name }}</a>
             {% else %}
               {{ s.name }}
             {% endif %}
@@ -85,6 +89,8 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>
+            {% elif has_perm('suppliers.view') %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_view', sup_id=s.id) }}">View</a>
             {% endif %}
           </td>
         </tr>

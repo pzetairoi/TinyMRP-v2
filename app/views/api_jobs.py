@@ -323,6 +323,8 @@ def delete_job(job_number):
         return json_error("not_found", "Job not found.", 404)
     if job.status in ("in_progress", "completed"):
         return json_error("invalid_state", "Job cannot be deleted in this status.", 400)
+    from app.models.order import Order
+    Order.objects(job=job).update(job=None, updated_at=datetime.utcnow())
     job.status = "cancelled"
     job.is_deleted = True
     job.updated_at = datetime.utcnow()

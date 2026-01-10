@@ -145,6 +145,12 @@
             {% if has_perm('orders.view') or has_perm('orders.manage') %}
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
             {% endif %}
+            {% if has_perm('jobs.manage') %}
+            <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=j.id) }}" onsubmit="return confirm('Delete job {{ j.job_number }}? This will unlink related orders and hide the job.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+            </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

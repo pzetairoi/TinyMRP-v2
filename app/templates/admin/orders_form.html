@@ -187,22 +187,21 @@
             </div>
           </div>
 
-          {% if order %}
-          <div class="mt-3">
-            <div class="fw-bold mb-2">Scope of supply</div>
-            <form method="post" action="{{ url_for('admin_orders.order_scope_pdf', order_id=order.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="attach_docs" name="attach_docs">
-                <label class="form-check-label" for="attach_docs">Attach all available documentation and files (ZIP)</label>
-              </div>
-              <button class="btn btn-outline-primary btn-sm" type="submit">Download scope</button>
-            </form>
-          </div>
-          {% endif %}
-
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
         </form>
+        {% if order %}
+        <div class="mt-3">
+          <div class="fw-bold mb-2">Scope of supply</div>
+          <form method="post" action="{{ url_for('admin_orders.order_scope_pdf', order_id=order.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="attach_docs" name="attach_docs">
+              <label class="form-check-label" for="attach_docs">Attach all available documentation and files (ZIP)</label>
+            </div>
+            <button class="btn btn-outline-primary btn-sm" type="submit">Download scope</button>
+          </form>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>

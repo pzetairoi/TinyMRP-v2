@@ -14,6 +14,7 @@ from app.services.api_auth import api_auth_required
 from app.services.attrs import harvest_part_attrs
 from app.services.biz_utils import generate_supplier_code
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
+from app.services.acl import apply_supplier_scope
 
 bp = Blueprint("suppliers_api", __name__, url_prefix="/api/suppliers")
 
@@ -104,6 +105,7 @@ def list_suppliers():
     if direction == "desc":
         sort_key = "-" + sort_key
 
+    q = apply_supplier_scope(q, user)
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
     return jsonify({
@@ -160,7 +162,8 @@ def get_supplier(code):
     user, err = ensure_permissions("suppliers.view")
     if err:
         return err
-    s = Supplier.objects(code=code).first() or Supplier.objects(id=code).first()
+    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
+        or apply_supplier_scope(Supplier.objects(id=code), user).first()
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     return jsonify({"ok": True, "supplier": _supplier_to_dict(s)})
@@ -172,7 +175,8 @@ def update_supplier(code):
     user, err = ensure_permissions("suppliers.manage")
     if err:
         return err
-    s = Supplier.objects(code=code).first() or Supplier.objects(id=code).first()
+    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
+        or apply_supplier_scope(Supplier.objects(id=code), user).first()
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     data = get_json()
@@ -207,7 +211,8 @@ def supplier_status(code):
     user, err = ensure_permissions("suppliers.manage")
     if err:
         return err
-    s = Supplier.objects(code=code).first() or Supplier.objects(id=code).first()
+    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
+        or apply_supplier_scope(Supplier.objects(id=code), user).first()
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     data = get_json()
@@ -225,7 +230,8 @@ def supplier_orders(code):
     user, err = ensure_permissions("suppliers.view")
     if err:
         return err
-    s = Supplier.objects(code=code).first() or Supplier.objects(id=code).first()
+    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
+        or apply_supplier_scope(Supplier.objects(id=code), user).first()
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     orders = Order.objects(supplier=s).order_by("-order_date").limit(50)
@@ -249,7 +255,8 @@ def supplier_parts(code):
     user, err = ensure_permissions("suppliers.view")
     if err:
         return err
-    s = Supplier.objects(code=code).first() or Supplier.objects(id=code).first()
+    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
+        or apply_supplier_scope(Supplier.objects(id=code), user).first()
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     name = (s.name or "").strip()
@@ -282,7 +289,8 @@ def supplier_performance(code):
     user, err = ensure_permissions("suppliers.view")
     if err:
         return err
-    s = Supplier.objects(code=code).first() or Supplier.objects(id=code).first()
+    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
+        or apply_supplier_scope(Supplier.objects(id=code), user).first()
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     orders = Order.objects(supplier=s)

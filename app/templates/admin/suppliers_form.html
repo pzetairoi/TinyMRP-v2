@@ -1,11 +1,12 @@
 ﻿{% extends "security/base.html" %}
-{% block title %}{{ 'Edit supplier' if supplier else 'New supplier' }} - Admin{% endblock %}
+{% set is_readonly = readonly if readonly is defined else false %}
+{% block title %}{{ 'View supplier' if is_readonly else ('Edit supplier' if supplier else 'New supplier') }} - Admin{% endblock %}
 {% block content %}
 <div class="row justify-content-center">
   <div class="col-lg-10">
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <h1 class="h5 mb-3">{{ 'Edit supplier' if supplier else 'New supplier' }}</h1>
+        <h1 class="h5 mb-3">{{ 'View supplier' if is_readonly else ('Edit supplier' if supplier else 'New supplier') }}</h1>
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -73,7 +74,9 @@
           <div class="mt-4">
             <label class="form-label fw-bold">Additional contacts</label>
             <div class="d-flex align-items-center gap-2 mb-2">
+              {% if not is_readonly %}
               <button type="button" class="btn btn-sm btn-outline-primary" id="contact-add-btn">Add contact</button>
+              {% endif %}
               <span class="text-muted small">Mark one as primary for quick reference.</span>
             </div>
             <div class="table-responsive">
@@ -200,13 +203,17 @@
               <option value="{{ u.id }}" {% if supplier and (u.id|string) in linked %}selected{% endif %}>{{ u.email }}</option>
               {% endfor %}
             </select>
+            {% if not is_readonly %}
             <div class="d-flex gap-2 mt-2">
               <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('supplier-users')">Select all</button>
               <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('supplier-users')">Clear</button>
             </div>
+            {% endif %}
           </div>
 
+          {% if not is_readonly %}
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
+          {% endif %}
         </form>
       </div>
     </div>
@@ -325,4 +332,16 @@
     });
   });
 </script>
+{% if is_readonly %}
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    const form = document.querySelector('form');
+    if(!form) return;
+    form.querySelectorAll('input, select, textarea, button').forEach((el) => {
+      if(el.type === 'hidden') return;
+      el.setAttribute('disabled', 'disabled');
+    });
+  });
+</script>
+{% endif %}
 {% endblock %}

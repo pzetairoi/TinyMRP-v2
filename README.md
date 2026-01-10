@@ -196,6 +196,63 @@ All endpoints require authentication and respect role permissions (`jobs.*`, `su
 
 ---
 
+## Roles & Permissions
+
+Default roles and permissions are created/updated by:
+
+```powershell
+flask --app run.py user seed-roles
+```
+
+This overwrites descriptions and permission lists for the built-in roles below.
+
+### Built-in roles (default permissions)
+
+- `admin`: full access (all permissions).
+- `planner`:
+  - `items.view`, `bom.view`, `mrp.run`, `reports.view`
+  - `jobs.view`, `jobs.manage`, `orders.view`, `orders.manage`
+  - `suppliers.view`, `customers.view`
+  - `tools.view`, `import.bom`
+- `operator`:
+  - `workorders.view`, `workorders.edit`, `workorders.close`
+  - `inventory.issue`, `inventory.receive`
+  - `items.view`, `bom.view`
+  - `tools.view`, `import.bom`
+- `viewer` (read-only):
+  - `items.view`, `bom.view`, `workorders.view`, `reports.view`
+  - `jobs.view`, `orders.view`, `suppliers.view`, `customers.view`
+- `customer_viewer` (scoped read-only):
+  - `items.view`, `bom.view`, `jobs.view`, `customers.view`
+- `supplier_viewer` (scoped read-only):
+  - `items.view`, `bom.view`, `orders.view`, `suppliers.view`
+
+Roles can be managed by admins in `/admin/roles`. If roles are corrupted, re-run `seed-roles` to restore defaults.
+
+### Row-level scoping for external users
+
+External users are scoped to the customers/suppliers they are linked to. This is enforced server-side for:
+
+- Jobs list/detail
+- Orders list/detail
+- Customers/Suppliers list/detail
+- Parts inventory listing and part detail
+
+Rules:
+
+- **Customer-scoped users** (linked via `Customer.users`) only see their customers, jobs, and orders (including orders tied to their jobs).
+- **Supplier-scoped users** (linked via `Supplier.users`) only see their suppliers, orders, and jobs associated via vendor/order links.
+- **Viewer role with links**: a user with role `viewer` who is linked to any customer/supplier is treated as scoped (prevents accidental global access).
+- **Internal roles** (`admin`, `operator`, `planner`) remain unscoped.
+
+To link a user, edit the Customer/Supplier in the admin UI and add the user under its `users` field.
+
+Optional override (not recommended in production):
+
+- `ACL_ENFORCED=false` disables row-level scoping.
+
+---
+
 ## Quick Start (local dev)
 
 PowerShell snippet (from `handycommands.txt`):

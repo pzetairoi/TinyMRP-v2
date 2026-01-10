@@ -119,8 +119,11 @@ def jobs_list():
 @permissions_required("jobs.manage")
 def jobs_delete(job_id):
     try:
-        j = Job.objects.get(id=job_id)
-        Order.objects(job=j).update(job=None)
+        j = Job.objects.get(id=job_id, is_deleted=False)
+        if (j.status or "") in ("in_progress", "completed"):
+            flash("Job cannot be deleted while in progress or completed.", "error")
+            return redirect(url_for("admin_jobs.jobs_list"))
+        Order.objects(job=j).update(job=None, updated_at=datetime.utcnow())
         j.status = "cancelled"
         j.is_deleted = True
         j.updated_at = datetime.utcnow()
