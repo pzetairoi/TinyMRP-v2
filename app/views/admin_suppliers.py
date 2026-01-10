@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
+from flask_login import current_user
 from flask_security import roles_required
-from app.services.acl import permissions_required
+from app.services.acl import permissions_required, apply_supplier_scope
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -45,7 +46,7 @@ def suppliers_list():
             sups = sups.filter(rating=int(rating_q))
         except Exception:
             pass
-    sups = sups.order_by("name")
+    sups = apply_supplier_scope(sups, current_user).order_by("name")
     return render_template(
         "admin/suppliers_list.html",
         suppliers=sups,
@@ -64,7 +65,10 @@ def suppliers_list():
 @permissions_required("suppliers.manage")
 def suppliers_delete(sup_id):
     try:
-        s = Supplier.objects.get(id=sup_id)
+        s = apply_supplier_scope(Supplier.objects(id=sup_id), current_user).first()
+        if not s:
+            flash("Supplier not found.", "error")
+            return redirect(url_for("admin_suppliers.suppliers_list"))
         Job.objects(vendors=s).update(pull__vendors=s)
         Order.objects(supplier=s).update(supplier=None)
         s.delete()
@@ -72,6 +76,38 @@ def suppliers_delete(sup_id):
     except Exception:
         flash("Delete failed.", "error")
     return redirect(url_for("admin_suppliers.suppliers_list"))
+
+
+@bp.get("/<sup_id>")
+@permissions_required("suppliers.view")
+def suppliers_view(sup_id):
+    try:
+        s = apply_supplier_scope(Supplier.objects(id=sup_id), current_user).first()
+        if not s:
+            abort(404)
+    except (DoesNotExist, ValidationError):
+        abort(404)
+    users = User.objects().order_by("email")
+    contacts_text = ""
+    if s.contacts:
+        lines = []
+        for c in s.contacts:
+            line = "|".join([
+                c.name or "",
+                c.title or "",
+                c.email or "",
+                c.phone or "",
+                "1" if c.is_primary else "0",
+            ])
+            lines.append(line)
+        contacts_text = "\n".join(lines)
+    return render_template(
+        "admin/suppliers_form.html",
+        users=users,
+        supplier=s,
+        contacts_text=contacts_text,
+        readonly=True,
+    )
 
 
 def _parse_int(value):
@@ -195,7 +231,9 @@ def suppliers_new():
 @permissions_required("suppliers.manage")
 def suppliers_edit(sup_id):
     try:
-        s = Supplier.objects.get(id=sup_id)
+        s = apply_supplier_scope(Supplier.objects(id=sup_id), current_user).first()
+        if not s:
+            abort(404)
     except (DoesNotExist, ValidationError):
         abort(404)
     if request.method == "POST":

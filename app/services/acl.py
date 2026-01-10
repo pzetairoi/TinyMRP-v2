@@ -127,6 +127,52 @@ def apply_order_scope(qs, user):
     return qs.filter(q)
 
 
+def apply_customer_scope(qs, user):
+    if not _acl_enforced():
+        return qs
+    if not is_external_scoped_user(user):
+        return qs
+    cust_ids = customer_scope_ids(user)
+    if not cust_ids:
+        return qs.filter(id__in=[])
+    return qs.filter(id__in=cust_ids)
+
+
+def apply_supplier_scope(qs, user):
+    if not _acl_enforced():
+        return qs
+    if not is_external_scoped_user(user):
+        return qs
+    supp_ids = supplier_scope_ids(user)
+    if not supp_ids:
+        return qs.filter(id__in=[])
+    return qs.filter(id__in=supp_ids)
+
+
+def can_access_customer(user, customer) -> bool:
+    if not _acl_enforced():
+        return True
+    if not is_external_scoped_user(user):
+        return True
+    cust_ids = customer_scope_ids(user)
+    try:
+        return bool(customer and customer.id in cust_ids)
+    except Exception:
+        return False
+
+
+def can_access_supplier(user, supplier) -> bool:
+    if not _acl_enforced():
+        return True
+    if not is_external_scoped_user(user):
+        return True
+    supp_ids = supplier_scope_ids(user)
+    try:
+        return bool(supplier and supplier.id in supp_ids)
+    except Exception:
+        return False
+
+
 def can_access_job(user, job) -> bool:
     if not _acl_enforced():
         return True

@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
+from flask_login import current_user
 from flask_security import roles_required
-from app.services.acl import permissions_required
+from app.services.acl import permissions_required, apply_customer_scope
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -44,7 +45,7 @@ def customers_list():
         tag_tokens = [t.strip() for t in tags_q.split(",") if t.strip()]
         if tag_tokens:
             cs = cs.filter(tags__in=tag_tokens)
-    cs = cs.order_by("name")
+    cs = apply_customer_scope(cs, current_user).order_by("name")
     return render_template(
         "admin/customers_list.html",
         customers=cs,
@@ -63,7 +64,10 @@ def customers_list():
 @permissions_required("customers.manage")
 def customers_delete(cust_id):
     try:
-        c = Customer.objects.get(id=cust_id)
+        c = apply_customer_scope(Customer.objects(id=cust_id), current_user).first()
+        if not c:
+            flash("Customer not found.", "error")
+            return redirect(url_for("admin_customers.customers_list"))
         Job.objects(customer=c).update(customer=None)
         Order.objects(customer=c).update(customer=None)
         c.delete()
@@ -71,6 +75,55 @@ def customers_delete(cust_id):
     except Exception:
         flash("Delete failed.", "error")
     return redirect(url_for("admin_customers.customers_list"))
+
+
+@bp.get("/<cust_id>")
+@permissions_required("customers.view")
+def customers_view(cust_id):
+    try:
+        c = apply_customer_scope(Customer.objects(id=cust_id), current_user).first()
+        if not c:
+            abort(404)
+    except (DoesNotExist, ValidationError):
+        abort(404)
+    users = User.objects().order_by("email")
+    shipping_text = ""
+    if c.shipping_addresses:
+        lines = []
+        for a in c.shipping_addresses:
+            line = "|".join([
+                a.label or "",
+                a.line1 or "",
+                a.line2 or "",
+                a.city or "",
+                a.state or "",
+                a.postal or "",
+                a.country or "",
+                "1" if a.is_default else "0",
+            ])
+            lines.append(line)
+        shipping_text = "\n".join(lines)
+    contacts_text = ""
+    if c.contacts:
+        lines = []
+        for ct in c.contacts:
+            line = "|".join([
+                ct.name or "",
+                ct.title or "",
+                ct.email or "",
+                ct.phone or "",
+                "1" if ct.is_primary else "0",
+            ])
+            lines.append(line)
+        contacts_text = "\n".join(lines)
+    return render_template(
+        "admin/customers_form.html",
+        users=users,
+        customer=c,
+        shipping_text=shipping_text,
+        contacts_text=contacts_text,
+        readonly=True,
+    )
 
 
 def _parse_float(value):
@@ -226,7 +279,9 @@ def customers_new():
 @permissions_required("customers.manage")
 def customers_edit(cust_id):
     try:
-        c = Customer.objects.get(id=cust_id)
+        c = apply_customer_scope(Customer.objects(id=cust_id), current_user).first()
+        if not c:
+            abort(404)
     except (DoesNotExist, ValidationError):
         abort(404)
     if request.method == "POST":

@@ -12,6 +12,7 @@ from app.models.common import Contact, Address
 from app.services.api_auth import api_auth_required
 from app.services.biz_utils import generate_customer_code
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
+from app.services.acl import apply_customer_scope
 
 bp = Blueprint("customers_api", __name__, url_prefix="/api/customers")
 
@@ -98,6 +99,7 @@ def list_customers():
     if direction == "desc":
         sort_key = "-" + sort_key
 
+    q = apply_customer_scope(q, user)
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
     return jsonify({
@@ -156,7 +158,8 @@ def get_customer(code):
     user, err = ensure_permissions("customers.view")
     if err:
         return err
-    c = Customer.objects(code=code).first() or Customer.objects(id=code).first()
+    c = apply_customer_scope(Customer.objects(code=code), user).first() \
+        or apply_customer_scope(Customer.objects(id=code), user).first()
     if not c:
         return json_error("not_found", "Customer not found.", 404)
     return jsonify({"ok": True, "customer": _customer_to_dict(c)})
@@ -168,7 +171,8 @@ def update_customer(code):
     user, err = ensure_permissions("customers.manage")
     if err:
         return err
-    c = Customer.objects(code=code).first() or Customer.objects(id=code).first()
+    c = apply_customer_scope(Customer.objects(code=code), user).first() \
+        or apply_customer_scope(Customer.objects(id=code), user).first()
     if not c:
         return json_error("not_found", "Customer not found.", 404)
     data = get_json()
@@ -201,7 +205,8 @@ def add_shipping_address(code):
     user, err = ensure_permissions("customers.manage")
     if err:
         return err
-    c = Customer.objects(code=code).first() or Customer.objects(id=code).first()
+    c = apply_customer_scope(Customer.objects(code=code), user).first() \
+        or apply_customer_scope(Customer.objects(id=code), user).first()
     if not c:
         return json_error("not_found", "Customer not found.", 404)
     data = get_json()
@@ -219,7 +224,8 @@ def customer_orders(code):
     user, err = ensure_permissions("customers.view")
     if err:
         return err
-    c = Customer.objects(code=code).first() or Customer.objects(id=code).first()
+    c = apply_customer_scope(Customer.objects(code=code), user).first() \
+        or apply_customer_scope(Customer.objects(id=code), user).first()
     if not c:
         return json_error("not_found", "Customer not found.", 404)
     orders = Order.objects(customer=c).order_by("-order_date").limit(50)
@@ -243,7 +249,8 @@ def customer_stats(code):
     user, err = ensure_permissions("customers.view")
     if err:
         return err
-    c = Customer.objects(code=code).first() or Customer.objects(id=code).first()
+    c = apply_customer_scope(Customer.objects(code=code), user).first() \
+        or apply_customer_scope(Customer.objects(id=code), user).first()
     if not c:
         return json_error("not_found", "Customer not found.", 404)
     orders = Order.objects(customer=c)
@@ -264,7 +271,7 @@ def customer_dashboard():
     user, err = ensure_permissions("customers.view")
     if err:
         return err
-    recent = Customer.objects().order_by("-id").limit(10)
+    recent = apply_customer_scope(Customer.objects(), user).order_by("-id").limit(10)
     return jsonify({
         "ok": True,
         "recent": [_customer_to_dict(c) for c in recent],
