@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Set, Tuple
+from typing import Optional, Set, Tuple, Iterable
 
 from flask import current_app
 from flask_login import current_user
@@ -25,6 +25,158 @@ def user_has_permission(user, perm: str) -> bool:
                 return True
     except Exception:
         return False
+    return False
+
+
+def is_privileged_internal(user) -> bool:
+    roles = _role_names(user)
+    return bool({"admin", "operator", "planner"} & roles)
+
+
+def customer_scope_ids(user) -> list:
+    from app.models.customer import Customer
+    try:
+        return [c.id for c in Customer.objects(users=user).only("id")]
+    except Exception:
+        return []
+
+
+def supplier_scope_ids(user) -> list:
+    from app.models.supplier import Supplier
+    try:
+        return [s.id for s in Supplier.objects(users=user).only("id")]
+    except Exception:
+        return []
+
+
+def is_external_scoped_user(user) -> bool:
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if is_privileged_internal(user):
+        return False
+    roles = _role_names(user)
+    cust_ids = customer_scope_ids(user)
+    supp_ids = supplier_scope_ids(user)
+    if "customer_viewer" in roles or "supplier_viewer" in roles:
+        return True
+    if "viewer" in roles and (cust_ids or supp_ids):
+        return True
+    if cust_ids or supp_ids:
+        return True
+    return False
+
+
+def _acl_enforced() -> bool:
+    try:
+        return bool(current_app.config.get("ACL_ENFORCED", True))
+    except Exception:
+        return True
+
+
+def apply_job_scope(qs, user):
+    if not _acl_enforced():
+        return qs
+    if not is_external_scoped_user(user):
+        return qs
+    cust_ids = customer_scope_ids(user)
+    supp_ids = supplier_scope_ids(user)
+    if not cust_ids and not supp_ids:
+        return qs.filter(id__in=[])
+
+    from mongoengine.queryset.visitor import Q
+    from app.models.order import Order
+
+    q = Q()
+    if cust_ids:
+        q = q | Q(customer__in=cust_ids)
+    if supp_ids:
+        q = q | Q(vendors__in=supp_ids)
+        job_ids = []
+        for o in Order.objects(supplier__in=supp_ids).only("job"):
+            try:
+                if o.job:
+                    job_ids.append(o.job.id)
+            except Exception:
+                continue
+        if job_ids:
+            q = q | Q(id__in=list(set(job_ids)))
+    return qs.filter(q)
+
+
+def apply_order_scope(qs, user):
+    if not _acl_enforced():
+        return qs
+    if not is_external_scoped_user(user):
+        return qs
+    cust_ids = customer_scope_ids(user)
+    supp_ids = supplier_scope_ids(user)
+    if not cust_ids and not supp_ids:
+        return qs.filter(id__in=[])
+
+    from mongoengine.queryset.visitor import Q
+    from app.models.job import Job
+
+    q = Q()
+    if supp_ids:
+        q = q | Q(supplier__in=supp_ids)
+    if cust_ids:
+        q = q | Q(customer__in=cust_ids)
+        job_ids = [j.id for j in Job.objects(customer__in=cust_ids).only("id")]
+        if job_ids:
+            q = q | Q(job__in=job_ids)
+    return qs.filter(q)
+
+
+def can_access_job(user, job) -> bool:
+    if not _acl_enforced():
+        return True
+    if not is_external_scoped_user(user):
+        return True
+    cust_ids = customer_scope_ids(user)
+    supp_ids = supplier_scope_ids(user)
+    try:
+        if cust_ids and getattr(job, "customer", None) and job.customer.id in cust_ids:
+            return True
+    except Exception:
+        pass
+    try:
+        if supp_ids and getattr(job, "vendors", None):
+            if any(v.id in supp_ids for v in (job.vendors or [])):
+                return True
+    except Exception:
+        pass
+    if supp_ids:
+        try:
+            from app.models.order import Order
+            if Order.objects(supplier__in=supp_ids, job=job).limit(1).count() > 0:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def can_access_order(user, order) -> bool:
+    if not _acl_enforced():
+        return True
+    if not is_external_scoped_user(user):
+        return True
+    cust_ids = customer_scope_ids(user)
+    supp_ids = supplier_scope_ids(user)
+    try:
+        if supp_ids and getattr(order, "supplier", None) and order.supplier.id in supp_ids:
+            return True
+    except Exception:
+        pass
+    try:
+        if cust_ids and getattr(order, "customer", None) and order.customer.id in cust_ids:
+            return True
+    except Exception:
+        pass
+    try:
+        if cust_ids and getattr(order, "job", None) and order.job and order.job.customer and order.job.customer.id in cust_ids:
+            return True
+    except Exception:
+        pass
     return False
 
 
@@ -69,22 +221,13 @@ def allowed_parts_for(user) -> Optional[Set[Tuple[str, str]]]:
     try:
         if not getattr(user, "is_authenticated", False):
             return set()
-        # Admin always unrestricted
-        if "admin" in _role_names(user):
+        # Admin/operator/planner always unrestricted
+        if is_privileged_internal(user):
             return None
         # Allow opt-out
-        enforce = True
-        try:
-            enforce = bool(current_app.config.get("ACL_ENFORCED", True))
-        except Exception:
-            enforce = True
-        if not enforce:
+        if not _acl_enforced():
             return None
-
-        roles = _role_names(user)
-        is_customer_viewer = "customer_viewer" in roles
-        is_supplier_viewer = "supplier_viewer" in roles
-        if not (is_customer_viewer or is_supplier_viewer):
+        if not is_external_scoped_user(user):
             return None
 
         from app.models.part import Part
@@ -121,19 +264,16 @@ def allowed_parts_for(user) -> Optional[Set[Tuple[str, str]]]:
                 pass
 
         allowed: Set[Tuple[str, str]] = set()
-        if is_customer_viewer:
-            customer_ids = [c.id for c in Customer.objects(users=user).only("id")]
-            if customer_ids:
-                for j in Job.objects(customer__in=customer_ids):
-                    for line in (j.bom or []):
-                        add_with_children(line.pn or "", line.rev or "")
-
-        if is_supplier_viewer:
-            supplier_ids = [s.id for s in Supplier.objects(users=user).only("id")]
-            if supplier_ids:
-                for o in Order.objects(supplier__in=supplier_ids):
-                    for line in (o.lines or []):
-                        add_with_children(line.pn or "", line.rev or "")
+        customer_ids = [c.id for c in Customer.objects(users=user).only("id")]
+        supplier_ids = [s.id for s in Supplier.objects(users=user).only("id")]
+        if customer_ids:
+            for j in Job.objects(customer__in=customer_ids):
+                for line in (j.bom or []):
+                    add_with_children(line.pn or "", line.rev or "")
+        if supplier_ids:
+            for o in Order.objects(supplier__in=supplier_ids):
+                for line in (o.lines or []):
+                    add_with_children(line.pn or "", line.rev or "")
 
         return allowed
     except Exception:
