@@ -5,6 +5,8 @@ from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
 from app.models.customer import Customer
+from app.models.job import Job
+from app.models.order import Order
 from app.models.auth import User
 from app.models.common import Address, Contact
 from app.services.biz_utils import generate_customer_code
@@ -62,6 +64,8 @@ def customers_list():
 def customers_delete(cust_id):
     try:
         c = Customer.objects.get(id=cust_id)
+        Job.objects(customer=c).update(customer=None)
+        Order.objects(customer=c).update(customer=None)
         c.delete()
         flash("Customer deleted.", "success")
     except Exception:

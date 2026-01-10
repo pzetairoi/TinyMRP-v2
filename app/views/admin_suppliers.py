@@ -5,6 +5,8 @@ from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
 from app.models.supplier import Supplier
+from app.models.job import Job
+from app.models.order import Order
 from app.models.auth import User
 from app.models.common import Address, Contact
 from app.services.biz_utils import generate_supplier_code
@@ -63,6 +65,8 @@ def suppliers_list():
 def suppliers_delete(sup_id):
     try:
         s = Supplier.objects.get(id=sup_id)
+        Job.objects(vendors=s).update(pull__vendors=s)
+        Order.objects(supplier=s).update(supplier=None)
         s.delete()
         flash("Supplier deleted.", "success")
     except Exception:

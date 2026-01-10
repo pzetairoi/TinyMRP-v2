@@ -55,8 +55,10 @@ def jobs_list():
     for j in jobs:
         try:
             cust_name = j.customer.name if j.customer else "-"
+            cust_id = str(j.customer.id) if j.customer else ""
         except Exception:
             cust_name = "-"
+            cust_id = ""
         try:
             vendors = ", ".join([v.name for v in (j.vendors or [])])
         except Exception:
@@ -79,6 +81,7 @@ def jobs_list():
                 "scheduled_start": j.scheduled_start,
                 "scheduled_end": j.scheduled_end,
                 "customer_name": cust_name or "-",
+                "customer_id": cust_id,
                 "participants": parts or "-",
                 "vendors": vendors or "-",
                 "required_total": required_total,
@@ -114,14 +117,12 @@ def jobs_list():
 def jobs_delete(job_id):
     try:
         j = Job.objects.get(id=job_id)
-        if j.status in ("in_progress", "completed"):
-            flash("Job cannot be deleted in this status.", "error")
-        else:
-            j.status = "cancelled"
-            j.is_deleted = True
-            j.updated_at = datetime.utcnow()
-            j.save()
-            flash("Job cancelled.", "success")
+        Order.objects(job=j).update(job=None)
+        j.status = "cancelled"
+        j.is_deleted = True
+        j.updated_at = datetime.utcnow()
+        j.save()
+        flash("Job deleted.", "success")
     except Exception:
         flash("Delete failed.", "error")
     return redirect(url_for("admin_jobs.jobs_list"))

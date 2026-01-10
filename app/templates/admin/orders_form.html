@@ -56,7 +56,9 @@
                 <option value="{{ j.id }}" data-customer-id="{{ j.customer_id }}" {% if (order and order.job and j.id==order.job.id) or (prefill_job and j.id|string==prefill_job|string) %}selected{% endif %}>{{ j.job_number }}</option>
                 {% endfor %}
               </select>
-              {% if order and order.job %}<div class="small mt-1"><a href="{{ url_for('admin_jobs.jobs_edit', job_id=order.job.id) }}">Open job</a></div>{% endif %}
+              {% if order and order.job and has_perm('jobs.manage') %}
+              <div class="small mt-1"><a href="{{ url_for('admin_jobs.jobs_edit', job_id=order.job.id) }}">Open job</a></div>
+              {% endif %}
             </div>
             <div class="col-md-4">
               <label class="form-label">Supplier</label>
@@ -117,7 +119,7 @@
           </div>
 
           <div class="mt-3">
-            <label class="form-label">Order Lines</label>
+            <label class="form-label fw-bold">Order Lines</label>
             <div class="table-responsive">
               <table class="table table-sm align-middle table-striped" id="order-table">
                 <thead>
@@ -185,6 +187,20 @@
             </div>
           </div>
 
+          {% if order %}
+          <div class="mt-3">
+            <div class="fw-bold mb-2">Scope of supply</div>
+            <form method="post" action="{{ url_for('admin_orders.order_scope_pdf', order_id=order.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="attach_docs" name="attach_docs">
+                <label class="form-check-label" for="attach_docs">Attach all available documentation and files (ZIP)</label>
+              </div>
+              <button class="btn btn-outline-primary btn-sm" type="submit">Download scope</button>
+            </form>
+          </div>
+          {% endif %}
+
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
         </form>
       </div>
@@ -197,6 +213,8 @@
   let orderRows = [];
   let replaceIdx = null;
   const thumbCache = {};
+  const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
+  const fallbackLogo = "{{ url_for('static', filename='images/logo.png') }}";
 
   function parseOrderLines(txt){
     const out = [];
@@ -302,10 +320,12 @@
       if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
       const totals = computeRowTotals(row);
       const tr = document.createElement('tr');
-      const pnLink = row.pn ? `<a href="/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}">${row.pn}</a>` : '';
+      const pnLink = row.pn && canViewParts
+        ? `<a href="/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}">${row.pn}</a>`
+        : (row.pn || '');
       tr.innerHTML = `
         <td style="width:64px;">
-          ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : '<div class="bg-light border rounded" style="height:48px;width:64px;"></div>'}
+          ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : `<img src="${fallbackLogo}" class="img-thumbnail" style="max-height:48px;max-width:64px;">`}
         </td>
         <td>${pnLink}</td>
         <td>${row.desc || ''}</td>

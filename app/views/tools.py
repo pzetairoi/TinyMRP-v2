@@ -3,6 +3,7 @@ import os
 from io import BytesIO
 from datetime import datetime
 from flask_login import login_required
+from app.services.acl import permissions_required
 
 bp = Blueprint("tools", __name__, url_prefix="/tools")
 
@@ -53,6 +54,7 @@ def _addin_installers():
 
 @bp.get("/")
 @login_required
+@permissions_required("tools.view")
 def tools_index():
     files = _static_tools()
     addin_files = _addin_installers()
@@ -61,6 +63,7 @@ def tools_index():
 
 @bp.get("/addin/latest")
 @login_required
+@permissions_required("tools.view")
 def addin_latest():
     addin_files = _addin_installers()
     if not addin_files:
@@ -73,6 +76,7 @@ def addin_latest():
 
 @bp.get("/addin/<path:filename>")
 @login_required
+@permissions_required("tools.view")
 def addin_download(filename):
     root = _addin_root()
     target = os.path.abspath(os.path.join(root, filename))
@@ -85,6 +89,7 @@ def addin_download(filename):
 
 @bp.route("/excelcompile", methods=["GET", "POST"])
 @login_required
+@permissions_required("tools.view")
 def excel_compile():
     if request.method == "POST":
         up = request.files.get("file")
@@ -148,6 +153,7 @@ def excel_compile():
 
 @bp.get("/excelcompile/download/<path:filename>")
 @login_required
+@permissions_required("tools.view")
 def excel_compile_download(filename):
     root = os.path.join(current_app.instance_path, "excelcompile")
     target = os.path.abspath(os.path.join(root, filename))

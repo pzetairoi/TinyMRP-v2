@@ -33,6 +33,7 @@ export default function PartsPage() {
       process:     { value: '', matchMode: FilterMatchMode.CONTAINS },
     } as DataTableFilterMeta
   })
+  const fallbackLogo = "/static/images/logo.png"
 
   const keyFor = (p: Part) => `${p.part_number}::${p.revision || ''}`
 
@@ -223,12 +224,16 @@ export default function PartsPage() {
                       {urls.length ? (
                         <img
                           src={urls[0]}
-                          onError={(ev: any) => urls[1] && (ev.currentTarget.src = urls[1])}
+                          onError={(ev: any) => urls[1] ? (ev.currentTarget.src = urls[1]) : (ev.currentTarget.src = fallbackLogo)}
                           alt=""
                           style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain', border: '1px solid #eee', borderRadius: 6, padding: 2, background: '#fff' }}
                         />
                       ) : (
-                        <div className="bg-light border rounded" style={{ height: 32, width: 48 }} />
+                        <img
+                          src={fallbackLogo}
+                          alt=""
+                          style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain', border: '1px solid #eee', borderRadius: 6, padding: 2, background: '#fff' }}
+                        />
                       )}
                     </td>
                     <td>{p.part_number}</td>
@@ -365,9 +370,15 @@ export default function PartsPage() {
 
         <Column header="" body={(p: any) => {
           const urls = (p as Part).thumb_urls || []
-          return urls.length ? (
-            <img src={urls[0]} onError={(ev:any) => urls[1] && (ev.currentTarget.src = urls[1])} alt="" style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain', border: '1px solid #eee', borderRadius: 6, padding: 2, background: '#fff' }} />
-          ) : null
+          const src = urls[0] || fallbackLogo
+          return (
+            <img
+              src={src}
+              onError={(ev:any) => urls[1] ? (ev.currentTarget.src = urls[1]) : (ev.currentTarget.src = fallbackLogo)}
+              alt=""
+              style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain', border: '1px solid #eee', borderRadius: 6, padding: 2, background: '#fff' }}
+            />
+          )
         }} style={{ width: 60 }} />
         <Column field="part_number" header="Part Number" sortable filter showFilterMenu={false}
         filterMatchMode="contains" filterMatchModeOptions={["contains"]}

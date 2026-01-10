@@ -1,6 +1,7 @@
 import json
+import io
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify, send_file
 from datetime import datetime
 from flask_security import roles_required
 from app.services.acl import permissions_required
@@ -13,6 +14,7 @@ from app.models.supplier import Supplier
 from app.models.customer import Customer
 from app.models.part import Part
 from app.services.biz_utils import generate_order_number, calculate_order_totals, consolidate_order_lines
+from app.services.order_scope import build_scope_pdf, build_scope_zip
 
 bp = Blueprint("admin_orders", __name__, url_prefix="/admin/orders")
 
@@ -81,24 +83,33 @@ def orders_list():
     for o in orders:
         try:
             job_number = o.job.job_number if o.job else "-"
+            job_id = str(o.job.id) if o.job else ""
         except Exception:
             job_number = "-"
+            job_id = ""
         try:
             supplier_name = o.supplier.name if o.supplier else "-"
+            supplier_id = str(o.supplier.id) if o.supplier else ""
         except Exception:
             supplier_name = "-"
+            supplier_id = ""
         try:
             customer_name = o.customer.name if o.customer else "-"
+            customer_id = str(o.customer.id) if o.customer else ""
         except Exception:
             customer_name = "-"
+            customer_id = ""
         safe_orders.append(
             {
                 "id": o.id,
                 "order_number": o.order_number,
                 "kind": o.kind,
                 "job": job_number,
+                "job_id": job_id,
                 "supplier": supplier_name,
+                "supplier_id": supplier_id,
                 "customer": customer_name,
+                "customer_id": customer_id,
                 "status": o.status,
                 "order_date": o.order_date,
                 "total": o.total,
@@ -126,16 +137,38 @@ def orders_list():
 def orders_delete(order_id):
     try:
         o = Order.objects.get(id=order_id)
-        if o.status in ("in_production", "ready_to_ship", "shipped", "delivered"):
-            flash("Order cannot be cancelled in this status.", "error")
-        else:
-            o.status = "cancelled"
-            o.updated_at = datetime.utcnow()
-            o.save()
-            flash("Order cancelled.", "success")
+        o.delete()
+        flash("Order deleted.", "success")
     except Exception:
         flash("Delete failed.", "error")
     return redirect(url_for("admin_orders.orders_list"))
+
+
+@bp.post("/<order_id>/scope_pdf")
+@permissions_required("orders.view")
+def order_scope_pdf(order_id):
+    try:
+        order = Order.objects.get(id=order_id)
+    except Exception:
+        flash("Order not found.", "error")
+        return redirect(url_for("admin_orders.orders_list"))
+
+    attach_docs = (request.form.get("attach_docs") or "").lower() in ("1", "true", "yes", "on")
+    pdf_bytes = build_scope_pdf(order)
+    if attach_docs:
+        zip_bytes = build_scope_zip(order, pdf_bytes, attach_docs=True)
+        return send_file(
+            io.BytesIO(zip_bytes),
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"{order.order_number}_scope.zip",
+        )
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"{order.order_number}_scope.pdf",
+    )
 
 
 def _parse_lines(text: str):

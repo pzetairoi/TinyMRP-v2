@@ -7,8 +7,15 @@ export default function ThumbImg({
   alt = "",
 }: { urls?: string[]; maxH?: number; maxW?: number; alt?: string }) {
   const [i, setI] = useState(0)
-  const src = urls[i]
-  const onErr = () => { if (i < urls.length - 1) setI(i + 1) }
+  const fallback = "/static/images/logo.png"
+  const src = urls.length && i < urls.length ? urls[i] : fallback
+  const onErr = () => {
+    if (urls.length && i < urls.length - 1) {
+      setI(i + 1)
+    } else if (src !== fallback) {
+      setI(urls.length)
+    }
+  }
   const style = {
     maxHeight: maxH,
     maxWidth: maxW,
@@ -18,6 +25,5 @@ export default function ThumbImg({
     padding: 4,
     background: "white",
   }
-  if (!src) return <div style={{ width: maxW, height: maxH, background: "#f2f2f2", borderRadius: 8 }} />
   return <img src={src} onError={onErr} alt={alt} style={style} />
 }

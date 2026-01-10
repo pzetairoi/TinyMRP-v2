@@ -24,8 +24,9 @@ export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit 
     return ()=>{cancelled=true}
   }, [pn, rev, mode])
 
-  if (!rows.length) return null
-  const list = typeof limit === 'number' ? rows.slice(0, Math.max(0, limit)) : rows
+  const list = rows.length
+    ? (typeof limit === 'number' ? rows.slice(0, Math.max(0, limit)) : rows)
+    : [{ urls: [] }]
   const wrapStyle = fit
     ? { display:'block', width:'100%', height:'100%' }
     : { display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }
@@ -38,13 +39,20 @@ export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit 
 
 function FallbackImg({ urls, fit }:{ urls:string[]; fit?: boolean }) {
   const [idx, setIdx] = useState(0)
+  const fallback = "/static/images/logo.png"
+  const src = urls.length && idx < urls.length ? urls[idx] : fallback
   const baseStyle = fit
     ? { height:'100%', width:'100%', objectFit:'contain', display:'block', background:'white' }
     : { maxHeight:160, maxWidth:240, objectFit:'contain', border:'1px solid rgba(0,0,0,.08)', borderRadius:8, padding:6, background:'white' }
+  const onErr = () => {
+    if (urls.length && idx < urls.length - 1) {
+      setIdx(idx + 1)
+    }
+  }
   return (
     <img
-      src={urls[idx]}
-      onError={()=> idx < urls.length-1 && setIdx(idx+1)}
+      src={src}
+      onError={onErr}
       style={baseStyle as any}
       alt=""
     />

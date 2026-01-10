@@ -27,6 +27,9 @@ PERMISSIONS = [
   "mrp.run",
   "reports.view",
   "numbering.manage",
+  # Tools / imports
+  "tools.view",
+  "import.bom",
 ]
 
 @bp.route("/")
