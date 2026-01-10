@@ -42,17 +42,8 @@
         <div class="collapse navbar-collapse" id="navbarMain">
           <!-- Left: primary nav -->
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-            <li class="nav-item">
-              <a class="nav-link {{ 'active' if request.endpoint=='main.index' else '' }}"
-                 href="{{ url_for('main.index') }}">Home test</a>
-            </li>
 
             {% if current_user.is_authenticated %}
-              <li class="nav-item">
-                <a class="nav-link {{ 'active' if request.endpoint=='main.app_home' else '' }}"
-                   href="{{ url_for('main.app_home') }}">App</a>
-              </li>
-              
               <li class="nav-item"><a class="nav-link" href="/ui/parts">Inventory</a></li>
               <li class="nav-item"><a class="nav-link" href="{{ url_for('tools.tools_index') }}">Tools</a></li>
               <li class="nav-item"><a class="nav-link" href="{{ url_for('importer.upload_form') }}">Import BOM</a></li>
@@ -107,47 +98,24 @@
                 <button class="btn btn-sm btn-outline-light" type="submit">Go</button>
               </form>
             </li>
-            {% if current_user.is_authenticated and current_user.has_role('admin') %}
-              <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle {{ 'active' if request.endpoint and request.endpoint.startswith('admin') else '' }}"
-                   href="#" id="navAdmin" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                  Admin
-                </a>
-                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navAdmin">
-                  <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Dashboard</a></li>
-                  <li><a class="dropdown-item" href="/ui/admin/addin">Add-in Admin</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_jobs.jobs_list') }}">Jobs</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_jobs.jobs_new') }}">New Job</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_suppliers.suppliers_new') }}">New Supplier</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_customers.customers_list') }}">Customers</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_customers.customers_new') }}">New Customer</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_orders.orders_list') }}">Orders</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_orders.orders_new') }}">New Order</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a></li>
-                  <li><a class="dropdown-item text-danger" href="{{ url_for('admin.purge_parts') }}">Purge Parts Data</a></li>
-                </ul>
-              </li>
-            {% endif %}
-
             {% if current_user.is_authenticated %}
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle" href="#" id="navUser" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                   {{ current_user.email or 'User' }}
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navUser">
+                  {% if current_user.has_role('admin') %}
+                  <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Dashboard</a></li>
+                  <li><a class="dropdown-item" href="/ui/admin/addin">Add-in Admin</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a></li>
+                  <li><a class="dropdown-item text-danger" href="{{ url_for('admin.purge_parts') }}">Purge Parts Data</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  {% endif %}
                   <li><a class="dropdown-item" href="{{ url_for('main.app_home') }}">My Home</a></li>
                   <li><a class="dropdown-item" href="/ui/addin/settings">Add-in Settings</a></li>
                   <li><a class="dropdown-item" href="/ui/addin/tokens">API Tokens</a></li>
-                  {# later: add profile/change password route here #}
                   <li><hr class="dropdown-divider"></li>
                   <li>
                     <form class="px-3" method="post" action="{{ url_for_security('logout') }}">
