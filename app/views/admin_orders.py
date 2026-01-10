@@ -2,9 +2,10 @@ import json
 import io
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify, send_file
+from flask_login import current_user
 from datetime import datetime
 from flask_security import roles_required
-from app.services.acl import permissions_required
+from app.services.acl import permissions_required, apply_order_scope, apply_job_scope
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -26,10 +27,13 @@ def orders_list():
     qs = Order.objects()
     if job_id:
         try:
-            j = Job.objects.get(id=job_id)
-            qs = qs.filter(job=j)
+            j = apply_job_scope(Job.objects(id=job_id), current_user).first()
+            if not j:
+                qs = qs.filter(id__in=[])
+            else:
+                qs = qs.filter(job=j)
         except Exception:
-            pass
+            qs = qs.filter(id__in=[])
     status = (request.args.get("status") or "").strip()
     if status:
         qs = qs.filter(status=status)
@@ -78,6 +82,7 @@ def orders_list():
             qs = qs.filter(total__lte=float(total_max))
     except Exception:
         pass
+    qs = apply_order_scope(qs, current_user)
     orders = qs.order_by("-created_at")
     safe_orders = []
     for o in orders:
@@ -147,9 +152,8 @@ def orders_delete(order_id):
 @bp.post("/<order_id>/scope_pdf")
 @permissions_required("orders.view")
 def order_scope_pdf(order_id):
-    try:
-        order = Order.objects.get(id=order_id)
-    except Exception:
+    order = apply_order_scope(Order.objects(id=order_id), current_user).first()
+    if not order:
         flash("Order not found.", "error")
         return redirect(url_for("admin_orders.orders_list"))
 

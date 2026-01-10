@@ -13,6 +13,7 @@ from app.models.supplier import Supplier
 from app.models.auth import User
 from app.services.api_auth import api_auth_required
 from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW
+from app.services.acl import apply_job_scope
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
 
 bp = Blueprint("jobs_api", __name__, url_prefix="/api/jobs")
@@ -162,6 +163,7 @@ def list_jobs():
     if direction == "desc":
         sort_key = "-" + sort_key
 
+    q = apply_job_scope(q, user)
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
 
@@ -242,7 +244,7 @@ def get_job(job_number):
     user, err = ensure_permissions("jobs.view")
     if err:
         return err
-    job = Job.objects(job_number=job_number, is_deleted=False).first()
+    job = apply_job_scope(Job.objects(job_number=job_number, is_deleted=False), user).first()
     if not job:
         return json_error("not_found", "Job not found.", 404)
     return jsonify({"ok": True, "job": _job_to_dict(job)})

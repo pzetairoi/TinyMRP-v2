@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify
+from flask_login import current_user
 from datetime import datetime, timedelta
-from app.services.acl import permissions_required
+from app.services.acl import permissions_required, apply_job_scope
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -50,6 +51,7 @@ def jobs_list():
     if date_to:
         q = q.filter(scheduled_end__lte=date_to)
 
+    q = apply_job_scope(q, current_user)
     jobs = q.order_by("job_number")
     safe_jobs = []
     for j in jobs:
@@ -92,9 +94,10 @@ def jobs_list():
             }
         )
     now = datetime.utcnow()
-    active_count = Job.objects(status__in=["released", "in_progress"], is_deleted=False).count()
-    overdue_count = Job.objects(status__in=["released", "in_progress"], scheduled_end__lt=now, is_deleted=False).count()
-    completed_week = Job.objects(status="completed", actual_end__gte=now - timedelta(days=7), is_deleted=False).count()
+    base_q = apply_job_scope(Job.objects(is_deleted=False), current_user)
+    active_count = base_q.filter(status__in=["released", "in_progress"]).count()
+    overdue_count = base_q.filter(status__in=["released", "in_progress"], scheduled_end__lt=now).count()
+    completed_week = base_q.filter(status="completed", actual_end__gte=now - timedelta(days=7)).count()
     return render_template(
         "admin/jobs_list.html",
         jobs=safe_jobs,
@@ -395,9 +398,8 @@ def _part_meta(pn: str, rev: str):
 @bp.get("/<job_id>/bom_json")
 @permissions_required("jobs.view")
 def job_bom_json(job_id):
-    try:
-        j = Job.objects.get(id=job_id)
-    except (DoesNotExist, ValidationError):
+    j = apply_job_scope(Job.objects(id=job_id, is_deleted=False), current_user).first()
+    if not j:
         abort(404)
     rows = []
     orders = _orders_for_job(j)

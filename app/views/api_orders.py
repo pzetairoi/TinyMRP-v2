@@ -13,6 +13,7 @@ from app.models.job import Job
 from app.models.common import Address
 from app.services.api_auth import api_auth_required
 from app.services.biz_utils import generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines
+from app.services.acl import apply_order_scope
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
 
 bp = Blueprint("orders_api", __name__, url_prefix="/api/orders")
@@ -113,7 +114,7 @@ def _order_to_dict(o: Order):
     }
 
 
-def _list_orders(args):
+def _list_orders(args, user):
     page, size = parse_pagination()
     q = Order.objects()
     kind = args.get("type")
@@ -149,6 +150,7 @@ def _list_orders(args):
     if direction == "desc":
         sort_key = "-" + sort_key
 
+    q = apply_order_scope(q, user)
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
     return jsonify({
@@ -166,7 +168,7 @@ def list_orders():
     user, err = ensure_permissions("orders.view")
     if err:
         return err
-    return _list_orders(request.args)
+    return _list_orders(request.args, user)
 
 
 @bp.get("/sales")
@@ -177,7 +179,7 @@ def list_sales_orders():
         return err
     args = request.args.to_dict(flat=True)
     args["type"] = "sales"
-    return _list_orders(args)
+    return _list_orders(args, user)
 
 
 @bp.get("/purchase")
@@ -188,7 +190,7 @@ def list_purchase_orders():
         return err
     args = request.args.to_dict(flat=True)
     args["type"] = "purchase"
-    return _list_orders(args)
+    return _list_orders(args, user)
 
 
 @bp.post("")
@@ -252,7 +254,7 @@ def get_order(order_number):
     user, err = ensure_permissions("orders.view")
     if err:
         return err
-    order = Order.objects(order_number=order_number).first()
+    order = apply_order_scope(Order.objects(order_number=order_number), user).first()
     if not order:
         return json_error("not_found", "Order not found.", 404)
     return jsonify({"ok": True, "order": _order_to_dict(order)})
