@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import io
 import os
-from typing import List
+from typing import Iterable, List, Optional, Tuple
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from flask import current_app
@@ -17,6 +17,7 @@ from app.models.order import Order, OrderLine
 from app.models.part import Part
 from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs
+from app.services.docpacks import _flatten_bom, _overlay_numbers_and_stamps
 
 
 def _safe_name(value: str) -> str:
@@ -81,14 +82,268 @@ def _draw_wrapped(c: canvas.Canvas, text: str, x: float, y: float, max_w: float,
         c.drawString(x, y - (i * (size + 2)), ln)
     return len(lines)
 
+def _norm_file_types(file_types: Optional[Iterable[str]]) -> List[str]:
+    out = []
+    for v in (file_types or []):
+        s = str(v or "").strip().lower()
+        if s:
+            out.append(s)
+    return out
 
-def _collect_part_files(pn: str, rev: str) -> List[PartFile]:
+
+def _file_abs_path(pf: PartFile) -> str:
+    root = (current_app.config.get("FILE_ROOT_LOCAL") or "").strip()
+    if getattr(pf, "path", None):
+        return pf.path if os.path.isabs(pf.path) else os.path.join(root, pf.path)
+    if getattr(pf, "rel_path", None):
+        return os.path.join(root, (pf.rel_path or "").replace("/", os.sep))
+    return ""
+
+
+def _collect_part_files(pn: str, rev: str, file_types: Optional[Iterable[str]] = None) -> List[PartFile]:
     q = PartFile.objects(part_number__iexact=pn, revision__iexact=rev)
     if q.limit(1).count() == 0 and rev:
         q = PartFile.objects(part_number__iexact=pn, revision__iexact="")
     if q.limit(1).count() == 0:
         q = PartFile.objects(part_number__iexact=pn)
-    return list(q)
+    files = list(q)
+    groups = set(_norm_file_types(file_types))
+    if not groups:
+        return files
+    out = []
+    for pf in files:
+        group = (getattr(pf, "ext_group", None) or "").lower()
+        ext = (getattr(pf, "ext", None) or "").lower()
+        if group in groups or ext in groups:
+            out.append(pf)
+    return out
+
+
+def _collect_order_parts(order: Order, include_children: bool) -> List[Tuple[str, str]]:
+    parts: List[Tuple[str, str]] = []
+    seen = set()
+
+    def add(pn: str, rev: str):
+        key = (pn.lower(), (rev or "").lower())
+        if key in seen:
+            return
+        seen.add(key)
+        parts.append((pn, rev))
+
+    for line in (order.lines or []):
+        pn = (line.pn or "").strip()
+        if not pn:
+            continue
+        rev = _resolve_rev(pn, line.rev or "")
+        add(pn, rev)
+        if include_children:
+            try:
+                children = _flatten_bom(
+                    pn,
+                    rev,
+                    full=True,
+                    include_consumed=True,
+                    terminal_processes=["welding", "purchase", "machine"],
+                )
+            except Exception:
+                children = []
+            for cpn, crev, _ in children:
+                if cpn:
+                    child_rev = crev or _resolve_rev(cpn, crev)
+                    add(cpn, child_rev or "")
+    return parts
+
+
+def _merge_pdf_paths(paths: List[str]) -> Tuple[bytes, List[int]]:
+    try:
+        from PyPDF2 import PdfMerger, PdfReader
+    except Exception:
+        return b"", []
+    merger = PdfMerger()
+    starts: List[int] = []
+    total = 1
+    for p in paths:
+        try:
+            rdr = PdfReader(p)
+            starts.append(total)
+            total += len(rdr.pages)
+            merger.append(p)
+        except Exception:
+            continue
+    buf = io.BytesIO()
+    merger.write(buf)
+    merger.close()
+    return buf.getvalue(), starts
+
+
+def _merge_pdf_bytes(segments: List[bytes]) -> bytes:
+    try:
+        from PyPDF2 import PdfMerger
+    except Exception:
+        return b""
+    merger = PdfMerger()
+    for b in segments:
+        try:
+            merger.append(io.BytesIO(b))
+        except Exception:
+            continue
+    buf = io.BytesIO()
+    merger.write(buf)
+    merger.close()
+    return buf.getvalue()
+
+
+def _order_cover_pdf(order: Order) -> Optional[bytes]:
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+    except Exception:
+        return None
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    margin = 18 * mm
+    y = H - margin
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(margin, y, f"Scope Binder: {order.order_number}")
+    y -= 10 * mm
+    c.setFont("Helvetica", 11)
+    if order.order_date:
+        c.drawString(margin, y, f"Order date: {order.order_date.strftime('%Y-%m-%d')}")
+        y -= 6 * mm
+    if order.supplier:
+        c.drawString(margin, y, f"Supplier: {order.supplier.name}")
+        y -= 6 * mm
+    if order.customer:
+        c.drawString(margin, y, f"Customer: {order.customer.name}")
+        y -= 6 * mm
+    c.setFont("Helvetica", 9)
+    c.drawString(margin, 20 * mm, "Generated by TinyMRP")
+    c.save()
+    return buf.getvalue()
+
+
+def _order_index_pdf(entries: List[Tuple[str, int]], cover_pages: int) -> Optional[bytes]:
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+        from PyPDF2 import PdfReader
+    except Exception:
+        return None
+    if not entries:
+        return None
+
+    def _build(assumed_index_pages: int) -> bytes:
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=A4)
+        W, H = A4
+        left_x = 18 * mm
+        right_x = W - 18 * mm
+        y = H - 20 * mm
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(left_x, y, "Index")
+        y -= 10 * mm
+        c.setFont("Helvetica", 10)
+        dot_w = stringWidth(".", "Helvetica", 10)
+        for label, start in entries:
+            if y < 20 * mm:
+                c.showPage()
+                y = H - 20 * mm
+                c.setFont("Helvetica", 10)
+            page_no = cover_pages + assumed_index_pages + int(start)
+            left_w = stringWidth(label, "Helvetica", 10)
+            page_s = str(page_no)
+            right_w = stringWidth(page_s, "Helvetica", 10)
+            dots_area = max(0, right_x - (left_x + left_w) - right_w - 6)
+            n_dots = int(dots_area / max(dot_w, 0.1))
+            c.drawString(left_x, y, label)
+            if n_dots > 0:
+                c.drawString(left_x + left_w + 3, y, "." * n_dots)
+            c.drawRightString(right_x, y, page_s)
+            y -= 6 * mm
+        c.save()
+        return buf.getvalue()
+
+    first = _build(1)
+    try:
+        idx_pages = len(PdfReader(io.BytesIO(first)).pages)
+    except Exception:
+        idx_pages = 1
+    if idx_pages == 1:
+        return first
+    return _build(idx_pages)
+
+
+def _build_order_binder(
+    order: Order,
+    parts: List[Tuple[str, str]],
+    file_types: Optional[Iterable[str]],
+) -> Optional[bytes]:
+    try:
+        from PyPDF2 import PdfReader
+    except Exception:
+        return None
+    groups = set(_norm_file_types(file_types))
+    allow_all = not groups
+    allow_pdf = allow_all or "pdf" in groups or "datasheet" in groups
+    if not allow_pdf:
+        return None
+    pdf_paths: List[str] = []
+    entries: List[Tuple[str, str]] = []
+    for pn, rev in parts:
+        q = PartFile.objects(part_number__iexact=pn)
+        if rev is not None:
+            q = q.filter(revision__iexact=(rev or ""))
+        files = list(q)
+        for pf in files:
+            ext = (getattr(pf, "ext", None) or "").lower()
+            group = (getattr(pf, "ext_group", None) or "").lower()
+            if ext != "pdf":
+                continue
+            if not allow_all and group not in groups and ext not in groups:
+                continue
+            pth = _file_abs_path(pf)
+            if not pth or not os.path.isfile(pth):
+                continue
+            base = os.path.splitext(os.path.basename(pth))[0]
+            label = f"{pn} {rev} - {base}".strip()
+            pdf_paths.append(pth)
+            entries.append((label, pth))
+
+    if not pdf_paths:
+        return None
+
+    pdf_paths = [p for _, p in sorted(entries, key=lambda t: (t[0].lower(), t[1].lower()))]
+    body_bytes, body_starts = _merge_pdf_paths(pdf_paths)
+    if not body_bytes:
+        return None
+
+    indexed = []
+    for pth, start in zip(pdf_paths, body_starts):
+        base = os.path.splitext(os.path.basename(pth))[0]
+        indexed.append((base, start))
+
+    cover = _order_cover_pdf(order)
+    cover_pages = 0
+    if cover:
+        try:
+            cover_pages = len(PdfReader(io.BytesIO(cover)).pages)
+        except Exception:
+            cover_pages = 1
+    index = _order_index_pdf(indexed, cover_pages)
+    segments = []
+    if cover:
+        segments.append(cover)
+    if index:
+        segments.append(index)
+    segments.append(body_bytes)
+    merged = _merge_pdf_bytes(segments)
+    if not merged:
+        return None
+    return _overlay_numbers_and_stamps(merged, [], skip_first_page=bool(cover))
 
 
 def build_scope_pdf(order: Order) -> bytes:
@@ -166,9 +421,16 @@ def build_scope_pdf(order: Order) -> bytes:
     return buf.getvalue()
 
 
-def build_scope_zip(order: Order, pdf_bytes: bytes, attach_docs: bool) -> bytes:
+def build_scope_zip(
+    order: Order,
+    pdf_bytes: bytes,
+    *,
+    attach_docs: bool,
+    include_children: bool,
+    file_types: Optional[Iterable[str]] = None,
+    include_binder: bool = False,
+) -> bytes:
     buf = io.BytesIO()
-    root = (current_app.config.get("FILE_ROOT_LOCAL") or "").strip()
     safe_order = _safe_name(order.order_number)
     pdf_name = f"{safe_order}_scope.pdf"
 
@@ -177,16 +439,23 @@ def build_scope_zip(order: Order, pdf_bytes: bytes, attach_docs: bool) -> bytes:
 
     with ZipFile(buf, "w", ZIP_DEFLATED) as zf:
         zf.writestr(pdf_name, pdf_bytes)
+        parts = _collect_order_parts(order, include_children)
+
+        if include_binder:
+            binder = _build_order_binder(order, parts, file_types)
+            if binder:
+                zf.writestr(f"{safe_order}_binder.pdf", binder)
+            else:
+                zf.writestr("binder_manifest.txt", "No PDF files were found for the parts in this order.\n")
+
         if attach_docs:
             seen = set()
-            for line in (order.lines or []):
-                pn = (line.pn or "").strip()
-                rev = _resolve_rev(pn, line.rev or "")
-                files = _collect_part_files(pn, rev)
+            for pn, rev in parts:
+                files = _collect_part_files(pn, rev, file_types=file_types)
                 if not files:
                     missing.append(f"{pn},{rev}: no files found in database")
                 for pf in files:
-                    pth = pf.path if os.path.isabs(pf.path or "") else os.path.join(root, (pf.rel_path or "").replace("/", os.sep))
+                    pth = _file_abs_path(pf)
                     if not pth or not os.path.exists(pth):
                         missing.append(f"{pn},{pf.revision or rev}: {pf.rel_path or pf.path or 'missing path'}")
                         continue

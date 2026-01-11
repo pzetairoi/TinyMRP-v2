@@ -219,6 +219,33 @@
               <input class="form-check-input" type="checkbox" id="attach_docs" name="attach_docs">
               <label class="form-check-label" for="attach_docs">Attach all available documentation and files (ZIP)</label>
             </div>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="include_children" name="include_children">
+              <label class="form-check-label" for="include_children">Include children documentation (BOM)</label>
+            </div>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="include_binder" name="include_binder">
+              <label class="form-check-label" for="include_binder">Include combined binder PDF</label>
+            </div>
+            <div class="small text-muted mb-1">File types (leave empty to include all)</div>
+            <div class="row row-cols-2 row-cols-md-4 g-1 mb-2">
+              {% for ft, label in [
+                ('pdf','PDF'),
+                ('datasheet','Datasheet'),
+                ('png','PNG'),
+                ('step','STEP'),
+                ('dxf','DXF'),
+                ('edr','eDrawings'),
+                ('3mf','3MF')
+              ] %}
+              <div class="col">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="ft_{{ ft }}" name="file_types" value="{{ ft }}">
+                  <label class="form-check-label" for="ft_{{ ft }}">{{ label }}</label>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
             <button class="btn btn-outline-primary btn-sm" type="submit">Download scope</button>
           </form>
         </div>
