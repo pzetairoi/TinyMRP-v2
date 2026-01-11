@@ -2294,6 +2294,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            ApplySequenceOverrideIfNeeded(GetQuickSchemeSelection());
+
             ApiResponse response = client.Preview(schemeId, BuildContextFromNumberingQuick());
             if (!response.Ok)
             {
@@ -2343,6 +2345,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
                 return;
             }
+
+            ApplySequenceOverrideIfNeeded(GetQuickSchemeSelection());
 
             ISldWorks app = AddinContext.SldWorks;
             if (app == null)
@@ -2399,6 +2403,64 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             SetNumberingStatus("Allocated and applied.", Color.DarkGreen);
             TryRenameAfterAllocation(info, partNumber, revision, forceRename);
+        }
+
+        private NumberingSchemeDefinition GetQuickSchemeSelection()
+        {
+            if (_numberingPresetCombo != null)
+            {
+                return _numberingPresetCombo.SelectedItem as NumberingSchemeDefinition;
+            }
+            if (_quickSchemeCombo != null)
+            {
+                return _quickSchemeCombo.SelectedItem as NumberingSchemeDefinition;
+            }
+            return null;
+        }
+
+        private void ApplySequenceOverrideIfNeeded(NumberingSchemeDefinition scheme)
+        {
+            if (scheme == null || _numberingSeqOverrides == null || _numberingSeqOverrides.Count == 0)
+            {
+                return;
+            }
+
+            int overrideValue = (int)_numberingSeqOverrides[0].Value;
+            if (overrideValue < 1)
+            {
+                return;
+            }
+
+            if (scheme.Seq == null)
+            {
+                scheme.Seq = new SequenceSettings();
+            }
+
+            if (scheme.Seq.StartAt == overrideValue)
+            {
+                return;
+            }
+
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                return;
+            }
+
+            int previous = scheme.Seq.StartAt;
+            scheme.Seq.StartAt = overrideValue;
+            ApiResponse response = client.UpdateScheme(scheme);
+            if (!response.Ok)
+            {
+                scheme.Seq.StartAt = previous;
+                SetNumberingStatus("Sequence start override requires scheme edit permission.", Color.DarkOrange);
+                return;
+            }
+
+            if (_seqStartUpDown != null && _seqStartUpDown.Value != overrideValue)
+            {
+                _seqStartUpDown.Value = overrideValue;
+            }
         }
 
         private void UpdateQuickPreviewFields(string partNumber, string revision, string display)
