@@ -101,6 +101,8 @@
           <td class="fw-semibold">
             {% if has_perm('jobs.manage') %}
               <a href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">{{ j.job_number }}</a>
+            {% elif has_perm('jobs.view') %}
+              <a href="{{ url_for('admin_jobs.jobs_view', job_id=j.id) }}">{{ j.job_number }}</a>
             {% else %}
               {{ j.job_number }}
             {% endif %}
@@ -134,13 +136,17 @@
           <td>
             {% if has_perm('customers.manage') and j.customer_id %}
               <a href="{{ url_for('admin_customers.customers_edit', cust_id=j.customer_id) }}">{{ j.customer_name }}</a>
+            {% elif has_perm('customers.view') and j.customer_id %}
+              <a href="{{ url_for('admin_customers.customers_view', cust_id=j.customer_id) }}">{{ j.customer_name }}</a>
             {% else %}
               {{ j.customer_name }}
             {% endif %}
           </td>
           <td class="d-flex gap-1">
             {% if has_perm('jobs.manage') %}
-            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">View</a>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">Edit</a>
+            {% elif has_perm('jobs.view') %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_view', job_id=j.id) }}">View</a>
             {% endif %}
             {% if has_perm('orders.view') or has_perm('orders.manage') %}
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>

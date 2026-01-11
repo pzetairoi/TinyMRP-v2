@@ -1,7 +1,14 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify
 from flask_login import current_user
 from datetime import datetime, timedelta
-from app.services.acl import permissions_required, apply_job_scope
+from app.services.acl import (
+    permissions_required,
+    apply_job_scope,
+    is_external_scoped_user,
+    customer_scope_ids,
+    supplier_scope_ids,
+    user_has_permission,
+)
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -52,6 +59,11 @@ def jobs_list():
         q = q.filter(scheduled_end__lte=date_to)
 
     q = apply_job_scope(q, current_user)
+    is_external = is_external_scoped_user(current_user)
+    cust_ids = customer_scope_ids(current_user)
+    supp_ids = supplier_scope_ids(current_user)
+    mask_vendors = bool(is_external and cust_ids)
+    mask_participants = bool(is_external)
     jobs = q.order_by("job_number")
     safe_jobs = []
     for j in jobs:
@@ -84,8 +96,8 @@ def jobs_list():
                 "scheduled_end": j.scheduled_end,
                 "customer_name": cust_name or "-",
                 "customer_id": cust_id,
-                "participants": parts or "-",
-                "vendors": vendors or "-",
+                "participants": "Hidden" if mask_participants else (parts or "-"),
+                "vendors": "Hidden" if mask_vendors else (vendors or "-"),
                 "required_total": required_total,
                 "ordered_total": ordered_total,
                 "received_total": received_total,
@@ -113,6 +125,85 @@ def jobs_list():
             "from": request.args.get("from") or "",
             "to": request.args.get("to") or "",
         },
+    )
+
+
+@bp.get("/<job_id>")
+@permissions_required("jobs.view")
+def jobs_view(job_id):
+    j = apply_job_scope(Job.objects(id=job_id, is_deleted=False), current_user).first()
+    if not j:
+        abort(404)
+    is_external = is_external_scoped_user(current_user)
+    cust_ids = customer_scope_ids(current_user)
+    supp_ids = supplier_scope_ids(current_user)
+    if supp_ids and not cust_ids:
+        abort(404)
+    users = User.objects().order_by("email")
+    suppliers = Supplier.objects().order_by("name")
+    customers = Customer.objects().order_by("name")
+    bom_text = "\n".join([f"{l.pn},{l.rev},{l.qty:g}" for l in (j.bom or [])])
+    orders = _orders_for_job(j)
+    ordered_parts = []
+    remaining_parts = []
+    oversupplied_parts = []
+    ordered_map = {}
+    order_links = {}
+    can_manage_orders = user_has_permission(current_user, "orders.manage")
+    for o in orders:
+        for l in (o.lines or []):
+            rev_key = _resolve_rev(l.pn or "", l.rev or "")
+            pn_key = (l.pn or "").strip()
+            key = (pn_key.lower(), (rev_key or "").lower())
+            ordered_map[key] = ordered_map.get(key, 0.0) + float(l.qty or 0)
+            href = url_for("admin_orders.orders_edit", order_id=str(o.id)) if can_manage_orders else url_for("admin_orders.orders_view", order_id=str(o.id))
+            order_links.setdefault(key, []).append({
+                "order_number": o.order_number,
+                "href": href,
+                "supplier": getattr(o.supplier, "name", ""),
+            })
+    for line in (j.bom or []):
+        resolved_rev = _resolve_rev(line.pn or "", line.rev or "")
+        pn_key = (line.pn or "").strip()
+        key = (pn_key.lower(), (resolved_rev or "").lower())
+        req = float(line.qty or 0)
+        ordered = ordered_map.get(key, 0.0)
+        rem = max(req - ordered, 0.0)
+        over = max(ordered - req, 0.0)
+        meta = _part_meta(line.pn, line.rev or "")
+        row = {
+            "pn": line.pn,
+            "rev": meta.get("rev") or (line.rev or ""),
+            "required": req,
+            "ordered": ordered,
+            "remaining": rem,
+            "over": over,
+            "desc": meta.get("desc") or "",
+            "thumb": meta.get("thumb") or "",
+            "orders": order_links.get(key, []),
+        }
+        if ordered > 0:
+            ordered_parts.append(row)
+        if rem > 0:
+            remaining_parts.append(row)
+        if over > 0:
+            oversupplied_parts.append(row)
+    return render_template(
+        "admin/jobs_form.html",
+        users=users,
+        suppliers=suppliers,
+        customers=customers,
+        job=j,
+        bom_text=bom_text,
+        orders=orders,
+        ordered_parts=ordered_parts,
+        remaining_parts=remaining_parts,
+        oversupplied_parts=oversupplied_parts,
+        readonly=True,
+        hide_participants=is_external,
+        hide_vendors=bool(is_external and cust_ids),
+        hide_customer=False,
+        mask_supplier_names=bool(is_external and cust_ids),
     )
 
 @bp.post("/<job_id>/delete")

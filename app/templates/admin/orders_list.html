@@ -82,6 +82,8 @@
           <td class="fw-semibold">
             {% if has_perm('orders.manage') %}
               <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
+            {% elif has_perm('orders.view') %}
+              <a href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">{{ o.order_number }}</a>
             {% else %}
               {{ o.order_number }}
             {% endif %}
@@ -90,6 +92,8 @@
           <td>
             {% if has_perm('jobs.manage') and o.job_id %}
               <a href="{{ url_for('admin_jobs.jobs_edit', job_id=o.job_id) }}">{{ o.job }}</a>
+            {% elif has_perm('jobs.view') and o.job_id %}
+              <a href="{{ url_for('admin_jobs.jobs_view', job_id=o.job_id) }}">{{ o.job }}</a>
             {% else %}
               {{ o.job }}
             {% endif %}
@@ -97,6 +101,8 @@
           <td>
             {% if has_perm('suppliers.manage') and o.supplier_id %}
               <a href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=o.supplier_id) }}">{{ o.supplier }}</a>
+            {% elif has_perm('suppliers.view') and o.supplier_id %}
+              <a href="{{ url_for('admin_suppliers.suppliers_view', sup_id=o.supplier_id) }}">{{ o.supplier }}</a>
             {% else %}
               {{ o.supplier }}
             {% endif %}
@@ -104,6 +110,8 @@
           <td>
             {% if has_perm('customers.manage') and o.customer_id %}
               <a href="{{ url_for('admin_customers.customers_edit', cust_id=o.customer_id) }}">{{ o.customer }}</a>
+            {% elif has_perm('customers.view') and o.customer_id %}
+              <a href="{{ url_for('admin_customers.customers_view', cust_id=o.customer_id) }}">{{ o.customer }}</a>
             {% else %}
               {{ o.customer }}
             {% endif %}
@@ -118,6 +126,8 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>
+            {% elif has_perm('orders.view') %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">View</a>
             {% endif %}
           </td>
         </tr>

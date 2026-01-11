@@ -1,11 +1,16 @@
 ﻿{% extends "security/base.html" %}
-{% block title %}{{ 'Edit job' if job else 'New job' }} - Admin{% endblock %}
+{% set is_readonly = readonly if readonly is defined else false %}
+{% set hide_participants = hide_participants if hide_participants is defined else false %}
+{% set hide_vendors = hide_vendors if hide_vendors is defined else false %}
+{% set hide_customer = hide_customer if hide_customer is defined else false %}
+{% set mask_supplier_names = mask_supplier_names if mask_supplier_names is defined else false %}
+{% block title %}{{ 'View job' if is_readonly else ('Edit job' if job else 'New job') }} - Admin{% endblock %}
 {% block content %}
 <div class="row">
   <div class="col-12">
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <h1 class="h5 mb-3">{{ 'Edit job' if job else 'New job' }}</h1>
+        <h1 class="h5 mb-3">{{ 'View job' if is_readonly else ('Edit job' if job else 'New job') }}</h1>
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="row g-3">
@@ -59,41 +64,63 @@
           </div>
 
           <div class="row g-3 mt-2">
+            {% if not hide_participants %}
             <div class="col-md-6">
               <label class="form-label">Participants (users)</label>
-              {% set assigned = (job.participants | map(attribute='id') | map('string') | list) if job else [] %}
-              <select class="form-select" name="participants" id="participants" multiple size="6">
-                {% for u in users %}
-                <option value="{{ u.id }}" {% if job and (u.id|string) in assigned %}selected{% endif %}>{{ u.email }}</option>
-                {% endfor %}
-              </select>
-              <div class="d-flex gap-2 mt-2">
-                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('participants')">Select all</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('participants')">Clear</button>
-              </div>
+              {% if is_readonly %}
+                <div class="form-control-plaintext">
+                  {{ (job.participants | map(attribute='email') | join(', ')) if job and job.participants else '-' }}
+                </div>
+              {% else %}
+                {% set assigned = (job.participants | map(attribute='id') | map('string') | list) if job else [] %}
+                <select class="form-select" name="participants" id="participants" multiple size="6">
+                  {% for u in users %}
+                  <option value="{{ u.id }}" {% if job and (u.id|string) in assigned %}selected{% endif %}>{{ u.email }}</option>
+                  {% endfor %}
+                </select>
+                <div class="d-flex gap-2 mt-2">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('participants')">Select all</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('participants')">Clear</button>
+                </div>
+              {% endif %}
             </div>
+            {% endif %}
+            {% if not hide_vendors %}
             <div class="col-md-3">
               <label class="form-label">Vendors (suppliers)</label>
-              {% set vend = (job.vendors | map(attribute='id') | map('string') | list) if job else [] %}
-              <select class="form-select" name="vendors" id="vendors" multiple size="6">
-                {% for s in suppliers %}
-                <option value="{{ s.id }}" {% if job and (s.id|string) in vend %}selected{% endif %}>{{ s.name }}</option>
-                {% endfor %}
-              </select>
-              <div class="d-flex gap-2 mt-2">
-                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('vendors')">Select all</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('vendors')">Clear</button>
-              </div>
+              {% if is_readonly %}
+                <div class="form-control-plaintext">
+                  {{ (job.vendors | map(attribute='name') | join(', ')) if job and job.vendors else '-' }}
+                </div>
+              {% else %}
+                {% set vend = (job.vendors | map(attribute='id') | map('string') | list) if job else [] %}
+                <select class="form-select" name="vendors" id="vendors" multiple size="6">
+                  {% for s in suppliers %}
+                  <option value="{{ s.id }}" {% if job and (s.id|string) in vend %}selected{% endif %}>{{ s.name }}</option>
+                  {% endfor %}
+                </select>
+                <div class="d-flex gap-2 mt-2">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('vendors')">Select all</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('vendors')">Clear</button>
+                </div>
+              {% endif %}
             </div>
+            {% endif %}
+            {% if not hide_customer %}
             <div class="col-md-3">
               <label class="form-label">Customer</label>
-              <select class="form-select" name="customer">
-                <option value="">-</option>
-                {% for c in customers %}
-                <option value="{{ c.id }}" {% if job and job.customer and c.id==job.customer.id %}selected{% endif %}>{{ c.name }}</option>
-                {% endfor %}
-              </select>
+              {% if is_readonly %}
+                <div class="form-control-plaintext">{{ job.customer.name if job and job.customer else '-' }}</div>
+              {% else %}
+                <select class="form-select" name="customer">
+                  <option value="">-</option>
+                  {% for c in customers %}
+                  <option value="{{ c.id }}" {% if job and job.customer and c.id==job.customer.id %}selected{% endif %}>{{ c.name }}</option>
+                  {% endfor %}
+                </select>
+              {% endif %}
             </div>
+            {% endif %}
           </div>
 
           <div class="mt-3">
@@ -128,7 +155,9 @@
                   </th>
                   <th>
                     <div class="d-flex gap-1">
+                      {% if not is_readonly %}
                       <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForJob()">Add part(s)</button>
+                      {% endif %}
                       <button class="btn btn-sm btn-outline-secondary" type="button" onclick="clearBomFilters()">Clear</button>
                     </div>
                   </th>
@@ -140,14 +169,18 @@
             <textarea id="bom_text" class="form-control d-none" name="bom_text" rows="6">{{ bom_text if bom_text is defined else '' }}</textarea>
           </div>
 
+          {% if not is_readonly %}
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
+          {% endif %}
           {% if job %}
+          {% if not is_readonly %}
           <div class="mt-3">
             <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=job.id) }}" onsubmit="return confirm('Delete job {{ job.job_number }}? This will unlink related orders and hide the job.');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-outline-danger w-100" type="submit">Delete job</button>
             </form>
           </div>
+          {% endif %}
           {% endif %}
         {% if orders %}
           <div class="mt-4">
@@ -168,6 +201,8 @@
                     <td>
                       {% if has_perm('orders.manage') %}
                         <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
+                      {% elif has_perm('orders.view') %}
+                        <a href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">{{ o.order_number }}</a>
                       {% else %}
                         {{ o.order_number }}
                       {% endif %}
@@ -197,7 +232,9 @@
                     <th style="width:12%;">Ordered</th>
                     <th style="width:12%;">Remaining</th>
                     <th style="width:20%;">Orders</th>
+                    {% if not mask_supplier_names %}
                     <th style="width:15%;">Suppliers</th>
+                    {% endif %}
                   </tr>
                 </thead>
                 <tbody>
@@ -227,11 +264,13 @@
                         <div><a href="{{ o.href }}">{{ o.order_number }}</a></div>
                       {% endfor %}
                     </td>
+                    {% if not mask_supplier_names %}
                     <td>
                       {% for o in p.orders %}
                         <div>{{ o.supplier }}</div>
                       {% endfor %}
                     </td>
+                    {% endif %}
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -254,7 +293,9 @@
                     <th style="width:12%;">Ordered</th>
                     <th style="width:12%;">Over</th>
                     <th style="width:20%;">Orders</th>
+                    {% if not mask_supplier_names %}
                     <th style="width:15%;">Suppliers</th>
+                    {% endif %}
                   </tr>
                 </thead>
                 <tbody>
@@ -284,11 +325,13 @@
                         <div><a href="{{ o.href }}">{{ o.order_number }}</a></div>
                       {% endfor %}
                     </td>
+                    {% if not mask_supplier_names %}
                     <td>
                       {% for o in p.orders %}
                         <div>{{ o.supplier }}</div>
                       {% endfor %}
                     </td>
+                    {% endif %}
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -317,7 +360,9 @@
                     <th style="width:12%;">Ordered</th>
                     <th style="width:12%;">Remaining</th>
                     <th style="width:20%;">Orders</th>
+                    {% if not mask_supplier_names %}
                     <th style="width:15%;">Suppliers</th>
+                    {% endif %}
                   </tr>
                   <tr class="table-light">
                     <th>
@@ -339,7 +384,9 @@
                       <input id="remaining-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Min">
                     </th>
                     <th></th>
+                    {% if not mask_supplier_names %}
                     <th></th>
+                    {% endif %}
                   </tr>
                 </thead>
                 <tbody>
@@ -372,11 +419,13 @@
                         <div><a href="{{ o.href }}">{{ o.order_number }}</a></div>
                       {% endfor %}
                     </td>
+                    {% if not mask_supplier_names %}
                     <td>
                       {% for o in p.orders %}
                         <div>{{ o.supplier }}</div>
                       {% endfor %}
                     </td>
+                    {% endif %}
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -673,4 +722,16 @@
   }
 
 </script>
+{% if is_readonly %}
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    const form = document.querySelector('form');
+    if(!form) return;
+    form.querySelectorAll('input, select, textarea, button').forEach((el) => {
+      if(el.type === 'hidden') return;
+      el.setAttribute('disabled', 'disabled');
+    });
+  });
+</script>
+{% endif %}
 {% endblock %}

@@ -38,12 +38,12 @@ Customer B viewer (`custB.viewer@demo.com`)
 
 Supplier X viewer (`supX.viewer@demo.com`)
 - Orders: `DEMO-PO-X1`
-- Jobs: `DEMO-JOB-A1`, `DEMO-JOB-O1`
+- Jobs: none (suppliers do not access jobs)
 - Forbidden order fetch `DEMO-PO-Y1` -> 404
 
 Supplier Y viewer (`supY.viewer@demo.com`)
 - Orders: `DEMO-PO-Y1`
-- Jobs: `DEMO-JOB-B1`, `DEMO-JOB-A1`
+- Jobs: none (suppliers do not access jobs)
 - Forbidden order fetch `DEMO-PO-X1` -> 404
 
 Misconfigured customer_viewer (`misconfig.custrole@demo.com`)

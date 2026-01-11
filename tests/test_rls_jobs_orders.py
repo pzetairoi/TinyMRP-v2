@@ -92,10 +92,9 @@ def test_supplier_viewer_scoping_api(client, app):
     r = client.get("/api/jobs", headers=_auth_headers(token))
     assert r.status_code == 200
     jobs = [i["job_number"] for i in r.json["items"]]
-    assert "JOB-10" in jobs  # vendor match
-    assert "JOB-20" in jobs  # order match via supplier
+    assert jobs == []
 
-    r = client.get("/api/jobs/JOB-99", headers=_auth_headers(token))
+    r = client.get("/api/jobs/JOB-10", headers=_auth_headers(token))
     assert r.status_code == 404
 
 
