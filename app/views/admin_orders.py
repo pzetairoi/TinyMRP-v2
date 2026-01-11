@@ -208,9 +208,23 @@ def order_scope_pdf(order_id):
         abort(404)
 
     attach_docs = (request.form.get("attach_docs") or "").lower() in ("1", "true", "yes", "on")
+    include_children = (request.form.get("include_children") or "").lower() in ("1", "true", "yes", "on")
+    include_binder = (request.form.get("include_binder") or "").lower() in ("1", "true", "yes", "on")
+    file_types = [v.strip().lower() for v in request.form.getlist("file_types") if (v or "").strip()]
+    if file_types:
+        attach_docs = True
+    if include_children and not (attach_docs or include_binder):
+        attach_docs = True
     pdf_bytes = build_scope_pdf(order)
-    if attach_docs:
-        zip_bytes = build_scope_zip(order, pdf_bytes, attach_docs=True)
+    if attach_docs or include_children or include_binder:
+        zip_bytes = build_scope_zip(
+            order,
+            pdf_bytes,
+            attach_docs=attach_docs,
+            include_children=include_children,
+            file_types=file_types,
+            include_binder=include_binder,
+        )
         return send_file(
             io.BytesIO(zip_bytes),
             mimetype="application/zip",
