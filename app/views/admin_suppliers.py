@@ -101,11 +101,13 @@ def suppliers_view(sup_id):
             ])
             lines.append(line)
         contacts_text = "\n".join(lines)
+    orders = Order.objects(supplier=s).order_by("-order_date")
     return render_template(
         "admin/suppliers_form.html",
         users=users,
         supplier=s,
         contacts_text=contacts_text,
+        orders=orders,
         readonly=True,
     )
 
@@ -283,4 +285,5 @@ def suppliers_edit(sup_id):
             ])
             lines.append(line)
         contacts_text = "\n".join(lines)
-    return render_template("admin/suppliers_form.html", users=users, supplier=s, contacts_text=contacts_text)
+    orders = Order.objects(supplier=s).order_by("-order_date")
+    return render_template("admin/suppliers_form.html", users=users, supplier=s, contacts_text=contacts_text, orders=orders)

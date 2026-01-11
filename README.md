@@ -223,7 +223,7 @@ This overwrites descriptions and permission lists for the built-in roles below.
   - `items.view`, `bom.view`, `workorders.view`, `reports.view`
   - `jobs.view`, `orders.view`, `suppliers.view`, `customers.view`
 - `customer_viewer` (scoped read-only):
-  - `items.view`, `bom.view`, `jobs.view`, `customers.view`
+  - `items.view`, `bom.view`, `jobs.view`, `orders.view`, `customers.view`
 - `supplier_viewer` (scoped read-only):
   - `items.view`, `bom.view`, `orders.view`, `suppliers.view`
 
