@@ -78,7 +78,7 @@ def seed_roles():
         "jobs.view","orders.view","suppliers.view","customers.view"
     ])
     upsert("customer_viewer", "Customer-linked viewer", [
-        "items.view","bom.view","jobs.view","customers.view"
+        "items.view","bom.view","jobs.view","orders.view","customers.view"
     ])
     upsert("supplier_viewer", "Supplier-linked viewer", [
         "items.view","bom.view","orders.view","suppliers.view"

@@ -116,12 +116,20 @@ def customers_view(cust_id):
             ])
             lines.append(line)
         contacts_text = "\n".join(lines)
+    jobs = list(Job.objects(customer=c).order_by("job_number"))
+    job_ids = [j.id for j in jobs]
+    q_orders = Q(customer=c)
+    if job_ids:
+        q_orders = q_orders | Q(job__in=job_ids)
+    orders = Order.objects(q_orders).order_by("-order_date")
     return render_template(
         "admin/customers_form.html",
         users=users,
         customer=c,
         shipping_text=shipping_text,
         contacts_text=contacts_text,
+        jobs=jobs,
+        orders=orders,
         readonly=True,
     )
 
@@ -350,10 +358,18 @@ def customers_edit(cust_id):
             ])
             lines.append(line)
         contacts_text = "\n".join(lines)
+    jobs = list(Job.objects(customer=c).order_by("job_number"))
+    job_ids = [j.id for j in jobs]
+    orders_q = Order.objects(customer=c)
+    if job_ids:
+        orders_q = orders_q | Order.objects(job__in=job_ids)
+    orders = orders_q.order_by("-order_date")
     return render_template(
         "admin/customers_form.html",
         users=users,
         customer=c,
         shipping_text=shipping_text,
         contacts_text=contacts_text,
+        jobs=jobs,
+        orders=orders,
     )

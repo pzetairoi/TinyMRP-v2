@@ -215,6 +215,48 @@
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
           {% endif %}
         </form>
+
+        {% if supplier and has_perm('orders.view') %}
+        <div class="mt-4">
+          <h2 class="h6 fw-bold">Orders</h2>
+          <div class="table-responsive">
+            <table class="table table-sm table-striped align-middle">
+              <thead>
+                <tr>
+                  <th>Order #</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Order date</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if orders %}
+                  {% for o in orders %}
+                  <tr>
+                    <td>
+                      {% if has_perm('orders.manage') %}
+                        <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
+                      {% else %}
+                        <a href="{{ url_for('admin_orders.orders_list', order_q=o.order_number) }}">{{ o.order_number }}</a>
+                      {% endif %}
+                    </td>
+                    <td>{{ o.kind }}</td>
+                    <td><span class="badge badge-status status-{{ o.status|default('draft') }}">{{ o.status or 'draft' }}</span></td>
+                    <td>{{ o.order_date.strftime('%Y-%m-%d') if o.order_date else '-' }}</td>
+                    <td>{{ '%.2f' % o.total if o.total is not none else '-' }}</td>
+                  </tr>
+                  {% endfor %}
+                {% else %}
+                  <tr>
+                    <td colspan="5" class="text-center text-muted py-3">No orders for this supplier.</td>
+                  </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
