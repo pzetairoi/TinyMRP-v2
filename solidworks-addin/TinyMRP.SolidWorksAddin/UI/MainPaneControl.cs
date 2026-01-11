@@ -92,6 +92,10 @@ namespace TinyMRP.SolidWorksAddin.UI
         private TextBox _numberingPreviewRevisionText;
         private TextBox _numberingPreviewDisplayText;
         private Label _numberingStatusLabel;
+        private FlowLayoutPanel _numberingSeqOverridePanel;
+        private GroupBox _numberingSeqOverrideGroup;
+        private Label _numberingSeqOverrideNote;
+        private readonly List<NumericUpDown> _numberingSeqOverrides = new List<NumericUpDown>();
         private CheckBox _renameAutoCheck;
         private ComboBox _renameModeCombo;
         private CheckBox _renameAppendRevisionCheck;
@@ -203,6 +207,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             _tabs.TabPages.Add(BuildToolsTab());
             _tabs.TabPages.Add(BuildNumberingTab());
             _tabs.TabPages.Add(BuildConfigTab());
+            InitializeNumberingDefaults();
         }
 
         private TabPage BuildPublishBomTab()
@@ -218,10 +223,10 @@ namespace TinyMRP.SolidWorksAddin.UI
                 WrapContents = false,
                 Dock = DockStyle.Fill
             };
-            _pngModelCheck = new CheckBox { Text = "PNG" };
-            _stepCheck = new CheckBox { Text = "STEP" };
-            _edrCheck = new CheckBox { Text = "eDrawings" };
-            _threeMfCheck = new CheckBox { Text = "3MF" };
+            _pngModelCheck = CreateCheckBox("PNG");
+            _stepCheck = CreateCheckBox("STEP");
+            _edrCheck = CreateCheckBox("eDrawings");
+            _threeMfCheck = CreateCheckBox("3MF");
             modelChecks.Controls.Add(_pngModelCheck);
             modelChecks.Controls.Add(_stepCheck);
             modelChecks.Controls.Add(_edrCheck);
@@ -234,9 +239,9 @@ namespace TinyMRP.SolidWorksAddin.UI
                 WrapContents = false,
                 Dock = DockStyle.Fill
             };
-            _pngDrawingCheck = new CheckBox { Text = "PNG drawing" };
-            _pdfCheck = new CheckBox { Text = "PDF" };
-            _edrDrawingCheck = new CheckBox { Text = "eDrawings drawing" };
+            _pngDrawingCheck = CreateCheckBox("PNG drawing");
+            _pdfCheck = CreateCheckBox("PDF");
+            _edrDrawingCheck = CreateCheckBox("eDrawings drawing");
             drawingChecks.Controls.Add(_pngDrawingCheck);
             drawingChecks.Controls.Add(_pdfCheck);
             drawingChecks.Controls.Add(_edrDrawingCheck);
@@ -275,17 +280,17 @@ namespace TinyMRP.SolidWorksAddin.UI
                 WrapContents = true,
                 Dock = DockStyle.Fill
             };
-            _overwriteCheck = new CheckBox { Text = "Overwrite files" };
-            _topLevelOnlyCheck = new CheckBox { Text = "Top level only" };
+            _overwriteCheck = CreateCheckBox("Overwrite files");
+            _topLevelOnlyCheck = CreateCheckBox("Top level only");
             optionsPanel.Controls.Add(_overwriteCheck);
             optionsPanel.Controls.Add(_topLevelOnlyCheck);
             AddSection(panel, CreateGroupBox("Options", optionsPanel));
 
             var publishActions = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true,
+                WrapContents = false,
                 Dock = DockStyle.Fill
             };
             var btnSelectAll = new Button { Text = "Select all", AutoSize = true };
@@ -301,9 +306,9 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var bomActions = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true,
+                WrapContents = false,
                 Dock = DockStyle.Fill
             };
             var btnBom = new Button { Text = "Process BOM", AutoSize = true };
@@ -356,9 +361,9 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var modelActions = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true,
+                WrapContents = false,
                 Dock = DockStyle.Fill
             };
 
@@ -392,11 +397,11 @@ namespace TinyMRP.SolidWorksAddin.UI
                 WrapContents = false,
                 Dock = DockStyle.Fill
             };
-            _hideOriginCheck = new CheckBox { Text = "Origin" };
-            _hidePlaneCheck = new CheckBox { Text = "Reference planes" };
-            _hideAxisCheck = new CheckBox { Text = "Reference axes" };
-            _hidePointCheck = new CheckBox { Text = "Reference points" };
-            _hideCoordSysCheck = new CheckBox { Text = "Coordinate systems" };
+            _hideOriginCheck = CreateCheckBox("Origin");
+            _hidePlaneCheck = CreateCheckBox("Reference planes");
+            _hideAxisCheck = CreateCheckBox("Reference axes");
+            _hidePointCheck = CreateCheckBox("Reference points");
+            _hideCoordSysCheck = CreateCheckBox("Coordinate systems");
             hideRefPanel.Controls.Add(_hideOriginCheck);
             hideRefPanel.Controls.Add(_hidePlaneCheck);
             hideRefPanel.Controls.Add(_hideAxisCheck);
@@ -410,11 +415,11 @@ namespace TinyMRP.SolidWorksAddin.UI
                 WrapContents = false,
                 Dock = DockStyle.Fill
             };
-            _hideSketch2DCheck = new CheckBox { Text = "2D sketches" };
-            _hideSketch3DCheck = new CheckBox { Text = "3D sketches" };
-            _hideSpline3DCheck = new CheckBox { Text = "3D spline curves" };
-            _hideCompositeCurveCheck = new CheckBox { Text = "Composite curves" };
-            _hideHelixCheck = new CheckBox { Text = "Helix" };
+            _hideSketch2DCheck = CreateCheckBox("2D sketches");
+            _hideSketch3DCheck = CreateCheckBox("3D sketches");
+            _hideSpline3DCheck = CreateCheckBox("3D spline curves");
+            _hideCompositeCurveCheck = CreateCheckBox("Composite curves");
+            _hideHelixCheck = CreateCheckBox("Helix");
             hideSketchPanel.Controls.Add(_hideSketch2DCheck);
             hideSketchPanel.Controls.Add(_hideSketch3DCheck);
             hideSketchPanel.Controls.Add(_hideSpline3DCheck);
@@ -426,14 +431,14 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var hideActions = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true,
+                WrapContents = false,
                 Dock = DockStyle.Fill,
                 Padding = new Padding(0, 2, 0, 0)
             };
-            _hideAllConfigsCheck = new CheckBox { Text = "All configurations", AutoSize = true };
-            _hideEnvelopeCheck = new CheckBox { Text = "Hide envelope components", AutoSize = true };
+            _hideAllConfigsCheck = CreateCheckBox("All configurations");
+            _hideEnvelopeCheck = CreateCheckBox("Hide envelope components");
             var btnHideSelectAll = new Button { Text = "Select all", AutoSize = true };
             btnHideSelectAll.Click += (_, __) => SetHideFeatureChecks(true);
             var btnHideSelectNone = new Button { Text = "Clear", AutoSize = true };
@@ -512,9 +517,10 @@ namespace TinyMRP.SolidWorksAddin.UI
                 WrapContents = true,
                 Dock = DockStyle.Fill
             };
-            _numberingPreviewButton = CreateCommandButton("Preview Next", OnNumberingPreview);
+            _numberingPreviewButton = CreateCommandButton("Preview Partnumber", OnNumberingPreview);
             _numberingAllocateButton = CreateCommandButton("Allocate & Apply", OnNumberingAllocate);
-            _numberingAllocateRenameButton = CreateCommandButton("Allocate + Apply + Rename", OnNumberingAllocateRename);
+            _numberingAllocateButton.Visible = false;
+            _numberingAllocateRenameButton = CreateCommandButton("Allocate and rename", OnNumberingAllocateRename);
             commandStrip.Controls.Add(_numberingPreviewButton);
             commandStrip.Controls.Add(_numberingAllocateButton);
             commandStrip.Controls.Add(_numberingAllocateRenameButton);
@@ -564,6 +570,10 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(previewBox, "Revision", _numberingPreviewRevisionText);
             _numberingPreviewDisplayText = CreateReadOnlyPreview();
             AddField(previewBox, "Display code", _numberingPreviewDisplayText);
+            _numberingPreviewRevisionText.Visible = false;
+            _numberingPreviewDisplayText.Visible = false;
+            SetFieldLabelVisible(previewBox, "Revision", false);
+            SetFieldLabelVisible(previewBox, "Display code", false);
 
             _numberingStatusLabel = new Label
             {
@@ -576,33 +586,27 @@ namespace TinyMRP.SolidWorksAddin.UI
             var quickWrap = CreateStackPanel();
             AddStackRow(quickWrap, quickLayout);
             AddStackRow(quickWrap, quickContextLayout);
-            AddStackRow(quickWrap, CreateGroupBox("Preview", previewBox));
-            _autoAssignGenericCheck = new CheckBox
+            _numberingSeqOverridePanel = new FlowLayoutPanel
             {
-                Text = "Auto-assign for Part1/Assembly1 names",
-                AutoSize = true
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
             };
-            _autoAssignGenericCheck.CheckedChanged += (_, __) => MaybeAutoAssignNumbering(true);
-            AddStackRow(quickWrap, _autoAssignGenericCheck);
+            _numberingSeqOverrideNote = new Label
+            {
+                Text = "Save the scheme in Advanced to persist overrides.",
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                MaximumSize = new Size(240, 0),
+                Padding = new Padding(0, 2, 0, 0)
+            };
+            _numberingSeqOverrideGroup = CreateGroupBox("Sequence start override", _numberingSeqOverridePanel);
+            _numberingSeqOverrideGroup.Visible = false;
+            AddStackRow(quickWrap, _numberingSeqOverrideGroup);
+            AddStackRow(quickWrap, CreateGroupBox("Preview", previewBox));
             AddStackRow(quickWrap, _numberingStatusLabel);
             AddSection(panel, CreateGroupBox("Quick setup", quickWrap));
-
-            var renameWrap = CreateStackPanel();
-            _renameAutoCheck = new CheckBox { Text = "Auto-rename file after allocation", AutoSize = true };
-            _renameModeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
-            _renameModeCombo.Items.AddRange(new object[] { "Safe (recommended)", "Rename only if not referenced" });
-            _renameAppendRevisionCheck = new CheckBox { Text = "Append revision to filename", AutoSize = true };
-            _renameKeepBackupCheck = new CheckBox { Text = "Keep original file as backup", AutoSize = true, Checked = true };
-            AddStackRow(renameWrap, _renameAutoCheck);
-            AddStackRow(renameWrap, _renameModeCombo);
-            AddStackRow(renameWrap, _renameAppendRevisionCheck);
-            AddStackRow(renameWrap, _renameKeepBackupCheck);
-            AddSection(panel, CreateGroupBox("Rename options", renameWrap));
-
-            var advancedContent = BuildNumberingAdvancedPanel();
-            AddSection(panel, CreateCollapsibleSection("Advanced", advancedContent, false));
-
-            InitializeNumberingDefaults();
             return page;
         }
 
@@ -656,9 +660,9 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var previewActions = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true,
+                WrapContents = false,
                 Dock = DockStyle.Fill
             };
             var btnPreview = new Button { Text = "Preview (advanced)", AutoSize = true };
@@ -687,9 +691,9 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var allocateActions = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true,
+                WrapContents = false,
                 Dock = DockStyle.Fill
             };
             var btnAllocate = new Button { Text = "Allocate (advanced)", AutoSize = true };
@@ -716,8 +720,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 WrapContents = false,
                 Dock = DockStyle.Fill
             };
-            _renameChildrenCheck = new CheckBox { Text = "Rename children in assemblies", AutoSize = true };
-            _autoAssignAnyNameCheck = new CheckBox { Text = "Allow auto-assign for any name (dangerous)", AutoSize = true };
+            _renameChildrenCheck = CreateCheckBox("Rename children in assemblies");
+            _autoAssignAnyNameCheck = CreateCheckBox("Allow auto-assign for any name (dangerous)");
             _autoAssignAnyNameCheck.CheckedChanged += (_, __) => MaybeAutoAssignNumbering(true);
             _renameDryRunButton = new Button { Text = "Dry run rename", AutoSize = true };
             _renameDryRunButton.Click += OnRenameDryRun;
@@ -736,9 +740,9 @@ namespace TinyMRP.SolidWorksAddin.UI
             _configListBox = new CheckedListBox { Height = 120, Dock = DockStyle.Fill };
             var configButtons = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true
+                WrapContents = false
             };
             _loadConfigsButton = new Button { Text = "Load configurations", AutoSize = true };
             _loadConfigsButton.Click += OnLoadConfigurations;
@@ -853,9 +857,9 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var segmentActions = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true,
+                WrapContents = false,
                 Dock = DockStyle.Fill
             };
             var btnSegAdd = new Button { Text = "Add", AutoSize = true };
@@ -911,9 +915,9 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var schemeActions = new FlowLayoutPanel
             {
-                FlowDirection = FlowDirection.LeftToRight,
+                FlowDirection = FlowDirection.TopDown,
                 AutoSize = true,
-                WrapContents = true,
+                WrapContents = false,
                 Dock = DockStyle.Fill
             };
             var btnValidate = new Button { Text = "Validate scheme", AutoSize = true };
@@ -953,30 +957,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(connectionLayout, "Backend URL", _quickBackendUrlText);
             _quickAuthTokenText = new TextBox { Width = 220, UseSystemPasswordChar = true };
             AddField(connectionLayout, "Auth token", _quickAuthTokenText);
-
-            var connectionActions = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true,
-                WrapContents = true
-            };
-            var btnTest = new Button { Text = "Test connection", AutoSize = true };
-            btnTest.Click += OnQuickTestConnection;
-            _quickDiagnosticsButton = new Button { Text = "Diagnostics", AutoSize = true };
-            _quickDiagnosticsButton.Click += OnQuickDiagnostics;
-            connectionActions.Controls.Add(btnTest);
-            connectionActions.Controls.Add(_quickDiagnosticsButton);
-
-            var connectionWrap = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                AutoSize = true,
-                WrapContents = false,
-                Dock = DockStyle.Fill
-            };
-            connectionWrap.Controls.Add(connectionLayout);
-            connectionWrap.Controls.Add(connectionActions);
-            AddSection(panel, CreateGroupBox("Connection", connectionWrap));
+            AddSection(panel, CreateGroupBox("Connection", connectionLayout));
 
             var schemeLayout = CreateFormLayout();
             _quickSchemeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
@@ -1006,69 +987,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddQuickContextRow(contextLayout, "Site", _quickContextSiteText, "site");
             AddSection(panel, CreateGroupBox("Context", contextLayout));
 
-            var mapLayout = CreateFormLayout();
-            _quickPartNumberPropText = new TextBox { Width = 200 };
-            AddField(mapLayout, "Part number property", _quickPartNumberPropText);
-            _quickRevisionPropText = new TextBox { Width = 200 };
-            AddField(mapLayout, "Revision property", _quickRevisionPropText);
-            _quickDisplayCodePropText = new TextBox { Width = 200 };
-            AddField(mapLayout, "Display code property", _quickDisplayCodePropText);
-            AddSection(panel, CreateGroupBox("Property mapping", mapLayout));
-
-            var applyLayout = CreateFormLayout();
-            _quickApplyModeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
-            _quickApplyModeCombo.Items.AddRange(new object[] { "Active configuration", "All configurations", "Selected configurations" });
-            AddField(applyLayout, "Apply mode", _quickApplyModeCombo);
-            AddSection(panel, CreateGroupBox("Apply mode", applyLayout));
-
-            var actions = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true,
-                WrapContents = true
-            };
-            var btnDefaults = new Button { Text = "Apply server defaults", AutoSize = true };
-            btnDefaults.Click += OnQuickApplyDefaults;
-            var btnSave = new Button { Text = "Save settings", AutoSize = true };
-            btnSave.Click += OnQuickSaveSettings;
-            var btnPreview = new Button { Text = "Preview next", AutoSize = true };
-            btnPreview.Click += OnQuickPreview;
-            var btnGoNumbering = new Button { Text = "Go to Numbering", AutoSize = true };
-            btnGoNumbering.Click += OnQuickGoToNumbering;
-            actions.Controls.Add(btnDefaults);
-            actions.Controls.Add(btnSave);
-            actions.Controls.Add(btnPreview);
-            actions.Controls.Add(btnGoNumbering);
-
-            _quickPreviewLabel = new Label { AutoSize = true, Text = "" };
-            var actionWrap = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                AutoSize = true,
-                WrapContents = false,
-                Dock = DockStyle.Fill
-            };
-            actionWrap.Controls.Add(actions);
-            actionWrap.Controls.Add(_quickPreviewLabel);
-            AddSection(panel, CreateGroupBox("Actions", actionWrap));
-
-            WireQuickStartSyncEvents();
-            return page;
-        }
-
-        private TabPage BuildConfigAdvancedTab()
-        {
-            var page = CreateTabPage("Advanced");
-            var panel = CreateTabPanel();
-            page.Controls.Add(panel);
-
-            var templates = CreateFormLayout();
-            _blankTemplateText = new TextBox { Width = 200 };
-            AddField(templates, "DXF template", CreateFilePicker(_blankTemplateText, OnBrowseBlankTemplate));
-            _bomTemplateText = new TextBox { Width = 200 };
-            AddField(templates, "BOM template", CreateFilePicker(_bomTemplateText, OnBrowseBomTemplate));
-            AddSection(panel, CreateGroupBox("Templates", templates));
-
             var paths = CreateFormLayout();
             _deliverablesFolderText = new TextBox { Width = 200 };
             AddField(paths, "Output folder", CreateFolderPicker(_deliverablesFolderText, OnBrowseDeliverables));
@@ -1089,6 +1007,42 @@ namespace TinyMRP.SolidWorksAddin.UI
             pathWrap.Controls.Add(paths);
             pathWrap.Controls.Add(pathNote);
             AddSection(panel, CreateGroupBox("Paths", pathWrap));
+
+            var actions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false
+            };
+            var btnSave = new Button { Text = "Save settings", AutoSize = true };
+            btnSave.Click += OnQuickSaveSettings;
+            actions.Controls.Add(btnSave);
+            var actionWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            actionWrap.Controls.Add(actions);
+            AddSection(panel, CreateGroupBox("Actions", actionWrap));
+
+            WireQuickStartSyncEvents();
+            return page;
+        }
+
+        private TabPage BuildConfigAdvancedTab()
+        {
+            var page = CreateTabPage("Advanced");
+            var panel = CreateTabPanel();
+            page.Controls.Add(panel);
+
+            var templates = CreateFormLayout();
+            _blankTemplateText = new TextBox { Width = 200 };
+            AddField(templates, "DXF template", CreateFilePicker(_blankTemplateText, OnBrowseBlankTemplate));
+            _bomTemplateText = new TextBox { Width = 200 };
+            AddField(templates, "BOM template", CreateFilePicker(_bomTemplateText, OnBrowseBomTemplate));
+            AddSection(panel, CreateGroupBox("Templates", templates));
 
             var web = CreateFormLayout();
             _weblinkText = new TextBox { Width = 200 };
@@ -1117,6 +1071,32 @@ namespace TinyMRP.SolidWorksAddin.UI
             serverWrap.Controls.Add(serverNote);
             AddSection(panel, CreateGroupBox("Server", serverWrap));
 
+            var quickActions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            var btnTest = new Button { Text = "Test connection", AutoSize = true };
+            btnTest.Click += OnQuickTestConnection;
+            var btnDefaults = new Button { Text = "Apply server defaults", AutoSize = true };
+            btnDefaults.Click += OnQuickApplyDefaults;
+            var btnPreview = new Button { Text = "Preview next", AutoSize = true };
+            btnPreview.Click += OnQuickPreview;
+            var btnGoNumbering = new Button { Text = "Go to Numbering", AutoSize = true };
+            btnGoNumbering.Click += OnQuickGoToNumbering;
+            _quickDiagnosticsButton = new Button { Text = "Diagnostics", AutoSize = true };
+            _quickDiagnosticsButton.Click += OnQuickDiagnostics;
+            _quickPreviewLabel = new Label { AutoSize = true, Text = "" };
+            quickActions.Controls.Add(btnTest);
+            quickActions.Controls.Add(btnDefaults);
+            quickActions.Controls.Add(btnPreview);
+            quickActions.Controls.Add(btnGoNumbering);
+            quickActions.Controls.Add(_quickDiagnosticsButton);
+            quickActions.Controls.Add(_quickPreviewLabel);
+            AddSection(panel, CreateGroupBox("Quick actions", quickActions));
+
             var defaultsLayout = CreateFormLayout();
             _advancedSchemeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
             AddField(defaultsLayout, "Default scheme", _advancedSchemeCombo);
@@ -1133,8 +1113,33 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(defaultsLayout, "Context JSON", _advancedContextJsonText);
             AddSection(panel, CreateGroupBox("Server defaults", defaultsLayout));
 
-            _removeModifiedNotesCheck = new CheckBox { Text = "Remove modified notes" };
+            _removeModifiedNotesCheck = CreateCheckBox("Remove modified notes");
             AddSection(panel, CreateGroupBox("Options", _removeModifiedNotesCheck));
+
+            var numberingAdvancedWrap = CreateStackPanel();
+
+            var renameWrap = CreateStackPanel();
+            _renameAutoCheck = CreateCheckBox("Auto-rename file after allocation");
+            _renameModeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            _renameModeCombo.Items.AddRange(new object[] { "Safe (recommended)", "Rename only if not referenced" });
+            _renameAppendRevisionCheck = CreateCheckBox("Append revision to filename");
+            _renameKeepBackupCheck = CreateCheckBox("Keep original file as backup");
+            _renameKeepBackupCheck.Checked = true;
+            AddStackRow(renameWrap, _renameAutoCheck);
+            AddStackRow(renameWrap, _renameModeCombo);
+            AddStackRow(renameWrap, _renameAppendRevisionCheck);
+            AddStackRow(renameWrap, _renameKeepBackupCheck);
+            AddStackRow(numberingAdvancedWrap, CreateGroupBox("Rename options", renameWrap));
+
+            var autoAssignWrap = CreateStackPanel();
+            _autoAssignGenericCheck = CreateCheckBox("Auto-assign for Part1/Assembly1 names");
+            _autoAssignGenericCheck.CheckedChanged += (_, __) => MaybeAutoAssignNumbering(true);
+            AddStackRow(autoAssignWrap, _autoAssignGenericCheck);
+            AddStackRow(numberingAdvancedWrap, CreateGroupBox("Auto-assign", autoAssignWrap));
+
+            var numberingAdvancedPanel = BuildNumberingAdvancedPanel();
+            AddStackRow(numberingAdvancedWrap, CreateCollapsibleSection("Numbering editor", numberingAdvancedPanel, false));
+            AddSection(panel, CreateGroupBox("Numbering (Advanced)", numberingAdvancedWrap));
 
             var configActions = new FlowLayoutPanel
             {
@@ -1394,6 +1399,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             UpdateContextVisibility(_quickContextRows, scheme);
             UpdateContextVisibility(_numberingContextRows, scheme);
+            UpdateSequenceOverridePanel(scheme);
         }
 
         private void UpdateContextVisibility(Dictionary<string, Control[]> rows, NumberingSchemeDefinition scheme)
@@ -1462,6 +1468,103 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             return required;
+        }
+
+        private void UpdateSequenceOverridePanel(NumberingSchemeDefinition scheme)
+        {
+            if (_numberingSeqOverridePanel == null)
+            {
+                return;
+            }
+
+            _numberingSeqOverridePanel.SuspendLayout();
+            _numberingSeqOverridePanel.Controls.Clear();
+            _numberingSeqOverrides.Clear();
+
+            int seqCount = CountSequenceSegments(scheme);
+            if (seqCount <= 0)
+            {
+                _numberingSeqOverridePanel.Visible = false;
+                if (_numberingSeqOverrideGroup != null)
+                {
+                    _numberingSeqOverrideGroup.Visible = false;
+                }
+                _numberingSeqOverridePanel.ResumeLayout();
+                return;
+            }
+
+            _numberingSeqOverridePanel.Visible = true;
+            if (_numberingSeqOverrideGroup != null)
+            {
+                _numberingSeqOverrideGroup.Visible = true;
+            }
+            int startAt = scheme != null && scheme.Seq != null ? scheme.Seq.StartAt : 1;
+
+            for (int i = 0; i < seqCount; i++)
+            {
+                var row = new TableLayoutPanel
+                {
+                    ColumnCount = 2,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    Dock = DockStyle.Top
+                };
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));
+                row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
+
+                var label = new Label
+                {
+                    Text = seqCount > 1 ? $"Sequence {i + 1} start" : "Sequence start",
+                    AutoSize = true,
+                    Anchor = AnchorStyles.Left
+                };
+                var upDown = new NumericUpDown
+                {
+                    Minimum = 1,
+                    Maximum = 999999,
+                    Width = 120,
+                    Value = startAt,
+                    Anchor = AnchorStyles.Left
+                };
+                int idx = i;
+                upDown.ValueChanged += (_, __) =>
+                {
+                    if (idx == 0 && _seqStartUpDown != null)
+                    {
+                        _seqStartUpDown.Value = upDown.Value;
+                    }
+                };
+                row.Controls.Add(label, 0, 0);
+                row.Controls.Add(upDown, 1, 0);
+
+                _numberingSeqOverridePanel.Controls.Add(row);
+                _numberingSeqOverrides.Add(upDown);
+            }
+
+            if (_numberingSeqOverrideNote != null)
+            {
+                _numberingSeqOverridePanel.Controls.Add(_numberingSeqOverrideNote);
+            }
+
+            _numberingSeqOverridePanel.ResumeLayout();
+        }
+
+        private int CountSequenceSegments(NumberingSchemeDefinition scheme)
+        {
+            if (scheme == null || scheme.PatternSegments == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            foreach (NumberingSegmentDefinition segment in scheme.PatternSegments)
+            {
+                if (segment != null && string.Equals(segment.Kind, "seq", StringComparison.OrdinalIgnoreCase))
+                {
+                    count++;
+                }
+            }
+            return count;
         }
 
         private string GetPreferredText(TextBox primary, TextBox fallback)
@@ -1785,6 +1888,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             SetStatus("Creating files...");
             publisher.ProcessFiles(options, Log, UpdatePublishProgress);
             SetStatus("Done.");
+            ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
         }
 
         private void OnProcessBom(object sender, EventArgs e)
@@ -1802,6 +1906,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             SetStatus("Processing BOM...");
             publisher.ProcessBom(options, Log, UpdateBomProgress);
             SetStatus("Done.");
+            ResetProgress(_bomProgressBar, _bomProgressLabel, "Process BOM");
         }
 
         private void OnCancelCurrentTask(object sender, EventArgs e)
@@ -1831,6 +1936,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             SetStatus(freeze ? "Freezing model..." : "Unfreezing model...");
             publisher.FreezeDesign(freeze, Log, UpdateToolsProgress);
             SetStatus("Done.");
+            ResetProgress(_toolsProgressBar, _toolsProgressLabel, _toolsActionName);
         }
 
         private void OnNormalizeUnits(object sender, EventArgs e)
@@ -1848,6 +1954,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             SetStatus("Normalizing units...");
             publisher.NormalizeUnits(Log, UpdateToolsProgress);
             SetStatus("Done.");
+            ResetProgress(_toolsProgressBar, _toolsProgressLabel, _toolsActionName);
         }
 
         private void OnHideFeatures(object sender, EventArgs e)
@@ -1884,6 +1991,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             SetStatus("Hiding features...");
             publisher.HideFeatures(options, Log, UpdateToolsProgress);
             SetStatus("Done.");
+            ResetProgress(_toolsProgressBar, _toolsProgressLabel, _toolsActionName);
         }
 
         private void OnSaveConfig(object sender, EventArgs e)
@@ -4875,6 +4983,21 @@ namespace TinyMRP.SolidWorksAddin.UI
             return btn;
         }
 
+        private static CheckBox CreateCheckBox(string text, int maxWidth = 240)
+        {
+            var box = new CheckBox
+            {
+                Text = text,
+                AutoSize = true,
+                Margin = new Padding(0, 2, 0, 2)
+            };
+            if (maxWidth > 0)
+            {
+                box.MaximumSize = new Size(maxWidth, 0);
+            }
+            return box;
+        }
+
         private static TextBox CreateReadOnlyPreview()
         {
             return new TextBox
@@ -4943,6 +5066,22 @@ namespace TinyMRP.SolidWorksAddin.UI
             control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
             table.Controls.Add(label, 0, row);
             table.Controls.Add(control, 1, row);
+        }
+
+        private static void SetFieldLabelVisible(TableLayoutPanel table, string labelText, bool visible)
+        {
+            if (table == null)
+            {
+                return;
+            }
+
+            foreach (Control control in table.Controls)
+            {
+                if (control is Label label && string.Equals(label.Text, labelText, StringComparison.OrdinalIgnoreCase))
+                {
+                    label.Visible = visible;
+                }
+            }
         }
 
         private static Control CreateFolderPicker(TextBox target, EventHandler onBrowse)
