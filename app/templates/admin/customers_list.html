@@ -14,7 +14,7 @@
   </div>
 </div>
 
-<form method="get">
+<form id="customers-filter" method="get"></form>
 <div class="table-responsive bg-white border rounded-3 shadow-sm">
   <table class="table align-middle mb-0">
     <thead>
@@ -30,13 +30,13 @@
       </tr>
       <tr class="table-light">
         <th>
-          <input class="form-control form-control-sm" type="search" name="code_q" value="{{ filters.code_q }}" placeholder="Code">
+          <input class="form-control form-control-sm" type="search" name="code_q" value="{{ filters.code_q }}" placeholder="Code" form="customers-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="name_q" value="{{ filters.name_q }}" placeholder="Name">
+          <input class="form-control form-control-sm" type="search" name="name_q" value="{{ filters.name_q }}" placeholder="Name" form="customers-filter">
         </th>
         <th>
-          <select class="form-select form-select-sm" name="status">
+          <select class="form-select form-select-sm" name="status" form="customers-filter">
             <option value="">Any</option>
             {% for s in ['active','inactive','prospect','on_hold'] %}
             <option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
@@ -44,7 +44,7 @@
           </select>
         </th>
         <th>
-          <select class="form-select form-select-sm" name="type">
+          <select class="form-select form-select-sm" name="type" form="customers-filter">
             <option value="">Any</option>
             {% for s in ['retail','wholesale','oem','distributor'] %}
             <option value="{{ s }}" {% if filters.type==s %}selected{% endif %}>{{ s.title() }}</option>
@@ -52,17 +52,17 @@
           </select>
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="contact_q" value="{{ filters.contact_q }}" placeholder="Contact">
+          <input class="form-control form-control-sm" type="search" name="contact_q" value="{{ filters.contact_q }}" placeholder="Contact" form="customers-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="email_q" value="{{ filters.email_q }}" placeholder="Email">
+          <input class="form-control form-control-sm" type="search" name="email_q" value="{{ filters.email_q }}" placeholder="Email" form="customers-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="tags_q" value="{{ filters.tags_q }}" placeholder="Tags">
+          <input class="form-control form-control-sm" type="search" name="tags_q" value="{{ filters.tags_q }}" placeholder="Tags" form="customers-filter">
         </th>
         <th>
           <div class="d-flex gap-1">
-            <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+            <button class="btn btn-sm btn-primary" type="submit" form="customers-filter">Apply</button>
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_customers.customers_list') }}">Clear</a>
           </div>
         </th>
@@ -108,5 +108,4 @@
     </tbody>
   </table>
 </div>
-</form>
 {% endblock %}

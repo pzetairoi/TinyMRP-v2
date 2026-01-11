@@ -175,10 +175,13 @@
           {% if job %}
           {% if not is_readonly %}
           <div class="mt-3">
-            <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=job.id) }}" onsubmit="return confirm('Delete job {{ job.job_number }}? This will unlink related orders and hide the job.');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-outline-danger w-100" type="submit">Delete job</button>
-            </form>
+            <button class="btn btn-outline-danger w-100" type="submit"
+              formaction="{{ url_for('admin_jobs.jobs_delete', job_id=job.id) }}"
+              formmethod="post"
+              formnovalidate
+              onclick="return confirm('Delete job {{ job.job_number }}? This will unlink related orders and hide the job.');">
+              Delete job
+            </button>
           </div>
           {% endif %}
           {% endif %}
