@@ -73,11 +73,11 @@ EXPECTED_VISIBILITY = {
         "orders": [],
     },
     "supX.viewer": {
-        "jobs": ["DEMO-JOB-A1", "DEMO-JOB-O1"],
+        "jobs": [],
         "orders": ["DEMO-PO-X1"],
     },
     "supY.viewer": {
-        "jobs": ["DEMO-JOB-A1", "DEMO-JOB-B1"],
+        "jobs": [],
         "orders": ["DEMO-PO-Y1"],
     },
     "misconfig.custrole": {
@@ -142,7 +142,7 @@ def _ensure_roles() -> Dict[str, Role]:
             "jobs.view","orders.view","suppliers.view","customers.view"
         ]),
         "customer_viewer": upsert("customer_viewer", "Customer-linked viewer", [
-            "items.view","bom.view","jobs.view","customers.view"
+            "items.view","bom.view","jobs.view","orders.view","customers.view"
         ]),
         "supplier_viewer": upsert("supplier_viewer", "Supplier-linked viewer", [
             "items.view","bom.view","orders.view","suppliers.view"

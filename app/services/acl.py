@@ -82,6 +82,8 @@ def apply_job_scope(qs, user):
     supp_ids = supplier_scope_ids(user)
     if not cust_ids and not supp_ids:
         return qs.filter(id__in=[])
+    if supp_ids and not cust_ids:
+        return qs.filter(id__in=[])
 
     from mongoengine.queryset.visitor import Q
     from app.models.order import Order
@@ -180,6 +182,8 @@ def can_access_job(user, job) -> bool:
         return True
     cust_ids = customer_scope_ids(user)
     supp_ids = supplier_scope_ids(user)
+    if supp_ids and not cust_ids:
+        return False
     try:
         if cust_ids and getattr(job, "customer", None) and job.customer.id in cust_ids:
             return True

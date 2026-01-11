@@ -1,11 +1,16 @@
 ﻿{% extends "security/base.html" %}
-{% block title %}{{ 'Edit order' if order else 'New order' }} - Admin{% endblock %}
+{% set is_readonly = readonly if readonly is defined else false %}
+{% set mask_supplier = mask_supplier if mask_supplier is defined else false %}
+{% set mask_customer = mask_customer if mask_customer is defined else false %}
+{% set mask_job = mask_job if mask_job is defined else false %}
+{% set show_scope_download = show_scope_download if show_scope_download is defined else true %}
+{% block title %}{{ 'View order' if is_readonly else ('Edit order' if order else 'New order') }} - Admin{% endblock %}
 {% block content %}
 <div class="row">
   <div class="col-12">
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <h1 class="h5 mb-3">{{ 'Edit order' if order else 'New order' }}</h1>
+        <h1 class="h5 mb-3">{{ 'View order' if is_readonly else ('Edit order' if order else 'New order') }}</h1>
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="row g-3">
@@ -50,6 +55,9 @@
           <div class="row g-3 mt-2">
             <div class="col-md-4">
               <label class="form-label">Job</label>
+              {% if is_readonly %}
+                <div class="form-control-plaintext">{{ '-' if mask_job else (order.job.job_number if order and order.job else '-') }}</div>
+              {% else %}
               <select class="form-select" name="job" id="order-job">
                 <option value="">-</option>
                 {% for j in jobs %}
@@ -59,18 +67,26 @@
               {% if order and order.job and has_perm('jobs.manage') %}
               <div class="small mt-1"><a href="{{ url_for('admin_jobs.jobs_edit', job_id=order.job.id) }}">Open job</a></div>
               {% endif %}
+              {% endif %}
             </div>
             <div class="col-md-4">
               <label class="form-label">Supplier</label>
+              {% if is_readonly %}
+                <div class="form-control-plaintext">{{ 'Hidden' if mask_supplier else (order.supplier.name if order and order.supplier else '-') }}</div>
+              {% else %}
               <select class="form-select" name="supplier">
                 <option value="">-</option>
                 {% for s in suppliers %}
                 <option value="{{ s.id }}" {% if order and order.supplier and s.id==order.supplier.id %}selected{% endif %}>{{ s.name }}</option>
                 {% endfor %}
               </select>
+              {% endif %}
             </div>
             <div class="col-md-4">
               <label class="form-label">Customer</label>
+              {% if is_readonly %}
+                <div class="form-control-plaintext">{{ 'Hidden' if mask_customer else (order.customer.name if order and order.customer else '-') }}</div>
+              {% else %}
               <select class="form-select" name="customer" id="order-customer">
                 <option value="">-</option>
                 {% for c in customers %}
@@ -78,6 +94,7 @@
                 {% endfor %}
               </select>
               <div class="form-text text-muted" id="customer-lock-note" style="display:none;">Customer locked to job.</div>
+              {% endif %}
             </div>
           </div>
 
@@ -162,7 +179,9 @@
                     <th></th>
                     <th>
                       <div class="d-flex gap-1">
+                        {% if not is_readonly %}
                         <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForOrder()">Add part(s)</button>
+                        {% endif %}
                         <button class="btn btn-sm btn-outline-secondary" type="button" onclick="clearOrderFilters()">Clear</button>
                       </div>
                     </th>
@@ -187,9 +206,11 @@
             </div>
           </div>
 
+          {% if not is_readonly %}
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
+          {% endif %}
         </form>
-        {% if order %}
+        {% if order and show_scope_download %}
         <div class="mt-3">
           <div class="fw-bold mb-2">Scope of supply</div>
           <form method="post" action="{{ url_for('admin_orders.order_scope_pdf', order_id=order.id) }}">
@@ -214,6 +235,7 @@
   const thumbCache = {};
   const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
   const fallbackLogo = "{{ url_for('static', filename='images/logo.png') }}";
+  const isReadOnly = {{ 'true' if is_readonly else 'false' }};
 
   function parseOrderLines(txt){
     const out = [];
@@ -330,28 +352,28 @@
         <td>${row.desc || ''}</td>
         <td>${row.rev || ''}</td>
         <td style="max-width:120px;">
-          <input type="number" step="1" min="0" class="form-control form-control-sm ol-qty" value="${row.qty || 1}" data-idx="${idx}">
+          <input type="number" step="1" min="0" class="form-control form-control-sm ol-qty" value="${row.qty || 1}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
         <td style="max-width:100px;">
-          <input type="text" class="form-control form-control-sm ol-uom" value="${row.uom || 'EA'}" data-idx="${idx}">
+          <input type="text" class="form-control form-control-sm ol-uom" value="${row.uom || 'EA'}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
         <td style="max-width:120px;">
-          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-price" value="${row.unit_price || 0}" data-idx="${idx}">
+          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-price" value="${row.unit_price || 0}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
         <td style="max-width:90px;">
-          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-disc" value="${row.discount_pct || 0}" data-idx="${idx}">
+          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-disc" value="${row.discount_pct || 0}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
         <td style="max-width:90px;">
-          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-tax" value="${row.tax_pct || 0}" data-idx="${idx}">
+          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-tax" value="${row.tax_pct || 0}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
         <td class="small text-muted ol-total" data-idx="${idx}">${totals.total.toFixed(2)}</td>
         <td>
-          <input type="text" class="form-control form-control-sm ol-note" value="${row.note || ''}" data-idx="${idx}">
+          <input type="text" class="form-control form-control-sm ol-note" value="${row.note || ''}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
         <td>
           <div class="d-flex gap-1">
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-action="replace" data-idx="${idx}">Replace</button>
-            <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove" data-idx="${idx}">Remove</button>
+            ${isReadOnly ? '' : `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="replace" data-idx="${idx}">Replace</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove" data-idx="${idx}">Remove</button>`}
           </div>
         </td>
       `;
@@ -484,10 +506,12 @@
     attachOrderHandlers();
     updateOrderSummary();
     const jobSel = document.getElementById('order-job');
-    if(jobSel){
+    if(jobSel && !isReadOnly){
       jobSel.addEventListener('change', syncCustomerToJob);
     }
-    syncCustomerToJob();
+    if(!isReadOnly){
+      syncCustomerToJob();
+    }
   });
 
   async function ensureThumbOrder(idx){
@@ -527,4 +551,16 @@
     }
   }
 </script>
+{% if is_readonly %}
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    const form = document.querySelector('form');
+    if(!form) return;
+    form.querySelectorAll('input, select, textarea, button').forEach((el) => {
+      if(el.type === 'hidden') return;
+      el.setAttribute('disabled', 'disabled');
+    });
+  });
+</script>
+{% endif %}
 {% endblock %}

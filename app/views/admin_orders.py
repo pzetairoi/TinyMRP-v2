@@ -5,7 +5,15 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import current_user
 from datetime import datetime
 from flask_security import roles_required
-from app.services.acl import permissions_required, apply_order_scope, apply_job_scope
+from app.services.acl import (
+    permissions_required,
+    apply_order_scope,
+    apply_job_scope,
+    is_external_scoped_user,
+    customer_scope_ids,
+    supplier_scope_ids,
+    user_has_permission,
+)
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -83,6 +91,12 @@ def orders_list():
     except Exception:
         pass
     qs = apply_order_scope(qs, current_user)
+    is_external = is_external_scoped_user(current_user)
+    cust_ids = customer_scope_ids(current_user)
+    supp_ids = supplier_scope_ids(current_user)
+    mask_supplier = bool(is_external and cust_ids)
+    mask_customer = bool(is_external and supp_ids and not cust_ids)
+    mask_job = bool(is_external and supp_ids and not cust_ids)
     orders = qs.order_by("-created_at")
     safe_orders = []
     for o in orders:
@@ -109,12 +123,12 @@ def orders_list():
                 "id": o.id,
                 "order_number": o.order_number,
                 "kind": o.kind,
-                "job": job_number,
-                "job_id": job_id,
-                "supplier": supplier_name,
-                "supplier_id": supplier_id,
-                "customer": customer_name,
-                "customer_id": customer_id,
+                "job": "-" if mask_job else job_number,
+                "job_id": "" if mask_job else job_id,
+                "supplier": "Hidden" if mask_supplier else supplier_name,
+                "supplier_id": "" if mask_supplier else supplier_id,
+                "customer": "Hidden" if mask_customer else customer_name,
+                "customer_id": "" if mask_customer else customer_id,
                 "status": o.status,
                 "order_date": o.order_date,
                 "total": o.total,
@@ -149,6 +163,40 @@ def orders_delete(order_id):
     return redirect(url_for("admin_orders.orders_list"))
 
 
+@bp.get("/<order_id>")
+@permissions_required("orders.view")
+def orders_view(order_id):
+    o = apply_order_scope(Order.objects(id=order_id), current_user).first()
+    if not o:
+        abort(404)
+    is_external = is_external_scoped_user(current_user)
+    cust_ids = customer_scope_ids(current_user)
+    supp_ids = supplier_scope_ids(current_user)
+    mask_supplier = bool(is_external and cust_ids)
+    mask_customer = bool(is_external and supp_ids and not cust_ids)
+    mask_job = bool(is_external and supp_ids and not cust_ids)
+    jobs = []
+    suppliers = []
+    customers = []
+    lines = "\n".join([
+        f"{l.pn},{l.rev},{l.qty:g},{l.uom},{l.note or ''},{l.unit_price or 0},{l.discount_pct or 0},{l.tax_pct or 0}"
+        for l in (o.lines or [])
+    ])
+    return render_template(
+        "admin/orders_form.html",
+        order=o,
+        jobs=jobs,
+        suppliers=suppliers,
+        customers=customers,
+        lines=lines,
+        readonly=True,
+        mask_supplier=mask_supplier,
+        mask_customer=mask_customer,
+        mask_job=mask_job,
+        show_scope_download=not is_external,
+    )
+
+
 @bp.post("/<order_id>/scope_pdf")
 @permissions_required("orders.view")
 def order_scope_pdf(order_id):
@@ -156,6 +204,8 @@ def order_scope_pdf(order_id):
     if not order:
         flash("Order not found.", "error")
         return redirect(url_for("admin_orders.orders_list"))
+    if is_external_scoped_user(current_user):
+        abort(404)
 
     attach_docs = (request.form.get("attach_docs") or "").lower() in ("1", "true", "yes", "on")
     pdf_bytes = build_scope_pdf(order)

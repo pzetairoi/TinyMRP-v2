@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import current_user
 from flask_security import roles_required
-from app.services.acl import permissions_required, apply_customer_scope
+from app.services.acl import permissions_required, apply_customer_scope, is_external_scoped_user
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -131,6 +131,7 @@ def customers_view(cust_id):
         jobs=jobs,
         orders=orders,
         readonly=True,
+        hide_user_links=is_external_scoped_user(current_user),
     )
 
 
@@ -360,10 +361,10 @@ def customers_edit(cust_id):
         contacts_text = "\n".join(lines)
     jobs = list(Job.objects(customer=c).order_by("job_number"))
     job_ids = [j.id for j in jobs]
-    orders_q = Order.objects(customer=c)
+    q_orders = Q(customer=c)
     if job_ids:
-        orders_q = orders_q | Order.objects(job__in=job_ids)
-    orders = orders_q.order_by("-order_date")
+        q_orders = q_orders | Q(job__in=job_ids)
+    orders = Order.objects(q_orders).order_by("-order_date")
     return render_template(
         "admin/customers_form.html",
         users=users,
