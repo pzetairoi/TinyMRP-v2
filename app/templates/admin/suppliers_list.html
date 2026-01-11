@@ -14,7 +14,7 @@
   </div>
 </div>
 
-<form method="get">
+<form id="suppliers-filter" method="get"></form>
 <div class="table-responsive bg-white border rounded-3 shadow-sm">
   <table class="table align-middle mb-0">
     <thead>
@@ -30,13 +30,13 @@
       </tr>
       <tr class="table-light">
         <th>
-          <input class="form-control form-control-sm" type="search" name="code_q" value="{{ filters.code_q }}" placeholder="Code">
+          <input class="form-control form-control-sm" type="search" name="code_q" value="{{ filters.code_q }}" placeholder="Code" form="suppliers-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="name_q" value="{{ filters.name_q }}" placeholder="Name">
+          <input class="form-control form-control-sm" type="search" name="name_q" value="{{ filters.name_q }}" placeholder="Name" form="suppliers-filter">
         </th>
         <th>
-          <select class="form-select form-select-sm" name="status">
+          <select class="form-select form-select-sm" name="status" form="suppliers-filter">
             <option value="">Any</option>
             {% for s in ['active','inactive','pending','blacklisted'] %}
             <option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s.title() }}</option>
@@ -44,20 +44,20 @@
           </select>
         </th>
         <th>
-          <input class="form-control form-control-sm" type="number" name="rating" min="1" max="5" value="{{ filters.rating }}" placeholder="Rating">
+          <input class="form-control form-control-sm" type="number" name="rating" min="1" max="5" value="{{ filters.rating }}" placeholder="Rating" form="suppliers-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="contact_q" value="{{ filters.contact_q }}" placeholder="Contact">
+          <input class="form-control form-control-sm" type="search" name="contact_q" value="{{ filters.contact_q }}" placeholder="Contact" form="suppliers-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="email_q" value="{{ filters.email_q }}" placeholder="Email">
+          <input class="form-control form-control-sm" type="search" name="email_q" value="{{ filters.email_q }}" placeholder="Email" form="suppliers-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="category" value="{{ filters.category }}" placeholder="Category">
+          <input class="form-control form-control-sm" type="search" name="category" value="{{ filters.category }}" placeholder="Category" form="suppliers-filter">
         </th>
         <th>
           <div class="d-flex gap-1">
-            <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+            <button class="btn btn-sm btn-primary" type="submit" form="suppliers-filter">Apply</button>
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Clear</a>
           </div>
         </th>
@@ -103,5 +103,4 @@
     </tbody>
   </table>
 </div>
-</form>
 {% endblock %}

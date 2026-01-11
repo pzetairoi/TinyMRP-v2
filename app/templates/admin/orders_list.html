@@ -9,9 +9,9 @@
   <a class="btn btn-primary mt-2 mt-md-0" href="{{ url_for('admin_orders.orders_new') }}">New order</a>
 </div>
 
-<form method="get">
+<form id="orders-filter" method="get"></form>
 {% if request.args.get('job') %}
-  <input type="hidden" name="job" value="{{ request.args.get('job') }}">
+  <input type="hidden" name="job" value="{{ request.args.get('job') }}" form="orders-filter">
 {% endif %}
 <div class="table-responsive bg-white border rounded-3 shadow-sm">
   <table class="table align-middle mb-0">
@@ -29,26 +29,26 @@
       </tr>
       <tr class="table-light">
         <th>
-          <input class="form-control form-control-sm" type="search" name="order_q" value="{{ filters.order_q }}" placeholder="Order #">
+          <input class="form-control form-control-sm" type="search" name="order_q" value="{{ filters.order_q }}" placeholder="Order #" form="orders-filter">
         </th>
         <th>
-          <select class="form-select form-select-sm" name="type">
+          <select class="form-select form-select-sm" name="type" form="orders-filter">
             <option value="">Any</option>
             <option value="purchase" {% if filters.type=='purchase' %}selected{% endif %}>Purchase</option>
             <option value="sales" {% if filters.type=='sales' %}selected{% endif %}>Sales</option>
           </select>
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="job_q" value="{{ filters.job_q }}" placeholder="Job #">
+          <input class="form-control form-control-sm" type="search" name="job_q" value="{{ filters.job_q }}" placeholder="Job #" form="orders-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="supplier_q" value="{{ filters.supplier_q }}" placeholder="Supplier">
+          <input class="form-control form-control-sm" type="search" name="supplier_q" value="{{ filters.supplier_q }}" placeholder="Supplier" form="orders-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="customer_q" value="{{ filters.customer_q }}" placeholder="Customer">
+          <input class="form-control form-control-sm" type="search" name="customer_q" value="{{ filters.customer_q }}" placeholder="Customer" form="orders-filter">
         </th>
         <th>
-          <select class="form-select form-select-sm" name="status">
+          <select class="form-select form-select-sm" name="status" form="orders-filter">
             <option value="">Any</option>
             {% for s in ['draft','submitted','confirmed','in_production','ready_to_ship','shipped','delivered','cancelled'] %}
             <option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
@@ -57,19 +57,19 @@
         </th>
         <th>
           <div class="d-flex flex-column gap-1">
-            <input class="form-control form-control-sm" type="date" name="from" value="{{ filters.from }}">
-            <input class="form-control form-control-sm" type="date" name="to" value="{{ filters.to }}">
+            <input class="form-control form-control-sm" type="date" name="from" value="{{ filters.from }}" form="orders-filter">
+            <input class="form-control form-control-sm" type="date" name="to" value="{{ filters.to }}" form="orders-filter">
           </div>
         </th>
         <th>
           <div class="d-flex flex-column gap-1">
-            <input class="form-control form-control-sm" type="number" step="0.01" min="0" name="total_min" value="{{ filters.total_min }}" placeholder="Min">
-            <input class="form-control form-control-sm" type="number" step="0.01" min="0" name="total_max" value="{{ filters.total_max }}" placeholder="Max">
+            <input class="form-control form-control-sm" type="number" step="0.01" min="0" name="total_min" value="{{ filters.total_min }}" placeholder="Min" form="orders-filter">
+            <input class="form-control form-control-sm" type="number" step="0.01" min="0" name="total_max" value="{{ filters.total_max }}" placeholder="Max" form="orders-filter">
           </div>
         </th>
         <th>
           <div class="d-flex gap-1">
-            <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+            <button class="btn btn-sm btn-primary" type="submit" form="orders-filter">Apply</button>
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_list') }}">Clear</a>
           </div>
         </th>
@@ -140,5 +140,4 @@
     </tbody>
   </table>
 </div>
-</form>
 {% endblock %}

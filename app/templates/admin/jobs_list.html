@@ -39,7 +39,7 @@
   </div>
 </div>
 
-<form method="get">
+<form id="jobs-filter" method="get"></form>
 <div class="table-responsive bg-white border rounded-3 shadow-sm">
   <table class="table align-middle mb-0">
     <thead>
@@ -55,13 +55,13 @@
       </tr>
       <tr class="table-light">
         <th>
-          <input class="form-control form-control-sm" type="search" name="job_q" value="{{ filters.job_q }}" placeholder="Job #">
+          <input class="form-control form-control-sm" type="search" name="job_q" value="{{ filters.job_q }}" placeholder="Job #" form="jobs-filter">
         </th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="title_q" value="{{ filters.title_q }}" placeholder="Title/desc">
+          <input class="form-control form-control-sm" type="search" name="title_q" value="{{ filters.title_q }}" placeholder="Title/desc" form="jobs-filter">
         </th>
         <th>
-          <select class="form-select form-select-sm" name="status">
+          <select class="form-select form-select-sm" name="status" form="jobs-filter">
             <option value="">Any</option>
             {% for s in ['draft','released','in_progress','on_hold','completed','cancelled'] %}
             <option value="{{ s }}" {% if filters.status==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
@@ -69,7 +69,7 @@
           </select>
         </th>
         <th>
-          <select class="form-select form-select-sm" name="priority">
+          <select class="form-select form-select-sm" name="priority" form="jobs-filter">
             <option value="">Any</option>
             {% for p in ['low','normal','high','urgent'] %}
             <option value="{{ p }}" {% if filters.priority==p %}selected{% endif %}>{{ p.title() }}</option>
@@ -78,17 +78,17 @@
         </th>
         <th>
           <div class="d-flex flex-column gap-1">
-            <input class="form-control form-control-sm" type="date" name="from" value="{{ filters.from }}" placeholder="From">
-            <input class="form-control form-control-sm" type="date" name="to" value="{{ filters.to }}" placeholder="To">
+            <input class="form-control form-control-sm" type="date" name="from" value="{{ filters.from }}" placeholder="From" form="jobs-filter">
+            <input class="form-control form-control-sm" type="date" name="to" value="{{ filters.to }}" placeholder="To" form="jobs-filter">
           </div>
         </th>
         <th class="text-muted small">-</th>
         <th>
-          <input class="form-control form-control-sm" type="search" name="customer_q" value="{{ filters.customer_q }}" placeholder="Customer">
+          <input class="form-control form-control-sm" type="search" name="customer_q" value="{{ filters.customer_q }}" placeholder="Customer" form="jobs-filter">
         </th>
         <th>
           <div class="d-flex gap-1">
-            <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+            <button class="btn btn-sm btn-primary" type="submit" form="jobs-filter">Apply</button>
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Clear</a>
           </div>
         </th>
@@ -168,5 +168,4 @@
     </tbody>
   </table>
 </div>
-</form>
 {% endblock %}
