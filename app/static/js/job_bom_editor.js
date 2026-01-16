@@ -25,6 +25,8 @@ document.addEventListener('DOMContentLoaded', function() {
       var rows = await r.json();
       tbody.innerHTML = '';
       if (!rows.length) { setLoading('No lines'); return; }
+      var canManage = true;
+      if (rows[0] && rows[0].can_manage === false) canManage = false;
       rows.forEach(function(x) {
         var tr = document.createElement('tr');
         function tdTxt(t){ var td=document.createElement('td'); td.textContent=t; return td; }
@@ -32,6 +34,7 @@ document.addEventListener('DOMContentLoaded', function() {
         tr.appendChild(tdTxt(x.rev || ''));
         var tdQty = document.createElement('td');
         var input = document.createElement('input'); input.type='number'; input.step='1'; input.min='0'; input.value=String(x.qty||0); input.style.width='90px';
+        if (!canManage) { input.disabled = true; }
         tdQty.appendChild(input); tr.appendChild(tdQty);
         tr.appendChild(tdTxt(String(x.ordered_qty||0)));
         tr.appendChild(tdTxt(String(x.remaining_qty||0)));
@@ -41,18 +44,25 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         tr.appendChild(tdOrders);
         var tdAct = document.createElement('td');
-        var btnSave=document.createElement('button'); btnSave.className='btn btn-sm btn-outline-primary me-1'; btnSave.textContent='Save';
-        var btnRemove=document.createElement('button'); btnRemove.className='btn btn-sm btn-outline-danger'; btnRemove.textContent='Remove';
-        tdAct.appendChild(btnSave); tdAct.appendChild(btnRemove); tr.appendChild(tdAct);
-        btnSave.addEventListener('click', async function(){
-          var qty=parseFloat(input.value||'0')||0;
-          await fetch('/admin/jobs/'+jobId+'/bom_update', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pn:x.pn, rev:(x.rev||''), qty:qty})});
-          refresh();
-        });
-        btnRemove.addEventListener('click', async function(){
-          await fetch('/admin/jobs/'+jobId+'/bom_remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pn:x.pn, rev:(x.rev||'')})});
-          refresh();
-        });
+        if (canManage) {
+          var btnSave=document.createElement('button'); btnSave.className='btn btn-sm btn-outline-primary me-1'; btnSave.textContent='Save';
+          var btnRemove=document.createElement('button'); btnRemove.className='btn btn-sm btn-outline-danger'; btnRemove.textContent='Remove';
+          tdAct.appendChild(btnSave); tdAct.appendChild(btnRemove); tr.appendChild(tdAct);
+          btnSave.addEventListener('click', async function(){
+            var qty=parseFloat(input.value||'0')||0;
+            var resp = await fetch('/admin/jobs/'+jobId+'/bom_update', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pn:x.pn, rev:(x.rev||''), line_rev:(x.line_rev||''), qty:qty})});
+            if (!resp.ok) { alert('Update failed.'); return; }
+            refresh();
+          });
+          btnRemove.addEventListener('click', async function(){
+            var resp = await fetch('/admin/jobs/'+jobId+'/bom_remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({pn:x.pn, rev:(x.rev||''), line_rev:(x.line_rev||'')})});
+            if (!resp.ok) { alert('Remove failed.'); return; }
+            refresh();
+          });
+        } else {
+          tdAct.textContent = 'Read-only';
+          tr.appendChild(tdAct);
+        }
         tbody.appendChild(tr);
       });
     } catch(e){ setLoading('Error'); }

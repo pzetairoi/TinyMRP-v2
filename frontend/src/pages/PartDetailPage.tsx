@@ -153,12 +153,14 @@ export default function PartDetailPage() {
   const [wantVisual, setWantVisual] = useState(false);
   const [binderAddIndex, setBinderAddIndex] = useState(true);
   const [binderAddDatasheets, setBinderAddDatasheets] = useState(false);
+  const [binderAddHardwareSummary, setBinderAddHardwareSummary] = useState(true);
   const [binderPageNumbers, setBinderPageNumbers] = useState(true);
   const [stampQuote, setStampQuote] = useState(false);
   const [stampConfidential, setStampConfidential] = useState(false);
   const [stampApproved, setStampApproved] = useState(false);
   const [stampWip, setStampWip] = useState(false);
   const [stampInprog, setStampInprog] = useState(false);
+  const [outputName, setOutputName] = useState("");
   const [includeConsumed, setIncludeConsumed] = useState(false); // Hide consumed by default
   const [fabricationPack, setFabricationPack] = useState(false);
 
@@ -1079,6 +1081,17 @@ function bestUrl(f: FileRow): string {
                     </div>
 
                     <div className="mb-3">
+                      <label className="fw-semibold small form-label" htmlFor="docOutName">Output name (optional)</label>
+                      <input
+                        id="docOutName"
+                        className="form-control form-control-sm"
+                        value={outputName}
+                        onChange={(e)=>setOutputName(e.target.value)}
+                        placeholder={`${pn}${rev ? `_${rev}` : ''}_docpack`}
+                      />
+                    </div>
+
+                    <div className="mb-3">
                       <div className="fw-semibold small">Doc Packs</div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual List</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div>
@@ -1094,6 +1107,7 @@ function bestUrl(f: FileRow): string {
                       <div className="mb-3">
                         <div className="fw-semibold small">PDF binder options</div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bIdx" checked={binderAddIndex} onChange={(e)=>setBinderAddIndex(e.target.checked)} /><label className="form-check-label" htmlFor="bIdx">Add index</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bHard" checked={binderAddHardwareSummary} onChange={(e)=>setBinderAddHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="bHard">Hardware summary</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bData" checked={binderAddDatasheets} onChange={(e)=>setBinderAddDatasheets(e.target.checked)} /><label className="form-check-label" htmlFor="bData">Add datasheets</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bNums" checked={binderPageNumbers} onChange={(e)=>setBinderPageNumbers(e.target.checked)} /><label className="form-check-label" htmlFor="bNums">Add page numbers</label></div>
                         <div className="form-check mt-2"><input className="form-check-input" type="checkbox" id="sQuote" checked={stampQuote} onChange={(e)=>setStampQuote(e.target.checked)} /><label className="form-check-label" htmlFor="sQuote">For quotation stamp</label></div>
@@ -1189,6 +1203,7 @@ function bestUrl(f: FileRow): string {
                         fabrication_pack: fabricationPack,
                         binder_add_index: binderAddIndex,
                         binder_add_datasheets: binderAddDatasheets,
+                        binder_add_hardware_summary: binderAddHardwareSummary,
                         binder_page_numbers: binderPageNumbers,
                         stamp_quote: stampQuote,
                         stamp_confidential: stampConfidential,
@@ -1196,6 +1211,7 @@ function bestUrl(f: FileRow): string {
                         stamp_wip: stampWip,
                         stamp_inprogress: stampInprog,
                       };
+                      if (outputName.trim()) body.output_name = outputName.trim();
                       const resp = await fetch('/api/docpacks/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                       if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
                       const blob = await resp.blob();
