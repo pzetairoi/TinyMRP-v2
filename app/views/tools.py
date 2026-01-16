@@ -4,6 +4,7 @@ from io import BytesIO
 from datetime import datetime
 from flask_login import login_required
 from app.services.acl import permissions_required
+from app.services.filenames import build_output_name
 
 bp = Blueprint("tools", __name__, url_prefix="/tools")
 
@@ -136,8 +137,11 @@ def excel_compile():
                 file_root=file_root,
             )
 
-            out_name = "excelcompile_" + datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f") + ".zip"
+            out_name = build_output_name("excelcompile", "zip", max_len=96, include_time=False, now=datetime.utcnow())
             out_path = os.path.join(temp_root, out_name)
+            if os.path.exists(out_path):
+                out_name = build_output_name("excelcompile", "zip", max_len=96, include_time=True, now=datetime.utcnow())
+                out_path = os.path.join(temp_root, out_name)
             with open(out_path, "wb") as f:
                 f.write(zip_bytes)
         finally:

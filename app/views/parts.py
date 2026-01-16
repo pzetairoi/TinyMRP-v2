@@ -107,7 +107,7 @@ def _part_label(pn: str, rev: str | None) -> dict:
     p = Part.objects(part_number__iexact=pn, revision__iexact=resolved_rev).first() \
         or Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
     attrs = harvest_part_attrs(p) if p else {}
-    desc = attrs.get("description") or (p.description if p else "") or ""
+    desc = (p.description if p else "") or attrs.get("description") or ""
     return {"pn": pn, "rev": resolved_rev, "desc": desc}
 
 
@@ -335,7 +335,7 @@ def parts_lazy():
                 "part_number": pn,
                 "revision": rev,
                 "display_code": display_code,
-                "description": attrs.get("description") or p.description or "",
+                "description": p.description or attrs.get("description") or "",
                 "category": attrs.get("category") or p.category or "",
                 "material": attrs.get("material", ""),
                 "finish": attrs.get("finish", ""),
@@ -421,7 +421,7 @@ def part_detail():
                 "part_number": pn_key,
                 "revision": rev_v,
                 "display_code": f"{pn_key}-{rev_v}" if rev_v else pn_key,
-                "description": attrs_v.get("description") or op.description or "",
+                "description": op.description or attrs_v.get("description") or "",
                 "thumb_urls": thumb_urls_for(pn_key, rev_v or None),
             }
         )
@@ -445,7 +445,7 @@ def part_detail():
         {
             "part": {
                 "part_number": p.part_number,
-                "description": attrs.get("description", ""),
+                "description": p.description or attrs.get("description", ""),
                 "revision": norm_rev,
                 "display_code": f"{p.part_number}-{norm_rev}" if norm_rev else p.part_number,
                 "category": attrs.get("category", ""),

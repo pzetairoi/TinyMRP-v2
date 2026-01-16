@@ -493,10 +493,12 @@ def job_bom_json(job_id):
     if not j:
         abort(404)
     rows = []
+    can_manage = user_has_permission(current_user, "jobs.manage")
     orders = _orders_for_job(j)
     for line in (j.bom or []):
         pn = line.pn
-        rev = _resolve_rev(pn, line.rev or "")
+        stored_rev = (line.rev or "")
+        rev = _resolve_rev(pn, stored_rev)
         req = float(line.qty or 0)
         ordered = 0.0
         links = []
@@ -510,10 +512,11 @@ def job_bom_json(job_id):
                 ordered += qty_in_o
                 links.append({"order_number": o.order_number, "href": url_for("admin_orders.orders_edit", order_id=str(o.id))})
         rows.append({
-            "pn": pn, "rev": rev, "qty": req,
+            "pn": pn, "rev": rev, "line_rev": stored_rev, "qty": req,
             "ordered_qty": ordered,
             "remaining_qty": max(req - ordered, 0.0),
             "orders": links,
+            "can_manage": can_manage,
         })
     return jsonify(rows)
 
@@ -522,7 +525,8 @@ def job_bom_json(job_id):
 def job_bom_update(job_id):
     j = Job.objects(id=job_id).first() or abort(404)
     data = request.get_json(silent=True) or {}
-    pn = _canonical_pn(data.get("pn") or ""); rev = (data.get("rev") or "")
+    pn = _canonical_pn(data.get("pn") or "")
+    rev = (data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
     try:
         qty = float(data.get("qty") or 1.0)
     except Exception:
@@ -545,7 +549,8 @@ def job_bom_update(job_id):
 def job_bom_remove(job_id):
     j = Job.objects(id=job_id).first() or abort(404)
     data = request.get_json(silent=True) or {}
-    pn = (data.get("pn") or "").strip(); rev = (data.get("rev") or "")
+    pn = (data.get("pn") or "").strip()
+    rev = (data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
     before = len(j.bom or [])
     j.bom = [l for l in (j.bom or []) if not (l.pn.lower() == pn.lower() and (l.rev or "") == rev)]
     if len(j.bom) != before:

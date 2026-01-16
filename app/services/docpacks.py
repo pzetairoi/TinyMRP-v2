@@ -1,5 +1,6 @@
 from __future__ import annotations
 import io, os, tempfile, zipfile
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple, Set
 
@@ -8,6 +9,7 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs, ALIASES
+from app.services.filenames import build_output_name
 
 
 @dataclass
@@ -27,6 +29,7 @@ class DocPackOptions:
     fabrication_pack: bool = False
     binder_add_index: bool = True
     binder_add_datasheets: bool = False
+    binder_add_hardware_summary: bool = True
     binder_page_numbers: bool = True
     # binder stamps
     stamp_quote: bool = False
@@ -34,6 +37,7 @@ class DocPackOptions:
     stamp_approved: bool = False
     stamp_wip: bool = False
     stamp_inprogress: bool = False
+    output_name: Optional[str] = None
 
 
 def _norm_rev(rev: Optional[str]) -> str:
@@ -44,6 +48,17 @@ def _part_by(pn: str, rev: Optional[str]) -> Optional[Part]:
     rev = _norm_rev(rev)
     return Part.objects(part_number=pn, revision=rev).first() or \
            Part.objects(part_number=pn).order_by("-updated_at").first()
+
+
+def _part_description(part: Optional[Part], attrs: Optional[Dict] = None) -> str:
+    if part and getattr(part, "description", ""):
+        return str(part.description or "")
+    if attrs is None and part:
+        try:
+            attrs = harvest_part_attrs(part)
+        except Exception:
+            attrs = {}
+    return str((attrs or {}).get("description") or "")
 
 
 def _part_processes(part: Optional[Part]) -> List[str]:
@@ -194,7 +209,8 @@ def _excel_bom_bytes(
     root_pn: str,
     root_rev: Optional[str],
     flat: List[Tuple[str,str,float]],
-    occ: Dict[Tuple[str,str], List[Tuple[int,float]]]
+    occ: Dict[Tuple[str,str], List[Tuple[int,float]]],
+    full_qty_map: Optional[Dict[Tuple[str,str], float]] = None,
 ) -> bytes:
     try:
         import openpyxl
@@ -237,15 +253,15 @@ def _excel_bom_bytes(
                 if canon:
                     attr_keys.add(str(canon))
     # Primary columns enforced (exact names per request)
-    qty_col = 'total qty (full BOM)'
+    qty_col = 'total qty'
     header_main = [
         'thumbnail',
-        'partnumber','revision','description','approvedby','material','process','finish','mass',
+        'partnumber','revision','description',qty_col,'material','process','finish','mass',
         'link','oem','oem partnumber',
-        qty_col,'level','level qty'
+        'level','level qty'
     ]
     # Remove any attribute keys that collide with primary names (case-insensitive)
-    ignore = set([h.lower() for h in header_main] + ['oem_partnumber','oem partnumber'])
+    ignore = set([h.lower() for h in header_main] + ['oem_partnumber','oem partnumber','approvedby','approved_by'])
     header_attrs = sorted([k for k in attr_keys if k and k.lower() not in ignore])
     header = header_main + header_attrs
     ws.append(header)
@@ -256,11 +272,10 @@ def _excel_bom_bytes(
         'thumbnail': 14,
         'partnumber': 26,
         'revision': 10,
-        qty_col: 14,
         'level': 10,
         'level qty': 14,
         'description': 40,
-        'approvedby': 18,
+        qty_col: 14,
         'material': 18,
         'process': 18,
         'thickness': 12,
@@ -331,12 +346,13 @@ def _excel_bom_bytes(
             for k in ('process','process2','secondprocess','process3','thirdprocess'):
                 if attrs.get(k): proc_list.append(str(attrs.get(k)))
 
+        full_qty = (full_qty_map or {}).get(key, qty)
         values = {
             'thumbnail': '',
             'partnumber': pn,
             'revision': _norm_rev(rev),
-            'description': getattr(p, 'description', '') or attrs.get('description','') or '',
-            'approvedby': attrs.get('approvedby','') or attrs.get('approved_by',''),
+            'description': _part_description(p, attrs) if p else attrs.get('description','') or '',
+            qty_col: full_qty,
             'material': attrs.get('material',''),
             'process': ", ".join(proc_list),
             'finish': attrs.get('finish',''),
@@ -344,7 +360,6 @@ def _excel_bom_bytes(
             'link': attrs.get('link',''),
             'oem': attrs.get('oem','') or attrs.get('manufacturer',''),
             'oem partnumber': attrs.get('oem_partnumber',''),
-            qty_col: qty,
             'level': ", ".join(str(x) for x in levels_list),
             'level qty': ", ".join(f"{x:g}" for x in qtys_list),
         }
@@ -390,8 +405,8 @@ def _excel_bom_bytes(
                 url = raw
                 if not (url.startswith('http://') or url.startswith('https://')):
                     url = 'http://' + url
-                # Force the link into column J (10)
-                lcell = ws.cell(row=row_idx, column=10)
+                lcol = header_index.get('link') or (header.index('link') + 1)
+                lcell = ws.cell(row=row_idx, column=lcol)
                 # HYPERLINK formula for compatibility
                 disp = raw
                 lcell.value = f'=HYPERLINK("{url}","{disp}")'
@@ -545,7 +560,7 @@ def _visual_list_pdf(
     if root_pn:
         try:
             rpdoc = _part_by(root_pn, root_rev or "")
-            root_desc = getattr(rpdoc, 'description', '') or ''
+            root_desc = _part_description(rpdoc)
         except Exception:
             pass
     def header():
@@ -578,7 +593,7 @@ def _visual_list_pdf(
         x = x0 + col * (box_w + gap)
         y = y0 - (row_in_page + 1) * (box_h + gap)
         # base box
-        c.setStrokeGray(0.8); c.setLineWidth(0.7)
+        c.setStrokeGray(0.25); c.setLineWidth(1.2)
         c.setFillColorRGB(1,1,1)
         c.rect(x, y, box_w, box_h, stroke=1, fill=1)
         # process colored rings inside the border
@@ -644,7 +659,7 @@ def _visual_list_pdf(
         # Description at bottom-left of box (avoid image/QR overlap)
         if not desc and pdoc is not None:
             try:
-                desc = (getattr(pdoc, 'attrs', {}) or {}).get('description') or ''
+                desc = _part_description(pdoc)
             except Exception:
                 desc = ''
         if desc:
@@ -690,7 +705,10 @@ def _visual_list_pdf(
             approved = False
             if pdoc is not None:
                 a = (getattr(pdoc, 'attrs', {}) or {})
-                approved = bool((a.get('approvedby') or a.get('approved_by') or '').strip())
+                raw = (a.get('approvedby') or a.get('approved_by') or a.get('approved') or '')
+                raw = str(raw).strip()
+                if raw:
+                    approved = raw.lower() not in ('wip', 'inprogress', 'in progress', 'not approved', 'no', 'false', '0')
             icon_w = 12*mm
             icon_h = 10*mm
             icon_x = x + box_w - icon_w - 4*mm
@@ -712,7 +730,7 @@ def _visual_list_pdf(
             r_w = min(W - 2*margin, cols * (box_w + gap) - gap)
             r_h = box_h
             # base box
-            c.setStrokeGray(0.8); c.setLineWidth(0.7)
+            c.setStrokeGray(0.25); c.setLineWidth(1.2)
             c.setFillColorRGB(1,1,1)
             c.rect(r_x, r_y, r_w, r_h, stroke=1, fill=1)
             # image area on left, wider than normal
@@ -759,7 +777,7 @@ def _visual_list_pdf(
             # description (from part)
             try:
                 pdoc = _part_by(pn, rev)
-                desc = (getattr(pdoc, 'description', '') or '')
+                desc = _part_description(pdoc)
             except Exception:
                 desc = ''
             if desc:
@@ -805,12 +823,110 @@ def _visual_list_pdf(
     for i, (pn, rev, qty, ip) in enumerate(rows):
         try:
             pdoc = _part_by(pn, rev)
-            desc = (getattr(pdoc, 'description', '') or '')
+            desc = _part_description(pdoc)
         except Exception:
             desc = ''
         draw_cell(start_ix + i, pn, rev, qty, ip, desc)
 
     c.save()
+    return buf.getvalue()
+
+
+def _norm_proc_name(val: object) -> str:
+    return " ".join(str(val or "").strip().lower().split())
+
+
+def _is_hardware_processes(processes: Iterable[str], alias_index: Dict[str, str]) -> bool:
+    for p in processes:
+        key = _norm_proc_name(p)
+        canon = alias_index.get(key, key)
+        if canon == "hardware":
+            return True
+    return False
+
+
+def _hardware_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List[Dict[str, object]]:
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    alias_index = meta.get("_alias_index", {}) or {}
+    rows: Dict[Tuple[str, str, str, str, str], float] = {}
+    for pn, rev, qty in pn_rev_qty:
+        pdoc = _part_by(pn, rev)
+        if not pdoc:
+            continue
+        procs = _part_processes(pdoc)
+        if not procs:
+            continue
+        if not _is_hardware_processes(procs, alias_index):
+            continue
+        attrs = harvest_part_attrs(pdoc)
+        desc = _part_description(pdoc, attrs)
+        material = attrs.get("material", "") or ""
+        finish = attrs.get("finish", "") or ""
+        key = (pn, _norm_rev(rev), desc, material, finish)
+        rows[key] = rows.get(key, 0.0) + float(qty or 0.0)
+    out = []
+    for (pn, rev, desc, material, finish), qty in rows.items():
+        out.append({
+            "partnumber": pn,
+            "revision": rev,
+            "description": desc,
+            "material": material,
+            "finish": finish,
+            "qty": qty,
+        })
+    out.sort(key=lambda r: (str(r.get("partnumber") or ""), str(r.get("revision") or "")))
+    return out
+
+
+def _hardware_summary_pdf(rows: List[Dict[str, object]]) -> Optional[bytes]:
+    if not rows:
+        return None
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+    except Exception:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=20*mm, bottomMargin=20*mm)
+    styles = getSampleStyleSheet()
+    flowables = []
+    flowables.append(Paragraph("Hardware Summary", styles["Heading2"]))
+    flowables.append(Spacer(0, 6*mm))
+
+    table_data = [["Part Number", "Description", "Material", "Finish", "Qty"]]
+    for r in rows:
+        pn = str(r.get("partnumber") or "")
+        desc = str(r.get("description") or "")
+        material = str(r.get("material") or "")
+        finish = str(r.get("finish") or "")
+        qty = r.get("qty") or 0
+        try:
+            qty_s = f"{float(qty):g}"
+        except Exception:
+            qty_s = str(qty)
+        table_data.append([pn, desc, material, finish, qty_s])
+
+    col_widths = [32*mm, 80*mm, 32*mm, 24*mm, 14*mm]
+    table = Table(table_data, colWidths=col_widths)
+    style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+        ('TOPPADDING', (0, 0), (-1, 0), 6),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+        ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
+    ])
+    table.setStyle(style)
+    flowables.append(table)
+    doc.build(flowables)
     return buf.getvalue()
 
 
@@ -831,7 +947,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     # Resolve part and attributes
     pdoc = _part_by(root_pn, root_rev or "")
     attrs = harvest_part_attrs(pdoc) if pdoc else {}
-    desc = (getattr(pdoc, 'description', '') or attrs.get('description') or '') if pdoc else ''
+    desc = _part_description(pdoc, attrs) if pdoc else ''
 
     # Image selection (PNG preview or fallback logo)
     root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
@@ -863,8 +979,18 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     c.setFont("Helvetica-Bold", 24)
     c.drawString(margin, H - margin - 8*mm, title)
 
-    # Description (wrap fully)
+    # Generated timestamp
     y = H - margin - 16*mm
+    try:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        ts = ""
+    if ts:
+        c.setFont("Helvetica", 11)
+        c.drawString(margin, y, f"Generated: {ts}")
+        y -= 6*mm
+
+    # Description (wrap fully)
     if desc:
         c.setFont("Helvetica", 13)
         avail_w = W - 2*margin
@@ -1116,12 +1242,24 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     return buf.getvalue()
 
 
-def _overlay_numbers_and_stamps(pdf_bytes: bytes, stamps: List[str], *, skip_first_page: bool = False) -> bytes:
+def _overlay_numbers_and_stamps(
+    pdf_bytes: bytes,
+    stamps: List[str],
+    *,
+    skip_first_page: bool = False,
+    draw_page_numbers: bool = True,
+) -> bytes:
+    if not draw_page_numbers and not stamps:
+        return pdf_bytes
     try:
         from reportlab.pdfgen import canvas
         from PyPDF2 import PdfReader, PdfWriter
-    except Exception:
-        return pdf_bytes
+    except Exception as exc:
+        try:
+            current_app.logger.error("PDF overlay failed: missing reportlab or PyPDF2")
+        except Exception:
+            pass
+        raise RuntimeError("PDF numbering/stamping requires reportlab and PyPDF2.") from exc
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     # stamp images (optional)
@@ -1130,15 +1268,19 @@ def _overlay_numbers_and_stamps(pdf_bytes: bytes, stamps: List[str], *, skip_fir
         'classified': 'classified_stamp.png',
         'approved': 'approved_stamp.png',
         'wip': 'wip_stamp.png',
-        'inprogress': 'wip_stamp.png',
+        'inprogress': None,
     }
     static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'images')
     sel_paths = []
     for key, fn in stamp_files.items():
         if key in stamps:
+            if fn is None:
+                sel_paths.append((key, None))
+                continue
             p = os.path.abspath(os.path.join(static_dir, fn))
-            if os.path.isfile(p):
-                sel_paths.append((key, p))
+            if not os.path.isfile(p):
+                raise RuntimeError(f"Stamp asset missing: {fn}")
+            sel_paths.append((key, p))
 
     total = len(reader.pages)
     for i, page in enumerate(reader.pages, start=1):
@@ -1156,7 +1298,7 @@ def _overlay_numbers_and_stamps(pdf_bytes: bytes, stamps: List[str], *, skip_fir
         except Exception:
             pass
         # page number bottom-right (skip on cover page if requested)
-        if not (skip_first_page and i == 1):
+        if draw_page_numbers and not (skip_first_page and i == 1):
             c.setFont("Helvetica-Bold", 9)
             c.setFillGray(0.2)
             c.drawRightString(W - 20, 18, f"{i} / {total}")
@@ -1168,11 +1310,24 @@ def _overlay_numbers_and_stamps(pdf_bytes: bytes, stamps: List[str], *, skip_fir
                     c.saveState()
                     c.translate(W/2, H/2)
                     c.rotate(0)
-                    c.setFillAlpha(0.13)
-                    c.drawImage(spath, -W*0.25, -H*0.25, width=W*0.5, height=H*0.5, preserveAspectRatio=True, mask='auto')
+                    c.setFillAlpha(0.08)
+                    if key == "inprogress":
+                        try:
+                            from reportlab.pdfbase.pdfmetrics import stringWidth
+                            label = "IN PROGRESS"
+                            size = max(24.0, min(W, H) * 0.12)
+                            c.setFont("Helvetica-Bold", size)
+                            c.setFillColorRGB(0.8, 0.0, 0.0)
+                            tw = stringWidth(label, "Helvetica-Bold", size)
+                            c.drawString(-tw/2.0, -size/2.5, label)
+                        except Exception:
+                            pass
+                    else:
+                        c.drawImage(spath, -W*0.25, -H*0.25, width=W*0.5, height=H*0.5, preserveAspectRatio=True, mask='auto')
                     c.restoreState()
                 elif key in ("quote","classified"):
-                    c.drawImage(spath, 20, H-80, width=160, preserveAspectRatio=True, mask='auto')
+                    from reportlab.lib.units import mm
+                    c.drawImage(spath, 15*mm, 40*mm, width=160, preserveAspectRatio=True, mask='auto')
         except Exception:
             pass
         c.save()
@@ -1219,6 +1374,15 @@ def _merge_pdfs(paths: List[str]) -> Tuple[bytes, List[int]]:
 def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     """Return (filename, bytes, mime). Currently returns a ZIP by default, unless only a single PDF binder is requested.
     """
+    build_ts = datetime.now()
+    base_stub = (opts.output_name or "").strip()
+    if not base_stub:
+        base_stub = (opts.root_pn or "docpack").strip()
+        if opts.root_rev:
+            base_stub = f"{base_stub}_{opts.root_rev}"
+    else:
+        base_stub = os.path.splitext(base_stub)[0]
+
     # 1) Build BOM
     # define terminal processes for "consumed" logic
     consumed_terminals = ["welding", "purchase", "machine"]
@@ -1264,8 +1428,17 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # Excel BOM
     if opts.want_excel_bom:
         occ_map = _bom_occurrences(opts.root_pn, opts.root_rev, include_consumed=bool(opts.include_consumed), terminal_processes=["welding","purchase","machine"])
-        xlsx = _excel_bom_bytes(opts.root_pn, opts.root_rev, filtered_flat, occ_map)
-        z.writestr("BOM.xlsx", xlsx)
+        full_flat = _flatten_bom(
+            opts.root_pn,
+            opts.root_rev,
+            full=True,
+            include_consumed=bool(opts.include_consumed),
+            terminal_processes=["welding","purchase","machine"],
+        )
+        full_qty_map = { (pn, _norm_rev(rev)): qty for pn, rev, qty in full_flat }
+        xlsx = _excel_bom_bytes(opts.root_pn, opts.root_rev, filtered_flat, occ_map, full_qty_map)
+        bom_name = build_output_name(f"{base_stub}_BOM", "xlsx", max_len=96, include_time=False, now=build_ts)
+        z.writestr(bom_name, xlsx)
 
     # Selected files
     if opts.want_selected_files and chosen_files:
@@ -1303,12 +1476,15 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             vis_filtered.append((pn, rev, qty))
         # Standalone visual list: omit root special placement
         vis_pdf = _visual_list_pdf(vis_filtered, None, None)
-        if vis_pdf:
-            if want_zip:
-                z.writestr("VisualList.pdf", vis_pdf)
-            else:
-                # single artifact path (rare)
-                return (f"{opts.root_pn}_visual_list.pdf", vis_pdf, "application/pdf")
+        if not vis_pdf:
+            raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
+        if want_zip:
+            vis_name = build_output_name(f"{base_stub}_VisualList", "pdf", max_len=96, include_time=False, now=build_ts)
+            z.writestr(vis_name, vis_pdf)
+        else:
+            # single artifact path (rare)
+            vis_name = build_output_name(f"{base_stub}_VisualList", "pdf", max_len=96, include_time=False, now=build_ts)
+            return (vis_name, vis_pdf, "application/pdf")
 
     # PDF binder (with index & page numbers)
     if opts.want_pdf_binder:
@@ -1353,10 +1529,12 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         # Preface: Cover page, Index (always), and optional VisualList
         preface_bytes: List[Tuple[str, bytes]] = []
         cover = _cover_page_pdf(opts.root_pn, opts.root_rev)
-        if cover:
-            preface_bytes.append(("Cover.pdf", cover))
+        if not cover:
+            raise RuntimeError("Failed to build binder cover page. Ensure reportlab is installed.")
+        preface_bytes.append(("Cover.pdf", cover))
         vis_pdf = None
-        if opts.want_visual_list:
+        vis_filtered: List[Tuple[str,str,float]] = []
+        if opts.want_visual_list or opts.binder_add_hardware_summary:
             # Use full-BOM aggregated quantities and sort children by PN
             vis_full = _flatten_bom(
                 opts.root_pn,
@@ -1365,7 +1543,6 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 include_consumed=bool(opts.include_consumed),
                 terminal_processes=["welding","purchase","machine"],
             )
-            vis_filtered: List[Tuple[str,str,float]] = []
             for pn, rev, qty in vis_full:
                 p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
                 if not p:
@@ -1375,10 +1552,25 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 if not _passes_process_filter(p, opts.processes, opts.process_mode):
                     continue
                 vis_filtered.append((pn, rev, qty))
+        if opts.want_visual_list:
             # sort here via _visual_list_pdf which also enforces root first
             vis_pdf = _visual_list_pdf(vis_filtered, opts.root_pn, opts.root_rev)
-            if vis_pdf:
-                preface_bytes.append(("VisualList.pdf", vis_pdf))
+            if not vis_pdf:
+                raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
+            preface_bytes.append(("VisualList.pdf", vis_pdf))
+
+        if opts.binder_add_hardware_summary:
+            try:
+                hardware_rows = _hardware_summary_rows(vis_filtered + [(opts.root_pn, opts.root_rev or "", 1.0)])
+                hardware_pdf = _hardware_summary_pdf(hardware_rows)
+                if hardware_rows and not hardware_pdf:
+                    raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
+                if hardware_pdf:
+                    preface_bytes.append(("HardwareSummary.pdf", hardware_pdf))
+            except RuntimeError:
+                raise
+            except Exception:
+                pass
 
         # Merge body first to measure page counts
         body_bytes, body_starts = _merge_pdfs(pdf_paths)
@@ -1386,6 +1578,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         # Build index in two passes to account for its own page count, include Visual Summary entry, dot leaders, and metadata
         # Skip index entirely if no harvested PDFs were found
         try:
+            if not opts.binder_add_index:
+                raise RuntimeError("skip_index")
             if not pdf_paths:
                 raise RuntimeError("no_body_pdfs")
             from reportlab.pdfgen import canvas
@@ -1397,11 +1591,14 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             # preface counts excluding index (cover + optional visual)
             cover_pages = 0
             vis_pages = 0
+            hardware_pages = 0
             for name, b in preface_bytes:
                 if name.lower().startswith("cover"):
                     cover_pages += len(PdfReader(io.BytesIO(b)).pages)
                 if name.lower().startswith("visual"):
                     vis_pages += len(PdfReader(io.BytesIO(b)).pages)
+                if name.lower().startswith("hardware"):
+                    hardware_pages += len(PdfReader(io.BytesIO(b)).pages)
 
             # Helper to build the index PDF with an assumed index page count
             def _build_index(assumed_idx_pages: int) -> bytes:
@@ -1423,7 +1620,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 except Exception:
                     now = ""
                 pdoc = _part_by(opts.root_pn, opts.root_rev or "")
-                desc = (getattr(pdoc, 'description', '') or '') if pdoc else ''
+                desc = _part_description(pdoc) if pdoc else ''
                 c.drawString(left_x, y, f"Generated: {now}"); y -= 6*mm
                 c.drawString(left_x, y, f"Part: {opts.root_pn}    Rev: {opts.root_rev or ''}"); y -= 6*mm
                 if desc:
@@ -1468,8 +1665,11 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 if vis_pdf:
                     vis_start = cover_pages + assumed_idx_pages + 1
                     _entry("Visual Summary", vis_start)
+                if hardware_pages:
+                    hw_start = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + 1
+                    _entry("Hardware Summary", hw_start)
                 # Body entries: base name without extension (father then children)
-                pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0)
+                pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + hardware_pages
                 for pth, start in zip(pdf_paths, body_starts):
                     base = os.path.splitext(os.path.basename(pth))[0]
                     _entry(base, pre_body_offset + start)
@@ -1495,6 +1695,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 cover_pages = 0
                 vis_pages = 0
                 index_pages = 0
+                hardware_pages = 0
                 for name, b in preface_bytes:
                     lc = name.lower()
                     if lc.startswith('cover'):
@@ -1503,7 +1704,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                         index_pages += len(PdfReader(io.BytesIO(b)).pages)
                     elif lc.startswith('visual'):
                         vis_pages += len(PdfReader(io.BytesIO(b)).pages)
-                pre_body_offset = cover_pages + index_pages + vis_pages
+                    elif lc.startswith('hardware'):
+                        hardware_pages += len(PdfReader(io.BytesIO(b)).pages)
+                pre_body_offset = cover_pages + index_pages + vis_pages + hardware_pages
                 # Map absolute path -> start page
                 start_by_path = {p: s for p, s in zip(pdf_paths, body_starts)}
                 # For each part, pick earliest starting page among its PDFs
@@ -1564,22 +1767,37 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
         # Always apply page numbers (skip cover page); include stamps if requested
         stamps = []
-        if opts.stamp_quote: stamps.append('quote')
-        if opts.stamp_confidential: stamps.append('classified')
-        if opts.stamp_approved: stamps.append('approved')
-        if opts.stamp_wip: stamps.append('wip')
-        if opts.stamp_inprogress: stamps.append('inprogress')
+        if opts.stamp_quote:
+            stamps.append('quote')
+        if opts.stamp_confidential:
+            stamps.append('classified')
+        status_stamp = None
+        if opts.stamp_approved:
+            status_stamp = 'approved'
+        elif opts.stamp_wip:
+            status_stamp = 'wip'
+        elif opts.stamp_inprogress:
+            status_stamp = 'inprogress'
+        if status_stamp:
+            stamps.append(status_stamp)
         if final_pdf:
-            final_pdf = _overlay_numbers_and_stamps(final_pdf, stamps, skip_first_page=bool(cover))
+            final_pdf = _overlay_numbers_and_stamps(
+                final_pdf,
+                stamps,
+                skip_first_page=bool(cover),
+                draw_page_numbers=bool(opts.binder_page_numbers),
+            )
 
         if final_pdf:
             if want_zip:
-                z.writestr("Binder.pdf", final_pdf)
+                binder_name = build_output_name(f"{base_stub}_Binder", "pdf", max_len=96, include_time=False, now=build_ts)
+                z.writestr(binder_name, final_pdf)
             else:
-                return (f"{opts.root_pn}_binder.pdf", final_pdf, "application/pdf")
+                binder_name = build_output_name(f"{base_stub}_Binder", "pdf", max_len=96, include_time=False, now=build_ts)
+                return (binder_name, final_pdf, "application/pdf")
     # Finish ZIP
     if z is not None:
         z.close()
     data = zip_buf.getvalue()
-    name = f"{opts.root_pn}_docpack.zip"
+    name = build_output_name(f"{base_stub}_DocPack", "zip", max_len=96, include_time=False, now=build_ts)
     return (name, data, "application/zip")

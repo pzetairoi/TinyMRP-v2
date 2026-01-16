@@ -465,7 +465,9 @@ Example payload:
   "visual_list": true,
   "binder_add_index": true,
   "binder_add_datasheets": false,
+  "binder_add_hardware_summary": true,
   "binder_page_numbers": true,
+  "output_name": "ASM-1001_A_docpack",
   "stamp_quote": false, "stamp_confidential": false, "stamp_approved": false,
   "stamp_wip": false, "stamp_inprogress": false
 }
@@ -476,6 +478,7 @@ Behavior highlights:
 - Visual Summary is listed first in the index, then the root (father) and children.
 - Cover page is page 1 (page numbers overlaid skip the cover when enabled).
 - Excel BOM includes thumbnails, hyperlinks to the app, and normalized attributes.
+- Output filenames include a timestamp suffix and are capped to a Windows-safe length.
 
 ---
 

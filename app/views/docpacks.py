@@ -86,9 +86,16 @@ def build():
             return [str(x) for x in v if x is not None]
         return [str(v)]
 
+    def _has_key(key: str) -> bool:
+        return key in payload or key in data or key in args
+
     # Robust PN/REV resolution (supports multiple legacy keys)
     _pn = gv("pn") or gv("part_number") or gv("partnumber") or gv("root_pn") or gv("root")
     _rev = gv("rev") if gv("rev") is not None else (gv("revision") if gv("revision") is not None else None)
+
+    output_name = gv("output_name") if _has_key("output_name") else gv("filename") if _has_key("filename") else None
+    if output_name is not None and not str(output_name).strip():
+        return jsonify({"error": "Requires a file name"}), 400
 
     opts = DocPackOptions(
         root_pn=str(_pn or "").strip(),
@@ -105,12 +112,14 @@ def build():
         want_visual_list=bool(gv("visual_list") in (True, "true", "1", 1, "on")),
         binder_add_index=bool(gv("binder_add_index") not in (False, None, "false", "0", 0)),
         binder_add_datasheets=bool(gv("binder_add_datasheets") in (True, "true", "1", 1, "on")),
+        binder_add_hardware_summary=bool(gv("binder_add_hardware_summary") not in (False, None, "false", "0", 0)),
         binder_page_numbers=bool(gv("binder_page_numbers") not in (False, None, "false", "0", 0)),
         stamp_quote=bool(gv("stamp_quote") in (True, "true", "1", 1, "on")),
         stamp_confidential=bool(gv("stamp_confidential") in (True, "true", "1", 1, "on")),
         stamp_approved=bool(gv("stamp_approved") in (True, "true", "1", 1, "on")),
         stamp_wip=bool(gv("stamp_wip") in (True, "true", "1", 1, "on")),
         stamp_inprogress=bool(gv("stamp_inprogress") in (True, "true", "1", 1, "on")),
+        output_name=str(output_name).strip() if output_name is not None else None,
     )
 
     # Fabrication pack convenience
@@ -129,7 +138,10 @@ def build():
             return jsonify({"error":"forbidden"}), 403
     except Exception:
         pass
-    name, data, mime = build_docpack(opts)
+    try:
+        name, data, mime = build_docpack(opts)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
     try:
         log_action(
             "docpack.build",
