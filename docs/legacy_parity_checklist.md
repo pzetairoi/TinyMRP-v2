@@ -29,6 +29,26 @@ This checklist captures legacy behaviors from `OLD/SourceCode` and maps them to 
   - Current: `app/services/docpacks.py` `_cover_page_pdf` includes `Generated:` timestamp, PN/REV, and description.
   - Verification: `tests/test_docpacks_binder.py` asserts cover page text contains `Generated:` and the root PN.
 
+- Cover page layout + TinyMRP logo
+  - Legacy: cover page kept a slim header and logo in top corner (see `OLD/SourceCode/app/static/images` + binder cover flowables).
+  - Current: `app/services/docpacks.py` `_cover_page_pdf` now only shows PN/REV + description at top, author/process/generated/related file at bottom, and draws logo top-right; cover is optional via `binder_add_cover` / `want_cover_page`.
+  - Verification: Manual (cover page content + logo placement in binder and standalone cover export).
+
+- Index entries include part number + description
+  - Legacy: index entries used `partnumber + revision + description` in binder bookmarks.
+  - Current: `app/services/docpacks.py` binder index entries use PN + description labels.
+  - Verification: Manual (index page text).
+
+- Visual index inclusion is optional + standalone export
+  - Legacy: visual index always appended to binder.
+  - Current: `app/services/docpacks.py` uses `binder_add_visual_list` for binder inclusion and `want_visual_list` for standalone; UI in `frontend/src/pages/PartDetailPage.tsx`.
+  - Verification: Manual (binder vs standalone output toggles).
+
+- Where-used report (printable)
+  - Legacy: not available as a printable report (only on-screen list).
+  - Current: `app/services/docpacks.py` `_whereused_report_pdf` with `binder_add_whereused` / `want_whereused_report` options.
+  - Verification: Manual (where-used report in binder + standalone PDF).
+
 ## Excel BOM
 
 - Replace "Approved By" column with "Total Qty"
@@ -59,6 +79,20 @@ This checklist captures legacy behaviors from `OLD/SourceCode` and maps them to 
   - Legacy: `dictlist[i]["description"]` derived from part description.
   - Current: `app/services/docpacks.py` `_part_description` prioritizes `Part.description`; `app/views/parts.py` preserves the same precedence for API responses.
   - Verification: Manual (visual list + cover page text).
+
+## Part Detail UI
+
+- Process icons for all processes
+  - Legacy: `OLD/SourceCode/app/tinylib/models.py` `get_process_icons()` included all processes (process/process2/process3).
+  - Current: `app/services/processmeta.py` + `app/services/insights.py` normalize + merge attrs and `Part.processes`; `frontend/src/pages/PartDetailPage.tsx` renders icons per process.
+  - Verification: Manual (assembly with multiple processes shows multiple chips).
+
+## Fabrication Pack
+
+- Fabrication pack covers all fabrication processes + scope-of-supply
+  - Legacy: `OLD/SourceCode/app/tinylib/views.py` `/fabrication` builds welding-based pack with scope-of-supply Excel and all docs (PDF/DXF/STEP/PNG).
+  - Current: `app/services/docpacks.py` `fabrication_pack` forces a fabrication process set, excludes consumed parts for scope-of-supply, and includes required docs via selected files + Excel BOM.
+  - Verification: Manual (fabrication pack output contents + Excel BOM).
 
 ## Job BOM Editor
 

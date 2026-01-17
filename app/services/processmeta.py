@@ -1,5 +1,5 @@
 import json, os, re
-from typing import Dict, List
+from typing import Dict, List, Iterable, Any
 
 _DEFAULT = {
     "purchase":  {"color":"112, 48, 160","icon":"purchase.svg","aliases":["purchasing","buy","procure"]},
@@ -47,14 +47,43 @@ def load_process_meta(path: str | None = None) -> Dict:
     meta["_alias_index"] = alias_index
     return meta
 
+def _split_process_value(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        out: List[str] = []
+        for item in value:
+            out.extend(_split_process_value(item))
+        return out
+    if isinstance(value, str):
+        parts = re.split(r"\s*(?:,|;|/|\||&|\+|\r|\n)\s*", value)
+        return [p for p in (p.strip() for p in parts) if p]
+    return [str(value)]
+
+
+def _attr_ci(attrs: Dict, key: str) -> Iterable[Any]:
+    if not isinstance(attrs, dict):
+        return []
+    if key in attrs:
+        return [attrs.get(key)]
+    key_l = (key or "").strip().lower()
+    for k, v in attrs.items():
+        try:
+            if str(k or "").strip().lower() == key_l:
+                return [v]
+        except Exception:
+            continue
+    return []
+
+
 def normalize_processes(attrs: Dict, meta: Dict) -> List[str]:
-    # take processes list, else process/process2/process3
+    # take processes list, else process/process2/process3 (case-insensitive keys)
     procs = []
-    if isinstance(attrs.get("processes"), list):
-        procs.extend([_norm(x) for x in attrs.get("processes", []) if x])
+    for val in _attr_ci(attrs, "processes"):
+        procs.extend(_split_process_value(val))
     for k in ("process", "process2", "process3"):
-        if attrs.get(k):
-            procs.append(_norm(attrs.get(k)))
+        for val in _attr_ci(attrs, k):
+            procs.extend(_split_process_value(val))
     if not procs:
         return []
 

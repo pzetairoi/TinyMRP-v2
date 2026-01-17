@@ -177,6 +177,11 @@ export default function PartDetailPage() {
   const [wantExcel, setWantExcel] = useState(false);
   const [wantBinder, setWantBinder] = useState(false);
   const [wantVisual, setWantVisual] = useState(false);
+  const [wantCoverPage, setWantCoverPage] = useState(false);
+  const [wantWhereusedReport, setWantWhereusedReport] = useState(false);
+  const [binderAddCover, setBinderAddCover] = useState(true);
+  const [binderAddVisualList, setBinderAddVisualList] = useState(true);
+  const [binderAddWhereused, setBinderAddWhereused] = useState(false);
   const [binderAddIndex, setBinderAddIndex] = useState(true);
   const [binderAddDatasheets, setBinderAddDatasheets] = useState(false);
   const [binderAddHardwareSummary, setBinderAddHardwareSummary] = useState(true);
@@ -898,24 +903,12 @@ function bestUrl(f: FileRow): string {
         <div className="d-flex align-items-start justify-content-between gap-3">
           <div>
             <h4 className="mb-0">
-              {pn} {part?.revision ? `· REV ${part.revision}` : ""}{" "}
-              {part?.description ? ` – ${part.description}` : ""}
+              {pn}
+              {part?.revision ? ` REV ${part.revision}` : ""}
+              {part?.description ? ` - ${part.description}` : ""}
             </h4>
             <div className="text-muted small">{part?.category || ""}</div>
           </div>
-          {canPartsDelete ? (
-            <div className="text-end">
-              <button
-                type="button"
-                className="btn btn-outline-danger btn-sm"
-                onClick={handleDeletePart}
-                disabled={deleteBusy}
-              >
-                {deleteBusy ? "Deleting..." : "Delete part"}
-              </button>
-              {deleteError ? <div className="text-danger small mt-1">{deleteError}</div> : null}
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -1209,11 +1202,11 @@ function bestUrl(f: FileRow): string {
                     <div className="mb-3">
                       <div className="fw-semibold small">Consumed components</div>
                       <div className="form-check">
-                        <input className="form-check-input" type="radio" name="consumed" id="cHide" checked={!includeConsumed} onChange={()=>setIncludeConsumed(true)} />
+                        <input className="form-check-input" type="radio" name="consumed" id="cHide" checked={!includeConsumed} onChange={() => setIncludeConsumed(false)} />
                         <label className="form-check-label" htmlFor="cHide">Hide consumed</label>
                       </div>
                       <div className="form-check">
-                        <input className="form-check-input" type="radio" name="consumed" id="cShow" checked={includeConsumed} onChange={()=>setIncludeConsumed(true)} />
+                        <input className="form-check-input" type="radio" name="consumed" id="cShow" checked={includeConsumed} onChange={() => setIncludeConsumed(true)} />
                         <label className="form-check-label" htmlFor="cShow">Show consumed</label>
                       </div>
                     </div>
@@ -1261,20 +1254,32 @@ function bestUrl(f: FileRow): string {
 
                     <div className="mb-3">
                       <div className="fw-semibold small">Doc Packs</div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual List</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docExcel" checked={wantExcel} onChange={(e)=>setWantExcel(e.target.checked)} /><label className="form-check-label" htmlFor="docExcel">Excel BOM</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual index (standalone)</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docCover" checked={wantCoverPage} onChange={(e)=>setWantCoverPage(e.target.checked)} /><label className="form-check-label" htmlFor="docCover">Cover page (standalone)</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docWhere" checked={wantWhereusedReport} onChange={(e)=>setWantWhereusedReport(e.target.checked)} /><label className="form-check-label" htmlFor="docWhere">Where-used report (standalone)</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docFab" checked={fabricationPack} onChange={(e)=>{
                         const on=e.target.checked; setFabricationPack(on);
-                        if(on){ setProcessMode('selected'); setSelProcesses(new Set(['lasercut','welding','machine'])); setSelTypes(new Set(['dxf','step','pdf'])); setWantSelectedFiles(true); }
+                        if(on){
+                          setProcessMode('selected');
+                          setSelProcesses(new Set(['welding','lasercut','profile cut','folding','rolling','cutting','machine','3d laser','casting']));
+                          setSelTypes(new Set(['dxf','step','pdf','png']));
+                          setWantSelectedFiles(true);
+                          setWantExcel(true);
+                          setIncludeConsumed(false);
+                        }
                       }} /><label className="form-check-label" htmlFor="docFab">Fabrication Pack</label></div>
                     </div>
 
                     {wantBinder && (
                       <div className="mb-3">
                         <div className="fw-semibold small">PDF binder options</div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bCover" checked={binderAddCover} onChange={(e)=>setBinderAddCover(e.target.checked)} /><label className="form-check-label" htmlFor="bCover">Add cover page</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bIdx" checked={binderAddIndex} onChange={(e)=>setBinderAddIndex(e.target.checked)} /><label className="form-check-label" htmlFor="bIdx">Add index</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bVis" checked={binderAddVisualList} onChange={(e)=>setBinderAddVisualList(e.target.checked)} /><label className="form-check-label" htmlFor="bVis">Visual index section</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bWhere" checked={binderAddWhereused} onChange={(e)=>setBinderAddWhereused(e.target.checked)} /><label className="form-check-label" htmlFor="bWhere">Where-used report section</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bHard" checked={binderAddHardwareSummary} onChange={(e)=>setBinderAddHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="bHard">Hardware summary</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bData" checked={binderAddDatasheets} onChange={(e)=>setBinderAddDatasheets(e.target.checked)} /><label className="form-check-label" htmlFor="bData">Add datasheets</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bNums" checked={binderPageNumbers} onChange={(e)=>setBinderPageNumbers(e.target.checked)} /><label className="form-check-label" htmlFor="bNums">Add page numbers</label></div>
@@ -1368,7 +1373,12 @@ function bestUrl(f: FileRow): string {
                         excel_bom: wantExcel,
                         pdf_binder: wantBinder,
                         visual_list: wantVisual,
+                        cover_page: wantCoverPage,
+                        whereused_report: wantWhereusedReport,
                         fabrication_pack: fabricationPack,
+                        binder_add_cover: binderAddCover,
+                        binder_add_visual_list: binderAddVisualList,
+                        binder_add_whereused: binderAddWhereused,
                         binder_add_index: binderAddIndex,
                         binder_add_datasheets: binderAddDatasheets,
                         binder_add_hardware_summary: binderAddHardwareSummary,
@@ -1406,7 +1416,16 @@ function bestUrl(f: FileRow): string {
                         <div className="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={docProgress} style={{width: `${Math.max(5, docProgress)}%`}} />
                       </div>
                       <div className="small text-muted mt-1">
-                        Preparing {wantSelectedFiles? 'selected files' : ''}{wantExcel? (wantSelectedFiles? ', Excel BOM' : 'Excel BOM') : ''}{wantVisual? ((wantExcel||wantSelectedFiles)? ', Visual List' : 'Visual List') : ''}{wantBinder? ((wantVisual||wantExcel||wantSelectedFiles)? ', Binder' : 'Binder') : ''}...
+                        {(() => {
+                          const items: string[] = [];
+                          if (wantSelectedFiles) items.push("selected files");
+                          if (wantExcel) items.push("Excel BOM");
+                          if (wantVisual) items.push("Visual index");
+                          if (wantCoverPage) items.push("Cover page");
+                          if (wantWhereusedReport) items.push("Where-used report");
+                          if (wantBinder) items.push("Binder");
+                          return `Preparing ${items.join(", ") || "outputs"}...`;
+                        })()}
                       </div>
                     </div>
                   )}
@@ -1495,9 +1514,8 @@ function bestUrl(f: FileRow): string {
           </TabPanel>
 
 
-            </TabView>
-            </div>
-
+            
+          <TabPanel header="Notes & Comments">
             <div className="pd-card p-3 mt-3">
               <div className="d-flex align-items-center justify-content-between">
                 <h6 className="mb-0">Notes</h6>
@@ -1561,6 +1579,31 @@ function bestUrl(f: FileRow): string {
                 )}
                 {commentError ? <div className="text-danger small mt-1">{commentError}</div> : null}
               </div>
+            </div>
+          </TabPanel>
+
+
+          <TabPanel header="Actions">
+            <div className="pd-card p-3">
+              {canPartsDelete ? (
+                <div>
+                  <button
+                    type="button"
+                    className="btn btn-outline-danger btn-sm"
+                    onClick={handleDeletePart}
+                    disabled={deleteBusy}
+                  >
+                    {deleteBusy ? "Deleting..." : "Delete part"}
+                  </button>
+                  {deleteError ? <div className="text-danger small mt-1">{deleteError}</div> : null}
+                </div>
+              ) : (
+                <div className="text-muted small">No actions available.</div>
+              )}
+            </div>
+          </TabPanel>
+
+            </TabView>
             </div>
 
             {/* Used in (always visible under tabs) */}
