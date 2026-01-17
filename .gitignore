@@ -1,5 +1,8 @@
 # Python
 __pycache__/
+**/__pycache__/
+**__pycache__*.*
+*.pyc
 *.py[cod]
 *.pyd
 *.pyo
@@ -53,3 +56,5 @@ Desktop.ini
 
 # Project-specific
 OLD/
+app/models/__pycache__/
+app/services/__pycache__/
