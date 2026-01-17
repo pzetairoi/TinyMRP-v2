@@ -919,13 +919,35 @@ def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from xml.sax.saxutils import escape as _xml_escape
     except Exception:
         return None
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=20*mm, bottomMargin=20*mm)
     styles = getSampleStyleSheet()
+    cell_style = ParagraphStyle(
+        "hw_cell",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=9,
+        wordWrap="CJK",
+    )
+    header_style = ParagraphStyle(
+        "hw_header",
+        parent=styles["BodyText"],
+        fontName="Helvetica-Bold",
+        fontSize=8.5,
+        leading=9.5,
+        alignment=1,
+    )
+    qty_style = ParagraphStyle(
+        "hw_qty",
+        parent=cell_style,
+        alignment=2,
+    )
     flowables = []
     flowables.append(Paragraph("Hardware Summary", styles["Heading2"]))
     flowables.append(Spacer(0, 6*mm))
@@ -934,7 +956,13 @@ def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty:
         doc.build(flowables)
         return buf.getvalue()
 
-    table_data = [["Part Number", "Description", "Material", "Finish", "Qty"]]
+    table_data = [[
+        Paragraph("Part Number", header_style),
+        Paragraph("Description", header_style),
+        Paragraph("Material", header_style),
+        Paragraph("Finish", header_style),
+        Paragraph("Qty", header_style),
+    ]]
     for r in rows:
         pn = str(r.get("partnumber") or "")
         desc = str(r.get("description") or "")
@@ -945,19 +973,32 @@ def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty:
             qty_s = f"{float(qty):g}"
         except Exception:
             qty_s = str(qty)
-        table_data.append([pn, desc, material, finish, qty_s])
+        table_data.append([
+            Paragraph(_xml_escape(pn), cell_style),
+            Paragraph(_xml_escape(desc), cell_style),
+            Paragraph(_xml_escape(material), cell_style),
+            Paragraph(_xml_escape(finish), cell_style),
+            Paragraph(_xml_escape(qty_s), qty_style),
+        ])
 
-    col_widths = [32*mm, 80*mm, 32*mm, 24*mm, 14*mm]
-    table = Table(table_data, colWidths=col_widths)
+    usable_w = doc.width
+    col_weights = [0.18, 0.44, 0.16, 0.14, 0.08]
+    col_widths = [usable_w * w for w in col_weights]
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
     style = TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('ALIGN', (0, 1), (-2, -1), 'LEFT'),
+        ('ALIGN', (-1, 1), (-1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+        ('FONTSIZE', (0, 0), (-1, 0), 8.5),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
         ('TOPPADDING', (0, 0), (-1, 0), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ('BACKGROUND', (0, 1), (-1, -1), colors.white),
         ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
     ])
