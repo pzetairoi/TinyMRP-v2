@@ -295,7 +295,7 @@ def _is_blankish(value: object, *, allow_na: bool = False) -> bool:
     return text in _EMPTY_VALUES
 
 def _is_approved(attrs: dict) -> bool:
-    raw = attrs.get("approvedby") or attrs.get("approved_by") or attrs.get("approved")
+    raw = attrs.get("approvedby")
     if raw is None:
         return False
     if isinstance(raw, bool):
@@ -748,6 +748,7 @@ def part_detail():
     can_orders_manage = user_has_permission(current_user, "orders.manage")
     can_parts_delete = user_has_permission(current_user, "items.edit")
     can_parts_edit = can_parts_delete
+    can_parts_note = user_has_permission(current_user, "items.view")
 
     return jsonify(
         {
@@ -773,6 +774,7 @@ def part_detail():
             "can_orders_manage": can_orders_manage,
             "can_parts_delete": can_parts_delete,
             "can_parts_edit": can_parts_edit,
+            "can_parts_note": can_parts_note,
         }
     )
 
@@ -822,7 +824,7 @@ def part_insights(pn):
 
 @bp.post("/parts/<pn>/notes")
 @login_required
-@permissions_required("items.edit")
+@require_items_view
 @csrf.exempt
 def part_notes_update(pn):
     pn = (pn or "").strip()
@@ -832,6 +834,12 @@ def part_notes_update(pn):
     p = _find_part_doc(pn, rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+    except Exception:
+        pass
     attrs = dict(p.attrs or {})
     attrs["notes"] = notes
     p.attrs = attrs
@@ -851,7 +859,7 @@ def part_notes_update(pn):
 
 @bp.post("/parts/<pn>/comments")
 @login_required
-@permissions_required("items.edit")
+@require_items_view
 @csrf.exempt
 def part_comments_add(pn):
     pn = (pn or "").strip()
@@ -863,6 +871,12 @@ def part_comments_add(pn):
     p = _find_part_doc(pn, rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+    except Exception:
+        pass
 
     attrs = dict(p.attrs or {})
     comments = attrs.get("comments")

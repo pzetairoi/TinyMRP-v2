@@ -3,6 +3,7 @@ import io
 import zipfile
 
 from app.models.part import Part
+from app.models.bom import BOMLink
 from app.services.import_zip import import_bom_zip
 
 
@@ -49,3 +50,29 @@ def test_import_bom_flags_hardware_from_folder(app):
         assert bolt.attrs.get("process") == "hardware"
         assert rivet.attrs.get("process") == "hardware"
         assert "hardware" not in (plate.processes or [])
+
+
+def test_import_bom_aggregates_duplicate_links(app):
+    flat_rows = [
+        {"partnumber": "ASM-2", "revision": "A", "description": "Assembly"},
+        {"partnumber": "CH-2", "revision": "A", "description": "Child"},
+    ]
+    flat_txt = "\n".join(repr(r) for r in flat_rows)
+    tree_txt = "\n".join(
+        [
+            "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+            "1\tASM-2\tA\t1",
+            "1.1\tCH-2\tA\t2",
+            "1.2\tCH-2\tA\t3",
+        ]
+    )
+    zip_bytes = _make_zip(flat_txt, tree_txt)
+
+    with app.app_context():
+        import_bom_zip(zip_bytes, "test.zip", seed_tag="test")
+
+        links = list(
+            BOMLink.objects(parent_pn="ASM-2", parent_rev="A", child_pn="CH-2", child_rev="A")
+        )
+        assert len(links) == 1
+        assert links[0].qty == 5

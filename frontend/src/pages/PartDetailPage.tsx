@@ -136,6 +136,7 @@ export default function PartDetailPage() {
   const [canJobsManage, setCanJobsManage] = useState(false);
   const [canOrdersManage, setCanOrdersManage] = useState(false);
   const [canPartsDelete, setCanPartsDelete] = useState(false);
+  const [canPartsNote, setCanPartsNote] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
@@ -441,6 +442,7 @@ function bestUrl(f: FileRow): string {
         setCanOrdersManage(!!j.can_orders_manage);
         setCanPartsDelete(!!j.can_parts_delete);
         setCanPartsEdit(!!j.can_parts_edit);
+        setCanPartsNote(j.can_parts_note !== undefined ? !!j.can_parts_note : !!j.can_parts_edit);
       } catch (e) {
         console.error("part_detail failed", e);
           if (!canceled) {
@@ -454,6 +456,7 @@ function bestUrl(f: FileRow): string {
             setNotes("");
             setComments([]);
             setCanPartsEdit(false);
+            setCanPartsNote(false);
           }
       } finally {
         if (!canceled) setLoading(false);
@@ -794,7 +797,7 @@ function bestUrl(f: FileRow): string {
   const massValue = (part?.attrs?.mass || part?.attrs?.Weight || "") as string
 
   const approvedInfo = useMemo(() => {
-    const raw = part?.attrs?.approvedby ?? part?.attrs?.approved_by ?? part?.attrs?.approved
+    const raw = part?.attrs?.approvedby
     if (raw === undefined || raw === null) return { approved: false, label: "" }
     if (typeof raw === "boolean") return { approved: raw, label: "" }
     const text = String(raw).trim()
@@ -883,7 +886,7 @@ function bestUrl(f: FileRow): string {
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
 
   async function saveNotes() {
-    if (!canPartsEdit || !part) return
+    if (!canPartsNote || !part) return
     setNotesSaving(true)
     setNotesError(null)
     try {
@@ -905,7 +908,7 @@ function bestUrl(f: FileRow): string {
   }
 
   async function addComment() {
-    if (!canPartsEdit || !part) return
+    if (!canPartsNote || !part) return
     const text = commentText.trim()
     if (!text) return
     setCommentSaving(true)
@@ -1537,7 +1540,7 @@ function bestUrl(f: FileRow): string {
             <div className="pd-card p-3 mt-3">
               <div className="d-flex align-items-center justify-content-between">
                 <h6 className="mb-0">Notes</h6>
-                {canPartsEdit ? (
+                {canPartsNote ? (
                   <button
                     type="button"
                     className="btn btn-sm btn-outline-primary"
@@ -1554,10 +1557,10 @@ function bestUrl(f: FileRow): string {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Add notes for this part..."
-                disabled={!canPartsEdit}
+                disabled={!canPartsNote}
               />
               {notesError ? <div className="text-danger small mt-1">{notesError}</div> : null}
-              {!canPartsEdit && <div className="text-muted small mt-1">Read-only</div>}
+              {!canPartsNote && <div className="text-muted small mt-1">Read-only</div>}
 
               <div className="mt-3">
                 <h6 className="mb-2">Comments</h6>
@@ -1575,7 +1578,7 @@ function bestUrl(f: FileRow): string {
                 ) : (
                   <div className="text-muted small">No comments yet.</div>
                 )}
-                {canPartsEdit && (
+                {canPartsNote && (
                   <div className="input-group input-group-sm mt-2">
                     <input
                       type="text"

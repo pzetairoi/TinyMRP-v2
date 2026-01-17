@@ -212,6 +212,26 @@ def _parse_treebom(txt: str) -> List[Tuple[str, str, str, str, float]]:
         links.append((parent_pn, parent_rev, child_pn, child_rev, qty))
     return links
 
+def _aggregate_links(
+    links: Iterable[Tuple[str, str, str, str, float]]
+) -> List[Tuple[str, str, str, str, float]]:
+    totals: Dict[Tuple[str, str, str, str], float] = {}
+    for parent_pn, parent_rev, child_pn, child_rev, qty in links:
+        key = (
+            _base_pn(str(parent_pn)).strip(),
+            _clean_rev(parent_rev),
+            _base_pn(str(child_pn)).strip(),
+            _clean_rev(child_rev),
+        )
+        if not key[0] or not key[2]:
+            continue
+        totals[key] = totals.get(key, 0.0) + float(qty or 0.0)
+    out: List[Tuple[str, str, str, str, float]] = []
+    for (ppn, prev, cpn, crev), qty in totals.items():
+        out.append((ppn, prev, cpn, crev, qty))
+    out.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
+    return out
+
 def _ensure_part_exists(pn: str, rev: str, seed_tag: str) -> bool:
     pn = _base_pn(str(pn)).strip()
     rev = _clean_rev(rev)
@@ -345,7 +365,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     # 2) Links from TREEBOM
     if tree_name:
         tree_txt = z.read(tree_name).decode("utf-8", errors="replace")
-        links = _parse_treebom(tree_txt)
+        links = _aggregate_links(_parse_treebom(tree_txt))
         for parent_pn, parent_rev, child_pn, child_rev, qty in links:
             if not parent_pn or not child_pn:
                 skipped_links += 1

@@ -537,6 +537,7 @@ def _visual_list_pdf(
     root_pn: Optional[str] = None,
     root_rev: Optional[str] = None,
     page_map: Optional[Dict[Tuple[str,str], int]] = None,
+    build_ts: Optional[datetime] = None,
 ) -> Optional[bytes]:
     try:
         from reportlab.pdfgen import canvas
@@ -619,8 +620,18 @@ def _visual_list_pdf(
         if title:
             c.drawCentredString(W/2, H - margin + 6*mm, title)
         if root_desc:
-            c.setFont("Helvetica", 12)
-            c.drawCentredString(W/2, H - margin - 1*mm, root_desc[:150])
+            c.setFont("Helvetica", 11)
+            c.drawCentredString(W/2, H - margin - 1*mm, _clip_line(root_desc[:200], "Helvetica", 11, W - 2*margin))
+        ts = build_ts or datetime.now()
+        try:
+            stamp = ts.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            stamp = ""
+        if stamp:
+            c.setFont("Helvetica", 9.5)
+            c.setFillGray(0.45)
+            c.drawCentredString(W/2, H - margin - 7*mm, f"Generated: {stamp}")
+            c.setFillGray(0.1)
         # top-left logo (10mm)
         _draw_svg_or_png(c, margin-8*mm, H - margin + 0.5*mm, 10*mm, 10*mm, 'logo.svg', 'tinylogo.png')
         # bottom center footer
@@ -742,7 +753,7 @@ def _visual_list_pdf(
             approved = False
             if pdoc is not None:
                 a = (getattr(pdoc, 'attrs', {}) or {})
-                raw = (a.get('approvedby') or a.get('approved_by') or a.get('approved') or '')
+                raw = (a.get('approvedby') or '')
                 raw = str(raw).strip()
                 if raw:
                     approved = raw.lower() not in ('', 'n/a', 'na', 'none', 'null', '0', 'false')
@@ -874,6 +885,18 @@ def _is_hardware_processes(processes: Iterable[str], alias_index: Dict[str, str]
     return False
 
 
+def _is_hardware_part(pn: str, rev: str) -> bool:
+    pdoc = _part_by(pn, rev)
+    if not pdoc:
+        return False
+    procs = _part_processes(pdoc)
+    if not procs:
+        return False
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    alias_index = meta.get("_alias_index", {}) or {}
+    return _is_hardware_processes(procs, alias_index)
+
+
 def _hardware_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List[Dict[str, object]]:
     meta = current_app.config.get("PROCESS_META", {}) or {}
     alias_index = meta.get("_alias_index", {}) or {}
@@ -907,11 +930,31 @@ def _hardware_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List
     return out
 
 
-def _hardware_summary_pdf(rows: List[Dict[str, object]]) -> Optional[bytes]:
-    return _hardware_summary_pdf_with_empty(rows, allow_empty=False)
+def _hardware_summary_pdf(
+    rows: List[Dict[str, object]],
+    root_pn: Optional[str] = None,
+    root_rev: Optional[str] = None,
+    root_desc: Optional[str] = None,
+    build_ts: Optional[datetime] = None,
+) -> Optional[bytes]:
+    return _hardware_summary_pdf_with_empty(
+        rows,
+        allow_empty=False,
+        root_pn=root_pn,
+        root_rev=root_rev,
+        root_desc=root_desc,
+        build_ts=build_ts,
+    )
 
 
-def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty: bool = False) -> Optional[bytes]:
+def _hardware_summary_pdf_with_empty(
+    rows: List[Dict[str, object]],
+    allow_empty: bool = False,
+    root_pn: Optional[str] = None,
+    root_rev: Optional[str] = None,
+    root_desc: Optional[str] = None,
+    build_ts: Optional[datetime] = None,
+) -> Optional[bytes]:
     if not rows and not allow_empty:
         return None
     try:
@@ -950,6 +993,19 @@ def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty:
     )
     flowables = []
     flowables.append(Paragraph("Hardware Summary", styles["Heading2"]))
+    if root_pn:
+        root_rev_clean = _clean_rev(root_rev) if root_rev is not None else ""
+        root_line = f"{root_pn} REV {root_rev_clean}".strip()
+        flowables.append(Paragraph(_xml_escape(root_line), styles["Heading4"]))
+        if root_desc:
+            flowables.append(Paragraph(_xml_escape(str(root_desc)), cell_style))
+        ts = build_ts or datetime.now()
+        try:
+            stamp = ts.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            stamp = ""
+        if stamp:
+            flowables.append(Paragraph(_xml_escape(f"Generated: {stamp}"), cell_style))
     flowables.append(Spacer(0, 6*mm))
     if not rows:
         flowables.append(Paragraph("No hardware items found.", styles["Normal"]))
@@ -957,13 +1013,14 @@ def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty:
         return buf.getvalue()
 
     table_data = [[
+        Paragraph("No.", header_style),
         Paragraph("Part Number", header_style),
         Paragraph("Description", header_style),
         Paragraph("Material", header_style),
         Paragraph("Finish", header_style),
         Paragraph("Qty", header_style),
     ]]
-    for r in rows:
+    for idx, r in enumerate(rows, start=1):
         pn = str(r.get("partnumber") or "")
         desc = str(r.get("description") or "")
         material = str(r.get("material") or "")
@@ -974,6 +1031,7 @@ def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty:
         except Exception:
             qty_s = str(qty)
         table_data.append([
+            Paragraph(_xml_escape(str(idx)), qty_style),
             Paragraph(_xml_escape(pn), cell_style),
             Paragraph(_xml_escape(desc), cell_style),
             Paragraph(_xml_escape(material), cell_style),
@@ -982,14 +1040,15 @@ def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty:
         ])
 
     usable_w = doc.width
-    col_weights = [0.18, 0.44, 0.16, 0.14, 0.08]
+    col_weights = [0.05, 0.17, 0.42, 0.16, 0.14, 0.06]
     col_widths = [usable_w * w for w in col_weights]
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
     style = TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        ('ALIGN', (0, 1), (-2, -1), 'LEFT'),
+        ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+        ('ALIGN', (1, 1), (-2, -1), 'LEFT'),
         ('ALIGN', (-1, 1), (-1, -1), 'RIGHT'),
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
@@ -1693,6 +1752,12 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # include datasheets in binder if requested (affects file_types for binder only)
     root_part = _part_by(opts.root_pn, None) if opts.root_rev is None else None
     root_rev_resolved = _clean_rev(opts.root_rev) if opts.root_rev is not None else _clean_rev(getattr(root_part, "revision", "") if root_part else "")
+    root_desc = ""
+    try:
+        pdoc = root_part if root_part is not None else _part_by(opts.root_pn, root_rev_resolved)
+        root_desc = _part_description(pdoc)
+    except Exception:
+        pass
     chosen_files = _collect_files(filtered_flat + [(opts.root_pn, root_rev_resolved, 1.0)], opts.file_types)
     output_count = 0
     if opts.want_selected_files:
@@ -1744,7 +1809,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 continue
 
     # Precompute visual list rows when needed (standalone or binder sections)
-    vis_filtered: List[Tuple[str, str, float]] = []
+    vis_filtered_all: List[Tuple[str, str, float]] = []
+    vis_filtered_visual: List[Tuple[str, str, float]] = []
     need_vis = bool(opts.want_visual_list) or bool(getattr(opts, "want_hardware_summary", False)) or (
         bool(opts.want_pdf_binder) and (bool(opts.binder_add_visual_list) or bool(opts.binder_add_hardware_summary))
     )
@@ -1759,12 +1825,22 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 include_consumed=bool(opts.include_consumed),
                 terminal_processes=["welding", "purchase", "machine"],
             )
-        vis_filtered = _filter_flat(vis_source)
+        vis_filtered_all = _filter_flat(vis_source)
+        vis_filtered_visual = [
+            (pn, rev, qty)
+            for pn, rev, qty in vis_filtered_all
+            if not _is_hardware_part(pn, rev)
+        ]
 
     # Visual list PDF (standalone)
     if opts.want_visual_list:
-        # Standalone visual list: omit root special placement
-        vis_pdf = _visual_list_pdf(vis_filtered, None, None)
+        # Standalone visual list includes root header/cell and omits hardware children
+        vis_pdf = _visual_list_pdf(
+            vis_filtered_visual,
+            opts.root_pn,
+            root_rev_resolved,
+            build_ts=build_ts,
+        )
         if not vis_pdf:
             raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
         if want_zip:
@@ -1780,10 +1856,14 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     hardware_pdf: Optional[bytes] = None
     if bool(getattr(opts, "want_hardware_summary", False)) or bool(opts.binder_add_hardware_summary):
         try:
-            hardware_rows = _hardware_summary_rows(vis_filtered + [(opts.root_pn, root_rev_resolved, 1.0)])
+            hardware_rows = _hardware_summary_rows(vis_filtered_all + [(opts.root_pn, root_rev_resolved, 1.0)])
             hardware_pdf = _hardware_summary_pdf_with_empty(
                 hardware_rows,
                 allow_empty=bool(getattr(opts, "want_hardware_summary", False)),
+                root_pn=opts.root_pn,
+                root_rev=root_rev_resolved,
+                root_desc=root_desc,
+                build_ts=build_ts,
             )
             if hardware_rows and not hardware_pdf:
                 raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
@@ -1905,7 +1985,12 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             preface_bytes.append(("Cover.pdf", cover))
         vis_pdf = None
         if opts.binder_add_visual_list:
-            vis_pdf = _visual_list_pdf(vis_filtered, opts.root_pn, opts.root_rev)
+            vis_pdf = _visual_list_pdf(
+                vis_filtered_visual,
+                opts.root_pn,
+                root_rev_resolved,
+                build_ts=build_ts,
+            )
             if not vis_pdf:
                 raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
             preface_bytes.append(("VisualList.pdf", vis_pdf))
@@ -2115,8 +2200,16 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                         continue
                     if not _passes_process_filter(p, opts.processes, opts.process_mode):
                         continue
+                    if _is_hardware_part(pn, rev):
+                        continue
                     vis_filtered2.append((pn, rev, qty))
-                vis_pdf2 = _visual_list_pdf(vis_filtered2, opts.root_pn, opts.root_rev, page_map=first_page)
+                vis_pdf2 = _visual_list_pdf(
+                    vis_filtered2,
+                    opts.root_pn,
+                    root_rev_resolved,
+                    page_map=first_page,
+                    build_ts=build_ts,
+                )
                 # Replace existing VisualList in preface_bytes
                 for i, (nm, _) in enumerate(preface_bytes):
                     if nm.lower().startswith('visual'):
