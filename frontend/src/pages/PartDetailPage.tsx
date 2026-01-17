@@ -18,6 +18,7 @@ type Part = {
   revision?: string;
   category?: string;
   uom?: string;
+  processes?: string[];
   attrs: Record<string, any>;
 };
 
@@ -77,16 +78,6 @@ type JobsOrdersRow = {
   top_pn: string;
   top_rev?: string;
   top_desc?: string;
-};
-
-type PartInsights = {
-  classification: string;
-  processes_normalized: string[];
-  missing_fields: string[];
-  deliverables_present: Record<string, boolean>;
-  deliverables_missing_recommended: string[];
-  where_used_count: number;
-  total_qty_used: number;
 };
 
 type CommentRow = {
@@ -152,8 +143,7 @@ export default function PartDetailPage() {
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [canPartsEdit, setCanPartsEdit] = useState(false);
-  const [insights, setInsights] = useState<PartInsights | null>(null);
-  const [insightsLoading, setInsightsLoading] = useState(false);
+  const insightsLoading = false;
   const [notes, setNotes] = useState("");
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [notesSaving, setNotesSaving] = useState(false);
@@ -404,6 +394,7 @@ function bestUrl(f: FileRow): string {
                 revision: j.part.revision || "",
                 category: j.part.category || "",
                 uom: j.part.uom || "EA",
+                processes: Array.isArray(j.part.processes) ? j.part.processes : [],
                 attrs: partAttrs,
               }
             : null
@@ -461,7 +452,6 @@ function bestUrl(f: FileRow): string {
             setJobsOrders([]);
             setNotes("");
             setComments([]);
-            setInsights(null);
             setCanPartsEdit(false);
           }
       } finally {
@@ -472,26 +462,6 @@ function bestUrl(f: FileRow): string {
       canceled = true;
     };
   }, [pn, rev, refreshTick]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!pn) return;
-      setInsightsLoading(true);
-      try {
-        const r = await fetch(`/api/parts/${encodeURIComponent(pn)}/insights?rev=${encodeURIComponent(rev || "")}`);
-        if (r.status === 403) { if (!cancelled) { setForbidden(true); } return; }
-        if (!r.ok) throw new Error(await r.text());
-        const j = await r.json();
-        if (!cancelled) setInsights(j as PartInsights);
-      } catch (e) {
-        if (!cancelled) setInsights(null);
-      } finally {
-        if (!cancelled) setInsightsLoading(false);
-      }
-    })();
-    return () => { cancelled = true };
-  }, [pn, rev]);
 
   // Load DocPack options when pn/rev/depth changes
   useEffect(() => {
@@ -797,23 +767,114 @@ function bestUrl(f: FileRow): string {
 
   // Processes: normalize and deduplicate
   const processes: string[] = useMemo(() => {
-    if (part?.processes && Array.isArray(part.processes)) return part.processes;
     const a = part?.attrs || {};
-    const tmp = ([] as string[]).concat(
-      Array.isArray(a.processes) ? a.processes : [],
-      a.process ? [a.process] : [],
-      a.process2 ? [a.process2] : [],
-      a.process3 ? [a.process3] : []
-    );
-    return tmp
+    const raw = (Array.isArray(part?.processes) && part.processes.length)
+      ? part.processes
+      : ([] as string[]).concat(
+          Array.isArray(a.processes) ? a.processes : [],
+          a.process ? [a.process] : [],
+          a.process2 ? [a.process2] : [],
+          a.process3 ? [a.process3] : []
+        );
+    return raw
       .map((x) => String(x || "").trim().toLowerCase())
       .filter((x, i, arr) => x && arr.indexOf(x) === i);
   }, [part]);
 
-  const isPurchased = useMemo(() => {
+  const isBlankish = (value: any, allowNa = false) => {
+    if (value === null || value === undefined) return true
+    const text = String(value).trim().toLowerCase()
+    if (allowNa && (text === "n/a" || text === "na")) return false
+    return text === "" || text === "none" || text === "null"
+  }
+
+  const materialValue = (part?.attrs?.material || part?.attrs?.Material || part?.attrs?.MATERIAL || "") as string
+  const finishValue = (part?.attrs?.finish || part?.attrs?.Finish || "") as string
+  const massValue = (part?.attrs?.mass || part?.attrs?.Weight || "") as string
+
+  const approvedInfo = useMemo(() => {
+    const raw = part?.attrs?.approvedby ?? part?.attrs?.approved_by ?? part?.attrs?.approved
+    if (raw === undefined || raw === null) return { approved: false, label: "" }
+    if (typeof raw === "boolean") return { approved: raw, label: "" }
+    const text = String(raw).trim()
+    if (!text) return { approved: false, label: "" }
+    const lowered = text.toLowerCase()
+    if (["wip", "inprogress", "in progress", "not approved", "no", "false", "0"].includes(lowered)) {
+      return { approved: false, label: text }
+    }
+    return { approved: true, label: text }
+  }, [part])
+
+  const uploaderName = useMemo(() => {
     const a = part?.attrs || {}
-    return processes.includes('purchase') || Boolean(a.oem || a.oem_partnumber)
-  }, [processes, part])
+    return (
+      a.uploader ||
+      a.uploaded_by ||
+      a.uploadedby ||
+      a.author ||
+      a.drawnby ||
+      ""
+    )
+  }, [part])
+
+  const approverName = useMemo(() => {
+    const a = part?.attrs || {}
+    return a.approvedby || a.approved_by || a.checkedby || ""
+  }, [part])
+
+  const missingCritical = useMemo(() => {
+    const missing: string[] = []
+    const pnValue = (part?.part_number || pn || "").toString().trim()
+    if (!pnValue) missing.push("partnumber")
+    const desc = (part?.description || part?.attrs?.description || "").toString().trim()
+    if (!desc) missing.push("description")
+    const rev = (part?.revision || part?.attrs?.revision || "").toString().trim()
+    if (!rev) missing.push("revision")
+    if (isBlankish(materialValue, true)) missing.push("material")
+    if (isBlankish(finishValue, true)) missing.push("finish")
+    if (!processes.length) missing.push("process")
+    return missing
+  }, [part, pn, processes, materialValue, finishValue])
+
+  const hasAnyFiles = useMemo(() => {
+    return Object.values(firstLinks).some((v) => !!v)
+  }, [firstLinks])
+
+  const legendKeys = useMemo(() => {
+    const keys = new Set<string>()
+    const addProcess = (val: any) => {
+      if (!val) return
+      if (Array.isArray(val)) {
+        val.forEach(addProcess)
+        return
+      }
+      const text = String(val)
+      const parts = text
+        .split(/[,;/|&+\n\r]+/)
+        .map((p) => p.trim().toLowerCase())
+        .filter(Boolean)
+      parts.forEach((p) => keys.add(p))
+    }
+    processes.forEach((p) => keys.add(String(p).toLowerCase()))
+    const walk = (nodes: TreeNode[]) => {
+      for (const n of nodes || []) {
+        addProcess((n as any)?.data?.process)
+        if (Array.isArray(n.children) && n.children.length) {
+          walk(n.children as TreeNode[])
+        }
+      }
+    }
+    walk(bomNodes)
+    return keys
+  }, [processes, bomNodes])
+
+  const legendEntries = useMemo(() => {
+    return Object.entries(procMeta || {}).filter(([k, v]) => {
+      if (!k || k.startsWith("_")) return false
+      if (!v || !(v as any).icon) return false
+      return legendKeys.has(String(k).toLowerCase())
+    })
+  }, [procMeta, legendKeys])
 
   // ---------- Render ----------
   const [tabIndex, setTabIndex] = useState(0)
@@ -821,16 +882,6 @@ function bestUrl(f: FileRow): string {
   // consider that we have a drawing. Otherwise, hide the Drawing tab and
   // default to All attributes.
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
-
-  const deliverableBadge = (label: string, on: boolean | undefined) => (
-    <span
-      className={`badge ${on ? "bg-success" : "bg-light text-muted"}`}
-      style={{ fontSize: "0.65rem", padding: "0.25rem 0.4rem" }}
-      title={label}
-    >
-      {label}
-    </span>
-  )
 
   async function saveNotes() {
     if (!canPartsEdit || !part) return
@@ -900,7 +951,13 @@ function bestUrl(f: FileRow): string {
       const found = j?.files_found ?? 0
       const upserts = j?.artifacts_upserted ?? 0
       const thumbs = j?.thumbnails_generated ?? 0
-      setRefreshMsg(`Found ${found} files, updated ${upserts}, thumbs ${thumbs}.`)
+      if (found <= 0) {
+        setRefreshMsg("No matching files found for this part.")
+      } else if (upserts <= 0) {
+        setRefreshMsg(`No new files found. ${found} file(s) already registered.`)
+      } else {
+        setRefreshMsg(`Found ${found} file(s). Updated ${upserts}. Thumbs ${thumbs}.`)
+      }
       setRefreshTick((t) => t + 1)
     } catch (err: any) {
       setRefreshError(err?.message || "Refresh failed")
@@ -959,189 +1016,107 @@ function bestUrl(f: FileRow): string {
               <ImageStrip pn={pn} rev={rev || ""} mode="preview" limit={1} fit />
             </div>
 
-            {/* quick info */}
-              <table className="table table-sm table-borderless mb-2">
-                <tbody>
-                  <tr>
-                    <th className="pd-th">Processes:</th>
-                    <td>
-                    {processes.length > 0 && (
-                      <div className="pd-proc-chips">
-                        {processes.map((p) => {
-                          const m = procMeta[p] || procMeta["others"];
-                          const bg = m?.color ? `rgb(${m.color})` : "rgba(0,0,0,.15)";
-                          const icon = m?.icon
-                            ? `/static/images/${m.icon}`
-                            : `/static/images/unknown.svg`;
-                          return (
-                            <span key={p} className="pd-proc-chip" style={{ background: bg }}>
-                              <img
-                                src={icon}
-                                onError={(e: any) => {
-                                  e.currentTarget.src = "/static/images/unknown.svg";
-                                }}
-                              />
-                              <span>{p}</span>
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-                {isPurchased && (
-                  <tr>
-                    <th className="pd-th">OEM:</th>
-                    <td>
-                      {(part?.attrs?.oem || '-')}
-                      {part?.attrs?.oem_partnumber ? ` · ${part?.attrs?.oem_partnumber}` : ''}
-                    </td>
-                  </tr>
-                )}
-                <tr>
-                  <th className="pd-th">Material:</th>
-                  <td>
-                    {part?.attrs?.material ||
-                      part?.attrs?.Material ||
-                      part?.attrs?.MATERIAL ||
-                      "-"}
-                  </td>
-                </tr>
-                <tr>
-                  <th className="pd-th">Finish:</th>
-                  <td>{part?.attrs?.finish || "-"}</td>
-                </tr>
-                  <tr>
-                    <th className="pd-th">Mass:</th>
-                    <td>{part?.attrs?.mass || part?.attrs?.Weight || "-"}</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div className="pd-info-rows">
+              <div className="pd-info-row pd-icon-row">
+                <img
+                  src={approvedInfo.approved ? "/static/images/approved.svg" : "/static/images/notapproved.svg"}
+                  alt={approvedInfo.approved ? "Approved" : "Not approved"}
+                  className="pd-status-icon"
+                />
+                {processes.map((p) => {
+                  const m = procMeta[p] || procMeta["others"]
+                  const icon = m?.icon ? `/static/images/${m.icon}` : `/static/images/unknown.svg`
+                  return (
+                    <img
+                      key={p}
+                      src={icon}
+                      title={p}
+                      className="pd-proc-icon"
+                      onError={(e: any) => {
+                        e.currentTarget.src = "/static/images/unknown.svg"
+                      }}
+                    />
+                  )
+                })}
+              </div>
 
-              <div className="mt-3 pt-2 border-top">
-                <div className="d-flex align-items-center justify-content-between">
-                  <div className="fw-semibold small">Insights</div>
-                  {insights?.classification ? (
-                    <span className="badge bg-secondary text-uppercase" style={{ fontSize: "0.6rem" }}>
-                      {insights.classification.replace("_", " ")}
-                    </span>
-                  ) : null}
-                </div>
-                {insightsLoading && <div className="text-muted small mt-2">Loading insights...</div>}
-                {!insightsLoading && insights && (
-                  <div className="mt-2">
-                    {insights.missing_fields?.length ? (
-                      <div className="text-danger small">
-                        Missing: {insights.missing_fields.join(", ")}
-                      </div>
-                    ) : (
-                      <div className="text-muted small">No missing fields detected.</div>
-                    )}
-                    {insights.processes_normalized?.length ? (
-                      <div className="d-flex flex-wrap gap-1 mt-2">
-                        {insights.processes_normalized.map((p) => (
-                          <span key={p} className="badge bg-light text-dark" style={{ fontSize: "0.6rem" }}>
-                            {p}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="d-flex flex-wrap gap-1 mt-2">
-                      {deliverableBadge("PDF", insights.deliverables_present?.pdf)}
-                      {deliverableBadge("DXF", insights.deliverables_present?.dxf)}
-                      {deliverableBadge("STEP", insights.deliverables_present?.step)}
-                      {deliverableBadge("DS", insights.deliverables_present?.datasheet)}
-                    </div>
-                    <div className="small text-muted mt-2">
-                      Used in {insights.where_used_count} parent(s), total qty {insights.total_qty_used}
-                      {" "} |{" "}
-                      <a href={`/ui/bom?q=${encodeURIComponent(pn)}`}>View BOM</a>
-                    </div>
-                    {insights.deliverables_missing_recommended?.length ? (
-                      <div className="small mt-1">
-                        Recommended: {insights.deliverables_missing_recommended.join(", ")}
-                      </div>
-                    ) : null}
-                  </div>
+              <div className="pd-info-row pd-meta-row">
+                <span><strong>Material:</strong> {materialValue || "-"}</span>
+                <span><strong>Finish:</strong> {finishValue || "-"}</span>
+                <span><strong>Mass:</strong> {massValue || "-"}</span>
+              </div>
+
+              <div className="pd-info-row pd-file-row">
+                {(() => {
+                  const href = (part?.attrs?.link || part?.attrs?.oem_internet || "").toString().trim()
+                  return href ? (
+                    <a className="btn btn-outline-primary btn-sm pd-file-btn" href={href} target="_blank" rel="noreferrer">
+                      Link
+                    </a>
+                  ) : null
+                })()}
+                {firstLinks.edr && (
+                  <a className="btn btn-info btn-sm pd-file-btn" href={firstLinks.edr.href} target="_blank" rel="noreferrer">
+                    3D{firstLinks.edr.count > 1 ? ` (${firstLinks.edr.count})` : ""}
+                  </a>
                 )}
-                {!insightsLoading && !insights && (
-                  <div className="text-muted small mt-2">No insights available.</div>
+                {firstLinks.step && (
+                  <a className="btn btn-info btn-sm pd-file-btn" href={firstLinks.step.href} target="_blank" rel="noreferrer">
+                    STEP{firstLinks.step.count > 1 ? ` (${firstLinks.step.count})` : ""}
+                  </a>
+                )}
+                {firstLinks.pdf && (
+                  <a className="btn btn-success btn-sm pd-file-btn" href={firstLinks.pdf.href} target="_blank" rel="noreferrer">
+                    PDF{firstLinks.pdf.count > 1 ? ` (${firstLinks.pdf.count})` : ""}
+                  </a>
+                )}
+                {firstLinks.dxf && (
+                  <a className="btn btn-success btn-sm pd-file-btn" href={firstLinks.dxf.href} target="_blank" rel="noreferrer">
+                    DXF{firstLinks.dxf.count > 1 ? ` (${firstLinks.dxf.count})` : ""}
+                  </a>
+                )}
+                {firstLinks.datasheet && (
+                  <a className="btn btn-outline-secondary btn-sm pd-file-btn" href={firstLinks.datasheet.href} target="_blank" rel="noreferrer">
+                    Datasheet{firstLinks.datasheet.count > 1 ? ` (${firstLinks.datasheet.count})` : ""}
+                  </a>
+                )}
+                {firstLinks.threeMF && (
+                  <a className="btn btn-outline-secondary btn-sm pd-file-btn" href={firstLinks.threeMF.href} target="_blank" rel="noreferrer">
+                    3MF{firstLinks.threeMF.count > 1 ? ` (${firstLinks.threeMF.count})` : ""}
+                  </a>
+                )}
+                {!hasAnyFiles && (
+                  <span className="text-muted small">No files found.</span>
                 )}
               </div>
 
-              {/* file buttons + external link */}
-              <div className="pd-files mt-2">
-              {(() => {
-                const href = (part?.attrs?.link || part?.attrs?.oem_internet || '').toString().trim()
-                return href ? (
-                  <a className="btn btn-outline-primary btn-sm pd-file-btn" href={href} target="_blank" rel="noreferrer">
-                    Link
-                  </a>
-                ) : null
-              })()}
-              {firstLinks.edr && (
-                <a
-                  className="btn btn-info btn-sm pd-file-btn"
-                  href={firstLinks.edr.href}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  3D{firstLinks.edr.count > 1 ? ` (${firstLinks.edr.count})` : ""}
-                </a>
-              )}
-              {firstLinks.step && (
-                <a
-                  className="btn btn-info btn-sm pd-file-btn"
-                  href={firstLinks.step.href}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  STEP{firstLinks.step.count > 1 ? ` (${firstLinks.step.count})` : ""}
-                </a>
-              )}
-              {firstLinks.pdf && (
-                <a
-                  className="btn btn-success btn-sm pd-file-btn"
-                  href={firstLinks.pdf.href}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  PDF{firstLinks.pdf.count > 1 ? ` (${firstLinks.pdf.count})` : ""}
-                </a>
-              )}
-              {firstLinks.dxf && (
-                <a
-                  className="btn btn-success btn-sm pd-file-btn"
-                  href={firstLinks.dxf.href}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  DXF{firstLinks.dxf.count > 1 ? ` (${firstLinks.dxf.count})` : ""}
-                </a>
-              )}
-              {firstLinks.datasheet && (
-                <a
-                  className="btn btn-outline-secondary btn-sm pd-file-btn"
-                  href={firstLinks.datasheet.href}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Datasheet
-                  {firstLinks.datasheet.count > 1
-                    ? ` (${firstLinks.datasheet.count})`
-                    : ""}
-                </a>
-              )}
-              {firstLinks.threeMF && (
-                <a
-                  className="btn btn-outline-secondary btn-sm pd-file-btn"
-                  href={firstLinks.threeMF.href}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  3MF
-                  {firstLinks.threeMF.count > 1 ? ` (${firstLinks.threeMF.count})` : ""}
-                </a>
+              <div className="pd-info-row pd-user-row">
+                <span className="pd-user-pill">
+                  <img src="/static/images/file.svg" alt="Uploader" />
+                  <span>{uploaderName ? `Uploaded by ${uploaderName}` : "Uploader unknown"}</span>
+                </span>
+                <span className="pd-user-pill">
+                  <img src={approvedInfo.approved ? "/static/images/approved.svg" : "/static/images/notapproved.svg"} alt="Approval" />
+                  <span>
+                    {approverName
+                      ? `Approved by ${approverName}`
+                      : approvedInfo.approved
+                      ? "Approved"
+                      : "Not approved"}
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            <div className="pd-missing mt-2 pt-2 border-top">
+              <div className="fw-semibold small">Missing properties</div>
+              {insightsLoading && <div className="text-muted small mt-1">Checking...</div>}
+              {!insightsLoading && (
+                missingCritical.length ? (
+                  <div className="text-danger small mt-1">Missing: {missingCritical.join(", ")}</div>
+                ) : (
+                  <div className="text-muted small mt-1">No missing properties detected.</div>
+                )
               )}
             </div>
           </div>
@@ -1838,19 +1813,21 @@ function bestUrl(f: FileRow): string {
       {/* Optional: small image strip under everything */}
       <br />
       <br />
-      <div className="pd-proc-legend">
-        {Object.entries(procMeta).map(([k, m]) => (
-          <span key={k} className="pd-proc-chip" style={{ background: `rgb(${m.color})` }}>
-            <img
-              src={`/static/images/${m.icon}`}
-              onError={(e: any) => {
-                e.currentTarget.src = "/static/images/unknown.svg";
-              }}
-            />
-            <span>{k}</span>
-          </span>
-        ))}
-      </div>
+      {legendEntries.length ? (
+        <div className="pd-proc-legend">
+          {legendEntries.map(([k, m]) => (
+            <span key={k} className="pd-proc-chip" style={{ background: `rgb(${m.color})` }}>
+              <img
+                src={`/static/images/${m.icon}`}
+                onError={(e: any) => {
+                  e.currentTarget.src = "/static/images/unknown.svg";
+                }}
+              />
+              <span>{k}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
