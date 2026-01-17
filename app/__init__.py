@@ -18,6 +18,7 @@ from .extensions import csrf, init_mongo # Import CSRF and MongoDB init
 security = None
 
 import os
+import re
 import secrets
 import json as _json
 from datetime import timedelta
@@ -80,6 +81,33 @@ def create_app(config_object=None):
         
     from app.services.processmeta import load_process_meta
     app.config["PROCESS_META"] = load_process_meta()
+
+    # Hardware folder keywords (legacy fastener/library folders)
+    default_hw_folders = [
+        "toolbox",
+        "browser",
+        "fasteners",
+        "fastener",
+        "hardware",
+        "library",
+        "bolts",
+        "nuts",
+        "washers",
+        "screws",
+        "rivets",
+        "pins",
+        "clips",
+        "studs",
+        "spacers",
+        "standoffs",
+        "inserts",
+    ]
+    env_hw = os.getenv("HARDWARE_FOLDERS") or os.getenv("HARDWARE_FOLDER") or ""
+    if env_hw.strip():
+        parts = [p.strip().lower() for p in re.split(r"[;,]", env_hw) if p.strip()]
+        app.config["HARDWARE_FOLDERS"] = parts
+    else:
+        app.config.setdefault("HARDWARE_FOLDERS", default_hw_folders)
 
 
     # Load default config if not set
@@ -376,4 +404,3 @@ def create_app(config_object=None):
     app.config.setdefault("ACL_ENFORCED", True)
     
     return app
-

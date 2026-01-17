@@ -68,6 +68,16 @@ This checklist captures legacy behaviors from `OLD/SourceCode` and maps them to 
   - Current: `app/services/thumbnails.py` and `app/services/docpacks.py` only use files whose `PartFile.revision` matches the requested revision (including blank).
   - Verification: New tests cover blank-rev and non-blank rev file lookup.
 
+- Hardware/fastener tagging from BOM import (process + folder)
+  - Legacy: `OLD/SourceCode/app/tinylib/models.py` sets process to `hardware` if `process` contains fastener/hardware, or if `folder` contains a token from `HARDWARE_FOLDER` (from `OLD/SourceCode/config.py`).
+  - Current: `app/__init__.py` defines `HARDWARE_FOLDERS`; `app/services/import_zip.py` sets process to `hardware` when folder/path matches or process aliases map to hardware.
+  - Verification: `tests/test_bom_import_hardware.py` validates hardware tagging via folder and process alias.
+
+- BOM tree ordering keeps hardware at the end
+  - Legacy: hardware shown in a separate list (see `OLD/SourceCode/app/tinylib/views.py` and templates).
+  - Current: `app/views/bom_tree.py` sorts children so hardware nodes appear after non-hardware siblings.
+  - Verification: Manual (part detail BOM list order).
+
 ## Filenames / Output Naming
 
 - Timestamp suffix + Windows-safe length
