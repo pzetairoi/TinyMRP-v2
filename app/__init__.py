@@ -89,7 +89,6 @@ def create_app(config_object=None):
         "fasteners",
         "fastener",
         "hardware",
-        "library",
         "bolts",
         "nuts",
         "washers",
