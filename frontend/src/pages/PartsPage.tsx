@@ -4,7 +4,23 @@ import type { DataTableFilterMeta } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
 
-type Part = { id?: string; part_number: string; description: string; category: string; revision?: string; material?: string; finish?: string; mass?: string | number; processes?: string[]; thumb_urls?: string[] }
+type Part = {
+  id?: string;
+  part_number: string;
+  description: string;
+  category: string;
+  revision?: string;
+  material?: string;
+  finish?: string;
+  mass?: string | number;
+  processes?: string[];
+  thumb_urls?: string[];
+  has_pdf?: boolean;
+  has_png?: boolean;
+  has_dxf?: boolean;
+  has_step?: boolean;
+  has_datasheet?: boolean;
+}
 
 export default function PartsPage() {
   const sp = new URLSearchParams(window.location.search)
@@ -31,11 +47,31 @@ export default function PartsPage() {
       material:    { value: '', matchMode: FilterMatchMode.CONTAINS },
       finish:      { value: '', matchMode: FilterMatchMode.CONTAINS },
       process:     { value: '', matchMode: FilterMatchMode.CONTAINS },
+      has_pdf:     { value: '', matchMode: FilterMatchMode.EQUALS },
     } as DataTableFilterMeta
   })
   const fallbackLogo = "/static/images/logo.png"
 
   const keyFor = (p: Part) => `${p.part_number}::${p.revision || ''}`
+
+  const coverageBadge = (label: string, on: boolean | undefined) => (
+    <span
+      className={`badge ${on ? 'bg-success' : 'bg-light text-muted'}`}
+      style={{ fontSize: '0.65rem', padding: '0.25rem 0.4rem' }}
+      title={label}
+    >
+      {label}
+    </span>
+  )
+
+  const coverageBody = (p: Part) => (
+    <div className="d-flex flex-wrap gap-1">
+      {coverageBadge('PDF', p.has_pdf)}
+      {coverageBadge('DXF', p.has_dxf)}
+      {coverageBadge('STEP', p.has_step)}
+      {coverageBadge('DS', p.has_datasheet)}
+    </div>
+  )
 
   useEffect(() => {
     if (!pickMode) return
@@ -86,6 +122,30 @@ export default function PartsPage() {
     try { window.close() } catch {}
   }
 
+  function applyQuickFilter(kind: 'missing_pdf' | 'missing_material' | 'hardware' | 'sheet' | 'clear') {
+    setLazy((s) => {
+      const nextFilters: any = { ...(s.filters as any) }
+      if (kind === 'clear') {
+        nextFilters.material = { ...(nextFilters.material || {}), value: '' }
+        nextFilters.process = { ...(nextFilters.process || {}), value: '' }
+        nextFilters.has_pdf = { ...(nextFilters.has_pdf || {}), value: '' }
+      }
+      if (kind === 'missing_pdf') {
+        nextFilters.has_pdf = { ...(nextFilters.has_pdf || {}), value: 'false' }
+      }
+      if (kind === 'missing_material') {
+        nextFilters.material = { ...(nextFilters.material || {}), value: '(missing)' }
+      }
+      if (kind === 'hardware') {
+        nextFilters.process = { ...(nextFilters.process || {}), value: 'hardware' }
+      }
+      if (kind === 'sheet') {
+        nextFilters.process = { ...(nextFilters.process || {}), value: 'sheet metal' }
+      }
+      return { ...s, first: 0, filters: nextFilters }
+    })
+  }
+
   const header = useMemo(() => (
     <div className={`d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 p-2 ${pickMode ? 'pick-header' : ''}`}>
       <div className="d-flex align-items-center gap-2">
@@ -113,6 +173,15 @@ export default function PartsPage() {
           <div className="form-check ms-2">
             <input className="form-check-input" type="checkbox" id="jobOnly" checked={jobOnly} onChange={(e) => setJobOnly(e.target.checked)} />
             <label className="form-check-label" htmlFor="jobOnly">Job parts only</label>
+          </div>
+        )}
+        {!pickMode && (
+          <div className="d-flex flex-wrap gap-2 ms-2">
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('missing_pdf')}>Missing PDF</button>
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('missing_material')}>Missing Material</button>
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('hardware')}>Hardware</button>
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('sheet')}>Sheet metal</button>
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('clear')}>Clear</button>
           </div>
         )}
       </div>
@@ -380,6 +449,9 @@ export default function PartsPage() {
             />
           )
         }} style={{ width: 60 }} />
+        {!pickMode && (
+          <Column header="Docs" body={(p: any) => coverageBody(p as Part)} style={{ width: 150 }} />
+        )}
         <Column field="part_number" header="Part Number" sortable filter showFilterMenu={false}
         filterMatchMode="contains" filterMatchModeOptions={["contains"]}
         style={{ minWidth: '12ch', width: '12ch' }}

@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+### ===== EDIT THESE =====
+DOMAIN="tinymrp.com"          # set to your real domain (or leave "_" for IP-only)
+REPO_URL="https://github.com/pzetairoi/TinyMRP-v2.git"
+APP_DIR="/opt/tinymrp_v2"
+VENV_DIR="/opt/tinymrp_venv"
+FILES_DIR="/srv/tinymrp/deliverables"
+ENV_DIR="/etc/tinymrp"
+SERVICE_NAME="tinymrp"
+### ======================
+
+need_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+echo "==> Updating OS packages"
+sudo apt-get update -y
+sudo apt-get install -y ca-certificates curl gnupg git nginx
+
+echo "==> Installing Python 3.12 + build deps"
+sudo apt-get install -y python3.12 python3.12-venv python3.12-dev build-essential pkg-config
+
+
+
+
+echo "==> Installing Node.js 20 (for building the frontend)"
+if ! need_cmd node || ! node -v | grep -qE '^v20\.'; then
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo apt-get install -y nodejs
+fi
+
+
+
+
+
+echo "==> Installing MongoDB (official mongodb-org repo)"
+# MongoDB’s official instructions (key + apt repo) follow this pattern. :contentReference[oaicite:2]{index=2}
+UBUNTU_CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+sudo apt-get install -y gnupg curl
+curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | \
+  sudo gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg --dearmor
+
+echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu ${UBUNTU_CODENAME}/mongodb-org/8.0 multiverse" | \
+  sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list >/dev/null
+
+sudo apt-get update -y
+sudo apt-get install -y mongodb-org
+sudo systemctl enable --now mongod
+
+
+
+
+
+echo "==> Creating tinymrp user + folders"
+sudo useradd --system --create-home --home-dir /home/tinymrp --shell /bin/bash tinymrp || true
+sudo mkdir -p "${FILES_DIR}"
+sudo chown -R tinymrp:tinymrp "$(dirname "${FILES_DIR}")"
+sudo chmod 755 "$(dirname "${FILES_DIR}")" "${FILES_DIR}"
+
+echo "==> Deploying app code to ${APP_DIR}"
+if [ -d "${APP_DIR}/.git" ]; then
+  sudo git -C "${APP_DIR}" pull --ff-only
+else
+  sudo rm -rf "${APP_DIR}"
+  sudo git clone "${REPO_URL}" "${APP_DIR}"
+fi
+sudo chown -R tinymrp:tinymrp "${APP_DIR}"
+
+
+
+
+
+echo "==> Creating venv at ${VENV_DIR} and installing Python deps"
+sudo python3.12 -m venv "${VENV_DIR}"
+sudo "${VENV_DIR}/bin/pip" install -U pip wheel
+sudo "${VENV_DIR}/bin/pip" install -r "${APP_DIR}/requirements.txt"
+
+echo "==> Building frontend (outputs to app/static/parts-ui per vite.config.ts)"
+sudo -u tinymrp -H bash -lc "cd '${APP_DIR}/frontend' && npm ci && npm run build"
+
+
+
+
+
+echo "==> Creating server env file at ${ENV_DIR}/.env"
+sudo mkdir -p "${ENV_DIR}"
+SECRET_KEY="$(python3 - <<'PY'
+import secrets; print(secrets.token_hex(32))
+PY
+)"
+SALT_KEY="$(python3 - <<'PY'
+import secrets; print(secrets.token_hex(32))
+PY
+)"
+
+sudo tee "${ENV_DIR}/.env" >/dev/null <<EOF
+# TinyMRP v2 — Ubuntu Server (no containers)
+MONGO_URI=mongodb://localhost:27017/tinymrp-v2
+FILES_LOCAL_ROOT=${FILES_DIR}
+FILES_URL_PREFIX=/Deliverables
+SECRET_KEY=${SECRET_KEY}
+SECURITY_PASSWORD_SALT=${SALT_KEY}
+EOF
+sudo chmod 600 "${ENV_DIR}/.env"
+
+
+
+
+
+echo "==> Installing systemd service"
+sudo cp -f "${APP_DIR}/deploy/tinymrp.service" "/etc/systemd/system/${SERVICE_NAME}.service"
+sudo systemctl daemon-reload
+sudo systemctl enable --now "${SERVICE_NAME}"
+
+
+
+echo "==> Installing nginx site"
+sudo cp -f "${APP_DIR}/deploy/nginx.server.conf" /etc/nginx/sites-available/tinymrp
+sudo sed -i "s/server_name _;/server_name ${DOMAIN};/" /etc/nginx/sites-available/tinymrp || true
+sudo ln -sf /etc/nginx/sites-available/tinymrp /etc/nginx/sites-enabled/tinymrp
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
+
+echo "==> Seeding roles (required) + creating an admin user (interactive prompts)"
+sudo -u tinymrp -H bash -lc "cd '${APP_DIR}' && '${VENV_DIR}/bin/flask' --app run.py user seed-roles"
+echo
+echo "Now create your admin user (you will be prompted for email/password):"
+sudo -u tinymrp -H bash -lc "cd '${APP_DIR}' && '${VENV_DIR}/bin/flask' --app run.py user create"
+echo
+echo "Then grant admin role (prompt for email):"
+sudo -u tinymrp -H bash -lc "cd '${APP_DIR}' && '${VENV_DIR}/bin/flask' --app run.py user grant-admin"
+
+echo
+echo "DONE."
+echo "Try: http://${DOMAIN}/  (or http://<server_ip>/ if DOMAIN is not set)"
+echo "Service logs: sudo journalctl -u ${SERVICE_NAME} -f"

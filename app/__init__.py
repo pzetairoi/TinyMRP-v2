@@ -264,6 +264,9 @@ def create_app(config_object=None):
     app.register_blueprint(bom_tree_api_bp)
     app.register_blueprint(whereused_api_bp)
     csrf.exempt(whereused_api_bp)
+
+    from app.views.dashboard import bp as dashboard_api_bp
+    app.register_blueprint(dashboard_api_bp)
     
     # Importer views for BOM uploads
     from app.views.importer import bp as importer_bp

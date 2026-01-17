@@ -1,5 +1,7 @@
 # app/views/parts.py
 from flask import Blueprint, request, jsonify, current_app, url_for
+from typing import Optional
+from datetime import datetime
 from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
 import re
@@ -17,6 +19,12 @@ from app.services.attrs import harvest_part_attrs
 from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
+from app.services.insights import (
+    classify_part,
+    normalized_processes as normalize_process_list,
+    missing_fields as insights_missing_fields,
+    recommended_deliverables,
+)
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
 from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed, user_has_permission, permissions_required
 from app.services.audit import log_action
@@ -39,6 +47,61 @@ def _resolve_rev_for_pn(pn: str, rev: str | None) -> str:
         return ""
     attrs = harvest_part_attrs(p)
     return (attrs.get("revision") or p.revision or "").strip()
+
+
+def _find_part_doc(pn: str, rev: str | None) -> Part | None:
+    pn = (pn or "").strip()
+    if not pn:
+        return None
+    if rev is not None and str(rev).strip() != "":
+        found = Part.objects(part_number__iexact=pn, revision__iexact=str(rev).strip()).first()
+        if found:
+            return found
+    return Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+
+
+def _deliverables_present(pn: str, rev: str | None) -> dict:
+    groups = set()
+    q = PartFile.objects(part_number__iexact=pn)
+    if rev is not None:
+        q = q.filter(revision__iexact=(rev or ""))
+    for f in q.only("ext_group"):
+        if f.ext_group:
+            groups.add(f.ext_group.lower())
+    if rev and not groups:
+        for f in PartFile.objects(part_number__iexact=pn, revision__iexact="").only("ext_group"):
+            if f.ext_group:
+                groups.add(f.ext_group.lower())
+    return {
+        "pdf": "pdf" in groups,
+        "png": "png" in groups,
+        "dxf": "dxf" in groups,
+        "step": "step" in groups,
+        "datasheet": "datasheet" in groups,
+    }
+
+
+def _where_used_stats(pn: str, rev: str | None) -> tuple[int, float]:
+    q = BOMLink.objects(child_pn=pn)
+    if rev is not None and "child_rev" in BOMLink._fields:
+        q = q.filter(child_rev=(rev or ""))
+        if (rev or "").strip() and q.limit(1).count() == 0:
+            q = BOMLink.objects(child_pn=pn, child_rev="")
+    parents = set()
+    total_qty = 0.0
+    for l in q.only("parent_pn", "parent_rev", "qty"):
+        parents.add(((l.parent_pn or "").strip(), (l.parent_rev or "").strip()))
+        total_qty += float(l.qty or 0)
+    return len(parents), total_qty
+
+
+def _has_bom_children(pn: str, rev: str | None) -> bool:
+    q = BOMLink.objects(parent_pn=pn)
+    if rev is not None and "parent_rev" in BOMLink._fields:
+        q = q.filter(parent_rev=(rev or ""))
+        if (rev or "").strip() and q.limit(1).count() == 0:
+            q = BOMLink.objects(parent_pn=pn, parent_rev="")
+    return q.limit(1).count() > 0
 
 
 def _parent_candidates(child_pn: str, child_rev: str | None, max_rows: int = 50):
@@ -253,7 +316,7 @@ def parts_lazy():
     def add_filter(q: Q, key: str, *fields):
         f = filters.get(key) or {}
         val = (f.get("value") or "").strip()
-        if not val:
+        if not val or val.startswith("__"):
             return q
         for t in _terms(val):
             or_q = Q()
@@ -267,10 +330,40 @@ def parts_lazy():
     q = add_filter(q, "revision", "revision")
     q = add_filter(q, "description", "description")
     q = add_filter(q, "category", "category")
-    q = add_filter(q, "material", "attrs__material")
+    material_val = (filters.get("material") or {}).get("value")
+    material_val_norm = str(material_val or "").strip().lower()
+    if material_val_norm not in ("__missing__", "missing", "(missing)"):
+        q = add_filter(q, "material", "attrs__material")
     q = add_filter(q, "finish", "attrs__finish")
+    def _process_filter_q(terms: list[str]) -> Q:
+        or_q = Q()
+        if terms:
+            or_q = or_q | Q(processes__in=terms)
+            for t in terms:
+                or_q = or_q | Q(attrs__process__icontains=t)
+                or_q = or_q | Q(attrs__process2__icontains=t)
+                or_q = or_q | Q(attrs__process3__icontains=t)
+                or_q = or_q | Q(attrs__processes__icontains=t)
+        return or_q
+
     proc_key = "process" if "process" in filters else "processes"
-    q = add_filter(q, proc_key, "processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes")
+    proc_val = (filters.get(proc_key) or {}).get("value")
+    proc_val_norm = str(proc_val or "").strip().lower()
+    if proc_val_norm in ("hardware", "fastener", "fasteners"):
+        q = q & (
+            _process_filter_q(["hardware", "fastener", "fasteners"])
+            | Q(attrs__category__icontains="hardware")
+            | Q(category__icontains="hardware")
+        )
+    elif proc_val_norm in ("sheet metal", "sheetmetal", "sheet"):
+        q = q & (
+            _process_filter_q(["lasercut", "profile cut", "cutting", "folding", "rolling", "sheet"])
+            | Q(attrs__category__icontains="sheet")
+            | Q(category__icontains="sheet")
+            | Q(attrs__material__icontains="sheet")
+        )
+    else:
+        q = add_filter(q, proc_key, "processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes")
     g = (filters.get("global") or {}).get("value")
     if g:
         for t in _terms(str(g)):
@@ -315,13 +408,74 @@ def parts_lazy():
         q = q & allowed_q
 
     qs = Part.objects(q)
-    filtered = qs.count()
-    docs = (
-        qs.order_by(order_by)
-        .only("part_number", "revision", "description", "category", "attrs", "processes")
-        .skip(first)
-        .limit(rows)
-    )
+
+    if material_val_norm in ("__missing__", "missing", "(missing)"):
+        qs = qs.filter(
+            __raw__={
+                "$or": [
+                    {"attrs.material": {"$exists": False}},
+                    {"attrs.material": ""},
+                    {"attrs.material": None},
+                ]
+            }
+        )
+
+    def _bool_filter(val: object) -> Optional[bool]:
+        if val is None:
+            return None
+        if isinstance(val, bool):
+            return val
+        s = str(val).strip().lower()
+        if s in ("true", "1", "yes", "y"):
+            return True
+        if s in ("false", "0", "no", "n", "missing"):
+            return False
+        return None
+
+    has_pdf_filter = _bool_filter((filters.get("has_pdf") or {}).get("value"))
+
+    def _coverage_map(parts_list: list[Part]) -> dict[tuple[str, str], set[str]]:
+        if not parts_list:
+            return {}
+        pn_list = list({p.part_number for p in parts_list if p.part_number})
+        rev_list = []
+        for p in parts_list:
+            attrs = harvest_part_attrs(p)
+            rev_list.append(_normalized_revision(p, attrs))
+        rev_list = list({r for r in rev_list if r is not None})
+        qf = PartFile.objects(part_number__in=pn_list)
+        if rev_list:
+            qf = qf.filter(revision__in=list(set(rev_list + [""])))
+        coverage: dict[tuple[str, str], set[str]] = {}
+        for f in qf.only("part_number", "revision", "ext_group"):
+            key = (f.part_number, f.revision or "")
+            coverage.setdefault(key, set()).add((f.ext_group or "").lower())
+        return coverage
+
+    if has_pdf_filter is not None:
+        all_docs = list(
+            qs.order_by(order_by).only("part_number", "revision", "description", "category", "attrs", "processes")
+        )
+        coverage = _coverage_map(all_docs)
+        filtered_docs = []
+        for p in all_docs:
+            attrs = harvest_part_attrs(p)
+            rev = _normalized_revision(p, attrs)
+            groups = coverage.get((p.part_number, rev)) or coverage.get((p.part_number, "")) or set()
+            has_pdf = "pdf" in groups
+            if has_pdf_filter == has_pdf:
+                filtered_docs.append(p)
+        filtered = len(filtered_docs)
+        docs = filtered_docs[first:first + rows]
+    else:
+        filtered = qs.count()
+        docs = list(
+            qs.order_by(order_by)
+            .only("part_number", "revision", "description", "category", "attrs", "processes")
+            .skip(first)
+            .limit(rows)
+        )
+        coverage = _coverage_map(docs)
 
     out = []
     for p in docs:
@@ -329,6 +483,7 @@ def parts_lazy():
         pn = p.part_number
         rev = _normalized_revision(p, attrs)
         display_code = f"{pn}-{rev}" if rev else pn
+        groups = coverage.get((pn, rev)) or coverage.get((pn, "")) or set()
         out.append(
             {
                 "id": f"{pn}::{rev}",
@@ -342,6 +497,11 @@ def parts_lazy():
                 "mass": attrs.get("mass", ""),
                 "processes": normalize_processes(attrs, current_app.config.get("PROCESS_META", {})),
                 "thumb_urls": thumb_urls_for(pn, rev or None),
+                "has_pdf": "pdf" in groups,
+                "has_png": "png" in groups,
+                "has_dxf": "dxf" in groups,
+                "has_step": "step" in groups,
+                "has_datasheet": "datasheet" in groups,
             }
         )
 
@@ -440,6 +600,7 @@ def part_detail():
     can_jobs_manage = user_has_permission(current_user, "jobs.manage")
     can_orders_manage = user_has_permission(current_user, "orders.manage")
     can_parts_delete = user_has_permission(current_user, "items.edit")
+    can_parts_edit = can_parts_delete
 
     return jsonify(
         {
@@ -464,8 +625,122 @@ def part_detail():
             "can_jobs_manage": can_jobs_manage,
             "can_orders_manage": can_orders_manage,
             "can_parts_delete": can_parts_delete,
+            "can_parts_edit": can_parts_edit,
         }
     )
+
+
+@bp.get("/parts/<pn>/insights")
+@login_required
+@require_items_view
+def part_insights(pn):
+    pn = (pn or "").strip()
+    rev = request.args.get("rev")
+    p = _find_part_doc(pn, rev)
+    if not p:
+        return jsonify({"error": "not found"}), 404
+
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            return jsonify({"error": "forbidden"}), 403
+    except Exception:
+        pass
+
+    attrs = harvest_part_attrs(p)
+    norm_rev = _normalized_revision(p, attrs)
+    meta = current_app.config.get("PROCESS_META", {})
+    proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
+    classification = classify_part(attrs, list(p.processes or []), meta, category=p.category or "")
+    missing = insights_missing_fields(attrs, p.description or "", list(p.processes or []), meta)
+    deliverables_present = _deliverables_present(p.part_number, norm_rev)
+    where_used_count, total_qty = _where_used_stats(p.part_number, norm_rev)
+    has_bom = _has_bom_children(p.part_number, norm_rev)
+    missing_recommended = recommended_deliverables(classification, deliverables_present, attrs, has_bom)
+
+    return jsonify(
+        {
+            "part_number": p.part_number,
+            "revision": norm_rev,
+            "classification": classification,
+            "processes_normalized": proc_list,
+            "missing_fields": missing,
+            "deliverables_present": deliverables_present,
+            "deliverables_missing_recommended": missing_recommended,
+            "where_used_count": where_used_count,
+            "total_qty_used": total_qty,
+        }
+    )
+
+
+@bp.post("/parts/<pn>/notes")
+@login_required
+@permissions_required("items.edit")
+@csrf.exempt
+def part_notes_update(pn):
+    pn = (pn or "").strip()
+    data = request.get_json(silent=True) or {}
+    rev = data.get("rev") if "rev" in data else request.args.get("rev")
+    notes = (data.get("notes") or "").strip()
+    p = _find_part_doc(pn, rev)
+    if not p:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    attrs = dict(p.attrs or {})
+    attrs["notes"] = notes
+    p.attrs = attrs
+    p.updated_at = datetime.utcnow()
+    p.save()
+    try:
+        log_action(
+            "part.notes.update",
+            resource_type="part",
+            resource=f"{p.part_number}:{p.revision or ''}",
+            meta={"notes_len": len(notes)},
+        )
+    except Exception:
+        pass
+    return jsonify({"ok": True, "notes": notes})
+
+
+@bp.post("/parts/<pn>/comments")
+@login_required
+@permissions_required("items.edit")
+@csrf.exempt
+def part_comments_add(pn):
+    pn = (pn or "").strip()
+    data = request.get_json(silent=True) or {}
+    rev = data.get("rev") if "rev" in data else request.args.get("rev")
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "missing text"}), 400
+    p = _find_part_doc(pn, rev)
+    if not p:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    attrs = dict(p.attrs or {})
+    comments = attrs.get("comments")
+    if not isinstance(comments, list):
+        comments = []
+    comment = {
+        "ts": datetime.utcnow().isoformat(),
+        "author": getattr(current_user, "email", "") or "",
+        "text": text,
+    }
+    comments.append(comment)
+    attrs["comments"] = comments
+    p.attrs = attrs
+    p.updated_at = datetime.utcnow()
+    p.save()
+    try:
+        log_action(
+            "part.comments.add",
+            resource_type="part",
+            resource=f"{p.part_number}:{p.revision or ''}",
+            meta={"comment_len": len(text)},
+        )
+    except Exception:
+        pass
+    return jsonify({"ok": True, "comment": comment})
 
 
 @bp.post("/part_delete")
