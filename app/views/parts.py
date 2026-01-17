@@ -495,7 +495,7 @@ def parts_lazy():
                 "material": attrs.get("material", ""),
                 "finish": attrs.get("finish", ""),
                 "mass": attrs.get("mass", ""),
-                "processes": normalize_processes(attrs, current_app.config.get("PROCESS_META", {})),
+                "processes": normalize_process_list(attrs, list(p.processes or []), current_app.config.get("PROCESS_META", {})),
                 "thumb_urls": thumb_urls_for(pn, rev or None),
                 "has_pdf": "pdf" in groups,
                 "has_png": "png" in groups,

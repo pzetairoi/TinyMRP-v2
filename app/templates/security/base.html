@@ -110,8 +110,12 @@
                   {{ current_user.email or 'User' }}
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navUser">
+                  <li><a class="dropdown-item" href="/ui/dashboard">Dashboard</a></li>
+                  <li><a class="dropdown-item" href="/ui/parts">Parts</a></li>
+                  <li><a class="dropdown-item" href="/ui/bom">BOM</a></li>
+                  <li><hr class="dropdown-divider"></li>
                   {% if current_user.has_role('admin') %}
-                  <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Dashboard</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Admin Dashboard</a></li>
                   <li><a class="dropdown-item" href="/ui/admin/addin">Add-in Admin</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
@@ -120,7 +124,7 @@
                   <li><hr class="dropdown-divider"></li>
                   {% endif %}
                   <li><a class="dropdown-item" href="{{ url_for('main.app_home') }}">My Home</a></li>
-                  <li><a class="dropdown-item" href="/ui/addin/tokens">API Tokens</a></li>
+                  <li><a class="dropdown-item" href="/ui/addin/tokens">Tokens</a></li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
                     <form class="px-3" method="post" action="{{ url_for_security('logout') }}">

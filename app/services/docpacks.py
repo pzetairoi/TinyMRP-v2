@@ -9,6 +9,7 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs, ALIASES
+from app.services.processmeta import normalize_processes
 from app.services.filenames import build_output_name
 
 
@@ -26,10 +27,15 @@ class DocPackOptions:
     want_selected_files: bool = True
     want_pdf_binder: bool = False
     want_visual_list: bool = False
+    want_cover_page: bool = False
+    want_whereused_report: bool = False
     fabrication_pack: bool = False
+    binder_add_cover: bool = True
     binder_add_index: bool = True
     binder_add_datasheets: bool = False
+    binder_add_visual_list: bool = True
     binder_add_hardware_summary: bool = True
+    binder_add_whereused: bool = False
     binder_page_numbers: bool = True
     # binder stamps
     stamp_quote: bool = False
@@ -64,13 +70,15 @@ def _part_description(part: Optional[Part], attrs: Optional[Dict] = None) -> str
 def _part_processes(part: Optional[Part]) -> List[str]:
     if not part:
         return []
-    if isinstance(getattr(part, "processes", None), list):
-        return [str(x).strip().lower() for x in (part.processes or []) if x]
     attrs = getattr(part, "attrs", {}) or {}
-    procs = attrs.get("processes") or []
-    if isinstance(procs, list):
-        return [str(x).strip().lower() for x in procs if x]
-    return []
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    proc_list = normalize_processes(attrs, meta)
+    if isinstance(getattr(part, "processes", None), list) and part.processes:
+        extra = normalize_processes({"processes": list(part.processes or [])}, meta)
+        for p in extra:
+            if p not in proc_list:
+                proc_list.append(p)
+    return proc_list
 
 
 def _flatten_bom(
@@ -144,7 +152,7 @@ def _passes_process_filter(part: Part, selected: Optional[List[str]], mode: str)
         return True
     if not selected:
         return True
-    procs = [p.lower() for p in (getattr(part, "processes", []) or []) if p]
+    procs = _part_processes(part)
     for p in selected:
         if p.lower() in procs:
             return True
@@ -592,8 +600,8 @@ def _visual_list_pdf(
         # compute origin of the cell (top-left)
         x = x0 + col * (box_w + gap)
         y = y0 - (row_in_page + 1) * (box_h + gap)
-        # base box
-        c.setStrokeGray(0.25); c.setLineWidth(1.2)
+        # base box (darker stroke for consistent visibility)
+        c.setStrokeColorRGB(0.1, 0.1, 0.1); c.setLineWidth(1.6)
         c.setFillColorRGB(1,1,1)
         c.rect(x, y, box_w, box_h, stroke=1, fill=1)
         # process colored rings inside the border
@@ -729,8 +737,8 @@ def _visual_list_pdf(
             r_y = y0 - (box_h + gap)
             r_w = min(W - 2*margin, cols * (box_w + gap) - gap)
             r_h = box_h
-            # base box
-            c.setStrokeGray(0.25); c.setLineWidth(1.2)
+            # base box (darker stroke for consistent visibility)
+            c.setStrokeColorRGB(0.1, 0.1, 0.1); c.setLineWidth(1.6)
             c.setFillColorRGB(1,1,1)
             c.rect(r_x, r_y, r_w, r_h, stroke=1, fill=1)
             # image area on left, wider than normal
@@ -930,12 +938,122 @@ def _hardware_summary_pdf(rows: List[Dict[str, object]]) -> Optional[bytes]:
     return buf.getvalue()
 
 
-def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
-    """Generate a single-page PDF cover with PN/REV, description, centered image, and a properties table at the bottom.
+def _whereused_rows(root_pn: str, root_rev: Optional[str]) -> List[Dict[str, object]]:
+    rows: Dict[Tuple[str, str], Dict[str, object]] = {}
+    if not root_pn:
+        return []
+    try:
+        if "child_pn" in BOMLink._fields:
+            q = BOMLink.objects(child_pn=root_pn)
+            if root_rev is not None and "child_rev" in BOMLink._fields:
+                q = q.filter(child_rev=(root_rev or ""))
+            links = q
+        else:
+            child_part = Part.objects(part_number=root_pn).only("id").first()
+            links = BOMLink.objects(child=child_part) if child_part else []
+    except Exception:
+        links = []
 
-    All textual data is fully visible: description, main properties, and bottom table wrap across multiple lines as needed.
-    The image area flexes to fill the remaining space between the header text and the bottom table.
-    """
+    for l in links:
+        if "parent_pn" in BOMLink._fields:
+            parent_pn = getattr(l, "parent_pn", None)
+            parent_rev = getattr(l, "parent_rev", "") if hasattr(l, "parent_rev") else ""
+        else:
+            parent_obj = getattr(l, "parent", None)
+            parent_pn = getattr(parent_obj, "part_number", None)
+            parent_rev = getattr(parent_obj, "revision", "") if parent_obj else ""
+        if not parent_pn:
+            continue
+        key = (parent_pn, parent_rev or "")
+        row = rows.get(key)
+        if row is None:
+            pdoc = _part_by(parent_pn, parent_rev or "")
+            desc = _part_description(pdoc) if pdoc else ""
+            row = {
+                "parent_pn": parent_pn,
+                "parent_rev": parent_rev or "",
+                "description": desc,
+                "qty": 0.0,
+            }
+            rows[key] = row
+        qty = getattr(l, "qty", 0) or 0
+        try:
+            row["qty"] = float(row.get("qty") or 0.0) + float(qty)
+        except Exception:
+            pass
+
+    return sorted(rows.values(), key=lambda r: (r.get("parent_pn") or "", r.get("parent_rev") or ""))
+
+
+def _whereused_report_pdf(rows: List[Dict[str, object]], root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet
+    except Exception:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=20*mm, rightMargin=20*mm, topMargin=20*mm, bottomMargin=20*mm)
+    styles = getSampleStyleSheet()
+
+    flowables = []
+    flowables.append(Paragraph("Where Used", styles["Heading2"]))
+    flowables.append(Spacer(0, 4*mm))
+
+    try:
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        ts = ""
+    if root_pn:
+        rev_s = root_rev or ""
+        flowables.append(Paragraph(f"Part: {root_pn}    Rev: {rev_s}", styles["Normal"]))
+    if ts:
+        flowables.append(Paragraph(f"Generated: {ts}", styles["Normal"]))
+    flowables.append(Spacer(0, 6*mm))
+
+    if not rows:
+        flowables.append(Paragraph("No where-used records found.", styles["Normal"]))
+        doc.build(flowables)
+        return buf.getvalue()
+
+    table_data = [["Parent PN", "Rev", "Description", "Total Qty"]]
+    for r in rows:
+        qty = r.get("qty") or 0
+        try:
+            qty_s = f"{float(qty):g}"
+        except Exception:
+            qty_s = str(qty)
+        table_data.append([
+            str(r.get("parent_pn") or ""),
+            str(r.get("parent_rev") or ""),
+            str(r.get("description") or ""),
+            qty_s,
+        ])
+
+    col_widths = [32*mm, 16*mm, 90*mm, 20*mm]
+    table = Table(table_data, colWidths=col_widths)
+    style = TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("GRID", (0, 0), (-1, -1), 0.8, colors.black),
+    ])
+    table.setStyle(style)
+    flowables.append(table)
+    doc.build(flowables)
+    return buf.getvalue()
+
+
+def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
+    """Generate a minimal cover page with PN/REV, description, logo, and footer fields."""
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import A4
@@ -944,299 +1062,110 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     except Exception:
         return None
 
-    # Resolve part and attributes
     pdoc = _part_by(root_pn, root_rev or "")
     attrs = harvest_part_attrs(pdoc) if pdoc else {}
-    desc = _part_description(pdoc, attrs) if pdoc else ''
+    desc = _part_description(pdoc, attrs) if pdoc else ""
 
-    # Image selection (PNG preview or fallback logo)
-    root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
-    png_path = None
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    processes = normalize_processes(attrs, meta)
+    if pdoc and isinstance(getattr(pdoc, "processes", None), list):
+        extra = normalize_processes({"processes": list(pdoc.processes or [])}, meta)
+        for p in extra:
+            if p not in processes:
+                processes.append(p)
+    proc_text = ", ".join([p for p in processes if p])
+
+    author = ""
+    for key in ("author", "drawnby", "checkedby", "approvedby"):
+        v = (attrs or {}).get(key)
+        if v and str(v).strip():
+            author = str(v).strip()
+            break
+
+    related_file = ""
     try:
-        q = PartFile.objects(part_number__iexact=root_pn, revision__iexact=(root_rev or ""), ext_group="png", is_dwg=False).order_by("-mtime_iso")
-        pf = q.first()
+        q = PartFile.objects(part_number__iexact=root_pn, ext__iexact="pdf")
+        if root_rev is not None:
+            q = q.filter(revision__iexact=(root_rev or ""))
+        pf = q.order_by("rel_path").first()
         if pf:
-            pth = pf.path if os.path.isabs(pf.path) else os.path.join(root, pf.rel_path.replace("/", os.sep))
-            if os.path.isfile(pth):
-                png_path = pth
+            related_file = os.path.basename(pf.rel_path or pf.path or "")
     except Exception:
-        pass
-    if not png_path:
-        png_path = _static_image_path('tinylogo.png')
+        related_file = ""
 
-    # Layout constants
-    W, H = A4
-    margin = 18*mm
-    gap = 8*mm
-    img_min_h = H/4.0
-    img_w = W - 2*margin
-
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
-
-    # Header: PN/REV
-    title = f"{root_pn}  REV {root_rev or ''}".strip()
-    c.setFont("Helvetica-Bold", 24)
-    c.drawString(margin, H - margin - 8*mm, title)
-
-    # Generated timestamp
-    y = H - margin - 16*mm
     try:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
     except Exception:
         ts = ""
-    if ts:
-        c.setFont("Helvetica", 11)
-        c.drawString(margin, y, f"Generated: {ts}")
-        y -= 6*mm
 
-    # Description (wrap fully)
+    W, H = A4
+    margin = 20 * mm
+    logo_w = 30 * mm
+    logo_h = 12 * mm
+    header_w = W - (2 * margin) - logo_w - 6 * mm
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+
+    # Logo top-right
+    _draw_svg_or_png(c, W - margin - logo_w, H - margin - logo_h, logo_w, logo_h, "logo.svg", "logo.png")
+
+    def _wrap_lines(text: str, font: str, size: float, max_w: float) -> List[str]:
+        words = (text or "").split()
+        if not words:
+            return []
+        lines: List[str] = []
+        cur = ""
+        for w in words:
+            trial = (cur + " " + w).strip()
+            if stringWidth(trial, font, size) <= max_w:
+                cur = trial
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+        return lines
+
+    # Header: PN/REV and description
+    y = H - margin
+    title = root_pn or ""
+    if root_rev:
+        title = f"{root_pn}  REV {root_rev}"
+    c.setFont("Helvetica-Bold", 18)
+    for line in _wrap_lines(title, "Helvetica-Bold", 18, max_w=header_w):
+        y -= 7 * mm
+        c.drawString(margin, y, line)
+
     if desc:
-        c.setFont("Helvetica", 13)
-        avail_w = W - 2*margin
-        words = desc.split(); lines=[]; cur=''
-        for w in words:
-            t = (cur + ' ' + w).strip()
-            if stringWidth(t, "Helvetica", 13) <= avail_w:
-                cur = t
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = w
-        if cur:
-            lines.append(cur)
-        for ln in lines:
-            c.drawString(margin, y, ln)
-            y -= 6*mm
+        c.setFont("Helvetica", 12)
+        for line in _wrap_lines(desc, "Helvetica", 12, max_w=header_w):
+            y -= 6 * mm
+            c.drawString(margin, y, line)
 
-    # Main properties (wrap fully)
-    main_keys = ["approvedby", "material", "processes", "finish", "mass", "oem", "oem_partnumber", "link"]
-    def _val(k):
-        v = attrs.get(k, "") if attrs else ""
-        if k == "processes" and isinstance(v, list):
-            v = ", ".join([str(x) for x in v if x])
-        return v
-    c.setFont("Helvetica", 10)
-    for k in main_keys:
-        v = _val(k)
-        if not v:
-            continue
-        label = k.replace('_',' ').title() if k != 'oem_partnumber' else 'OEM Partnumber'
-        text = f"{label}: {v}"
-        avail = W - 2*margin
-        words = text.split(); cur=''; lines=[]
-        for w in words:
-            t = (cur + ' ' + w).strip()
-            if stringWidth(t, "Helvetica", 10) <= avail:
-                cur = t
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = w
-        if cur:
-            lines.append(cur)
-        for ln in lines:
-            c.drawString(margin, y, ln)
-            y -= 5.2*mm
+    # Footer: author, process, generated date, related file
+    footer_items: List[str] = []
+    if author:
+        footer_items.append(f"Author: {author}")
+    if proc_text:
+        footer_items.append(f"Process: {proc_text}")
+    if ts:
+        footer_items.append(f"Generated: {ts}")
+    if related_file:
+        footer_items.append(f"Related file: {related_file}")
 
-    # Build bottom table content
-    def labelize(k: str) -> str:
-        if not k:
-            return ''
-        s = str(k).replace('_', ' ').strip()
-        s = ' '.join([('OEM' if w.lower()=="oem" else ('UOM' if w.lower()=="uom" else w.capitalize())) for w in s.split()])
-        return s
+    footer_lines: List[str] = []
+    for item in footer_items:
+        footer_lines.extend(_wrap_lines(item, "Helvetica", 10, max_w=W - 2 * margin))
 
-    kv = []
-    if attrs:
-        a = dict(attrs)
-        if isinstance(a.get('processes'), list):
-            a['processes'] = ", ".join([str(x) for x in a.get('processes') if x])
-        for k, v in sorted(a.items()):
-            if k in ("partnumber", "revision", "description"):
-                continue
-            if v in (None, ""):
-                continue
-            kv.append((labelize(k), str(v)))
-
-    col_count = 3 if len(kv) >= 12 else (2 if len(kv) >= 6 else 1)
-    avail_w = W - 2*margin
-    col_w = avail_w / max(1, col_count)
-    # Padding and widths tuned for readability: ensure a sensible minimum label width
-    pad = 8.0
-    label_w = max(80.0, min(160.0, col_w * 0.40))
-    value_w = max(40.0, col_w - label_w - pad - 2.0)
-
-    def _wrap_words(text: str, font: str, size: float, max_w: float) -> List[str]:
-        # Word-wrap only; do not break tokens (for labels)
-        from reportlab.pdfbase.pdfmetrics import stringWidth as _sw
-        words = (text or '').split()
-        lines: List[str] = []
-        cur = ''
-        for w in words:
-            trial = (cur + ' ' + w).strip()
-            if _sw(trial, font, size) <= max_w:
-                cur = trial
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = w
-        if cur:
-            lines.append(cur)
-        return lines
-
-    def _wrap_break(text: str, font: str, size: float, max_w: float) -> List[str]:
-        # Greedy wrap that preserves order and breaks long tokens if needed.
-        # Do not introduce spaces between chunks of the same original token.
-        from reportlab.pdfbase.pdfmetrics import stringWidth as _sw
-        def _break_token(tok: str) -> List[str]:
-            out: List[str] = []
-            s = tok
-            while s:
-                i = 1
-                while i <= len(s) and _sw(s[:i], font, size) <= max_w:
-                    i += 1
-                if i == 1:
-                    out.append(s[0])
-                    s = s[1:]
-                else:
-                    out.append(s[:i-1])
-                    s = s[i-1:]
-            return out
-        words = (text or '').split()
-        # Build a sequence of (piece, joiner) where joiner is '' for broken pieces and ' ' for word gaps
-        seq: List[tuple[str, str]] = []
-        for w in words:
-            if _sw(w, font, size) <= max_w:
-                seq.append((w, ' ' if seq else ''))
-            else:
-                parts = _break_token(w)
-                for j, p in enumerate(parts):
-                    # For first part of a word, use ' ' as joiner if it isn't the first element overall
-                    # For subsequent parts, no joiner so we don't inject spaces inside tokens
-                    joiner = (' ' if (j == 0 and seq) else '')
-                    seq.append((p, joiner))
-        # Greedily pack pieces into lines using provided joiners
-        lines: List[str] = []
-        cur = ''
-        for piece, joiner in seq:
-            trial = (cur + joiner + piece) if cur else piece
-            if _sw(trial, font, size) <= max_w:
-                cur = trial
-            else:
-                if cur:
-                    lines.append(cur)
-                # When starting a new line, drop the joiner (line start has no preceding separator)
-                cur = piece
-        if cur:
-            lines.append(cur)
-        return lines
-
-    # prepare entries with computed heights
-    line_h = 10.0
-    row_gap = 3.0
-    entries = []  # (k_lines, v_lines, height)
-    for k, v in kv:
-        # Allow breaking long label tokens as well so very long field names can wrap
-        kl = _wrap_break(f"{k}:", "Helvetica-Bold", 8.8, label_w)
-        vl = _wrap_break(str(v), "Helvetica", 8.6, value_w)
-        h = max(len(kl), len(vl)) * line_h + row_gap
-        entries.append((kl, vl, h))
-
-    # Distribute sequentially into columns to preserve order, balancing by target height
-    ncols = max(1, col_count)
-    total_h = sum(h for _, _, h in entries) or 0.0
-    target_h = (total_h / ncols) if ncols > 0 else total_h
-    cols: List[List[Tuple[list, list, float]]] = []
-    heights: List[float] = []
-    cur: List[Tuple[list, list, float]] = []
-    cur_h = 0.0
-    for e in entries:
-        if heights.__len__() < (ncols - 1) and cur_h > 0 and (cur_h + e[2]) > target_h:
-            cols.append(cur); heights.append(cur_h)
-            cur = [e]; cur_h = e[2]
-        else:
-            cur.append(e); cur_h += e[2]
-    cols.append(cur); heights.append(cur_h)
-    # pad to ncols
-    while len(cols) < ncols:
-        cols.append([]); heights.append(0.0)
-
-    table_h = max(heights) if entries else 0.0
-    img_y0 = margin + table_h + gap
-    img_h = max(0.0, (y - gap) - img_y0)
-    if img_h < img_min_h:
-        # allow table to consume more space and reduce image if needed
-        img_h = max(0.0, img_min_h if (y - gap) - (margin + gap) >= img_min_h else (y - gap) - (margin + gap))
-        img_y0 = max(margin + gap, (y - gap) - img_h)
-
-    # Draw image (cropped like thumbnails) if any height available
-    if img_h > 0:
-        drew = False
-        try:
-            from PIL import Image, ImageOps, ImageFilter
-            from reportlab.lib.utils import ImageReader
-
-            def _crop_like_thumb(path: str):
-                im = Image.open(path)
-                base_rgb = im.convert("RGB")
-                inv = ImageOps.invert(base_rgb.convert("L"))
-                mask = inv.point(lambda p: 255 if p > 0 else 0, mode='1').convert('L')
-                mask = mask.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.MinFilter(3))
-                mask = mask.filter(ImageFilter.MinFilter(3)).filter(ImageFilter.MaxFilter(3))
-                rgba = base_rgb.convert("RGBA")
-                rgba.putalpha(mask)
-                bbox = mask.getbbox()
-                if bbox:
-                    x0, y0, x1, y1 = bbox
-                    if (x1-x0) * (y1-y0) > 8000:
-                        rgba = rgba.crop(bbox)
-                return rgba
-
-            if png_path and os.path.isfile(png_path):
-                try:
-                    proc = _crop_like_thumb(png_path)
-                    iw, ih = proc.size
-                    if iw > 0 and ih > 0:
-                        sx = img_w / float(iw)
-                        sy = img_h / float(ih)
-                        s = min(sx, sy)
-                        rw = max(1.0, iw * s)
-                        rh = max(1.0, ih * s)
-                        dx = margin + (img_w - rw)/2.0
-                        dy = img_y0 + (img_h - rh)/2.0
-                        c.drawImage(ImageReader(proc), dx, dy, width=rw, height=rh, preserveAspectRatio=True, anchor='sw', mask='auto')
-                        drew = True
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        if not drew:
-            _draw_svg_or_png(c, margin, img_y0, img_w, img_h, 'tinylogo.svg', 'tinylogo.png')
-
-    # Draw table from top to bottom per column to preserve item order
-    try:
-        for idx, col in enumerate(cols):
-            x = margin + idx * col_w
-            y_top = margin + table_h
-            y = y_top - line_h
-            for k_lines, v_lines, h in col:
-                # top-aligned label and value blocks
-                c.setFont("Helvetica-Bold", 8.8)
-                ly = y
-                for li in k_lines:
-                    c.drawString(x, ly, li)
-                    ly -= line_h
-                c.setFont("Helvetica", 8.6)
-                vx = x + label_w + pad
-                vy = y
-                for li in v_lines:
-                    c.drawString(vx, vy, li)
-                    vy -= line_h
-                # advance cursor by full row height
-                y -= (max(len(k_lines), len(v_lines)) * line_h + row_gap)
-    except Exception:
-        pass
+    if footer_lines:
+        line_h = 5 * mm
+        y = margin + (len(footer_lines) - 1) * line_h
+        c.setFont("Helvetica", 10)
+        for line in footer_lines:
+            c.drawString(margin, y, line)
+            y -= line_h
 
     c.save()
     return buf.getvalue()
@@ -1397,15 +1326,29 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # 2) Filter parts by classification/process
     filtered_flat: List[Tuple[str,str,float]] = []
     # fabrication_pack convenience filters
-    fab_procs = {"lasercut", "welding", "machine"}
+    fab_procs = {
+        "welding",
+        "lasercut",
+        "profile cut",
+        "folding",
+        "rolling",
+        "cutting",
+        "machine",
+        "3d laser",
+        "casting",
+    }
     force_proc_filter = False
     if getattr(opts, "fabrication_pack", False):
         # restrict to fab processes
         opts.process_mode = "selected"
         opts.processes = list(sorted(fab_procs))
         force_proc_filter = True
-        # restrict file types
-        opts.file_types = ["dxf", "step", "pdf"]
+        # scope of supply: exclude consumed parts
+        opts.include_consumed = False
+        # include docs for fabrication pack
+        opts.file_types = ["dxf", "step", "pdf", "png"]
+        opts.want_selected_files = True
+        opts.want_excel_bom = True
 
     for pn, rev, qty in flat:
         p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
@@ -1420,7 +1363,20 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # 3) Collect files
     # include datasheets in binder if requested (affects file_types for binder only)
     chosen_files = _collect_files(filtered_flat + [(opts.root_pn, opts.root_rev or "", 1.0)], opts.file_types)
-    want_zip = opts.want_selected_files or opts.want_excel_bom or opts.want_visual_list or (opts.want_pdf_binder and len(chosen_files) != 1)
+    output_count = 0
+    if opts.want_selected_files:
+        output_count += 1
+    if opts.want_excel_bom:
+        output_count += 1
+    if opts.want_visual_list:
+        output_count += 1
+    if opts.want_cover_page:
+        output_count += 1
+    if opts.want_whereused_report:
+        output_count += 1
+    if opts.want_pdf_binder:
+        output_count += 1
+    want_zip = bool(opts.want_selected_files) or output_count != 1
     # 4) Build payloads (ZIP container)
     zip_buf = io.BytesIO()
     z: Optional[zipfile.ZipFile] = zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED)
@@ -1452,19 +1408,19 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             except Exception:
                 continue
 
-    # Visual list PDF
-    vis_pages = 0
-    if opts.want_visual_list:
-        # For binder visual list, always use full-BOM aggregated quantities
+    # Precompute visual list rows when needed (standalone or binder sections)
+    vis_filtered: List[Tuple[str, str, float]] = []
+    need_vis = bool(opts.want_visual_list) or (
+        bool(opts.want_pdf_binder) and (bool(opts.binder_add_visual_list) or bool(opts.binder_add_hardware_summary))
+    )
+    if need_vis:
         vis_full = _flatten_bom(
             opts.root_pn,
             opts.root_rev,
             full=True,
             include_consumed=bool(opts.include_consumed),
-            terminal_processes=["welding","purchase","machine"],
+            terminal_processes=["welding", "purchase", "machine"],
         )
-        # Apply same classification/process filters as for the binder
-        vis_filtered: List[Tuple[str,str,float]] = []
         for pn, rev, qty in vis_full:
             p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
             if not p:
@@ -1474,6 +1430,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             if not _passes_process_filter(p, opts.processes, opts.process_mode):
                 continue
             vis_filtered.append((pn, rev, qty))
+
+    # Visual list PDF (standalone)
+    if opts.want_visual_list:
         # Standalone visual list: omit root special placement
         vis_pdf = _visual_list_pdf(vis_filtered, None, None)
         if not vis_pdf:
@@ -1485,6 +1444,31 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             # single artifact path (rare)
             vis_name = build_output_name(f"{base_stub}_VisualList", "pdf", max_len=96, include_time=False, now=build_ts)
             return (vis_name, vis_pdf, "application/pdf")
+
+    cover_pdf = None
+    if opts.want_cover_page or (opts.want_pdf_binder and opts.binder_add_cover):
+        cover_pdf = _cover_page_pdf(opts.root_pn, opts.root_rev)
+        if not cover_pdf:
+            raise RuntimeError("Failed to build binder cover page. Ensure reportlab is installed.")
+    if opts.want_cover_page and cover_pdf:
+        cover_name = build_output_name(f"{base_stub}_Cover", "pdf", max_len=96, include_time=False, now=build_ts)
+        if want_zip:
+            z.writestr(cover_name, cover_pdf)
+        else:
+            return (cover_name, cover_pdf, "application/pdf")
+
+    whereused_pdf = None
+    if opts.want_whereused_report or (opts.want_pdf_binder and opts.binder_add_whereused):
+        where_rows = _whereused_rows(opts.root_pn, opts.root_rev)
+        whereused_pdf = _whereused_report_pdf(where_rows, opts.root_pn, opts.root_rev)
+        if not whereused_pdf:
+            raise RuntimeError("Failed to build Where-Used report. Ensure reportlab is installed.")
+    if opts.want_whereused_report and whereused_pdf:
+        where_name = build_output_name(f"{base_stub}_WhereUsed", "pdf", max_len=96, include_time=False, now=build_ts)
+        if want_zip:
+            z.writestr(where_name, whereused_pdf)
+        else:
+            return (where_name, whereused_pdf, "application/pdf")
 
     # PDF binder (with index & page numbers)
     if opts.want_pdf_binder:
@@ -1526,38 +1510,26 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         except Exception:
             pass
 
-        # Preface: Cover page, Index (always), and optional VisualList
+        # Preface: cover, index, and optional sections
         preface_bytes: List[Tuple[str, bytes]] = []
-        cover = _cover_page_pdf(opts.root_pn, opts.root_rev)
-        if not cover:
-            raise RuntimeError("Failed to build binder cover page. Ensure reportlab is installed.")
-        preface_bytes.append(("Cover.pdf", cover))
+        cover = cover_pdf if opts.binder_add_cover else None
+        if opts.binder_add_cover:
+            if not cover:
+                raise RuntimeError("Failed to build binder cover page. Ensure reportlab is installed.")
+            preface_bytes.append(("Cover.pdf", cover))
         vis_pdf = None
-        vis_filtered: List[Tuple[str,str,float]] = []
-        if opts.want_visual_list or opts.binder_add_hardware_summary:
-            # Use full-BOM aggregated quantities and sort children by PN
-            vis_full = _flatten_bom(
-                opts.root_pn,
-                opts.root_rev,
-                full=True,
-                include_consumed=bool(opts.include_consumed),
-                terminal_processes=["welding","purchase","machine"],
-            )
-            for pn, rev, qty in vis_full:
-                p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
-                if not p:
-                    continue
-                if not _passes_classified_filter(p, opts.classified_filter):
-                    continue
-                if not _passes_process_filter(p, opts.processes, opts.process_mode):
-                    continue
-                vis_filtered.append((pn, rev, qty))
-        if opts.want_visual_list:
-            # sort here via _visual_list_pdf which also enforces root first
+        if opts.binder_add_visual_list:
             vis_pdf = _visual_list_pdf(vis_filtered, opts.root_pn, opts.root_rev)
             if not vis_pdf:
                 raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
             preface_bytes.append(("VisualList.pdf", vis_pdf))
+        if opts.binder_add_whereused:
+            if whereused_pdf is None:
+                where_rows = _whereused_rows(opts.root_pn, opts.root_rev)
+                whereused_pdf = _whereused_report_pdf(where_rows, opts.root_pn, opts.root_rev)
+                if not whereused_pdf:
+                    raise RuntimeError("Failed to build Where-Used report. Ensure reportlab is installed.")
+            preface_bytes.append(("WhereUsed.pdf", whereused_pdf))
 
         if opts.binder_add_hardware_summary:
             try:
@@ -1588,16 +1560,40 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             from reportlab.pdfbase.pdfmetrics import stringWidth
             from PyPDF2 import PdfReader
 
-            # preface counts excluding index (cover + optional visual)
+            desc_cache: Dict[Tuple[str, str], str] = {}
+            multi_by_pn: Dict[str, int] = {}
+            for pn, rev, _ in pdf_items:
+                multi_by_pn[pn] = multi_by_pn.get(pn, 0) + 1
+
+            def _entry_label(pn: str, rev: str, path: str) -> str:
+                key = (pn, _norm_rev(rev))
+                if key not in desc_cache:
+                    pdoc = _part_by(pn, _norm_rev(rev))
+                    desc_cache[key] = _part_description(pdoc) if pdoc else ""
+                desc = desc_cache.get(key) or ""
+                label = pn
+                if desc:
+                    label = f"{pn} - {desc}"
+                if multi_by_pn.get(pn, 0) > 1:
+                    base = os.path.splitext(os.path.basename(path))[0]
+                    if base and base.lower() not in label.lower():
+                        label = f"{label} ({base})" if label else base
+                return label
+
+            # preface counts excluding index
             cover_pages = 0
             vis_pages = 0
+            where_pages = 0
             hardware_pages = 0
             for name, b in preface_bytes:
-                if name.lower().startswith("cover"):
+                lc = name.lower()
+                if lc.startswith("cover"):
                     cover_pages += len(PdfReader(io.BytesIO(b)).pages)
-                if name.lower().startswith("visual"):
+                elif lc.startswith("visual"):
                     vis_pages += len(PdfReader(io.BytesIO(b)).pages)
-                if name.lower().startswith("hardware"):
+                elif lc.startswith("where"):
+                    where_pages += len(PdfReader(io.BytesIO(b)).pages)
+                elif lc.startswith("hardware"):
                     hardware_pages += len(PdfReader(io.BytesIO(b)).pages)
 
             # Helper to build the index PDF with an assumed index page count
@@ -1661,18 +1657,21 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     c.drawRightString(right_x, y, page_s)
                     y -= 6*mm
 
-                # Visual Summary entry first (always before father/children)
+                # Visual Summary entry first (always before body)
                 if vis_pdf:
                     vis_start = cover_pages + assumed_idx_pages + 1
                     _entry("Visual Summary", vis_start)
+                if where_pages:
+                    where_start = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + 1
+                    _entry("Where Used", where_start)
                 if hardware_pages:
-                    hw_start = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + 1
+                    hw_start = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + where_pages + 1
                     _entry("Hardware Summary", hw_start)
-                # Body entries: base name without extension (father then children)
-                pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + hardware_pages
-                for pth, start in zip(pdf_paths, body_starts):
-                    base = os.path.splitext(os.path.basename(pth))[0]
-                    _entry(base, pre_body_offset + start)
+                # Body entries: PN + Description
+                pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + where_pages + hardware_pages
+                for (pn, rev, pth), start in zip(pdf_items, body_starts):
+                    label = _entry_label(pn, rev, pth)
+                    _entry(label, pre_body_offset + start)
                 c.save()
                 return idx_io.getvalue()
 
@@ -1688,13 +1687,14 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             pass
 
         # If we have body PDFs, compute part -> first page map and rebuild VisualList with page numbers
-        if pdf_paths and opts.want_visual_list:
+        if pdf_paths and opts.binder_add_visual_list:
             try:
                 # Compute cover/index/visual page counts now that index is finalized
                 from PyPDF2 import PdfReader
                 cover_pages = 0
                 vis_pages = 0
                 index_pages = 0
+                where_pages = 0
                 hardware_pages = 0
                 for name, b in preface_bytes:
                     lc = name.lower()
@@ -1704,9 +1704,11 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                         index_pages += len(PdfReader(io.BytesIO(b)).pages)
                     elif lc.startswith('visual'):
                         vis_pages += len(PdfReader(io.BytesIO(b)).pages)
+                    elif lc.startswith('where'):
+                        where_pages += len(PdfReader(io.BytesIO(b)).pages)
                     elif lc.startswith('hardware'):
                         hardware_pages += len(PdfReader(io.BytesIO(b)).pages)
-                pre_body_offset = cover_pages + index_pages + vis_pages + hardware_pages
+                pre_body_offset = cover_pages + index_pages + vis_pages + where_pages + hardware_pages
                 # Map absolute path -> start page
                 start_by_path = {p: s for p, s in zip(pdf_paths, body_starts)}
                 # For each part, pick earliest starting page among its PDFs
