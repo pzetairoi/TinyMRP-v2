@@ -24,6 +24,23 @@ def _latest_file(root: str, patterns: list[str]) -> str | None:
                 latest_mtime = mtime
     return latest
 
+
+def _latest_file_any(roots: list[str], patterns: list[str]) -> str | None:
+    latest = None
+    latest_mtime = -1.0
+    for root in roots:
+        path = _latest_file(root, patterns)
+        if not path:
+            continue
+        try:
+            mtime = os.path.getmtime(path)
+        except Exception:
+            continue
+        if mtime > latest_mtime:
+            latest = path
+            latest_mtime = mtime
+    return latest
+
 @bp.route("/")
 def index():
     return render_template("index.html")
@@ -36,8 +53,13 @@ def app_home():
 
 @bp.get("/downloads/macro")
 def download_macro():
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "OLD", "SourceCode", "app", "static", "misc"))
-    path = _latest_file(root, [".swp"])
+    roots = []
+    env_root = os.getenv("MACRO_FILES_ROOT") or ""
+    if env_root.strip():
+        roots.append(os.path.abspath(env_root))
+    roots.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "misc")))
+    roots.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "OLD", "SourceCode", "app", "static", "misc")))
+    path = _latest_file_any(roots, [".swp"])
     if not path or not os.path.isfile(path):
         abort(404)
     try:
