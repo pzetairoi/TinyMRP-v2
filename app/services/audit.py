@@ -17,6 +17,21 @@ def _safe_str(v: Any, max_len: int = 500) -> str:
     return s
 
 
+def _client_ip() -> str:
+    if not has_request_context():
+        return ""
+    try:
+        xff = request.headers.get("X-Forwarded-For") or ""
+        if xff:
+            return xff.split(",")[0].strip()
+        xri = request.headers.get("X-Real-IP") or ""
+        if xri:
+            return xri.strip()
+        return request.remote_addr or ""
+    except Exception:
+        return ""
+
+
 def log_action(action: str, resource_type: Optional[str] = None, resource: Optional[str] = None,
                meta: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """Create an AuditLog document with contextual info.
@@ -47,15 +62,31 @@ def log_action(action: str, resource_type: Optional[str] = None, resource: Optio
             _meta.setdefault("source", "cli")
         ip = ""
         ua = ""
+        method = ""
+        endpoint = ""
         if has_request_context():
             try:
-                ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "")
+                ip = _client_ip()
             except Exception:
                 ip = ""
             try:
-                ua = _safe_str(request.user_agent.string if request.user_agent else "")
+                ua = _safe_str(request.headers.get("User-Agent") or (request.user_agent.string if request.user_agent else ""))
             except Exception:
                 ua = ""
+            try:
+                method = _safe_str(request.method or "")
+            except Exception:
+                method = ""
+            try:
+                endpoint = _safe_str(request.path or "")
+            except Exception:
+                endpoint = ""
+            try:
+                _meta.setdefault("endpoint_name", _safe_str(request.endpoint or ""))
+                _meta.setdefault("referrer", _safe_str(request.referrer or ""))
+                _meta.setdefault("request_id", _safe_str(request.headers.get("X-Request-Id") or ""))
+            except Exception:
+                pass
         entry = AuditLog(
             user_id=str(getattr(user, "id", "")) if user else "",
             email=(getattr(user, "email", "") or "") if user else "",
@@ -65,6 +96,8 @@ def log_action(action: str, resource_type: Optional[str] = None, resource: Optio
             resource=resource or "",
             ip=ip,
             ua=ua,
+            method=method,
+            endpoint=endpoint,
             extra=_meta,
         )
         entry.save()

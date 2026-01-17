@@ -17,6 +17,8 @@ class AuditLog(Document):
     - resource: freeform identifier (like PN:REV, or rel path)
     - ip: remote ip address
     - ua: user-agent string (truncated if needed)
+    - method: HTTP method (GET/POST/etc)
+    - endpoint: request path (e.g., /downloads/macro)
     - meta: optional dictionary with extra details
     """
 
@@ -29,6 +31,8 @@ class AuditLog(Document):
     resource = StringField()
     ip = StringField()
     ua = StringField()
+    method = StringField()
+    endpoint = StringField()
     # Use 'extra' instead of 'meta' to avoid clashing with MongoEngine's meta options
     extra = DictField()
 
@@ -38,6 +42,10 @@ class AuditLog(Document):
             "-ts",
             "action",
             "email",
+            "ip",
+            "endpoint",
+            "method",
+            "user_id",
         ],
         "db_alias": DB_ALIAS,
     }
