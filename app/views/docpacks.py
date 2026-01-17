@@ -110,6 +110,10 @@ def build():
         want_selected_files=bool(gv("selected_files") in (True, "true", "1", 1, "on")),
         want_pdf_binder=bool(gv("pdf_binder") in (True, "true", "1", 1, "on")),
         want_visual_list=bool(gv("visual_list") in (True, "true", "1", 1, "on")),
+        want_hardware_summary=bool(
+            gv("hardware_summary") in (True, "true", "1", 1, "on")
+            or gv("hardware_list") in (True, "true", "1", 1, "on")
+        ),
         want_cover_page=bool(gv("cover_page") in (True, "true", "1", 1, "on")),
         want_whereused_report=bool(gv("whereused_report") in (True, "true", "1", 1, "on")),
         binder_add_cover=bool(gv("binder_add_cover") not in (False, None, "false", "0", 0)),

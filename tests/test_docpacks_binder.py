@@ -197,3 +197,31 @@ def test_binder_has_numbers_visual_boxes_and_center_stamp(app, tmp_path):
 
     vreader = PdfReader(io.BytesIO(visual_bytes))
     assert _has_box_strokes(vreader.pages[0])
+
+
+def test_hardware_summary_standalone(app, tmp_path):
+    root_dir = tmp_path
+    app.config["FILE_ROOT_LOCAL"] = str(root_dir)
+
+    root = Part(part_number="ASM-200", revision="", description="Root Assembly", processes=["assembly"]).save()
+    child = Part(part_number="HW-20", revision="", description="Washer", processes=["hardware"]).save()
+
+    BOMLink(parent_pn=root.part_number, parent_rev="", child_pn=child.part_number, child_rev="", qty=6).save()
+
+    opts = DocPackOptions(
+        root_pn=root.part_number,
+        root_rev="",
+        depth="full",
+        include_consumed=True,
+        want_selected_files=False,
+        want_hardware_summary=True,
+    )
+
+    with app.app_context():
+        name, data, mime = build_docpack(opts)
+
+    assert mime == "application/pdf"
+    assert "HardwareSummary" in name
+    reader = PdfReader(io.BytesIO(data))
+    assert len(reader.pages) >= 1
+    assert "Hardware Summary" in _page_text(reader.pages[0])

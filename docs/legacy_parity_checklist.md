@@ -9,10 +9,20 @@ This checklist captures legacy behaviors from `OLD/SourceCode` and maps them to 
   - Current: `app/services/docpacks.py` `_hardware_summary_rows` + `_hardware_summary_pdf`, option `binder_add_hardware_summary` in `DocPackOptions`; wired through `app/views/docpacks.py` + UI checkbox in `frontend/src/pages/PartDetailPage.tsx`.
   - Verification: `tests/test_docpacks_binder.py` asserts "Hardware Summary" appears in binder text when option enabled.
 
+- Hardware Summary standalone export
+  - Legacy: hardware list appeared inside the binder only.
+  - Current: `DocPackOptions.want_hardware_summary` (`hardware_summary` API key) emits a standalone `*_HardwareSummary.pdf` and is wired in `frontend/src/pages/PartDetailPage.tsx`.
+  - Verification: `tests/test_docpacks_binder.py` `test_hardware_summary_standalone` checks PDF output + header text.
+
 - Visual index boxes / borders
   - Legacy: `OLD/SourceCode/app/tinylib/publisher.py` `BoxyGrid.draw()` draws thick colored rectangles and borders.
   - Current: `app/services/docpacks.py` `_visual_list_pdf` increases stroke darkness/width for card borders.
   - Verification: `tests/test_docpacks_binder.py` checks stroke width >= 1.0 and rectangle ops.
+
+- Visual index card header shows PN/REV + description
+  - Legacy: `BoxyGrid.draw()` prints partnumber + revision at the top and description under it.
+  - Current: `app/services/docpacks.py` `_visual_list_pdf` renders `PN REV` on the header line with description below in smaller text.
+  - Verification: Manual (visual list card header text in standalone or binder section).
 
 - Page numbers bottom-right
   - Legacy: `OLD/SourceCode/app/tinylib/publisher.py` `pdf_pagenum()` draws bottom-right page number box/text.
@@ -96,6 +106,11 @@ This checklist captures legacy behaviors from `OLD/SourceCode` and maps them to 
   - Legacy: `pdf_pagenum()` selects `approved` vs `wip` based on status.
   - Current: `app/services/docpacks.py` selects `approved` > `wip` > `inprogress` and maps in-progress to a dedicated centered stamp.
   - Verification: Manual (stamp selection in docpack UI).
+
+- Approval icons use non-empty approved field
+  - Legacy: `OLD/SourceCode/app/templates/tinylib/part/details.html` shows approved icon when `approved` is populated.
+  - Current: `frontend/src/pages/PartDetailPage.tsx` treats non-empty `approved*` fields as approved; `app/services/docpacks.py` visual list uses the same rule; `app/views/parts.py` filter uses matching logic.
+  - Verification: Manual (approved icons in part detail and visual list).
 
 - Description field precedence
   - Legacy: `dictlist[i]["description"]` derived from part description.
