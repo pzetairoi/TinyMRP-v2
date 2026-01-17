@@ -24,6 +24,11 @@ class Part(Document):
         "indexes": [
             { "fields": ["part_number", "revision"], "unique": True, "name": "unique_part_rev" },
             { "fields": ["part_number"], "name": "part_number_idx" },
+            { "fields": ["updated_at"], "name": "parts_updated_at_idx" },
+            { "fields": ["processes"], "name": "parts_processes_idx" },
+            { "fields": ["description"], "name": "parts_description_idx" },
+            { "fields": ["attrs.material"], "name": "parts_material_idx" },
+            { "fields": ["attrs.finish"], "name": "parts_finish_idx" },
         ],
         "db_alias": DB_ALIAS
     }

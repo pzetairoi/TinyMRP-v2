@@ -36,8 +36,9 @@ export default function BomPage() {
   // PN comes from router (/ui/bom/:pn). If you are using the Jinja shell, it
   // also exists in window.__INITIAL__.pn; we fall back gracefully.
   const route = useParams()
-  const pn = route.pn || (window as any).__INITIAL__?.pn || ''
   const sp = new URLSearchParams(window.location.search)
+  const pnQuery = sp.get('pn') || sp.get('q') || ''
+  const pn = route.pn || (window as any).__INITIAL__?.pn || pnQuery || ''
   const rev = sp.get('rev') || ((window as any).__INITIAL__?.rev ?? '')
 
   // --- BOM Tree ---
@@ -161,6 +162,15 @@ export default function BomPage() {
   if (!urls || !urls.length) return <div style={{ width: 64, height: 40, background: '#f2f2f2', borderRadius: 8 }} />
   // simple fallback: if first fails try the next
   const [i, setI] = useState(0)
+  if (!pn) {
+    return (
+      <div className="p-3">
+        <h5 className="mb-2">BOM</h5>
+        <div className="text-muted">Select a part from the Parts list to view its BOM.</div>
+      </div>
+    )
+  }
+
   return (
     <img
       src={urls[i]}

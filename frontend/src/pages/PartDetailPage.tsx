@@ -79,6 +79,22 @@ type JobsOrdersRow = {
   top_desc?: string;
 };
 
+type PartInsights = {
+  classification: string;
+  processes_normalized: string[];
+  missing_fields: string[];
+  deliverables_present: Record<string, boolean>;
+  deliverables_missing_recommended: string[];
+  where_used_count: number;
+  total_qty_used: number;
+};
+
+type CommentRow = {
+  ts: string;
+  author: string;
+  text: string;
+};
+
 // threeMF viewer (lazy load)
 const ThreeMFViewer = React.lazy(() => import("../components/ThreeMFViewer"));
 
@@ -131,6 +147,16 @@ export default function PartDetailPage() {
   const [canPartsDelete, setCanPartsDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [canPartsEdit, setCanPartsEdit] = useState(false);
+  const [insights, setInsights] = useState<PartInsights | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [comments, setComments] = useState<CommentRow[]>([]);
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState("");
+  const [commentSaving, setCommentSaving] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
 
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
@@ -358,6 +384,7 @@ function bestUrl(f: FileRow): string {
         const j = await r.json();
         if (canceled) return;
 
+        const partAttrs = j.part?.attributes || j.part?.attrs || {};
         setPart(
           j.part
             ? {
@@ -366,10 +393,12 @@ function bestUrl(f: FileRow): string {
                 revision: j.part.revision || "",
                 category: j.part.category || "",
                 uom: j.part.uom || "EA",
-                attrs: j.part.attributes || j.part.attrs || {},
+                attrs: partAttrs,
               }
             : null
         );
+        setNotes(String(partAttrs?.notes || ""));
+        setComments(Array.isArray(partAttrs?.comments) ? partAttrs.comments : []);
 
         // --- files: handle both array and grouped object ---
         const arrFiles: FileRow[] = [];
@@ -408,17 +437,22 @@ function bestUrl(f: FileRow): string {
         setCanJobsManage(!!j.can_jobs_manage);
         setCanOrdersManage(!!j.can_orders_manage);
         setCanPartsDelete(!!j.can_parts_delete);
+        setCanPartsEdit(!!j.can_parts_edit);
       } catch (e) {
         console.error("part_detail failed", e);
-        if (!canceled) {
-          setPart(null);
-          setFiles([]);
-          setChildren([]);
-          setWU([]);
-          setDrawingUrls([]);
-          setImages([]);
-          setJobsOrders([]);
-        }
+          if (!canceled) {
+            setPart(null);
+            setFiles([]);
+            setChildren([]);
+            setWU([]);
+            setDrawingUrls([]);
+            setImages([]);
+            setJobsOrders([]);
+            setNotes("");
+            setComments([]);
+            setInsights(null);
+            setCanPartsEdit(false);
+          }
       } finally {
         if (!canceled) setLoading(false);
       }
@@ -426,6 +460,26 @@ function bestUrl(f: FileRow): string {
     return () => {
       canceled = true;
     };
+  }, [pn, rev]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!pn) return;
+      setInsightsLoading(true);
+      try {
+        const r = await fetch(`/api/parts/${encodeURIComponent(pn)}/insights?rev=${encodeURIComponent(rev || "")}`);
+        if (r.status === 403) { if (!cancelled) { setForbidden(true); } return; }
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json();
+        if (!cancelled) setInsights(j as PartInsights);
+      } catch (e) {
+        if (!cancelled) setInsights(null);
+      } finally {
+        if (!cancelled) setInsightsLoading(false);
+      }
+    })();
+    return () => { cancelled = true };
   }, [pn, rev]);
 
   // Load DocPack options when pn/rev/depth changes
@@ -695,7 +749,11 @@ function bestUrl(f: FileRow): string {
     const raw = (part?.attrs || {}) as Record<string, any>;
 
     // only non-empty
-    const allEntries = Object.entries(raw).filter(([, v]) => hasDisplayValue(v));
+    const skipKeys = new Set(["notes", "comments"]);
+    const allEntries = Object.entries(raw).filter(([k, v]) => {
+      if (skipKeys.has(String(k || "").toLowerCase())) return false;
+      return hasDisplayValue(v);
+    });
 
     // surface some common keys first (only if non-empty)
     const prio = [
@@ -748,6 +806,65 @@ function bestUrl(f: FileRow): string {
   // consider that we have a drawing. Otherwise, hide the Drawing tab and
   // default to All attributes.
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
+
+  const deliverableBadge = (label: string, on: boolean | undefined) => (
+    <span
+      className={`badge ${on ? "bg-success" : "bg-light text-muted"}`}
+      style={{ fontSize: "0.65rem", padding: "0.25rem 0.4rem" }}
+      title={label}
+    >
+      {label}
+    </span>
+  )
+
+  async function saveNotes() {
+    if (!canPartsEdit || !part) return
+    setNotesSaving(true)
+    setNotesError(null)
+    try {
+      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/notes?rev=${encodeURIComponent(part.revision || "")}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes, rev: part.revision || "" }),
+      })
+      if (!resp.ok) {
+        throw new Error(await resp.text())
+      }
+      const j = await resp.json()
+      setNotes(String(j.notes || ""))
+    } catch (e: any) {
+      setNotesError(e?.message || "Failed to save notes")
+    } finally {
+      setNotesSaving(false)
+    }
+  }
+
+  async function addComment() {
+    if (!canPartsEdit || !part) return
+    const text = commentText.trim()
+    if (!text) return
+    setCommentSaving(true)
+    setCommentError(null)
+    try {
+      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/comments?rev=${encodeURIComponent(part.revision || "")}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, rev: part.revision || "" }),
+      })
+      if (!resp.ok) {
+        throw new Error(await resp.text())
+      }
+      const j = await resp.json()
+      if (j.comment) {
+        setComments((prev) => [...prev, j.comment as CommentRow])
+      }
+      setCommentText("")
+    } catch (e: any) {
+      setCommentError(e?.message || "Failed to add comment")
+    } finally {
+      setCommentSaving(false)
+    }
+  }
 
   async function handleDeletePart() {
     if (!canPartsDelete || !part) return;
@@ -812,11 +929,11 @@ function bestUrl(f: FileRow): string {
             </div>
 
             {/* quick info */}
-            <table className="table table-sm table-borderless mb-2">
-              <tbody>
-                <tr>
-                  <th className="pd-th">Processes:</th>
-                  <td>
+              <table className="table table-sm table-borderless mb-2">
+                <tbody>
+                  <tr>
+                    <th className="pd-th">Processes:</th>
+                    <td>
                     {processes.length > 0 && (
                       <div className="pd-proc-chips">
                         {processes.map((p) => {
@@ -863,15 +980,66 @@ function bestUrl(f: FileRow): string {
                   <th className="pd-th">Finish:</th>
                   <td>{part?.attrs?.finish || "-"}</td>
                 </tr>
-                <tr>
-                  <th className="pd-th">Mass:</th>
-                  <td>{part?.attrs?.mass || part?.attrs?.Weight || "-"}</td>
-                </tr>
-              </tbody>
-            </table>
+                  <tr>
+                    <th className="pd-th">Mass:</th>
+                    <td>{part?.attrs?.mass || part?.attrs?.Weight || "-"}</td>
+                  </tr>
+                </tbody>
+              </table>
 
-            {/* file buttons + external link */}
-            <div className="pd-files mt-2">
+              <div className="mt-3 pt-2 border-top">
+                <div className="d-flex align-items-center justify-content-between">
+                  <div className="fw-semibold small">Insights</div>
+                  {insights?.classification ? (
+                    <span className="badge bg-secondary text-uppercase" style={{ fontSize: "0.6rem" }}>
+                      {insights.classification.replace("_", " ")}
+                    </span>
+                  ) : null}
+                </div>
+                {insightsLoading && <div className="text-muted small mt-2">Loading insights...</div>}
+                {!insightsLoading && insights && (
+                  <div className="mt-2">
+                    {insights.missing_fields?.length ? (
+                      <div className="text-danger small">
+                        Missing: {insights.missing_fields.join(", ")}
+                      </div>
+                    ) : (
+                      <div className="text-muted small">No missing fields detected.</div>
+                    )}
+                    {insights.processes_normalized?.length ? (
+                      <div className="d-flex flex-wrap gap-1 mt-2">
+                        {insights.processes_normalized.map((p) => (
+                          <span key={p} className="badge bg-light text-dark" style={{ fontSize: "0.6rem" }}>
+                            {p}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="d-flex flex-wrap gap-1 mt-2">
+                      {deliverableBadge("PDF", insights.deliverables_present?.pdf)}
+                      {deliverableBadge("DXF", insights.deliverables_present?.dxf)}
+                      {deliverableBadge("STEP", insights.deliverables_present?.step)}
+                      {deliverableBadge("DS", insights.deliverables_present?.datasheet)}
+                    </div>
+                    <div className="small text-muted mt-2">
+                      Used in {insights.where_used_count} parent(s), total qty {insights.total_qty_used}
+                      {" "} |{" "}
+                      <a href={`/ui/bom?q=${encodeURIComponent(pn)}`}>View BOM</a>
+                    </div>
+                    {insights.deliverables_missing_recommended?.length ? (
+                      <div className="small mt-1">
+                        Recommended: {insights.deliverables_missing_recommended.join(", ")}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+                {!insightsLoading && !insights && (
+                  <div className="text-muted small mt-2">No insights available.</div>
+                )}
+              </div>
+
+              {/* file buttons + external link */}
+              <div className="pd-files mt-2">
               {(() => {
                 const href = (part?.attrs?.link || part?.attrs?.oem_internet || '').toString().trim()
                 return href ? (
@@ -1327,11 +1495,76 @@ function bestUrl(f: FileRow): string {
           </TabPanel>
 
 
-          </TabView>
-          </div>
+            </TabView>
+            </div>
 
-          {/* Used in (always visible under tabs) */}
-          <div className="pd-usedin pd-card">
+            <div className="pd-card p-3 mt-3">
+              <div className="d-flex align-items-center justify-content-between">
+                <h6 className="mb-0">Notes</h6>
+                {canPartsEdit ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-primary"
+                    onClick={saveNotes}
+                    disabled={notesSaving}
+                  >
+                    {notesSaving ? "Saving..." : "Save"}
+                  </button>
+                ) : null}
+              </div>
+              <textarea
+                className="form-control form-control-sm mt-2"
+                rows={4}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Add notes for this part..."
+                disabled={!canPartsEdit}
+              />
+              {notesError ? <div className="text-danger small mt-1">{notesError}</div> : null}
+              {!canPartsEdit && <div className="text-muted small mt-1">Read-only</div>}
+
+              <div className="mt-3">
+                <h6 className="mb-2">Comments</h6>
+                {comments.length ? (
+                  <div className="d-flex flex-column gap-2">
+                    {comments.map((c, idx) => (
+                      <div key={`${c.ts}-${idx}`} className="border rounded p-2">
+                        <div className="small text-muted">
+                          {c.author || "User"} {c.ts ? `- ${new Date(c.ts).toLocaleString()}` : ""}
+                        </div>
+                        <div className="small">{c.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-muted small">No comments yet.</div>
+                )}
+                {canPartsEdit && (
+                  <div className="input-group input-group-sm mt-2">
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      placeholder="Add a comment..."
+                      disabled={commentSaving}
+                    />
+                    <button
+                      className="btn btn-outline-primary"
+                      type="button"
+                      onClick={addComment}
+                      disabled={commentSaving || !commentText.trim()}
+                    >
+                      {commentSaving ? "Adding..." : "Add"}
+                    </button>
+                  </div>
+                )}
+                {commentError ? <div className="text-danger small mt-1">{commentError}</div> : null}
+              </div>
+            </div>
+
+            {/* Used in (always visible under tabs) */}
+            <div className="pd-usedin pd-card">
             <h6 className="mb-2">Used in</h6>
             <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll">
               <Column
