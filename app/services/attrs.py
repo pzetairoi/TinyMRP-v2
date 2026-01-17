@@ -23,6 +23,7 @@ REQUIRED_KEYS: Iterable[str] = (
 ALIASES: Dict[str, str] = {
     # common variants / capitalizations
     "approvedby": "approvedby",
+    "approvedby": "approved",
     "approveddate": "approveddate",
     "approvedby_": "approvedby",
     "approveddate_": "approveddate",
