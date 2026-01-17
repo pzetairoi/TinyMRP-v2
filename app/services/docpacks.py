@@ -542,12 +542,26 @@ def _visual_list_pdf(
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
+        from reportlab.pdfbase.pdfmetrics import stringWidth
         import qrcode
         from PIL import Image as PILImage
     except Exception:
         return None
     root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
     root_rev_clean = _clean_rev(root_rev) if root_rev is not None else ""
+
+    def _clip_line(text: str, font: str, size: float, max_w: float) -> str:
+        text = text or ""
+        if not text:
+            return ""
+        if stringWidth(text, font, size) <= max_w:
+            return text
+        suffix = "..."
+        max_w = max(0.0, max_w - stringWidth(suffix, font, size))
+        out = text
+        while out and stringWidth(out, font, size) > max_w:
+            out = out[:-1]
+        return out.rstrip() + (suffix if out else "")
     # Build rows with: pn, rev, qty, imgpath
     # Ensure root appears first (alone) and children sorted by partnumber
     rows: List[Tuple[str,str,float,str|None]] = []
@@ -635,9 +649,10 @@ def _visual_list_pdf(
         # process colored rings inside the border
         pdoc = _part_by(pn, rev)
         procs = _part_processes(pdoc)
+        procs_lower = [p.lower() for p in procs]
         inset = 0.8*mm
-        for i, p in enumerate(procs):
-            col = proc_colors.get(p.lower())
+        for i, p in enumerate(procs_lower):
+            col = proc_colors.get(p)
             if not col: continue
             off = (i+1) * inset
             c.setStrokeColorRGB(*col); c.setLineWidth(2)
@@ -658,18 +673,34 @@ def _visual_list_pdf(
         else:
             _draw_svg_or_png(c, ix_x, ix_y, ix_w, ix_h, 'tinylogo.svg', 'tinylogo.png')
         # text area
-        # Top-left header: PN and REV (left-justified)
         hl_x = x + 4*mm
         hl_y = y + box_h - 6*mm
+        if not desc and pdoc is not None:
+            try:
+                desc = _part_description(pdoc)
+            except Exception:
+                desc = ''
+        try:
+            qty_val = float(qty)
+            qty_str = f"x{qty_val:g}"
+        except Exception:
+            qty_str = f"x{qty}"
+        try:
+            qty_w = stringWidth(qty_str, "Helvetica-Bold", 11.5)
+        except Exception:
+            qty_w = 0.0
+        title = f"{pn} REV {rev}" if rev else f"{pn}"
+        max_title_w = max(20*mm, box_w - 8*mm - qty_w - 4*mm)
         c.setFillGray(0.1)
         c.setFont("Helvetica-Bold", 11.5)
-        c.drawString(hl_x, hl_y, f"{pn}")
-        c.setFont("Helvetica", 9.5); c.setFillGray(0.25)
-        c.drawString(hl_x, hl_y - 12, f"REV: {rev}")
+        c.drawString(hl_x, hl_y, _clip_line(title, "Helvetica-Bold", 11.5, max_title_w))
+        if desc:
+            c.setFont("Helvetica", 8.8)
+            c.setFillGray(0.35)
+            c.drawString(hl_x, hl_y - 12, _clip_line(desc, "Helvetica", 8.8, box_w - 8*mm))
+            c.setFillGray(0.1)
         # Qty at top-right in bold red, same size as PN
         try:
-            from reportlab.pdfbase.pdfmetrics import stringWidth
-            qty_str = f"x{qty:g}" if isinstance(qty, float) else f"x{qty}"
             c.setFont("Helvetica-Bold", 11.5)
             c.setFillColorRGB(0.82, 0.0, 0.0)
             tw = stringWidth(qty_str, "Helvetica-Bold", 11.5)
@@ -692,36 +723,6 @@ def _visual_list_pdf(
                     c.setFillGray(0.1)
         except Exception:
             pass
-        # Description at bottom-left of box (avoid image/QR overlap)
-        if not desc and pdoc is not None:
-            try:
-                desc = _part_description(pdoc)
-            except Exception:
-                desc = ''
-        if desc:
-            d_x = x + 4*mm
-            d_y1 = y + 8*mm   # first line above bottom
-            line_h = 9.5
-            right_reserved = 18*mm + 6*mm  # QR + margin
-            max_w = max(20*mm, (x + box_w) - d_x - right_reserved)
-            try:
-                from reportlab.pdfbase.pdfmetrics import stringWidth
-                c.setFillGray(0.35); c.setFont("Helvetica", 8.8)
-                words = desc.split(); lines=[]; cur=''
-                for w in words:
-                    t=(cur+' '+w).strip()
-                    if stringWidth(t, "Helvetica", 8.8) <= max_w: cur=t
-                    else:
-                        if cur: lines.append(cur); cur=w
-                        if len(lines)>=2: break
-                if cur and len(lines)<2: lines.append(cur)
-                # draw from bottom upwards to keep inside area
-                if len(lines)>=1:
-                    c.drawString(d_x, d_y1, lines[0])
-                if len(lines)>=2:
-                    c.drawString(d_x, d_y1 + line_h, lines[1])
-            except Exception:
-                pass
         # QR code (links to part detail) — draw last to ensure it sits on top
         try:
             qr_url = _part_detail_url(pn, rev)
@@ -744,14 +745,17 @@ def _visual_list_pdf(
                 raw = (a.get('approvedby') or a.get('approved_by') or a.get('approved') or '')
                 raw = str(raw).strip()
                 if raw:
-                    approved = raw.lower() not in ('wip', 'inprogress', 'in progress', 'not approved', 'no', 'false', '0')
+                    approved = raw.lower() not in ('', 'n/a', 'na', 'none', 'null', '0', 'false')
+            show_notapproved = True
+            if procs_lower and any(p in ('hardware', 'purchase', 'others') for p in procs_lower):
+                show_notapproved = False
             icon_w = 12*mm
             icon_h = 10*mm
             icon_x = x + box_w - icon_w - 4*mm
             icon_y = y + 4*mm + qr_size + 2*mm
             if approved:
                 _draw_svg_or_png(c, icon_x, icon_y, icon_w, icon_h, 'approved.svg', 'approved.png')
-            else:
+            elif show_notapproved:
                 _draw_svg_or_png(c, icon_x, icon_y, icon_w, icon_h, 'notapproved.svg', 'notapproved.png')
         except Exception:
             pass
@@ -784,15 +788,32 @@ def _visual_list_pdf(
             # text header
             hl_x = r_x + ix_w + 6*mm
             hl_y = r_y + r_h - 6*mm
+            try:
+                pdoc = _part_by(pn, rev)
+                desc = _part_description(pdoc)
+            except Exception:
+                desc = ''
+            try:
+                qty_val = float(qty)
+                qty_str = f"x{qty_val:g}"
+            except Exception:
+                qty_str = f"x{qty}"
+            try:
+                qty_w = stringWidth(qty_str, "Helvetica-Bold", 12.5)
+            except Exception:
+                qty_w = 0.0
+            title = f"{pn} REV {rev}" if rev else f"{pn}"
+            max_title_w = max(25*mm, r_w - (hl_x - r_x) - qty_w - 6*mm)
             c.setFillGray(0.1)
             c.setFont("Helvetica-Bold", 12.5)
-            c.drawString(hl_x, hl_y, f"{pn}")
-            c.setFont("Helvetica", 10.0); c.setFillGray(0.25)
-            c.drawString(hl_x, hl_y - 12, f"REV: {rev}")
+            c.drawString(hl_x, hl_y, _clip_line(title, "Helvetica-Bold", 12.5, max_title_w))
+            if desc:
+                c.setFont("Helvetica", 9.0)
+                c.setFillGray(0.35)
+                c.drawString(hl_x, hl_y - 14, _clip_line(desc, "Helvetica", 9.0, r_w - (hl_x - r_x) - 6*mm))
+                c.setFillGray(0.1)
             # qty at top-right in bold red
             try:
-                from reportlab.pdfbase.pdfmetrics import stringWidth
-                qty_str = f"x{qty:g}" if isinstance(qty, float) else f"x{qty}"
                 c.setFont("Helvetica-Bold", 12.5)
                 c.setFillColorRGB(0.82, 0.0, 0.0)
                 tw = stringWidth(qty_str, "Helvetica-Bold", 12.5)
@@ -810,34 +831,6 @@ def _visual_list_pdf(
                         c.setFillGray(0.1)
             except Exception:
                 pass
-            # description (from part)
-            try:
-                pdoc = _part_by(pn, rev)
-                desc = _part_description(pdoc)
-            except Exception:
-                desc = ''
-            if desc:
-                try:
-                    from reportlab.pdfbase.pdfmetrics import stringWidth
-                    d_x = hl_x
-                    d_y1 = r_y + 8*mm
-                    max_w = r_x + r_w - d_x - 4*mm
-                    c.setFillGray(0.35); c.setFont("Helvetica", 9.0)
-                    words = desc.split(); cur='';
-                    while words:
-                        t = (cur + ' ' + words[0]).strip()
-                        if stringWidth(t, "Helvetica", 9.0) <= max_w:
-                            cur = t; words.pop(0)
-                        else:
-                            if cur:
-                                c.drawString(d_x, d_y1, cur); d_y1 += 10
-                                cur=''
-                            else:
-                                c.drawString(d_x, d_y1, words.pop(0)); d_y1 += 10
-                    if cur:
-                        c.drawString(d_x, d_y1, cur)
-                except Exception:
-                    pass
             # QR bottom-right
             try:
                 qr_url = _part_detail_url(pn, rev)
@@ -915,7 +908,11 @@ def _hardware_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List
 
 
 def _hardware_summary_pdf(rows: List[Dict[str, object]]) -> Optional[bytes]:
-    if not rows:
+    return _hardware_summary_pdf_with_empty(rows, allow_empty=False)
+
+
+def _hardware_summary_pdf_with_empty(rows: List[Dict[str, object]], allow_empty: bool = False) -> Optional[bytes]:
+    if not rows and not allow_empty:
         return None
     try:
         from reportlab.lib import colors
@@ -932,6 +929,10 @@ def _hardware_summary_pdf(rows: List[Dict[str, object]]) -> Optional[bytes]:
     flowables = []
     flowables.append(Paragraph("Hardware Summary", styles["Heading2"]))
     flowables.append(Spacer(0, 6*mm))
+    if not rows:
+        flowables.append(Paragraph("No hardware items found.", styles["Normal"]))
+        doc.build(flowables)
+        return buf.getvalue()
 
     table_data = [["Part Number", "Description", "Material", "Finish", "Qty"]]
     for r in rows:
@@ -1663,6 +1664,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         output_count += 1
     if opts.want_whereused_report:
         output_count += 1
+    if getattr(opts, "want_hardware_summary", False):
+        output_count += 1
     if getattr(opts, "fabrication_pack", False):
         output_count += 2
     if opts.want_pdf_binder:
@@ -1701,7 +1704,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
     # Precompute visual list rows when needed (standalone or binder sections)
     vis_filtered: List[Tuple[str, str, float]] = []
-    need_vis = bool(opts.want_visual_list) or (
+    need_vis = bool(opts.want_visual_list) or bool(getattr(opts, "want_hardware_summary", False)) or (
         bool(opts.want_pdf_binder) and (bool(opts.binder_add_visual_list) or bool(opts.binder_add_hardware_summary))
     )
     if need_vis:
@@ -1730,6 +1733,32 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             # single artifact path (rare)
             vis_name = build_output_name(f"{base_stub}_VisualList", "pdf", max_len=96, include_time=False, now=build_ts)
             return (vis_name, vis_pdf, "application/pdf")
+
+    # Hardware Summary PDF (standalone or binder section)
+    hardware_rows: List[Dict[str, object]] = []
+    hardware_pdf: Optional[bytes] = None
+    if bool(getattr(opts, "want_hardware_summary", False)) or bool(opts.binder_add_hardware_summary):
+        try:
+            hardware_rows = _hardware_summary_rows(vis_filtered + [(opts.root_pn, root_rev_resolved, 1.0)])
+            hardware_pdf = _hardware_summary_pdf_with_empty(
+                hardware_rows,
+                allow_empty=bool(getattr(opts, "want_hardware_summary", False)),
+            )
+            if hardware_rows and not hardware_pdf:
+                raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
+    if getattr(opts, "want_hardware_summary", False):
+        if not hardware_pdf:
+            raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
+        hw_name = build_output_name(f"{base_stub}_HardwareSummary", "pdf", max_len=96, include_time=False, now=build_ts)
+        if want_zip:
+            z.writestr(hw_name, hardware_pdf)
+        else:
+            return (hw_name, hardware_pdf, "application/pdf")
 
     cover_pdf = None
     if opts.want_cover_page or (opts.want_pdf_binder and opts.binder_add_cover):
@@ -1848,17 +1877,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             preface_bytes.append(("WhereUsed.pdf", whereused_pdf))
 
         if opts.binder_add_hardware_summary:
-            try:
-                hardware_rows = _hardware_summary_rows(vis_filtered + [(opts.root_pn, root_rev_resolved, 1.0)])
-                hardware_pdf = _hardware_summary_pdf(hardware_rows)
-                if hardware_rows and not hardware_pdf:
-                    raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
-                if hardware_pdf:
-                    preface_bytes.append(("HardwareSummary.pdf", hardware_pdf))
-            except RuntimeError:
-                raise
-            except Exception:
-                pass
+            if hardware_pdf and hardware_rows:
+                preface_bytes.append(("HardwareSummary.pdf", hardware_pdf))
 
         # Merge body first to measure page counts
         body_bytes, body_starts = _merge_pdfs(pdf_paths)

@@ -303,8 +303,6 @@ def _is_approved(attrs: dict) -> bool:
     text = str(raw).strip().lower()
     if text in _EMPTY_VALUES:
         return False
-    if text in ("wip", "inprogress", "in progress", "not approved", "no"):
-        return False
     return True
 
 _REQUIRED_ALWAYS = {"pdf"}
