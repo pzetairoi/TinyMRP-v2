@@ -1,6 +1,7 @@
 import os
 from flask import Blueprint, render_template, send_file, abort
 from flask_security import auth_required, current_user
+from app.services.audit import log_action
 
 bp = Blueprint("main", __name__)
 
@@ -39,6 +40,10 @@ def download_macro():
     path = _latest_file(root, [".swp"])
     if not path or not os.path.isfile(path):
         abort(404)
+    try:
+        log_action("download.macro", resource_type="download", resource=os.path.basename(path), meta={"source": "landing"})
+    except Exception:
+        pass
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
@@ -48,4 +53,8 @@ def download_addin():
     path = _latest_file(root, [".exe", ".msi"])
     if not path or not os.path.isfile(path):
         abort(404)
+    try:
+        log_action("download.addin", resource_type="download", resource=os.path.basename(path), meta={"source": "landing"})
+    except Exception:
+        pass
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
