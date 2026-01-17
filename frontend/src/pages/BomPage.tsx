@@ -99,8 +99,9 @@ export default function BomPage() {
   async function loadChildrenFor(key: string) {
     try {
       const parent = findNode(nodes, key)
+      const parentPn = (parent as any)?.data?.pn || key
       const prev = (parent as any)?.data?.rev || ''
-      const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(key)}&parent_rev=${encodeURIComponent(prev)}`)
+      const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(prev)}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const kids: TreeNode[] = await r.json()
       setNodes((prev) => setNodeChildren(prev, key, kids))

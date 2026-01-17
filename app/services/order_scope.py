@@ -19,20 +19,31 @@ from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs
 from app.services.docpacks import _flatten_bom, _overlay_numbers_and_stamps
 
+_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
+
+def _clean_rev(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in _REV_BLANKS:
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.strip()
+
 
 def _safe_name(value: str) -> str:
     return "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in (value or "").strip())
 
 
 def _resolve_rev(pn: str, rev: str | None) -> str:
-    rev = (rev or "").strip()
-    if rev:
-        return rev
-    p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
-    if not p:
-        return ""
-    attrs = harvest_part_attrs(p)
-    return (attrs.get("revision") or p.revision or "").strip()
+    if rev is None:
+        p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+        if not p:
+            return ""
+        attrs = harvest_part_attrs(p)
+        return _clean_rev(attrs.get("revision") or p.revision or "")
+    return _clean_rev(rev)
 
 
 def _thumb_path(pn: str, rev: str) -> str | None:
@@ -100,12 +111,11 @@ def _file_abs_path(pf: PartFile) -> str:
     return ""
 
 
-def _collect_part_files(pn: str, rev: str, file_types: Optional[Iterable[str]] = None) -> List[PartFile]:
-    q = PartFile.objects(part_number__iexact=pn, revision__iexact=rev)
-    if q.limit(1).count() == 0 and rev:
-        q = PartFile.objects(part_number__iexact=pn, revision__iexact="")
-    if q.limit(1).count() == 0:
+def _collect_part_files(pn: str, rev: str | None, file_types: Optional[Iterable[str]] = None) -> List[PartFile]:
+    if rev is None:
         q = PartFile.objects(part_number__iexact=pn)
+    else:
+        q = PartFile.objects(part_number__iexact=pn, revision__iexact=(rev or ""))
     files = list(q)
     groups = set(_norm_file_types(file_types))
     if not groups:
@@ -134,7 +144,7 @@ def _collect_order_parts(order: Order, include_children: bool) -> List[Tuple[str
         pn = (line.pn or "").strip()
         if not pn:
             continue
-        rev = _resolve_rev(pn, line.rev or "")
+        rev = _resolve_rev(pn, line.rev)
         add(pn, rev)
         if include_children:
             try:
@@ -149,7 +159,7 @@ def _collect_order_parts(order: Order, include_children: bool) -> List[Tuple[str
                 children = []
             for cpn, crev, _ in children:
                 if cpn:
-                    child_rev = crev or _resolve_rev(cpn, crev)
+                    child_rev = _clean_rev(crev)
                     add(cpn, child_rev or "")
     return parts
 

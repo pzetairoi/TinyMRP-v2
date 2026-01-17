@@ -9,7 +9,7 @@ _DEFAULT = {
     "rolling":   {"color":"0, 102, 0","icon":"roll.svg","aliases":[]},
     "casting":   {"color":"255, 0, 255","icon":"casting.svg","aliases":[]},
     "lasercut":  {"color":"0, 176, 80","icon":"lasercut.svg","aliases":["laser cut","laser-cut"]},
-    "profile cut":{"color":"153, 102, 51","icon":"profilecut.svg","aliases":["profile-cut","oxy","plasma"]},
+    "profile cut":{"color":"153, 102, 51","icon":"profilecut.svg","aliases":["profile-cut","oxy","plasma","plasma cut","plasmacut","waterjet","water jet","water-jet"]},
     "3d laser":  {"color":"0, 176, 80","icon":"3d-laser.svg","aliases":["3dlaser"]},
     "cutting":   {"color":"255, 192, 0","icon":"cutting.svg","aliases":[]},
     "sewing":    {"color":"192, 0, 0","icon":"sewing.svg","aliases":[]},
@@ -91,7 +91,7 @@ def normalize_processes(attrs: Dict, meta: Dict) -> List[str]:
     normalized = []
     seen = set()
     for p in procs:
-        canon = alias.get(p, p)
+        canon = alias.get(_norm(p), p)
         if canon not in meta:
             canon = "others"
         if canon not in seen:

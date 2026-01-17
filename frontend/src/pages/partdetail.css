@@ -116,6 +116,29 @@
   overflow: auto;
 }
 
+/* Tab bar: wrap labels on desktop, allow scroll on small screens */
+.p-tabview .p-tabview-nav {
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
+  column-gap: 0.25rem;
+}
+.p-tabview .p-tabview-nav li {
+  flex: 0 0 auto;
+}
+.p-tabview .p-tabview-nav li .p-tabview-nav-link {
+  white-space: normal;
+  line-height: 1.1;
+  padding: 0.4rem 0.6rem;
+  text-align: center;
+  max-width: 9rem;
+}
+@media (max-width: 768px) {
+  .p-tabview .p-tabview-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+}
+
 
 .tt-pncell {
   display: inline-flex;

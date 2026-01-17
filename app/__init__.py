@@ -141,6 +141,11 @@ def create_app(config_object=None):
         print("Warning: SECRET_KEY uses a default value. Set SECRET_KEY in the environment.")
     if app.config.get("SECURITY_PASSWORD_SALT") in ("change-me-too", "changeme"):
         print("Warning: SECURITY_PASSWORD_SALT uses a default value. Set SECURITY_PASSWORD_SALT in the environment.")
+    # Keep env in sync for services that resolve secrets outside app context
+    if not os.getenv("SECRET_KEY") and app.config.get("SECRET_KEY"):
+        os.environ["SECRET_KEY"] = str(app.config.get("SECRET_KEY"))
+    if not os.getenv("SECURITY_PASSWORD_SALT") and app.config.get("SECURITY_PASSWORD_SALT"):
+        os.environ["SECURITY_PASSWORD_SALT"] = str(app.config.get("SECURITY_PASSWORD_SALT"))
 
     # Plain MongoEngine connect – capture the connection object
     app.config.setdefault("MONGODB_ALIAS", "tinymrp-v2")

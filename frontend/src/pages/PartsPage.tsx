@@ -47,31 +47,16 @@ export default function PartsPage() {
       material:    { value: '', matchMode: FilterMatchMode.CONTAINS },
       finish:      { value: '', matchMode: FilterMatchMode.CONTAINS },
       process:     { value: '', matchMode: FilterMatchMode.CONTAINS },
-      has_pdf:     { value: '', matchMode: FilterMatchMode.EQUALS },
+      approved:    { value: false, matchMode: FilterMatchMode.EQUALS },
+      full_files:  { value: false, matchMode: FilterMatchMode.EQUALS },
+      used_in_job: { value: false, matchMode: FilterMatchMode.EQUALS },
+      job_number:  { value: '', matchMode: FilterMatchMode.CONTAINS },
+      min_props:   { value: false, matchMode: FilterMatchMode.EQUALS },
     } as DataTableFilterMeta
   })
   const fallbackLogo = "/static/images/logo.png"
 
   const keyFor = (p: Part) => `${p.part_number}::${p.revision || ''}`
-
-  const coverageBadge = (label: string, on: boolean | undefined) => (
-    <span
-      className={`badge ${on ? 'bg-success' : 'bg-light text-muted'}`}
-      style={{ fontSize: '0.65rem', padding: '0.25rem 0.4rem' }}
-      title={label}
-    >
-      {label}
-    </span>
-  )
-
-  const coverageBody = (p: Part) => (
-    <div className="d-flex flex-wrap gap-1">
-      {coverageBadge('PDF', p.has_pdf)}
-      {coverageBadge('DXF', p.has_dxf)}
-      {coverageBadge('STEP', p.has_step)}
-      {coverageBadge('DS', p.has_datasheet)}
-    </div>
-  )
 
   useEffect(() => {
     if (!pickMode) return
@@ -108,6 +93,23 @@ export default function PartsPage() {
     })()
   }, [lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters), jobId, jobOnly])
 
+  const filterApproved = Boolean((lazy.filters as any)?.approved?.value)
+  const filterFullFiles = Boolean((lazy.filters as any)?.full_files?.value)
+  const filterUsedInJob = Boolean((lazy.filters as any)?.used_in_job?.value)
+  const filterJobNumber = String((lazy.filters as any)?.job_number?.value || '')
+  const filterMinProps = Boolean((lazy.filters as any)?.min_props?.value)
+
+  function setFilterValue(key: string, value: any) {
+    setLazy((s) => ({
+      ...s,
+      first: 0,
+      filters: {
+        ...s.filters,
+        [key]: { ...(s.filters as any)[key], value },
+      } as DataTableFilterMeta,
+    }))
+  }
+
   function onAddSelected() {
     try {
       const items = Object.values(selectedByKey).map((p) => {
@@ -120,30 +122,6 @@ export default function PartsPage() {
       }
     } catch {}
     try { window.close() } catch {}
-  }
-
-  function applyQuickFilter(kind: 'missing_pdf' | 'missing_material' | 'hardware' | 'sheet' | 'clear') {
-    setLazy((s) => {
-      const nextFilters: any = { ...(s.filters as any) }
-      if (kind === 'clear') {
-        nextFilters.material = { ...(nextFilters.material || {}), value: '' }
-        nextFilters.process = { ...(nextFilters.process || {}), value: '' }
-        nextFilters.has_pdf = { ...(nextFilters.has_pdf || {}), value: '' }
-      }
-      if (kind === 'missing_pdf') {
-        nextFilters.has_pdf = { ...(nextFilters.has_pdf || {}), value: 'false' }
-      }
-      if (kind === 'missing_material') {
-        nextFilters.material = { ...(nextFilters.material || {}), value: '(missing)' }
-      }
-      if (kind === 'hardware') {
-        nextFilters.process = { ...(nextFilters.process || {}), value: 'hardware' }
-      }
-      if (kind === 'sheet') {
-        nextFilters.process = { ...(nextFilters.process || {}), value: 'sheet metal' }
-      }
-      return { ...s, first: 0, filters: nextFilters }
-    })
   }
 
   const header = useMemo(() => (
@@ -176,12 +154,68 @@ export default function PartsPage() {
           </div>
         )}
         {!pickMode && (
-          <div className="d-flex flex-wrap gap-2 ms-2">
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('missing_pdf')}>Missing PDF</button>
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('missing_material')}>Missing Material</button>
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('hardware')}>Hardware</button>
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('sheet')}>Sheet metal</button>
-            <button className="btn btn-sm btn-outline-secondary" onClick={() => applyQuickFilter('clear')}>Clear</button>
+          <div className="d-flex flex-wrap align-items-center gap-2 ms-2">
+            <div className="form-check form-check-inline m-0">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="filterApproved"
+                checked={filterApproved}
+                onChange={(e) => setFilterValue('approved', e.target.checked)}
+              />
+              <label className="form-check-label small" htmlFor="filterApproved">Approved</label>
+            </div>
+            <div className="form-check form-check-inline m-0">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="filterFullFiles"
+                checked={filterFullFiles}
+                onChange={(e) => setFilterValue('full_files', e.target.checked)}
+              />
+              <label className="form-check-label small" htmlFor="filterFullFiles">Full files</label>
+            </div>
+            <div className="form-check form-check-inline m-0">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="filterMinProps"
+                checked={filterMinProps}
+                onChange={(e) => setFilterValue('min_props', e.target.checked)}
+              />
+              <label className="form-check-label small" htmlFor="filterMinProps">Minimum properties</label>
+            </div>
+            <div className="form-check form-check-inline m-0">
+              <input
+                className="form-check-input"
+                type="checkbox"
+                id="filterUsedInJob"
+                checked={filterUsedInJob}
+                onChange={(e) => {
+                  const on = e.target.checked
+                  setLazy((s) => ({
+                    ...s,
+                    first: 0,
+                    filters: {
+                      ...s.filters,
+                      used_in_job: { ...(s.filters as any).used_in_job, value: on },
+                      job_number: { ...(s.filters as any).job_number, value: on ? (s.filters as any).job_number?.value || '' : '' },
+                    } as DataTableFilterMeta,
+                  }))
+                }}
+              />
+              <label className="form-check-label small" htmlFor="filterUsedInJob">Used in job</label>
+            </div>
+            {filterUsedInJob && (
+              <input
+                className="form-control form-control-sm"
+                style={{ width: 180 }}
+                type="search"
+                placeholder="Job number contains"
+                value={filterJobNumber}
+                onChange={(e) => setFilterValue('job_number', e.target.value)}
+              />
+            )}
           </div>
         )}
       </div>
@@ -192,7 +226,7 @@ export default function PartsPage() {
         </div>
       )}
     </div>
-  ), [pickMode, selectedByKey, search, jobOnly])
+  ), [pickMode, selectedByKey, search, jobOnly, filterApproved, filterFullFiles, filterMinProps, filterUsedInJob, filterJobNumber])
 
   if (pickMode) {
     const page = Math.floor(lazy.first / lazy.rows) + 1
@@ -357,7 +391,7 @@ export default function PartsPage() {
              sortOrder: (e.sortOrder === -1 ? -1 : 1) as 1 | -1
            }))
          }
-        onFilter={(e) => setLazy(s => ({...s, first: 0, filters: e.filters}))}
+        onFilter={(e) => setLazy(s => ({...s, first: 0, filters: { ...s.filters, ...e.filters }}))}
         filterDisplay="row" removableSort rowsPerPageOptions={[10,25,50,100]}
         stripedRows responsiveLayout="scroll"
         rowClassName={pickMode ? () => 'pick-row' : undefined}
@@ -449,9 +483,6 @@ export default function PartsPage() {
             />
           )
         }} style={{ width: 60 }} />
-        {!pickMode && (
-          <Column header="Docs" body={(p: any) => coverageBody(p as Part)} style={{ width: 150 }} />
-        )}
         <Column field="part_number" header="Part Number" sortable filter showFilterMenu={false}
         filterMatchMode="contains" filterMatchModeOptions={["contains"]}
         style={{ minWidth: '12ch', width: '12ch' }}

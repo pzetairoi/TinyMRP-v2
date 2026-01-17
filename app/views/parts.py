@@ -26,52 +26,66 @@ from app.services.insights import (
     recommended_deliverables,
 )
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
+from app.services.filescan import discover_part_files, upsert_part_files
+from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed, user_has_permission, permissions_required
 from app.services.audit import log_action
 from app.services.parts_delete import delete_part_and_refs
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
+_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
+
+def _clean_rev_value(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in _REV_BLANKS:
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.strip()
+
+def _clean_rev_input(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return _clean_rev_value(value)
+
 
 def _normalized_revision(p: Part, attrs: dict) -> str:
-    rev = (attrs.get("revision") or p.revision or "").strip()
-    return rev
+    return _clean_rev_value(attrs.get("revision") or p.revision or "")
 
 
 def _resolve_rev_for_pn(pn: str, rev: str | None) -> str:
-    rev = (rev or "").strip()
-    if rev:
-        return rev
+    rev_clean = _clean_rev_input(rev)
+    if rev_clean is not None:
+        return rev_clean
     p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
     if not p:
         return ""
     attrs = harvest_part_attrs(p)
-    return (attrs.get("revision") or p.revision or "").strip()
+    return _clean_rev_value(attrs.get("revision") or p.revision or "")
 
 
 def _find_part_doc(pn: str, rev: str | None) -> Part | None:
     pn = (pn or "").strip()
     if not pn:
         return None
-    if rev is not None and str(rev).strip() != "":
-        found = Part.objects(part_number__iexact=pn, revision__iexact=str(rev).strip()).first()
-        if found:
-            return found
+    rev_clean = _clean_rev_input(rev)
+    if rev_clean is not None:
+        return Part.objects(part_number__iexact=pn, revision__iexact=rev_clean).first()
     return Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
 
 
 def _deliverables_present(pn: str, rev: str | None) -> dict:
     groups = set()
     q = PartFile.objects(part_number__iexact=pn)
-    if rev is not None:
-        q = q.filter(revision__iexact=(rev or ""))
+    rev_clean = _clean_rev_input(rev)
+    if rev_clean is not None:
+        q = q.filter(revision__iexact=rev_clean)
     for f in q.only("ext_group"):
         if f.ext_group:
             groups.add(f.ext_group.lower())
-    if rev and not groups:
-        for f in PartFile.objects(part_number__iexact=pn, revision__iexact="").only("ext_group"):
-            if f.ext_group:
-                groups.add(f.ext_group.lower())
     return {
         "pdf": "pdf" in groups,
         "png": "png" in groups,
@@ -84,9 +98,7 @@ def _deliverables_present(pn: str, rev: str | None) -> dict:
 def _where_used_stats(pn: str, rev: str | None) -> tuple[int, float]:
     q = BOMLink.objects(child_pn=pn)
     if rev is not None and "child_rev" in BOMLink._fields:
-        q = q.filter(child_rev=(rev or ""))
-        if (rev or "").strip() and q.limit(1).count() == 0:
-            q = BOMLink.objects(child_pn=pn, child_rev="")
+        q = q.filter(child_rev=_clean_rev_value(rev))
     parents = set()
     total_qty = 0.0
     for l in q.only("parent_pn", "parent_rev", "qty"):
@@ -98,24 +110,20 @@ def _where_used_stats(pn: str, rev: str | None) -> tuple[int, float]:
 def _has_bom_children(pn: str, rev: str | None) -> bool:
     q = BOMLink.objects(parent_pn=pn)
     if rev is not None and "parent_rev" in BOMLink._fields:
-        q = q.filter(parent_rev=(rev or ""))
-        if (rev or "").strip() and q.limit(1).count() == 0:
-            q = BOMLink.objects(parent_pn=pn, parent_rev="")
+        q = q.filter(parent_rev=_clean_rev_value(rev))
     return q.limit(1).count() > 0
 
 
 def _parent_candidates(child_pn: str, child_rev: str | None, max_rows: int = 50):
     q = BOMLink.objects(child_pn=child_pn)
     if child_rev is not None and "child_rev" in BOMLink._fields:
-        q = q.filter(child_rev=(child_rev or ""))
-        if (child_rev or "").strip() and q.limit(1).count() == 0:
-            q = BOMLink.objects(child_pn=child_pn, child_rev="")
+        q = q.filter(child_rev=_clean_rev_value(child_rev))
     parents = []
     for l in q.limit(max_rows):
         parent_pn = (getattr(l, "parent_pn", None) or "").strip()
         if not parent_pn:
             continue
-        parent_rev = (getattr(l, "parent_rev", "") or "").strip()
+        parent_rev = _clean_rev_value(getattr(l, "parent_rev", "") or "")
         parents.append((parent_pn, _resolve_rev_for_pn(parent_pn, parent_rev)))
     return parents
 
@@ -148,27 +156,20 @@ def _build_used_set(pairs: list[tuple[str, str | None]]):
         pn_clean = (pn or "").strip()
         if not pn_clean:
             continue
-        rev_clean = (rev or "").strip()
-        if rev_clean:
-            used.add((pn_clean.lower(), rev_clean.lower()))
-        else:
-            resolved = _resolve_rev_for_pn(pn_clean, "")
-            if resolved:
-                used.add((pn_clean.lower(), resolved.lower()))
-            used.add((pn_clean.lower(), ""))
+        rev_clean = _clean_rev_value(rev)
+        used.add((pn_clean.lower(), rev_clean.lower()))
     return used
 
 
 def _match_used(used: set[tuple[str, str]], pn: str, rev: str | None) -> bool:
     pn_l = (pn or "").strip().lower()
-    rev_l = (rev or "").strip().lower()
-    return (pn_l, rev_l) in used or (pn_l, "") in used
+    rev_l = _clean_rev_value(rev).lower()
+    return (pn_l, rev_l) in used
 
 
 def _part_label(pn: str, rev: str | None) -> dict:
     resolved_rev = _resolve_rev_for_pn(pn, rev)
-    p = Part.objects(part_number__iexact=pn, revision__iexact=resolved_rev).first() \
-        or Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+    p = Part.objects(part_number__iexact=pn, revision__iexact=resolved_rev).first()
     attrs = harvest_part_attrs(p) if p else {}
     desc = (p.description if p else "") or attrs.get("description") or ""
     return {"pn": pn, "rev": resolved_rev, "desc": desc}
@@ -283,6 +284,99 @@ def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
     return rows
 
 
+_EMPTY_VALUES = {"", "n/a", "na", "none", "null", "0", "false"}
+
+def _is_blankish(value: object, *, allow_na: bool = False) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip().lower()
+    if allow_na and text in ("n/a", "na"):
+        return False
+    return text in _EMPTY_VALUES
+
+def _is_approved(attrs: dict) -> bool:
+    raw = attrs.get("approvedby") or attrs.get("approved_by") or attrs.get("approved")
+    if raw is None:
+        return False
+    if isinstance(raw, bool):
+        return raw
+    text = str(raw).strip().lower()
+    if text in _EMPTY_VALUES:
+        return False
+    if text in ("wip", "inprogress", "in progress", "not approved", "no"):
+        return False
+    return True
+
+_REQUIRED_ALWAYS = {"pdf"}
+_REQUIRED_BY_PROCESS = {
+    "machine": {"step"},
+    "3d print": {"step", "3mf"},
+    "3d laser": {"step"},
+    "folding": {"dxf", "png", "step"},
+    "rolling": {"dxf", "png", "step"},
+    "lasercut": {"dxf", "png"},
+    "profile cut": {"dxf", "png"},
+    "cutting": {"dxf", "png"},
+    "waterjet": {"dxf", "png"},
+    "plasma": {"dxf", "png"},
+}
+
+def _norm_file_group(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if text in ("stp", "step"):
+        return "step"
+    if text in ("jpg", "jpeg"):
+        return "png"
+    return text
+
+def _required_files_for_processes(proc_list: list[str], meta: dict) -> set[str]:
+    required: set[str] = set(_REQUIRED_ALWAYS)
+    for p in proc_list or []:
+        entry = meta.get(p) or {}
+        explicit_for_process = False
+        if isinstance(entry, dict):
+            for key in ("required_files", "files_required", "files", "file_groups", "file_groups_required"):
+                vals = entry.get(key)
+                if not vals:
+                    continue
+                explicit_for_process = True
+                if isinstance(vals, (str, bytes)):
+                    vals = [vals]
+                for v in vals:
+                    g = _norm_file_group(v)
+                    if g:
+                        required.add(g)
+        if not explicit_for_process:
+            required.update(_REQUIRED_BY_PROCESS.get(p, set()))
+    return {g for g in required if g}
+
+def _full_files_ok(proc_list: list[str], groups: set[str], meta: dict) -> bool:
+    if not proc_list:
+        return False
+    required = _required_files_for_processes(proc_list, meta)
+    if not required:
+        return False
+    return required.issubset(groups or set())
+
+def _min_props_ok(part: Part, attrs: dict, proc_list: list[str]) -> bool:
+    if not (part.part_number or "").strip():
+        return False
+    desc = part.description or attrs.get("description") or ""
+    if _is_blankish(desc):
+        return False
+    rev = _clean_rev_value(attrs.get("revision") or part.revision or "")
+    if not rev:
+        return False
+    material = attrs.get("material") or attrs.get("Material") or ""
+    if _is_blankish(material, allow_na=True):
+        return False
+    finish = attrs.get("finish") or attrs.get("Finish") or ""
+    if _is_blankish(finish, allow_na=True):
+        return False
+    if not proc_list:
+        return False
+    return True
+
 @login_required
 @require_items_view
 @bp.route("/parts_lazy", methods=["GET", "POST"])
@@ -324,6 +418,14 @@ def parts_lazy():
                 or_q = or_q | Q(**{f"{fld}__icontains": t})
             q = q & or_q
         return q
+
+    def _flag_enabled(key: str) -> bool:
+        val = (filters.get(key) or {}).get("value")
+        if isinstance(val, bool):
+            return val
+        if val is None:
+            return False
+        return str(val).strip().lower() in ("true", "1", "yes", "y", "on")
 
     q = Q()
     q = add_filter(q, "part_number", "part_number")
@@ -378,18 +480,48 @@ def parts_lazy():
             )
             q = q & orq
 
+    def _pairs_q(pairs: set[tuple[str, str]]):
+        pair_q = Q()
+        for pn, rev in pairs:
+            pn_clean = (pn or "").strip()
+            if not pn_clean:
+                continue
+            rev_clean = _clean_rev_value(rev)
+            pair_q = pair_q | Q(part_number__iexact=pn_clean, revision__iexact=rev_clean)
+        return pair_q
+
     # Optional job filter: limit to BOM parts for that job unless explicitly bypassed
     job_id = body.get("job") or request.args.get("job")
     job_filter_enabled = bool(job_id) and str(body.get("job_only", "true")).lower() != "false"
     if job_filter_enabled and job_id:
         job = Job.objects(id=job_id).first()
         if job and job.bom:
-            pn_list = list({(l.pn or "").strip() for l in job.bom if (l.pn or "").strip()})
-            if pn_list:
-                job_q = Q()
-                for pn in pn_list:
-                    job_q = job_q | Q(part_number__iexact=pn)
-                q = q & job_q
+            pairs = set()
+            for line in job.bom:
+                pn_line = (line.pn or "").strip()
+                if not pn_line:
+                    continue
+                pairs.add((pn_line, _clean_rev_value(line.rev)))
+            if pairs:
+                q = q & _pairs_q(pairs)
+
+    # Optional "used in job" filter (with optional job number substring)
+    used_in_job = _flag_enabled("used_in_job")
+    job_number_filter = str((filters.get("job_number") or {}).get("value") or "").strip()
+    if used_in_job:
+        job_qs = Job.objects(is_deleted=False)
+        if job_number_filter:
+            job_qs = job_qs.filter(job_number__icontains=job_number_filter)
+        pairs = set()
+        for j in job_qs.only("bom"):
+            for line in (j.bom or []):
+                pn_line = (line.pn or "").strip()
+                if not pn_line:
+                    continue
+                pairs.add((pn_line, _clean_rev_value(line.rev)))
+        if not pairs:
+            return jsonify({"data": [], "totalRecords": 0})
+        q = q & _pairs_q(pairs)
 
     # ACL filter for restricted viewers
     allowed = allowed_parts_for(current_user)
@@ -433,6 +565,9 @@ def parts_lazy():
         return None
 
     has_pdf_filter = _bool_filter((filters.get("has_pdf") or {}).get("value"))
+    full_files_filter = _flag_enabled("full_files")
+    approved_filter = _flag_enabled("approved")
+    min_props_filter = _flag_enabled("min_props")
 
     def _coverage_map(parts_list: list[Part]) -> dict[tuple[str, str], set[str]]:
         if not parts_list:
@@ -442,29 +577,44 @@ def parts_lazy():
         for p in parts_list:
             attrs = harvest_part_attrs(p)
             rev_list.append(_normalized_revision(p, attrs))
-        rev_list = list({r for r in rev_list if r is not None})
+        rev_list = list({r for r in rev_list})
         qf = PartFile.objects(part_number__in=pn_list)
         if rev_list:
-            qf = qf.filter(revision__in=list(set(rev_list + [""])))
+            qf = qf.filter(revision__in=list(set(rev_list)))
         coverage: dict[tuple[str, str], set[str]] = {}
         for f in qf.only("part_number", "revision", "ext_group"):
             key = (f.part_number, f.revision or "")
             coverage.setdefault(key, set()).add((f.ext_group or "").lower())
         return coverage
 
-    if has_pdf_filter is not None:
+    needs_scan = any([
+        has_pdf_filter is not None,
+        full_files_filter,
+        approved_filter,
+        min_props_filter,
+    ])
+
+    if needs_scan:
         all_docs = list(
             qs.order_by(order_by).only("part_number", "revision", "description", "category", "attrs", "processes")
         )
         coverage = _coverage_map(all_docs)
         filtered_docs = []
+        meta = current_app.config.get("PROCESS_META", {})
         for p in all_docs:
             attrs = harvest_part_attrs(p)
             rev = _normalized_revision(p, attrs)
-            groups = coverage.get((p.part_number, rev)) or coverage.get((p.part_number, "")) or set()
-            has_pdf = "pdf" in groups
-            if has_pdf_filter == has_pdf:
-                filtered_docs.append(p)
+            groups = coverage.get((p.part_number, rev)) or set()
+            proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
+            if has_pdf_filter is not None and ("pdf" in groups) != has_pdf_filter:
+                continue
+            if approved_filter and not _is_approved(attrs):
+                continue
+            if min_props_filter and not _min_props_ok(p, attrs, proc_list):
+                continue
+            if full_files_filter and not _full_files_ok(proc_list, groups, meta):
+                continue
+            filtered_docs.append(p)
         filtered = len(filtered_docs)
         docs = filtered_docs[first:first + rows]
     else:
@@ -483,7 +633,7 @@ def parts_lazy():
         pn = p.part_number
         rev = _normalized_revision(p, attrs)
         display_code = f"{pn}-{rev}" if rev else pn
-        groups = coverage.get((pn, rev)) or coverage.get((pn, "")) or set()
+        groups = coverage.get((pn, rev)) or set()
         out.append(
             {
                 "id": f"{pn}::{rev}",
@@ -496,7 +646,7 @@ def parts_lazy():
                 "finish": attrs.get("finish", ""),
                 "mass": attrs.get("mass", ""),
                 "processes": normalize_process_list(attrs, list(p.processes or []), current_app.config.get("PROCESS_META", {})),
-                "thumb_urls": thumb_urls_for(pn, rev or None),
+                "thumb_urls": thumb_urls_for(pn, rev),
                 "has_pdf": "pdf" in groups,
                 "has_png": "png" in groups,
                 "has_dxf": "dxf" in groups,
@@ -520,10 +670,9 @@ def part_detail():
     pn = (request.args.get("pn") or "").strip()
     p = None
     if "rev" in request.args:
-        rev = request.args.get("rev") or ""
-        p = Part.objects(part_number__iexact=pn, revision__iexact=rev).first()
-        if not p:
-            p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+        rev = request.args.get("rev")
+        rev_clean = _clean_rev_input(rev)
+        p = Part.objects(part_number__iexact=pn, revision__iexact=(rev_clean or "")).first()
     else:
         p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
     if not p:
@@ -543,7 +692,7 @@ def part_detail():
     attrs = harvest_part_attrs(p)
     norm_rev = _normalized_revision(p, attrs)
     meta = current_app.config.get("PROCESS_META", {})
-    proc_list = normalize_processes(attrs, meta)
+    proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
 
     preview_urls = preview_png_urls_for(p.part_number, norm_rev)
     drawing_urls = drawing_png_urls_for(p.part_number, norm_rev)
@@ -582,7 +731,7 @@ def part_detail():
                 "revision": rev_v,
                 "display_code": f"{pn_key}-{rev_v}" if rev_v else pn_key,
                 "description": op.description or attrs_v.get("description") or "",
-                "thumb_urls": thumb_urls_for(pn_key, rev_v or None),
+                "thumb_urls": thumb_urls_for(pn_key, rev_v),
             }
         )
 
@@ -741,6 +890,49 @@ def part_comments_add(pn):
     except Exception:
         pass
     return jsonify({"ok": True, "comment": comment})
+
+
+@bp.post("/parts/<pn>/refresh_files")
+@login_required
+@permissions_required("items.edit")
+@csrf.exempt
+def part_refresh_files(pn):
+    pn = (pn or "").strip()
+    data = request.get_json(silent=True) or {}
+    rev_in = data.get("rev") if "rev" in data else request.args.get("rev")
+    rev_clean = _clean_rev_input(rev_in)
+    p = _find_part_doc(pn, rev_clean)
+    if not p:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    target_rev = _clean_rev_value(p.revision or "")
+    found = discover_part_files(p.part_number, target_rev)
+    recs = []
+    for (group, is_dwg), meta in found.items():
+        rec = dict(meta)
+        rec["ext_group"] = group
+        rec["is_dwg"] = bool(is_dwg)
+        recs.append(rec)
+    upserts = upsert_part_files(recs, p.part_number, target_rev)
+    thumbs = generate_thumbs_for_parts([(p.part_number, target_rev)])
+    try:
+        log_action(
+            "part.files.refresh",
+            resource_type="part",
+            resource=f"{p.part_number}:{target_rev}",
+            meta={"found": len(recs), "upserts": upserts, "thumbs": thumbs},
+        )
+    except Exception:
+        pass
+    return jsonify(
+        {
+            "ok": True,
+            "part_number": p.part_number,
+            "revision": target_rev,
+            "files_found": len(recs),
+            "artifacts_upserted": upserts,
+            "thumbnails_generated": thumbs,
+        }
+    )
 
 
 @bp.post("/part_delete")

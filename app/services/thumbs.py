@@ -13,14 +13,17 @@ def _root_local() -> str:
 def _abs(path_rel: str) -> str:
     return os.path.join(_root_local(), (path_rel or "").replace("/", os.sep))
 
-def _urls_for(pn: str, rev: str, *, is_dwg: bool):
+def _urls_for(pn: str, rev: Optional[str], *, is_dwg: bool):
     """Return best-first URLs for preview/drawing PNGs, preferring thumbnails.
 
     Order: HTTP thumbnail -> HTTP original -> tokenized local (thumb/original).
     """
-    rows = PartFile.objects(part_number__iexact=pn, revision__iexact=rev, ext_group="png", is_dwg=is_dwg)
-    if not rows:
-        # Fallback to any revision if specific match is missing
+    if rev is not None:
+        rev_clean = rev or ""
+        rows = PartFile.objects(part_number__iexact=pn, revision__iexact=rev_clean, ext_group="png", is_dwg=is_dwg)
+        if not rows:
+            return []
+    else:
         rows = PartFile.objects(part_number__iexact=pn, ext_group="png", is_dwg=is_dwg).order_by("-mtime")
         if not rows:
             return []
@@ -60,10 +63,10 @@ def _urls_for(pn: str, rev: str, *, is_dwg: bool):
     return dedup
 
 def preview_png_urls_for(pn: str, rev: str | None):
-    return _urls_for(pn, (rev or ""), is_dwg=False)
+    return _urls_for(pn, rev, is_dwg=False)
 
 def drawing_png_urls_for(pn: str, rev: str | None):
-    return _urls_for(pn, (rev or ""), is_dwg=True)
+    return _urls_for(pn, rev, is_dwg=True)
 
 # kept for backward compat – use only for places that truly want preview images
 def thumb_urls_for(pn: str, rev: str | None):
@@ -97,22 +100,19 @@ def drawing_urls_for(pn: str, rev_pref: Optional[str]) -> List[str]:
          .order_by("-mtime", "path"))
     docs = list(q)
     if not docs:
-        # nothing at all, keep existing behavior
         return thumb_urls_for(pn, rev_pref)
 
     def is_dwg(d: PartFile) -> bool:
         return "_DWG" in ((d.rel_path or d.path or "").upper())
 
-    dwg_docs = [d for d in docs if is_dwg(d)]
-
-    # try to honor requested revision first (including empty "")
+    # If revision provided, stay within that revision only.
     if rev_pref is not None:
         pref = rev_pref or ""
-        for d in dwg_docs:
-            if (d.revision or "") == pref:
-                return _urls_for_doc(d, http_base)
+        docs = [d for d in docs if (d.revision or "") == pref]
+        if not docs:
+            return thumb_urls_for(pn, pref)
 
-    # otherwise first drawing if any
+    dwg_docs = [d for d in docs if is_dwg(d)]
     if dwg_docs:
         return _urls_for_doc(dwg_docs[0], http_base)
 

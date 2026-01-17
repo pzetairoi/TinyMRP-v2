@@ -8,12 +8,23 @@
     <dt class="col-sm-3">Root</dt><dd class="col-sm-9">{{ result.root or '-' }}</dd>
     <dt class="col-sm-3">Parts created</dt><dd class="col-sm-9">{{ result.parts_created }}</dd>
     <dt class="col-sm-3">Parts updated</dt><dd class="col-sm-9">{{ result.parts_updated }}</dd>
+    <dt class="col-sm-3">Parts seeded</dt><dd class="col-sm-9">{{ result.parts_seeded or 0 }}</dd>
     <dt class="col-sm-3">Links created</dt><dd class="col-sm-9">{{ result.links_created }}</dd>
     <dt class="col-sm-3">Links skipped</dt><dd class="col-sm-9">{{ result.links_skipped }}</dd>
     <dt class="col-sm-3">Parts with properties</dt><dd class="col-sm-9">{{ result.parts_with_props }}</dd>
     <dt class="col-sm-3">Artifacts added</dt><dd class="col-sm-9">{{ result.artifacts_added }}</dd>
     <dt class="col-sm-3">Thumbnails generated</dt><dd class="col-sm-9">{{ result.thumbnails_generated or result.thumbnails_built or 0 }}</dd>
   </dl>
+  {% if result.parts_seeded_list %}
+  <div class="mt-2">
+    <div class="small text-muted">Seeded parts were created for PN/REV pairs that did not exist yet:</div>
+    <ul class="small mb-0">
+      {% for item in result.parts_seeded_list %}
+        <li>{{ item.part_number }}{% if item.revision %} REV {{ item.revision }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 
   {% if result.artifacts_found_by_type %}
   <h5 class="mt-3">Files Found By Type</h5>

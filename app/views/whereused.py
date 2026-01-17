@@ -12,13 +12,25 @@ from app.services.acl import require_items_view, allowed_parts_for, part_is_allo
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
+_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
+
+def _clean_rev(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in _REV_BLANKS:
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.strip()
+
 def _rows_for_child_pn(pn: str, child_rev: str | None = None):
     """Return where-used rows for a child part number, keeping revisions accurate."""
     # Fetch links where this PN is the child
     if "child_pn" in BOMLink._fields:
         query = BOMLink.objects(child_pn=pn)
         if child_rev is not None and "child_rev" in BOMLink._fields:
-            query = query.filter(child_rev=(child_rev or ""))
+            query = query.filter(child_rev=_clean_rev(child_rev))
         links = query
     else:
         child_part = Part.objects(part_number=pn).only("id").first()
@@ -30,13 +42,13 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None):
         # Resolve parent PN / REV
         if "parent_pn" in BOMLink._fields:
             parent_pn = getattr(l, "parent_pn", None)
-            parent_rev = getattr(l, "parent_rev", "") if hasattr(l, "parent_rev") else ""
-            effective_child_rev = getattr(l, "child_rev", "") if hasattr(l, "child_rev") else (child_rev or "")
+            parent_rev = _clean_rev(getattr(l, "parent_rev", "") if hasattr(l, "parent_rev") else "")
+            effective_child_rev = _clean_rev(getattr(l, "child_rev", "") if hasattr(l, "child_rev") else (child_rev or ""))
         else:
             parent_obj = getattr(l, "parent", None)
             parent_pn = getattr(parent_obj, "part_number", None)
-            parent_rev = getattr(parent_obj, "revision", "") if parent_obj else ""
-            effective_child_rev = child_rev or ""
+            parent_rev = _clean_rev(getattr(parent_obj, "revision", "") if parent_obj else "")
+            effective_child_rev = _clean_rev(child_rev or "")
 
         if not parent_pn:
             continue
@@ -47,11 +59,10 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None):
             continue
         seen.add(key)
 
-        # Prefer the exact revision from the link; fall back to latest if missing
-        parent_part = Part.objects(part_number=parent_pn, revision=(parent_rev or "")).first() or \
-                      Part.objects(part_number=parent_pn).order_by("-updated_at").first()
+        # Prefer the exact revision from the link; no cross-rev fallback
+        parent_part = Part.objects(part_number=parent_pn, revision=(parent_rev or "")).first()
         attrs = harvest_part_attrs(parent_part) if parent_part else {}
-        resolved_parent_rev = attrs.get("revision", "") or parent_rev or ""
+        resolved_parent_rev = _clean_rev(attrs.get("revision", "") or parent_rev or "")
 
         rows.append({
             "id": f"{parent_pn}::{resolved_parent_rev}::{pn}::{effective_child_rev}",
@@ -60,7 +71,7 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None):
             "qty": getattr(l, "qty", None),
             "uom": getattr(l, "uom", "") or "",
             "alt_group": getattr(l, "alt_group", "") or "",
-            "parent_thumb_urls": thumb_urls_for(parent_pn, (resolved_parent_rev or None)),
+            "parent_thumb_urls": thumb_urls_for(parent_pn, resolved_parent_rev),
             "parent_rev": resolved_parent_rev,
             "child_pn": pn,
             "child_rev": (effective_child_rev or ""),

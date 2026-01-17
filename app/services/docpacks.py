@@ -46,14 +46,31 @@ class DocPackOptions:
     output_name: Optional[str] = None
 
 
+_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
+
+def _clean_rev(rev: Optional[str]) -> str:
+    if rev is None:
+        return ""
+    text = str(rev).strip()
+    if text.lower() in _REV_BLANKS:
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.strip()
+
 def _norm_rev(rev: Optional[str]) -> str:
-    return (rev or "")
+    return _clean_rev(rev)
+
+def _rev_or_none(rev: Optional[str]) -> Optional[str]:
+    if rev is None:
+        return None
+    return _clean_rev(rev)
 
 
 def _part_by(pn: str, rev: Optional[str]) -> Optional[Part]:
-    rev = _norm_rev(rev)
-    return Part.objects(part_number=pn, revision=rev).first() or \
-           Part.objects(part_number=pn).order_by("-updated_at").first()
+    if rev is None:
+        return Part.objects(part_number=pn).order_by("-updated_at").first()
+    return Part.objects(part_number=pn, revision=_clean_rev(rev)).first()
 
 
 def _part_description(part: Optional[Part], attrs: Optional[Dict] = None) -> str:
@@ -92,28 +109,32 @@ def _flatten_bom(
     """Return a flat list of (pn, rev, qty). If full=False, only top-level children.
     Accumulates quantities when a child appears multiple times along different paths.
     """
-    root_rev = _norm_rev(root_rev)
+    if root_rev is None:
+        root_part = _part_by(root_pn, None)
+        root_rev = _clean_rev(getattr(root_part, "revision", "") if root_part else "")
+    else:
+        root_rev = _clean_rev(root_rev)
     out: Dict[Tuple[str,str], float] = {}
 
     def add(pn: str, rev: str, qty: float):
-        key = (pn, _norm_rev(rev))
+        key = (pn, _clean_rev(rev))
         out[key] = out.get(key, 0.0) + float(qty or 0.0)
 
     terminals: Set[str] = set([str(x).strip().lower() for x in (terminal_processes or [])])
 
     def children(pn: str, rev: Optional[str]):
-        rev = _norm_rev(rev)
+        rev_val = _rev_or_none(rev)
         if "parent_rev" in BOMLink._fields:
-            if rev is not None:
-                return BOMLink.objects(parent_pn=pn, parent_rev=rev)
+            if rev_val is not None:
+                return BOMLink.objects(parent_pn=pn, parent_rev=rev_val)
         return BOMLink.objects(parent_pn=pn)
 
     stack: List[Tuple[str,str,float]] = []
     # Seed stack with immediate children
     for l in children(root_pn, root_rev):
-        stack.append((l.child_pn, getattr(l, "child_rev", "") or "", float(getattr(l, "qty", 1.0) or 1.0)))
+        stack.append((l.child_pn, _clean_rev(getattr(l, "child_rev", "") or ""), float(getattr(l, "qty", 1.0) or 1.0)))
         if not full:
-            add(l.child_pn, getattr(l, "child_rev", "") or "", float(getattr(l, "qty", 1.0) or 1.0))
+            add(l.child_pn, _clean_rev(getattr(l, "child_rev", "") or ""), float(getattr(l, "qty", 1.0) or 1.0))
 
     if not full:
         return [(pn, rev, qty) for (pn, rev), qty in out.items()]
@@ -130,7 +151,7 @@ def _flatten_bom(
                 continue
         for l in children(pn, rev):
             cq = float(getattr(l, "qty", 1.0) or 1.0) * q
-            stack.append((l.child_pn, getattr(l, "child_rev", "") or "", cq))
+            stack.append((l.child_pn, _clean_rev(getattr(l, "child_rev", "") or ""), cq))
 
     return [(pn, rev, qty) for (pn, rev), qty in out.items()]
 
@@ -165,7 +186,7 @@ def _collect_files(pn_rev_qty: Iterable[Tuple[str,str,float]], file_types: Optio
     for pn, rev, _ in pn_rev_qty:
         q = PartFile.objects(part_number__iexact=pn)
         if rev is not None:
-            q = q.filter(revision__iexact=(rev or ""))
+            q = q.filter(revision__iexact=_clean_rev(rev))
         if groups:
             q = q.filter(ext_group__in=list(groups))
         out.extend(list(q))
@@ -183,23 +204,28 @@ def _bom_occurrences(
     Level starts at 1 for immediate children of the root.
     Applies the same consumed/terminal filtering as the visual list/BOM flatten.
     """
+    if root_rev is None:
+        root_part = _part_by(root_pn, None)
+        root_rev = _clean_rev(getattr(root_part, "revision", "") if root_part else "")
+    else:
+        root_rev = _clean_rev(root_rev)
     occ: Dict[Tuple[str,str], List[Tuple[int,float]]] = {}
     terminals: Set[str] = set([str(x).strip().lower() for x in (terminal_processes or [])])
 
     def children(pn: str, rev: Optional[str]):
-        rev = _norm_rev(rev)
+        rev_val = _rev_or_none(rev)
         if "parent_rev" in BOMLink._fields:
-            if rev is not None:
-                return BOMLink.objects(parent_pn=pn, parent_rev=rev)
+            if rev_val is not None:
+                return BOMLink.objects(parent_pn=pn, parent_rev=rev_val)
         return BOMLink.objects(parent_pn=pn)
 
     stack: List[Tuple[str,str,int,float]] = []
     for l in children(root_pn, root_rev):
-        stack.append((l.child_pn, getattr(l, "child_rev", "") or "", 1, float(getattr(l, "qty", 1.0) or 1.0)))
+        stack.append((l.child_pn, _clean_rev(getattr(l, "child_rev", "") or ""), 1, float(getattr(l, "qty", 1.0) or 1.0)))
 
     while stack:
         pn, rev, level, q = stack.pop()
-        key = (pn, _norm_rev(rev))
+        key = (pn, _clean_rev(rev))
         occ.setdefault(key, []).append((level, q))
         if not include_consumed:
             pdoc = _part_by(pn, rev)
@@ -209,7 +235,7 @@ def _bom_occurrences(
                 continue
         for l in children(pn, rev):
             cq = float(getattr(l, "qty", 1.0) or 1.0) * q
-            stack.append((l.child_pn, getattr(l, "child_rev", "") or "", level+1, cq))
+            stack.append((l.child_pn, _clean_rev(getattr(l, "child_rev", "") or ""), level+1, cq))
     return occ
 
 
@@ -520,19 +546,20 @@ def _visual_list_pdf(
     except Exception:
         return None
     root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
+    root_rev_clean = _clean_rev(root_rev) if root_rev is not None else ""
     # Build rows with: pn, rev, qty, imgpath
     # Ensure root appears first (alone) and children sorted by partnumber
     rows: List[Tuple[str,str,float,str|None]] = []
     # Prepare children items, excluding the root if present
     items = list(flat or [])
     if root_pn:
-        items = [t for t in items if not (str(t[0]).strip().lower() == str(root_pn).strip().lower() and _norm_rev(t[1]) == _norm_rev(root_rev))]
+        items = [t for t in items if not (str(t[0]).strip().lower() == str(root_pn).strip().lower() and _norm_rev(t[1]) == root_rev_clean)]
     # Sort children by partnumber then revision
     items.sort(key=lambda t: (str(t[0]) or "", _norm_rev(t[1]) or ""))
 
     # Helper to find image path for a pn/rev
     def _img_for(pn: str, rev: str) -> Optional[str]:
-        q = PartFile.objects(part_number__iexact=pn, revision__iexact=(rev or ""), ext_group="png", is_dwg=False).order_by("-mtime_iso")
+        q = PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev), ext_group="png", is_dwg=False).order_by("-mtime_iso")
         pf = q.first()
         if pf:
             pth = pf.path if os.path.isabs(pf.path) else os.path.join(root, pf.rel_path.replace("/", os.sep))
@@ -543,11 +570,11 @@ def _visual_list_pdf(
     # Root entry first if provided
     root_entry: Optional[Tuple[str,str,float,Optional[str]]] = None
     if root_pn:
-        root_entry = (root_pn, _norm_rev(root_rev or ""), 1.0, _img_for(root_pn, _norm_rev(root_rev or "")))
+        root_entry = (root_pn, root_rev_clean, 1.0, _img_for(root_pn, root_rev_clean))
 
     # Child rows
     for pn, rev, qty in items:
-        rows.append((pn, rev or "", qty, _img_for(pn, rev or "")))
+        rows.append((pn, _clean_rev(rev), qty, _img_for(pn, _clean_rev(rev))))
 
     # Layout close to legacy BoxyGrid (3 columns on A4 portrait)
     box_w = 58*mm
@@ -567,12 +594,12 @@ def _visual_list_pdf(
     root_desc = ''
     if root_pn:
         try:
-            rpdoc = _part_by(root_pn, root_rev or "")
+            rpdoc = _part_by(root_pn, root_rev_clean)
             root_desc = _part_description(rpdoc)
         except Exception:
             pass
     def header():
-        title = (f"{root_pn or ''} REV {root_rev or ''}").strip()
+        title = (f"{root_pn or ''} REV {root_rev_clean}").strip()
         c.setFont("Helvetica-Bold", 18)
         if title:
             c.drawCentredString(W/2, H - margin + 6*mm, title)
@@ -937,6 +964,150 @@ def _hardware_summary_pdf(rows: List[Dict[str, object]]) -> Optional[bytes]:
     doc.build(flowables)
     return buf.getvalue()
 
+def _aggregate_qty(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> Dict[Tuple[str, str], float]:
+    totals: Dict[Tuple[str, str], float] = {}
+    for pn, rev, qty in pn_rev_qty:
+        key = (pn, _clean_rev(rev))
+        totals[key] = totals.get(key, 0.0) + float(qty or 0.0)
+    return totals
+
+def _scope_supply_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List[Dict[str, object]]:
+    totals = _aggregate_qty(pn_rev_qty)
+    rows: List[Dict[str, object]] = []
+    for (pn, rev), qty in sorted(totals.items(), key=lambda t: (t[0][0] or "", t[0][1] or "")):
+        pdoc = _part_by(pn, rev)
+        rows.append(
+            {
+                "partnumber": pn,
+                "revision": rev,
+                "description": _part_description(pdoc),
+                "qty": qty,
+            }
+        )
+    return rows
+
+def _cut_fold_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List[Dict[str, object]]:
+    totals = _aggregate_qty(pn_rev_qty)
+    rows: List[Dict[str, object]] = []
+    for (pn, rev), qty in sorted(totals.items(), key=lambda t: (t[0][0] or "", t[0][1] or "")):
+        pdoc = _part_by(pn, rev)
+        procs = _part_processes(pdoc)
+        rows.append(
+            {
+                "partnumber": pn,
+                "revision": rev,
+                "description": _part_description(pdoc),
+                "process": ", ".join(procs),
+                "qty": qty,
+            }
+        )
+    return rows
+
+def _scope_supply_pdf(rows: List[Dict[str, object]], title: str) -> Optional[bytes]:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet
+    except Exception:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=20*mm, bottomMargin=20*mm)
+    styles = getSampleStyleSheet()
+    flowables = [Paragraph(title, styles["Heading2"]), Spacer(0, 4*mm)]
+    if not rows:
+        flowables.append(Paragraph("No items found.", styles["Normal"]))
+        doc.build(flowables)
+        return buf.getvalue()
+
+    table_data = [["Part Number", "Revision", "Description", "Total Qty"]]
+    for r in rows:
+        qty = r.get("qty") or 0
+        try:
+            qty_s = f"{float(qty):g}"
+        except Exception:
+            qty_s = str(qty)
+        table_data.append([
+            str(r.get("partnumber") or ""),
+            str(r.get("revision") or ""),
+            str(r.get("description") or ""),
+            qty_s,
+        ])
+
+    col_widths = [32*mm, 16*mm, 90*mm, 20*mm]
+    table = Table(table_data, colWidths=col_widths)
+    style = TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.8, colors.black),
+    ])
+    table.setStyle(style)
+    flowables.append(table)
+    doc.build(flowables)
+    return buf.getvalue()
+
+def _cut_fold_summary_pdf(rows: List[Dict[str, object]], title: str) -> Optional[bytes]:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet
+    except Exception:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=20*mm, bottomMargin=20*mm)
+    styles = getSampleStyleSheet()
+    flowables = [Paragraph(title, styles["Heading2"]), Spacer(0, 4*mm)]
+    if not rows:
+        flowables.append(Paragraph("No items found.", styles["Normal"]))
+        doc.build(flowables)
+        return buf.getvalue()
+
+    table_data = [["Part Number", "Revision", "Description", "Process", "Total Qty"]]
+    for r in rows:
+        qty = r.get("qty") or 0
+        try:
+            qty_s = f"{float(qty):g}"
+        except Exception:
+            qty_s = str(qty)
+        table_data.append([
+            str(r.get("partnumber") or ""),
+            str(r.get("revision") or ""),
+            str(r.get("description") or ""),
+            str(r.get("process") or ""),
+            qty_s,
+        ])
+
+    col_widths = [30*mm, 14*mm, 70*mm, 45*mm, 18*mm]
+    table = Table(table_data, colWidths=col_widths)
+    style = TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.8, colors.black),
+    ])
+    table.setStyle(style)
+    flowables.append(table)
+    doc.build(flowables)
+    return buf.getvalue()
+
 
 def _whereused_rows(root_pn: str, root_rev: Optional[str]) -> List[Dict[str, object]]:
     rows: Dict[Tuple[str, str], Dict[str, object]] = {}
@@ -945,8 +1116,9 @@ def _whereused_rows(root_pn: str, root_rev: Optional[str]) -> List[Dict[str, obj
     try:
         if "child_pn" in BOMLink._fields:
             q = BOMLink.objects(child_pn=root_pn)
-            if root_rev is not None and "child_rev" in BOMLink._fields:
-                q = q.filter(child_rev=(root_rev or ""))
+            root_rev_clean = _rev_or_none(root_rev)
+            if root_rev_clean is not None and "child_rev" in BOMLink._fields:
+                q = q.filter(child_rev=root_rev_clean)
             links = q
         else:
             child_part = Part.objects(part_number=root_pn).only("id").first()
@@ -957,11 +1129,11 @@ def _whereused_rows(root_pn: str, root_rev: Optional[str]) -> List[Dict[str, obj
     for l in links:
         if "parent_pn" in BOMLink._fields:
             parent_pn = getattr(l, "parent_pn", None)
-            parent_rev = getattr(l, "parent_rev", "") if hasattr(l, "parent_rev") else ""
+            parent_rev = _clean_rev(getattr(l, "parent_rev", "") if hasattr(l, "parent_rev") else "")
         else:
             parent_obj = getattr(l, "parent", None)
             parent_pn = getattr(parent_obj, "part_number", None)
-            parent_rev = getattr(parent_obj, "revision", "") if parent_obj else ""
+            parent_rev = _clean_rev(getattr(parent_obj, "revision", "") if parent_obj else "")
         if not parent_pn:
             continue
         key = (parent_pn, parent_rev or "")
@@ -1008,7 +1180,7 @@ def _whereused_report_pdf(rows: List[Dict[str, object]], root_pn: str, root_rev:
     except Exception:
         ts = ""
     if root_pn:
-        rev_s = root_rev or ""
+        rev_s = _clean_rev(root_rev) if root_rev is not None else ""
         flowables.append(Paragraph(f"Part: {root_pn}    Rev: {rev_s}", styles["Normal"]))
     if ts:
         flowables.append(Paragraph(f"Generated: {ts}", styles["Normal"]))
@@ -1062,7 +1234,8 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     except Exception:
         return None
 
-    pdoc = _part_by(root_pn, root_rev or "")
+    pdoc = _part_by(root_pn, root_rev)
+    root_rev_clean = _clean_rev(root_rev) if root_rev is not None else _clean_rev(getattr(pdoc, "revision", "") if pdoc else "")
     attrs = harvest_part_attrs(pdoc) if pdoc else {}
     desc = _part_description(pdoc, attrs) if pdoc else ""
 
@@ -1085,8 +1258,8 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     related_file = ""
     try:
         q = PartFile.objects(part_number__iexact=root_pn, ext__iexact="pdf")
-        if root_rev is not None:
-            q = q.filter(revision__iexact=(root_rev or ""))
+        if root_rev is not None or root_rev_clean:
+            q = q.filter(revision__iexact=root_rev_clean)
         pf = q.order_by("rel_path").first()
         if pf:
             related_file = os.path.basename(pf.rel_path or pf.path or "")
@@ -1108,7 +1281,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     c = canvas.Canvas(buf, pagesize=A4)
 
     # Logo top-right
-    _draw_svg_or_png(c, W - margin - logo_w, H - margin - logo_h, logo_w, logo_h, "logo.svg", "logo.png")
+    _draw_svg_or_png(c, W - margin - logo_w, H - margin - logo_h, logo_w, logo_h, "tinylogo.svg", "tinylogo.png")
 
     def _wrap_lines(text: str, font: str, size: float, max_w: float) -> List[str]:
         words = (text or "").split()
@@ -1131,8 +1304,8 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     # Header: PN/REV and description
     y = H - margin
     title = root_pn or ""
-    if root_rev:
-        title = f"{root_pn}  REV {root_rev}"
+    if root_rev_clean:
+        title = f"{root_pn}  REV {root_rev_clean}"
     c.setFont("Helvetica-Bold", 18)
     for line in _wrap_lines(title, "Helvetica-Bold", 18, max_w=header_w):
         y -= 7 * mm
@@ -1308,7 +1481,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     if not base_stub:
         base_stub = (opts.root_pn or "docpack").strip()
         if opts.root_rev:
-            base_stub = f"{base_stub}_{opts.root_rev}"
+            rev_stub = _clean_rev(opts.root_rev)
+            if rev_stub:
+                base_stub = f"{base_stub}_{rev_stub}"
     else:
         base_stub = os.path.splitext(base_stub)[0]
 
@@ -1337,6 +1512,17 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         "3d laser",
         "casting",
     }
+    fab_cut_procs = {
+        "lasercut",
+        "profile cut",
+        "folding",
+        "rolling",
+        "cutting",
+        "plasma",
+        "waterjet",
+    }
+    fab_all: Optional[List[Tuple[str, str, float]]] = None
+    fab_scope: Optional[List[Tuple[str, str, float]]] = None
     force_proc_filter = False
     if getattr(opts, "fabrication_pack", False):
         # restrict to fab processes
@@ -1345,24 +1531,50 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         force_proc_filter = True
         # scope of supply: exclude consumed parts
         opts.include_consumed = False
-        # include docs for fabrication pack
-        opts.file_types = ["dxf", "step", "pdf", "png"]
+        # include docs for fabrication pack (exclude PNGs per request)
+        opts.file_types = ["dxf", "step", "pdf"]
         opts.want_selected_files = True
         opts.want_excel_bom = True
+        opts.want_pdf_binder = True
+        fab_full = (opts.depth != "top")
+        # all fabrication parts (include consumed)
+        fab_all = _flatten_bom(
+            opts.root_pn,
+            opts.root_rev,
+            full=fab_full,
+            include_consumed=True,
+            terminal_processes=consumed_terminals,
+        )
+        # scope of supply: stop at fabrication parts
+        fab_scope = _flatten_bom(
+            opts.root_pn,
+            opts.root_rev,
+            full=fab_full,
+            include_consumed=False,
+            terminal_processes=list(fab_procs),
+        )
 
-    for pn, rev, qty in flat:
-        p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
-        if not p:
-            continue
-        if not _passes_classified_filter(p, opts.classified_filter):
-            continue
-        if not _passes_process_filter(p, opts.processes, opts.process_mode):
-            continue
-        filtered_flat.append((pn, rev, qty))
+    def _filter_flat(source: Iterable[Tuple[str, str, float]]) -> List[Tuple[str, str, float]]:
+        out: List[Tuple[str, str, float]] = []
+        for pn, rev, qty in source:
+            p = _part_by(pn, rev)
+            if not p:
+                continue
+            if not _passes_classified_filter(p, opts.classified_filter):
+                continue
+            if not _passes_process_filter(p, opts.processes, opts.process_mode):
+                continue
+            out.append((pn, rev, qty))
+        return out
+
+    flat_source = fab_all if fab_all is not None else flat
+    filtered_flat = _filter_flat(flat_source)
 
     # 3) Collect files
     # include datasheets in binder if requested (affects file_types for binder only)
-    chosen_files = _collect_files(filtered_flat + [(opts.root_pn, opts.root_rev or "", 1.0)], opts.file_types)
+    root_part = _part_by(opts.root_pn, None) if opts.root_rev is None else None
+    root_rev_resolved = _clean_rev(opts.root_rev) if opts.root_rev is not None else _clean_rev(getattr(root_part, "revision", "") if root_part else "")
+    chosen_files = _collect_files(filtered_flat + [(opts.root_pn, root_rev_resolved, 1.0)], opts.file_types)
     output_count = 0
     if opts.want_selected_files:
         output_count += 1
@@ -1374,6 +1586,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         output_count += 1
     if opts.want_whereused_report:
         output_count += 1
+    if getattr(opts, "fabrication_pack", False):
+        output_count += 2
     if opts.want_pdf_binder:
         output_count += 1
     want_zip = bool(opts.want_selected_files) or output_count != 1
@@ -1414,22 +1628,17 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         bool(opts.want_pdf_binder) and (bool(opts.binder_add_visual_list) or bool(opts.binder_add_hardware_summary))
     )
     if need_vis:
-        vis_full = _flatten_bom(
-            opts.root_pn,
-            opts.root_rev,
-            full=True,
-            include_consumed=bool(opts.include_consumed),
-            terminal_processes=["welding", "purchase", "machine"],
-        )
-        for pn, rev, qty in vis_full:
-            p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
-            if not p:
-                continue
-            if not _passes_classified_filter(p, opts.classified_filter):
-                continue
-            if not _passes_process_filter(p, opts.processes, opts.process_mode):
-                continue
-            vis_filtered.append((pn, rev, qty))
+        if fab_all is not None:
+            vis_source = fab_all
+        else:
+            vis_source = _flatten_bom(
+                opts.root_pn,
+                opts.root_rev,
+                full=True,
+                include_consumed=bool(opts.include_consumed),
+                terminal_processes=["welding", "purchase", "machine"],
+            )
+        vis_filtered = _filter_flat(vis_source)
 
     # Visual list PDF (standalone)
     if opts.want_visual_list:
@@ -1470,6 +1679,36 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         else:
             return (where_name, whereused_pdf, "application/pdf")
 
+    # Fabrication pack extras: scope-of-supply + cut/fold summary
+    if getattr(opts, "fabrication_pack", False):
+        scope_source = _filter_flat(fab_scope or [])
+        scope_rows = _scope_supply_rows(scope_source)
+        scope_pdf = _scope_supply_pdf(scope_rows, "Scope of Supply")
+        if scope_rows and not scope_pdf:
+            raise RuntimeError("Failed to build Scope of Supply PDF. Ensure reportlab is installed.")
+        if scope_pdf:
+            scope_name = build_output_name(f"{base_stub}_ScopeOfSupply", "pdf", max_len=96, include_time=False, now=build_ts)
+            z.writestr(scope_name, scope_pdf)
+
+        cut_rows_src: List[Tuple[str, str, float]] = []
+        for pn, rev, qty in (fab_all or []):
+            p = _part_by(pn, rev)
+            if not p:
+                continue
+            if not _passes_classified_filter(p, opts.classified_filter):
+                continue
+            if not _passes_process_filter(p, opts.processes, opts.process_mode):
+                continue
+            if set(_part_processes(p)) & fab_cut_procs:
+                cut_rows_src.append((pn, rev, qty))
+        cut_rows = _cut_fold_summary_rows(cut_rows_src)
+        cut_pdf = _cut_fold_summary_pdf(cut_rows, "Laser / Fold Summary")
+        if cut_rows and not cut_pdf:
+            raise RuntimeError("Failed to build Laser/Fold Summary PDF. Ensure reportlab is installed.")
+        if cut_pdf:
+            cut_name = build_output_name(f"{base_stub}_LaserFoldSummary", "pdf", max_len=96, include_time=False, now=build_ts)
+            z.writestr(cut_name, cut_pdf)
+
     # PDF binder (with index & page numbers)
     if opts.want_pdf_binder:
         # Gather PDFs independent of UI file filter (always include PDFs if present)
@@ -1478,7 +1717,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         for pn, rev, _ in filtered_flat:
             key = (pn, _norm_rev(rev))
             uniq_children[key] = None
-        root_key = (opts.root_pn, _norm_rev(opts.root_rev or ""))
+        root_key = (opts.root_pn, root_rev_resolved)
         if root_key in uniq_children:
             uniq_children.pop(root_key, None)
         ordered_children = sorted(list(uniq_children.keys()), key=lambda t: (t[0] or "", t[1] or ""))
@@ -1533,7 +1772,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
         if opts.binder_add_hardware_summary:
             try:
-                hardware_rows = _hardware_summary_rows(vis_filtered + [(opts.root_pn, opts.root_rev or "", 1.0)])
+                hardware_rows = _hardware_summary_rows(vis_filtered + [(opts.root_pn, root_rev_resolved, 1.0)])
                 hardware_pdf = _hardware_summary_pdf(hardware_rows)
                 if hardware_rows and not hardware_pdf:
                     raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
@@ -1615,10 +1854,10 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
                 except Exception:
                     now = ""
-                pdoc = _part_by(opts.root_pn, opts.root_rev or "")
+                pdoc = _part_by(opts.root_pn, root_rev_resolved)
                 desc = _part_description(pdoc) if pdoc else ''
                 c.drawString(left_x, y, f"Generated: {now}"); y -= 6*mm
-                c.drawString(left_x, y, f"Part: {opts.root_pn}    Rev: {opts.root_rev or ''}"); y -= 6*mm
+                c.drawString(left_x, y, f"Part: {opts.root_pn}    Rev: {root_rev_resolved}"); y -= 6*mm
                 if desc:
                     # wrap description
                     avail_w = right_x - left_x
@@ -1731,7 +1970,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 )
                 vis_filtered2: List[Tuple[str,str,float]] = []
                 for pn, rev, qty in vis_full2:
-                    p = Part.objects(part_number=pn, revision=(rev or "")).first() or Part.objects(part_number=pn).order_by("-updated_at").first()
+                    p = _part_by(pn, rev)
                     if not p:
                         continue
                     if not _passes_classified_filter(p, opts.classified_filter):
