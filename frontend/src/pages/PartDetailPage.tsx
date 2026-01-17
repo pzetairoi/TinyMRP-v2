@@ -147,6 +147,10 @@ export default function PartDetailPage() {
   const [canPartsDelete, setCanPartsDelete] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
   const [canPartsEdit, setCanPartsEdit] = useState(false);
   const [insights, setInsights] = useState<PartInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(false);
@@ -382,6 +386,8 @@ function bestUrl(f: FileRow): string {
     let canceled = false;
     (async () => {
       setLoading(true);
+      setRefreshMsg(null);
+      setRefreshError(null);
       try {
         const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`);
         if (r.status === 403) { if (!canceled) { setForbidden(true); } return; }
@@ -465,7 +471,7 @@ function bestUrl(f: FileRow): string {
     return () => {
       canceled = true;
     };
-  }, [pn, rev]);
+  }, [pn, rev, refreshTick]);
 
   useEffect(() => {
     let cancelled = false;
@@ -546,12 +552,14 @@ function bestUrl(f: FileRow): string {
           return;
         }
 
-        const rk = String(root[0].key ?? root[0].data?.pn ?? pn);
-        const rootRev = (root[0] as any)?.data?.rev || "";
+        const rootNode = root[0] as any;
+        const rootPn = (rootNode?.data?.pn || pn) as string;
+        const rk = String(rootNode?.key ?? rootPn);
+        const rootRev = (rootNode?.data?.rev || "") as string;
         setRootKey(rk);
 
         const r2 = await fetch(
-          `/api/bom_tree?parent=${encodeURIComponent(rk)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`
+          `/api/bom_tree?parent=${encodeURIComponent(rootPn)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`
         );
         if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
         let kids: TreeNode[] = asArr(await r2.json());
@@ -608,9 +616,10 @@ function bestUrl(f: FileRow): string {
     if (!key) return;
     try {
       const parentNode = findNode(bomNodes, key);
+      const parentPn = (parentNode as any)?.data?.pn || key;
       const parentRev = (parentNode as any)?.data?.rev || "";
       const r = await fetch(
-        `/api/bom_tree?parent=${encodeURIComponent(key)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`
+        `/api/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`
       );
       if (r.status === 403) { setForbidden(true); return; }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -647,9 +656,10 @@ function bestUrl(f: FileRow): string {
       if (!node.children || (node.children as TreeNode[]).length === 0) {
         try {
           const parentNode2 = findNode(nextTree, key);
+          const parentPn2 = (parentNode2 as any)?.data?.pn || key;
           const parentRev2 = (parentNode2 as any)?.data?.rev || "";
           const r = await fetch(
-            `/api/bom_tree?parent=${encodeURIComponent(key)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`
+            `/api/bom_tree?parent=${encodeURIComponent(parentPn2)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`
           );
           if (r.ok) {
             let kids: TreeNode[] = asArr(await r.json());
@@ -868,6 +878,34 @@ function bestUrl(f: FileRow): string {
       setCommentError(e?.message || "Failed to add comment")
     } finally {
       setCommentSaving(false)
+    }
+  }
+
+  async function handleRefreshFiles() {
+    if (!canPartsEdit || !part) return
+    setRefreshBusy(true)
+    setRefreshError(null)
+    setRefreshMsg(null)
+    try {
+      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/refresh_files?rev=${encodeURIComponent(part.revision || "")}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rev: part.revision || "" }),
+      })
+      const j = await resp.json().catch(() => ({}))
+      if (!resp.ok) {
+        const msg = j?.error || `HTTP ${resp.status}`
+        throw new Error(msg)
+      }
+      const found = j?.files_found ?? 0
+      const upserts = j?.artifacts_upserted ?? 0
+      const thumbs = j?.thumbnails_generated ?? 0
+      setRefreshMsg(`Found ${found} files, updated ${upserts}, thumbs ${thumbs}.`)
+      setRefreshTick((t) => t + 1)
+    } catch (err: any) {
+      setRefreshError(err?.message || "Refresh failed")
+    } finally {
+      setRefreshBusy(false)
     }
   }
 
@@ -1265,9 +1303,10 @@ function bestUrl(f: FileRow): string {
                         if(on){
                           setProcessMode('selected');
                           setSelProcesses(new Set(['welding','lasercut','profile cut','folding','rolling','cutting','machine','3d laser','casting']));
-                          setSelTypes(new Set(['dxf','step','pdf','png']));
+                          setSelTypes(new Set(['dxf','step','pdf']));
                           setWantSelectedFiles(true);
                           setWantExcel(true);
+                          setWantBinder(true);
                           setIncludeConsumed(false);
                         }
                       }} /><label className="form-check-label" htmlFor="docFab">Fabrication Pack</label></div>
@@ -1433,14 +1472,16 @@ function bestUrl(f: FileRow): string {
               </div>
             </TabPanel>
 
-          <TabPanel header="Other versions">
-            <DataTable value={versions} dataKey="id" responsiveLayout="scroll" stripedRows>
-              <Column header="" body={(r: VersionRow) => <ThumbImg urls={r.thumb_urls || []} maxH={32} maxW={48} />} style={{width:60}} />
-              <Column field="part_number" header="Part Number" body={(r: VersionRow) => <a href={`/ui/part/${encodeURIComponent(r.part_number)}?rev=${encodeURIComponent(r.revision||"")}`}>{r.part_number}</a>} sortable />
-              <Column field="revision" header="Rev" sortable />
-              <Column field="description" header="Description" sortable />
-            </DataTable>
-          </TabPanel>
+          {versions.length > 1 && (
+            <TabPanel header="Other versions">
+              <DataTable value={versions} dataKey="id" responsiveLayout="scroll" stripedRows>
+                <Column header="" body={(r: VersionRow) => <ThumbImg urls={r.thumb_urls || []} maxH={32} maxW={48} />} style={{width:60}} />
+                <Column field="part_number" header="Part Number" body={(r: VersionRow) => <a href={`/ui/part/${encodeURIComponent(r.part_number)}?rev=${encodeURIComponent(r.revision||"")}`}>{r.part_number}</a>} sortable />
+                <Column field="revision" header="Rev" sortable />
+                <Column field="description" header="Description" sortable />
+              </DataTable>
+            </TabPanel>
+          )}
 
           <TabPanel header="Jobs & Orders">
             {jobsOrders.length ? (
@@ -1585,17 +1626,36 @@ function bestUrl(f: FileRow): string {
 
           <TabPanel header="Actions">
             <div className="pd-card p-3">
-              {canPartsDelete ? (
-                <div>
-                  <button
-                    type="button"
-                    className="btn btn-outline-danger btn-sm"
-                    onClick={handleDeletePart}
-                    disabled={deleteBusy}
-                  >
-                    {deleteBusy ? "Deleting..." : "Delete part"}
-                  </button>
-                  {deleteError ? <div className="text-danger small mt-1">{deleteError}</div> : null}
+              {(canPartsEdit || canPartsDelete) ? (
+                <div className="d-flex flex-column gap-3">
+                  {canPartsEdit && (
+                    <div>
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary btn-sm"
+                        onClick={handleRefreshFiles}
+                        disabled={refreshBusy}
+                      >
+                        {refreshBusy ? "Refreshing..." : "Update files"}
+                      </button>
+                      {refreshMsg ? <div className="text-muted small mt-1">{refreshMsg}</div> : null}
+                      {refreshError ? <div className="text-danger small mt-1">{refreshError}</div> : null}
+                      <div className="text-muted small mt-1">Scans storage for files matching this PN and revision.</div>
+                    </div>
+                  )}
+                  {canPartsDelete && (
+                    <div>
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger btn-sm"
+                        onClick={handleDeletePart}
+                        disabled={deleteBusy}
+                      >
+                        {deleteBusy ? "Deleting..." : "Delete part"}
+                      </button>
+                      {deleteError ? <div className="text-danger small mt-1">{deleteError}</div> : null}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-muted small">No actions available.</div>

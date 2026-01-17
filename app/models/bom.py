@@ -33,10 +33,8 @@ class BOMLink(Document):
 
     @property
     def parent(self):
-        return Part.objects(part_number=self.parent_pn, revision=(self.parent_rev or "")).first() \
-            or Part.objects(part_number=self.parent_pn).order_by("-updated_at").first()
+        return Part.objects(part_number=self.parent_pn, revision=(self.parent_rev or "")).first()
 
     @property
     def child(self):
-        return Part.objects(part_number=self.child_pn, revision=(self.child_rev or "")).first() \
-            or Part.objects(part_number=self.child_pn).order_by("-updated_at").first()
+        return Part.objects(part_number=self.child_pn, revision=(self.child_rev or "")).first()

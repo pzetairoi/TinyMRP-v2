@@ -56,6 +56,18 @@ This checklist captures legacy behaviors from `OLD/SourceCode` and maps them to 
   - Current: `app/services/docpacks.py` `_excel_bom_bytes` uses `total qty` header at the legacy position and sources values from `full_qty_map`.
   - Verification: `tests/test_excel_bom_total_qty.py` confirms header uses `total qty` and omits approved columns.
 
+## BOM Revision Matching / File Association
+
+- Strict PN+REV matching for BOM links and outputs
+  - Legacy: `OLD/SourceCode/app/tinylib/models.py` BOM links are keyed on `partnumber` + `revision` (no latest-rev fallback).
+  - Current: `app/services/import_zip.py` uses exact TREEBOM revisions; no fallback to latest in `BOMLink` creation; `app/views/bom_tree.py`, `app/views/whereused.py`, `app/services/docpacks.py`, and `app/services/order_scope.py` honor exact PN+REV pairs.
+  - Verification: New tests assert no fallback to latest when rev is blank and only matching-rev files are used (see tests added in this patch set).
+
+- File selection respects exact revision (no cross-rev fallback)
+  - Legacy: files resolved by partnumber + revision match in deliverables folders.
+  - Current: `app/services/thumbnails.py` and `app/services/docpacks.py` only use files whose `PartFile.revision` matches the requested revision (including blank).
+  - Verification: New tests cover blank-rev and non-blank rev file lookup.
+
 ## Filenames / Output Naming
 
 - Timestamp suffix + Windows-safe length
@@ -91,8 +103,8 @@ This checklist captures legacy behaviors from `OLD/SourceCode` and maps them to 
 
 - Fabrication pack covers all fabrication processes + scope-of-supply
   - Legacy: `OLD/SourceCode/app/tinylib/views.py` `/fabrication` builds welding-based pack with scope-of-supply Excel and all docs (PDF/DXF/STEP/PNG).
-  - Current: `app/services/docpacks.py` `fabrication_pack` forces a fabrication process set, excludes consumed parts for scope-of-supply, and includes required docs via selected files + Excel BOM.
-  - Verification: Manual (fabrication pack output contents + Excel BOM).
+  - Current: `app/services/docpacks.py` `fabrication_pack` builds a binder for all fabrication parts, adds a scope-of-supply PDF for non-consumed items, and adds a cut/fold summary PDF for consumed components; selected files exclude PNGs per request.
+  - Verification: Added tests validate fabrication pack zip contents and scope-of-supply/cut-fold summaries.
 
 ## Job BOM Editor
 

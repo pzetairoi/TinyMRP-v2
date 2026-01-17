@@ -28,6 +28,18 @@ def _safe_qty(s: str) -> float:
     except Exception:
         return 1.0
 
+_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
+
+def _clean_rev(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in _REV_BLANKS:
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.strip()
+
 def _parse_flatbom(txt: str) -> List[Dict[str, Any]]:
     """
     FLATBOM contains one Python-like dict per line with single quotes.
@@ -58,14 +70,14 @@ def _normalize_part(d: Dict[str, Any]) -> Dict[str, Any]:
             desc = (f"{desc} {low[k]}").strip()
     category = d.get("category") or low.get("category") or ""
     uom = d.get("uom") or d.get("UoM") or low.get("uom") or "EA"
-    revision = d.get("revision") or low.get("revision") or ""
+    revision = _clean_rev(d.get("revision") or low.get("revision") or "")
 
     return {
         "part_number": pn,
         "description": (desc or "").strip(),
         "category": (str(category) if category is not None else "").strip(),
         "uom": (str(uom) if uom is not None else "EA").strip() or "EA",
-        "revision": (str(revision) if revision is not None else "").strip(),
+        "revision": _clean_rev(revision),
         "attrs": d,  # store full original dict
     }
 
@@ -87,7 +99,7 @@ def _parse_treebom(txt: str) -> List[Tuple[str, str, str, str, float]]:
             continue
         item_no = parts[0].strip()
         part_number = parts[1].strip()
-        revision = parts[2].strip()
+        revision = _clean_rev(parts[2].strip())
         qty = parts[3].strip()
         rows.append({"item_no": item_no, "part_number": part_number, "revision": revision, "qty": qty})
 
@@ -95,7 +107,7 @@ def _parse_treebom(txt: str) -> List[Tuple[str, str, str, str, float]]:
     item_to_part: Dict[str, Tuple[str, str]] = {}
     for r in rows:
         pn = _base_pn(r["part_number"])
-        rev = (r.get("revision") or "").strip()
+        rev = _clean_rev(r.get("revision") or "")
         item_to_part[r["item_no"]] = (pn, rev)
 
     links: List[Tuple[str, str, str, str, float]] = []
@@ -120,7 +132,7 @@ def _parse_treebom(txt: str) -> List[Tuple[str, str, str, str, float]]:
 
 def _ensure_part_exists(pn: str, rev: str, seed_tag: str) -> bool:
     pn = _base_pn(str(pn)).strip()
-    rev = (rev or "").strip()
+    rev = _clean_rev(rev)
     if not pn:
         return False
     if Part.objects(part_number=pn, revision=rev).first():
@@ -131,24 +143,11 @@ def _ensure_part_exists(pn: str, rev: str, seed_tag: str) -> bool:
     except NotUniqueError:
         return False
 
-def _find_existing_link(parent_pn: str, parent_rev: str, child_pn: str, child_rev: str,
-                        resolved_parent_rev: str, resolved_child_rev: str):
+def _find_existing_link(parent_pn: str, parent_rev: str, child_pn: str, child_rev: str):
     query = dict(parent_pn=parent_pn, child_pn=child_pn)
     if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
-        query.update(parent_rev=resolved_parent_rev, child_rev=resolved_child_rev)
+        query.update(parent_rev=parent_rev, child_rev=child_rev)
     existing_links = list(BOMLink.objects(**query))
-
-    if not existing_links and (parent_rev or child_rev):
-        alt_query = dict(parent_pn=parent_pn, child_pn=child_pn)
-        if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
-            alt_query.update(parent_rev=(parent_rev or "").strip(), child_rev=(child_rev or "").strip())
-        existing_links = list(BOMLink.objects(**alt_query))
-
-    if not existing_links and (not parent_rev and not child_rev) and (resolved_parent_rev or resolved_child_rev):
-        blank_query = dict(parent_pn=parent_pn, child_pn=child_pn)
-        if "parent_rev" in BOMLink._fields and "child_rev" in BOMLink._fields:
-            blank_query.update(parent_rev="", child_rev="")
-        existing_links = list(BOMLink.objects(**blank_query))
 
     if not existing_links:
         return None, []
@@ -174,6 +173,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     found_artifacts = 0
     skipped_artifacts = 0
     tree_parts: Set[Tuple[str, str]] = set()
+    seeded_parts: Set[Tuple[str, str]] = set()
 
     # 1) Parts from FLATBOM
     part_props: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -184,7 +184,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             norm = _normalize_part(d)
             
             pn = norm["part_number"]
-            rev=norm.get("revision") or ""
+            rev = _clean_rev(norm.get("revision") or "")
                         
             if pn:
                 key = (pn, rev)
@@ -196,7 +196,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     # Upsert parts
     for (pn, rev), norm in part_props.items():
         ##print( "upserting part", pn, rev, norm)
-        rev = rev or ""
+        rev = _clean_rev(rev)
         attrs = norm["attrs"] or {}
     
         p = Part.objects(part_number=pn, revision=rev).first()
@@ -260,27 +260,18 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             if not parent_pn or not child_pn:
                 skipped_links += 1
                 continue
-            tree_parts.add((parent_pn, (parent_rev or "").strip()))
-            tree_parts.add((child_pn, (child_rev or "").strip()))
+            parent_rev = _clean_rev(parent_rev)
+            child_rev = _clean_rev(child_rev)
+            tree_parts.add((parent_pn, parent_rev))
+            tree_parts.add((child_pn, child_rev))
             # ensure parts exist (create shells if missing)
             for pn, rev in ((parent_pn, parent_rev), (child_pn, child_rev)):
                 if _ensure_part_exists(pn, rev, seed_tag):
                     created_parts += 1
-            # resolve revisions, prefer explicit TREEBOM rev then fall back to latest
-            raw_parent_rev = (parent_rev or "").strip()
-            raw_child_rev = (child_rev or "").strip()
-            resolved_parent_rev = raw_parent_rev
-            resolved_child_rev = raw_child_rev
-            if not resolved_parent_rev:
-                prt_parent = Part.objects(part_number=parent_pn).order_by("-updated_at").first()
-                resolved_parent_rev = (prt_parent.revision if prt_parent else "") or ""
-            if not resolved_child_rev:
-                prt_child  = Part.objects(part_number=child_pn).order_by("-updated_at").first()
-                resolved_child_rev  = (prt_child.revision if prt_child else "") or ""
+                    seeded_parts.add((_base_pn(pn), _clean_rev(rev)))
 
             existing, duplicates = _find_existing_link(
-                parent_pn, raw_parent_rev, child_pn, raw_child_rev,
-                resolved_parent_rev, resolved_child_rev)
+                parent_pn, parent_rev, child_pn, child_rev)
             if duplicates:
                 for dup in duplicates:
                     dup.delete()
@@ -289,16 +280,16 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 existing.qty = qty
                 existing.uom = existing.uom or "EA"
                 if hasattr(existing, "parent_rev"):
-                    existing.parent_rev = resolved_parent_rev
+                    existing.parent_rev = parent_rev
                 if hasattr(existing, "child_rev"):
-                    existing.child_rev = resolved_child_rev
+                    existing.child_rev = child_rev
                 existing.save()
             else:
                 kwargs = dict(parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom="EA")
                 if "parent_rev" in BOMLink._fields:
-                    kwargs["parent_rev"] = resolved_parent_rev
+                    kwargs["parent_rev"] = parent_rev
                 if "child_rev" in BOMLink._fields:
-                    kwargs["child_rev"] = resolved_child_rev
+                    kwargs["child_rev"] = child_rev
                 BOMLink(**kwargs).save()
                 created_links += 1
                 
@@ -321,7 +312,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
    #print("part_props", part_props)
     for item, norm in part_props.items():
         pn = norm["part_number"]
-        rev = (norm.get("revision") or "")  # allow ""
+        rev = _clean_rev(norm.get("revision") or "")  # allow ""
         key = (pn, rev)
        #print(key)
         if key in seen:
@@ -365,10 +356,10 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         for (pn, rev), _norm in part_props.items():
             if pn == root_pn:
                 if rev:
-                    root_rev = rev
+                    root_rev = _clean_rev(rev)
                     break
                 if not root_rev:
-                    root_rev = rev or ""
+                    root_rev = _clean_rev(rev or "")
 
     return {
         "zip": filename,
@@ -378,6 +369,8 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         "parts_updated": updated_parts,
         "links_created": created_links,
         "links_skipped": skipped_links,
+        "parts_seeded": len(seeded_parts),
+        "parts_seeded_list": [{"part_number": pn, "revision": rev} for pn, rev in sorted(seeded_parts)],
         "parts_with_props": len(part_props),
         "artifacts_added": artifact_inserts,
         "artifacts_found_by_type": dict(sorted(artifacts_found_by_type.items())),

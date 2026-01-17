@@ -24,9 +24,16 @@
       Root: <code id="sumRoot">-</code>
       <a id="openBomLink" class="ms-2 d-none" href="#" target="_blank" rel="noopener">Open part details</a><br>
       Parts created: <b id="sumPartsCreated">-</b>, updated: <b id="sumPartsUpdated">-</b><br>
+      Parts seeded: <b id="sumPartsSeeded">-</b><br>
       Links created: <b id="sumLinksCreated">-</b>, skipped: <b id="sumLinksSkipped">-</b><br>
       Parts with properties: <b id="sumPartsWithProps">-</b><br>
       Artifacts added: <b id="sumArtifactsAdded">-</b>, thumbnails: <b id="sumThumbs">-</b>
+    </div>
+    <div id="seededPartsWrap" class="mt-2 d-none">
+      <details>
+        <summary>Seeded parts</summary>
+        <ul id="seededPartsList" class="small mb-0"></ul>
+      </details>
     </div>
     <div id="filesByTypeWrap" class="mt-3 d-none">
       <h6 class="mb-2">Files found by type</h6>
@@ -61,6 +68,7 @@
   const sumRoot = document.getElementById('sumRoot');
   const sumPartsCreated = document.getElementById('sumPartsCreated');
   const sumPartsUpdated = document.getElementById('sumPartsUpdated');
+  const sumPartsSeeded = document.getElementById('sumPartsSeeded');
   const sumLinksCreated = document.getElementById('sumLinksCreated');
   const sumLinksSkipped = document.getElementById('sumLinksSkipped');
   const sumPartsWithProps = document.getElementById('sumPartsWithProps');
@@ -69,6 +77,8 @@
   const openBomLink = document.getElementById('openBomLink');
   const filesByTypeWrap = document.getElementById('filesByTypeWrap');
   const filesByTypeBody = document.getElementById('filesByTypeBody');
+  const seededPartsWrap = document.getElementById('seededPartsWrap');
+  const seededPartsList = document.getElementById('seededPartsList');
   const rootPreviewStatus = document.getElementById('rootPreviewStatus');
   const rootPreviewLink = document.getElementById('rootPreviewLink');
   const rootPreviewImg = document.getElementById('rootPreviewImg');
@@ -94,6 +104,7 @@
     sumRoot.textContent = '-';
     sumPartsCreated.textContent = '...';
     sumPartsUpdated.textContent = '...';
+    sumPartsSeeded.textContent = '...';
     sumLinksCreated.textContent = '...';
     sumLinksSkipped.textContent = '...';
     sumPartsWithProps.textContent = '...';
@@ -102,6 +113,8 @@
     if (openBomLink) openBomLink.classList.add('d-none');
     filesByTypeWrap.classList.add('d-none');
     filesByTypeBody.innerHTML = '';
+    seededPartsWrap.classList.add('d-none');
+    seededPartsList.innerHTML = '';
     rootPreviewStatus.textContent = 'Preview will appear after import.';
     rootPreviewLink.classList.add('d-none');
     rootPreviewImg.removeAttribute('src');
@@ -164,6 +177,7 @@
         sumRoot.textContent = data.root || '';
         sumPartsCreated.textContent = data.parts_created || 0;
         sumPartsUpdated.textContent = data.parts_updated || 0;
+        sumPartsSeeded.textContent = data.parts_seeded || 0;
         sumLinksCreated.textContent = data.links_created || 0;
         sumLinksSkipped.textContent = data.links_skipped || 0;
         sumPartsWithProps.textContent = data.parts_with_props || 0;
@@ -195,6 +209,17 @@
             filesByTypeBody.appendChild(tr);
           });
           filesByTypeWrap.classList.remove('d-none');
+        }
+
+        if (Array.isArray(data.parts_seeded_list) && data.parts_seeded_list.length) {
+          seededPartsList.innerHTML = '';
+          data.parts_seeded_list.forEach((item) => {
+            const li = document.createElement('li');
+            const rev = item.revision ? ` REV ${item.revision}` : '';
+            li.textContent = `${item.part_number || ''}${rev}`;
+            seededPartsList.appendChild(li);
+          });
+          seededPartsWrap.classList.remove('d-none');
         }
 
         loadRootPreview(data.root || '');

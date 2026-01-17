@@ -23,7 +23,7 @@ def _clean_rev(value: object) -> str:
     if value is None:
         return ""
     text = str(value).strip()
-    if text.lower() in ("nan", "none"):
+    if text.lower() in ("nan", "none", "n/a", "na", "null", "0", "false"):
         return ""
     if text.endswith(".0"):
         text = text[:-2]
@@ -96,10 +96,6 @@ def build_excel_compile_zip(
 
     for r in rows:
         part = Part.objects(part_number=r.part_number, revision=r.revision).first()
-        if not part:
-            part = Part.objects(part_number=r.part_number).order_by("-updated_at").first()
-            if part:
-                r.revision = part.revision or ""
         if not part:
             r.status = "missing"
             missing.append(r)

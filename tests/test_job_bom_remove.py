@@ -23,7 +23,7 @@ def test_job_bom_remove_uses_line_rev(client, user):
     resp = client.get(f"/admin/jobs/{job.id}/bom_json")
     assert resp.status_code == 200
     rows = resp.get_json()
-    assert rows and rows[0]["rev"] == "A"
+    assert rows and rows[0]["rev"] == ""
     assert rows[0]["line_rev"] == ""
 
     resp2 = client.post(

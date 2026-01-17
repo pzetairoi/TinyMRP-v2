@@ -24,6 +24,18 @@ from app.services.biz_utils import generate_job_number
 
 bp = Blueprint("admin_jobs", __name__, url_prefix="/admin/jobs")
 
+_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
+
+def _clean_rev(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() in _REV_BLANKS:
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.strip()
+
 
 @bp.get("/")
 @permissions_required("jobs.view")
@@ -461,28 +473,26 @@ def _job_order_totals(job: Job):
 
     return required_total, ordered_total, received_total
 
-def _resolve_rev(pn: str, rev: str):
-    rev = (rev or "").strip()
-    if rev:
-        return rev
-    p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
-    if not p:
-        return ""
-    attrs = harvest_part_attrs(p)
-    return (attrs.get("revision") or p.revision or "").strip()
+def _resolve_rev(pn: str, rev: str | None):
+    if rev is None:
+        p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+        if not p:
+            return ""
+        attrs = harvest_part_attrs(p)
+        return _clean_rev(attrs.get("revision") or p.revision or "")
+    return _clean_rev(rev)
 
 
 def _part_meta(pn: str, rev: str):
     resolved_rev = _resolve_rev(pn, rev)
-    p = Part.objects(part_number__iexact=pn, revision__iexact=resolved_rev).first() \
-        or Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+    p = Part.objects(part_number__iexact=pn, revision__iexact=resolved_rev).first()
     desc = ""
     thumb = ""
     if p:
         attrs = harvest_part_attrs(p)
         desc = attrs.get("description") or p.description or ""
-        resolved_rev = (attrs.get("revision") or p.revision or resolved_rev or "").strip()
-        urls = thumb_urls_for(pn, resolved_rev or None)
+        resolved_rev = _clean_rev(attrs.get("revision") or p.revision or resolved_rev or "")
+        urls = thumb_urls_for(pn, resolved_rev)
         thumb = urls[0] if urls else ""
     return {"desc": desc, "rev": resolved_rev, "thumb": thumb}
 

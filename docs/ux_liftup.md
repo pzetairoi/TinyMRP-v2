@@ -56,9 +56,9 @@ Permissions:
 ## Parts List UX
 
 Updates:
-- Coverage icons for PDF/DXF/STEP/Datasheet per row.
-- Quick filters: Missing PDF, Missing Material, Hardware, Sheet metal.
-- `parts_lazy` returns `has_pdf`, `has_dxf`, `has_step`, `has_datasheet`, `has_png` flags.
+- Inline checkbox filters near search: Approved, Full files (process-aware), Minimum properties, Used in job (optional job number contains).
+- "Full files" uses `process_meta` file groups when present, otherwise falls back to process-based defaults (PDF always, DXF/PNG for cutting, STEP for machine/3D print/folding, 3MF for 3D print).
+- `parts_lazy` still returns deliverable flags (`has_pdf`, `has_dxf`, `has_step`, `has_datasheet`, `has_png`) for fast filtering and future UI use.
 
 ## Indexes Added
 
