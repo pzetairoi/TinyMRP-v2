@@ -1162,7 +1162,7 @@ def _whereused_report_pdf(rows: List[Dict[str, object]], root_pn: str, root_rev:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
         from reportlab.lib.styles import getSampleStyleSheet
     except Exception:
         return None
@@ -1191,26 +1191,54 @@ def _whereused_report_pdf(rows: List[Dict[str, object]], root_pn: str, root_rev:
         doc.build(flowables)
         return buf.getvalue()
 
-    table_data = [["Parent PN", "Rev", "Description", "Total Qty"]]
+    file_root = (current_app.config.get("FILE_ROOT_LOCAL") or current_app.config.get("FILES_LOCAL_ROOT") or "").rstrip("/\\")
+    def preview_png_path(pn: str, rev: str) -> Optional[str]:
+        try:
+            q = PartFile.objects(part_number__iexact=pn, ext_group="png", is_dwg=False)
+            q = q.filter(revision__iexact=_norm_rev(rev))
+            pf = q.order_by("-mtime_iso").first()
+            if pf:
+                pth = pf.path if os.path.isabs(pf.path) else os.path.join(file_root, (pf.rel_path or "").replace("/", os.sep))
+                if os.path.isfile(pth):
+                    return pth
+        except Exception:
+            pass
+        return None
+
+    table_data = [["Thumbnail", "Parent PN", "Rev", "Description", "Total Qty"]]
     for r in rows:
         qty = r.get("qty") or 0
         try:
             qty_s = f"{float(qty):g}"
         except Exception:
             qty_s = str(qty)
+        pn = str(r.get("parent_pn") or "")
+        rev = str(r.get("parent_rev") or "")
+        desc = str(r.get("description") or "")
+        img_cell = ""
+        img_path = preview_png_path(pn, rev)
+        if img_path:
+            try:
+                img_cell = RLImage(img_path, width=16*mm, height=16*mm)
+                img_cell.hAlign = "CENTER"
+            except Exception:
+                img_cell = ""
         table_data.append([
-            str(r.get("parent_pn") or ""),
-            str(r.get("parent_rev") or ""),
-            str(r.get("description") or ""),
+            img_cell,
+            pn,
+            rev,
+            desc,
             qty_s,
         ])
 
-    col_widths = [32*mm, 16*mm, 90*mm, 20*mm]
-    table = Table(table_data, colWidths=col_widths)
+    col_widths = [20*mm, 32*mm, 16*mm, 84*mm, 18*mm]
+    row_heights = [8*mm] + [18*mm] * (len(table_data) - 1)
+    table = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
     style = TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (0, 1), (0, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 8.5),
@@ -1231,6 +1259,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
         from reportlab.pdfbase.pdfmetrics import stringWidth
+        from reportlab.lib.utils import ImageReader
     except Exception:
         return None
 
@@ -1254,6 +1283,10 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
         if v and str(v).strip():
             author = str(v).strip()
             break
+
+    material = str((attrs or {}).get("material") or "").strip()
+    finish = str((attrs or {}).get("finish") or "").strip()
+    mass = str((attrs or {}).get("mass") or "").strip()
 
     related_file = ""
     try:
@@ -1301,6 +1334,20 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
             lines.append(cur)
         return lines
 
+    def _preview_png_path(pn: str, rev: str) -> Optional[str]:
+        try:
+            root = (current_app.config.get("FILE_ROOT_LOCAL") or current_app.config.get("FILES_LOCAL_ROOT") or "").rstrip("/\\")
+            q = PartFile.objects(part_number__iexact=pn, ext_group="png", is_dwg=False)
+            q = q.filter(revision__iexact=_norm_rev(rev))
+            pf = q.order_by("-mtime_iso").first()
+            if pf:
+                pth = pf.path if os.path.isabs(pf.path) else os.path.join(root, (pf.rel_path or "").replace("/", os.sep))
+                if os.path.isfile(pth):
+                    return pth
+        except Exception:
+            pass
+        return None
+
     # Header: PN/REV and description
     y = H - margin
     title = root_pn or ""
@@ -1316,6 +1363,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
         for line in _wrap_lines(desc, "Helvetica", 12, max_w=header_w):
             y -= 6 * mm
             c.drawString(margin, y, line)
+    header_bottom = y
 
     # Footer: author, process, generated date, related file
     footer_items: List[str] = []
@@ -1327,13 +1375,41 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
         footer_items.append(f"Generated: {ts}")
     if related_file:
         footer_items.append(f"Related file: {related_file}")
+    if material:
+        footer_items.append(f"Material: {material}")
+    if finish:
+        footer_items.append(f"Finish: {finish}")
+    if mass:
+        footer_items.append(f"Mass: {mass}")
 
     footer_lines: List[str] = []
     for item in footer_items:
         footer_lines.extend(_wrap_lines(item, "Helvetica", 10, max_w=W - 2 * margin))
 
+    line_h = 5 * mm
+    footer_top = margin + (len(footer_lines) * line_h)
+
+    # Center image between header and footer
+    try:
+        img_path = _preview_png_path(root_pn, root_rev_clean)
+        if img_path:
+            img_reader = ImageReader(img_path)
+            iw, ih = img_reader.getSize()
+            img_max_w = W - 2 * margin
+            img_top = header_bottom - 8 * mm
+            img_bottom = footer_top + 8 * mm
+            img_max_h = max(0, img_top - img_bottom)
+            if img_max_h > 10 * mm and iw > 0 and ih > 0:
+                scale = min(img_max_w / iw, img_max_h / ih)
+                draw_w = iw * scale
+                draw_h = ih * scale
+                x = (W - draw_w) / 2.0
+                y = img_bottom + (img_max_h - draw_h) / 2.0
+                c.drawImage(img_reader, x, y, width=draw_w, height=draw_h, preserveAspectRatio=True, mask="auto")
+    except Exception:
+        pass
+
     if footer_lines:
-        line_h = 5 * mm
         y = margin + (len(footer_lines) - 1) * line_h
         c.setFont("Helvetica", 10)
         for line in footer_lines:

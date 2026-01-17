@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, app, request
 from mongoengine import connect, get_connection
 from flask_security import Security, MongoEngineUserDatastore
 from .models.auth import User, Role
@@ -52,6 +52,11 @@ def _load_vite_manifest(app):
 
 def create_app(config_object=None):
     app = Flask(__name__)
+    
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+    
     if config_object:
         app.config.from_object(config_object)
 

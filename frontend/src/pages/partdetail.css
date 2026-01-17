@@ -20,6 +20,46 @@
 }
 .pd-hero img { height: 100%; width: 100%; object-fit: contain; }
 
+.pd-info-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pd-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.pd-icon-row { gap: 6px; }
+.pd-status-icon,
+.pd-proc-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-block;
+}
+.pd-meta-row span { font-size: 0.85rem; }
+.pd-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pd-user-row { gap: 8px; }
+.pd-user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 999px;
+  background: #f8f9fa;
+  font-size: 0.78rem;
+}
+.pd-user-pill img {
+  width: 16px;
+  height: 16px;
+}
+
 .pd-th { width: 28%; white-space: nowrap; }
 
 .pd-files a { font-weight: 600; }
@@ -97,6 +137,12 @@
   height: 18px;
   display: inline-block;
   filter: drop-shadow(0 0 1px rgba(0,0,0,.2));
+}
+.pd-proc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 /* Right-side split: tabs on top, Used-in fixed at bottom */
