@@ -81,16 +81,33 @@ def _attr_ci_value(attrs: Dict[str, Any], key: str) -> List[str]:
 
 def _hardware_folder_tokens() -> List[str]:
     cfg = current_app.config.get("HARDWARE_FOLDERS") or []
+    raw: List[str] = []
     if isinstance(cfg, str):
-        parts = [p.strip().lower() for p in re.split(r"[;,]", cfg) if p.strip()]
-        return parts
+        raw = [p for p in re.split(r"[;,]", cfg) if p.strip()]
+    else:
+        for item in cfg:
+            if item is None:
+                continue
+            raw.append(str(item))
+    tokens: List[str] = []
+    for item in raw:
+        for chunk in re.split(r"[^A-Za-z0-9]+", str(item)):
+            t = chunk.strip().lower()
+            if not t:
+                continue
+            tokens.append(t)
+            if t.endswith("ies") and len(t) > 3:
+                tokens.append(t[:-3] + "y")
+            if t.endswith("es") and len(t) > 2:
+                tokens.append(t[:-2])
+            if t.endswith("s") and len(t) > 1:
+                tokens.append(t[:-1])
+    seen: Set[str] = set()
     out: List[str] = []
-    for item in cfg:
-        if item is None:
-            continue
-        s = str(item).strip().lower()
-        if s:
-            out.append(s)
+    for t in tokens:
+        if t not in seen:
+            out.append(t)
+            seen.add(t)
     return out
 
 def _path_text_from_attrs(attrs: Dict[str, Any]) -> str:
@@ -106,7 +123,15 @@ def _is_hardware_by_folder(attrs: Dict[str, Any]) -> bool:
     path_text = _path_text_from_attrs(attrs)
     if not path_text:
         return False
-    return any(t in path_text for t in tokens)
+    path_text = path_text.lower()
+    words = [w for w in re.split(r"[^a-z0-9]+", path_text) if w]
+    for t in tokens:
+        if t in path_text:
+            return True
+        for w in words:
+            if t in w:
+                return True
+    return False
 
 def _is_hardware_by_process(attrs: Dict[str, Any]) -> bool:
     meta = current_app.config.get("PROCESS_META", {}) or {}

@@ -15,8 +15,9 @@ def _make_zip(flat_txt: str, tree_txt: str) -> bytes:
 
 
 def test_import_bom_flags_hardware_from_folder(app):
+    app.config["HARDWARE_FOLDERS"] = ["FASTENERS"]
     flat_rows = [
-        {"partnumber": "BOLT-1", "revision": "", "description": "Bolt", "folder": r"C:\CAD\fasteners\bolts", "process": "purchase"},
+        {"partnumber": "BOLT-1", "revision": "", "description": "Bolt", "folder": r"C:\CAD\FastenerLib\bolts", "process": "purchase"},
         {"partnumber": "PLATE-1", "revision": "A", "description": "Plate", "folder": r"C:\CAD\\plates", "process": "lasercut"},
         {"partnumber": "RIVET-1", "revision": "", "description": "Rivet", "process": "fasteners"},
     ]
