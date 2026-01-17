@@ -1,10 +1,11 @@
 # app/views/bom_tree.py
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs import preview_png_urls_for
 from app.services.attrs import harvest_part_attrs
+from app.services.processmeta import normalize_processes
 from flask_login import current_user
 from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.acl import require_items_view
@@ -60,6 +61,15 @@ def _node(pn: str, link=None, rev: str | None = None):
             "attrs": attrs,
         }
     }
+
+def _is_hardware_node(node: dict) -> bool:
+    try:
+        attrs = (node.get("data") or {}).get("attrs") or {}
+        meta = current_app.config.get("PROCESS_META", {}) or {}
+        procs = normalize_processes(attrs, meta)
+        return "hardware" in procs
+    except Exception:
+        return False
 
 @bp.get("/bom_tree")
 @login_required
@@ -119,6 +129,7 @@ def bom_tree():
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}:{(parent_rev or '')}")
             except Exception:
                 pass
+            kids.sort(key=lambda n: 1 if _is_hardware_node(n) else 0)
             return jsonify(kids)
         else:
             pp = Part.objects(part_number=parent).only("id").first()
@@ -141,6 +152,7 @@ def bom_tree():
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}")
             except Exception:
                 pass
+            kids.sort(key=lambda n: 1 if _is_hardware_node(n) else 0)
             return jsonify(kids)
 
     return jsonify([])

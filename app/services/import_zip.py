@@ -12,6 +12,7 @@ from collections import defaultdict
 from app.services.filescan import discover_part_files, upsert_part_files
 # Import necessary services for attributes normalization and merging
 from app.services.attrs import normalize_props, merge_save_part_attrs, process_attributes
+from app.services.processmeta import normalize_processes
 
 
 from flask import current_app
@@ -58,6 +59,62 @@ def _parse_flatbom(txt: str) -> List[Dict[str, Any]]:
             # ignore unparseable line
             pass
     return out
+
+def _attr_ci_value(attrs: Dict[str, Any], key: str) -> List[str]:
+    if not isinstance(attrs, dict):
+        return []
+    key_l = (key or "").strip().lower()
+    hits: List[str] = []
+    for k, v in attrs.items():
+        try:
+            if str(k or "").strip().lower() != key_l:
+                continue
+        except Exception:
+            continue
+        if v is None:
+            continue
+        if isinstance(v, (list, tuple)):
+            hits.extend([str(x) for x in v if x is not None])
+        else:
+            hits.append(str(v))
+    return hits
+
+def _hardware_folder_tokens() -> List[str]:
+    cfg = current_app.config.get("HARDWARE_FOLDERS") or []
+    if isinstance(cfg, str):
+        parts = [p.strip().lower() for p in re.split(r"[;,]", cfg) if p.strip()]
+        return parts
+    out: List[str] = []
+    for item in cfg:
+        if item is None:
+            continue
+        s = str(item).strip().lower()
+        if s:
+            out.append(s)
+    return out
+
+def _path_text_from_attrs(attrs: Dict[str, Any]) -> str:
+    text_parts: List[str] = []
+    for key in ("folder", "file", "filepath", "path", "nativepath", "native_file", "file_path"):
+        text_parts.extend(_attr_ci_value(attrs, key))
+    return " ".join(text_parts).lower()
+
+def _is_hardware_by_folder(attrs: Dict[str, Any]) -> bool:
+    tokens = _hardware_folder_tokens()
+    if not tokens:
+        return False
+    path_text = _path_text_from_attrs(attrs)
+    if not path_text:
+        return False
+    return any(t in path_text for t in tokens)
+
+def _is_hardware_by_process(attrs: Dict[str, Any]) -> bool:
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    try:
+        procs = normalize_processes(attrs, meta)
+    except Exception:
+        procs = []
+    return "hardware" in (p for p in procs if p)
 
 def _normalize_part(d: Dict[str, Any]) -> Dict[str, Any]:
     low = { (k.lower() if isinstance(k,str) else k): v for k,v in d.items() }
@@ -216,6 +273,14 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         # attrs = p.attrs or {}
         # print("attributes", attrs)
         attrs, processes = process_attributes(attrs)
+        hardware_by_folder = _is_hardware_by_folder(attrs)
+        hardware_by_process = _is_hardware_by_process(attrs)
+        if hardware_by_folder or hardware_by_process:
+            attrs["process"] = "hardware"
+            attrs["process2"] = ""
+            attrs["process3"] = ""
+            attrs["processes"] = ["hardware"]
+            processes = ["hardware"]
         ##print("attributes", attrs)
         ##print("processes", processes)
         
