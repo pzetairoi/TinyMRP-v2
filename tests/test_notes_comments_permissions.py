@@ -25,7 +25,9 @@ def test_notes_update_permissions(client, user):
     _login(client, user)
 
     resp = client.post(f"/api/parts/{part.part_number}/notes", json={"notes": "hello"})
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    part.reload()
+    assert part.attrs.get("notes") == "hello"
 
     editor = _make_user("editor@example.com")
     editor.roles = [editor_role]
