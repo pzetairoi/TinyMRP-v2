@@ -29,6 +29,7 @@ class DocPackOptions:
     want_visual_list: bool = False
     want_cover_page: bool = False
     want_whereused_report: bool = False
+    want_hardware_summary: bool = False
     fabrication_pack: bool = False
     binder_add_cover: bool = True
     binder_add_index: bool = True
