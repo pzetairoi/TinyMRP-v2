@@ -14,6 +14,7 @@ from app.models.auth import User
 from app.services.api_auth import api_auth_required
 from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW
 from app.services.acl import apply_job_scope
+from app.services.part_norm import clean_rev
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
 
 bp = Blueprint("jobs_api", __name__, url_prefix="/api/jobs")
@@ -62,7 +63,7 @@ def _parse_bom(items) -> List[JobBOMLine]:
         pn = (raw.get("pn") or raw.get("part_number") or "").strip()
         if not pn:
             continue
-        rev = (raw.get("rev") or raw.get("revision") or "").strip()
+        rev = clean_rev(raw.get("rev") or raw.get("revision") or "")
         qty = _parse_float(raw.get("qty"), 1.0)
         out.append(JobBOMLine(pn=pn, rev=rev, qty=qty))
     return out

@@ -24,6 +24,7 @@ from app.models.customer import Customer
 from app.models.part import Part
 from app.services.biz_utils import generate_order_number, calculate_order_totals, consolidate_order_lines
 from app.services.order_scope import build_scope_pdf, build_scope_zip
+from app.services.part_norm import clean_rev
 
 bp = Blueprint("admin_orders", __name__, url_prefix="/admin/orders")
 
@@ -246,7 +247,7 @@ def _parse_lines(text: str):
         if not s or s.startswith("#"): continue
         parts = [x.strip() for x in s.split(",")]
         pn = _canonical_pn(parts[0] if parts else "")
-        rev = parts[1] if len(parts) > 1 else ""
+        rev = clean_rev(parts[1] if len(parts) > 1 else "")
         qty = 1.0
         if len(parts) > 2:
             try:
@@ -469,7 +470,7 @@ def orders_from_job(job_id):
         pn = _canonical_pn(p.get("pn") or "")
         if not pn:
             continue
-        rev = (p.get("rev") or "").strip()
+        rev = clean_rev(p.get("rev") or "")
         try:
             qty = float(p.get("qty") or 1.0)
         except Exception:
@@ -505,7 +506,7 @@ def _job_required_qty(job: Job, pn: str, rev: str) -> float:
     if not job:
         return total
     for l in (job.bom or []):
-        if l.pn.lower() == (pn or '').lower() and (l.rev or '') == (rev or ''):
+        if l.pn.lower() == (pn or '').lower() and clean_rev(l.rev) == clean_rev(rev):
             try:
                 total += float(l.qty or 0)
             except Exception:
@@ -518,7 +519,7 @@ def _total_ordered_for_job(job: Job, pn: str, rev: str) -> float:
     tot = 0.0
     for o in Order.objects(job=job, status__ne="cancelled"):
         for l in (o.lines or []):
-            if (l.pn or '').strip().lower() == (pn or '').lower() and (l.rev or '') == (rev or ''):
+            if (l.pn or '').strip().lower() == (pn or '').lower() and clean_rev(l.rev) == clean_rev(rev):
                 try:
                     tot += float(l.qty or 0)
                 except Exception:
@@ -545,10 +546,11 @@ def order_lines_json(order_id):
             o.save()
     rows = []
     for l in (o.lines or []):
-        row = dict(pn=l.pn, rev=(l.rev or ''), qty=float(l.qty or 0), uom=(l.uom or 'EA'), note=(l.note or ''))
+        rev = clean_rev(l.rev)
+        row = dict(pn=l.pn, rev=rev, qty=float(l.qty or 0), uom=(l.uom or 'EA'), note=(l.note or ''))
         if o.job:
-            req = _job_required_qty(o.job, l.pn, (l.rev or ''))
-            tot_ord = _total_ordered_for_job(o.job, l.pn, (l.rev or ''))
+            req = _job_required_qty(o.job, l.pn, rev)
+            tot_ord = _total_ordered_for_job(o.job, l.pn, rev)
             row.update(job_required_qty=req, total_ordered_for_job=tot_ord)
         rows.append(row)
     return jsonify(rows)
@@ -558,7 +560,7 @@ def order_lines_json(order_id):
 def order_lines_update(order_id):
     o = Order.objects(id=order_id).first() or abort(404)
     d = request.get_json(silent=True) or {}
-    pn = _canonical_pn(d.get('pn') or ''); rev = (d.get('rev') or '')
+    pn = _canonical_pn(d.get('pn') or ''); rev = clean_rev(d.get('rev') or '')
     try:
         qty = float(d.get('qty') or 1.0)
     except Exception:
@@ -570,7 +572,7 @@ def order_lines_update(order_id):
     if o.lines is None:
         o.lines = []
     for l in o.lines:
-        if (l.pn or '').lower() == pn.lower() and (l.rev or '') == rev:
+        if (l.pn or '').lower() == pn.lower() and clean_rev(l.rev) == rev:
             l.qty = qty
             l.uom = uom
             l.note = note
@@ -593,9 +595,9 @@ def order_lines_update(order_id):
 def order_lines_remove(order_id):
     o = Order.objects(id=order_id).first() or abort(404)
     d = request.get_json(silent=True) or {}
-    pn = (d.get('pn') or '').strip(); rev = (d.get('rev') or '')
+    pn = (d.get('pn') or '').strip(); rev = clean_rev(d.get('rev') or '')
     before = len(o.lines or [])
-    o.lines = [l for l in (o.lines or []) if not ((l.pn or '').lower() == pn.lower() and (l.rev or '') == rev)]
+    o.lines = [l for l in (o.lines or []) if not ((l.pn or '').lower() == pn.lower() and clean_rev(l.rev) == rev)]
     if len(o.lines) != before:
         o.lines = consolidate_order_lines(o.lines)
         subtotal, tax_total, discount_total = calculate_order_totals(o.lines)

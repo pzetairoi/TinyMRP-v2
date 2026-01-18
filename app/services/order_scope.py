@@ -18,18 +18,10 @@ from app.models.part import Part
 from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs
 from app.services.docpacks import _flatten_bom, _overlay_numbers_and_stamps
-
-_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
+from app.services.part_norm import clean_rev
 
 def _clean_rev(value: object) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if text.lower() in _REV_BLANKS:
-        return ""
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text.strip()
+    return clean_rev(value)
 
 
 def _safe_name(value: str) -> str:

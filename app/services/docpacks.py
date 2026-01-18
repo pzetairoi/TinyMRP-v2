@@ -11,6 +11,7 @@ from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs, ALIASES, approved_value
 from app.services.processmeta import normalize_processes
 from app.services.filenames import build_output_name
+from app.services.part_norm import clean_rev as _clean_rev, clean_rev_or_none as _rev_or_none
 
 
 @dataclass
@@ -47,24 +48,7 @@ class DocPackOptions:
     output_name: Optional[str] = None
 
 
-_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
-
-def _clean_rev(rev: Optional[str]) -> str:
-    if rev is None:
-        return ""
-    text = str(rev).strip()
-    if text.lower() in _REV_BLANKS:
-        return ""
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text.strip()
-
 def _norm_rev(rev: Optional[str]) -> str:
-    return _clean_rev(rev)
-
-def _rev_or_none(rev: Optional[str]) -> Optional[str]:
-    if rev is None:
-        return None
     return _clean_rev(rev)
 
 
@@ -200,9 +184,9 @@ def _bom_occurrences(
     *,
     include_consumed: bool = True,
     terminal_processes: Optional[Iterable[str]] = None,
-) -> Dict[Tuple[str,str], List[Tuple[int, float]]]:
-    """Return mapping (pn,rev) -> list of (level, qty_at_that_level).
-    Level starts at 1 for immediate children of the root.
+) -> Dict[Tuple[str,str], List[Tuple[str, float]]]:
+    """Return mapping (pn,rev) -> list of (level_path, qty_at_that_level).
+    Level path follows legacy-style "+.01.02" when sequence metadata exists.
     Applies the same consumed/terminal filtering as the visual list/BOM flatten.
     """
     if root_rev is None:
@@ -210,7 +194,7 @@ def _bom_occurrences(
         root_rev = _clean_rev(getattr(root_part, "revision", "") if root_part else "")
     else:
         root_rev = _clean_rev(root_rev)
-    occ: Dict[Tuple[str,str], List[Tuple[int,float]]] = {}
+    occ: Dict[Tuple[str,str], List[Tuple[str,float]]] = {}
     terminals: Set[str] = set([str(x).strip().lower() for x in (terminal_processes or [])])
 
     def children(pn: str, rev: Optional[str]):
@@ -220,23 +204,61 @@ def _bom_occurrences(
                 return BOMLink.objects(parent_pn=pn, parent_rev=rev_val)
         return BOMLink.objects(parent_pn=pn)
 
-    stack: List[Tuple[str,str,int,float]] = []
-    for l in children(root_pn, root_rev):
-        stack.append((l.child_pn, _clean_rev(getattr(l, "child_rev", "") or ""), 1, float(getattr(l, "qty", 1.0) or 1.0)))
+    def _fmt_seq(seq: object, fallback: int | None) -> str:
+        val = seq if seq not in (None, "") else fallback
+        if val is None:
+            return ""
+        try:
+            n = int(str(val).strip())
+            return f"{n:02d}" if n < 10 else str(n)
+        except Exception:
+            return str(val).strip()
+
+    def _append_path(base: str, seq: object, fallback: int | None) -> str:
+        seg = _fmt_seq(seq, fallback)
+        if not seg:
+            return base
+        return f"{base}.{seg}" if base else seg
+
+    def _link_occurrences(link: BOMLink) -> List[Tuple[float, object]]:
+        occs = getattr(link, "occurrences", None) or []
+        if occs:
+            out = []
+            for occ in occs:
+                qty_val = occ.get("qty")
+                if qty_val is None:
+                    qty_val = getattr(link, "qty", 1.0)
+                qty = float(qty_val or 0.0)
+                out.append((qty, occ.get("seq")))
+            return out
+        link_qty = getattr(link, "qty", None)
+        if link_qty is None:
+            link_qty = 1.0
+        return [(float(link_qty), None)]
+
+    stack: List[Tuple[str,str,str,float]] = []
+    for link_idx, l in enumerate(children(root_pn, root_rev), start=1):
+        child_rev = _clean_rev(getattr(l, "child_rev", "") or "")
+        for _occ_idx, (oqty, seq) in enumerate(_link_occurrences(l), start=1):
+            path = _append_path("+", seq, link_idx)
+            stack.append((l.child_pn, child_rev, path, oqty))
 
     while stack:
-        pn, rev, level, q = stack.pop()
+        pn, rev, level_path, q = stack.pop()
         key = (pn, _clean_rev(rev))
-        occ.setdefault(key, []).append((level, q))
+        occ.setdefault(key, []).append((level_path, q))
         if not include_consumed:
             pdoc = _part_by(pn, rev)
             procs = set(_part_processes(pdoc))
             if terminals and (procs & terminals):
                 # stop at consumed parts
                 continue
-        for l in children(pn, rev):
-            cq = float(getattr(l, "qty", 1.0) or 1.0) * q
-            stack.append((l.child_pn, _clean_rev(getattr(l, "child_rev", "") or ""), level+1, cq))
+        for link_idx, l in enumerate(children(pn, rev), start=1):
+            child_rev = _clean_rev(getattr(l, "child_rev", "") or "")
+            for _occ_idx, (oqty, seq) in enumerate(_link_occurrences(l), start=1):
+                cq = oqty * q
+                child_path = _append_path(level_path, seq, link_idx)
+                stack.append((l.child_pn, child_rev, child_path, cq))
     return occ
 
 
@@ -244,9 +266,20 @@ def _excel_bom_bytes(
     root_pn: str,
     root_rev: Optional[str],
     flat: List[Tuple[str,str,float]],
-    occ: Dict[Tuple[str,str], List[Tuple[int,float]]],
+    occ: Dict[Tuple[str,str], List[Tuple[str,float]]],
     full_qty_map: Optional[Dict[Tuple[str,str], float]] = None,
 ) -> bytes:
+    def _sorted_occ(key: Tuple[str, str]):
+        rows = list(occ.get(key, []))
+        if not rows:
+            return rows
+        def _key(item):
+            level = item[0]
+            if isinstance(level, (int, float)):
+                return (0, float(level))
+            return (1, str(level))
+        return sorted(rows, key=_key)
+
     try:
         import openpyxl
         from openpyxl.utils import get_column_letter
@@ -262,8 +295,9 @@ def _excel_bom_bytes(
         w = csv.writer(buf)
         w.writerow(["Part Number","Revision","Qty","Levels","Level Qtys"]) 
         for pn, rev, qty in flat:
-            lvls = ", ".join(str(l) for l,_ in occ.get((pn,_norm_rev(rev)), []))
-            lq   = ", ".join(f"{q:g}" for _,q in occ.get((pn,_norm_rev(rev)), []))
+            occ_list = _sorted_occ((pn, _norm_rev(rev)))
+            lvls = ", ".join(str(l) for l,_ in occ_list)
+            lq   = ", ".join(f"{q:g}" for _,q in occ_list)
             w.writerow([pn, rev, qty, lvls, lq])
         return buf.getvalue().encode("utf-8")
 
@@ -369,8 +403,9 @@ def _excel_bom_bytes(
         p = parts_cache.get(key)
         # Normalize attributes to handle mixed-case and aliases (e.g., Link/LINK/oem_link -> link)
         attrs = harvest_part_attrs(p) if p else {}
-        levels_list = [l for l,_ in occ.get(key, [])]
-        qtys_list = [q for _,q in occ.get(key, [])]
+        occ_list = _sorted_occ(key)
+        levels_list = [l for l,_ in occ_list]
+        qtys_list = [q for _,q in occ_list]
         # processes as comma-separated
         proc_list = []
         if p and isinstance(getattr(p, 'processes', None), list):
@@ -1784,6 +1819,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # Excel BOM
     if opts.want_excel_bom:
         occ_map = _bom_occurrences(opts.root_pn, opts.root_rev, include_consumed=bool(opts.include_consumed), terminal_processes=["welding","purchase","machine"])
+        root_key = (opts.root_pn, _norm_rev(root_rev_resolved))
+        if root_key not in occ_map:
+            occ_map[root_key] = [("+", 1.0)]
         full_flat = _flatten_bom(
             opts.root_pn,
             opts.root_rev,
@@ -1792,7 +1830,11 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             terminal_processes=["welding","purchase","machine"],
         )
         full_qty_map = { (pn, _norm_rev(rev)): qty for pn, rev, qty in full_flat }
-        xlsx = _excel_bom_bytes(opts.root_pn, opts.root_rev, filtered_flat, occ_map, full_qty_map)
+        excel_flat = list(filtered_flat)
+        root_key_norm = (opts.root_pn or "").strip().lower(), _norm_rev(root_rev_resolved)
+        if not any(((pn or "").strip().lower(), _norm_rev(rev)) == root_key_norm for pn, rev, _ in excel_flat):
+            excel_flat.insert(0, (opts.root_pn, root_rev_resolved, 1.0))
+        xlsx = _excel_bom_bytes(opts.root_pn, opts.root_rev, excel_flat, occ_map, full_qty_map)
         bom_name = build_output_name(f"{base_stub}_BOM", "xlsx", max_len=96, include_time=False, now=build_ts)
         z.writestr(bom_name, xlsx)
 
