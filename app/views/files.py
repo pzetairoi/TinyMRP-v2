@@ -1,9 +1,9 @@
 # app/views/files.py
-from flask import Blueprint, request, jsonify, current_app, url_for
+from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
 from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed
 from app.services.audit import log_action
-import os, base64
+from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.models.part import Part
 from app.models.artifact import PartFile
 
@@ -49,25 +49,24 @@ def part_images():
         # "all" -> both
         pass
 
-    local_root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or current_app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
+    allow_public = public_file_urls_enabled()
     rows = []
     for d in qs.order_by("-mtime_iso"):
         urls: list[str] = []
-        # 1) Prefer direct HTTP url if saved by the scanner
-        if getattr(d, "http_url", None):
+        # 1) Public URLs only if explicitly allowed
+        if allow_public and getattr(d, "http_url", None):
             urls.append(d.http_url)
 
-        # 2) Build HTTP URL from configured prefix if rel_path exists
-        if getattr(d, "rel_path", None) and http_base:
+        # 2) Public prefix if explicitly allowed
+        if allow_public and getattr(d, "rel_path", None) and http_base:
             urls.append(f"{http_base}/{d.rel_path}")
 
-        # 3) Fallback to fileserve token using rel_path
-        if getattr(d, "rel_path", None) and local_root:
-            abs_path = os.path.normpath(os.path.join(local_root, d.rel_path.replace("/", os.sep)))
-            # Use URL-safe base64 to be safe in URLs
-            token = base64.urlsafe_b64encode(abs_path.encode("utf-8")).decode("ascii")
-            urls.append(url_for("fileserve.view", token=token))
+        # 3) Secure tokenized URL
+        try:
+            urls.append(file_url_for(d))
+        except Exception:
+            pass
 
         # de-duplicate while preserving order
         seen = set()

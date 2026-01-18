@@ -58,3 +58,4 @@ Desktop.ini
 OLD/
 app/models/__pycache__/
 app/services/__pycache__/
+app/views/__pycache__/

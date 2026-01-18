@@ -43,7 +43,9 @@ def parts_ui():
     assets = vite_assets()
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
-    files_base = (current_app.config.get("FILE_ROOT_HTTP") or current_app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
+    files_base = ""
+    if current_app.config.get("FILES_PUBLIC_URLS"):
+        files_base = (current_app.config.get("FILE_ROOT_HTTP") or current_app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
     pick_mode = (request.args.get("pick") or "").strip().lower() in ("1", "true", "yes")
     body_class = "pick-mode" if pick_mode else ""
     return render_template("ui/react_shell.html", title="Parts", assets=assets, initial={}, files_base=files_base, body_class=body_class)

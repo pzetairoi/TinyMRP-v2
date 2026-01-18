@@ -141,12 +141,18 @@ def create_app(config_object=None):
     files_local_root = (os.getenv("FILES_LOCAL_ROOT") or os.getenv("FILE_ROOT_LOCAL") or "").strip()
     files_url_prefix = (os.getenv("FILES_URL_PREFIX") or os.getenv("FILE_ROOT_HTTP")  or "").strip()
     files_upstream   = (os.getenv("FILES_UPSTREAM_BASE") or "").strip()
+    files_public     = (os.getenv("FILES_PUBLIC_URLS") or "").strip().lower()
+    accel_prefix     = (os.getenv("FILES_ACCEL_REDIRECT_PREFIX") or "").strip()
+    allow_legacy     = (os.getenv("FILES_ALLOW_LEGACY_TOKENS") or "").strip().lower()
 
     # Canonical keys
     app.config["FILES_LOCAL_ROOT"]   = files_local_root
     app.config["FILES_URL_PREFIX"]   = files_url_prefix
     app.config["FILES_UPSTREAM_BASE"] = files_upstream
     app.config["FILE_HASH_MAX_BYTES"] = int(os.getenv("FILE_HASH_MAX_BYTES") or "0")
+    app.config["FILES_PUBLIC_URLS"] = files_public in ("1", "true", "yes", "on")
+    app.config["FILES_ACCEL_REDIRECT_PREFIX"] = accel_prefix
+    app.config["FILES_ALLOW_LEGACY_TOKENS"] = allow_legacy in ("1", "true", "yes", "on")
 
     # Backward-compatible aliases used elsewhere in the codebase
     # (prefer the canonical FILES_* keys in new code)
@@ -246,6 +252,12 @@ def create_app(config_object=None):
             ])
             resp.headers.setdefault("Content-Security-Policy", csp)
             return resp
+
+    try:
+        from app.services.metrics import init_metrics
+        init_metrics(app)
+    except Exception:
+        pass
 
     # Mongo initialized earlier
     try:
@@ -377,7 +389,9 @@ def create_app(config_object=None):
     # Make files_base available in all templates for the frontend runtime
     @app.context_processor
     def inject_files_base():
-        fb = (app.config.get("FILE_ROOT_HTTP") or app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
+        fb = ""
+        if app.config.get("FILES_PUBLIC_URLS"):
+            fb = (app.config.get("FILE_ROOT_HTTP") or app.config.get("FILES_URL_PREFIX") or "").rstrip("/")
         # expose a has_perm helper for templates
         try:
             from app.services.acl import user_has_permission

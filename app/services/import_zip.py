@@ -18,6 +18,13 @@ from app.services.part_norm import clean_rev, clean_pn, clean_qty
 
 
 from flask import current_app
+try:
+    from app.services.metrics import timed_span
+except Exception:
+    from contextlib import contextmanager
+    @contextmanager
+    def timed_span(_name: str):
+        yield
 
 
 def _base_pn(pn: str) -> str:
@@ -363,238 +370,229 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     Creates/updates Parts from FLATBOM and links from TREEBOM.
     Stores all properties under Part.attrs.
     """
-    z = zipfile.ZipFile(io.BytesIO(file_bytes))
-    # find the first *_FLATBOM.txt and *_TREEBOM.txt
-    flat_name = next((n for n in z.namelist() if n.endswith("_FLATBOM.txt")), None)
-    tree_name = next((n for n in z.namelist() if n.endswith("_TREEBOM.txt")), None)
+    with timed_span("import.bom.total"):
+        z = zipfile.ZipFile(io.BytesIO(file_bytes))
+        # find the first *_FLATBOM.txt and *_TREEBOM.txt
+        flat_name = next((n for n in z.namelist() if n.endswith("_FLATBOM.txt")), None)
+        tree_name = next((n for n in z.namelist() if n.endswith("_TREEBOM.txt")), None)
 
-    created_parts = 0
-    updated_parts = 0
-    created_links = 0
-    removed_links = 0
-    skipped_links = 0
-    found_artifacts = 0
-    skipped_artifacts = 0
-    tree_parts: Set[Tuple[str, str]] = set()
-    seeded_parts: Set[Tuple[str, str]] = set()
+        created_parts = 0
+        updated_parts = 0
+        created_links = 0
+        removed_links = 0
+        skipped_links = 0
+        found_artifacts = 0
+        skipped_artifacts = 0
+        tree_parts: Set[Tuple[str, str]] = set()
+        seeded_parts: Set[Tuple[str, str]] = set()
 
     # 1) Parts from FLATBOM
-    part_props: Dict[Tuple[str, str], Dict[str, Any]] = {}
-    if flat_name:
-        flat_txt = z.read(flat_name).decode("utf-8", errors="replace")
-        
-        for d in _parse_flatbom(flat_txt):
-            norm = _normalize_part(d)
-            
-            pn = norm["part_number"]
-            rev = clean_rev(norm.get("revision") or "")
-                        
-            if pn:
-                key = (pn, rev)
-                # keep the latest occurrence so new data overrides older rows
-                part_props[key] = norm
+        part_props: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        if flat_name:
+            with timed_span("import.bom.flatbom.parse"):
+                flat_txt = z.read(flat_name).decode("utf-8", errors="replace")
+                for d in _parse_flatbom(flat_txt):
+                    norm = _normalize_part(d)
+                    pn = norm["part_number"]
+                    rev = clean_rev(norm.get("revision") or "")
+                    if pn:
+                        key = (pn, rev)
+                        # keep the latest occurrence so new data overrides older rows
+                        part_props[key] = norm
 
     
-    # Upsert parts
-    for (pn, rev), norm in part_props.items():
-        ##print( "upserting part", pn, rev, norm)
-        rev = clean_rev(rev)
-        attrs = norm["attrs"] or {}
-    
-        p = Part.objects(part_number=pn, revision=rev).first()
+        # Upsert parts
+        with timed_span("import.bom.parts.upsert"):
+            for (pn, rev), norm in part_props.items():
+                ##print( "upserting part", pn, rev, norm)
+                rev = clean_rev(rev)
+                attrs = norm["attrs"] or {}
 
-        
-        if not p:
-            p = Part(part_number=pn, revision=rev)
-            created_parts += 1
-        else:
-            updated_parts += 1
-        p.description = norm["description"]
-        p.category = norm["category"]
-        p.uom = norm["uom"]
-        
-        
+                p = Part.objects(part_number=pn, revision=rev).first()
+                if not p:
+                    p = Part(part_number=pn, revision=rev)
+                    created_parts += 1
+                else:
+                    updated_parts += 1
+                p.description = norm["description"]
+                p.category = norm["category"]
+                p.uom = norm["uom"]
 
-        # attrs = p.attrs or {}
-        # print("attributes", attrs)
-        attrs, processes = process_attributes(attrs)
-        hardware_by_folder = _is_hardware_by_folder(attrs)
-        hardware_by_process = _is_hardware_by_process(attrs)
-        if hardware_by_folder or hardware_by_process:
-            attrs["process"] = "hardware"
-            attrs["process2"] = ""
-            attrs["process3"] = ""
-            attrs["processes"] = ["hardware"]
-            processes = ["hardware"]
-        ##print("attributes", attrs)
-        ##print("processes", processes)
-        
-        
-        # attrs.update(norm.get("attrs") or {})
-        
-        
-        attrs["seed"] = seed_tag
-        # attrs = normalize_props(attrs)
-        ##print("#############################")
-    
-        
-        
-        
-        p.attrs = attrs
-        
-        if processes:
-            p.processes = processes
-        
-        
-        try:
-            p.save()
-        except NotUniqueError:
-            # Another process may have inserted the same part_number/revision; re-fetch and update
-            existing = Part.objects(part_number=pn, revision=rev).first()
-            if not existing:
-                raise
-            existing.description = norm["description"]
-            existing.category = norm["category"]
-            existing.uom = norm["uom"]
-            existing.attrs = attrs
-            if processes:
-                existing.processes = processes
-            existing.save()
+                # attrs = p.attrs or {}
+                # print("attributes", attrs)
+                attrs, processes = process_attributes(attrs)
+                hardware_by_folder = _is_hardware_by_folder(attrs)
+                hardware_by_process = _is_hardware_by_process(attrs)
+                if hardware_by_folder or hardware_by_process:
+                    attrs["process"] = "hardware"
+                    attrs["process2"] = ""
+                    attrs["process3"] = ""
+                    attrs["processes"] = ["hardware"]
+                    processes = ["hardware"]
+                ##print("attributes", attrs)
+                ##print("processes", processes)
+
+                # attrs.update(norm.get("attrs") or {})
+                attrs["seed"] = seed_tag
+                # attrs = normalize_props(attrs)
+                ##print("#############################")
+
+                p.attrs = attrs
+                if processes:
+                    p.processes = processes
+
+                try:
+                    p.save()
+                except NotUniqueError:
+                    # Another process may have inserted the same part_number/revision; re-fetch and update
+                    existing = Part.objects(part_number=pn, revision=rev).first()
+                    if not existing:
+                        raise
+                    existing.description = norm["description"]
+                    existing.category = norm["category"]
+                    existing.uom = norm["uom"]
+                    existing.attrs = attrs
+                    if processes:
+                        existing.processes = processes
+                    existing.save()
 
 
     # 2) Links from TREEBOM
-    if tree_name:
-        tree_txt = z.read(tree_name).decode("utf-8", errors="replace")
-        links = _aggregate_links(_parse_treebom(tree_txt))
-        parent_pairs = {(p, clean_rev(r)) for p, r, _, _, _, _ in links if p}
-        if parent_pairs:
-            removed_links = _clear_existing_links(parent_pairs)
-        for parent_pn, parent_rev, child_pn, child_rev, qty, occs in links:
-            if not parent_pn or not child_pn:
-                skipped_links += 1
-                continue
-            parent_rev = clean_rev(parent_rev)
-            child_rev = clean_rev(child_rev)
-            tree_parts.add((parent_pn, parent_rev))
-            tree_parts.add((child_pn, child_rev))
-            # ensure parts exist (create shells if missing)
-            for pn, rev in ((parent_pn, parent_rev), (child_pn, child_rev)):
-                if _ensure_part_exists(pn, rev, seed_tag):
-                    created_parts += 1
-                    seeded_parts.add((_base_pn(pn), clean_rev(rev)))
+        if tree_name:
+            with timed_span("import.bom.tree.parse"):
+                tree_txt = z.read(tree_name).decode("utf-8", errors="replace")
+                links = _aggregate_links(_parse_treebom(tree_txt))
+            parent_pairs = {(p, clean_rev(r)) for p, r, _, _, _, _ in links if p}
+            if parent_pairs:
+                removed_links = _clear_existing_links(parent_pairs)
+            with timed_span("import.bom.links.save"):
+                for parent_pn, parent_rev, child_pn, child_rev, qty, occs in links:
+                    if not parent_pn or not child_pn:
+                        skipped_links += 1
+                        continue
+                    parent_rev = clean_rev(parent_rev)
+                    child_rev = clean_rev(child_rev)
+                    tree_parts.add((parent_pn, parent_rev))
+                    tree_parts.add((child_pn, child_rev))
+                    # ensure parts exist (create shells if missing)
+                    for pn, rev in ((parent_pn, parent_rev), (child_pn, child_rev)):
+                        if _ensure_part_exists(pn, rev, seed_tag):
+                            created_parts += 1
+                            seeded_parts.add((_base_pn(pn), clean_rev(rev)))
 
-            existing, duplicates = _find_existing_link(
-                parent_pn, parent_rev, child_pn, child_rev)
-            if duplicates:
-                for dup in duplicates:
-                    dup.delete()
+                    existing, duplicates = _find_existing_link(
+                        parent_pn, parent_rev, child_pn, child_rev)
+                    if duplicates:
+                        for dup in duplicates:
+                            dup.delete()
 
-            if existing:
-                existing.qty = qty
-                existing.uom = existing.uom or "EA"
-                if hasattr(existing, "parent_rev"):
-                    existing.parent_rev = parent_rev
-                if hasattr(existing, "child_rev"):
-                    existing.child_rev = child_rev
-                if hasattr(existing, "occurrences"):
-                    existing.occurrences = occs
-                existing.updated_at = datetime.utcnow()
-                existing.save()
-            else:
-                kwargs = dict(parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom="EA")
-                if "parent_rev" in BOMLink._fields:
-                    kwargs["parent_rev"] = parent_rev
-                if "child_rev" in BOMLink._fields:
-                    kwargs["child_rev"] = child_rev
-                if "occurrences" in BOMLink._fields:
-                    kwargs["occurrences"] = occs
-                BOMLink(**kwargs).save()
-                created_links += 1
-        if parent_pairs:
-            removed_links += _dedupe_links_for_parents(parent_pairs)
+                    if existing:
+                        existing.qty = qty
+                        existing.uom = existing.uom or "EA"
+                        if hasattr(existing, "parent_rev"):
+                            existing.parent_rev = parent_rev
+                        if hasattr(existing, "child_rev"):
+                            existing.child_rev = child_rev
+                        if hasattr(existing, "occurrences"):
+                            existing.occurrences = occs
+                        existing.updated_at = datetime.utcnow()
+                        existing.save()
+                    else:
+                        kwargs = dict(parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom="EA")
+                        if "parent_rev" in BOMLink._fields:
+                            kwargs["parent_rev"] = parent_rev
+                        if "child_rev" in BOMLink._fields:
+                            kwargs["child_rev"] = child_rev
+                        if "occurrences" in BOMLink._fields:
+                            kwargs["occurrences"] = occs
+                        BOMLink(**kwargs).save()
+                        created_links += 1
+            if parent_pairs:
+                removed_links += _dedupe_links_for_parents(parent_pairs)
                 
     # 3) Discover and register artifacts for all parts
-    for pn, rev in tree_parts:
-        key = (pn, rev)
-        if key not in part_props:
-            part_props[key] = {
-                "part_number": pn,
-                "description": "",
-                "category": "",
-                "uom": "EA",
-                "revision": rev,
-                "attrs": {"seed": seed_tag},
-            }
+        for pn, rev in tree_parts:
+            key = (pn, rev)
+            if key not in part_props:
+                part_props[key] = {
+                    "part_number": pn,
+                    "description": "",
+                    "category": "",
+                    "uom": "EA",
+                    "revision": rev,
+                    "attrs": {"seed": seed_tag},
+                }
 
-    artifact_inserts = 0
-    artifacts_found_by_type = defaultdict(int)
-    seen = set()
-   #print("part_props", part_props)
-    for item, norm in part_props.items():
-        pn = norm["part_number"]
-        rev = clean_rev(norm.get("revision") or "")  # allow ""
-        key = (pn, rev)
-       #print(key)
-        if key in seen:
-            continue
-        seen.add(key)
+        artifact_inserts = 0
+        artifacts_found_by_type = defaultdict(int)
+        seen = set()
+       #print("part_props", part_props)
+        with timed_span("import.bom.artifacts"):
+            for item, norm in part_props.items():
+                pn = norm["part_number"]
+                rev = clean_rev(norm.get("revision") or "")  # allow ""
+                key = (pn, rev)
+               #print(key)
+                if key in seen:
+                    continue
+                seen.add(key)
 
-        found = discover_part_files(pn, rev)
-        
-        
-        recs = []
-        for (group, is_dwg), meta in found.items():
-            # meta is the dict you printed as "record {...}"
-            rec = dict(meta)
-            rec["ext_group"] = group  # e.g. 'png','pdf','dxf','step','edr','3mf','datasheet'
-            rec["is_dwg"] = bool(is_dwg)
-            recs.append(rec)
-            # aggregate counters
-            artifacts_found_by_type[str(group or "unknown")] += 1
+                found = discover_part_files(pn, rev)
+                
+                
+                recs = []
+                for (group, is_dwg), meta in found.items():
+                    # meta is the dict you printed as "record {...}"
+                    rec = dict(meta)
+                    rec["ext_group"] = group  # e.g. 'png','pdf','dxf','step','edr','3mf','datasheet'
+                    rec["is_dwg"] = bool(is_dwg)
+                    recs.append(rec)
+                    # aggregate counters
+                    artifacts_found_by_type[str(group or "unknown")] += 1
 
-       #print("upserting", len(recs), "artifacts for", pn, rev)
-        artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
+               #print("upserting", len(recs), "artifacts for", pn, rev)
+                artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
 
-    
-    thumbs = generate_thumbs_for_parts(seen)
+        with timed_span("import.bom.thumbnails"):
+            thumbs = generate_thumbs_for_parts(seen)
     
     
     
     
     # root guess for convenience (top item in TREEBOM)
-    root_pn = None
-    root_rev = ""
-    if tree_name:
-        txt = z.read(tree_name).decode("utf-8", errors="replace")
-        for line in txt.splitlines():
-            cols = line.split("\t")
-            if len(cols) >= 2 and cols[0].strip() not in ("", "ITEM NO."):
-                if cols[0].strip() == "1":
-                    root_pn = _base_pn(cols[1].strip())
-                break
-    if root_pn:
-        for (pn, rev), _norm in part_props.items():
-            if pn == root_pn:
-                if rev:
-                    root_rev = clean_rev(rev)
+        root_pn = None
+        root_rev = ""
+        if tree_name:
+            txt = z.read(tree_name).decode("utf-8", errors="replace")
+            for line in txt.splitlines():
+                cols = line.split("\t")
+                if len(cols) >= 2 and cols[0].strip() not in ("", "ITEM NO."):
+                    if cols[0].strip() == "1":
+                        root_pn = _base_pn(cols[1].strip())
                     break
-                if not root_rev:
-                    root_rev = clean_rev(rev or "")
+        if root_pn:
+            for (pn, rev), _norm in part_props.items():
+                if pn == root_pn:
+                    if rev:
+                        root_rev = clean_rev(rev)
+                        break
+                    if not root_rev:
+                        root_rev = clean_rev(rev or "")
 
-    return {
-        "zip": filename,
-        "root": root_pn,
-        "root_revision": root_rev,
-        "parts_created": created_parts,
-        "parts_updated": updated_parts,
-        "links_created": created_links,
-        "links_skipped": skipped_links,
-        "links_removed": removed_links,
-        "parts_seeded": len(seeded_parts),
-        "parts_seeded_list": [{"part_number": pn, "revision": rev} for pn, rev in sorted(seeded_parts)],
-        "parts_with_props": len(part_props),
-        "artifacts_added": artifact_inserts,
-        "artifacts_found_by_type": dict(sorted(artifacts_found_by_type.items())),
-        "thumbnails_built": thumbs,
-        "thumbnails_generated": thumbs
-    }
+        return {
+            "zip": filename,
+            "root": root_pn,
+            "root_revision": root_rev,
+            "parts_created": created_parts,
+            "parts_updated": updated_parts,
+            "links_created": created_links,
+            "links_skipped": skipped_links,
+            "links_removed": removed_links,
+            "parts_seeded": len(seeded_parts),
+            "parts_seeded_list": [{"part_number": pn, "revision": rev} for pn, rev in sorted(seeded_parts)],
+            "parts_with_props": len(part_props),
+            "artifacts_added": artifact_inserts,
+            "artifacts_found_by_type": dict(sorted(artifacts_found_by_type.items())),
+            "thumbnails_built": thumbs,
+            "thumbnails_generated": thumbs
+        }

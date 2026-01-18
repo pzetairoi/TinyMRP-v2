@@ -250,27 +250,25 @@ export default function PartDetailPage() {
 // in PartDetailPage.tsx (replace your bestUrl)
 function bestUrl(f: FileRow): string {
   const runtimeBase = (window as any).__FILES_BASE_URL as string | undefined;
-  const base = runtimeBase || (import.meta as any).env?.VITE_FILES_BASE_URL || "/extfiles/deliverables";
+  const base = runtimeBase || (import.meta as any).env?.VITE_FILES_BASE_URL || "";
 
-  // 1) Preferred: rel_path -> same-origin {base}/rel_path
-  if (f.rel_path) {
-    const rp = String(f.rel_path).replace(/^\/+/, "");
-    return `${base}/${rp}`.replace(/([^:]\/)\/+/g, "$1");
-  }
-
-  // 2) Rewrite absolute URLs that contain /deliverables/ -> same-origin
+  // 1) Prefer explicit URLs returned by the API (tokenized or same-origin)
   const direct = f.url || f.http_url || (Array.isArray(f.urls) ? f.urls[0] : "");
   if (direct) {
     try {
       const u = new URL(direct, window.location.origin);
-      const m = u.pathname.match(/\/deliverables\/(.+)$/);
-      if (m) return `${base}/${m[1]}`.replace(/([^:]\/)\/+/g, "$1");
-      // allow same-origin direct urls
       if (u.origin === window.location.origin) return u.toString();
-    } catch { /* ignore */ }
+    } catch {
+      if (direct.startsWith("/")) return direct;
+    }
   }
 
-  // 3) Nothing else
+  // 2) Fallback: rel_path -> same-origin {base}/rel_path (only if base is provided)
+  if (base && f.rel_path) {
+    const rp = String(f.rel_path).replace(/^\/+/, "");
+    return `${base}/${rp}`.replace(/([^:]\/)\/+/g, "$1");
+  }
+
   return "";
 }
 
