@@ -1110,17 +1110,15 @@ function bestUrl(f: FileRow): string {
               </div>
             </div>
 
-            <div className="pd-missing mt-2 pt-2 border-top">
-              <div className="fw-semibold small">Missing properties</div>
-              {insightsLoading && <div className="text-muted small mt-1">Checking...</div>}
-              {!insightsLoading && (
-                missingCritical.length ? (
+            {(insightsLoading || missingCritical.length > 0) && (
+              <div className="pd-missing mt-2 pt-2 border-top">
+                <div className="fw-semibold small">Missing properties</div>
+                {insightsLoading && <div className="text-muted small mt-1">Checking...</div>}
+                {!insightsLoading && missingCritical.length > 0 && (
                   <div className="text-danger small mt-1">Missing: {missingCritical.join(", ")}</div>
-                ) : (
-                  <div className="text-muted small mt-1">No missing properties detected.</div>
-                )
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
