@@ -1,17 +1,7 @@
-import base64
 from typing import List, Optional
-import os
 from flask import current_app
 from app.models.artifact import PartFile
-
-def _token_for(path: str) -> str:
-    return base64.urlsafe_b64encode((path or "").encode("utf-8")).decode("ascii")
-
-def _root_local() -> str:
-    return (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
-
-def _abs(path_rel: str) -> str:
-    return os.path.join(_root_local(), (path_rel or "").replace("/", os.sep))
+from app.services.files_access import file_url_for, public_file_urls_enabled
 
 def _urls_for(pn: str, rev: Optional[str], *, is_dwg: bool):
     """Return best-first URLs for preview/drawing PNGs, preferring thumbnails.
@@ -30,28 +20,28 @@ def _urls_for(pn: str, rev: Optional[str], *, is_dwg: bool):
     pf = rows.first()
 
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
+    allow_public = public_file_urls_enabled()
     out: list[str] = []
 
     # 1) HTTP thumbnail if available
-    if http_base and getattr(pf, "thumb_rel_path", None):
+    if allow_public and http_base and getattr(pf, "thumb_rel_path", None):
         out.append(f"{http_base}/{pf.thumb_rel_path}")
 
     # 2) HTTP original if available
-    if http_base and getattr(pf, "rel_path", None):
+    if allow_public and http_base and getattr(pf, "rel_path", None):
         out.append(f"{http_base}/{pf.rel_path}")
 
     # 3) Pre-built http_url saved by scanner, if present
-    if getattr(pf, "http_url", None):
+    if allow_public and getattr(pf, "http_url", None):
         out.append(pf.http_url)
 
-    # 4) Tokenized local (thumb first, then original)
-    if getattr(pf, "thumb_rel_path", None):
-        out.append(f"/files/view/{_token_for(_abs(pf.thumb_rel_path))}")
-    if getattr(pf, "rel_path", None):
-        out.append(f"/files/view/{_token_for(_abs(pf.rel_path))}")
-    elif getattr(pf, "path", None):
-        p = pf.path if os.path.isabs(pf.path) else _abs(pf.path)
-        out.append(f"/files/view/{_token_for(p)}")
+    # 4) Tokenized URLs (thumb first, then original)
+    try:
+        if getattr(pf, "thumb_rel_path", None):
+            out.append(file_url_for(pf, kind="thumb"))
+        out.append(file_url_for(pf, kind="file"))
+    except Exception:
+        pass
 
     # Deduplicate while preserving order
     seen = set()
@@ -76,16 +66,18 @@ def thumb_urls_for(pn: str, rev: str | None):
 # helper: build URL list for a single PartFile doc
 def _urls_for_doc(d: PartFile, http_base: str) -> List[str]:
     urls: List[str] = []
-    if http_base and d.thumb_rel_path:
+    allow_public = public_file_urls_enabled()
+    if allow_public and http_base and d.thumb_rel_path:
         urls.append(f"{http_base}/{d.thumb_rel_path}")
-    if http_base and d.rel_path:
+    if allow_public and http_base and d.rel_path:
         urls.append(f"{http_base}/{d.rel_path}")
-    # fallback to tokenized local file using absolute path resolution
-    if d.rel_path:
-        urls.append(f"/files/view/{_token_for(_abs(d.rel_path))}")
-    elif d.path:
-        p = d.path if os.path.isabs(d.path) else _abs(d.path)
-        urls.append(f"/files/view/{_token_for(p)}")
+    # fallback to tokenized local file using signed token
+    try:
+        if d.thumb_rel_path:
+            urls.append(file_url_for(d, kind="thumb"))
+        urls.append(file_url_for(d, kind="file"))
+    except Exception:
+        pass
     return urls
 
 def drawing_urls_for(pn: str, rev_pref: Optional[str]) -> List[str]:

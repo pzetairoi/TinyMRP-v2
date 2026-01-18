@@ -1,11 +1,11 @@
 # app/views/parts.py
-from flask import Blueprint, request, jsonify, current_app, url_for
+from flask import Blueprint, request, jsonify, current_app
 from typing import Optional
 from datetime import datetime
 from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
 import re
-from base64 import urlsafe_b64encode
+import os
 
 from app.models.part import Part
 from app.models.job import Job
@@ -30,6 +30,7 @@ from app.services.filescan import discover_part_files, upsert_part_files
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed, user_has_permission, permissions_required
 from app.services.audit import log_action
+from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.services.parts_delete import delete_part_and_refs
 from app.services.part_norm import clean_rev, clean_rev_or_none
 
@@ -686,11 +687,16 @@ def part_detail():
     drawing_urls = drawing_png_urls_for(p.part_number, norm_rev)
 
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
+    allow_public = public_file_urls_enabled()
 
     def to_url(f: PartFile):
-        if http_base and f.rel_path:
+        if allow_public and http_base and f.rel_path:
             return f"{http_base}/{f.rel_path}"
-        return f"/files/view/{urlsafe_b64encode((f.path or '').encode()).decode()}"
+        return file_url_for(f)
+
+    def file_label(f: PartFile) -> str:
+        name = os.path.basename(f.rel_path or f.path or "")
+        return name or "file"
 
     files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": []}
     for f in (
@@ -699,7 +705,7 @@ def part_detail():
         .order_by("ext_group", "rel_path")
     ):
         if f.ext_group in files:
-            files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path})
+            files[f.ext_group].append({"url": to_url(f), "rel": "", "name": file_label(f)})
 
     wu_rows = _rows_for_child_pn(p.part_number, p.revision)
 

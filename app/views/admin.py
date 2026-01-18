@@ -1,5 +1,5 @@
 # app/views/admin.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask import abort
 from mongoengine.errors import DoesNotExist, ValidationError
 from flask_security import roles_required, current_user
@@ -18,6 +18,17 @@ bp = Blueprint("admin", __name__, url_prefix="/admin")
 @roles_required("admin")
 def admin_index():
     return render_template("admin/index.html")
+
+@bp.get("/metrics")
+@roles_required("admin")
+def admin_metrics():
+    try:
+        from app.services.metrics import get_metrics_store
+        file_root = current_app.config.get("FILE_ROOT_LOCAL") or current_app.root_path
+        metrics = get_metrics_store().snapshot(file_root=file_root)
+    except Exception:
+        metrics = {}
+    return render_template("admin/metrics.html", metrics=metrics)
 
 @bp.route("/users")
 @roles_required("admin")

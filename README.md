@@ -27,7 +27,7 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
 - Backend: Python 3.12, Flask 3.x, MongoEngine 0.29.x, PyMongo 4.x.
 - DB: MongoDB 6/7 (local or Atlas).
 - Frontend: React 19, Vite 7, PrimeReact, ThreeJS (3MF viewer).
-- Dev: `python-dotenv`, Docker Compose, optional Nginx for static deliverables.
+- Dev: `python-dotenv`, Docker Compose, optional Nginx for secure file offload.
 
 ---
 
@@ -40,8 +40,11 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
 - `MONGO_URI`: e.g. `mongodb://localhost:27017/tinymrp-v2`.
 - File roots (canonical keys, see `app/__init__.py`):
   - `FILES_LOCAL_ROOT`: absolute path where deliverables are stored (host/container).
-  - `FILES_URL_PREFIX`: URL prefix used by the app to serve files (e.g. `/deliverables` or `http://localhost:5001/Deliverables`).
+  - `FILES_URL_PREFIX`: URL prefix for protected files when Nginx is fronting the app (e.g. `/deliverables`).
   - Optional `FILES_UPSTREAM_BASE`: upstream file server base URL if proxying.
+  - `FILES_PUBLIC_URLS=false`: allow direct public file URLs (off by default).
+  - `FILES_ACCEL_REDIRECT_PREFIX=/__files`: internal Nginx location used for X-Accel-Redirect.
+  - `FILES_ALLOW_LEGACY_TOKENS=false`: allow legacy base64 file tokens (off by default).
 - Optional:
   - `FILE_HASH_MAX_BYTES`: compute/verify file hashes up to this size (0 to disable).
   - `VITE_BACKEND_URL`: dev proxy target for Vite (`frontend/vite.config.ts`).
@@ -258,10 +261,10 @@ Optional override (not recommended in production):
 PowerShell snippet (from `handycommands.txt`):
 
 ```powershell
-# 1) Serve deliverables through a tiny nginx
+# 1) (optional) Run nginx in front of Flask for protected file offload
 $env:FILES_LOCAL_ROOT = "C:/CADEXPORT"
-docker run --rm -d --name tinymrp-nginx-static -p 5001:80 `
-  -v "${PWD}/docker/nginx/nginx.static.conf:/etc/nginx/nginx.conf:ro" `
+docker run --rm -d --name tinymrp-nginx-dev -p 5001:80 `
+  -v "${PWD}/docker/nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro" `
   -v "${env:FILES_LOCAL_ROOT}:/data/deliverables:ro" nginx:1.27-alpine
 
 # 2) Run the app with the dev env file
@@ -279,7 +282,7 @@ npm install
 npm run build
 ```
 
-Visit http://localhost:5000 (app) and http://localhost:5001/Deliverables (files).
+Visit http://localhost:5000 (app). Files are served via `/files/view/<token>` after login.
 
 ---
 
@@ -396,7 +399,7 @@ docker compose ps
 6) Test
 
 - App: `http://YOUR_SERVER_IP/` (or `http://YOUR_SERVER_IP:<HTTP_PORT>`)
-- Files: `http://YOUR_SERVER_IP/deliverables/`
+- Files: served through the app with `/files/view/<token>` (no public listing).
 - First login: `admin@admin.com / admin` (or your `DEFAULT_ADMIN_*`).
 
 ### Mappings & Paths (repo-specific)
@@ -410,10 +413,10 @@ docker compose ps
 - App file roots and URL prefix:
   - `docker-compose.yml` sets `FILES_LOCAL_ROOT=/data/deliverables` and `FILES_URL_PREFIX=/deliverables` for the app.
   - Backend reads these in `app/__init__.py` and also exposes legacy aliases `FILE_ROOT_LOCAL`/`FILE_ROOT_HTTP` for internal services.
-- Nginx static paths:
-  - `docker/nginx/nginx.conf` serves both `/deliverables/` and `/Deliverables/` via `alias /data/deliverables/`.
+- Nginx protected paths:
+  - `docker/nginx/nginx.conf` exposes an internal `/__files/` location for X-Accel-Redirect and protects `/deliverables/` with `auth_request`.
 - Frontend file base:
-  - `frontend/.env.production` uses `VITE_FILES_BASE_URL=/deliverables`; UI normalizes links accordingly.
+  - `frontend/.env.production` should be empty unless you intentionally enable `FILES_PUBLIC_URLS=true`.
 
 ### First-Run Seeding
 

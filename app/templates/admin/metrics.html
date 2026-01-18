@@ -1,0 +1,140 @@
+{% extends "security/base.html" %}
+{% block title %}Admin Metrics{% endblock %}
+{% block content %}
+<div class="container my-4">
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <h1 class="h4 mb-0">Admin Metrics</h1>
+    <div class="text-muted small">Snapshot: {{ metrics.snapshot_at|default('n/a') }}</div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h6 class="card-title">Requests</h6>
+          <div class="fw-bold">{{ metrics.requests.total|default(0) }}</div>
+          <div class="text-muted small">Errors: {{ metrics.requests.errors|default(0) }}</div>
+          <div class="text-muted small">Avg: {{ "%.0f"|format(metrics.requests.avg_ms|default(0)) }} ms</div>
+          <div class="text-muted small">P95: {{ "%.0f"|format(metrics.requests.p95_ms|default(0)) }} ms</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h6 class="card-title">Memory</h6>
+          <div class="fw-bold">{{ metrics.memory.rss_h|default('0 B') }}</div>
+          <div class="text-muted small">Uptime: {{ metrics.uptime|default('0:00:00') }}</div>
+          <div class="text-muted small">CPU: {{ "%.1f"|format(metrics.cpu.process_s|default(0)) }} s</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h6 class="card-title">Disk (File Root)</h6>
+          <div class="fw-bold">{{ metrics.disk.used_h|default('0 B') }}</div>
+          <div class="text-muted small">Free: {{ metrics.disk.free_h|default('0 B') }}</div>
+          <div class="progress mt-2" style="height: 8px;">
+            <div class="progress-bar" role="progressbar" style="width: {{ metrics.disk.used_pct|default(0) }}%"></div>
+          </div>
+          <div class="text-muted small mt-1">{{ metrics.disk.used_pct|default(0)|round(1) }}% used</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h6 class="card-title">Bandwidth</h6>
+          <div class="fw-bold">In: {{ metrics.bandwidth.in_h|default('0 B') }}</div>
+          <div class="text-muted small">Out: {{ metrics.bandwidth.out_h|default('0 B') }}</div>
+          <div class="text-muted small">Last {{ metrics.recent_count|default(0) }} reqs: {{ metrics.bandwidth.recent_in_h|default('0 B') }} / {{ metrics.bandwidth.recent_out_h|default('0 B') }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h6 class="card-title">Top Features (Total Time)</h6>
+          {% if metrics.features and metrics.features|length %}
+            {% for row in metrics.features %}
+              <div class="d-flex justify-content-between">
+                <div class="small">{{ row.name }}</div>
+                <div class="text-muted small">{{ "%.0f"|format(row.total_ms) }} ms</div>
+              </div>
+              <div class="progress mb-2" style="height: 7px;">
+                <div class="progress-bar bg-primary" role="progressbar" style="width: {{ row.pct|default(0) }}%"></div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="text-muted small">No data yet.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <h6 class="card-title">Import Spans (Timed)</h6>
+          {% if metrics.spans and metrics.spans|length %}
+            {% for row in metrics.spans %}
+              <div class="d-flex justify-content-between">
+                <div class="small">{{ row.name }}</div>
+                <div class="text-muted small">{{ "%.0f"|format(row.total_ms) }} ms</div>
+              </div>
+              <div class="progress mb-2" style="height: 7px;">
+                <div class="progress-bar bg-warning" role="progressbar" style="width: {{ row.pct|default(0) }}%"></div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="text-muted small">No import spans recorded yet.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-12">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <h6 class="card-title">Top Endpoints</h6>
+          {% if metrics.endpoints and metrics.endpoints|length %}
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr class="text-muted small">
+                  <th>Endpoint</th>
+                  <th class="text-end">Count</th>
+                  <th class="text-end">Avg ms</th>
+                  <th class="text-end">Max ms</th>
+                  <th class="text-end">In</th>
+                  <th class="text-end">Out</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in metrics.endpoints %}
+                <tr>
+                  <td class="small">{{ row.name }}</td>
+                  <td class="text-end small">{{ row.count }}</td>
+                  <td class="text-end small">{{ "%.0f"|format(row.avg_ms) }}</td>
+                  <td class="text-end small">{{ "%.0f"|format(row.max_ms) }}</td>
+                  <td class="text-end small">{{ row.in_h }}</td>
+                  <td class="text-end small">{{ row.out_h }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+            <div class="text-muted small">No endpoint data yet.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
