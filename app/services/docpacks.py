@@ -571,8 +571,12 @@ def _visual_list_pdf(
     flat: List[Tuple[str,str,float]],
     root_pn: Optional[str] = None,
     root_rev: Optional[str] = None,
+    *,
     page_map: Optional[Dict[Tuple[str,str], int]] = None,
     build_ts: Optional[datetime] = None,
+    hardware_rows: Optional[List[Dict[str, object]]] = None,
+    hardware_pdf_bytes: Optional[bytes] = None,
+    root_desc: Optional[str] = None,
 ) -> Optional[bytes]:
     try:
         from reportlab.pdfgen import canvas
@@ -585,6 +589,15 @@ def _visual_list_pdf(
         return None
     root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
     root_rev_clean = _clean_rev(root_rev) if root_rev is not None else ""
+    resolved_root_desc = root_desc
+    if resolved_root_desc is None and root_pn:
+        try:
+            rpdoc = _part_by(root_pn, root_rev_clean)
+            resolved_root_desc = _part_description(rpdoc)
+        except Exception:
+            resolved_root_desc = ""
+    if resolved_root_desc is None:
+        resolved_root_desc = ""
 
     def _clip_line(text: str, font: str, size: float, max_w: float) -> str:
         text = text or ""
@@ -632,31 +645,26 @@ def _visual_list_pdf(
     box_h = 46*mm
     gap = 6*mm
     margin = 14*mm
+    header_pad = 10*mm
     W, H = A4
     cols = max(1, int((W - 2*margin + gap) // (box_w + gap)))
     # Aim for exactly 3 columns if space permits
     cols = min(max(cols, 3), 4)
     x0 = margin
-    y0 = H - margin
+    y0 = H - margin - header_pad
+    qty_margin = 8*mm
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     # Title with root PN/REV and description, plus logos
-    root_desc = ''
-    if root_pn:
-        try:
-            rpdoc = _part_by(root_pn, root_rev_clean)
-            root_desc = _part_description(rpdoc)
-        except Exception:
-            pass
     def header():
         title = (f"{root_pn or ''} REV {root_rev_clean}").strip()
         c.setFont("Helvetica-Bold", 18)
         if title:
             c.drawCentredString(W/2, H - margin + 6*mm, title)
-        if root_desc:
+        if resolved_root_desc:
             c.setFont("Helvetica", 11)
-            c.drawCentredString(W/2, H - margin - 1*mm, _clip_line(root_desc[:200], "Helvetica", 11, W - 2*margin))
+            c.drawCentredString(W/2, H - margin - 1*mm, _clip_line(resolved_root_desc[:200], "Helvetica", 11, W - 2*margin))
         ts = build_ts or datetime.now()
         try:
             stamp = ts.strftime("%Y-%m-%d %H:%M")
@@ -674,7 +682,7 @@ def _visual_list_pdf(
     header()
 
     proc_colors = _process_color_map()
-    rows_per_page = max(1, int((H - 2*margin + gap) // (box_h + gap)))
+    rows_per_page = max(1, int((H - 2*margin - header_pad + gap) // (box_h + gap)))
     cur_page = 0
 
     def draw_cell(ix: int, pn: str, rev: str, qty: float, imgpath: Optional[str], desc: str = ""):
@@ -736,7 +744,7 @@ def _visual_list_pdf(
         except Exception:
             qty_w = 0.0
         title = f"{pn} REV {rev}" if rev else f"{pn}"
-        max_title_w = max(20*mm, box_w - 8*mm - qty_w - 4*mm)
+        max_title_w = max(20*mm, box_w - (hl_x - x) - qty_w - 6*mm)
         c.setFillGray(0.1)
         c.setFont("Helvetica-Bold", 11.5)
         c.drawString(hl_x, hl_y, _clip_line(title, "Helvetica-Bold", 11.5, max_title_w))
@@ -745,13 +753,15 @@ def _visual_list_pdf(
             c.setFillGray(0.35)
             c.drawString(hl_x, hl_y - 12, _clip_line(desc, "Helvetica", 8.8, box_w - 8*mm))
             c.setFillGray(0.1)
-        # Qty at top-right in bold red, same size as PN
+        # Qty at top-right in bold red
         try:
-            c.setFont("Helvetica-Bold", 11.5)
-            c.setFillColorRGB(0.82, 0.0, 0.0)
-            tw = stringWidth(qty_str, "Helvetica-Bold", 11.5)
-            c.drawString(x + box_w - 4*mm - tw, hl_y, qty_str)
-            c.setFillGray(0.1)  # restore default dark text color
+            if qty_str:
+                c.setFont("Helvetica-Bold", 11.5)
+                c.setFillColorRGB(0.82, 0.0, 0.0)
+                qty_x = x + box_w - qty_margin - qty_w
+                c.drawString(qty_x, hl_y, qty_str)
+                c.setFillGray(0.1)
+                c.setFillColorRGB(0.1, 0.1, 0.1)
         except Exception:
             pass
         # Binder page reference (optional): show below quantity if provided
@@ -863,8 +873,9 @@ def _visual_list_pdf(
                 c.setFont("Helvetica-Bold", 12.5)
                 c.setFillColorRGB(0.82, 0.0, 0.0)
                 tw = stringWidth(qty_str, "Helvetica-Bold", 12.5)
-                c.drawString(r_x + r_w - 4*mm - tw, hl_y, qty_str)
+                c.drawString(r_x + r_w - qty_margin - tw, hl_y, qty_str)
                 c.setFillGray(0.1)
+                c.setFillColorRGB(0.1, 0.1, 0.1)
                 # binder page below qty if available
                 if page_map is not None:
                     key = (pn, _norm_rev(rev))
@@ -873,7 +884,7 @@ def _visual_list_pdf(
                         s = f"p. {pg}"
                         c.setFont("Helvetica", 9.0); c.setFillGray(0.4)
                         tw2 = stringWidth(s, "Helvetica", 9.0)
-                        c.drawString(r_x + r_w - 4*mm - tw2, hl_y - 12, s)
+                        c.drawString(r_x + r_w - qty_margin - tw2, hl_y - 12, s)
                         c.setFillGray(0.1)
             except Exception:
                 pass
@@ -904,7 +915,33 @@ def _visual_list_pdf(
         draw_cell(start_ix + i, pn, rev, qty, ip, desc)
 
     c.save()
-    return buf.getvalue()
+    base_pdf = buf.getvalue()
+    if hardware_rows:
+        try:
+            hw_pdf = _hardware_summary_pdf_with_empty(
+                hardware_rows,
+                allow_empty=False,
+                root_pn=root_pn,
+                root_rev=root_rev,
+                root_desc=resolved_root_desc,
+                build_ts=build_ts,
+            )
+        except Exception:
+            hw_pdf = None
+        if hw_pdf:
+            try:
+                from PyPDF2 import PdfReader, PdfWriter
+            except Exception:
+                return base_pdf
+            writer = PdfWriter()
+            for payload in (base_pdf, hw_pdf):
+                reader = PdfReader(io.BytesIO(payload))
+                for page in reader.pages:
+                    writer.add_page(page)
+            merged_buf = io.BytesIO()
+            writer.write(merged_buf)
+            return merged_buf.getvalue()
+    return base_pdf
 
 
 def _norm_proc_name(val: object) -> str:
@@ -1028,6 +1065,7 @@ def _hardware_summary_pdf_with_empty(
     )
     flowables = []
     flowables.append(Paragraph("Hardware Summary", styles["Heading2"]))
+    flowables.append(Paragraph("Hardware Summary Details", styles["Normal"]))
     if root_pn:
         root_rev_clean = _clean_rev(root_rev) if root_rev is not None else ""
         root_line = f"{root_pn} REV {root_rev_clean}".strip()
@@ -1874,6 +1912,46 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             if not _is_hardware_part(pn, rev)
         ]
 
+    # Hardware Summary PDF (standalone or binder section)
+    hardware_rows: List[Dict[str, object]] = []
+    hardware_pdf: Optional[bytes] = None
+    if bool(getattr(opts, "want_hardware_summary", False)) or bool(opts.binder_add_hardware_summary):
+        try:
+            hardware_rows = _hardware_summary_rows(vis_filtered_all + [(opts.root_pn, root_rev_resolved, 1.0)])
+            hardware_pdf = _hardware_summary_pdf_with_empty(
+                hardware_rows,
+                allow_empty=bool(getattr(opts, "want_hardware_summary", False)),
+                root_pn=opts.root_pn,
+                root_rev=root_rev_resolved,
+                root_desc=root_desc,
+                build_ts=build_ts,
+            )
+            if hardware_rows and not hardware_pdf:
+                raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
+    embed_hw_summary = bool(
+        hardware_rows
+        and (
+            (opts.want_visual_list and opts.want_hardware_summary)
+            or (opts.binder_add_visual_list and opts.binder_add_hardware_summary)
+        )
+    )
+    visual_hw_rows = hardware_rows if embed_hw_summary else None
+    visual_hw_pdf = hardware_pdf if embed_hw_summary else None
+
+    if getattr(opts, "want_hardware_summary", False):
+        if not hardware_pdf:
+            raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
+        hw_name = build_output_name(f"{base_stub}_HardwareSummary", "pdf", max_len=96, include_time=False, now=build_ts)
+        if want_zip:
+            z.writestr(hw_name, hardware_pdf)
+        else:
+            return (hw_name, hardware_pdf, "application/pdf")
+
     # Visual list PDF (standalone)
     if opts.want_visual_list:
         # Standalone visual list includes root header/cell and omits hardware children
@@ -1882,6 +1960,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             opts.root_pn,
             root_rev_resolved,
             build_ts=build_ts,
+            hardware_rows=visual_hw_rows,
+            hardware_pdf_bytes=visual_hw_pdf,
+            root_desc=root_desc,
         )
         if not vis_pdf:
             raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
@@ -1913,6 +1994,16 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             raise
         except Exception:
             pass
+
+    embed_hw_summary = bool(
+        hardware_rows
+        and (
+            (opts.want_visual_list and opts.want_hardware_summary)
+            or (opts.binder_add_visual_list and opts.binder_add_hardware_summary)
+        )
+    )
+    visual_hw_rows = hardware_rows if embed_hw_summary else None
+    visual_hw_pdf = hardware_pdf if embed_hw_summary else None
 
     if getattr(opts, "want_hardware_summary", False):
         if not hardware_pdf:
@@ -2032,6 +2123,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 opts.root_pn,
                 root_rev_resolved,
                 build_ts=build_ts,
+                hardware_rows=visual_hw_rows,
+                hardware_pdf_bytes=visual_hw_pdf,
+                root_desc=root_desc,
             )
             if not vis_pdf:
                 raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
@@ -2044,7 +2138,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     raise RuntimeError("Failed to build Where-Used report. Ensure reportlab is installed.")
             preface_bytes.append(("WhereUsed.pdf", whereused_pdf))
 
-        if opts.binder_add_hardware_summary:
+        if opts.binder_add_hardware_summary and not embed_hw_summary:
             if hardware_pdf and hardware_rows:
                 preface_bytes.append(("HardwareSummary.pdf", hardware_pdf))
 
@@ -2251,6 +2345,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     root_rev_resolved,
                     page_map=first_page,
                     build_ts=build_ts,
+                    hardware_rows=visual_hw_rows,
+                    hardware_pdf_bytes=visual_hw_pdf,
+                    root_desc=root_desc,
                 )
                 # Replace existing VisualList in preface_bytes
                 for i, (nm, _) in enumerate(preface_bytes):
