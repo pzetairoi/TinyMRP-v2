@@ -21,20 +21,12 @@ from app.models.part import Part
 from app.services.attrs import harvest_part_attrs
 from app.services.thumbs import thumb_urls_for
 from app.services.biz_utils import generate_job_number
+from app.services.part_norm import clean_rev
 
 bp = Blueprint("admin_jobs", __name__, url_prefix="/admin/jobs")
 
-_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
-
 def _clean_rev(value: object) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if text.lower() in _REV_BLANKS:
-        return ""
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text.strip()
+    return clean_rev(value)
 
 
 @bp.get("/")
@@ -244,7 +236,7 @@ def _parse_bom_text(text: str):
         if len(parts) < 1:
             continue
         pn = _canonical_pn(parts[0])
-        rev = parts[1] if len(parts) > 1 else ""
+        rev = _clean_rev(parts[1] if len(parts) > 1 else "")
         try:
             qty = float(parts[2]) if len(parts) > 2 else 1.0
         except Exception:
@@ -257,7 +249,7 @@ def _consolidate_lines(lines):
     merged = {}
     for l in lines or []:
         pn_raw = (l.pn or "").strip()
-        rev_raw = (l.rev or "").strip()
+        rev_raw = _clean_rev(l.rev)
         key = (pn_raw.lower(), rev_raw)
         if key in merged:
             merged[key]["qty"] += float(l.qty or 0)
@@ -536,7 +528,7 @@ def job_bom_update(job_id):
     j = Job.objects(id=job_id).first() or abort(404)
     data = request.get_json(silent=True) or {}
     pn = _canonical_pn(data.get("pn") or "")
-    rev = (data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
+    rev = _clean_rev(data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
     try:
         qty = float(data.get("qty") or 1.0)
     except Exception:
@@ -547,7 +539,7 @@ def job_bom_update(job_id):
     if j.bom is None:
         j.bom = []
     for line in j.bom:
-        if line.pn.lower() == pn.lower() and (line.rev or "") == rev:
+        if line.pn.lower() == pn.lower() and _clean_rev(line.rev) == rev:
             line.qty = qty; updated = True; break
     if not updated:
         j.bom.append(JobBOMLine(pn=pn, rev=rev or "", qty=qty))
@@ -560,9 +552,9 @@ def job_bom_remove(job_id):
     j = Job.objects(id=job_id).first() or abort(404)
     data = request.get_json(silent=True) or {}
     pn = (data.get("pn") or "").strip()
-    rev = (data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
+    rev = _clean_rev(data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
     before = len(j.bom or [])
-    j.bom = [l for l in (j.bom or []) if not (l.pn.lower() == pn.lower() and (l.rev or "") == rev)]
+    j.bom = [l for l in (j.bom or []) if not (l.pn.lower() == pn.lower() and _clean_rev(l.rev) == rev)]
     if len(j.bom) != before:
         j.save()
     return jsonify({"ok": True, "removed": before - len(j.bom)})
@@ -572,11 +564,11 @@ def job_bom_remove(job_id):
 def job_bom_replace(job_id):
     j = Job.objects(id=job_id).first() or abort(404)
     d = request.get_json(silent=True) or {}
-    opn = (d.get("old_pn") or "").strip(); orev = (d.get("old_rev") or "")
-    npn = _canonical_pn(d.get("new_pn") or ""); nrev = (d.get("new_rev") or "")
+    opn = (d.get("old_pn") or "").strip(); orev = _clean_rev(d.get("old_rev") or "")
+    npn = _canonical_pn(d.get("new_pn") or ""); nrev = _clean_rev(d.get("new_rev") or "")
     if not npn:
         return jsonify({"error":"missing new_pn"}), 400
     for line in (j.bom or []):
-        if line.pn.lower() == opn.lower() and (line.rev or "") == orev:
+        if line.pn.lower() == opn.lower() and _clean_rev(line.rev) == orev:
             line.pn = npn; line.rev = nrev or ""; j.save(); return jsonify({"ok": True})
     return jsonify({"ok": False, "error":"not found"}), 404

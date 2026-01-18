@@ -9,6 +9,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from app.models.part import Part
 from app.models.artifact import PartFile
+from app.services.part_norm import clean_rev
 
 
 @dataclass
@@ -20,14 +21,7 @@ class CompileRow:
 
 
 def _clean_rev(value: object) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if text.lower() in ("nan", "none", "n/a", "na", "null", "0", "false"):
-        return ""
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text.strip()
+    return clean_rev(value)
 
 
 def _to_qty(value: object) -> float:

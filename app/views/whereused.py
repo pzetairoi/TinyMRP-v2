@@ -9,20 +9,12 @@ from app.services.thumbs import thumb_urls_for
 from app.services.attrs import harvest_part_attrs
 from flask_login import login_required, current_user
 from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed
+from app.services.part_norm import clean_rev
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
-_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
-
 def _clean_rev(value: object) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if text.lower() in _REV_BLANKS:
-        return ""
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text.strip()
+    return clean_rev(value)
 
 def _rows_for_child_pn(pn: str, child_rev: str | None = None):
     """Return where-used rows for a child part number, keeping revisions accurate."""

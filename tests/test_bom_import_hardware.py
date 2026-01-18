@@ -79,6 +79,10 @@ def test_import_bom_aggregates_duplicate_links(app):
         )
         assert len(links) == 1
         assert links[0].qty == 5
+        occs = links[0].occurrences or []
+        assert len(occs) == 2
+        assert {o.get("seq") for o in occs} == {1, 2}
+        assert sum(float(o.get("qty") or 0) for o in occs) == 5
 
 
 def test_import_bom_no_duplicate_links_sample(app):
@@ -88,6 +92,33 @@ def test_import_bom_no_duplicate_links_sample(app):
     with zip_path.open("rb") as fh:
         data = fh.read()
     with app.app_context():
+        import_bom_zip(data, zip_path.name, seed_tag="test")
+        keys = [
+            (l.parent_pn, l.parent_rev or "", l.child_pn, l.child_rev or "")
+            for l in BOMLink.objects.only("parent_pn", "parent_rev", "child_pn", "child_rev")
+        ]
+        dups = [k for k, v in Counter(keys).items() if v > 1]
+        assert not dups
+
+
+def test_import_bom_clears_existing_duplicates_sample(app):
+    zip_path = Path(__file__).resolve().parents[1] / "testfiles" / "bom" / "13-2921_REV__2026_01_18_09_03_22.zip"
+    if not zip_path.exists():
+        pytest.skip("sample BOM zip not found")
+    with zip_path.open("rb") as fh:
+        data = fh.read()
+    with app.app_context():
+        import_bom_zip(data, zip_path.name, seed_tag="test")
+        link = BOMLink.objects.first()
+        assert link is not None
+        BOMLink(
+            parent_pn=f"  {link.parent_pn}  ",
+            parent_rev=link.parent_rev,
+            child_pn=f"{link.child_pn} ",
+            child_rev=link.child_rev,
+            qty=link.qty,
+            uom=link.uom or "EA",
+        ).save()
         import_bom_zip(data, zip_path.name, seed_tag="test")
         keys = [
             (l.parent_pn, l.parent_rev or "", l.child_pn, l.child_rev or "")

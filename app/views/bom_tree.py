@@ -10,20 +10,12 @@ from flask_login import current_user
 from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.acl import require_items_view
 from app.services.audit import log_action
+from app.services.part_norm import clean_rev
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
-_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
-
 def _clean_rev(value: object) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if text.lower() in _REV_BLANKS:
-        return ""
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text.strip()
+    return clean_rev(value)
 
 def _has_children(pn: str, rev: str | None = None) -> bool:
     if "parent_pn" in BOMLink._fields:

@@ -14,6 +14,7 @@ from app.models.common import Address
 from app.services.api_auth import api_auth_required
 from app.services.biz_utils import generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines
 from app.services.acl import apply_order_scope
+from app.services.part_norm import clean_rev
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
 
 bp = Blueprint("orders_api", __name__, url_prefix="/api/orders")
@@ -51,7 +52,7 @@ def _parse_lines(items) -> List[OrderLine]:
             continue
         line = OrderLine(
             pn=pn,
-            rev=(raw.get("rev") or raw.get("revision") or "").strip(),
+            rev=clean_rev(raw.get("rev") or raw.get("revision") or ""),
             qty=float(raw.get("qty") or 1.0),
             uom=(raw.get("uom") or "EA").strip(),
             note=(raw.get("note") or "").strip(),
@@ -96,7 +97,7 @@ def _order_to_dict(o: Order):
         "lines": [
             {
                 "pn": l.pn,
-                "rev": l.rev or "",
+                "rev": clean_rev(l.rev),
                 "qty": float(l.qty or 0.0),
                 "uom": l.uom,
                 "note": l.note,

@@ -1,5 +1,5 @@
 # app/models/bom.py
-from mongoengine import Document, StringField, FloatField, ListField, DateTimeField, BooleanField
+from mongoengine import Document, StringField, FloatField, ListField, DateTimeField, BooleanField, DictField
 from datetime import datetime
 from app.models.part import Part  # <-- absolute import
 
@@ -13,6 +13,7 @@ class BOMLink(Document):
     qty         = FloatField(default=1.0)
     uom         = StringField(default="EA")
     refdes      = ListField(StringField())
+    occurrences = ListField(DictField(), default=list)
     scrap_rate  = FloatField(default=0.0)
     alt_group   = StringField(default="")
     effective_from = DateTimeField()

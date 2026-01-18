@@ -31,25 +31,15 @@ from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed, user_has_permission, permissions_required
 from app.services.audit import log_action
 from app.services.parts_delete import delete_part_and_refs
+from app.services.part_norm import clean_rev, clean_rev_or_none
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
-_REV_BLANKS = {"", "n/a", "na", "none", "null", "nan", "0", "false"}
-
 def _clean_rev_value(value: object) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if text.lower() in _REV_BLANKS:
-        return ""
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text.strip()
+    return clean_rev(value)
 
 def _clean_rev_input(value: object | None) -> str | None:
-    if value is None:
-        return None
-    return _clean_rev_value(value)
+    return clean_rev_or_none(value)
 
 
 def _normalized_revision(p: Part, attrs: dict) -> str:

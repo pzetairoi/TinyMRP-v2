@@ -10,15 +10,16 @@ from app.models.job import Job
 from app.models.order import Order
 from app.models.part_revision import PartRevisionHistory
 from app.services.biz_utils import calculate_order_totals
+from app.services.part_norm import clean_rev
 
 
 def _match_pn_rev(pn: str, rev: str, target_pn: str, target_rev: str) -> bool:
-    return (pn or "").strip().lower() == target_pn and (rev or "").strip().lower() == target_rev
+    return (pn or "").strip().lower() == target_pn and clean_rev(rev).lower() == target_rev
 
 
 def delete_part_and_refs(pn: str, rev: str | None) -> Dict[str, int]:
     pn_clean = (pn or "").strip()
-    rev_clean = (rev or "").strip()
+    rev_clean = clean_rev(rev)
     if not pn_clean:
         return {
             "deleted_parts": 0,
