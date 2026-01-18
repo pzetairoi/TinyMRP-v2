@@ -1974,46 +1974,6 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             vis_name = build_output_name(f"{base_stub}_VisualList", "pdf", max_len=96, include_time=False, now=build_ts)
             return (vis_name, vis_pdf, "application/pdf")
 
-    # Hardware Summary PDF (standalone or binder section)
-    hardware_rows: List[Dict[str, object]] = []
-    hardware_pdf: Optional[bytes] = None
-    if bool(getattr(opts, "want_hardware_summary", False)) or bool(opts.binder_add_hardware_summary):
-        try:
-            hardware_rows = _hardware_summary_rows(vis_filtered_all + [(opts.root_pn, root_rev_resolved, 1.0)])
-            hardware_pdf = _hardware_summary_pdf_with_empty(
-                hardware_rows,
-                allow_empty=bool(getattr(opts, "want_hardware_summary", False)),
-                root_pn=opts.root_pn,
-                root_rev=root_rev_resolved,
-                root_desc=root_desc,
-                build_ts=build_ts,
-            )
-            if hardware_rows and not hardware_pdf:
-                raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
-        except RuntimeError:
-            raise
-        except Exception:
-            pass
-
-    embed_hw_summary = bool(
-        hardware_rows
-        and (
-            (opts.want_visual_list and opts.want_hardware_summary)
-            or (opts.binder_add_visual_list and opts.binder_add_hardware_summary)
-        )
-    )
-    visual_hw_rows = hardware_rows if embed_hw_summary else None
-    visual_hw_pdf = hardware_pdf if embed_hw_summary else None
-
-    if getattr(opts, "want_hardware_summary", False):
-        if not hardware_pdf:
-            raise RuntimeError("Failed to build Hardware Summary PDF. Ensure reportlab is installed.")
-        hw_name = build_output_name(f"{base_stub}_HardwareSummary", "pdf", max_len=96, include_time=False, now=build_ts)
-        if want_zip:
-            z.writestr(hw_name, hardware_pdf)
-        else:
-            return (hw_name, hardware_pdf, "application/pdf")
-
     cover_pdf = None
     if opts.want_cover_page or (opts.want_pdf_binder and opts.binder_add_cover):
         cover_pdf = _cover_page_pdf(opts.root_pn, opts.root_rev)
