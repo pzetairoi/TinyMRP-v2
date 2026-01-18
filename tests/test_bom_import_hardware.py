@@ -1,6 +1,9 @@
 # tests/test_bom_import_hardware.py
 import io
 import zipfile
+from pathlib import Path
+from collections import Counter
+import pytest
 
 from app.models.part import Part
 from app.models.bom import BOMLink
@@ -76,3 +79,19 @@ def test_import_bom_aggregates_duplicate_links(app):
         )
         assert len(links) == 1
         assert links[0].qty == 5
+
+
+def test_import_bom_no_duplicate_links_sample(app):
+    zip_path = Path(__file__).resolve().parents[1] / "testfiles" / "bom" / "13-2921_REV__2026_01_18_09_03_22.zip"
+    if not zip_path.exists():
+        pytest.skip("sample BOM zip not found")
+    with zip_path.open("rb") as fh:
+        data = fh.read()
+    with app.app_context():
+        import_bom_zip(data, zip_path.name, seed_tag="test")
+        keys = [
+            (l.parent_pn, l.parent_rev or "", l.child_pn, l.child_rev or "")
+            for l in BOMLink.objects.only("parent_pn", "parent_rev", "child_pn", "child_rev")
+        ]
+        dups = [k for k, v in Counter(keys).items() if v > 1]
+        assert not dups

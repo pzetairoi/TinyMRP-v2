@@ -257,6 +257,21 @@ def _find_existing_link(parent_pn: str, parent_rev: str, child_pn: str, child_re
     existing_links.sort(key=lambda link: link.updated_at or link.id, reverse=True)
     return existing_links[0], existing_links[1:]
 
+def _clear_existing_links(parents: Iterable[Tuple[str, str]]) -> int:
+    removed = 0
+    for parent_pn, parent_rev in parents:
+        if not parent_pn:
+            continue
+        q = BOMLink.objects(parent_pn=parent_pn)
+        if "parent_rev" in BOMLink._fields:
+            if parent_rev:
+                q = q.filter(parent_rev=parent_rev)
+            else:
+                q = q.filter(Q(parent_rev="") | Q(parent_rev=None) | Q(parent_rev__exists=False))
+        removed += q.count()
+        q.delete()
+    return removed
+
 def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -> Dict[str, Any]:
     """
     Main entry: import a single ZIP file.
@@ -271,6 +286,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     created_parts = 0
     updated_parts = 0
     created_links = 0
+    removed_links = 0
     skipped_links = 0
     found_artifacts = 0
     skipped_artifacts = 0
@@ -366,6 +382,9 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     if tree_name:
         tree_txt = z.read(tree_name).decode("utf-8", errors="replace")
         links = _aggregate_links(_parse_treebom(tree_txt))
+        parent_pairs = {(p, _clean_rev(r)) for p, r, _, _, _ in links if p}
+        if parent_pairs:
+            removed_links = _clear_existing_links(parent_pairs)
         for parent_pn, parent_rev, child_pn, child_rev, qty in links:
             if not parent_pn or not child_pn:
                 skipped_links += 1
@@ -479,6 +498,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         "parts_updated": updated_parts,
         "links_created": created_links,
         "links_skipped": skipped_links,
+        "links_removed": removed_links,
         "parts_seeded": len(seeded_parts),
         "parts_seeded_list": [{"part_number": pn, "revision": rev} for pn, rev in sorted(seeded_parts)],
         "parts_with_props": len(part_props),
