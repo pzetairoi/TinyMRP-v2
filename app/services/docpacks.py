@@ -8,7 +8,7 @@ from flask import current_app, request
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
-from app.services.attrs import harvest_part_attrs, ALIASES
+from app.services.attrs import harvest_part_attrs, ALIASES, approved_value
 from app.services.processmeta import normalize_processes
 from app.services.filenames import build_output_name
 
@@ -296,7 +296,7 @@ def _excel_bom_bytes(
         'level','level qty'
     ]
     # Remove any attribute keys that collide with primary names (case-insensitive)
-    ignore = set([h.lower() for h in header_main] + ['oem_partnumber','oem partnumber','approvedby','approved_by'])
+    ignore = set([h.lower() for h in header_main] + ['oem_partnumber','oem partnumber','approvedby','approved_by','approved'])
     header_attrs = sorted([k for k in attr_keys if k and k.lower() not in ignore])
     header = header_main + header_attrs
     ws.append(header)
@@ -753,7 +753,7 @@ def _visual_list_pdf(
             approved = False
             if pdoc is not None:
                 a = (getattr(pdoc, 'attrs', {}) or {})
-                raw = (a.get('approvedby') or '')
+                raw = approved_value(a)
                 raw = str(raw).strip()
                 if raw:
                     approved = raw.lower() not in ('', 'n/a', 'na', 'none', 'null', '0', 'false')
