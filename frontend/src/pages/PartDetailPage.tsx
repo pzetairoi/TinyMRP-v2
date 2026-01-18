@@ -797,7 +797,7 @@ function bestUrl(f: FileRow): string {
   const massValue = (part?.attrs?.mass || part?.attrs?.Weight || "") as string
 
   const approvedInfo = useMemo(() => {
-    const raw = part?.attrs?.approvedby
+    const raw = part?.attrs?.approvedby ?? part?.attrs?.approved ?? part?.attrs?.approved_by
     if (raw === undefined || raw === null) return { approved: false, label: "" }
     if (typeof raw === "boolean") return { approved: raw, label: "" }
     const text = String(raw).trim()
@@ -821,7 +821,7 @@ function bestUrl(f: FileRow): string {
 
   const approverName = useMemo(() => {
     const a = part?.attrs || {}
-    return a.approvedby || a.approved_by || a.checkedby || ""
+    return a.approvedby || a.approved || a.approved_by || a.checkedby || ""
   }, [part])
 
   const missingCritical = useMemo(() => {

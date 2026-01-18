@@ -15,7 +15,7 @@ from app.models.customer import Customer
 from app.models.supplier import Supplier
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
-from app.services.attrs import harvest_part_attrs
+from app.services.attrs import harvest_part_attrs, approved_value
 from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
@@ -295,7 +295,7 @@ def _is_blankish(value: object, *, allow_na: bool = False) -> bool:
     return text in _EMPTY_VALUES
 
 def _is_approved(attrs: dict) -> bool:
-    raw = attrs.get("approvedby")
+    raw = approved_value(attrs)
     if raw is None:
         return False
     if isinstance(raw, bool):

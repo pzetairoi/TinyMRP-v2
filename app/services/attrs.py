@@ -23,7 +23,8 @@ REQUIRED_KEYS: Iterable[str] = (
 ALIASES: Dict[str, str] = {
     # common variants / capitalizations
     "approvedby": "approvedby",
-    "approvedby": "approved",
+    "approved": "approvedby",
+    "approved_by": "approvedby",
     "approveddate": "approveddate",
     "approvedby_": "approvedby",
     "approveddate_": "approveddate",
@@ -86,6 +87,38 @@ ALIASES: Dict[str, str] = {
     "weight": "mass",
 }
 
+_APPROVAL_EMPTY = {"", "n/a", "na", "none", "null", "0", "false"}
+
+def _is_blankish_approval(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return not value
+    text = str(value).strip().lower()
+    return text in _APPROVAL_EMPTY
+
+def approved_value(attrs: Dict[str, Any]) -> Any:
+    if not isinstance(attrs, dict):
+        return None
+    for key in ("approvedby", "approved_by", "approved"):
+        if key in attrs and not _is_blankish_approval(attrs.get(key)):
+            return attrs.get(key)
+    for k, v in attrs.items():
+        kl = (str(k) if k is not None else "").strip().lower()
+        if kl in ("approvedby", "approved_by", "approved") and not _is_blankish_approval(v):
+            return v
+    return None
+
+def _normalize_approved_fields(attrs: Dict[str, Any]) -> None:
+    if not isinstance(attrs, dict):
+        return
+    val = approved_value(attrs)
+    if val is None:
+        return
+    attrs["approvedby"] = val
+    attrs["approved_by"] = val
+    attrs["approved"] = val
+
 def _to_list(v) -> List[str]:
     if v is None:
         return []
@@ -133,6 +166,7 @@ def process_attributes(raw_attrs: Dict | None) -> Tuple[Dict, List[str]]:
     - Leaves legacy attrs['process'] intact if present; do NOT overwrite it.
     """
     attrs = dict(raw_attrs or {})
+    _normalize_approved_fields(attrs)
     processes = normalize_processes_from_attrs(attrs)
 
     # Mirror the list into attrs for the UI "All attributes" panel
@@ -159,6 +193,7 @@ def _aliasize(raw: Dict[str, Any]) -> Dict[str, Any]:
 def normalize_props(raw: Dict[str, Any] | None) -> Dict[str, Any]:
     """Return a fresh dict with canonicalized keys, processes list, and REQUIRED_KEYS present."""
     aliased = _aliasize(raw or {})
+    _normalize_approved_fields(aliased)
 
     # Build processes list from explicit list or process/process2/process3
     processes_list = []
