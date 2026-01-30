@@ -39,7 +39,7 @@ export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit 
 
 function FallbackImg({ urls, fit }:{ urls:string[]; fit?: boolean }) {
   const [idx, setIdx] = useState(0)
-  const fallback = "/static/images/logo.png"
+  const fallback = "/branding/logo"
   const src = urls.length && idx < urls.length ? urls[idx] : fallback
   const baseStyle = fit
     ? { height:'100%', width:'100%', objectFit:'contain', display:'block', background:'white' }

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import io, os, tempfile, zipfile
+import io, os, re, tempfile, zipfile
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple, Set
@@ -12,6 +12,8 @@ from app.services.attrs import harvest_part_attrs, ALIASES, approved_value
 from app.services.processmeta import normalize_processes
 from app.services.filenames import build_output_name
 from app.services.part_norm import clean_rev as _clean_rev, clean_rev_or_none as _rev_or_none
+from app.services.app_settings import format_display_ts, get_display_dt, resolve_brand_logo_path
+from app.services.insights import classify_part
 
 
 @dataclass
@@ -27,6 +29,7 @@ class DocPackOptions:
     want_excel_bom: bool = False
     want_selected_files: bool = True
     want_pdf_binder: bool = False
+    want_index_pdf: bool = False
     want_visual_list: bool = False
     want_cover_page: bool = False
     want_whereused_report: bool = False
@@ -39,6 +42,7 @@ class DocPackOptions:
     binder_add_hardware_summary: bool = True
     binder_add_whereused: bool = False
     binder_page_numbers: bool = True
+    binder_include_flat_patterns: bool = False
     # binder stamps
     stamp_quote: bool = False
     stamp_confidential: bool = False
@@ -46,6 +50,7 @@ class DocPackOptions:
     stamp_wip: bool = False
     stamp_inprogress: bool = False
     output_name: Optional[str] = None
+    build_ts: Optional[datetime] = None
 
 
 def _norm_rev(rev: Optional[str]) -> str:
@@ -176,6 +181,56 @@ def _collect_files(pn_rev_qty: Iterable[Tuple[str,str,float]], file_types: Optio
             q = q.filter(ext_group__in=list(groups))
         out.extend(list(q))
     return out
+
+
+_FLAT_PATTERN_RE = re.compile(r"(?:^|[^a-z0-9])(flatpattern|flat[-_ ]pattern|fp)(?:[^a-z0-9]|$)", re.IGNORECASE)
+
+
+def _is_flat_pattern_name(name: str) -> bool:
+    base = os.path.splitext(os.path.basename(name or ""))[0].lower()
+    if not base:
+        return False
+    if "flatpattern" in base or "flat-pattern" in base or "flat_pattern" in base or "flat pattern" in base:
+        return True
+    return bool(_FLAT_PATTERN_RE.search(base))
+
+
+def _is_flat_pattern_file(pf: PartFile) -> bool:
+    name = pf.rel_path or pf.path or ""
+    return _is_flat_pattern_name(name)
+
+
+def _pdf_items_for_pairs(
+    pairs: Iterable[Tuple[str, str]],
+    *,
+    include_datasheets: bool,
+    include_flat_patterns: bool,
+) -> Tuple[List[Dict[str, object]], List[str]]:
+    root_dir = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
+    items: List[Dict[str, object]] = []
+    paths: List[str] = []
+    for pn, rev in pairs:
+        q = PartFile.objects(part_number__iexact=pn)
+        if rev is not None:
+            q = q.filter(revision__iexact=(rev or ""))
+        files = [f for f in q.filter(ext__iexact="pdf")]
+        files.sort(key=lambda f: os.path.basename(f.rel_path or f.path or "").lower())
+        for f in files:
+            if (getattr(f, "ext_group", "") or "").lower() == "datasheet" and not include_datasheets:
+                continue
+            if not include_flat_patterns and _is_flat_pattern_file(f):
+                continue
+            rp = f.rel_path.replace("\\", "/") if f.rel_path else os.path.basename(f.path)
+            abs_path = f.path if os.path.isabs(f.path) else os.path.join(root_dir, rp.replace("/", os.sep))
+            if os.path.isfile(abs_path):
+                paths.append(abs_path)
+                items.append({
+                    "pn": pn,
+                    "rev": _norm_rev(rev),
+                    "path": abs_path,
+                    "ext_group": (getattr(f, "ext_group", "") or "").lower(),
+                })
+    return items, paths
 
 
 def _bom_occurrences(
@@ -535,9 +590,38 @@ def _process_color_map() -> Dict[str, Tuple[float,float,float]]:
     return out
 
 
+_BRAND_LOGO_NAMES = {
+    "logo.svg",
+    "logo.png",
+    "tinylogo.svg",
+    "tinylogo.png",
+    "tinyfooter.svg",
+    "tinyfooter.png",
+}
+
+
+def _branding_logo_paths() -> Tuple[Optional[str], Optional[str]]:
+    path = resolve_brand_logo_path()
+    if not path:
+        return (None, None)
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".svg":
+        return (path, None)
+    if ext == ".png":
+        return (None, path)
+    return (None, None)
+
+
 def _static_image_path(*names: str) -> Optional[str]:
+    brand_svg, brand_png = _branding_logo_paths()
     base = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static', 'images'))
     for n in names:
+        nl = (n or "").lower()
+        if nl in _BRAND_LOGO_NAMES:
+            if nl.endswith(".svg") and brand_svg:
+                return brand_svg
+            if nl.endswith(".png") and brand_png:
+                return brand_png
         p = os.path.join(base, n)
         if os.path.isfile(p):
             return p
@@ -545,6 +629,26 @@ def _static_image_path(*names: str) -> Optional[str]:
 
 
 def _draw_svg_or_png(c, x, y, w, h, svg_name: str, png_fallback: str):
+    brand_svg, brand_png = _branding_logo_paths()
+    if brand_svg:
+        try:
+            from svglib.svglib import svg2rlg
+            from reportlab.graphics import renderPDF
+            drawing = svg2rlg(brand_svg)
+            sx = w / float(drawing.width or 1)
+            sy = h / float(drawing.height or 1)
+            s = min(sx, sy)
+            c.saveState(); c.translate(x, y); c.scale(s, s)
+            renderPDF.draw(drawing, c, 0, 0)
+            c.restoreState(); return
+        except Exception:
+            pass
+    if brand_png:
+        try:
+            c.drawImage(brand_png, x, y, width=w, height=h, preserveAspectRatio=True, anchor='sw', mask='auto')
+            return
+        except Exception:
+            pass
     svg_path = _static_image_path(svg_name)
     if svg_path:
         try:
@@ -665,11 +769,7 @@ def _visual_list_pdf(
         if resolved_root_desc:
             c.setFont("Helvetica", 11)
             c.drawCentredString(W/2, H - margin - 1*mm, _clip_line(resolved_root_desc[:200], "Helvetica", 11, W - 2*margin))
-        ts = build_ts or datetime.now()
-        try:
-            stamp = ts.strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            stamp = ""
+        stamp = format_display_ts(build_ts)
         if stamp:
             c.setFont("Helvetica", 9.5)
             c.setFillGray(0.45)
@@ -957,32 +1057,36 @@ def _is_hardware_processes(processes: Iterable[str], alias_index: Dict[str, str]
     return False
 
 
+def _category_override_is_non_hardware(pdoc: Part, attrs: Dict[str, object]) -> bool:
+    cat = str(getattr(pdoc, "category", "") or attrs.get("category") or "").strip().lower()
+    return bool(cat and "hardware" not in cat)
+
+
 def _is_hardware_part(pn: str, rev: str) -> bool:
     pdoc = _part_by(pn, rev)
     if not pdoc:
         return False
-    procs = _part_processes(pdoc)
-    if not procs:
+    attrs = harvest_part_attrs(pdoc)
+    if _category_override_is_non_hardware(pdoc, attrs):
         return False
     meta = current_app.config.get("PROCESS_META", {}) or {}
-    alias_index = meta.get("_alias_index", {}) or {}
-    return _is_hardware_processes(procs, alias_index)
+    classification = classify_part(attrs, list(pdoc.processes or []), meta, category=getattr(pdoc, "category", ""))
+    return classification == "hardware"
 
 
 def _hardware_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List[Dict[str, object]]:
-    meta = current_app.config.get("PROCESS_META", {}) or {}
-    alias_index = meta.get("_alias_index", {}) or {}
     rows: Dict[Tuple[str, str, str, str, str], float] = {}
     for pn, rev, qty in pn_rev_qty:
         pdoc = _part_by(pn, rev)
         if not pdoc:
             continue
-        procs = _part_processes(pdoc)
-        if not procs:
-            continue
-        if not _is_hardware_processes(procs, alias_index):
-            continue
         attrs = harvest_part_attrs(pdoc)
+        if _category_override_is_non_hardware(pdoc, attrs):
+            continue
+        meta = current_app.config.get("PROCESS_META", {}) or {}
+        classification = classify_part(attrs, list(pdoc.processes or []), meta, category=getattr(pdoc, "category", ""))
+        if classification != "hardware":
+            continue
         desc = _part_description(pdoc, attrs)
         material = attrs.get("material", "") or ""
         finish = attrs.get("finish", "") or ""
@@ -1072,11 +1176,7 @@ def _hardware_summary_pdf_with_empty(
         flowables.append(Paragraph(_xml_escape(root_line), styles["Heading4"]))
         if root_desc:
             flowables.append(Paragraph(_xml_escape(str(root_desc)), cell_style))
-        ts = build_ts or datetime.now()
-        try:
-            stamp = ts.strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            stamp = ""
+        stamp = format_display_ts(build_ts)
         if stamp:
             flowables.append(Paragraph(_xml_escape(f"Generated: {stamp}"), cell_style))
     flowables.append(Spacer(0, 6*mm))
@@ -1090,14 +1190,12 @@ def _hardware_summary_pdf_with_empty(
         Paragraph("Part Number", header_style),
         Paragraph("Description", header_style),
         Paragraph("Material", header_style),
-        Paragraph("Finish", header_style),
         Paragraph("Qty", header_style),
     ]]
     for idx, r in enumerate(rows, start=1):
         pn = str(r.get("partnumber") or "")
         desc = str(r.get("description") or "")
         material = str(r.get("material") or "")
-        finish = str(r.get("finish") or "")
         qty = r.get("qty") or 0
         try:
             qty_s = f"{float(qty):g}"
@@ -1108,12 +1206,11 @@ def _hardware_summary_pdf_with_empty(
             Paragraph(_xml_escape(pn), cell_style),
             Paragraph(_xml_escape(desc), cell_style),
             Paragraph(_xml_escape(material), cell_style),
-            Paragraph(_xml_escape(finish), cell_style),
             Paragraph(_xml_escape(qty_s), qty_style),
         ])
 
     usable_w = doc.width
-    col_weights = [0.05, 0.17, 0.42, 0.16, 0.14, 0.06]
+    col_weights = [0.06, 0.2, 0.5, 0.16, 0.08]
     col_widths = [usable_w * w for w in col_weights]
     table = Table(table_data, colWidths=col_widths, repeatRows=1)
     style = TableStyle([
@@ -1332,7 +1429,12 @@ def _whereused_rows(root_pn: str, root_rev: Optional[str]) -> List[Dict[str, obj
     return sorted(rows.values(), key=lambda r: (r.get("parent_pn") or "", r.get("parent_rev") or ""))
 
 
-def _whereused_report_pdf(rows: List[Dict[str, object]], root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
+def _whereused_report_pdf(
+    rows: List[Dict[str, object]],
+    root_pn: str,
+    root_rev: Optional[str],
+    build_ts: Optional[datetime] = None,
+) -> Optional[bytes]:
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
@@ -1350,10 +1452,7 @@ def _whereused_report_pdf(rows: List[Dict[str, object]], root_pn: str, root_rev:
     flowables.append(Paragraph("Where Used", styles["Heading2"]))
     flowables.append(Spacer(0, 4*mm))
 
-    try:
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        ts = ""
+    ts = format_display_ts(build_ts)
     if root_pn:
         rev_s = _clean_rev(root_rev) if root_rev is not None else ""
         flowables.append(Paragraph(f"Part: {root_pn}    Rev: {rev_s}", styles["Normal"]))
@@ -1427,7 +1526,7 @@ def _whereused_report_pdf(rows: List[Dict[str, object]], root_pn: str, root_rev:
     return buf.getvalue()
 
 
-def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
+def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[datetime] = None) -> Optional[bytes]:
     """Generate a minimal cover page with PN/REV, description, logo, and footer fields."""
     try:
         from reportlab.pdfgen import canvas
@@ -1474,10 +1573,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str]) -> Optional[bytes]:
     except Exception:
         related_file = ""
 
-    try:
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        ts = ""
+    ts = format_display_ts(build_ts)
 
     W, H = A4
     margin = 20 * mm
@@ -1724,10 +1820,151 @@ def _merge_pdfs(paths: List[str]) -> Tuple[bytes, List[int]]:
     return (buf.getvalue(), starts)
 
 
+def _index_label_suffix(path: str, ext_group: str, seq: int) -> str:
+    if (ext_group or "").lower() == "datasheet":
+        return "datasheet"
+    base = os.path.splitext(os.path.basename(path or ""))[0].lower()
+    if "datasheet" in base:
+        return "datasheet"
+    if "drawing" in base or re.search(r"(?:^|[^a-z0-9])(?:dwg|drw)(?:[^a-z0-9]|$)", base):
+        return "drawing"
+    if "revision" in base or re.search(r"(?:^|[^a-z0-9])rev(?:[^a-z0-9]|$)", base):
+        return "rev"
+    return f"pdf {seq}"
+
+
+def _index_label_for_item(
+    item: Dict[str, object],
+    desc_cache: Dict[Tuple[str, str], str],
+    multi_by_pn: Dict[str, int],
+    seq_by_pn: Dict[str, int],
+) -> str:
+    pn = str(item.get("pn") or "")
+    rev = str(item.get("rev") or "")
+    key = (pn, _norm_rev(rev))
+    if key not in desc_cache:
+        pdoc = _part_by(pn, _norm_rev(rev))
+        desc_cache[key] = _part_description(pdoc) if pdoc else ""
+    desc = desc_cache.get(key) or ""
+    label = pn
+    if desc:
+        label = f"{pn} - {desc}"
+    if multi_by_pn.get(pn, 0) > 1:
+        seq_by_pn[pn] = seq_by_pn.get(pn, 0) + 1
+        suffix = _index_label_suffix(str(item.get("path") or ""), str(item.get("ext_group") or ""), seq_by_pn[pn])
+        if suffix:
+            label = f"{label} ({suffix})" if label else suffix
+    return label
+
+
+def _index_pdf_standalone(
+    pdf_items: List[Dict[str, object]],
+    root_pn: Optional[str],
+    root_rev: Optional[str],
+    root_desc: Optional[str],
+    *,
+    build_ts: Optional[datetime] = None,
+) -> Optional[bytes]:
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+    except Exception:
+        return None
+
+    desc_cache: Dict[Tuple[str, str], str] = {}
+    multi_by_pn: Dict[str, int] = {}
+    for item in pdf_items:
+        pn = str(item.get("pn") or "")
+        multi_by_pn[pn] = multi_by_pn.get(pn, 0) + 1
+
+    seq_by_pn: Dict[str, int] = {}
+    labels = [
+        _index_label_for_item(item, desc_cache, multi_by_pn, seq_by_pn)
+        for item in pdf_items
+    ]
+
+    def _clip_line(text: str, font: str, size: float, max_w: float) -> str:
+        text = text or ""
+        if not text:
+            return ""
+        if stringWidth(text, font, size) <= max_w:
+            return text
+        suffix = "..."
+        max_w = max(0.0, max_w - stringWidth(suffix, font, size))
+        out = text
+        while out and stringWidth(out, font, size) > max_w:
+            out = out[:-1]
+        return out.rstrip() + (suffix if out else "")
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    left_x = 20 * mm
+    right_x = W - 20 * mm
+    y = H - 20 * mm
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(left_x, y, "Index")
+    y -= 8 * mm
+
+    c.setFont("Helvetica", 10)
+    stamp = format_display_ts(build_ts)
+    if stamp:
+        c.drawString(left_x, y, f"Generated: {stamp}")
+        y -= 6 * mm
+    if root_pn:
+        root_rev_clean = _clean_rev(root_rev) if root_rev is not None else ""
+        c.drawString(left_x, y, f"Part: {root_pn}    Rev: {root_rev_clean}")
+        y -= 6 * mm
+    if root_desc:
+        avail_w = right_x - left_x
+        words = str(root_desc).split()
+        cur = ""
+        while words and y > (H / 2):
+            t = (cur + " " + words[0]).strip()
+            if stringWidth(t, "Helvetica", 10) <= avail_w:
+                cur = t
+                words.pop(0)
+            else:
+                if cur:
+                    c.drawString(left_x, y, f"Description: {cur}")
+                    y -= 6 * mm
+                    cur = ""
+                else:
+                    c.drawString(left_x, y, f"Description: {t[:60]}")
+                    y -= 6 * mm
+                    words.pop(0)
+                    break
+        if cur and y > (H / 2):
+            c.drawString(left_x, y, f"Description: {cur}")
+            y -= 6 * mm
+    y -= 2 * mm
+
+    if not labels:
+        c.drawString(left_x, y, "No PDFs found.")
+        c.save()
+        return buf.getvalue()
+
+    c.setFont("Helvetica", 10)
+    max_w = right_x - left_x
+    for label in labels:
+        if y < 20 * mm:
+            c.showPage()
+            y = H - 20 * mm
+            c.setFont("Helvetica", 10)
+        c.drawString(left_x, y, _clip_line(label, "Helvetica", 10, max_w))
+        y -= 6 * mm
+
+    c.save()
+    return buf.getvalue()
+
+
 def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     """Return (filename, bytes, mime). Currently returns a ZIP by default, unless only a single PDF binder is requested.
     """
-    build_ts = datetime.now()
+    build_ts = get_display_dt(getattr(opts, "build_ts", None))
     base_stub = (opts.output_name or "").strip()
     if not base_stub:
         base_stub = (opts.root_pn or "docpack").strip()
@@ -1837,6 +2074,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         output_count += 1
     if opts.want_excel_bom:
         output_count += 1
+    if opts.want_index_pdf:
+        output_count += 1
     if opts.want_visual_list:
         output_count += 1
     if opts.want_cover_page:
@@ -1850,9 +2089,33 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     if opts.want_pdf_binder:
         output_count += 1
     want_zip = bool(opts.want_selected_files) or output_count != 1
+    # Precompute PDF body items for binder/index
+    pairs: List[Tuple[str, str]] = []
+    pdf_items: List[Dict[str, object]] = []
+    pdf_paths: List[str] = []
+    if opts.want_pdf_binder or opts.want_index_pdf:
+        uniq_children: Dict[Tuple[str, str], None] = {}
+        for pn, rev, _ in filtered_flat:
+            key = (pn, _norm_rev(rev))
+            uniq_children[key] = None
+        root_key = (opts.root_pn, root_rev_resolved)
+        if root_key in uniq_children:
+            uniq_children.pop(root_key, None)
+        ordered_children = sorted(list(uniq_children.keys()), key=lambda t: (t[0] or "", t[1] or ""))
+        pairs = [root_key] + ordered_children
+        try:
+            pdf_items, pdf_paths = _pdf_items_for_pairs(
+                pairs,
+                include_datasheets=bool(getattr(opts, "binder_add_datasheets", False)),
+                include_flat_patterns=bool(getattr(opts, "binder_include_flat_patterns", False)),
+            )
+        except Exception:
+            pass
     # 4) Build payloads (ZIP container)
     zip_buf = io.BytesIO()
-    z: Optional[zipfile.ZipFile] = zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED)
+    z: Optional[zipfile.ZipFile] = None
+    if want_zip:
+        z = zipfile.ZipFile(zip_buf, mode="w", compression=zipfile.ZIP_DEFLATED)
 
     # Excel BOM
     if opts.want_excel_bom:
@@ -1952,6 +2215,23 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         else:
             return (hw_name, hardware_pdf, "application/pdf")
 
+    # Index PDF (standalone)
+    if opts.want_index_pdf:
+        idx_pdf = _index_pdf_standalone(
+            pdf_items,
+            opts.root_pn,
+            root_rev_resolved,
+            root_desc,
+            build_ts=build_ts,
+        )
+        if not idx_pdf:
+            raise RuntimeError("Failed to build Index PDF. Ensure reportlab is installed.")
+        idx_name = build_output_name(f"{base_stub}_Index", "pdf", max_len=96, include_time=False, now=build_ts)
+        if want_zip:
+            z.writestr(idx_name, idx_pdf)
+        else:
+            return (idx_name, idx_pdf, "application/pdf")
+
     # Visual list PDF (standalone)
     if opts.want_visual_list:
         # Standalone visual list includes root header/cell and omits hardware children
@@ -1976,7 +2256,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
     cover_pdf = None
     if opts.want_cover_page or (opts.want_pdf_binder and opts.binder_add_cover):
-        cover_pdf = _cover_page_pdf(opts.root_pn, opts.root_rev)
+        cover_pdf = _cover_page_pdf(opts.root_pn, opts.root_rev, build_ts=build_ts)
         if not cover_pdf:
             raise RuntimeError("Failed to build binder cover page. Ensure reportlab is installed.")
     if opts.want_cover_page and cover_pdf:
@@ -1989,7 +2269,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     whereused_pdf = None
     if opts.want_whereused_report or (opts.want_pdf_binder and opts.binder_add_whereused):
         where_rows = _whereused_rows(opts.root_pn, opts.root_rev)
-        whereused_pdf = _whereused_report_pdf(where_rows, opts.root_pn, opts.root_rev)
+        whereused_pdf = _whereused_report_pdf(where_rows, opts.root_pn, opts.root_rev, build_ts=build_ts)
         if not whereused_pdf:
             raise RuntimeError("Failed to build Where-Used report. Ensure reportlab is installed.")
     if opts.want_whereused_report and whereused_pdf:
@@ -2032,42 +2312,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     # PDF binder (with index & page numbers)
     if opts.want_pdf_binder:
         # Gather PDFs independent of UI file filter (always include PDFs if present)
-        # Build unique (pn,rev) list ordered: root first, then children by partnumber
-        uniq_children: Dict[Tuple[str,str], None] = {}
-        for pn, rev, _ in filtered_flat:
-            key = (pn, _norm_rev(rev))
-            uniq_children[key] = None
-        root_key = (opts.root_pn, root_rev_resolved)
-        if root_key in uniq_children:
-            uniq_children.pop(root_key, None)
-        ordered_children = sorted(list(uniq_children.keys()), key=lambda t: (t[0] or "", t[1] or ""))
-        pairs: List[Tuple[str,str]] = [root_key] + ordered_children
-
-        root_dir = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")
-        # Keep mapping to part for page numbers
-        pdf_items: List[Tuple[str,str,str]] = []  # (pn, rev, abs_path)
-        pdf_paths: List[str] = []
-        try:
-            for pn, rev in pairs:
-                q = PartFile.objects(part_number__iexact=pn)
-                if rev is not None:
-                    q = q.filter(revision__iexact=(rev or ""))
-                # pull all PDFs; later we may filter out datasheets if not requested
-                files = [f for f in q.filter(ext__iexact="pdf")]
-                # deterministic order of files per part
-                files.sort(key=lambda f: os.path.basename(f.rel_path or f.path or "").lower())
-                for f in files:
-                    if not getattr(f, 'rel_path', None) and not getattr(f, 'path', None):
-                        continue
-                    if (getattr(f, 'ext_group', '') or '').lower() == 'datasheet' and not bool(getattr(opts, 'binder_add_datasheets', False)):
-                        continue
-                    rp = f.rel_path.replace("\\","/") if f.rel_path else os.path.basename(f.path)
-                    abs_path = f.path if os.path.isabs(f.path) else os.path.join(root_dir, rp.replace("/", os.sep))
-                    if os.path.isfile(abs_path):
-                        pdf_paths.append(abs_path)
-                        pdf_items.append((pn, _norm_rev(rev), abs_path))
-        except Exception:
-            pass
+        # pdf_items/pdf_paths already prepared above to keep binder + index consistent.
 
         # Preface: cover, index, and optional sections
         preface_bytes: List[Tuple[str, bytes]] = []
@@ -2093,7 +2338,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         if opts.binder_add_whereused:
             if whereused_pdf is None:
                 where_rows = _whereused_rows(opts.root_pn, opts.root_rev)
-                whereused_pdf = _whereused_report_pdf(where_rows, opts.root_pn, opts.root_rev)
+                whereused_pdf = _whereused_report_pdf(where_rows, opts.root_pn, opts.root_rev, build_ts=build_ts)
                 if not whereused_pdf:
                     raise RuntimeError("Failed to build Where-Used report. Ensure reportlab is installed.")
             preface_bytes.append(("WhereUsed.pdf", whereused_pdf))
@@ -2120,23 +2365,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
             desc_cache: Dict[Tuple[str, str], str] = {}
             multi_by_pn: Dict[str, int] = {}
-            for pn, rev, _ in pdf_items:
+            for item in pdf_items:
+                pn = str(item.get("pn") or "")
                 multi_by_pn[pn] = multi_by_pn.get(pn, 0) + 1
-
-            def _entry_label(pn: str, rev: str, path: str) -> str:
-                key = (pn, _norm_rev(rev))
-                if key not in desc_cache:
-                    pdoc = _part_by(pn, _norm_rev(rev))
-                    desc_cache[key] = _part_description(pdoc) if pdoc else ""
-                desc = desc_cache.get(key) or ""
-                label = pn
-                if desc:
-                    label = f"{pn} - {desc}"
-                if multi_by_pn.get(pn, 0) > 1:
-                    base = os.path.splitext(os.path.basename(path))[0]
-                    if base and base.lower() not in label.lower():
-                        label = f"{label} ({base})" if label else base
-                return label
 
             # preface counts excluding index
             cover_pages = 0
@@ -2156,6 +2387,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
             # Helper to build the index PDF with an assumed index page count
             def _build_index(assumed_idx_pages: int) -> bytes:
+                seq_by_pn: Dict[str, int] = {}
                 idx_io = io.BytesIO()
                 c = canvas.Canvas(idx_io, pagesize=A4)
                 W, H = A4
@@ -2168,11 +2400,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 y -= 8*mm
                 # Binder metadata
                 c.setFont("Helvetica", 10)
-                try:
-                    import datetime as _dt
-                    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    now = ""
+                now = format_display_ts(build_ts)
                 pdoc = _part_by(opts.root_pn, root_rev_resolved)
                 desc = _part_description(pdoc) if pdoc else ''
                 c.drawString(left_x, y, f"Generated: {now}"); y -= 6*mm
@@ -2227,8 +2455,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     _entry("Hardware Summary", hw_start)
                 # Body entries: PN + Description
                 pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + where_pages + hardware_pages
-                for (pn, rev, pth), start in zip(pdf_items, body_starts):
-                    label = _entry_label(pn, rev, pth)
+                for item, start in zip(pdf_items, body_starts):
+                    label = _index_label_for_item(item, desc_cache, multi_by_pn, seq_by_pn)
                     _entry(label, pre_body_offset + start)
                 c.save()
                 return idx_io.getvalue()
@@ -2271,11 +2499,12 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 start_by_path = {p: s for p, s in zip(pdf_paths, body_starts)}
                 # For each part, pick earliest starting page among its PDFs
                 first_page: Dict[Tuple[str,str], int] = {}
-                for pn, rev, ap in pdf_items:
+                for item in pdf_items:
+                    ap = str(item.get("path") or "")
                     sp = start_by_path.get(ap)
                     if sp is None:
                         continue
-                    key = (pn, rev)
+                    key = (str(item.get("pn") or ""), str(item.get("rev") or ""))
                     val = pre_body_offset + int(sp)
                     if key not in first_page or val < first_page[key]:
                         first_page[key] = val

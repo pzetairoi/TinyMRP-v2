@@ -54,7 +54,7 @@ export default function PartsPage() {
       min_props:   { value: false, matchMode: FilterMatchMode.EQUALS },
     } as DataTableFilterMeta
   })
-  const fallbackLogo = "/static/images/logo.png"
+  const fallbackLogo = "/branding/logo"
 
   const keyFor = (p: Part) => `${p.part_number}::${p.revision || ''}`
 

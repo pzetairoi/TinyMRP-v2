@@ -51,10 +51,16 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `FORCE_HTTPS=true`: enforce HTTPS and set secure cookies.
   - `SECURITY_HEADERS_ENABLED=true`: send CSP + security headers.
   - `EXCEL_COMPILE_MAX_BYTES=10485760`: max upload size for Excel Compile.
+  - `APP_TIMEZONE`: default timezone (IANA name) for docpack timestamps if no admin override is set.
+  - `BRANDING_LOGO_MAX_BYTES`: max logo upload size in bytes (default 2097152).
 
 Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 
 ---
+
+## Admin Settings
+
+- `/admin/settings` lets admins upload a branding logo (PNG/SVG) and set the default timezone used in document packs.
 
 ## SolidWorks Add-in
 
