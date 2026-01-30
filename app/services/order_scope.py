@@ -18,6 +18,7 @@ from app.models.part import Part
 from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs
 from app.services.docpacks import _flatten_bom, _overlay_numbers_and_stamps
+from app.services.app_settings import resolve_brand_logo_path
 from app.services.part_norm import clean_rev
 
 def _clean_rev(value: object) -> str:
@@ -58,6 +59,9 @@ def _thumb_path(pn: str, rev: str) -> str | None:
 
 
 def _logo_path() -> str:
+    branded = resolve_brand_logo_path()
+    if branded:
+        return branded
     static_dir = current_app.static_folder or ""
     return os.path.join(static_dir, "images", "logo.png")
 

@@ -61,6 +61,18 @@
     <div class="col-md-4">
       <div class="card shadow-sm h-100">
         <div class="card-body">
+          <h5 class="card-title">App Settings</h5>
+          <p class="card-text text-muted">Branding logo and timezone.</p>
+          <a class="btn btn-primary" href="{{ url_for('admin.admin_settings') }}">Open Settings</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
           <h5 class="card-title">Jobs, Suppliers & Customers</h5>
           <p class="card-text text-muted">Manage access and master data (jobs, suppliers, customers, orders).</p>
           <a class="btn btn-primary me-2" href="/admin/jobs/">Jobs</a>

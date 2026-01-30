@@ -171,6 +171,7 @@ export default function PartDetailPage() {
   const [wantSelectedFiles, setWantSelectedFiles] = useState(false);
   const [wantExcel, setWantExcel] = useState(false);
   const [wantBinder, setWantBinder] = useState(false);
+  const [wantIndex, setWantIndex] = useState(false);
   const [wantVisual, setWantVisual] = useState(false);
   const [wantCoverPage, setWantCoverPage] = useState(false);
   const [wantWhereusedReport, setWantWhereusedReport] = useState(false);
@@ -182,6 +183,7 @@ export default function PartDetailPage() {
   const [binderAddDatasheets, setBinderAddDatasheets] = useState(false);
   const [binderAddHardwareSummary, setBinderAddHardwareSummary] = useState(true);
   const [binderPageNumbers, setBinderPageNumbers] = useState(true);
+  const [binderIncludeFlatPatterns, setBinderIncludeFlatPatterns] = useState(false);
   const [stampQuote, setStampQuote] = useState(false);
   const [stampConfidential, setStampConfidential] = useState(false);
   const [stampApproved, setStampApproved] = useState(false);
@@ -1268,7 +1270,8 @@ function bestUrl(f: FileRow): string {
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docExcel" checked={wantExcel} onChange={(e)=>setWantExcel(e.target.checked)} /><label className="form-check-label" htmlFor="docExcel">Excel BOM</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual index (standalone)</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docIndex" checked={wantIndex} onChange={(e)=>setWantIndex(e.target.checked)} /><label className="form-check-label" htmlFor="docIndex">Index (PDF)</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual summary (PDF)</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docHardware" checked={wantHardwareSummary} onChange={(e)=>setWantHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="docHardware">Hardware summary (standalone)</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docCover" checked={wantCoverPage} onChange={(e)=>setWantCoverPage(e.target.checked)} /><label className="form-check-label" htmlFor="docCover">Cover page (standalone)</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docWhere" checked={wantWhereusedReport} onChange={(e)=>setWantWhereusedReport(e.target.checked)} /><label className="form-check-label" htmlFor="docWhere">Where-used report (standalone)</label></div>
@@ -1295,6 +1298,7 @@ function bestUrl(f: FileRow): string {
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bWhere" checked={binderAddWhereused} onChange={(e)=>setBinderAddWhereused(e.target.checked)} /><label className="form-check-label" htmlFor="bWhere">Where-used report section</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bHard" checked={binderAddHardwareSummary} onChange={(e)=>setBinderAddHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="bHard">Hardware summary</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bData" checked={binderAddDatasheets} onChange={(e)=>setBinderAddDatasheets(e.target.checked)} /><label className="form-check-label" htmlFor="bData">Add datasheets</label></div>
+                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bFlat" checked={binderIncludeFlatPatterns} onChange={(e)=>setBinderIncludeFlatPatterns(e.target.checked)} /><label className="form-check-label" htmlFor="bFlat">Include flat pattern PDFs</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="bNums" checked={binderPageNumbers} onChange={(e)=>setBinderPageNumbers(e.target.checked)} /><label className="form-check-label" htmlFor="bNums">Add page numbers</label></div>
                         <div className="form-check mt-2"><input className="form-check-input" type="checkbox" id="sQuote" checked={stampQuote} onChange={(e)=>setStampQuote(e.target.checked)} /><label className="form-check-label" htmlFor="sQuote">For quotation stamp</label></div>
                         <div className="form-check"><input className="form-check-input" type="checkbox" id="sConf" checked={stampConfidential} onChange={(e)=>setStampConfidential(e.target.checked)} /><label className="form-check-label" htmlFor="sConf">Confidential stamp</label></div>
@@ -1385,6 +1389,7 @@ function bestUrl(f: FileRow): string {
                         selected_files: wantSelectedFiles,
                         excel_bom: wantExcel,
                         pdf_binder: wantBinder,
+                        index_pdf: wantIndex,
                         visual_list: wantVisual,
                         hardware_summary: wantHardwareSummary,
                         cover_page: wantCoverPage,
@@ -1397,6 +1402,7 @@ function bestUrl(f: FileRow): string {
                         binder_add_datasheets: binderAddDatasheets,
                         binder_add_hardware_summary: binderAddHardwareSummary,
                         binder_page_numbers: binderPageNumbers,
+                        binder_include_flat_patterns: binderIncludeFlatPatterns,
                         stamp_quote: stampQuote,
                         stamp_confidential: stampConfidential,
                         stamp_approved: stampApproved,
@@ -1434,7 +1440,8 @@ function bestUrl(f: FileRow): string {
                           const items: string[] = [];
                           if (wantSelectedFiles) items.push("selected files");
                           if (wantExcel) items.push("Excel BOM");
-                          if (wantVisual) items.push("Visual index");
+                          if (wantIndex) items.push("Index");
+                          if (wantVisual) items.push("Visual summary");
                           if (wantHardwareSummary) items.push("Hardware summary");
                           if (wantCoverPage) items.push("Cover page");
                           if (wantWhereusedReport) items.push("Where-used report");

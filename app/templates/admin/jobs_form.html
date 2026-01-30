@@ -247,7 +247,7 @@
                       {% if p.thumb %}
                         <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% else %}
-                        <img src="{{ url_for('static', filename='images/logo.png') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
+                        <img src="{{ url_for('branding.logo') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% endif %}
                     </td>
                     <td>
@@ -308,7 +308,7 @@
                       {% if p.thumb %}
                         <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% else %}
-                        <img src="{{ url_for('static', filename='images/logo.png') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
+                        <img src="{{ url_for('branding.logo') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% endif %}
                     </td>
                     <td>
@@ -402,7 +402,7 @@
                       {% if p.thumb %}
                         <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% else %}
-                        <img src="{{ url_for('static', filename='images/logo.png') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
+                        <img src="{{ url_for('branding.logo') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
                       {% endif %}
                     </td>
                     <td>
@@ -454,7 +454,7 @@
   let replaceIdx = null;
   const thumbCache = {};
   const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
-  const fallbackLogo = "{{ url_for('static', filename='images/logo.png') }}";
+  const fallbackLogo = "{{ url_for('branding.logo') }}";
 
   function selectAllOptions(id){
     const el = document.getElementById(id);

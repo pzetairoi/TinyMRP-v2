@@ -261,7 +261,7 @@
   let replaceIdx = null;
   const thumbCache = {};
   const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
-  const fallbackLogo = "{{ url_for('static', filename='images/logo.png') }}";
+  const fallbackLogo = "{{ url_for('branding.logo') }}";
   const isReadOnly = {{ 'true' if is_readonly else 'false' }};
 
   function parseOrderLines(txt){

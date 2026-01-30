@@ -109,6 +109,7 @@ def build():
         want_excel_bom=bool(gv("excel_bom") in (True, "true", "1", 1, "on")),
         want_selected_files=bool(gv("selected_files") in (True, "true", "1", 1, "on")),
         want_pdf_binder=bool(gv("pdf_binder") in (True, "true", "1", 1, "on")),
+        want_index_pdf=bool(gv("index_pdf") in (True, "true", "1", 1, "on") or gv("index") in (True, "true", "1", 1, "on")),
         want_visual_list=bool(gv("visual_list") in (True, "true", "1", 1, "on")),
         want_hardware_summary=bool(
             gv("hardware_summary") in (True, "true", "1", 1, "on")
@@ -123,6 +124,7 @@ def build():
         binder_add_datasheets=bool(gv("binder_add_datasheets") in (True, "true", "1", 1, "on")),
         binder_add_hardware_summary=bool(gv("binder_add_hardware_summary") not in (False, None, "false", "0", 0)),
         binder_page_numbers=bool(gv("binder_page_numbers") not in (False, None, "false", "0", 0)),
+        binder_include_flat_patterns=bool(gv("binder_include_flat_patterns") in (True, "true", "1", 1, "on")),
         stamp_quote=bool(gv("stamp_quote") in (True, "true", "1", 1, "on")),
         stamp_confidential=bool(gv("stamp_confidential") in (True, "true", "1", 1, "on")),
         stamp_approved=bool(gv("stamp_approved") in (True, "true", "1", 1, "on")),

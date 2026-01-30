@@ -273,6 +273,9 @@ def create_app(config_object=None):
     # Register blueprints
     from .views.main import bp as main_bp
     app.register_blueprint(main_bp)
+
+    from .views.branding import bp as branding_bp
+    app.register_blueprint(branding_bp)
     
     from .views.admin import bp as admin_bp
     app.register_blueprint(admin_bp)

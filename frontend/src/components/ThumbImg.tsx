@@ -7,7 +7,7 @@ export default function ThumbImg({
   alt = "",
 }: { urls?: string[]; maxH?: number; maxW?: number; alt?: string }) {
   const [i, setI] = useState(0)
-  const fallback = "/static/images/logo.png"
+  const fallback = "/branding/logo"
   const src = urls.length && i < urls.length ? urls[i] : fallback
   const onErr = () => {
     if (urls.length && i < urls.length - 1) {

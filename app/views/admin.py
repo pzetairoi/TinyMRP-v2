@@ -1,6 +1,7 @@
 # app/views/admin.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask import abort
+from datetime import datetime
 from mongoengine.errors import DoesNotExist, ValidationError
 from flask_security import roles_required, current_user
 from flask_security.utils import hash_password
@@ -11,6 +12,9 @@ from ..models.supplier import Supplier
 from ..models.customer import Customer
 from ..models.api_token import ApiToken
 from ..models.user_settings import UserSettings
+from app.services.app_settings import branding_root, get_app_settings
+from zoneinfo import ZoneInfo
+import os
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -29,6 +33,66 @@ def admin_metrics():
     except Exception:
         metrics = {}
     return render_template("admin/metrics.html", metrics=metrics)
+
+
+@bp.route("/settings", methods=["GET", "POST"])
+@roles_required("admin")
+def admin_settings():
+    settings = get_app_settings(create=True)
+    if request.method == "POST":
+        tz = (request.form.get("timezone") or "").strip()
+        if tz:
+            try:
+                ZoneInfo(tz)
+            except Exception:
+                flash("Invalid timezone. Use a valid IANA name like Australia/Melbourne.", "error")
+                return redirect(url_for("admin.admin_settings"))
+        settings.timezone = tz
+
+        remove_logo = bool(request.form.get("remove_logo") in ("on", "true", "1", True))
+        upload = request.files.get("brand_logo")
+        if upload and upload.filename:
+            raw = upload.read() or b""
+            max_bytes = int(current_app.config.get("BRANDING_LOGO_MAX_BYTES", 2 * 1024 * 1024))
+            if len(raw) > max_bytes:
+                flash(f"Logo file too large (max {max_bytes} bytes).", "error")
+                return redirect(url_for("admin.admin_settings"))
+            ext = os.path.splitext(upload.filename)[1].lower()
+            if ext not in (".png", ".svg"):
+                flash("Logo must be a PNG or SVG file.", "error")
+                return redirect(url_for("admin.admin_settings"))
+            if ext == ".png" and not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                flash("Invalid PNG file.", "error")
+                return redirect(url_for("admin.admin_settings"))
+            if ext == ".svg" and b"<svg" not in raw[:2048].lower():
+                flash("Invalid SVG file.", "error")
+                return redirect(url_for("admin.admin_settings"))
+            brand_dir, base_root = branding_root()
+            os.makedirs(brand_dir, exist_ok=True)
+            target_name = f"logo{ext}"
+            abs_path = os.path.join(brand_dir, target_name)
+            with open(abs_path, "wb") as fh:
+                fh.write(raw)
+            try:
+                rel_path = os.path.relpath(abs_path, base_root)
+            except Exception:
+                rel_path = abs_path
+            settings.brand_logo_rel_path = rel_path
+            remove_logo = False
+
+        if remove_logo:
+            settings.brand_logo_rel_path = ""
+
+        settings.updated_at = datetime.utcnow()
+        settings.save()
+        try:
+            log_action("admin.settings.update", resource_type="settings", resource="app_settings")
+        except Exception:
+            pass
+        flash("Settings updated.", "success")
+        return redirect(url_for("admin.admin_settings"))
+
+    return render_template("admin/settings.html", settings=settings)
 
 @bp.route("/users")
 @roles_required("admin")
