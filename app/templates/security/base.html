@@ -116,7 +116,6 @@
                   <li><hr class="dropdown-divider"></li>
                   {% if current_user.has_role('admin') %}
                   <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Admin Dashboard</a></li>
-                  <li><a class="dropdown-item" href="/ui/admin/addin">Add-in Admin</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a></li>

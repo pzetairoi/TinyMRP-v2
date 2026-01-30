@@ -629,8 +629,13 @@ def _static_image_path(*names: str) -> Optional[str]:
 
 
 def _draw_svg_or_png(c, x, y, w, h, svg_name: str, png_fallback: str):
+    prefer_brand = False
+    for nm in (svg_name, png_fallback):
+        if (nm or "").lower() in _BRAND_LOGO_NAMES:
+            prefer_brand = True
+            break
     brand_svg, brand_png = _branding_logo_paths()
-    if brand_svg:
+    if prefer_brand and brand_svg:
         try:
             from svglib.svglib import svg2rlg
             from reportlab.graphics import renderPDF
@@ -643,7 +648,7 @@ def _draw_svg_or_png(c, x, y, w, h, svg_name: str, png_fallback: str):
             c.restoreState(); return
         except Exception:
             pass
-    if brand_png:
+    if prefer_brand and brand_png:
         try:
             c.drawImage(brand_png, x, y, width=w, height=h, preserveAspectRatio=True, anchor='sw', mask='auto')
             return
