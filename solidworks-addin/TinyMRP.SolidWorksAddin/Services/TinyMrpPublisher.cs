@@ -275,6 +275,35 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        public void ProcessUploadPack(PublishOptions options, Action<string> log)
+        {
+            PublishOptions effective = NormalizeOptions(options);
+            if (effective == null)
+            {
+                return;
+            }
+
+            try
+            {
+                ResetCancel();
+                HashSet<string> uploadPackBases;
+                string flatFile = TraverseModel(false, string.Empty, effective, log, null, null, out uploadPackBases);
+                CreateUploadPack(flatFile, uploadPackBases, effective, log);
+                System.Windows.Forms.MessageBox.Show("Upload pack created.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                System.Windows.Forms.MessageBox.Show("Upload pack failed: " + ex.Message, "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+            }
+        }
+
         public void NormalizeUnits(Action<string> log)
         {
             NormalizeUnits(log, null);
@@ -1178,7 +1207,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         private string TraverseModel(bool createFiles, string exportTag, PublishOptions options, Action<string> log,
             Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress, out HashSet<string> uploadPackBases)
         {
-            uploadPackBases = null;
+            uploadPackBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
             if (swModel == null)
             {
@@ -1276,10 +1305,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     outputFile = exportTag + "_FLATBOM.txt";
                 }
-
-                uploadPackBases = createFiles
-                    ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    : null;
 
                 UpdateProgress(flatBomProgress, 0, entries.Count);
                 WriteFlatBom(outputFile, entries, log, flatBomProgress, initialDocs, rootModel, rootTitle, uploadPackBases);
@@ -1397,8 +1422,14 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             deliverablesRoot = deliverablesRoot.TrimEnd('\\', '/');
 
-            string zipName = GetFileString(swModel, config.Name) + "_UPLOADPACK.zip";
+            string zipName = GetFileString(swModel, config.Name) + "_UPLOADPACK_" +
+                DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss") + ".zip";
             string zipPath = Path.Combine(deliverablesRoot, zipName);
+
+            HashSet<string> allowedGroups = BuildUploadPackGroups(options);
+            IEnumerable<AssociatedFileEntry> extras = options.UploadPackIncludeExtras
+                ? payload.Files
+                : null;
 
             UploadPackBuilder.Build(
                 zipPath,
@@ -1407,9 +1438,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                 treeBomPath,
                 pn,
                 rev,
-                payload.Files,
+                extras,
                 log,
-                uploadPackBases);
+                uploadPackBases,
+                allowedGroups);
 
             Log(log, "Upload pack created: " + zipPath);
         }
@@ -1421,7 +1453,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return new AssociatedFilesPayload();
             }
 
-            string raw = GetEvalProperty(model, string.Empty, AssociatedFilesPayload.PropertyName);
+            string raw = GetEvalProperty(model, configName, AssociatedFilesPayload.PropertyName);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                raw = GetEvalProperty(model, string.Empty, AssociatedFilesPayload.PropertyName);
+            }
             AssociatedFilesPayload payload = AssociatedFilesPayload.FromJson(raw);
             if (payload.Files == null)
             {
@@ -1443,6 +1479,51 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return flatBomPath.Substring(0, flatBomPath.Length - suffix.Length) + "_TREEBOM.txt";
             }
             return flatBomPath + "_TREEBOM.txt";
+        }
+
+        private HashSet<string> BuildUploadPackGroups(PublishOptions options)
+        {
+            var groups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (options == null)
+            {
+                return groups;
+            }
+
+            if (!options.UploadPackIncludeDeliverables)
+            {
+                return groups;
+            }
+
+            if (options.ExportPngModel || options.ExportPngDrawing)
+            {
+                groups.Add("png");
+            }
+            if (options.ExportPdf)
+            {
+                groups.Add("pdf");
+            }
+            if (options.ExportStep)
+            {
+                groups.Add("step");
+            }
+            if (options.ExportEdrawing || options.ExportEdrawingDrawing)
+            {
+                groups.Add("edr");
+            }
+            if (options.Export3mf)
+            {
+                groups.Add("3mf");
+            }
+            if (options.ExportPly)
+            {
+                groups.Add("ply");
+            }
+            if (options.ExportStl)
+            {
+                groups.Add("stl");
+            }
+
+            return groups;
         }
 
         private bool TryBuildTreeBom(ModelDoc2 rootModel, string treeBomPath, Action<string> log)

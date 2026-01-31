@@ -43,6 +43,11 @@ export default function UploadPackPage() {
   const [strictStructure, setStrictStructure] = useState(false);
 
   const items = useMemo(() => result?.items || [], [result]);
+  const rootPn = result?.import?.root || "";
+  const rootRev = result?.import?.root_revision || "";
+  const rootHref = rootPn
+    ? `/ui/part/${encodeURIComponent(rootPn)}?rev=${encodeURIComponent(rootRev)}`
+    : "";
 
   function onPickFile(files: FileList | null) {
     if (!files || !files.length) return;
@@ -198,6 +203,15 @@ extra/
                 ? ` Extra files: ${result.extra_files_written}.`
                 : ""}
             </div>
+            {rootPn ? (
+              <div className="small mb-2">
+                Top level:{" "}
+                <a href={rootHref} target="_blank" rel="noreferrer">
+                  {rootPn}
+                  {rootRev ? ` REV ${rootRev}` : ""}
+                </a>
+              </div>
+            ) : null}
             {result.warnings && result.warnings.length ? (
               <div className="alert alert-warning small">
                 <div className="fw-semibold mb-1">Warnings</div>

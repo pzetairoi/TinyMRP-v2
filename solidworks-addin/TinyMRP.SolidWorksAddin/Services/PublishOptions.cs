@@ -16,5 +16,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         public bool OverwriteFiles { get; set; }
         public bool TopLevelOnly { get; set; }
         public bool CreateUploadPack { get; set; }
+        public bool UploadPackIncludeDeliverables { get; set; }
+        public bool UploadPackIncludeExtras { get; set; }
     }
 }

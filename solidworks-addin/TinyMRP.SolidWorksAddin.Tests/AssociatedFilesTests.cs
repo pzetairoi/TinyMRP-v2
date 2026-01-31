@@ -66,6 +66,10 @@ namespace TinyMRP.SolidWorksAddin.Tests
             {
                 "PN-10_REV_"
             };
+            var allowedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "pdf"
+            };
 
             UploadPackBuilder.Build(
                 zipPath,
@@ -76,7 +80,8 @@ namespace TinyMRP.SolidWorksAddin.Tests
                 "",
                 extras,
                 null,
-                allowedBases);
+                allowedBases,
+                allowedGroups);
 
             using (var zip = ZipFile.OpenRead(zipPath))
             {
@@ -106,6 +111,10 @@ namespace TinyMRP.SolidWorksAddin.Tests
             {
                 "PN-11_REV_A"
             };
+            var allowedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "pdf"
+            };
 
             UploadPackBuilder.Build(
                 zipPath,
@@ -116,7 +125,8 @@ namespace TinyMRP.SolidWorksAddin.Tests
                 "A",
                 extras,
                 null,
-                allowedBases);
+                allowedBases,
+                allowedGroups);
 
             using (var zip = ZipFile.OpenRead(zipPath))
             {
