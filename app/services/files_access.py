@@ -13,7 +13,7 @@ _TOKEN_SALT = "tinymrp.files.v1"
 
 
 def _serializer() -> URLSafeSerializer:
-    secret = current_app.config.get("SECRET_KEY") or "change-me"
+    secret = current_app.config.get("SECRET_KEY") or current_app.config.get("SECURITY_PASSWORD_SALT") or ""
     return URLSafeSerializer(secret, salt=_TOKEN_SALT)
 
 

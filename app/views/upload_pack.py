@@ -76,6 +76,10 @@ def upload_pack():
     f = request.files.get("file")
     if not f or not f.filename:
         return jsonify({"error": "file required"}), 400
+    max_zip_mb = int(current_app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 0)
+    if max_zip_mb and request.content_length:
+        if request.content_length > max_zip_mb * 1024 * 1024:
+            return jsonify({"error": "file too large"}), 413
     filename = secure_filename(f.filename)
     dry_run = _parse_bool(request.form.get("dry_run") or request.args.get("dry_run"))
     strict = _parse_bool(request.form.get("strict_structure") or request.args.get("strict_structure"))

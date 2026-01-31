@@ -9,16 +9,7 @@ from flask_security import current_user
 
 from app.models.auth import User
 from app.services.api_tokens import verify_token, touch_last_used
-
-
-def _extract_token() -> str:
-    auth = request.headers.get("Authorization", "")
-    if auth.lower().startswith("bearer "):
-        return auth.split(" ", 1)[1].strip()
-    token = request.headers.get("Authentication-Token", "").strip()
-    if token:
-        return token
-    return request.headers.get("X-Auth-Token", "").strip()
+from app.services.security_mode import extract_token_value, is_api_request, is_strict_mode
 
 
 def _user_from_token(raw_token: str) -> Tuple[Optional[User], Optional[str]]:
@@ -33,7 +24,7 @@ def get_request_user() -> Optional[User]:
     user = getattr(g, "api_user", None)
     if user:
         return user
-    if getattr(current_user, "is_authenticated", False):
+    if getattr(current_user, "is_authenticated", False) and not (is_strict_mode() and is_api_request(request.path)):
         return current_user
     return None
 
@@ -41,7 +32,7 @@ def get_request_user() -> Optional[User]:
 def api_auth_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        token_value = _extract_token()
+        token_value = extract_token_value()
         if token_value:
             user, token_id = _user_from_token(token_value)
             if user:
@@ -49,7 +40,7 @@ def api_auth_required(fn):
                 g.api_token_id = token_id
                 return fn(*args, **kwargs)
 
-        if getattr(current_user, "is_authenticated", False):
+        if getattr(current_user, "is_authenticated", False) and not (is_strict_mode() and is_api_request(request.path)):
             return fn(*args, **kwargs)
 
         return jsonify({

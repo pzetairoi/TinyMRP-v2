@@ -8,7 +8,6 @@ import os
 from typing import Optional, Tuple
 
 from flask import current_app, has_app_context
-import os
 from mongoengine.errors import NotUniqueError
 
 from app.models.api_token import ApiToken
@@ -21,8 +20,8 @@ LAST_USED_MINUTES = 10
 
 def _pepper() -> str:
     if has_app_context():
-        return (current_app.config.get("SECRET_KEY") or current_app.config.get("SECURITY_PASSWORD_SALT") or "change-me").strip()
-    return (os.environ.get("SECRET_KEY") or os.environ.get("SECURITY_PASSWORD_SALT") or "change-me").strip()
+        return (current_app.config.get("SECRET_KEY") or current_app.config.get("SECURITY_PASSWORD_SALT") or "").strip()
+    return (os.environ.get("SECRET_KEY") or os.environ.get("SECURITY_PASSWORD_SALT") or "").strip()
 
 
 def _hash_token(raw_token: str) -> str:

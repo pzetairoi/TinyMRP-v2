@@ -1,4 +1,4 @@
-from flask import Flask, app, request
+from flask import Flask, app, request, g, jsonify
 from mongoengine import connect, get_connection
 from flask_security import Security, MongoEngineUserDatastore
 from .models.auth import User, Role
@@ -77,6 +77,13 @@ def create_app(config_object=None):
     except Exception:
         print("did not work loading env file(s), continuing without them")
         pass
+
+    # Security mode (compat by default)
+    security_mode = (os.getenv("TINYMRP_SECURITY_MODE") or app.config.get("TINYMRP_SECURITY_MODE") or "compat")
+    security_mode = str(security_mode).strip().lower()
+    if security_mode != "strict":
+        security_mode = "compat"
+    app.config["TINYMRP_SECURITY_MODE"] = security_mode
     
         
     from app.services.processmeta import load_process_meta
@@ -110,8 +117,7 @@ def create_app(config_object=None):
 
 
     # Load default config if not set
-    app.config.setdefault("SECRET_KEY", "change-me")
-    app.config.setdefault("SECURITY_PASSWORD_SALT", "change-me-too")
+    # (Secrets are resolved below to avoid shipping insecure defaults.)
     app.config.setdefault("SECURITY_PASSWORD_HASH", "argon2")
     app.config.setdefault("MONGO_URI", "mongodb://localhost:27017/tinymrp-v2")
     app.config.setdefault("SECURITY_REGISTERABLE", False)
@@ -135,6 +141,35 @@ def create_app(config_object=None):
         "EXTRA_FILES_ALLOWED",
         str(os.getenv("EXTRA_FILES_ALLOWED") or "true").strip().lower() in ("1", "true", "yes", "on"),
     )
+
+    if security_mode == "strict":
+        app.config["SESSION_COOKIE_SECURE"] = True
+        app.config["REMEMBER_COOKIE_SECURE"] = True
+        app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+        app.config["REMEMBER_COOKIE_SAMESITE"] = "Strict"
+
+    # CORS allowlist (comma-separated, optional)
+    app.config.setdefault("TINYMRP_ALLOWED_ORIGINS", os.getenv("TINYMRP_ALLOWED_ORIGINS") or "")
+
+    # Upload caps (Flask rejects larger requests before reading)
+    max_content_mb = os.getenv("TINYMRP_MAX_CONTENT_MB")
+    if max_content_mb:
+        try:
+            max_content_mb = int(max_content_mb)
+        except Exception:
+            max_content_mb = None
+    if not max_content_mb:
+        if security_mode == "strict":
+            max_content_mb = min(int(app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 200), 200)
+        else:
+            max_content_mb = int(app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 200)
+    app.config.setdefault("MAX_CONTENT_LENGTH", int(max_content_mb) * 1024 * 1024)
+
+    # Proxy size caps
+    if security_mode == "strict":
+        app.config.setdefault("FILES_PROXY_MAX_BYTES", int(os.getenv("FILES_PROXY_MAX_BYTES") or str(200 * 1024 * 1024)))
+    else:
+        app.config.setdefault("FILES_PROXY_MAX_BYTES", int(os.getenv("FILES_PROXY_MAX_BYTES") or str(2 * 1024 * 1024 * 1024)))
     
     app.config["TEMPLATES_AUTO_RELOAD"]=True # Enable auto-reload for templates in development
     
@@ -148,6 +183,7 @@ def create_app(config_object=None):
     files_local_root = (os.getenv("FILES_LOCAL_ROOT") or os.getenv("FILE_ROOT_LOCAL") or "").strip()
     files_url_prefix = (os.getenv("FILES_URL_PREFIX") or os.getenv("FILE_ROOT_HTTP")  or "").strip()
     files_upstream   = (os.getenv("FILES_UPSTREAM_BASE") or "").strip()
+    files_upstream_allowed = (os.getenv("FILES_UPSTREAM_ALLOWED_HOSTS") or "").strip()
     files_public     = (os.getenv("FILES_PUBLIC_URLS") or "").strip().lower()
     accel_prefix     = (os.getenv("FILES_ACCEL_REDIRECT_PREFIX") or "").strip()
     allow_legacy     = (os.getenv("FILES_ALLOW_LEGACY_TOKENS") or "").strip().lower()
@@ -156,6 +192,7 @@ def create_app(config_object=None):
     app.config["FILES_LOCAL_ROOT"]   = files_local_root
     app.config["FILES_URL_PREFIX"]   = files_url_prefix
     app.config["FILES_UPSTREAM_BASE"] = files_upstream
+    app.config["FILES_UPSTREAM_ALLOWED_HOSTS"] = files_upstream_allowed
     app.config["FILE_HASH_MAX_BYTES"] = int(os.getenv("FILE_HASH_MAX_BYTES") or "0")
     app.config["FILES_PUBLIC_URLS"] = files_public in ("1", "true", "yes", "on")
     app.config["FILES_ACCEL_REDIRECT_PREFIX"] = accel_prefix
@@ -177,24 +214,34 @@ def create_app(config_object=None):
 
 
     csrf.init_app(app)
-    
+
     # Then override from environment if set (non-empty)
-    for k in ("SECRET_KEY", "SECURITY_PASSWORD_SALT", "MONGO_URI"):
+    for k in ("MONGO_URI",):
         v = os.getenv(k)
         if v:  # only override if not empty
             app.config[k] = v
-            
-    # Final safety net for local dev
-    if not app.config.get("SECRET_KEY"):
-        app.config["SECRET_KEY"] = secrets.token_urlsafe(32)
-    if app.config.get("SECRET_KEY") in ("change-me", "changeme"):
-        print("Warning: SECRET_KEY uses a default value. Set SECRET_KEY in the environment.")
-    if app.config.get("SECURITY_PASSWORD_SALT") in ("change-me-too", "changeme"):
-        print("Warning: SECURITY_PASSWORD_SALT uses a default value. Set SECURITY_PASSWORD_SALT in the environment.")
-    # Keep env in sync for services that resolve secrets outside app context
-    if not os.getenv("SECRET_KEY") and app.config.get("SECRET_KEY"):
+
+    # Resolve secrets safely (avoid insecure defaults)
+    def _resolve_secret(name: str) -> str:
+        raw = (os.getenv(name) or app.config.get(name) or "").strip()
+        low = raw.lower()
+        if raw and low not in ("change-me", "changeme", "change-me-too"):
+            return raw
+        if security_mode == "strict":
+            raise RuntimeError(
+                f"{name} must be set to a strong value when TINYMRP_SECURITY_MODE=strict."
+            )
+        # Compat: warn and generate a temporary in-memory secret.
+        print(f"Warning: {name} missing or default. Using a temporary runtime value; set {name} in the environment.")
+        return secrets.token_urlsafe(32)
+
+    app.config["SECRET_KEY"] = _resolve_secret("SECRET_KEY")
+    app.config["SECURITY_PASSWORD_SALT"] = _resolve_secret("SECURITY_PASSWORD_SALT")
+
+    # Keep env in sync for services that resolve secrets outside app context (in-process only).
+    if not os.getenv("SECRET_KEY"):
         os.environ["SECRET_KEY"] = str(app.config.get("SECRET_KEY"))
-    if not os.getenv("SECURITY_PASSWORD_SALT") and app.config.get("SECURITY_PASSWORD_SALT"):
+    if not os.getenv("SECURITY_PASSWORD_SALT"):
         os.environ["SECURITY_PASSWORD_SALT"] = str(app.config.get("SECURITY_PASSWORD_SALT"))
 
     # Plain MongoEngine connect – capture the connection object
@@ -251,19 +298,97 @@ def create_app(config_object=None):
             if files_prefix:
                 img_src.append(files_prefix)
                 connect_src.append(files_prefix)
+            script_src = ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"]
+            style_src = ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"]
             csp = " ".join([
                 "default-src 'self';",
                 "base-uri 'self';",
                 "object-src 'none';",
                 "frame-ancestors 'none';",
-                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;",
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;",
+                f"script-src {' '.join(script_src)};",
+                f"style-src {' '.join(style_src)};",
                 f"img-src {' '.join(img_src)};",
                 "font-src 'self' data: https://cdn.jsdelivr.net;",
                 f"connect-src {' '.join(connect_src)};",
             ])
+            if security_mode == "strict":
+                csp = " ".join([csp, "form-action 'self';", "upgrade-insecure-requests;"])
             resp.headers.setdefault("Content-Security-Policy", csp)
             return resp
+
+    # CORS handling (dynamic allowlist; safe by default)
+    from app.services.security_mode import resolve_cors_origin, request_has_token, session_csrf_allowed, is_api_request, extract_token_value, is_strict_mode
+
+    @app.before_request
+    def _cors_preflight():
+        if request.method != "OPTIONS":
+            return None
+        if not request.headers.get("Origin"):
+            return None
+        origin, allow_credentials = resolve_cors_origin()
+        if not origin:
+            return ("", 403)
+        resp = app.make_response("", 204)
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Auth-Token, Authentication-Token, X-Requested-With, X-CSRFToken"
+        resp.headers["Access-Control-Max-Age"] = "600"
+        if allow_credentials:
+            resp.headers["Access-Control-Allow-Credentials"] = "true"
+        return resp
+
+    @app.after_request
+    def _cors_headers(resp):
+        origin, allow_credentials = resolve_cors_origin()
+        if origin:
+            resp.headers.setdefault("Access-Control-Allow-Origin", origin)
+            resp.headers.setdefault("Vary", "Origin")
+            resp.headers.setdefault("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type")
+            if allow_credentials:
+                resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        return resp
+
+    # Strict mode: /api requires a valid bearer token (no session fallback)
+    from app.services.api_tokens import verify_token, touch_last_used
+
+    @app.before_request
+    def _strict_api_token_guard():
+        if not is_strict_mode():
+            return None
+        if not is_api_request(request.path):
+            return None
+        token_value = extract_token_value()
+        if not token_value:
+            return jsonify({"ok": False, "error": "token_required"}), 401
+        token = verify_token(token_value)
+        if not token:
+            return jsonify({"ok": False, "error": "invalid_token"}), 401
+        g.api_user = token.user_id
+        g.api_token_id = str(token.id)
+        touch_last_used(token)
+        try:
+            security.login_manager._update_request_context_with_user(token.user_id)
+        except Exception:
+            pass
+        return None
+
+    # Session CSRF guard (origin/referer check for unsafe methods)
+    from flask_security import current_user
+
+    @app.before_request
+    def _session_csrf_guard():
+        if request.method in ("GET", "HEAD", "OPTIONS", "TRACE"):
+            return None
+        if request_has_token():
+            return None
+        if not getattr(current_user, "is_authenticated", False):
+            return None
+        if session_csrf_allowed():
+            return None
+        if is_api_request(request.path):
+            return jsonify({"ok": False, "error": "csrf_failed"}), 400
+        return render_template("csrf_error.html", reason="CSRF origin check failed"), 400
 
     try:
         from app.services.metrics import init_metrics

@@ -1,0 +1,10 @@
+title = "TinyMRP gitleaks config"
+
+[allowlist]
+paths = [
+  '''^docs/''',
+  '''^app/static/''',
+  '''^frontend/dist/''',
+  '''^frontend/node_modules/''',
+  '''^testfiles/''',
+]

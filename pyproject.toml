@@ -1,0 +1,42 @@
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+exclude = '''
+(
+  /(\.git|\.venv|venv|env|ENV|node_modules|dist|build|out|frontend/dist|frontend/node_modules)/
+  | /app/static/
+  | /OLD/
+  | /instance/
+)
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E9", "F63", "F7", "F82"]
+exclude = [
+  ".git",
+  ".venv",
+  "venv",
+  "env",
+  "ENV",
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "app/static",
+  "OLD",
+  "instance",
+  "frontend/dist",
+  "frontend/node_modules",
+]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = true
+exclude = "(app/static|frontend/dist|frontend/node_modules|OLD|instance)"
+
+[tool.bandit]
+exclude_dirs = ["tests", "frontend", "solidworks-addin", "app/static", "OLD", "instance"]
