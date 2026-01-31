@@ -18,6 +18,15 @@ def _make_zip(flat_txt: str, tree_txt: str) -> bytes:
     return buf.getvalue()
 
 
+def _make_zip_with_bom(flat_txt: str, tree_txt: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        flat_bytes = b"\xef\xbb\xbf" + flat_txt.encode("utf-8")
+        zf.writestr("TEST_FLATBOM.txt", flat_bytes)
+        zf.writestr("TEST_TREEBOM.txt", tree_txt)
+    return buf.getvalue()
+
+
 def test_import_bom_flags_hardware_from_folder(app):
     app.config["HARDWARE_FOLDERS"] = ["FASTENERS"]
     flat_rows = [
@@ -126,3 +135,23 @@ def test_import_bom_clears_existing_duplicates_sample(app):
         ]
         dups = [k for k, v in Counter(keys).items() if v > 1]
         assert not dups
+
+
+def test_import_bom_flatbom_utf8_bom_is_ok(app):
+    flat_rows = [
+        {"partnumber": "BOM-B1", "revision": "A", "description": "Bom Part"},
+    ]
+    flat_txt = "\n".join(repr(r) for r in flat_rows)
+    tree_txt = "\n".join(
+        [
+            "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+            "1\tBOM-B1\tA\t1",
+        ]
+    )
+    zip_bytes = _make_zip_with_bom(flat_txt, tree_txt)
+
+    with app.app_context():
+        import_bom_zip(zip_bytes, "test.zip", seed_tag="test")
+
+        part = Part.objects(part_number="BOM-B1", revision="A").first()
+        assert part is not None

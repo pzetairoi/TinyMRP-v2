@@ -3,6 +3,7 @@ import os
 import zipfile
 
 from app.models.auth import Role
+from app.models.part import Part
 from app.models.extra_file import PartExtraFile
 
 
@@ -12,7 +13,13 @@ def _login(client, user):
         sess["_fresh"] = True
 
 
-def _make_bom_zip(pn: str, rev: str, extra_entries: dict[str, bytes]) -> bytes:
+def _make_bom_zip(
+    pn: str,
+    rev: str,
+    extra_entries: dict[str, bytes],
+    *,
+    bom_with_utf8_bom: bool = False,
+) -> bytes:
     flat = {"partnumber": pn, "revision": rev, "description": "Test part"}
     flat_txt = "\n".join([repr(flat)])
     tree_txt = "\n".join(
@@ -23,11 +30,41 @@ def _make_bom_zip(pn: str, rev: str, extra_entries: dict[str, bytes]) -> bytes:
     )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("TEST_FLATBOM.txt", flat_txt)
+        if bom_with_utf8_bom:
+            flat_bytes = b"\xef\xbb\xbf" + flat_txt.encode("utf-8")
+            zf.writestr("TEST_FLATBOM.txt", flat_bytes)
+        else:
+            zf.writestr("TEST_FLATBOM.txt", flat_txt)
         zf.writestr("TEST_TREEBOM.txt", tree_txt)
         for name, data in extra_entries.items():
             zf.writestr(name, data)
     return buf.getvalue()
+
+
+def test_upload_pack_accepts_flatbom_with_bom(client, app, user, tmp_path):
+    role = Role(name="importer_bom", permissions=["import.bom", "items.view", "items.edit"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    with app.app_context():
+        app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+        app.config["EXTRA_FILES_ALLOWED"] = True
+
+    pn = "PN-BOM"
+    rev = "A"
+    zip_bytes = _make_bom_zip(pn, rev, {}, bom_with_utf8_bom=True)
+
+    resp = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(zip_bytes), "pack.zip")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+
+    part = Part.objects(part_number=pn, revision=rev).first()
+    assert part is not None
 
 
 def test_upload_pack_imports_extra_with_rev(client, app, user, tmp_path):
