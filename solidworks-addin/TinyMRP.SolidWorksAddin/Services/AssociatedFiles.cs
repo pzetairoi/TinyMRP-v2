@@ -9,6 +9,7 @@ namespace TinyMRP.SolidWorksAddin.Services
     {
         public string Path { get; set; }
         public string Label { get; set; }
+        public string Extension { get; set; }
     }
 
     internal sealed class AssociatedFilesPayload
@@ -24,8 +25,6 @@ namespace TinyMRP.SolidWorksAddin.Services
             var serializer = new JavaScriptSerializer();
             var data = new Dictionary<string, object>
             {
-                ["pn"] = PartNumber ?? string.Empty,
-                ["rev"] = Revision ?? string.Empty,
                 ["files"] = BuildFileList()
             };
             return serializer.Serialize(data);
@@ -125,10 +124,17 @@ namespace TinyMRP.SolidWorksAddin.Services
                     continue;
                 }
 
+                string ext = ReadString(dict, "ext");
+                if (string.IsNullOrWhiteSpace(ext))
+                {
+                    ext = ReadString(dict, "extension");
+                }
+
                 files.Add(new AssociatedFileEntry
                 {
                     Path = path,
-                    Label = ReadString(dict, "label")
+                    Label = ReadString(dict, "label"),
+                    Extension = ext
                 });
             }
 
@@ -153,10 +159,32 @@ namespace TinyMRP.SolidWorksAddin.Services
                 list.Add(new Dictionary<string, object>
                 {
                     ["path"] = entry.Path ?? string.Empty,
-                    ["label"] = entry.Label ?? string.Empty
+                    ["label"] = entry.Label ?? string.Empty,
+                    ["ext"] = BuildExtension(entry)
                 });
             }
             return list;
+        }
+
+        private static string BuildExtension(AssociatedFileEntry entry)
+        {
+            if (entry == null)
+            {
+                return string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.Extension))
+            {
+                return entry.Extension.TrimStart('.').ToLowerInvariant();
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.Path))
+            {
+                return string.Empty;
+            }
+
+            string ext = System.IO.Path.GetExtension(entry.Path) ?? string.Empty;
+            return ext.TrimStart('.').ToLowerInvariant();
         }
     }
 }

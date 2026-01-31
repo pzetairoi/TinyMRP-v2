@@ -16,8 +16,6 @@ namespace TinyMRP.SolidWorksAddin.Tests
         {
             var payload = new AssociatedFilesPayload
             {
-                PartNumber = "PN-10",
-                Revision = "",
                 Files = new List<AssociatedFileEntry>
                 {
                     new AssociatedFileEntry { Path = @"C:\temp\scan.e57", Label = "scan" }
@@ -27,7 +25,9 @@ namespace TinyMRP.SolidWorksAddin.Tests
             string json = payload.ToJson();
             var loaded = AssociatedFilesPayload.FromJson(json);
 
-            Assert.AreEqual("PN-10", loaded.PartNumber);
+            Assert.IsFalse(json.Contains("\"pn\""));
+            Assert.IsFalse(json.Contains("\"rev\""));
+            Assert.AreEqual("", loaded.PartNumber);
             Assert.AreEqual("", loaded.Revision);
             Assert.AreEqual(1, loaded.Files.Count);
             Assert.AreEqual(@"C:\temp\scan.e57", loaded.Files[0].Path);
@@ -37,17 +37,7 @@ namespace TinyMRP.SolidWorksAddin.Tests
         [TestMethod]
         public void AssociatedFilesPayload_ParsesWrappedJson()
         {
-            var payload = new AssociatedFilesPayload
-            {
-                PartNumber = "PN-20",
-                Revision = "B",
-                Files = new List<AssociatedFileEntry>
-                {
-                    new AssociatedFileEntry { Path = @"C:\temp\report.pdf", Label = "report" }
-                }
-            };
-
-            string json = payload.ToJson();
+            string json = "{\"pn\":\"PN-20\",\"rev\":\"B\",\"files\":[{\"path\":\"C:\\\\temp\\\\report.pdf\",\"label\":\"report\"}]}";
             var serializer = new JavaScriptSerializer();
             string wrapped = serializer.Serialize(json);
 
