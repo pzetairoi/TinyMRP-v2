@@ -22,6 +22,14 @@ namespace TinyMRP.SolidWorksAddin.Services
             public string ConfigurationName;
         }
 
+        private sealed class BatchEntry
+        {
+            public string ModelPath;
+            public string ModelTitle;
+            public string ConfigurationName;
+            public bool IsRoot;
+        }
+
         private struct DrawingReference
         {
             public ModelDoc2 Model;
@@ -1235,23 +1243,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 _swApp.SetUserPreferenceIntegerValue(
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, 16777215);
 
-                var entries = new List<ModelEntry>();
-                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                AddModelEntry(swModel, swConf.Name, entries, seen, false);
-
-                if (modelType == (int)swDocumentTypes_e.swDocASSEMBLY)
-                {
-                    AssemblyDoc assy = swModel as AssemblyDoc;
-                    if (assy != null)
-                    {
-                        assy.ResolveAllLightWeightComponents(true);
-                    }
-                    if (!options.TopLevelOnly)
-                    {
-                        Component2 root = swConf.GetRootComponent() as Component2;
-                        TraverseComponents(root, entries, seen);
-                    }
-                }
+                var entries = BuildBatchEntries(swModel, swConf, modelType, options.TopLevelOnly);
 
                 string outputFile;
                 if (string.IsNullOrWhiteSpace(exportTag))
@@ -1266,18 +1258,24 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
 
                 UpdateProgress(flatBomProgress, 0, entries.Count);
-                WriteFlatBom(outputFile, entries, log, flatBomProgress);
+                WriteFlatBom(outputFile, entries, log, flatBomProgress, initialDocs, rootModel, rootTitle);
                 ThrowIfCancelled();
 
                 if (createFiles)
                 {
                     UpdateProgress(deliverablesProgress, 0, entries.Count);
                     int processed = 0;
-                    foreach (ModelEntry entry in entries)
+                    foreach (BatchEntry entry in entries)
                     {
                         ThrowIfCancelled();
-                        ProcessDeliverables(entry, deliverablesFolder, options, log);
-                        CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                        bool openedHere;
+                        ModelDoc2 model = ResolveBatchModel(entry, rootModel, out openedHere);
+                        if (model != null)
+                        {
+                            ProcessDeliverables(model, entry.ConfigurationName, deliverablesFolder, options, log);
+                            CloseBatchModel(model, entry, initialDocs, rootModel, rootTitle, openedHere);
+                            CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                        }
                         processed++;
                         UpdateProgress(deliverablesProgress, processed, entries.Count);
                     }
@@ -1442,38 +1440,336 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private void WriteFlatBom(string outputFile, List<ModelEntry> entries, Action<string> log,
-            Action<int, int> progress)
+        private List<BatchEntry> BuildBatchEntries(ModelDoc2 rootModel, Configuration rootConfig, int modelType, bool topLevelOnly)
+        {
+            var entries = new List<BatchEntry>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            string rootConfigName = rootConfig != null ? rootConfig.Name : string.Empty;
+            AddBatchEntry(rootModel.GetPathName(), rootModel.GetTitle(), rootConfigName, true, entries, seen, false);
+
+            if (modelType == (int)swDocumentTypes_e.swDocASSEMBLY)
+            {
+                AssemblyDoc assy = rootModel as AssemblyDoc;
+                if (assy != null)
+                {
+                    assy.ResolveAllLightWeightComponents(true);
+                }
+                if (!topLevelOnly && rootConfig != null)
+                {
+                    Component2 root = rootConfig.GetRootComponent() as Component2;
+                    TraverseComponentRefs(root, entries, seen);
+                }
+            }
+
+            return entries;
+        }
+
+        private void AddBatchEntry(string path, string title, string configName, bool isRoot,
+            List<BatchEntry> entries, HashSet<string> seen, bool prepend)
+        {
+            ThrowIfCancelled();
+            string keyPath = !string.IsNullOrWhiteSpace(path) ? path : (title ?? string.Empty);
+            string key = keyPath + "|" + (configName ?? string.Empty);
+            if (!seen.Add(key))
+            {
+                return;
+            }
+
+            var entry = new BatchEntry
+            {
+                ModelPath = path ?? string.Empty,
+                ModelTitle = title ?? string.Empty,
+                ConfigurationName = configName ?? string.Empty,
+                IsRoot = isRoot
+            };
+
+            if (prepend)
+            {
+                entries.Insert(0, entry);
+            }
+            else
+            {
+                entries.Add(entry);
+            }
+        }
+
+        private void TraverseComponentRefs(Component2 parent, List<BatchEntry> entries, HashSet<string> seen)
+        {
+            if (parent == null)
+            {
+                return;
+            }
+
+            object[] children = parent.GetChildren() as object[];
+            if (children == null)
+            {
+                return;
+            }
+
+            foreach (object obj in children)
+            {
+                ThrowIfCancelled();
+                System.Windows.Forms.Application.DoEvents();
+                Component2 child = obj as Component2;
+                if (child == null)
+                {
+                    continue;
+                }
+
+                if (child.IsSuppressed() || child.ExcludeFromBOM)
+                {
+                    continue;
+                }
+
+                string confName = child.ReferencedConfiguration;
+                string path = string.Empty;
+                string title = string.Empty;
+                try
+                {
+                    path = child.GetPathName();
+                }
+                catch
+                {
+                    path = string.Empty;
+                }
+
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    ModelDoc2 childModel = child.GetModelDoc2() as ModelDoc2;
+                    if (childModel != null)
+                    {
+                        try
+                        {
+                            path = childModel.GetPathName();
+                            title = childModel.GetTitle();
+                        }
+                        catch
+                        {
+                            path = string.Empty;
+                        }
+                    }
+                }
+
+                AddBatchEntry(path, title, confName, false, entries, seen, true);
+                TraverseComponentRefs(child, entries, seen);
+            }
+        }
+
+        private ModelDoc2 ResolveBatchModel(BatchEntry entry, ModelDoc2 rootModel, out bool openedHere)
+        {
+            openedHere = false;
+            if (entry == null)
+            {
+                return null;
+            }
+            if (entry.IsRoot && rootModel != null)
+            {
+                TryShowConfiguration(rootModel, entry.ConfigurationName);
+                return rootModel;
+            }
+
+            ModelDoc2 openDoc = FindOpenDocument(entry.ModelPath, entry.ModelTitle);
+            if (openDoc != null)
+            {
+                TryShowConfiguration(openDoc, entry.ConfigurationName);
+                return openDoc;
+            }
+
+            if (!string.IsNullOrWhiteSpace(entry.ModelPath) && File.Exists(entry.ModelPath))
+            {
+                int errors = 0;
+                int warnings = 0;
+                int docType = DocumentTypeFromPath(entry.ModelPath);
+                ModelDoc2 opened = _swApp.OpenDoc6(entry.ModelPath, docType,
+                    (int)swOpenDocOptions_e.swOpenDocOptions_Silent, string.Empty, ref errors, ref warnings) as ModelDoc2;
+                if (opened != null)
+                {
+                    openedHere = true;
+                    TryShowConfiguration(opened, entry.ConfigurationName);
+                }
+                return opened;
+            }
+
+            return null;
+        }
+
+        private ModelDoc2 FindOpenDocument(string path, string title)
+        {
+            object docsObj = _swApp.GetDocuments();
+            object[] docs = docsObj as object[];
+            if (docs == null)
+            {
+                return null;
+            }
+
+            foreach (object obj in docs)
+            {
+                ModelDoc2 doc = obj as ModelDoc2;
+                if (doc == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    string docPath = doc.GetPathName();
+                    if (!string.IsNullOrWhiteSpace(path) &&
+                        !string.IsNullOrWhiteSpace(docPath) &&
+                        string.Equals(docPath, path, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return doc;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(title))
+                    {
+                        string docTitle = doc.GetTitle();
+                        if (!string.IsNullOrWhiteSpace(docTitle) &&
+                            string.Equals(docTitle, title, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return doc;
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore lookup errors
+                }
+            }
+
+            return null;
+        }
+
+        private void CloseBatchModel(ModelDoc2 model, BatchEntry entry, HashSet<string> initialDocs,
+            ModelDoc2 rootModel, string rootTitle, bool openedHere)
+        {
+            if (model == null || entry == null)
+            {
+                return;
+            }
+
+            if (entry.IsRoot || ReferenceEquals(model, rootModel))
+            {
+                return;
+            }
+
+            string id = GetDocumentId(model);
+            if (!string.IsNullOrWhiteSpace(id) && initialDocs != null && initialDocs.Contains(id))
+            {
+                return;
+            }
+
+            string title = string.Empty;
+            try
+            {
+                title = model.GetTitle();
+            }
+            catch
+            {
+                title = string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(rootTitle) &&
+                string.Equals(title, rootTitle, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!openedHere && !string.IsNullOrWhiteSpace(id) && initialDocs != null && initialDocs.Contains(id))
+            {
+                return;
+            }
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    _swApp.CloseDoc(title);
+                }
+            }
+            catch
+            {
+                // ignore close errors
+            }
+        }
+
+        private int DocumentTypeFromPath(string path)
+        {
+            string ext = Path.GetExtension(path ?? string.Empty).ToLowerInvariant();
+            if (ext == ".sldasm")
+            {
+                return (int)swDocumentTypes_e.swDocASSEMBLY;
+            }
+            if (ext == ".slddrw")
+            {
+                return (int)swDocumentTypes_e.swDocDRAWING;
+            }
+            return (int)swDocumentTypes_e.swDocPART;
+        }
+
+        private void TryShowConfiguration(ModelDoc2 model, string configName)
+        {
+            if (model == null || string.IsNullOrWhiteSpace(configName))
+            {
+                return;
+            }
+
+            try
+            {
+                model.ShowConfiguration2(configName);
+            }
+            catch
+            {
+                // ignore config switch errors
+            }
+        }
+
+        private void WriteFlatBom(string outputFile, List<BatchEntry> entries, Action<string> log,
+            Action<int, int> progress, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle)
         {
             using (var writer = new StreamWriter(outputFile, false, Encoding.UTF8))
             {
                 int processed = 0;
-                foreach (ModelEntry entry in entries)
+                foreach (BatchEntry entry in entries)
                 {
                     ThrowIfCancelled();
+                    bool openedHere;
+                    ModelDoc2 model = ResolveBatchModel(entry, rootModel, out openedHere);
+                    if (model == null)
+                    {
+                        processed++;
+                        UpdateProgress(progress, processed, entries.Count);
+                        continue;
+                    }
                     try
                     {
-                        writer.WriteLine(GetDocDict(entry.Model, entry.ConfigurationName));
+                        writer.WriteLine(GetDocDict(model, entry.ConfigurationName));
                     }
                     catch (Exception ex)
                     {
                         Log(log, "Error building properties for model: " + ex.Message);
-                        Configuration entryConf = entry.Model.GetConfigurationByName(entry.ConfigurationName) as Configuration;
-                        string fallback = "{'partnumber':'" +
-                                          SanitizeString(BomPartNumber(entryConf, entry.Model)) + "'}";
-                        writer.WriteLine(fallback);
+                        try
+                        {
+                            Configuration entryConf = model.GetConfigurationByName(entry.ConfigurationName) as Configuration;
+                            string fallback = "{'partnumber':'" +
+                                              SanitizeString(BomPartNumber(entryConf, model)) + "'}";
+                            writer.WriteLine(fallback);
+                        }
+                        catch
+                        {
+                            writer.WriteLine("{'partnumber':''}");
+                        }
                     }
 
                     processed++;
                     UpdateProgress(progress, processed, entries.Count);
+                    CloseBatchModel(model, entry, initialDocs, rootModel, rootTitle, openedHere);
                 }
             }
         }
 
-        private void ProcessDeliverables(ModelEntry entry, string deliverablesFolder, PublishOptions options, Action<string> log)
+        private void ProcessDeliverables(ModelDoc2 model, string confName, string deliverablesFolder, PublishOptions options, Action<string> log)
         {
-            ModelDoc2 model = entry.Model;
-            string confName = entry.ConfigurationName;
             ThrowIfCancelled();
 
             try
@@ -2294,7 +2590,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private string GetFileString(ModelDoc2 model, string configName)
         {
-            string tempRev = GetEvalProperty(model, configName, "revision");
+            string tempRev = (GetEvalProperty(model, configName, "revision") ?? string.Empty).Trim();
             Configuration config = model.GetConfigurationByName(configName) as Configuration;
             string fileString = BomPartNumber(config, model) + "_REV_" + tempRev;
             return fileString.ToUpperInvariant();
@@ -2525,6 +2821,30 @@ namespace TinyMRP.SolidWorksAddin.Services
             return json.ToString().IndexOf("'" + prop + "':", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        private bool HasCustomProperty(ModelDoc2 model, string confName, string property)
+        {
+            if (model == null || string.IsNullOrWhiteSpace(property))
+            {
+                return false;
+            }
+
+            string[] names = GetCustomPropertyNames(model, confName);
+            if (names == null || names.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (string name in names)
+            {
+                if (string.Equals(name, property, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private string GetEvalProperty(ModelDoc2 model, string confName, string property)
         {
             if (model == null)
@@ -2542,8 +2862,13 @@ namespace TinyMRP.SolidWorksAddin.Services
             CustomPropertyManager cpm = model.Extension.CustomPropertyManager[confName];
             cpm.Get2(property, out valOut, out resolved);
 
+            bool hasConfigProperty = !string.IsNullOrEmpty(confName) &&
+                HasCustomProperty(model, confName, property);
+
             if (string.Equals(property, "revision", StringComparison.OrdinalIgnoreCase) &&
-                string.IsNullOrEmpty(resolved))
+                string.IsNullOrEmpty(resolved) &&
+                !string.IsNullOrEmpty(confName) &&
+                !hasConfigProperty)
             {
                 cpm = model.Extension.CustomPropertyManager[string.Empty];
                 cpm.Get2(property, out valOut, out resolved);

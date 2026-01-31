@@ -26,6 +26,9 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
   const sectionBoundsRef = useRef<Record<SectionAxis, SectionRange> | null>(
     null
   );
+  const measureGroupRef = useRef<THREE.Group | null>(null);
+  const measurePointsRef = useRef<THREE.Vector3[]>([]);
+  const resizeRef = useRef<(() => void) | null>(null);
 
   const [err, setErr] = useState<string | null>(null);
   const [edgesOn, setEdgesOn] = useState(true);
@@ -39,6 +42,8 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
   const [sectionOffset, setSectionOffset] = useState(0);
   const [sectionRange, setSectionRange] = useState<SectionRange | null>(null);
   const [sectionFlip, setSectionFlip] = useState(false);
+  const [measureOn, setMeasureOn] = useState(false);
+  const [measureValue, setMeasureValue] = useState<number | null>(null);
 
   const applyEdgesVisibility = (value: boolean) => {
     edgesRef.current.forEach((edge) => {
@@ -94,6 +99,53 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     if (!bounds) return;
     setSectionRange(bounds[axis]);
     setSectionOffset(0);
+  };
+
+  const disposeSceneObject = (obj: THREE.Object3D) => {
+    obj.traverse((child: any) => {
+      if (child.geometry?.dispose) {
+        child.geometry.dispose();
+      }
+      if (child.material) {
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        mats.forEach((mat: any) => mat?.dispose?.());
+      }
+    });
+  };
+
+  const clearMeasureObjects = () => {
+    const group = measureGroupRef.current;
+    if (!group) return;
+    while (group.children.length > 0) {
+      const child = group.children[0];
+      group.remove(child);
+      disposeSceneObject(child);
+    }
+    measurePointsRef.current = [];
+    setMeasureValue(null);
+  };
+
+  const addMeasureMarker = (point: THREE.Vector3) => {
+    const group = measureGroupRef.current;
+    if (!group) return;
+    const radius = fitRef.current?.radius ?? 1;
+    const markerSize = Math.max(radius * 0.01, 0.2);
+    const geom = new THREE.SphereGeometry(markerSize, 16, 16);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xff6b00 });
+    const marker = new THREE.Mesh(geom, mat);
+    marker.position.copy(point);
+    group.add(marker);
+  };
+
+  const addMeasureLine = (start: THREE.Vector3, end: THREE.Vector3) => {
+    const group = measureGroupRef.current;
+    if (!group) return;
+    const geom = new THREE.BufferGeometry().setFromPoints([start, end]);
+    const mat = new THREE.LineBasicMaterial({ color: 0xff6b00 });
+    const line = new THREE.Line(geom, mat);
+    group.add(line);
   };
 
   const fitToView = () => {
@@ -213,9 +265,16 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     scene.background = new THREE.Color(0xffffff);
     sceneRef.current = scene;
 
+    const measureGroup = new THREE.Group();
+    measureGroupRef.current = measureGroup;
+    scene.add(measureGroup);
+    measurePointsRef.current = [];
+    setMeasureValue(null);
+
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(container.clientWidth, height);
+    const initialHeight = Math.max(container.clientHeight, height);
+    renderer.setSize(container.clientWidth, initialHeight);
     renderer.setClearColor(0xffffff, 1);
     if ("outputColorSpace" in renderer) {
       (renderer as any).outputColorSpace = THREE.SRGBColorSpace;
@@ -225,7 +284,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
 
     const camera = new THREE.PerspectiveCamera(
       45,
-      container.clientWidth / height,
+      container.clientWidth / initialHeight,
       0.1,
       10000
     );
@@ -327,11 +386,12 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
         return;
       }
       const w = containerRef.current.clientWidth;
-      const h = height;
+      const h = Math.max(containerRef.current.clientHeight, height);
       rendererRef.current.setSize(w, h);
       cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
     };
+    resizeRef.current = onResize;
     window.addEventListener("resize", onResize);
 
     let raf = 0;
@@ -368,6 +428,11 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
       (gridRef.current as any)?.material?.dispose?.();
       axesRef.current?.geometry?.dispose?.();
       (axesRef.current as any)?.material?.dispose?.();
+      if (measureGroupRef.current) {
+        disposeSceneObject(measureGroupRef.current);
+        scene.remove(measureGroupRef.current);
+        measureGroupRef.current = null;
+      }
 
       renderer.dispose();
       containerRef.current?.removeChild(renderer.domElement);
@@ -387,6 +452,12 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
+
+  useEffect(() => {
+    if (!resizeRef.current) return;
+    const id = requestAnimationFrame(() => resizeRef.current?.());
+    return () => cancelAnimationFrame(id);
+  }, [isFullscreen]);
 
   useEffect(() => {
     if (gridRef.current) gridRef.current.visible = gridOn;
@@ -412,6 +483,52 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     updateSectionRangeForAxis(sectionAxis);
   }, [sectionAxis]);
 
+  useEffect(() => {
+    if (!measureOn) {
+      clearMeasureObjects();
+      return;
+    }
+    clearMeasureObjects();
+
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !camera) return;
+
+    const dom = renderer.domElement;
+    const onClick = (event: MouseEvent) => {
+      if (!rendererRef.current || !cameraRef.current || !modelRef.current) {
+        return;
+      }
+      const rect = dom.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera({ x, y }, cameraRef.current);
+      const hits = raycaster.intersectObject(modelRef.current, true);
+      if (!hits.length) return;
+      const point = hits[0].point.clone();
+
+      if (measurePointsRef.current.length >= 2) {
+        clearMeasureObjects();
+      }
+
+      measurePointsRef.current.push(point);
+      addMeasureMarker(point);
+
+      if (measurePointsRef.current.length === 2) {
+        const [p1, p2] = measurePointsRef.current;
+        addMeasureLine(p1, p2);
+        setMeasureValue(p1.distanceTo(p2));
+      }
+    };
+
+    dom.addEventListener("click", onClick);
+    return () => {
+      dom.removeEventListener("click", onClick);
+    };
+  }, [measureOn, url, format]);
+
   const btnBase: React.CSSProperties = {
     fontSize: 12,
     padding: "2px 6px",
@@ -428,6 +545,14 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     color: active ? "#ffffff" : "#333333",
   });
 
+  const viewerStyle: React.CSSProperties = {
+    position: "relative",
+    width: isFullscreen ? "100vw" : "100%",
+    height: isFullscreen ? "100vh" : height,
+    background: "#ffffff",
+    overflow: "hidden",
+  };
+
   return (
     <div>
       {err ? (
@@ -435,7 +560,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
           {err}
         </div>
       ) : (
-        <div ref={viewerRef} style={{ position: "relative", width: "100%", height }}>
+        <div ref={viewerRef} style={viewerStyle}>
           <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
           <div
             style={{
@@ -451,6 +576,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
               border: "1px solid #e2e2e2",
               background: "rgba(255,255,255,0.9)",
               alignItems: "center",
+              zIndex: 2,
             }}
           >
             <button style={btnBase} type="button" onClick={fitToView}>
@@ -585,6 +711,20 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
             >
               Full screen
             </button>
+            <button
+              style={toggleStyle(measureOn)}
+              type="button"
+              onClick={() => setMeasureOn((v) => !v)}
+            >
+              Measure
+            </button>
+            {measureOn ? (
+              <span style={{ fontSize: 12, color: "#333" }}>
+                {measureValue === null
+                  ? "Measure: click two points"
+                  : `Measure: ${measureValue.toFixed(2)}`}
+              </span>
+            ) : null}
             <span style={{ fontSize: 11, color: "#666" }}>
               Drag to rotate, right drag to pan, wheel to zoom
             </span>
