@@ -82,6 +82,9 @@ def _deliverables_present(pn: str, rev: str | None) -> dict:
         "png": "png" in groups,
         "dxf": "dxf" in groups,
         "step": "step" in groups,
+        "3mf": "3mf" in groups,
+        "ply": "ply" in groups,
+        "stl": "stl" in groups,
         "datasheet": "datasheet" in groups,
     }
 
@@ -698,14 +701,14 @@ def part_detail():
         name = os.path.basename(f.rel_path or f.path or "")
         return name or "file"
 
-    files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": []}
+    files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": [], "ply": [], "stl": []}
     for f in (
         PartFile.objects(part_number__iexact=p.part_number, revision__iexact=norm_rev)
         .only("ext_group", "rel_path", "path")
         .order_by("ext_group", "rel_path")
     ):
         if f.ext_group in files:
-            files[f.ext_group].append({"url": to_url(f), "rel": "", "name": file_label(f)})
+            files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path or "", "name": file_label(f)})
 
     wu_rows = _rows_for_child_pn(p.part_number, p.revision)
 

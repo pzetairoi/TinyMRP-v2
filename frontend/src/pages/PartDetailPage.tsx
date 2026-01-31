@@ -32,7 +32,10 @@ type FileRow = {
   url?: string;
   http_url?: string;
   urls?: string[];
+  name?: string;
 };
+
+type PreviewFormat = "3mf" | "ply" | "stl";
 
 type ChildRow = {
   child_pn: string;
@@ -156,6 +159,7 @@ export default function PartDetailPage() {
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
   const [images, setImages] = useState<string[]>([]);
+  const [selectedPreviewKey, setSelectedPreviewKey] = useState<string>("");
 
   // Doc Packs state
   type DocOpts = { file_types: string[]; processes: string[] };
@@ -170,6 +174,7 @@ export default function PartDetailPage() {
   const [selTypes, setSelTypes] = useState<Set<string>>(new Set());
   const [wantSelectedFiles, setWantSelectedFiles] = useState(false);
   const [wantExcel, setWantExcel] = useState(false);
+  const [excelAllFields, setExcelAllFields] = useState(false);
   const [wantBinder, setWantBinder] = useState(false);
   const [wantIndex, setWantIndex] = useState(false);
   const [wantVisual, setWantVisual] = useState(false);
@@ -292,6 +297,7 @@ function bestUrl(f: FileRow): string {
       url: raw?.url,
       http_url: raw?.http_url,
       urls: Array.isArray(raw?.urls) ? raw.urls : urlCandidate ? [urlCandidate] : [],
+      name: raw?.name ?? "",
     };
   }
 
@@ -707,6 +713,25 @@ function bestUrl(f: FileRow): string {
 
   // ---------- Derived ----------
   const fileGroups = useMemo(() => groupFiles(files), [files]);
+  const threeDOptions = useMemo(() => {
+    const options: Array<{ key: string; url: string; format: PreviewFormat; label: string }> = [];
+    const labelFor = (f: FileRow, fmt: PreviewFormat, idx: number) => {
+      const name = f.name || (f.rel_path ? f.rel_path.split("/").pop() : "") || f.ext || `file ${idx + 1}`;
+      return `${fmt.toUpperCase()} - ${name}`;
+    };
+    const addGroup = (fmt: PreviewFormat) => {
+      const arr = fileGroups[fmt] || [];
+      arr.forEach((file, idx) => {
+        const url = bestUrl(file);
+        if (!url) return;
+        options.push({ key: `${fmt}:${idx}`, url, format: fmt, label: labelFor(file, fmt, idx) });
+      });
+    };
+    addGroup("3mf");
+    addGroup("ply");
+    addGroup("stl");
+    return options;
+  }, [fileGroups]);
 
   const firstLinks = useMemo(() => {
     const pick = (k: string) => {
@@ -721,18 +746,29 @@ function bestUrl(f: FileRow): string {
       dxf: pick("dxf"),
       datasheet: pick("datasheet"),
       threeMF: pick("3mf"),
+      ply: pick("ply"),
+      stl: pick("stl"),
     };
   }, [fileGroups]);
 
   const pdfHref = firstLinks.pdf?.href || "";
 
-  // 3D: find first 3MF
-  const threeMfUrl: string | null = useMemo(() => {
-    const arr = fileGroups["3mf"] || [];
-    if (!arr.length) return null;
-    const href = bestUrl(arr[0]);
-    return href || null;
-  }, [fileGroups]);
+  useEffect(() => {
+    if (threeDOptions.length <= 1) {
+      setSelectedPreviewKey(threeDOptions[0]?.key || "");
+    } else {
+      setSelectedPreviewKey("");
+    }
+  }, [threeDOptions]);
+
+  const activePreview = useMemo(() => {
+    if (threeDOptions.length === 0) return null;
+    if (threeDOptions.length === 1) return threeDOptions[0];
+    return threeDOptions.find((opt) => opt.key === selectedPreviewKey) || null;
+  }, [threeDOptions, selectedPreviewKey]);
+
+  const previewUrl = activePreview?.url ?? null;
+  const previewFormat = activePreview?.format ?? null;
 
   const attrs = useMemo(() => {
     const raw = (part?.attrs || {}) as Record<string, any>;
@@ -1087,6 +1123,16 @@ function bestUrl(f: FileRow): string {
                     3MF{firstLinks.threeMF.count > 1 ? ` (${firstLinks.threeMF.count})` : ""}
                   </a>
                 )}
+                {firstLinks.ply && (
+                  <a className="btn btn-outline-secondary btn-sm pd-file-btn" href={firstLinks.ply.href} target="_blank" rel="noreferrer">
+                    PLY{firstLinks.ply.count > 1 ? ` (${firstLinks.ply.count})` : ""}
+                  </a>
+                )}
+                {firstLinks.stl && (
+                  <a className="btn btn-outline-secondary btn-sm pd-file-btn" href={firstLinks.stl.href} target="_blank" rel="noreferrer">
+                    STL{firstLinks.stl.count > 1 ? ` (${firstLinks.stl.count})` : ""}
+                  </a>
+                )}
                 {!hasAnyFiles && (
                   <span className="text-muted small">No files found.</span>
                 )}
@@ -1153,14 +1199,18 @@ function bestUrl(f: FileRow): string {
 
             
 
-            {/* NEW: 3D Preview tab using 3MF */}
+            {/* NEW: 3D Preview tab using available 3D formats */}
             {/* 3D moved to end */} {false && (<TabPanel header="3D Preview">
-              {threeMfUrl ? (
-                <Suspense fallback={<div className="p-3">Loading 3D viewer…</div>}>
-                  <ThreeMFViewer url={threeMfUrl} height={520} />
+              {previewUrl ? (
+                <Suspense fallback={<div className="p-3">Loading 3D viewer...</div>}>
+                  <ThreeMFViewer
+                    url={previewUrl}
+                    format={previewFormat || "3mf"}
+                    height={520}
+                  />
                 </Suspense>
               ) : (
-                <div className="p-3 text-muted">No 3D file found for this part (3MF).</div>
+                <div className="p-3 text-muted">No 3D preview available.</div>
               )}
             </TabPanel>)}
 
@@ -1183,12 +1233,38 @@ function bestUrl(f: FileRow): string {
 
             {/* 3D Preview tab at the end */}
             <TabPanel header="3D Preview">
-              {threeMfUrl ? (
+              {threeDOptions.length > 1 && (
+                <div className="p-3 pb-0">
+                  <label className="form-label small" htmlFor="previewSelect">
+                    3D file
+                  </label>
+                  <select
+                    id="previewSelect"
+                    className="form-select form-select-sm"
+                    value={selectedPreviewKey}
+                    onChange={(e) => setSelectedPreviewKey(e.target.value)}
+                  >
+                    <option value="">Select a 3D file...</option>
+                    {threeDOptions.map((opt) => (
+                      <option key={opt.key} value={opt.key}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {previewUrl ? (
                 <Suspense fallback={<div className="p-3">Loading 3D viewer...</div>}>
-                  <ThreeMFViewer url={threeMfUrl} height={520} />
+                  <ThreeMFViewer
+                    url={previewUrl}
+                    format={previewFormat || "3mf"}
+                    height={520}
+                  />
                 </Suspense>
+              ) : threeDOptions.length ? (
+                <div className="p-3 text-muted">Select a 3D file to preview.</div>
               ) : (
-                <div className="p-3 text-muted">No 3D file found for this part (3MF).</div>
+                <div className="p-3 text-muted">No 3D preview available.</div>
               )}
             </TabPanel>
 
@@ -1269,6 +1345,12 @@ function bestUrl(f: FileRow): string {
                       <div className="fw-semibold small">Doc Packs</div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docExcel" checked={wantExcel} onChange={(e)=>setWantExcel(e.target.checked)} /><label className="form-check-label" htmlFor="docExcel">Excel BOM</label></div>
+                      {wantExcel && (
+                        <div className="form-check ms-3">
+                          <input className="form-check-input" type="checkbox" id="docExcelAll" checked={excelAllFields} onChange={(e)=>setExcelAllFields(e.target.checked)} />
+                          <label className="form-check-label" htmlFor="docExcelAll">Include all fields</label>
+                        </div>
+                      )}
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docIndex" checked={wantIndex} onChange={(e)=>setWantIndex(e.target.checked)} /><label className="form-check-label" htmlFor="docIndex">Index (PDF)</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual summary (PDF)</label></div>
@@ -1388,6 +1470,7 @@ function bestUrl(f: FileRow): string {
                         file_types: Array.from(selTypes),
                         selected_files: wantSelectedFiles,
                         excel_bom: wantExcel,
+                        excel_all_fields: excelAllFields,
                         pdf_binder: wantBinder,
                         index_pdf: wantIndex,
                         visual_list: wantVisual,

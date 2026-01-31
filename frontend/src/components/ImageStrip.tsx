@@ -42,8 +42,8 @@ function FallbackImg({ urls, fit }:{ urls:string[]; fit?: boolean }) {
   const fallback = "/branding/logo"
   const src = urls.length && idx < urls.length ? urls[idx] : fallback
   const baseStyle = fit
-    ? { height:'100%', width:'100%', objectFit:'contain', display:'block', background:'white' }
-    : { maxHeight:160, maxWidth:240, objectFit:'contain', border:'1px solid rgba(0,0,0,.08)', borderRadius:8, padding:6, background:'white' }
+    ? { height:'100%', width:'100%', objectFit:'contain', display:'block' }
+    : { maxHeight:160, maxWidth:240, objectFit:'contain', border:'1px solid rgba(0,0,0,.08)', borderRadius:8, padding:6 }
   const onErr = () => {
     if (urls.length && idx < urls.length - 1) {
       setIdx(idx + 1)

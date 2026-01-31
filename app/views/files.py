@@ -54,16 +54,22 @@ def part_images():
     rows = []
     for d in qs.order_by("-mtime_iso"):
         urls: list[str] = []
-        # 1) Public URLs only if explicitly allowed
+        # 1) Public thumbnail URLs only if explicitly allowed
+        if allow_public and http_base and getattr(d, "thumb_rel_path", None):
+            urls.append(f"{http_base}/{d.thumb_rel_path}")
+
+        # 2) Public URLs only if explicitly allowed
         if allow_public and getattr(d, "http_url", None):
             urls.append(d.http_url)
 
-        # 2) Public prefix if explicitly allowed
+        # 3) Public prefix if explicitly allowed
         if allow_public and getattr(d, "rel_path", None) and http_base:
             urls.append(f"{http_base}/{d.rel_path}")
 
-        # 3) Secure tokenized URL
+        # 4) Secure tokenized URL
         try:
+            if getattr(d, "thumb_rel_path", None):
+                urls.append(file_url_for(d, kind="thumb"))
             urls.append(file_url_for(d))
         except Exception:
             pass

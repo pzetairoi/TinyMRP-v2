@@ -4,7 +4,8 @@ from datetime import datetime
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple, Set
 
-from flask import current_app, request
+from flask import current_app, request, url_for
+from urllib.parse import quote
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
@@ -27,6 +28,7 @@ class DocPackOptions:
     process_mode: str = "all"            # "selected" | "all"
     file_types: List[str] = None         # ext_groups to include (e.g., ["png","pdf","step","dxf","edr","3mf","datasheet"]) 
     want_excel_bom: bool = False
+    excel_all_fields: bool = False
     want_selected_files: bool = True
     want_pdf_binder: bool = False
     want_index_pdf: bool = False
@@ -323,6 +325,7 @@ def _excel_bom_bytes(
     flat: List[Tuple[str,str,float]],
     occ: Dict[Tuple[str,str], List[Tuple[str,float]]],
     full_qty_map: Optional[Dict[Tuple[str,str], float]] = None,
+    include_all_fields: bool = False,
 ) -> bytes:
     def _sorted_occ(key: Tuple[str, str]):
         rows = list(occ.get(key, []))
@@ -386,7 +389,7 @@ def _excel_bom_bytes(
     ]
     # Remove any attribute keys that collide with primary names (case-insensitive)
     ignore = set([h.lower() for h in header_main] + ['oem_partnumber','oem partnumber','approvedby','approved_by','approved'])
-    header_attrs = sorted([k for k in attr_keys if k and k.lower() not in ignore])
+    header_attrs = sorted([k for k in attr_keys if k and k.lower() not in ignore]) if include_all_fields else []
     header = header_main + header_attrs
     ws.append(header)
     ws.freeze_panes = 'A2'
@@ -422,6 +425,11 @@ def _excel_bom_bytes(
         q = PartFile.objects(part_number__iexact=pn, revision__iexact=_norm_rev(rev), ext_group='png', is_dwg=False).order_by('-mtime_iso')
         pf = q.first()
         if pf:
+            thumb_rel = getattr(pf, "thumb_rel_path", None)
+            if thumb_rel:
+                thumb_abs = os.path.join(file_root, thumb_rel.replace("/", os.sep))
+                if os.path.isfile(thumb_abs):
+                    return thumb_abs
             pth = pf.path if os.path.isabs(pf.path) else os.path.join(file_root, pf.rel_path.replace('/', os.sep))
             if os.path.isfile(pth):
                 return pth
@@ -563,13 +571,23 @@ def _excel_bom_bytes(
 
 
 def _part_detail_url(pn: str, rev: str) -> str:
+    rev_val = None if rev is None or str(rev).strip() == "" else rev
     try:
-        root = (request.url_root or "").rstrip("/")  # prefers outer URL
+        if rev_val is None:
+            return url_for("ui.part_ui", pn=pn, _external=True)
+        return url_for("ui.part_ui", pn=pn, rev=rev_val, _external=True)
     except Exception:
-        root = ""
-    if not root:
-        root = (current_app.config.get("VITE_BACKEND_URL") or "http://localhost:5000").rstrip("/")
-    return f"{root}/ui/part/{pn}?rev={rev}"
+        try:
+            root = (request.url_root or "").rstrip("/")
+        except Exception:
+            root = ""
+        if not root:
+            root = (current_app.config.get("VITE_BACKEND_URL") or "http://localhost:5000").rstrip("/")
+        pn_enc = quote(str(pn or ""), safe="")
+        if rev_val is None:
+            return f"{root}/ui/part/{pn_enc}"
+        rev_enc = quote(str(rev_val or ""), safe="")
+        return f"{root}/ui/part/{pn_enc}?rev={rev_enc}"
 
 
 def _pil_to_rl_image(pil_img, width=None, height=None):
@@ -735,6 +753,11 @@ def _visual_list_pdf(
         q = PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev), ext_group="png", is_dwg=False).order_by("-mtime_iso")
         pf = q.first()
         if pf:
+            thumb_rel = getattr(pf, "thumb_rel_path", None)
+            if thumb_rel:
+                thumb_abs = os.path.join(root, thumb_rel.replace("/", os.sep))
+                if os.path.isfile(thumb_abs):
+                    return thumb_abs
             pth = pf.path if os.path.isabs(pf.path) else os.path.join(root, pf.rel_path.replace("/", os.sep))
             if os.path.isfile(pth):
                 return pth
@@ -817,12 +840,12 @@ def _visual_list_pdf(
             c.setStrokeColorRGB(*col); c.setLineWidth(2)
             c.rect(x+off, y+off, box_w-2*off, box_h-2*off, stroke=1, fill=0)
         # geometry: reserve top header (PN/REV/QTY) and bottom (desc + QR)
-        top_space = 18*mm
-        bottom_space = 18*mm
+        top_space = 16*mm
+        bottom_space = 12*mm
         # image area (left side), vertically between top_space and bottom_space
         ix_x = x + 3*mm
         ix_y = y + bottom_space
-        ix_w = 30*mm
+        ix_w = 34*mm
         ix_h = box_h - (top_space + bottom_space)
         if imgpath:
             try:
@@ -893,7 +916,7 @@ def _visual_list_pdf(
             qimg = qr.make_image(fill_color="black", back_color="white").convert("RGB")
             from reportlab.lib.utils import ImageReader
             qbuf = io.BytesIO(); qimg.save(qbuf, format='PNG'); qbuf.seek(0)
-            qr_size = 18*mm
+            qr_size = 12*mm
             c.drawImage(ImageReader(qbuf), x + box_w - qr_size - 4*mm, y + 4*mm, width=qr_size, height=qr_size, preserveAspectRatio=True, mask='auto')
         except Exception:
             pass
@@ -910,10 +933,10 @@ def _visual_list_pdf(
             show_notapproved = True
             if procs_lower and any(p in ('hardware', 'purchase', 'others') for p in procs_lower):
                 show_notapproved = False
-            icon_w = 12*mm
-            icon_h = 10*mm
+            icon_w = 10*mm
+            icon_h = 8*mm
             icon_x = x + box_w - icon_w - 4*mm
-            icon_y = y + 4*mm + qr_size + 2*mm
+            icon_y = y + 4*mm + qr_size + 1*mm
             if approved:
                 _draw_svg_or_png(c, icon_x, icon_y, icon_w, icon_h, 'approved.svg', 'approved.png')
             elif show_notapproved:
@@ -2094,6 +2117,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     if opts.want_pdf_binder:
         output_count += 1
     want_zip = bool(opts.want_selected_files) or output_count != 1
+    if not want_zip and opts.want_excel_bom:
+        want_zip = True
     # Precompute PDF body items for binder/index
     pairs: List[Tuple[str, str]] = []
     pdf_items: List[Dict[str, object]] = []
@@ -2140,7 +2165,14 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         root_key_norm = (opts.root_pn or "").strip().lower(), _norm_rev(root_rev_resolved)
         if not any(((pn or "").strip().lower(), _norm_rev(rev)) == root_key_norm for pn, rev, _ in excel_flat):
             excel_flat.insert(0, (opts.root_pn, root_rev_resolved, 1.0))
-        xlsx = _excel_bom_bytes(opts.root_pn, opts.root_rev, excel_flat, occ_map, full_qty_map)
+        xlsx = _excel_bom_bytes(
+            opts.root_pn,
+            opts.root_rev,
+            excel_flat,
+            occ_map,
+            full_qty_map,
+            include_all_fields=bool(getattr(opts, "excel_all_fields", False)),
+        )
         bom_name = build_output_name(f"{base_stub}_BOM", "xlsx", max_len=96, include_time=False, now=build_ts)
         z.writestr(bom_name, xlsx)
 

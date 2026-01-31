@@ -34,6 +34,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         private CheckBox _stepCheck;
         private CheckBox _edrCheck;
         private CheckBox _threeMfCheck;
+        private CheckBox _plyCheck;
+        private CheckBox _stlCheck;
         private CheckBox _pngDrawingCheck;
         private CheckBox _pdfCheck;
         private CheckBox _edrDrawingCheck;
@@ -227,10 +229,14 @@ namespace TinyMRP.SolidWorksAddin.UI
             _stepCheck = CreateCheckBox("STEP");
             _edrCheck = CreateCheckBox("eDrawings");
             _threeMfCheck = CreateCheckBox("3MF");
+            _plyCheck = CreateCheckBox("PLY");
+            _stlCheck = CreateCheckBox("STL");
             modelChecks.Controls.Add(_pngModelCheck);
             modelChecks.Controls.Add(_stepCheck);
             modelChecks.Controls.Add(_edrCheck);
             modelChecks.Controls.Add(_threeMfCheck);
+            modelChecks.Controls.Add(_plyCheck);
+            modelChecks.Controls.Add(_stlCheck);
 
             var drawingChecks = new FlowLayoutPanel
             {
@@ -1802,6 +1808,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 ExportStep = _stepCheck != null && _stepCheck.Checked,
                 ExportEdrawing = _edrCheck != null && _edrCheck.Checked,
                 Export3mf = _threeMfCheck != null && _threeMfCheck.Checked,
+                ExportPly = _plyCheck != null && _plyCheck.Checked,
+                ExportStl = _stlCheck != null && _stlCheck.Checked,
                 ExportPngDrawing = _pngDrawingCheck != null && _pngDrawingCheck.Checked,
                 ExportPdf = _pdfCheck != null && _pdfCheck.Checked,
                 ExportEdrawingDrawing = _edrDrawingCheck != null && _edrDrawingCheck.Checked,
@@ -4797,6 +4805,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_stepCheck != null) _stepCheck.Checked = value;
             if (_edrCheck != null) _edrCheck.Checked = value;
             if (_threeMfCheck != null) _threeMfCheck.Checked = value;
+            if (_plyCheck != null) _plyCheck.Checked = value;
+            if (_stlCheck != null) _stlCheck.Checked = value;
             if (_pngDrawingCheck != null) _pngDrawingCheck.Checked = value;
             if (_pdfCheck != null) _pdfCheck.Checked = value;
             if (_edrDrawingCheck != null) _edrDrawingCheck.Checked = value;
