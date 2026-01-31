@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-01-31 02:15 UTC",
-  "commit": "7adac3b",
+  "generated_at": "2026-01-31 04:22 UTC",
+  "commit": "ea8ac7a",
   "items": [
     {
       "id": "how-this-help-is-generated-how-to-update-it",
@@ -135,6 +135,11 @@
     {
       "id": "step-by-step-downloading-files",
       "title": "Step-by-step: downloading files",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-associated-files",
+      "title": "Step-by-step: associated files",
       "level": 3
     },
     {
@@ -283,6 +288,11 @@
       "level": 3
     },
     {
+      "id": "legacy-bom-import-if-needed",
+      "title": "Legacy BOM import (if needed)",
+      "level": 3
+    },
+    {
       "id": "what-you-need",
       "title": "What you need",
       "level": 2
@@ -335,6 +345,16 @@
     {
       "id": "step-by-step-publish-deliverables",
       "title": "Step-by-step: publish deliverables",
+      "level": 3
+    },
+    {
+      "id": "associated-files-extra-files",
+      "title": "Associated files (extra files)",
+      "level": 3
+    },
+    {
+      "id": "create-upload-pack-zip",
+      "title": "Create Upload Pack (ZIP)",
       "level": 3
     },
     {

@@ -3,6 +3,7 @@ import json, os
 from flask import Blueprint, render_template, abort, current_app, request
 from flask_login import login_required
 from flask_security import current_user
+from app.services.acl import user_has_permission
 
 bp = Blueprint("ui", __name__, url_prefix="/ui")
 
@@ -84,6 +85,17 @@ def admin_addin_ui():
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
     return render_template("ui/react_shell.html", title="Add-in Admin", assets=assets, initial={})
+
+@bp.get("/upload-pack")
+@login_required
+def upload_pack_ui():
+    if not (getattr(current_user, "has_role", None) and current_user.has_role("admin")):
+        if not user_has_permission(current_user, "import.bom"):
+            abort(403)
+    assets = vite_assets()
+    if not assets["js"]:
+        abort(404, "React build missing. Run `npm run build` in /frontend.")
+    return render_template("ui/react_shell.html", title="Upload Pack", assets=assets, initial={})
 
 @bp.get("/part/<path:pn>")
 @login_required

@@ -39,6 +39,7 @@ Use this section when something is not working as expected.
 - **ZIP rejected:** Check the folder structure.
 - **No parts created:** Ensure the BOM file and deliverables exist.
 - **Wrong revision:** Check the revision value in file names.
+- **Associated files missing:** Check `extra/<PN>/<REV_OR__no_rev__>/...` paths in the ZIP.
 
 ## Add-in connection failed
 

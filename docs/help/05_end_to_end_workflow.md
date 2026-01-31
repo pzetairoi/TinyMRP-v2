@@ -25,23 +25,28 @@ This is the recommended workflow from design to doc pack.
 1) Open the Publish/BOM tab in the add-in.
 2) Select the outputs you need (PDF, DXF, STEP, 3MF, PLY, STL, PNG).
 3) Choose the deliverables folder.
-4) Click Publish.
-5) Wait until the process finishes.
+4) Optional: click "Manage associated files..." and add extra files (photos, scans, reports).
+5) Optional: enable "Create Upload Pack (ZIP)" if you want a ready-to-upload ZIP.
+6) Click Publish.
+7) Wait until the process finishes.
 
 **Expected result:** Files appear in the correct deliverables subfolders.
 
 ## Step 4: Package for import
 
-1) Create a ZIP file that includes the deliverables folder structure.
-2) Keep the folder names exactly as expected (`pdf`, `png`, `dxf`, `step`, `3mf`, `ply`, `stl`, etc).
-3) Make sure file names match `PARTNUMBER_REV_REVISION.ext`.
+1) If you used "Create Upload Pack (ZIP)", use that file.
+2) Otherwise, create a ZIP with the correct structure:
+   - `deliverables/<group>/...`
+   - `bom/` with `*_FLATBOM.txt` and `*_TREEBOM.txt`
+   - `extra/<PN>/<REV_OR__no_rev__>/...`
+3) Keep file names matching `PARTNUMBER_REV_REVISION.ext`.
 
 **Tip:** If you are unsure, start by zipping one part and verify the import result.
 
 ## Step 5: Import into TinyMRP
 
 1) Log in to the web app.
-2) Go to Import BOM.
+2) Go to Upload Pack.
 3) Upload the ZIP file.
 4) Wait for the import summary.
 5) Open the part detail page to confirm files are visible.

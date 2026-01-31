@@ -11,6 +11,7 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
 - Auth and Roles: Flask-Security-Too, Argon2 hashing, role/permission editor.
 - Parts & BOM APIs: MongoEngine models, server-side filters, where-used.
 - Files & Thumbnails: file discovery, preview/drawing PNGs, 3MF viewer assets.
+- Upload Pack: ZIP import with BOM + deliverables + associated files.
 - Part numbering: server-side numbering schemes, revision policies, and history.
 - Document Packs:
   - PDF binder with cover page, index (with dot leaders), and Visual Summary listed first.
@@ -51,6 +52,10 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `FORCE_HTTPS=true`: enforce HTTPS and set secure cookies.
   - `SECURITY_HEADERS_ENABLED=true`: send CSP + security headers.
   - `EXCEL_COMPILE_MAX_BYTES=10485760`: max upload size for Excel Compile.
+  - `UPLOAD_PACK_MAX_ZIP_MB=500`: max ZIP size for Upload Pack.
+  - `UPLOAD_PACK_MAX_FILE_MB=200`: max single file size for Upload Pack/extra uploads.
+  - `UPLOAD_PACK_MAX_FILES=5000`: max file count inside a pack.
+  - `EXTRA_FILES_ALLOWED=true`: enable/disable associated file uploads.
   - `APP_TIMEZONE`: default timezone (IANA name) for docpack timestamps if no admin override is set.
   - `BRANDING_LOGO_MAX_BYTES`: max logo upload size in bytes (default 2097152).
 
@@ -61,6 +66,22 @@ Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 ## Admin Settings
 
 - `/admin/settings` lets admins upload a branding logo (PNG/SVG) and set the default timezone used in document packs.
+
+## Upload Pack + Associated Files
+
+- UI: `/ui/upload-pack` (requires `import.bom` permission).
+- ZIP structure:
+  - `bom/` with `*_FLATBOM.txt` and `*_TREEBOM.txt`
+  - `deliverables/<group>/...`
+  - `extra/<PN>/<REV_OR__no_rev__>/...`
+- If revision is blank, use the `__no_rev__` token in paths; DB stores revision as an empty string.
+
+API endpoints:
+
+- `POST /api/upload/pack` (multipart `file` plus optional `dry_run`, `strict_structure`)
+- `GET /api/parts/<pn>/<rev>/extra`
+- `POST /api/parts/<pn>/<rev>/extra`
+- `DELETE /api/parts/<pn>/<rev>/extra/<file_id>`
 
 ## Help System
 
@@ -132,6 +153,7 @@ TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://
 - Task pane tabs: Publish/BOM, Tools, Numbering, Configuration.
 - Publish exports deliverables under `DeliverablesFolder`.
 - BOM exports `*_FLATBOM.txt` and `*_TREEBOM.txt`, then zips them into `BOM_Folder\bom`.
+- Publish/BOM includes "Manage associated files..." and an optional "Create Upload Pack (ZIP)" toggle.
 - Child documents opened during export are closed automatically; only the root stays open.
 - Numbering tab previews and allocates `PartNumber` + `Revision` via `/api/numbering/*`, then writes custom properties.
 
@@ -454,6 +476,7 @@ Main UI routes:
 - `/ui/parts` - React shell for browsing parts.
 - `/ui/part/<pn>?rev=<rev>` - part detail; links from PDF binder and Excel BOM.
 - `/ui/bom/<pn>?rev=<rev>` - BOM view (when enabled in the current build).
+- `/ui/upload-pack` - Upload Pack (ZIP import of BOM + deliverables + associated files).
 
 ---
 

@@ -89,6 +89,20 @@ type CommentRow = {
   text: string;
 };
 
+type ExtraFileRow = {
+  id?: string;
+  pn?: string;
+  rev?: string;
+  original_name?: string;
+  label?: string;
+  size?: number;
+  mime?: string;
+  uploaded_by?: string;
+  uploaded_at?: string;
+  url?: string;
+  rel_path?: string;
+};
+
 // threeMF viewer (lazy load)
 const ThreeMFViewer = React.lazy(() => import("../components/ThreeMFViewer"));
 
@@ -121,6 +135,19 @@ function groupFiles(files: FileRow[]) {
   return g;
 }
 
+function formatBytes(value?: number): string {
+  const num = Number(value || 0);
+  if (!num) return "-";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let n = num;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i += 1;
+  }
+  return `${n.toFixed(n >= 10 ? 0 : 1)} ${units[i]}`;
+}
+
 // ---------- Component ----------
 export default function PartDetailPage() {
   const route = useParams();
@@ -130,6 +157,12 @@ export default function PartDetailPage() {
 
   const [part, setPart] = useState<Part | null>(null);
   const [files, setFiles] = useState<FileRow[]>([]);
+  const [extraFiles, setExtraFiles] = useState<ExtraFileRow[]>([]);
+  const [extraLoading, setExtraLoading] = useState(false);
+  const [extraError, setExtraError] = useState<string | null>(null);
+  const [extraUploadBusy, setExtraUploadBusy] = useState(false);
+  const [extraUploadError, setExtraUploadError] = useState<string | null>(null);
+  const [extraDeleteBusy, setExtraDeleteBusy] = useState<string | null>(null);
   const [children, setChildren] = useState<ChildRow[]>([]);
   const [wu, setWU] = useState<WURow[]>([]);
   const [versions, setVersions] = useState<VersionRow[]>([]);
@@ -167,6 +200,7 @@ export default function PartDetailPage() {
   const [docLoading, setDocLoading] = useState(false);
   const [docProgress, setDocProgress] = useState(0);
   const progressTimer = useRef<number | null>(null);
+  const extraFileInputRef = useRef<HTMLInputElement | null>(null);
   const [depth, setDepth] = useState<'top'|'full'>('full');
   const [classified, setClassified] = useState<'hide'|'show'|'only'>('show');
   const [processMode, setProcessMode] = useState<'all'|'selected'>('all');
@@ -202,6 +236,9 @@ export default function PartDetailPage() {
   const [bomNodes, setBomNodes] = useState<TreeNode[]>([]);
   const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({});
   const [rootKey, setRootKey] = useState<string | null>(null); // <- moved up so helpers can reference it
+
+  const effectiveRev = (part?.revision ?? rev ?? "").trim();
+  const revToken = effectiveRev ? effectiveRev : "__no_rev__";
 
   // --- TreeTable filters (controlled) ---
   type TTFilters = Record<string, { value: any; matchMode: string }>;
@@ -472,6 +509,35 @@ function bestUrl(f: FileRow): string {
       canceled = true;
     };
   }, [pn, rev, refreshTick]);
+
+  async function loadExtraFiles() {
+    if (!pn) return;
+    setExtraLoading(true);
+    setExtraError(null);
+    try {
+      const resp = await fetch(
+        `/api/parts/${encodeURIComponent(pn)}/${encodeURIComponent(revToken)}/extra`
+      );
+      if (resp.status === 403) {
+        setExtraFiles([]);
+        setExtraError("Forbidden");
+        return;
+      }
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      const rows = Array.isArray(data) ? data : data?.files || [];
+      setExtraFiles(rows);
+    } catch (err: any) {
+      setExtraFiles([]);
+      setExtraError(err?.message || "Failed to load associated files.");
+    } finally {
+      setExtraLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadExtraFiles();
+  }, [pn, revToken, refreshTick]);
 
   // Load DocPack options when pn/rev/depth changes
   useEffect(() => {
@@ -1029,6 +1095,57 @@ function bestUrl(f: FileRow): string {
     }
   }
 
+  async function handleExtraUpload(files: FileList | null) {
+    if (!files || !files.length || !pn) return;
+    setExtraUploadBusy(true);
+    setExtraUploadError(null);
+    try {
+      const form = new FormData();
+      Array.from(files).forEach((f) => form.append("file", f));
+      const resp = await fetch(
+        `/api/parts/${encodeURIComponent(pn)}/${encodeURIComponent(revToken)}/extra`,
+        { method: "POST", body: form }
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const msg = data?.error || `HTTP ${resp.status}`;
+        throw new Error(msg);
+      }
+      if (Array.isArray(data?.errors) && data.errors.length) {
+        setExtraUploadError(data.errors.join("; "));
+      }
+      await loadExtraFiles();
+    } catch (err: any) {
+      setExtraUploadError(err?.message || "Upload failed.");
+    } finally {
+      setExtraUploadBusy(false);
+      if (extraFileInputRef.current) extraFileInputRef.current.value = "";
+    }
+  }
+
+  async function handleExtraDelete(fileId?: string) {
+    if (!fileId || !pn) return;
+    const ok = window.confirm("Delete this associated file?");
+    if (!ok) return;
+    setExtraDeleteBusy(fileId);
+    try {
+      const resp = await fetch(
+        `/api/parts/${encodeURIComponent(pn)}/${encodeURIComponent(revToken)}/extra/${encodeURIComponent(fileId)}`,
+        { method: "DELETE" }
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const msg = data?.error || `HTTP ${resp.status}`;
+        throw new Error(msg);
+      }
+      await loadExtraFiles();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setExtraDeleteBusy(null);
+    }
+  }
+
   return (
     <div className="container-xxl py-3">
       {/* Title */}
@@ -1137,6 +1254,24 @@ function bestUrl(f: FileRow): string {
                   <span className="text-muted small">No files found.</span>
                 )}
               </div>
+
+              {extraFiles.length > 0 && (
+                <div className="pd-info-row">
+                  <div className="small text-muted fw-semibold">
+                    Associated files ({extraFiles.length})
+                  </div>
+                  <div className="small">
+                    {extraFiles.slice(0, 3).map((f, idx) => (
+                      <div key={f.id || f.rel_path || f.original_name || `extra-${idx}`}>
+                        {f.original_name || f.rel_path || "file"}
+                      </div>
+                    ))}
+                    {extraFiles.length > 3 && (
+                      <div className="text-muted">+{extraFiles.length - 3} more</div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="pd-info-row pd-user-row">
                 <span className="pd-user-pill">
@@ -1266,6 +1401,83 @@ function bestUrl(f: FileRow): string {
               ) : (
                 <div className="p-3 text-muted">No 3D preview available.</div>
               )}
+            </TabPanel>
+
+            <TabPanel header="Associated files">
+              <div className="pd-card p-3 mt-3">
+                <div className="d-flex align-items-center justify-content-between mb-2">
+                  <h6 className="mb-0">Associated files</h6>
+                  {canPartsEdit && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => extraFileInputRef.current?.click()}
+                      disabled={extraUploadBusy}
+                    >
+                      {extraUploadBusy ? "Uploading..." : "Upload files..."}
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={extraFileInputRef}
+                  type="file"
+                  multiple
+                  className="d-none"
+                  onChange={(e) => handleExtraUpload(e.target.files)}
+                />
+                {extraUploadError && <div className="text-danger small mb-2">{extraUploadError}</div>}
+                {extraError && <div className="text-danger small mb-2">{extraError}</div>}
+                {extraLoading ? (
+                  <div className="text-muted small">Loading...</div>
+                ) : extraFiles.length ? (
+                  <div className="table-responsive">
+                    <table className="table table-sm">
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Size</th>
+                          <th>Type</th>
+                          <th>Uploaded</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {extraFiles.map((f) => (
+                          <tr key={f.id || f.rel_path || f.original_name}>
+                            <td>{f.original_name || f.rel_path || "file"}</td>
+                            <td>{formatBytes(f.size)}</td>
+                            <td>{f.mime || "-"}</td>
+                            <td>
+                              {f.uploaded_at ? new Date(f.uploaded_at).toLocaleString() : "-"}
+                            </td>
+                            <td>
+                              {f.url ? (
+                                <a className="btn btn-sm btn-outline-secondary" href={f.url} target="_blank" rel="noreferrer">
+                                  Download
+                                </a>
+                              ) : (
+                                <span className="text-muted small">-</span>
+                              )}
+                              {canPartsEdit && (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-danger ms-2"
+                                  disabled={extraDeleteBusy === f.id}
+                                  onClick={() => handleExtraDelete(f.id)}
+                                >
+                                  {extraDeleteBusy === f.id ? "Deleting..." : "Delete"}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-muted small">No associated files.</div>
+                )}
+              </div>
             </TabPanel>
 
             

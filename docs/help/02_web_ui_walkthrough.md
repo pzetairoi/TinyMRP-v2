@@ -78,6 +78,15 @@ This section explains each screen in the web app, what it is for, and how to use
 1) In the file groups section, click a file type (PDF, DXF, STEP, 3MF, PLY, STL).
 2) If multiple files exist, choose the one you need.
 
+### Step-by-step: associated files
+
+1) Open the "Associated files" tab.
+2) Click "Upload files..." to attach extra files (photos, scans, reports).
+3) Use Download to open a file.
+4) If you have edit permission, use Delete to remove a file.
+
+**Tip:** Associated files are stored by Part Number + Revision. An empty revision is still valid.
+
 ### Step-by-step: generating doc packs
 
 1) Open the Doc Pack panel.
@@ -204,15 +213,15 @@ This section explains each screen in the web app, what it is for, and how to use
 
 ## Import BOM and deliverables
 
-**URL:** `/import/upload`
+**Recommended:** `/ui/upload-pack`
 
 ### Where to find it
 
-- Top navbar: Import BOM (if you have permission)
+- Top navbar: Upload Pack (if you have permission)
 
 ### What you can do on this screen
 
-- Upload a ZIP file containing deliverables and BOM data.
+- Upload a ZIP file containing BOM, deliverables, and associated files.
 - Trigger a scan and thumbnail build.
 
 ### Step-by-step
@@ -226,4 +235,10 @@ This section explains each screen in the web app, what it is for, and how to use
 
 - **ZIP rejected:** Check the folder structure and file naming.
 - **No thumbnails:** Run the thumbnail rebuild command or re-import.
+
+### Legacy BOM import (if needed)
+
+**URL:** `/import/upload`
+
+Use this screen if you only need to import a BOM and do not need to upload deliverables or associated files.
 

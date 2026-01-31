@@ -9,6 +9,7 @@ import BomPage from './pages/BomPage'
 import ApiTokensPage from './pages/ApiTokensPage'
 import AdminAddinPage from './pages/AdminAddinPage'
 import DashboardPage from './pages/DashboardPage'
+import UploadPackPage from './pages/UploadPackPage'
 
 // PrimeReact CSS
 import 'primereact/resources/themes/lara-light-blue/theme.css'
@@ -28,6 +29,7 @@ const router = createBrowserRouter([
       { path: '/ui/part/:pn', element: <PartDetailPage /> },
       { path: '/ui/addin/tokens', element: <ApiTokensPage /> },
       { path: '/ui/admin/addin', element: <AdminAddinPage /> },
+      { path: '/ui/upload-pack', element: <UploadPackPage /> },
       // fallback: send unknown paths to Parts
       { path: '*', element: <PartsPage /> },
     ],
