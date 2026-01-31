@@ -307,6 +307,10 @@ def create_app(config_object=None):
     # register blueprints for ui
     from app.views.ui import bp as ui_bp
     app.register_blueprint(ui_bp)
+
+    # Help page
+    from app.views.help import bp as help_bp
+    app.register_blueprint(help_bp)
     
     #Bom and parts APIs
     from app.views.parts import bp as parts_api_bp

@@ -1,0 +1,959 @@
+<h1 id="overview">Overview</h1>
+<p>TinyMRP is a parts and documentation hub for manufacturing teams. It keeps parts, revisions, deliverables, and doc packs in one place so you can find and share the right data quickly.</p>
+<p>This Help page is written for non-IT users. It explains what to click, what you should see, and what to do next.</p>
+<h2 id="how-this-help-is-generated-how-to-update-it">How this help is generated / how to update it</h2>
+<p>This Help page is built from markdown files in <code>docs/help/</code> plus a small amount of auto-generated reference data.</p>
+<p>To update the help:</p>
+<ol>
+<li>Edit the markdown files in <code>docs/help/</code>.</li>
+<li>Run <code>flask help build</code> from the server project.</li>
+<li>Commit the generated files in <code>app/static/help/</code> so the help page is up to date.</li>
+</ol>
+<p>The reference section is auto-filled from the codebase using placeholders like <code>| Route | What it is for | Permissions | | --- | --- | --- | | </code>/ui/dashboard<code>| System dashboard and summary metrics. | Requires login | |</code>/ui/parts<code>| Inventory list and search. | Requires login | |</code>/ui/bom<code>| BOM tree view for parts and assemblies. | Requires login | |</code>/ui/bom/:pn<code>| BOM tree view for parts and assemblies. | Requires login | |</code>/ui/part/:pn<code>| Part detail view with files, previews, and doc packs. | Requires login | |</code>/ui/addin/tokens<code>| Create and manage add-in access tokens. | Requires login | |</code>/ui/admin/addin<code> | Admin tools for add-in settings and monitoring. | Admin only |</code> and `### app\views\importer.py</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Tip:</strong> Keep headings consistent and avoid deep nesting so the table of contents stays clean.</p>
+<h2 id="what-you-can-do-in-tinymrp">What you can do in TinyMRP</h2>
+<ul>
+<li>Search and browse parts and revisions.</li>
+<li>View deliverables (PDF, DXF, STEP, 3MF, PLY, STL, and more).</li>
+<li>Generate doc packs (binder, index, visuals, BOM spreadsheets).</li>
+<li>Share data with suppliers, customers, and internal teams.</li>
+<li>Manage users, roles, permissions, and branding.</li>
+</ul>
+<h2 id="who-this-guide-is-for">Who this guide is for</h2>
+<ul>
+<li>Engineers and designers who publish deliverables.</li>
+<li>Production and purchasing teams who consume BOMs and drawings.</li>
+<li>Administrators who manage users, roles, and system settings.</li>
+</ul>
+<h2 id="quick-navigation">Quick navigation</h2>
+<ul>
+<li>Server and web app: installation, usage, and customization.</li>
+<li>SolidWorks add-in: installation, usage, and options.</li>
+<li>End-to-end workflow: create parts to doc packs.</li>
+<li>Reference: routes, UI pages, API endpoints, and options.</li>
+</ul>
+<h1 id="server-and-web-app-installation">Server and web app installation</h1>
+<p>This section explains how to install and run the TinyMRP server and web app. It is written for non-IT users and assumes you have someone with basic server access.</p>
+<h2 id="before-you-begin">Before you begin</h2>
+<p>You will need:</p>
+<ul>
+<li>A Windows or Linux server (or a workstation for testing).</li>
+<li>An internet connection for the first setup.</li>
+<li>Access to the deliverables folder where SolidWorks exports files.</li>
+<li>A browser (Chrome, Edge, or Firefox).</li>
+</ul>
+<p><strong>Tip:</strong> If you are not sure which installation method to use, ask your IT contact to set up the Docker method. It is usually the simplest to keep stable.</p>
+<h2 id="option-a-recommended-installation-docker-compose">Option A: Recommended installation (Docker Compose)</h2>
+<p>This method runs the app, database, and file service together.</p>
+<h3 id="step-1-get-the-project-files">Step 1: Get the project files</h3>
+<ol>
+<li>Download or clone the TinyMRP repository to a folder on the server.</li>
+<li>Keep this folder for future updates.</li>
+</ol>
+<h3 id="step-2-prepare-the-environment-file">Step 2: Prepare the environment file</h3>
+<ol>
+<li>Copy an example env file (for example <code>.env.server.example</code>) to <code>.env</code>.</li>
+<li>Open <code>.env</code> in a text editor.</li>
+<li>Fill in the required values. At minimum you must set:
+<ul>
+<li><code>SECRET_KEY</code></li>
+<li><code>SECURITY_PASSWORD_SALT</code></li>
+<li><code>MONGO_URI</code></li>
+<li><code>DELIVERABLES_DIR</code> or <code>FILES_LOCAL_ROOT</code> (where deliverables are stored)</li>
+<li><code>HTTP_PORT</code> (the port users will open in their browser)</li>
+</ul>
+</li>
+</ol>
+<p><strong>Common mistake:</strong> Pointing <code>DELIVERABLES_DIR</code> to a local folder on your PC instead of the shared folder where deliverables are exported.</p>
+<h3 id="step-3-start-the-stack">Step 3: Start the stack</h3>
+<ol>
+<li>Open a terminal in the project folder.</li>
+<li>Run:
+<ul>
+<li><code>docker compose up -d --build</code></li>
+</ul>
+</li>
+<li>Wait until the containers are running.</li>
+</ol>
+<h3 id="step-4-create-the-first-admin-user">Step 4: Create the first admin user</h3>
+<ol>
+<li>Run the commands below:
+<ul>
+<li><code>docker compose exec app flask --app run.py user seed-roles</code></li>
+<li><code>docker compose exec app flask --app run.py user create --email admin@yourcompany.com --password &lt;password&gt;</code></li>
+<li><code>docker compose exec app flask --app run.py user grant-admin --email admin@yourcompany.com</code></li>
+</ul>
+</li>
+<li>The admin can now log in and create other users.</li>
+</ol>
+<h3 id="step-5-open-the-web-app">Step 5: Open the web app</h3>
+<ol>
+<li>Open your browser.</li>
+<li>Go to <code>http://&lt;server&gt;:&lt;HTTP_PORT&gt;</code> (for example <code>http://192.168.1.10:5000</code>).</li>
+<li>Log in with the admin account you created.</li>
+</ol>
+<h2 id="option-b-local-development-install-advanced">Option B: Local development install (advanced)</h2>
+<p>This is intended for developers. It is not the recommended production setup.</p>
+<ol>
+<li>Install Python and Node.js.</li>
+<li>Install Python requirements: <code>pip install -r requirements.txt</code>.</li>
+<li>Install frontend dependencies: <code>npm install</code> in the <code>frontend/</code> folder.</li>
+<li>Run the backend: <code>python run.py</code>.</li>
+<li>Run the frontend build: <code>npm run build</code> (or <code>npm run dev</code> for development).</li>
+</ol>
+<h2 id="file-storage-and-deliverables">File storage and deliverables</h2>
+<p>TinyMRP expects deliverables to be stored in a folder structure like this:</p>
+<ul>
+<li><code>deliverables/png/</code> (preview images)</li>
+<li><code>deliverables/pdf/</code> (drawings)</li>
+<li><code>deliverables/dxf/</code></li>
+<li><code>deliverables/step/</code></li>
+<li><code>deliverables/3mf/</code></li>
+<li><code>deliverables/ply/</code></li>
+<li><code>deliverables/stl/</code></li>
+</ul>
+<p>Each file should follow the naming pattern:</p>
+<ul>
+<li><code>PARTNUMBER_REV_REVISION.ext</code></li>
+</ul>
+<p>For example:</p>
+<ul>
+<li><code>ABC-100_REV_A.pdf</code></li>
+<li><code>ABC-100_REV_A.png</code></li>
+<li><code>ABC-100_REV_.pdf</code> (empty revision is allowed)</li>
+</ul>
+<p><strong>What this means:</strong> If you publish a part and later change the revision, the file name changes. TinyMRP uses this to keep revisions separate.</p>
+<h2 id="logging-in-and-permissions">Logging in and permissions</h2>
+<ul>
+<li>Users must log in to see the app.</li>
+<li>Roles control which menus and actions are visible.</li>
+<li>The admin can create roles and assign permissions in the Admin Dashboard.</li>
+</ul>
+<h2 id="updating-the-server-later">Updating the server later</h2>
+<ol>
+<li>Pull the latest code changes into the server folder.</li>
+<li>Re-run <code>docker compose up -d --build</code>.</li>
+<li>If the database schema changes, follow the release notes.</li>
+</ol>
+<p><strong>Tip:</strong> Schedule updates during low usage hours.</p>
+<h1 id="web-ui-walkthrough">Web UI walkthrough</h1>
+<p>This section explains each screen in the web app, what it is for, and how to use it.</p>
+<h2 id="inventory-parts-list">Inventory (Parts list)</h2>
+<p><strong>URL:</strong> <code>/ui/parts</code></p>
+<h3 id="where-to-find-it">Where to find it</h3>
+<ul>
+<li>Top navbar: Inventory</li>
+</ul>
+<h3 id="what-you-can-do-on-this-screen">What you can do on this screen</h3>
+<ul>
+<li>Search and filter parts.</li>
+<li>See basic metadata (part number, revision, description, category, status).</li>
+<li>Jump to a part detail page.</li>
+<li>Use pick mode when selecting parts for other workflows.</li>
+</ul>
+<h3 id="step-by-step">Step-by-step</h3>
+<ol>
+<li>Open Inventory.</li>
+<li>Use the search box to type a part number or description.</li>
+<li>Use filters (if visible) to narrow by process, category, status, or document type.</li>
+<li>Click a part number to open its detail page.</li>
+</ol>
+<h3 id="what-to-expect">What to expect</h3>
+<ul>
+<li>The list updates as you search.</li>
+<li>If you have no permissions, the list may be empty.</li>
+</ul>
+<h3 id="troubleshooting">Troubleshooting</h3>
+<ul>
+<li><strong>Nothing appears:</strong> Confirm you have at least the &quot;items.view&quot; permission.</li>
+<li><strong>Search is slow:</strong> Reduce filters or search a smaller term.</li>
+</ul>
+<h2 id="part-detail">Part detail</h2>
+<p><strong>URL:</strong> <code>/ui/part/:pn</code></p>
+<h3 id="where-to-find-it-2">Where to find it</h3>
+<ul>
+<li>From Inventory, click a part number.</li>
+</ul>
+<h3 id="what-you-can-do-on-this-screen-2">What you can do on this screen</h3>
+<ul>
+<li>See thumbnails and drawings.</li>
+<li>Download deliverables (PDF, DXF, STEP, 3MF, PLY, STL, etc).</li>
+<li>Preview 3D models.</li>
+<li>Generate doc packs.</li>
+<li>Review revision history, where-used, and related jobs/orders.</li>
+</ul>
+<h3 id="step-by-step-viewing-images-and-drawings">Step-by-step: viewing images and drawings</h3>
+<ol>
+<li>Look at the preview image area near the top.</li>
+<li>If a drawing exists, it appears in the drawing panel.</li>
+<li>Click the image to view it larger in the browser.</li>
+</ol>
+<p><strong>Tip:</strong> Drawing images are taken from files ending with <code>_DWG.png</code>.</p>
+<h3 id="step-by-step-3d-preview">Step-by-step: 3D preview</h3>
+<ol>
+<li>If a 3D file exists, the preview panel is visible.</li>
+<li>If multiple formats exist, select the format before loading.</li>
+<li>Use the toolbar:
+<ul>
+<li>Fit, Reset, Front/Right/Top/Iso views</li>
+<li>Zoom in and out</li>
+<li>Toggle Grid, Axes, Edges, Wireframe</li>
+<li>Toggle Section cut</li>
+<li>Auto-rotate</li>
+<li>Full screen</li>
+<li>Measure (click two points)</li>
+</ul>
+</li>
+</ol>
+<p><strong>What this button does:</strong> The Measure tool shows the total distance plus X/Y/Z distances between two clicks.</p>
+<h3 id="step-by-step-downloading-files">Step-by-step: downloading files</h3>
+<ol>
+<li>In the file groups section, click a file type (PDF, DXF, STEP, 3MF, PLY, STL).</li>
+<li>If multiple files exist, choose the one you need.</li>
+</ol>
+<h3 id="step-by-step-generating-doc-packs">Step-by-step: generating doc packs</h3>
+<ol>
+<li>Open the Doc Pack panel.</li>
+<li>Choose the outputs you want (Binder, Index, Visual, Hardware Summary, Excel BOM).</li>
+<li>Optional: include flat patterns or extra fields if available.</li>
+<li>Click Generate.</li>
+<li>Download the result when it is ready.</li>
+</ol>
+<p><strong>Common mistake:</strong> Generating a binder without deliverable PDFs will produce an empty pack. Always ensure PDFs exist first.</p>
+<h3 id="troubleshooting-2">Troubleshooting</h3>
+<ul>
+<li><strong>No 3D preview available:</strong> Confirm a 3MF, PLY, or STL is present.</li>
+<li><strong>Missing files:</strong> Check that files were exported and imported correctly.</li>
+</ul>
+<h2 id="dashboard">Dashboard</h2>
+<p><strong>URL:</strong> <code>/ui/dashboard</code></p>
+<h3 id="where-to-find-it-3">Where to find it</h3>
+<ul>
+<li>User menu (top right) &gt; Dashboard</li>
+</ul>
+<h3 id="what-you-can-do-on-this-screen-3">What you can do on this screen</h3>
+<ul>
+<li>See system health statistics and recent updates.</li>
+<li>Get a quick overview of document coverage.</li>
+</ul>
+<h3 id="step-by-step-2">Step-by-step</h3>
+<ol>
+<li>Open Dashboard.</li>
+<li>Review the summary tiles and tables.</li>
+</ol>
+<h3 id="troubleshooting-3">Troubleshooting</h3>
+<ul>
+<li><strong>No data:</strong> The system may be new or data import has not run yet.</li>
+</ul>
+<h2 id="bom-views">BOM views</h2>
+<p><strong>URL:</strong> <code>/ui/bom</code> and <code>/ui/bom/:pn</code></p>
+<h3 id="where-to-find-it-4">Where to find it</h3>
+<ul>
+<li>User menu &gt; BOM</li>
+</ul>
+<h3 id="what-you-can-do-on-this-screen-4">What you can do on this screen</h3>
+<ul>
+<li>View a multi-level BOM.</li>
+<li>Expand and collapse assemblies.</li>
+<li>Inspect quantities and part info.</li>
+</ul>
+<h3 id="step-by-step-3">Step-by-step</h3>
+<ol>
+<li>Open BOM.</li>
+<li>Search for a top-level part number.</li>
+<li>Expand rows to see child components.</li>
+<li>Click a part number to open its detail page.</li>
+</ol>
+<h3 id="troubleshooting-4">Troubleshooting</h3>
+<ul>
+<li><strong>Parts missing:</strong> The BOM may not be imported or linked yet.</li>
+</ul>
+<h2 id="tokens-page-add-in-access">Tokens page (Add-in access)</h2>
+<p><strong>URL:</strong> <code>/ui/addin/tokens</code></p>
+<h3 id="where-to-find-it-5">Where to find it</h3>
+<ul>
+<li>User menu &gt; Tokens</li>
+</ul>
+<h3 id="what-you-can-do-on-this-screen-5">What you can do on this screen</h3>
+<ul>
+<li>Create access tokens for the SolidWorks add-in.</li>
+<li>Copy a token to use in the add-in configuration.</li>
+<li>Revoke tokens when no longer needed.</li>
+</ul>
+<h3 id="step-by-step-4">Step-by-step</h3>
+<ol>
+<li>Click &quot;Create token&quot;.</li>
+<li>Copy the token and store it securely.</li>
+<li>Paste it into the SolidWorks add-in configuration.</li>
+</ol>
+<p><strong>Common mistake:</strong> Tokens are shown only once. Copy them immediately.</p>
+<h2 id="admin-add-in-page">Admin add-in page</h2>
+<p><strong>URL:</strong> <code>/ui/admin/addin</code></p>
+<h3 id="where-to-find-it-6">Where to find it</h3>
+<ul>
+<li>Admin Dashboard &gt; Add-in</li>
+</ul>
+<h3 id="what-you-can-do-on-this-screen-6">What you can do on this screen</h3>
+<ul>
+<li>Review add-in settings and token health.</li>
+<li>Monitor add-in usage (if enabled).</li>
+</ul>
+<h3 id="troubleshooting-5">Troubleshooting</h3>
+<ul>
+<li><strong>Access denied:</strong> You must be an admin user.</li>
+</ul>
+<h2 id="admin-dashboard">Admin Dashboard</h2>
+<p><strong>URL:</strong> <code>/admin</code> (varies by setup)</p>
+<h3 id="where-to-find-it-7">Where to find it</h3>
+<ul>
+<li>User menu &gt; Admin Dashboard (admin users only)</li>
+</ul>
+<h3 id="what-you-can-do-on-this-screen-7">What you can do on this screen</h3>
+<ul>
+<li>Manage users and roles.</li>
+<li>Set app branding and timezone.</li>
+<li>View the audit log.</li>
+</ul>
+<h3 id="step-by-step-branding-and-timezone">Step-by-step: branding and timezone</h3>
+<ol>
+<li>Go to Admin Dashboard.</li>
+<li>Open App Settings.</li>
+<li>Upload a logo and set the timezone.</li>
+<li>Save changes.</li>
+</ol>
+<p><strong>What this affects:</strong> The logo appears in the app and doc packs. The timezone controls generated timestamps.</p>
+<h2 id="import-bom-and-deliverables">Import BOM and deliverables</h2>
+<p><strong>URL:</strong> <code>/import/upload</code></p>
+<h3 id="where-to-find-it-8">Where to find it</h3>
+<ul>
+<li>Top navbar: Import BOM (if you have permission)</li>
+</ul>
+<h3 id="what-you-can-do-on-this-screen-8">What you can do on this screen</h3>
+<ul>
+<li>Upload a ZIP file containing deliverables and BOM data.</li>
+<li>Trigger a scan and thumbnail build.</li>
+</ul>
+<h3 id="step-by-step-5">Step-by-step</h3>
+<ol>
+<li>Create a ZIP with the correct folder structure (see End-to-end workflow section).</li>
+<li>Drag the ZIP into the upload box or click to browse.</li>
+<li>Wait for the import result message.</li>
+<li>Open the part detail page to verify files were found.</li>
+</ol>
+<h3 id="troubleshooting-6">Troubleshooting</h3>
+<ul>
+<li><strong>ZIP rejected:</strong> Check the folder structure and file naming.</li>
+<li><strong>No thumbnails:</strong> Run the thumbnail rebuild command or re-import.</li>
+</ul>
+<h1 id="solidworks-add-in-installation">SolidWorks add-in installation</h1>
+<p>This section explains how to install the TinyMRP SolidWorks add-in.</p>
+<h2 id="what-you-need">What you need</h2>
+<ul>
+<li>SolidWorks installed on the workstation.</li>
+<li>Windows user with permission to install software.</li>
+<li>The TinyMRP add-in installer (<code>TinyMRP_SolidWorksAddin_*.exe</code>).</li>
+<li>A TinyMRP access token (from the Tokens page in the web app).</li>
+</ul>
+<p><strong>Tip:</strong> If you do not have an installer, ask your admin to build or provide it.</p>
+<h2 id="step-by-step-install-the-add-in">Step-by-step: install the add-in</h2>
+<ol>
+<li>Close SolidWorks if it is open.</li>
+<li>Run the installer file.</li>
+<li>Accept the prompts. The installer registers the add-in with SolidWorks.</li>
+<li>When finished, open SolidWorks.</li>
+</ol>
+<h2 id="step-by-step-enable-the-add-in-in-solidworks">Step-by-step: enable the add-in in SolidWorks</h2>
+<ol>
+<li>In SolidWorks, go to <code>Tools &gt; Add-Ins</code>.</li>
+<li>Find &quot;TinyMRP SolidWorks Add-in&quot; in the list.</li>
+<li>Check &quot;Active Add-ins&quot; to enable it now.</li>
+<li>Check &quot;Start Up&quot; so it loads every time.</li>
+</ol>
+<p><strong>Common mistake:</strong> Enabling only &quot;Active Add-ins&quot; means it will not load on next restart.</p>
+<h2 id="step-by-step-open-the-task-pane">Step-by-step: open the task pane</h2>
+<ol>
+<li>Look on the right side for the task pane.</li>
+<li>Click the TinyMRP icon.</li>
+<li>If the pane is hidden, use <code>View &gt; Task Pane</code> to show it.</li>
+</ol>
+<h2 id="step-by-step-configure-the-connection">Step-by-step: configure the connection</h2>
+<ol>
+<li>Open the Configuration tab in the add-in.</li>
+<li>Set the Server URL (for example <code>http://server:5000</code>).</li>
+<li>Paste your access token from the Tokens page.</li>
+<li>Click &quot;Test connection&quot; (or the equivalent button).</li>
+<li>Save the settings.</li>
+</ol>
+<p><strong>What this button does:</strong> Test connection checks that the server and token are valid.</p>
+<h2 id="where-settings-are-saved">Where settings are saved</h2>
+<p>The add-in stores its settings in a configuration file and uses it when SolidWorks opens. If settings are missing, the add-in may open with empty fields.</p>
+<h2 id="if-installation-fails">If installation fails</h2>
+<ul>
+<li>Restart the computer and try again.</li>
+<li>Check that SolidWorks is installed correctly.</li>
+<li>Ask your IT team to run the installer as an administrator.</li>
+</ul>
+<h1 id="solidworks-add-in-walkthrough">SolidWorks add-in walkthrough</h1>
+<p>This section explains each tab and option in the TinyMRP SolidWorks add-in.</p>
+<h2 id="publishbom-tab">Publish/BOM tab</h2>
+<h3 id="where-to-find-it-9">Where to find it</h3>
+<ul>
+<li>Open the TinyMRP task pane.</li>
+<li>Click the Publish/BOM tab.</li>
+</ul>
+<h3 id="what-you-can-do">What you can do</h3>
+<ul>
+<li>Export deliverables (PDF, DXF, STEP, 3MF, PLY, STL, PNG).</li>
+<li>Export BOM files.</li>
+<li>Publish for a single model or a whole assembly.</li>
+</ul>
+<h3 id="step-by-step-publish-deliverables">Step-by-step: publish deliverables</h3>
+<ol>
+<li>Open a part or assembly in SolidWorks.</li>
+<li>In Publish/BOM, select the outputs you need.</li>
+<li>Choose the deliverables folder.</li>
+<li>Click Publish.</li>
+<li>Wait for the process to complete.</li>
+</ol>
+<p><strong>What this button does:</strong> Publish creates files on disk. It does not automatically upload them; you upload or import them later.</p>
+<h3 id="step-by-step-export-bom">Step-by-step: export BOM</h3>
+<ol>
+<li>Open the top-level assembly.</li>
+<li>Choose BOM options (flat or indented).</li>
+<li>Click Export BOM.</li>
+<li>Verify that a BOM file is created in the output folder.</li>
+</ol>
+<h3 id="troubleshooting-7">Troubleshooting</h3>
+<ul>
+<li><strong>Missing output files:</strong> Check that the model is saved and has a part number.</li>
+<li><strong>Wrong file name:</strong> Check the revision value and part number in properties.</li>
+</ul>
+<h2 id="tools-tab">Tools tab</h2>
+<h3 id="what-you-can-do-2">What you can do</h3>
+<ul>
+<li>Normalize units.</li>
+<li>Hide feature types.</li>
+<li>Run bulk operations on assemblies.</li>
+</ul>
+<h3 id="tips">Tips</h3>
+<ul>
+<li>Use Tools carefully on large assemblies.</li>
+<li>Make a backup before running mass changes.</li>
+</ul>
+<h2 id="numbering-tab">Numbering tab</h2>
+<h3 id="what-you-can-do-3">What you can do</h3>
+<ul>
+<li>Select a numbering scheme.</li>
+<li>Preview how numbers will look.</li>
+<li>Allocate part numbers to configurations.</li>
+<li>Apply or rename based on rules.</li>
+</ul>
+<h3 id="step-by-step-allocate-part-numbers">Step-by-step: allocate part numbers</h3>
+<ol>
+<li>Open the Numbering tab.</li>
+<li>Pick a scheme from the list.</li>
+<li>Click Preview to see the next number.</li>
+<li>Click Allocate to assign to the current configuration.</li>
+</ol>
+<p><strong>Common mistake:</strong> Allocating numbers without saving the document. Always save after allocating.</p>
+<h2 id="configuration-tab">Configuration tab</h2>
+<p>This area controls how the add-in connects to the server.</p>
+<h3 id="quick-start-sub-tab">Quick Start sub-tab</h3>
+<ul>
+<li>Server URL</li>
+<li>Token</li>
+<li>Test connection</li>
+</ul>
+<h3 id="advanced-sub-tab">Advanced sub-tab</h3>
+<ul>
+<li>Folder locations</li>
+<li>Custom behavior flags</li>
+<li>Debug options (if enabled)</li>
+</ul>
+<h3 id="step-by-step-update-settings">Step-by-step: update settings</h3>
+<ol>
+<li>Go to Configuration.</li>
+<li>Update the fields.</li>
+<li>Click Save.</li>
+</ol>
+<p><strong>Tip:</strong> If the add-in cannot connect, double-check the URL and token.</p>
+<h2 id="output-folders-and-naming">Output folders and naming</h2>
+<p>The add-in writes files to subfolders inside your deliverables folder. Typical examples:</p>
+<ul>
+<li><code>deliverables/pdf/</code></li>
+<li><code>deliverables/step/</code></li>
+<li><code>deliverables/3mf/</code></li>
+<li><code>deliverables/ply/</code></li>
+<li><code>deliverables/stl/</code></li>
+</ul>
+<p>File naming uses part number and revision:</p>
+<ul>
+<li><code>PARTNUMBER_REV_REVISION.ext</code></li>
+</ul>
+<p>If the revision is blank, the name ends with <code>_REV_.ext</code> (this is expected).</p>
+<h1 id="end-to-end-workflow-golden-path">End-to-end workflow (golden path)</h1>
+<p>This is the recommended workflow from design to doc pack.</p>
+<h2 id="step-1-set-up-the-server">Step 1: Set up the server</h2>
+<ol>
+<li>Install the TinyMRP server (see Server installation section).</li>
+<li>Create the first admin user.</li>
+<li>Log in as admin and create roles and users.</li>
+<li>Set branding and timezone in Admin Settings.</li>
+</ol>
+<p><strong>Expected result:</strong> Users can log in and see the Inventory page.</p>
+<h2 id="step-2-prepare-parts-in-solidworks">Step 2: Prepare parts in SolidWorks</h2>
+<ol>
+<li>Open the part or assembly.</li>
+<li>Confirm the part number and revision in the properties.</li>
+<li>Save the model.</li>
+<li>If you use numbering, allocate a number and apply it.</li>
+</ol>
+<p><strong>Common mistake:</strong> Exporting deliverables before the part number is saved.</p>
+<h2 id="step-3-publish-deliverables">Step 3: Publish deliverables</h2>
+<ol>
+<li>Open the Publish/BOM tab in the add-in.</li>
+<li>Select the outputs you need (PDF, DXF, STEP, 3MF, PLY, STL, PNG).</li>
+<li>Choose the deliverables folder.</li>
+<li>Click Publish.</li>
+<li>Wait until the process finishes.</li>
+</ol>
+<p><strong>Expected result:</strong> Files appear in the correct deliverables subfolders.</p>
+<h2 id="step-4-package-for-import">Step 4: Package for import</h2>
+<ol>
+<li>Create a ZIP file that includes the deliverables folder structure.</li>
+<li>Keep the folder names exactly as expected (<code>pdf</code>, <code>png</code>, <code>dxf</code>, <code>step</code>, <code>3mf</code>, <code>ply</code>, <code>stl</code>, etc).</li>
+<li>Make sure file names match <code>PARTNUMBER_REV_REVISION.ext</code>.</li>
+</ol>
+<p><strong>Tip:</strong> If you are unsure, start by zipping one part and verify the import result.</p>
+<h2 id="step-5-import-into-tinymrp">Step 5: Import into TinyMRP</h2>
+<ol>
+<li>Log in to the web app.</li>
+<li>Go to Import BOM.</li>
+<li>Upload the ZIP file.</li>
+<li>Wait for the import summary.</li>
+<li>Open the part detail page to confirm files are visible.</li>
+</ol>
+<p><strong>Expected result:</strong> The part shows files and thumbnails on its detail page.</p>
+<h2 id="step-6-generate-doc-packs">Step 6: Generate doc packs</h2>
+<ol>
+<li>On the part detail page, open Doc Packs.</li>
+<li>Select the outputs you need:
+<ul>
+<li>Binder (full PDF pack)</li>
+<li>Index (standalone)</li>
+<li>Visual summary</li>
+<li>Hardware summary</li>
+<li>Excel BOM</li>
+</ul>
+</li>
+<li>Click Generate and download the result.</li>
+</ol>
+<p><strong>What this button does:</strong> Generate creates a PDF or ZIP. It does not change your part data.</p>
+<h2 id="step-7-extract-bom-and-reports">Step 7: Extract BOM and reports</h2>
+<ol>
+<li>Use the Excel BOM output to share the BOM.</li>
+<li>Use the binder and visuals for manufacturing packages.</li>
+<li>Save outputs to your project folder.</li>
+</ol>
+<h2 id="iteration-loop-when-a-part-changes">Iteration loop (when a part changes)</h2>
+<ol>
+<li>Update the model in SolidWorks.</li>
+<li>Increment the revision if required.</li>
+<li>Re-export deliverables.</li>
+<li>Re-import into TinyMRP.</li>
+<li>Regenerate doc packs.</li>
+</ol>
+<h2 id="if-something-goes-wrong-decision-tree">If something goes wrong (decision tree)</h2>
+<ul>
+<li>
+<p><strong>No files appear after import</strong></p>
+<ul>
+<li>Check folder names inside the ZIP.</li>
+<li>Check that file names match the part number and revision.</li>
+<li>Confirm the deliverables folder is mounted to the server.</li>
+</ul>
+</li>
+<li>
+<p><strong>Wrong revision shown</strong></p>
+<ul>
+<li>Confirm the revision in SolidWorks properties.</li>
+<li>Re-export and re-import.</li>
+</ul>
+</li>
+<li>
+<p><strong>3D preview missing</strong></p>
+<ul>
+<li>Confirm a 3MF, PLY, or STL file exists.</li>
+<li>Check the file name pattern.</li>
+</ul>
+</li>
+<li>
+<p><strong>Doc pack is empty</strong></p>
+<ul>
+<li>Ensure PDFs exist for the part.</li>
+<li>Re-generate after verifying files.</li>
+</ul>
+</li>
+</ul>
+<h1 id="customization-and-admin-settings">Customization and admin settings</h1>
+<p>This section is for admins who manage the system.</p>
+<h2 id="branding-logo-and-visual-identity">Branding (logo and visual identity)</h2>
+<h3 id="where-to-find-it-10">Where to find it</h3>
+<ul>
+<li>Admin Dashboard &gt; App Settings</li>
+</ul>
+<h3 id="what-you-can-do-4">What you can do</h3>
+<ul>
+<li>Upload a company logo.</li>
+<li>Update the branding used in the web app and doc packs.</li>
+</ul>
+<h3 id="step-by-step-6">Step-by-step</h3>
+<ol>
+<li>Open Admin Dashboard.</li>
+<li>Go to App Settings.</li>
+<li>Upload a logo file (PNG or SVG).</li>
+<li>Save changes.</li>
+</ol>
+<p><strong>Expected result:</strong> The new logo appears in the header and in doc packs.</p>
+<h2 id="timezone">Timezone</h2>
+<h3 id="why-it-matters">Why it matters</h3>
+<p>Doc packs show a &quot;Generated&quot; timestamp. The timezone setting ensures the time is correct for your location.</p>
+<h3 id="step-by-step-7">Step-by-step</h3>
+<ol>
+<li>Open Admin Dashboard.</li>
+<li>Go to App Settings.</li>
+<li>Enter a timezone (for example <code>Australia/Melbourne</code>).</li>
+<li>Save changes.</li>
+</ol>
+<p><strong>Tip:</strong> Use standard timezone names from the IANA list.</p>
+<h2 id="users-and-roles">Users and roles</h2>
+<h3 id="where-to-find-it-11">Where to find it</h3>
+<ul>
+<li>Admin Dashboard &gt; Users</li>
+<li>Admin Dashboard &gt; Roles</li>
+</ul>
+<h3 id="what-you-can-do-5">What you can do</h3>
+<ul>
+<li>Add users.</li>
+<li>Assign roles and permissions.</li>
+<li>Limit access to specific functions.</li>
+</ul>
+<h3 id="common-role-patterns">Common role patterns</h3>
+<ul>
+<li>Viewer: read-only access</li>
+<li>Operator: view + import</li>
+<li>Planner: manage jobs and orders</li>
+<li>Admin: full access</li>
+</ul>
+<h2 id="add-in-administration">Add-in administration</h2>
+<h3 id="where-to-find-it-12">Where to find it</h3>
+<ul>
+<li>Admin Dashboard &gt; Add-in</li>
+</ul>
+<h3 id="what-you-can-do-6">What you can do</h3>
+<ul>
+<li>View or manage add-in settings and tokens.</li>
+<li>Check usage if logs are enabled.</li>
+</ul>
+<h2 id="deliverables-storage">Deliverables storage</h2>
+<h3 id="what-you-can-do-7">What you can do</h3>
+<ul>
+<li>Choose the deliverables root folder.</li>
+<li>Control public file access.</li>
+</ul>
+<p><strong>Common mistake:</strong> Enabling public file URLs without a proxy or security layer.</p>
+<h1 id="troubleshooting-8">Troubleshooting</h1>
+<p>Use this section when something is not working as expected.</p>
+<h2 id="login-issues">Login issues</h2>
+<ul>
+<li><strong>Cannot log in:</strong> Check email and password. Ask an admin to reset your password.</li>
+<li><strong>Access denied:</strong> You may not have the required role or permission.</li>
+</ul>
+<h2 id="missing-files-in-part-detail">Missing files in part detail</h2>
+<ul>
+<li>Confirm the file is in the deliverables folder.</li>
+<li>Confirm the file name matches the part number and revision.</li>
+<li>Re-import the ZIP.</li>
+</ul>
+<h2 id="thumbnails-not-showing">Thumbnails not showing</h2>
+<ul>
+<li>Wait a few seconds after import (thumbnails are generated).</li>
+<li>If still missing, re-import or run thumbnail rebuild.</li>
+</ul>
+<h2 id="drawing-preview-is-blank">Drawing preview is blank</h2>
+<ul>
+<li>Confirm a file ending with <code>_DWG.png</code> exists in the <code>png</code> folder.</li>
+<li>Ensure the drawing file is readable (open it outside TinyMRP).</li>
+</ul>
+<h2 id="3d-preview-missing">3D preview missing</h2>
+<ul>
+<li>Confirm a 3MF, PLY, or STL file exists.</li>
+<li>Confirm the file name matches the part number and revision.</li>
+<li>Try selecting a different format in the 3D preview selector.</li>
+</ul>
+<h2 id="doc-pack-is-empty-or-missing-sections">Doc pack is empty or missing sections</h2>
+<ul>
+<li>Ensure PDFs exist for the part.</li>
+<li>Re-generate the doc pack after verifying files.</li>
+</ul>
+<h2 id="import-errors">Import errors</h2>
+<ul>
+<li><strong>ZIP rejected:</strong> Check the folder structure.</li>
+<li><strong>No parts created:</strong> Ensure the BOM file and deliverables exist.</li>
+<li><strong>Wrong revision:</strong> Check the revision value in file names.</li>
+</ul>
+<h2 id="add-in-connection-failed">Add-in connection failed</h2>
+<ul>
+<li>Check the server URL and token.</li>
+<li>Ensure the server is running.</li>
+<li>Ask your admin to create a new token.</li>
+</ul>
+<h2 id="when-to-contact-support">When to contact support</h2>
+<ul>
+<li>You see repeated errors after following the steps above.</li>
+<li>The server does not start.</li>
+<li>Data appears corrupted or missing across multiple parts.</li>
+</ul>
+<h1 id="reference-auto-updated">Reference (auto-updated)</h1>
+<p>This section is auto-generated when you run <code>flask help build</code>. It summarizes routes, pages, and options detected in the codebase.</p>
+<h2 id="web-ui-pages-routes">Web UI pages (routes)</h2>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>What it is for</th>
+<th>Permissions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/ui/dashboard</code></td>
+<td>System dashboard and summary metrics.</td>
+<td>Requires login</td>
+</tr>
+<tr>
+<td><code>/ui/parts</code></td>
+<td>Inventory list and search.</td>
+<td>Requires login</td>
+</tr>
+<tr>
+<td><code>/ui/bom</code></td>
+<td>BOM tree view for parts and assemblies.</td>
+<td>Requires login</td>
+</tr>
+<tr>
+<td><code>/ui/bom/:pn</code></td>
+<td>BOM tree view for parts and assemblies.</td>
+<td>Requires login</td>
+</tr>
+<tr>
+<td><code>/ui/part/:pn</code></td>
+<td>Part detail view with files, previews, and doc packs.</td>
+<td>Requires login</td>
+</tr>
+<tr>
+<td><code>/ui/addin/tokens</code></td>
+<td>Create and manage add-in access tokens.</td>
+<td>Requires login</td>
+</tr>
+<tr>
+<td><code>/ui/admin/addin</code></td>
+<td>Admin tools for add-in settings and monitoring.</td>
+<td>Admin only</td>
+</tr>
+</tbody>
+</table>
+<h2 id="api-endpoints">API endpoints</h2>
+<h3 id="appviewsimporterpy">app\views\importer.py</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td><code>/api</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="environment-variables">Environment variables</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Example</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DELIVERABLES_DIR</code></td>
+<td><code>C:/CADEXPORT/Deliverables</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>FILES_LOCAL_ROOT</code></td>
+<td><code>C:/CADEXPORT</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>FILES_UPSTREAM_BASE</code></td>
+<td><code>http://localhost:5001</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>FILES_URL_PREFIX</code></td>
+<td><code>/deliverables</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>HTTP_PORT</code></td>
+<td><code>5000</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>MONGO_DB</code></td>
+<td><code>tinymrp-v2</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>MONGO_URI</code></td>
+<td><code>mongodb://localhost:27017/tinymrp-v2</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>SECRET_KEY</code></td>
+<td><code>dev-secret</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>SECURITY_PASSWORD_SALT</code></td>
+<td><code>dev-salt</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>VITE_BACKEND_URL</code></td>
+<td><code>http://localhost:5000</code></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2 id="solidworks-add-in-options">SolidWorks add-in options</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>What it does</th>
+<th>Where in UI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ExportPngModel</code></td>
+<td>Export PNG model preview.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>ExportStep</code></td>
+<td>Export STEP model.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>ExportEdrawing</code></td>
+<td>Export eDrawings model.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>Export3mf</code></td>
+<td>Export 3MF model.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>ExportPly</code></td>
+<td>Export PLY model.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>ExportStl</code></td>
+<td>Export STL model.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>ExportPngDrawing</code></td>
+<td>Export drawing PNG (DWG preview).</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>ExportPdf</code></td>
+<td>Export drawing PDF.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>ExportEdrawingDrawing</code></td>
+<td>Export eDrawings drawing.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>OverwriteFiles</code></td>
+<td>Overwrite existing files on export.</td>
+<td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>TopLevelOnly</code></td>
+<td>Export only the top-level assembly.</td>
+<td>Publish/BOM tab</td>
+</tr>
+</tbody>
+</table>
+<h2 id="solidworks-add-in-tabs">SolidWorks add-in tabs</h2>
+<table>
+<thead>
+<tr>
+<th>Tab</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Publish/BOM</td>
+<td>Export deliverables and BOMs.</td>
+</tr>
+<tr>
+<td>Tools</td>
+<td>Utilities like hide features and unit normalization.</td>
+</tr>
+<tr>
+<td>Numbering</td>
+<td>Part numbering schemes and allocation.</td>
+</tr>
+<tr>
+<td>Configuration</td>
+<td>Server connection and advanced settings.</td>
+</tr>
+<tr>
+<td>Quick Start</td>
+<td>Basic connection settings.</td>
+</tr>
+<tr>
+<td>Advanced</td>
+<td>Additional configuration options.</td>
+</tr>
+</tbody>
+</table>
