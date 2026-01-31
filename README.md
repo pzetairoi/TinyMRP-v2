@@ -62,6 +62,13 @@ Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 
 - `/admin/settings` lets admins upload a branding logo (PNG/SVG) and set the default timezone used in document packs.
 
+## Help System
+
+- Help content lives in `docs/help/` (markdown).
+- Generate the static help page with: `flask help build`.
+- The output is written to `app/static/help/help.html` and `app/static/help/help_toc.json`.
+- Commit the generated files so `/help` is always up to date.
+
 ## SolidWorks Add-in
 
 Add-in project lives in `solidworks-addin/`.

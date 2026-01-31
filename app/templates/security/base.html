@@ -47,6 +47,7 @@
 
             {% if current_user.is_authenticated %}
               <li class="nav-item"><a class="nav-link" href="/ui/parts">Inventory</a></li>
+              <li class="nav-item"><a class="nav-link" href="/help">Help</a></li>
               {% if has_perm('tools.view') %}
               <li class="nav-item"><a class="nav-link" href="{{ url_for('tools.tools_index') }}">Tools</a></li>
               {% endif %}

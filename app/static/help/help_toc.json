@@ -1,0 +1,606 @@
+{
+  "generated_at": "2026-01-31 02:15 UTC",
+  "commit": "7adac3b",
+  "items": [
+    {
+      "id": "how-this-help-is-generated-how-to-update-it",
+      "title": "How this help is generated / how to update it",
+      "level": 2
+    },
+    {
+      "id": "what-you-can-do-in-tinymrp",
+      "title": "What you can do in TinyMRP",
+      "level": 2
+    },
+    {
+      "id": "who-this-guide-is-for",
+      "title": "Who this guide is for",
+      "level": 2
+    },
+    {
+      "id": "quick-navigation",
+      "title": "Quick navigation",
+      "level": 2
+    },
+    {
+      "id": "before-you-begin",
+      "title": "Before you begin",
+      "level": 2
+    },
+    {
+      "id": "option-a-recommended-installation-docker-compose",
+      "title": "Option A: Recommended installation (Docker Compose)",
+      "level": 2
+    },
+    {
+      "id": "step-1-get-the-project-files",
+      "title": "Step 1: Get the project files",
+      "level": 3
+    },
+    {
+      "id": "step-2-prepare-the-environment-file",
+      "title": "Step 2: Prepare the environment file",
+      "level": 3
+    },
+    {
+      "id": "step-3-start-the-stack",
+      "title": "Step 3: Start the stack",
+      "level": 3
+    },
+    {
+      "id": "step-4-create-the-first-admin-user",
+      "title": "Step 4: Create the first admin user",
+      "level": 3
+    },
+    {
+      "id": "step-5-open-the-web-app",
+      "title": "Step 5: Open the web app",
+      "level": 3
+    },
+    {
+      "id": "option-b-local-development-install-advanced",
+      "title": "Option B: Local development install (advanced)",
+      "level": 2
+    },
+    {
+      "id": "file-storage-and-deliverables",
+      "title": "File storage and deliverables",
+      "level": 2
+    },
+    {
+      "id": "logging-in-and-permissions",
+      "title": "Logging in and permissions",
+      "level": 2
+    },
+    {
+      "id": "updating-the-server-later",
+      "title": "Updating the server later",
+      "level": 2
+    },
+    {
+      "id": "inventory-parts-list",
+      "title": "Inventory (Parts list)",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-on-this-screen",
+      "title": "What you can do on this screen",
+      "level": 3
+    },
+    {
+      "id": "step-by-step",
+      "title": "Step-by-step",
+      "level": 3
+    },
+    {
+      "id": "what-to-expect",
+      "title": "What to expect",
+      "level": 3
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "level": 3
+    },
+    {
+      "id": "part-detail",
+      "title": "Part detail",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-2",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-on-this-screen-2",
+      "title": "What you can do on this screen",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-viewing-images-and-drawings",
+      "title": "Step-by-step: viewing images and drawings",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-3d-preview",
+      "title": "Step-by-step: 3D preview",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-downloading-files",
+      "title": "Step-by-step: downloading files",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-generating-doc-packs",
+      "title": "Step-by-step: generating doc packs",
+      "level": 3
+    },
+    {
+      "id": "troubleshooting-2",
+      "title": "Troubleshooting",
+      "level": 3
+    },
+    {
+      "id": "dashboard",
+      "title": "Dashboard",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-3",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-on-this-screen-3",
+      "title": "What you can do on this screen",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-2",
+      "title": "Step-by-step",
+      "level": 3
+    },
+    {
+      "id": "troubleshooting-3",
+      "title": "Troubleshooting",
+      "level": 3
+    },
+    {
+      "id": "bom-views",
+      "title": "BOM views",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-4",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-on-this-screen-4",
+      "title": "What you can do on this screen",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-3",
+      "title": "Step-by-step",
+      "level": 3
+    },
+    {
+      "id": "troubleshooting-4",
+      "title": "Troubleshooting",
+      "level": 3
+    },
+    {
+      "id": "tokens-page-add-in-access",
+      "title": "Tokens page (Add-in access)",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-5",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-on-this-screen-5",
+      "title": "What you can do on this screen",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-4",
+      "title": "Step-by-step",
+      "level": 3
+    },
+    {
+      "id": "admin-add-in-page",
+      "title": "Admin add-in page",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-6",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-on-this-screen-6",
+      "title": "What you can do on this screen",
+      "level": 3
+    },
+    {
+      "id": "troubleshooting-5",
+      "title": "Troubleshooting",
+      "level": 3
+    },
+    {
+      "id": "admin-dashboard",
+      "title": "Admin Dashboard",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-7",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-on-this-screen-7",
+      "title": "What you can do on this screen",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-branding-and-timezone",
+      "title": "Step-by-step: branding and timezone",
+      "level": 3
+    },
+    {
+      "id": "import-bom-and-deliverables",
+      "title": "Import BOM and deliverables",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-8",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-on-this-screen-8",
+      "title": "What you can do on this screen",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-5",
+      "title": "Step-by-step",
+      "level": 3
+    },
+    {
+      "id": "troubleshooting-6",
+      "title": "Troubleshooting",
+      "level": 3
+    },
+    {
+      "id": "what-you-need",
+      "title": "What you need",
+      "level": 2
+    },
+    {
+      "id": "step-by-step-install-the-add-in",
+      "title": "Step-by-step: install the add-in",
+      "level": 2
+    },
+    {
+      "id": "step-by-step-enable-the-add-in-in-solidworks",
+      "title": "Step-by-step: enable the add-in in SolidWorks",
+      "level": 2
+    },
+    {
+      "id": "step-by-step-open-the-task-pane",
+      "title": "Step-by-step: open the task pane",
+      "level": 2
+    },
+    {
+      "id": "step-by-step-configure-the-connection",
+      "title": "Step-by-step: configure the connection",
+      "level": 2
+    },
+    {
+      "id": "where-settings-are-saved",
+      "title": "Where settings are saved",
+      "level": 2
+    },
+    {
+      "id": "if-installation-fails",
+      "title": "If installation fails",
+      "level": 2
+    },
+    {
+      "id": "publishbom-tab",
+      "title": "Publish/BOM tab",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-9",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do",
+      "title": "What you can do",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-publish-deliverables",
+      "title": "Step-by-step: publish deliverables",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-export-bom",
+      "title": "Step-by-step: export BOM",
+      "level": 3
+    },
+    {
+      "id": "troubleshooting-7",
+      "title": "Troubleshooting",
+      "level": 3
+    },
+    {
+      "id": "tools-tab",
+      "title": "Tools tab",
+      "level": 2
+    },
+    {
+      "id": "what-you-can-do-2",
+      "title": "What you can do",
+      "level": 3
+    },
+    {
+      "id": "tips",
+      "title": "Tips",
+      "level": 3
+    },
+    {
+      "id": "numbering-tab",
+      "title": "Numbering tab",
+      "level": 2
+    },
+    {
+      "id": "what-you-can-do-3",
+      "title": "What you can do",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-allocate-part-numbers",
+      "title": "Step-by-step: allocate part numbers",
+      "level": 3
+    },
+    {
+      "id": "configuration-tab",
+      "title": "Configuration tab",
+      "level": 2
+    },
+    {
+      "id": "quick-start-sub-tab",
+      "title": "Quick Start sub-tab",
+      "level": 3
+    },
+    {
+      "id": "advanced-sub-tab",
+      "title": "Advanced sub-tab",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-update-settings",
+      "title": "Step-by-step: update settings",
+      "level": 3
+    },
+    {
+      "id": "output-folders-and-naming",
+      "title": "Output folders and naming",
+      "level": 2
+    },
+    {
+      "id": "step-1-set-up-the-server",
+      "title": "Step 1: Set up the server",
+      "level": 2
+    },
+    {
+      "id": "step-2-prepare-parts-in-solidworks",
+      "title": "Step 2: Prepare parts in SolidWorks",
+      "level": 2
+    },
+    {
+      "id": "step-3-publish-deliverables",
+      "title": "Step 3: Publish deliverables",
+      "level": 2
+    },
+    {
+      "id": "step-4-package-for-import",
+      "title": "Step 4: Package for import",
+      "level": 2
+    },
+    {
+      "id": "step-5-import-into-tinymrp",
+      "title": "Step 5: Import into TinyMRP",
+      "level": 2
+    },
+    {
+      "id": "step-6-generate-doc-packs",
+      "title": "Step 6: Generate doc packs",
+      "level": 2
+    },
+    {
+      "id": "step-7-extract-bom-and-reports",
+      "title": "Step 7: Extract BOM and reports",
+      "level": 2
+    },
+    {
+      "id": "iteration-loop-when-a-part-changes",
+      "title": "Iteration loop (when a part changes)",
+      "level": 2
+    },
+    {
+      "id": "if-something-goes-wrong-decision-tree",
+      "title": "If something goes wrong (decision tree)",
+      "level": 2
+    },
+    {
+      "id": "branding-logo-and-visual-identity",
+      "title": "Branding (logo and visual identity)",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-10",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-4",
+      "title": "What you can do",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-6",
+      "title": "Step-by-step",
+      "level": 3
+    },
+    {
+      "id": "timezone",
+      "title": "Timezone",
+      "level": 2
+    },
+    {
+      "id": "why-it-matters",
+      "title": "Why it matters",
+      "level": 3
+    },
+    {
+      "id": "step-by-step-7",
+      "title": "Step-by-step",
+      "level": 3
+    },
+    {
+      "id": "users-and-roles",
+      "title": "Users and roles",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-11",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-5",
+      "title": "What you can do",
+      "level": 3
+    },
+    {
+      "id": "common-role-patterns",
+      "title": "Common role patterns",
+      "level": 3
+    },
+    {
+      "id": "add-in-administration",
+      "title": "Add-in administration",
+      "level": 2
+    },
+    {
+      "id": "where-to-find-it-12",
+      "title": "Where to find it",
+      "level": 3
+    },
+    {
+      "id": "what-you-can-do-6",
+      "title": "What you can do",
+      "level": 3
+    },
+    {
+      "id": "deliverables-storage",
+      "title": "Deliverables storage",
+      "level": 2
+    },
+    {
+      "id": "what-you-can-do-7",
+      "title": "What you can do",
+      "level": 3
+    },
+    {
+      "id": "login-issues",
+      "title": "Login issues",
+      "level": 2
+    },
+    {
+      "id": "missing-files-in-part-detail",
+      "title": "Missing files in part detail",
+      "level": 2
+    },
+    {
+      "id": "thumbnails-not-showing",
+      "title": "Thumbnails not showing",
+      "level": 2
+    },
+    {
+      "id": "drawing-preview-is-blank",
+      "title": "Drawing preview is blank",
+      "level": 2
+    },
+    {
+      "id": "3d-preview-missing",
+      "title": "3D preview missing",
+      "level": 2
+    },
+    {
+      "id": "doc-pack-is-empty-or-missing-sections",
+      "title": "Doc pack is empty or missing sections",
+      "level": 2
+    },
+    {
+      "id": "import-errors",
+      "title": "Import errors",
+      "level": 2
+    },
+    {
+      "id": "add-in-connection-failed",
+      "title": "Add-in connection failed",
+      "level": 2
+    },
+    {
+      "id": "when-to-contact-support",
+      "title": "When to contact support",
+      "level": 2
+    },
+    {
+      "id": "web-ui-pages-routes",
+      "title": "Web UI pages (routes)",
+      "level": 2
+    },
+    {
+      "id": "api-endpoints",
+      "title": "API endpoints",
+      "level": 2
+    },
+    {
+      "id": "appviewsimporterpy",
+      "title": "app\\views\\importer.py",
+      "level": 3
+    },
+    {
+      "id": "environment-variables",
+      "title": "Environment variables",
+      "level": 2
+    },
+    {
+      "id": "solidworks-add-in-options",
+      "title": "SolidWorks add-in options",
+      "level": 2
+    },
+    {
+      "id": "solidworks-add-in-tabs",
+      "title": "SolidWorks add-in tabs",
+      "level": 2
+    }
+  ]
+}

@@ -694,6 +694,32 @@ def init_app(app):
 
     app.cli.add_command(audit)
 
+    # ---- Help documentation ----
+    import sys
+    import subprocess
+
+    @click.group(name="help")
+    def helpcmd():
+        """Help documentation utilities."""
+
+    @helpcmd.command("build")
+    @with_appcontext
+    def help_build():
+        """Generate the static help HTML and TOC files."""
+        root = os.path.abspath(os.path.join(current_app.root_path, os.pardir))
+        script = os.path.join(root, "tools", "build_help.py")
+        if not os.path.isfile(script):
+            click.echo("tools/build_help.py not found.")
+            raise SystemExit(1)
+        try:
+            out = subprocess.check_output([sys.executable, script], cwd=root)
+            click.echo(out.decode("utf-8").strip())
+        except subprocess.CalledProcessError as exc:
+            click.echo(f"Help build failed: {exc}")
+            raise SystemExit(1)
+
+    app.cli.add_command(helpcmd)
+
     # ---- Business demo seeding (jobs, suppliers, customers, orders) ----
     import click
 
