@@ -54,8 +54,10 @@ def part_images():
     rows = []
     for d in qs.order_by("-mtime_iso"):
         urls: list[str] = []
-        # 1) Public thumbnail URLs only if explicitly allowed
-        if allow_public and http_base and getattr(d, "thumb_rel_path", None):
+        prefer_thumb = not bool(getattr(d, "is_dwg", False))
+
+        # 1) Public thumbnail URLs only if explicitly allowed (preview images only)
+        if prefer_thumb and allow_public and http_base and getattr(d, "thumb_rel_path", None):
             urls.append(f"{http_base}/{d.thumb_rel_path}")
 
         # 2) Public URLs only if explicitly allowed
@@ -68,7 +70,7 @@ def part_images():
 
         # 4) Secure tokenized URL
         try:
-            if getattr(d, "thumb_rel_path", None):
+            if prefer_thumb and getattr(d, "thumb_rel_path", None):
                 urls.append(file_url_for(d, kind="thumb"))
             urls.append(file_url_for(d))
         except Exception:

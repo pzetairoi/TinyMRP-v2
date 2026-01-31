@@ -4,9 +4,9 @@ from app.models.artifact import PartFile
 from app.services.files_access import file_url_for, public_file_urls_enabled
 
 def _urls_for(pn: str, rev: Optional[str], *, is_dwg: bool):
-    """Return best-first URLs for preview/drawing PNGs, preferring thumbnails.
+    """Return best-first URLs for preview/drawing PNGs.
 
-    Order: HTTP thumbnail -> HTTP original -> tokenized local (thumb/original).
+    Order: preview prefers thumbnails; drawings prefer originals.
     """
     if rev is not None:
         rev_clean = rev or ""
@@ -20,37 +20,9 @@ def _urls_for(pn: str, rev: Optional[str], *, is_dwg: bool):
     pf = rows.first()
 
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
-    allow_public = public_file_urls_enabled()
-    out: list[str] = []
-
-    # 1) HTTP thumbnail if available
-    if allow_public and http_base and getattr(pf, "thumb_rel_path", None):
-        out.append(f"{http_base}/{pf.thumb_rel_path}")
-
-    # 2) HTTP original if available
-    if allow_public and http_base and getattr(pf, "rel_path", None):
-        out.append(f"{http_base}/{pf.rel_path}")
-
-    # 3) Pre-built http_url saved by scanner, if present
-    if allow_public and getattr(pf, "http_url", None):
-        out.append(pf.http_url)
-
-    # 4) Tokenized URLs (thumb first, then original)
-    try:
-        if getattr(pf, "thumb_rel_path", None):
-            out.append(file_url_for(pf, kind="thumb"))
-        out.append(file_url_for(pf, kind="file"))
-    except Exception:
-        pass
-
-    # Deduplicate while preserving order
-    seen = set()
-    dedup = []
-    for u in out:
-        if u and u not in seen:
-            seen.add(u)
-            dedup.append(u)
-    return dedup
+    prefer_thumb = not is_dwg
+    out = _urls_for_doc(pf, http_base, prefer_thumb=prefer_thumb)
+    return _dedup_urls(out)
 
 def preview_png_urls_for(pn: str, rev: str | None):
     return _urls_for(pn, rev, is_dwg=False)
@@ -64,21 +36,32 @@ def thumb_urls_for(pn: str, rev: str | None):
 
 
 # helper: build URL list for a single PartFile doc
-def _urls_for_doc(d: PartFile, http_base: str) -> List[str]:
+def _urls_for_doc(d: PartFile, http_base: str, *, prefer_thumb: bool = True) -> List[str]:
     urls: List[str] = []
     allow_public = public_file_urls_enabled()
-    if allow_public and http_base and d.thumb_rel_path:
+    if prefer_thumb and allow_public and http_base and d.thumb_rel_path:
         urls.append(f"{http_base}/{d.thumb_rel_path}")
     if allow_public and http_base and d.rel_path:
         urls.append(f"{http_base}/{d.rel_path}")
+    if allow_public and getattr(d, "http_url", None):
+        urls.append(d.http_url)
     # fallback to tokenized local file using signed token
     try:
-        if d.thumb_rel_path:
+        if prefer_thumb and d.thumb_rel_path:
             urls.append(file_url_for(d, kind="thumb"))
         urls.append(file_url_for(d, kind="file"))
     except Exception:
         pass
     return urls
+
+def _dedup_urls(urls: List[str]) -> List[str]:
+    seen = set()
+    dedup: List[str] = []
+    for u in urls:
+        if u and u not in seen:
+            seen.add(u)
+            dedup.append(u)
+    return dedup
 
 def drawing_urls_for(pn: str, rev_pref: Optional[str]) -> List[str]:
     """
@@ -106,7 +89,7 @@ def drawing_urls_for(pn: str, rev_pref: Optional[str]) -> List[str]:
 
     dwg_docs = [d for d in docs if is_dwg(d)]
     if dwg_docs:
-        return _urls_for_doc(dwg_docs[0], http_base)
+        return _dedup_urls(_urls_for_doc(dwg_docs[0], http_base, prefer_thumb=False))
 
     # fallback to standard thumbnail policy
     return thumb_urls_for(pn, rev_pref)
