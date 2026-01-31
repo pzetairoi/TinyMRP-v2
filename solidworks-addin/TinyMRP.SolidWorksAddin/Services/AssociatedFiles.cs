@@ -39,18 +39,19 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return payload;
             }
 
+            if (TryParse(json, payload))
+            {
+                return payload;
+            }
+
             try
             {
                 var serializer = new JavaScriptSerializer();
-                var data = serializer.DeserializeObject(json) as Dictionary<string, object>;
-                if (data == null)
+                string unwrapped = serializer.Deserialize<string>(json);
+                if (!string.IsNullOrWhiteSpace(unwrapped) && TryParse(unwrapped, payload))
                 {
                     return payload;
                 }
-
-                payload.PartNumber = ReadString(data, "pn");
-                payload.Revision = ReadString(data, "rev");
-                payload.Files = ReadFiles(data);
             }
             catch
             {
@@ -58,6 +59,33 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             return payload;
+        }
+
+        private static bool TryParse(string json, AssociatedFilesPayload payload)
+        {
+            if (string.IsNullOrWhiteSpace(json) || payload == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var serializer = new JavaScriptSerializer();
+                var data = serializer.DeserializeObject(json) as Dictionary<string, object>;
+                if (data == null)
+                {
+                    return false;
+                }
+
+                payload.PartNumber = ReadString(data, "pn");
+                payload.Revision = ReadString(data, "rev");
+                payload.Files = ReadFiles(data);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string ReadString(Dictionary<string, object> data, string key)

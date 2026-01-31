@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Web.Script.Serialization;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using TinyMRP.SolidWorksAddin.Services;
 
@@ -31,6 +32,32 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.AreEqual(1, loaded.Files.Count);
             Assert.AreEqual(@"C:\temp\scan.e57", loaded.Files[0].Path);
             Assert.AreEqual("scan", loaded.Files[0].Label);
+        }
+
+        [TestMethod]
+        public void AssociatedFilesPayload_ParsesWrappedJson()
+        {
+            var payload = new AssociatedFilesPayload
+            {
+                PartNumber = "PN-20",
+                Revision = "B",
+                Files = new List<AssociatedFileEntry>
+                {
+                    new AssociatedFileEntry { Path = @"C:\temp\report.pdf", Label = "report" }
+                }
+            };
+
+            string json = payload.ToJson();
+            var serializer = new JavaScriptSerializer();
+            string wrapped = serializer.Serialize(json);
+
+            var loaded = AssociatedFilesPayload.FromJson(wrapped);
+
+            Assert.AreEqual("PN-20", loaded.PartNumber);
+            Assert.AreEqual("B", loaded.Revision);
+            Assert.AreEqual(1, loaded.Files.Count);
+            Assert.AreEqual(@"C:\temp\report.pdf", loaded.Files[0].Path);
+            Assert.AreEqual("report", loaded.Files[0].Label);
         }
 
         [TestMethod]

@@ -95,7 +95,7 @@ def upload_pack_ui():
     assets = vite_assets()
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
-    return render_template("ui/react_shell.html", title="Upload Pack", assets=assets, initial={})
+    return render_template("ui/react_shell.html", title="Import", assets=assets, initial={})
 
 @bp.get("/part/<path:pn>")
 @login_required
