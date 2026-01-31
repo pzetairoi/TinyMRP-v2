@@ -36,8 +36,8 @@ def test_cors_compat_same_origin(monkeypatch):
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="compat",
-        SECRET_KEY="test-secret",
-        SECURITY_PASSWORD_SALT="test-salt",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
     )
     client = app.test_client()
     resp = client.get("/", headers={"Origin": "http://localhost"})
@@ -49,8 +49,8 @@ def test_cors_strict_requires_allowlist(monkeypatch):
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="strict",
-        SECRET_KEY="test-secret",
-        SECURITY_PASSWORD_SALT="test-salt",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
         TINYMRP_ALLOWED_ORIGINS="",
     )
     client = app.test_client()
@@ -62,8 +62,8 @@ def test_cors_strict_allowlist_no_creds_by_default(monkeypatch):
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="strict",
-        SECRET_KEY="test-secret",
-        SECURITY_PASSWORD_SALT="test-salt",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
         TINYMRP_ALLOWED_ORIGINS="http://example.com",
     )
     client = app.test_client()
@@ -76,8 +76,8 @@ def test_strict_api_requires_token_even_with_session(monkeypatch):
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="strict",
-        SECRET_KEY="test-secret",
-        SECURITY_PASSWORD_SALT="test-salt",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
     )
     user = User(email="strict@example.com", password="x", active=True, fs_uniquifier="u1").save()
     client = app.test_client()
@@ -91,8 +91,8 @@ def test_session_csrf_blocks_cross_origin(monkeypatch):
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="compat",
-        SECRET_KEY="test-secret",
-        SECURITY_PASSWORD_SALT="test-salt",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
     )
     user = User(email="csrf@example.com", password="x", active=True, fs_uniquifier="u2").save()
     client = app.test_client()
@@ -110,8 +110,8 @@ def test_files_proxy_blocks_ip_in_strict(monkeypatch):
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="strict",
-        SECRET_KEY="test-secret",
-        SECURITY_PASSWORD_SALT="test-salt",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
     )
     app.config["FILES_UPSTREAM_BASE"] = "http://127.0.0.1:8080"
     with app.test_request_context("/deliverables/test.txt"):
@@ -123,8 +123,8 @@ def test_files_proxy_no_redirects(monkeypatch):
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="compat",
-        SECRET_KEY="test-secret",
-        SECURITY_PASSWORD_SALT="test-salt",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
     )
     app.config["FILES_UPSTREAM_BASE"] = "http://example.com"
     called = {}
