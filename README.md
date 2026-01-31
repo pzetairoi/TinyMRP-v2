@@ -47,10 +47,16 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `FILES_ACCEL_REDIRECT_PREFIX=/__files`: internal Nginx location used for X-Accel-Redirect.
   - `FILES_ALLOW_LEGACY_TOKENS=false`: allow legacy base64 file tokens (off by default).
 - Optional:
+  - `TINYMRP_SECURITY_MODE=compat|strict`: security profile (default compat).
+  - `TINYMRP_ALLOWED_ORIGINS`: comma-separated CORS allowlist (strict mode requires this).
+  - `TINYMRP_CORS_CREDENTIALS=true`: allow credentials when using an explicit allowlist.
+  - `TINYMRP_MAX_CONTENT_MB`: global request size cap (falls back to Upload Pack max).
   - `FILE_HASH_MAX_BYTES`: compute/verify file hashes up to this size (0 to disable).
   - `VITE_BACKEND_URL`: dev proxy target for Vite (`frontend/vite.config.ts`).
   - `FORCE_HTTPS=true`: enforce HTTPS and set secure cookies.
   - `SECURITY_HEADERS_ENABLED=true`: send CSP + security headers.
+  - `FILES_UPSTREAM_ALLOWED_HOSTS`: optional allowlist for proxy upstream hostnames.
+  - `FILES_PROXY_MAX_BYTES`: max bytes proxied from upstream file servers.
   - `EXCEL_COMPILE_MAX_BYTES=10485760`: max upload size for Excel Compile.
   - `UPLOAD_PACK_MAX_ZIP_MB=500`: max ZIP size for Upload Pack.
   - `UPLOAD_PACK_MAX_FILE_MB=200`: max single file size for Upload Pack/extra uploads.
@@ -58,10 +64,19 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `EXTRA_FILES_ALLOWED=true`: enable/disable associated file uploads.
   - `APP_TIMEZONE`: default timezone (IANA name) for docpack timestamps if no admin override is set.
   - `BRANDING_LOGO_MAX_BYTES`: max logo upload size in bytes (default 2097152).
+  - `TINYMRP_SEED_ADMIN=true`: opt-in admin seeding on first boot (compat mode).
+  - `TINYMRP_ADMIN_EMAIL`, `TINYMRP_ADMIN_PASSWORD`: credentials used when seeding.
 
 Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 
 ---
+
+## Security Modes
+
+- **compat (default)**: backward-compatible behavior, with safer CORS defaults, origin-based CSRF guard for session APIs, and warnings for weak secrets. If secrets are missing/weak, TinyMRP generates a temporary runtime secret (sessions/tokens will reset on restart).
+- **strict**: /api is token-only, CORS is disabled unless `TINYMRP_ALLOWED_ORIGINS` is set, cookies are Secure + SameSite=Strict, and startup fails if secrets are missing/weak.
+
+See `SECURITY.md` for the full threat model and `MIGRATION.md` for a safe rollout checklist.
 
 ## Admin Settings
 
@@ -423,7 +438,7 @@ Edit your local `.env` and set at minimum:
 
 - `DELIVERABLES_DIR=/srv/tinymrp/deliverables` (Linux absolute path)
 - `HTTP_PORT=80` (or another free port if 80 is taken)
-- Optional first-run admin seed: `DEFAULT_ADMIN_EMAIL`, `DEFAULT_ADMIN_PASSWORD`.
+- Optional first-run admin seed: `TINYMRP_SEED_ADMIN=true`, `TINYMRP_ADMIN_EMAIL`, `TINYMRP_ADMIN_PASSWORD`.
 
 5) Build and start
 
@@ -436,7 +451,7 @@ docker compose ps
 
 - App: `http://YOUR_SERVER_IP/` (or `http://YOUR_SERVER_IP:<HTTP_PORT>`)
 - Files: served through the app with `/files/view/<token>` (no public listing).
-- First login: `admin@admin.com / admin` (or your `DEFAULT_ADMIN_*`).
+- First login: only if you enabled `TINYMRP_SEED_ADMIN=true`; use `TINYMRP_ADMIN_EMAIL`/`TINYMRP_ADMIN_PASSWORD` (or the one-time password logged on first boot in compat mode).
 
 ### Mappings & Paths (repo-specific)
 
@@ -456,7 +471,11 @@ docker compose ps
 
 ### First-Run Seeding
 
-On first boot, if the database has no users, the app auto-creates roles and a default admin using `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` (or falls back to `admin@admin.com` / `admin`).
+On first boot, the app always seeds built-in roles. Admin users are only created if you opt in with:
+
+- `TINYMRP_SEED_ADMIN=true`
+- `TINYMRP_ADMIN_EMAIL`
+- `TINYMRP_ADMIN_PASSWORD` (or a one-time generated password in compat mode)
 
 ### Troubleshooting Quick Checks
 
@@ -555,6 +574,7 @@ Data helpers (see `app/cli.py`):
 ## Notes & Tips
 
 - CSRF is enabled; some API blueprints are explicitly exempted where required for SPA calls.
+- Session-authenticated API requests are protected by an origin/referer CSRF guard; strict mode makes `/api/*` token-only.
 - Files config uses canonical keys `FILES_LOCAL_ROOT`, `FILES_URL_PREFIX`, `FILES_UPSTREAM_BASE`. Backward-compatible aliases `FILE_ROOT_LOCAL` and `FILE_ROOT_HTTP` remain for older code paths.
 - Frontend build artifacts are written to `app/static/parts-ui` by `npm run build` from the `frontend` directory.
 

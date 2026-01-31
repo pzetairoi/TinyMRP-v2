@@ -22,7 +22,11 @@ services:
     environment:
       # These defaults are safe–your .env can override anything
       FLASK_ENV: production
-      SECRET_KEY: ${SECRET_KEY:-change-me}
+      SECRET_KEY: ${SECRET_KEY}
+      SECURITY_PASSWORD_SALT: ${SECURITY_PASSWORD_SALT}
+      TINYMRP_SECURITY_MODE: ${TINYMRP_SECURITY_MODE:-compat}
+      TINYMRP_ALLOWED_ORIGINS: ${TINYMRP_ALLOWED_ORIGINS}
+      TINYMRP_CORS_CREDENTIALS: ${TINYMRP_CORS_CREDENTIALS}
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/${MONGO_DB:-tinymrp-v2}}
       # Unified files configuration
       FILES_LOCAL_ROOT: /data/deliverables
@@ -31,10 +35,13 @@ services:
       FILES_ACCEL_REDIRECT_PREFIX: ${FILES_ACCEL_REDIRECT_PREFIX:-/__files}
       # Optional: enable HTTP proxy to an external file server
       # FILES_UPSTREAM_BASE: ${FILES_UPSTREAM_BASE}
+      FILES_UPSTREAM_ALLOWED_HOSTS: ${FILES_UPSTREAM_ALLOWED_HOSTS}
+      FILES_PROXY_MAX_BYTES: ${FILES_PROXY_MAX_BYTES}
       DELIVERABLES_DIR: Z:/
-      # Auto-seed default admin when DB is empty
-      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@admin.com}
-      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-admin}
+      # Optional admin seeding (compat mode only)
+      TINYMRP_SEED_ADMIN: ${TINYMRP_SEED_ADMIN:-false}
+      TINYMRP_ADMIN_EMAIL: ${TINYMRP_ADMIN_EMAIL}
+      TINYMRP_ADMIN_PASSWORD: ${TINYMRP_ADMIN_PASSWORD}
     depends_on:
       - mongo
     volumes:

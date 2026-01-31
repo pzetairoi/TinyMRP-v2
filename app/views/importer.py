@@ -23,6 +23,11 @@ def upload_post():
     if not f or not f.filename:
         flash("Please choose a .zip file.", "warning")
         return redirect(url_for("importer.upload_form"))
+    max_zip_mb = int(current_app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 0)
+    if max_zip_mb and request.content_length:
+        if request.content_length > max_zip_mb * 1024 * 1024:
+            flash("File too large.", "warning")
+            return redirect(url_for("importer.upload_form"))
     fn = secure_filename(f.filename)
     result = import_bom_zip(f.read(), fn, seed_tag="upload")
     thumbs = result.get('thumbnails_generated') or result.get('thumbnails_built') or 0
@@ -41,6 +46,10 @@ def upload_api():
     f = request.files.get("file")
     if not f or not f.filename:
         return jsonify({"error": "file required"}), 400
+    max_zip_mb = int(current_app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 0)
+    if max_zip_mb and request.content_length:
+        if request.content_length > max_zip_mb * 1024 * 1024:
+            return jsonify({"error": "file too large"}), 413
     fn = secure_filename(f.filename)
     result = import_bom_zip(f.read(), fn, seed_tag="upload-api")
     return jsonify(result)

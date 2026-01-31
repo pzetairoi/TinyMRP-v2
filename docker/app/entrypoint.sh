@@ -54,12 +54,28 @@ with app.app_context():
         print("[seed] role upsert failed:", e, file=sys.stderr)
         sys.exit(4)
 
-    email = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@admin.com").strip().lower()
-    password = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin")
+    mode = (os.getenv("TINYMRP_SECURITY_MODE") or "compat").strip().lower()
+    seed_admin = str(os.getenv("TINYMRP_SEED_ADMIN") or "").strip().lower() in ("1","true","yes","on")
+    email = (os.getenv("TINYMRP_ADMIN_EMAIL") or os.getenv("DEFAULT_ADMIN_EMAIL") or "").strip().lower()
+    password = (os.getenv("TINYMRP_ADMIN_PASSWORD") or os.getenv("DEFAULT_ADMIN_PASSWORD") or "").strip()
+
+    if not seed_admin:
+        print("[seed] Admin seeding disabled (set TINYMRP_SEED_ADMIN=true to enable).")
+        sys.exit(0)
 
     # Only auto-create default admin if the DB has no users yet
     try:
         if User.objects.count() == 0:
+            if mode == "strict":
+                if not email or not password:
+                    print("[seed] Strict mode requires TINYMRP_ADMIN_EMAIL and TINYMRP_ADMIN_PASSWORD.")
+                    sys.exit(0)
+            if not email:
+                print("[seed] Admin email missing; set TINYMRP_ADMIN_EMAIL to seed.")
+                sys.exit(0)
+            if not password:
+                password = secrets.token_urlsafe(16)
+                print("[seed] Generated one-time admin password:", password)
             u = User(
                 email=email,
                 password=hash_password(password),
@@ -96,4 +112,3 @@ fi
 
 echo "[entrypoint] Launching: $@"
 exec "$@"
-
