@@ -1367,118 +1367,120 @@ function bestUrl(f: FileRow): string {
             </TabPanel>
 
             {/* 3D Preview tab at the end */}
-            <TabPanel header="3D Preview">
-              {threeDOptions.length > 1 && (
-                <div className="p-3 pb-0">
-                  <label className="form-label small" htmlFor="previewSelect">
-                    3D file
-                  </label>
-                  <select
-                    id="previewSelect"
-                    className="form-select form-select-sm"
-                    value={selectedPreviewKey}
-                    onChange={(e) => setSelectedPreviewKey(e.target.value)}
-                  >
-                    <option value="">Select a 3D file...</option>
-                    {threeDOptions.map((opt) => (
-                      <option key={opt.key} value={opt.key}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {previewUrl ? (
-                <Suspense fallback={<div className="p-3">Loading 3D viewer...</div>}>
-                  <ThreeMFViewer
-                    url={previewUrl}
-                    format={previewFormat || "3mf"}
-                    height={520}
-                  />
-                </Suspense>
-              ) : threeDOptions.length ? (
-                <div className="p-3 text-muted">Select a 3D file to preview.</div>
-              ) : (
-                <div className="p-3 text-muted">No 3D preview available.</div>
-              )}
-            </TabPanel>
-
-            <TabPanel header="Associated files">
-              <div className="pd-card p-3 mt-3">
-                <div className="d-flex align-items-center justify-content-between mb-2">
-                  <h6 className="mb-0">Associated files</h6>
-                  {canPartsEdit && (
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-primary"
-                      onClick={() => extraFileInputRef.current?.click()}
-                      disabled={extraUploadBusy}
+            {threeDOptions.length > 0 && (
+              <TabPanel header="3D Preview">
+                {threeDOptions.length > 1 && (
+                  <div className="p-3 pb-0">
+                    <label className="form-label small" htmlFor="previewSelect">
+                      3D file
+                    </label>
+                    <select
+                      id="previewSelect"
+                      className="form-select form-select-sm"
+                      value={selectedPreviewKey}
+                      onChange={(e) => setSelectedPreviewKey(e.target.value)}
                     >
-                      {extraUploadBusy ? "Uploading..." : "Upload files..."}
-                    </button>
+                      <option value="">Select a 3D file...</option>
+                      {threeDOptions.map((opt) => (
+                        <option key={opt.key} value={opt.key}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {previewUrl ? (
+                  <Suspense fallback={<div className="p-3">Loading 3D viewer...</div>}>
+                    <ThreeMFViewer
+                      url={previewUrl}
+                      format={previewFormat || "3mf"}
+                      height={520}
+                    />
+                  </Suspense>
+                ) : (
+                  <div className="p-3 text-muted">Select a 3D file to preview.</div>
+                )}
+              </TabPanel>
+            )}
+
+            {extraFiles.length > 0 && (
+              <TabPanel header="Associated files">
+                <div className="pd-card p-3 mt-3">
+                  <div className="d-flex align-items-center justify-content-between mb-2">
+                    <h6 className="mb-0">Associated files</h6>
+                    {canPartsEdit && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={() => extraFileInputRef.current?.click()}
+                        disabled={extraUploadBusy}
+                      >
+                        {extraUploadBusy ? "Uploading..." : "Upload files..."}
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={extraFileInputRef}
+                    type="file"
+                    multiple
+                    className="d-none"
+                    onChange={(e) => handleExtraUpload(e.target.files)}
+                  />
+                  {extraUploadError && <div className="text-danger small mb-2">{extraUploadError}</div>}
+                  {extraError && <div className="text-danger small mb-2">{extraError}</div>}
+                  {extraLoading ? (
+                    <div className="text-muted small">Loading...</div>
+                  ) : extraFiles.length ? (
+                    <div className="table-responsive">
+                      <table className="table table-sm">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>Size</th>
+                            <th>Type</th>
+                            <th>Uploaded</th>
+                            <th />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {extraFiles.map((f) => (
+                            <tr key={f.id || f.rel_path || f.original_name}>
+                              <td>{f.original_name || f.rel_path || "file"}</td>
+                              <td>{formatBytes(f.size)}</td>
+                              <td>{f.mime || "-"}</td>
+                              <td>
+                                {f.uploaded_at ? new Date(f.uploaded_at).toLocaleString() : "-"}
+                              </td>
+                              <td>
+                                {f.url ? (
+                                  <a className="btn btn-sm btn-outline-secondary" href={f.url} target="_blank" rel="noreferrer">
+                                    Download
+                                  </a>
+                                ) : (
+                                  <span className="text-muted small">-</span>
+                                )}
+                                {canPartsEdit && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-danger ms-2"
+                                    disabled={extraDeleteBusy === f.id}
+                                    onClick={() => handleExtraDelete(f.id)}
+                                  >
+                                    {extraDeleteBusy === f.id ? "Deleting..." : "Delete"}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-muted small">No associated files.</div>
                   )}
                 </div>
-                <input
-                  ref={extraFileInputRef}
-                  type="file"
-                  multiple
-                  className="d-none"
-                  onChange={(e) => handleExtraUpload(e.target.files)}
-                />
-                {extraUploadError && <div className="text-danger small mb-2">{extraUploadError}</div>}
-                {extraError && <div className="text-danger small mb-2">{extraError}</div>}
-                {extraLoading ? (
-                  <div className="text-muted small">Loading...</div>
-                ) : extraFiles.length ? (
-                  <div className="table-responsive">
-                    <table className="table table-sm">
-                      <thead>
-                        <tr>
-                          <th>Name</th>
-                          <th>Size</th>
-                          <th>Type</th>
-                          <th>Uploaded</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {extraFiles.map((f) => (
-                          <tr key={f.id || f.rel_path || f.original_name}>
-                            <td>{f.original_name || f.rel_path || "file"}</td>
-                            <td>{formatBytes(f.size)}</td>
-                            <td>{f.mime || "-"}</td>
-                            <td>
-                              {f.uploaded_at ? new Date(f.uploaded_at).toLocaleString() : "-"}
-                            </td>
-                            <td>
-                              {f.url ? (
-                                <a className="btn btn-sm btn-outline-secondary" href={f.url} target="_blank" rel="noreferrer">
-                                  Download
-                                </a>
-                              ) : (
-                                <span className="text-muted small">-</span>
-                              )}
-                              {canPartsEdit && (
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-outline-danger ms-2"
-                                  disabled={extraDeleteBusy === f.id}
-                                  onClick={() => handleExtraDelete(f.id)}
-                                >
-                                  {extraDeleteBusy === f.id ? "Deleting..." : "Delete"}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="text-muted small">No associated files.</div>
-                )}
-              </div>
-            </TabPanel>
+              </TabPanel>
+            )}
 
             
             <TabPanel header="Doc Packs">

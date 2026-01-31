@@ -47,13 +47,11 @@
 
             {% if current_user.is_authenticated %}
               <li class="nav-item"><a class="nav-link" href="/ui/parts">Inventory</a></li>
-              <li class="nav-item"><a class="nav-link" href="/help">Help</a></li>
               {% if has_perm('tools.view') %}
               <li class="nav-item"><a class="nav-link" href="{{ url_for('tools.tools_index') }}">Tools</a></li>
               {% endif %}
               {% if has_perm('import.bom') %}
-              <li class="nav-item"><a class="nav-link" href="/ui/upload-pack">Upload Pack</a></li>
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('importer.upload_form') }}">Import BOM</a></li>
+              <li class="nav-item"><a class="nav-link" href="/ui/upload-pack">Import</a></li>
               {% endif %}
 
               {% if has_perm('jobs.view') or has_perm('jobs.manage') %}
@@ -112,9 +110,7 @@
                   {{ current_user.email or 'User' }}
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navUser">
-                  <li><a class="dropdown-item" href="/ui/dashboard">Dashboard</a></li>
-                  <li><a class="dropdown-item" href="/ui/parts">Parts</a></li>
-                  <li><a class="dropdown-item" href="/ui/bom">BOM</a></li>
+                  <li><a class="dropdown-item" href="/help">Help</a></li>
                   <li><hr class="dropdown-divider"></li>
                   {% if current_user.has_role('admin') %}
                   <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Admin Dashboard</a></li>

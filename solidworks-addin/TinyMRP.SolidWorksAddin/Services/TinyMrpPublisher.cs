@@ -1453,10 +1453,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return new AssociatedFilesPayload();
             }
 
-            string raw = GetEvalProperty(model, configName, AssociatedFilesPayload.PropertyName);
+            string raw = GetRawProperty(model, configName, AssociatedFilesPayload.PropertyName);
             if (string.IsNullOrWhiteSpace(raw))
             {
-                raw = GetEvalProperty(model, string.Empty, AssociatedFilesPayload.PropertyName);
+                raw = GetRawProperty(model, string.Empty, AssociatedFilesPayload.PropertyName);
             }
             AssociatedFilesPayload payload = AssociatedFilesPayload.FromJson(raw);
             if (payload.Files == null)
@@ -3179,6 +3179,30 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             return resolved ?? string.Empty;
+        }
+
+        private string GetRawProperty(ModelDoc2 model, string confName, string property)
+        {
+            if (model == null || string.IsNullOrWhiteSpace(property))
+            {
+                return string.Empty;
+            }
+
+            string conf = confName ?? string.Empty;
+            if (!string.IsNullOrEmpty(conf))
+            {
+                model.ShowConfiguration(conf);
+            }
+
+            string valOut;
+            string resolved;
+            CustomPropertyManager cpm = model.Extension.CustomPropertyManager[conf];
+            cpm.Get2(property, out valOut, out resolved);
+            if (!string.IsNullOrWhiteSpace(resolved))
+            {
+                return resolved;
+            }
+            return valOut ?? string.Empty;
         }
 
         private bool HasProcess(ModelDoc2 model, string confName, string process)

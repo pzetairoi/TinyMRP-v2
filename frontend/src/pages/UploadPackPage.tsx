@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./uploadpack.css";
 
 type UploadItem = {
@@ -32,8 +32,18 @@ function formatBytes(value?: number): string {
   return `${n.toFixed(n >= 10 ? 0 : 1)} ${units[i]}`;
 }
 
+function parseJsonResponse(xhr: XMLHttpRequest): any {
+  if (xhr.response && typeof xhr.response === "object") return xhr.response;
+  try {
+    return JSON.parse(xhr.responseText || "{}");
+  } catch {
+    return {};
+  }
+}
+
 export default function UploadPackPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const progressTimer = useRef<number | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -41,13 +51,77 @@ export default function UploadPackPage() {
   const [result, setResult] = useState<UploadResult | null>(null);
   const [dryRun, setDryRun] = useState(false);
   const [strictStructure, setStrictStructure] = useState(false);
+  const [progressPct, setProgressPct] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("Waiting to start...");
+  const [showProgress, setShowProgress] = useState(false);
+  const [rootPreviewUrl, setRootPreviewUrl] = useState<string | null>(null);
+  const [rootPreviewStatus, setRootPreviewStatus] = useState("Preview will appear after import.");
 
   const items = useMemo(() => result?.items || [], [result]);
-  const rootPn = result?.import?.root || "";
-  const rootRev = result?.import?.root_revision || "";
+  const importSummary = result?.import || null;
+  const rootPn = importSummary?.root || "";
+  const rootRev = importSummary?.root_revision || "";
   const rootHref = rootPn
     ? `/ui/part/${encodeURIComponent(rootPn)}?rev=${encodeURIComponent(rootRev)}`
     : "";
+
+  const filesByTypeEntries = useMemo(() => {
+    const map = importSummary?.artifacts_found_by_type;
+    if (!map || typeof map !== "object") return [] as Array<[string, number]>;
+    return Object.keys(map)
+      .sort()
+      .map((key) => [key, Number(map[key] || 0)] as [string, number]);
+  }, [importSummary]);
+
+  const seededParts = useMemo(() => {
+    const list = importSummary?.parts_seeded_list || [];
+    return Array.isArray(list) ? list : [];
+  }, [importSummary]);
+
+  useEffect(() => {
+    return () => {
+      if (progressTimer.current) {
+        window.clearInterval(progressTimer.current);
+        progressTimer.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!rootPn) {
+      setRootPreviewUrl(null);
+      setRootPreviewStatus(importSummary ? "No root part reported." : "Preview will appear after import.");
+      return () => {
+        cancelled = true;
+      };
+    }
+    setRootPreviewUrl(null);
+    setRootPreviewStatus("Loading preview...");
+
+    const qs = new URLSearchParams({ pn: rootPn, mode: "preview" });
+    qs.set("rev", rootRev || "");
+    fetch(`/api/part_images?${qs.toString()}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then((rows) => {
+        if (cancelled) return;
+        const urls = Array.isArray(rows) && rows.length ? rows[0].urls : [];
+        const url = urls && urls.length ? urls[0] : "";
+        if (url) {
+          setRootPreviewUrl(url);
+          setRootPreviewStatus("");
+        } else {
+          setRootPreviewStatus("No preview image found for the root part.");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRootPreviewStatus("Failed to load preview image.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rootPn, rootRev, importSummary]);
 
   function onPickFile(files: FileList | null) {
     if (!files || !files.length) return;
@@ -55,9 +129,34 @@ export default function UploadPackPage() {
     setFile(next);
     setResult(null);
     setError(null);
+    setShowProgress(false);
+    setProgressPct(0);
+    setProgressLabel("Waiting to start...");
   }
 
-  async function runImport() {
+  function stopProgressTimer() {
+    if (progressTimer.current) {
+      window.clearInterval(progressTimer.current);
+      progressTimer.current = null;
+    }
+  }
+
+  function setProgress(pct: number, label?: string) {
+    const clamped = Math.max(1, Math.min(100, pct));
+    setProgressPct(clamped);
+    if (label) setProgressLabel(label);
+  }
+
+  function startIndeterminate(from: number) {
+    stopProgressTimer();
+    let p = from;
+    progressTimer.current = window.setInterval(() => {
+      if (p < 90) p += Math.max(1, Math.round((90 - p) * 0.08));
+      setProgress(p, "Processing import...");
+    }, 700);
+  }
+
+  function runImport() {
     if (!file) {
       setError("Select a ZIP file first.");
       return;
@@ -65,29 +164,62 @@ export default function UploadPackPage() {
     setBusy(true);
     setError(null);
     setResult(null);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      if (dryRun) form.append("dry_run", "1");
-      if (strictStructure) form.append("strict_structure", "1");
-      const resp = await fetch("/api/upload/pack", { method: "POST", body: form });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        const msg = data?.error || `HTTP ${resp.status}`;
-        throw new Error(msg);
+    setShowProgress(true);
+    setProgress(2, "Starting upload...");
+
+    const form = new FormData();
+    form.append("file", file);
+    if (dryRun) form.append("dry_run", "1");
+    if (strictStructure) form.append("strict_structure", "1");
+
+    let lastPct = 2;
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload/pack");
+    xhr.responseType = "json";
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const pct = Math.min(95, Math.round((e.loaded / e.total) * 80));
+        lastPct = pct;
+        setProgress(pct, `Uploading... ${pct}%`);
       }
-      setResult(data || {});
-    } catch (err: any) {
-      setError(err?.message || "Upload failed.");
-    } finally {
+    };
+
+    xhr.onload = () => {
+      stopProgressTimer();
+      const ok = xhr.status >= 200 && xhr.status < 300;
+      const data = parseJsonResponse(xhr) || {};
+      if (!ok || data?.error) {
+        const msg = data?.error || `HTTP ${xhr.status}`;
+        setError(msg);
+        setProgress(100, `Failed: ${msg}`);
+      } else {
+        setResult(data || {});
+        setProgress(100, "Done");
+      }
       setBusy(false);
-    }
+    };
+
+    xhr.onerror = () => {
+      stopProgressTimer();
+      setError("Network error.");
+      setProgress(100, "Network error");
+      setBusy(false);
+    };
+
+    xhr.upload.onloadend = () => {
+      startIndeterminate(Math.min(85, lastPct || 70));
+    };
+
+    xhr.send(form);
   }
+
+  const thumbCount = importSummary?.thumbnails_generated ?? importSummary?.thumbnails_built ?? 0;
 
   return (
     <div className="container-xxl py-3">
       <div className="pb-2 border-bottom mb-3">
-        <h4 className="mb-0">Upload Pack</h4>
+        <h4 className="mb-0">Import</h4>
         <div className="text-muted small">
           Upload a ZIP with BOM + deliverables + associated files. The system assigns files by Part Number + Revision.
         </div>
@@ -132,6 +264,7 @@ export default function UploadPackPage() {
               type="file"
               accept=".zip"
               className="d-none"
+              disabled={busy}
               onChange={(e) => onPickFile(e.target.files)}
             />
 
@@ -166,6 +299,22 @@ export default function UploadPackPage() {
               </button>
               {error && <div className="text-danger small mt-2">{error}</div>}
             </div>
+
+            {showProgress && (
+              <div className="mt-3">
+                <div className="progress" style={{ height: 10 }}>
+                  <div
+                    className="progress-bar progress-bar-striped progress-bar-animated"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={progressPct}
+                    style={{ width: `${Math.max(1, progressPct)}%` }}
+                  />
+                </div>
+                <div className="small text-muted mt-2">{progressLabel}</div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -203,17 +352,103 @@ extra/
                 ? ` Extra files: ${result.extra_files_written}.`
                 : ""}
             </div>
-            {rootPn ? (
-              <div className="small mb-2">
-                Top level:{" "}
-                <a href={rootHref} target="_blank" rel="noreferrer">
-                  {rootPn}
-                  {rootRev ? ` REV ${rootRev}` : ""}
-                </a>
+
+            <div className="small">
+              <div>
+                ZIP: <code>{result.zip || "-"}</code>
               </div>
-            ) : null}
+              {importSummary ? (
+                <>
+                  <div>
+                    Root: <code>{rootPn || "-"}</code>
+                    {rootPn ? (
+                      <a className="ms-2" href={rootHref} target="_blank" rel="noreferrer">
+                        Open part details
+                      </a>
+                    ) : null}
+                  </div>
+                  <div>
+                    Parts created: <b>{importSummary.parts_created ?? 0}</b>, updated:{" "}
+                    <b>{importSummary.parts_updated ?? 0}</b>
+                  </div>
+                  <div>
+                    Parts seeded: <b>{importSummary.parts_seeded ?? 0}</b>
+                  </div>
+                  <div>
+                    Links created: <b>{importSummary.links_created ?? 0}</b>, skipped:{" "}
+                    <b>{importSummary.links_skipped ?? 0}</b>
+                  </div>
+                  <div>
+                    Parts with properties: <b>{importSummary.parts_with_props ?? 0}</b>
+                  </div>
+                  <div>
+                    Artifacts added: <b>{importSummary.artifacts_added ?? 0}</b>, thumbnails:{" "}
+                    <b>{thumbCount}</b>
+                  </div>
+                </>
+              ) : (
+                <div className="text-muted">Import summary is available after a non-dry run upload.</div>
+              )}
+            </div>
+
+            {seededParts.length > 0 && (
+              <div className="mt-2">
+                <details>
+                  <summary>Seeded parts</summary>
+                  <ul className="small mb-0">
+                    {seededParts.map((item: any) => (
+                      <li key={`${item.part_number || ""}:${item.revision || ""}`}>
+                        {item.part_number || ""}
+                        {item.revision ? ` REV ${item.revision}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </div>
+            )}
+
+            {filesByTypeEntries.length > 0 && (
+              <div className="mt-3">
+                <h6 className="mb-2">Files found by type</h6>
+                <table className="table table-sm w-auto mb-0">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filesByTypeEntries.map(([key, count]) => (
+                      <tr key={key}>
+                        <td>{key}</td>
+                        <td>{count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {importSummary && (
+              <div className="mt-3">
+                {rootPreviewStatus ? (
+                  <div className="text-muted small mb-2">{rootPreviewStatus}</div>
+                ) : null}
+                {rootPreviewUrl && rootHref ? (
+                  <a className="d-inline-block" href={rootHref} target="_blank" rel="noreferrer">
+                    <img
+                      src={rootPreviewUrl}
+                      className="img-fluid border rounded"
+                      alt="Root preview"
+                      style={{ maxWidth: "40vw" }}
+                    />
+                  </a>
+                ) : null}
+              </div>
+            )}
+
             {result.warnings && result.warnings.length ? (
-              <div className="alert alert-warning small">
+              <div className="alert alert-warning small mt-3">
                 <div className="fw-semibold mb-1">Warnings</div>
                 <ul className="mb-0">
                   {result.warnings.map((w, idx) => (
@@ -222,8 +457,9 @@ extra/
                 </ul>
               </div>
             ) : null}
+
             {items.length ? (
-              <div className="table-responsive">
+              <div className="table-responsive mt-2">
                 <table className="table table-sm">
                   <thead>
                     <tr>
@@ -258,7 +494,7 @@ extra/
                 </table>
               </div>
             ) : (
-              <div className="text-muted small">No results yet.</div>
+              <div className="text-muted small mt-2">No results yet.</div>
             )}
           </>
         ) : (
