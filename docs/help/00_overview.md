@@ -22,6 +22,8 @@ The reference section is auto-filled from the codebase using placeholders like `
 
 - Search and browse parts and revisions.
 - View deliverables (PDF, DXF, STEP, 3MF, PLY, STL, and more).
+- Upload packs that bundle BOM, deliverables, and associated files.
+- Attach extra files to parts (photos, scans, reports).
 - Generate doc packs (binder, index, visuals, BOM spreadsheets).
 - Share data with suppliers, customers, and internal teams.
 - Manage users, roles, permissions, and branding.

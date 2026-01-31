@@ -52,6 +52,7 @@
               <li class="nav-item"><a class="nav-link" href="{{ url_for('tools.tools_index') }}">Tools</a></li>
               {% endif %}
               {% if has_perm('import.bom') %}
+              <li class="nav-item"><a class="nav-link" href="/ui/upload-pack">Upload Pack</a></li>
               <li class="nav-item"><a class="nav-link" href="{{ url_for('importer.upload_form') }}">Import BOM</a></li>
               {% endif %}
 

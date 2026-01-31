@@ -59,7 +59,19 @@ namespace TinyMRP.SolidWorksAddin.Services
             try
             {
                 ResetCancel();
-                TraverseModel(true, string.Empty, effective, log, null, progress);
+                HashSet<string> uploadPackBases;
+                string flatFile = TraverseModel(true, string.Empty, effective, log, null, progress, out uploadPackBases);
+                if (effective.CreateUploadPack)
+                {
+                    try
+                    {
+                        CreateUploadPack(flatFile, uploadPackBases, effective, log);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log(log, "Upload pack failed: " + ex.Message);
+                    }
+                }
                 System.Windows.Forms.MessageBox.Show("File creation finished.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
@@ -1159,6 +1171,14 @@ namespace TinyMRP.SolidWorksAddin.Services
         private string TraverseModel(bool createFiles, string exportTag, PublishOptions options, Action<string> log,
             Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress)
         {
+            HashSet<string> ignored;
+            return TraverseModel(createFiles, exportTag, options, log, flatBomProgress, deliverablesProgress, out ignored);
+        }
+
+        private string TraverseModel(bool createFiles, string exportTag, PublishOptions options, Action<string> log,
+            Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress, out HashSet<string> uploadPackBases)
+        {
+            uploadPackBases = null;
             ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
             if (swModel == null)
             {
@@ -1257,8 +1277,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                     outputFile = exportTag + "_FLATBOM.txt";
                 }
 
+                uploadPackBases = createFiles
+                    ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    : null;
+
                 UpdateProgress(flatBomProgress, 0, entries.Count);
-                WriteFlatBom(outputFile, entries, log, flatBomProgress, initialDocs, rootModel, rootTitle);
+                WriteFlatBom(outputFile, entries, log, flatBomProgress, initialDocs, rootModel, rootTitle, uploadPackBases);
                 ThrowIfCancelled();
 
                 if (createFiles)
@@ -1305,6 +1329,196 @@ namespace TinyMRP.SolidWorksAddin.Services
                 CloseNonRootDocs(initialDocs, rootModel, rootTitle);
                 CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
                 RestoreStartDocument(startTitle);
+            }
+        }
+
+        private void CreateUploadPack(string flatBomPath, HashSet<string> uploadPackBases, PublishOptions options, Action<string> log)
+        {
+            if (string.IsNullOrWhiteSpace(flatBomPath))
+            {
+                Log(log, "Upload pack skipped: missing flat BOM path.");
+                return;
+            }
+
+            ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
+            if (swModel == null)
+            {
+                Log(log, "Upload pack skipped: no active model.");
+                return;
+            }
+
+            Configuration config = swModel.GetActiveConfiguration() as Configuration;
+            if (config == null)
+            {
+                Log(log, "Upload pack skipped: no active configuration.");
+                return;
+            }
+
+            string treeBomPath = BuildTreeBomPath(flatBomPath);
+            TryBuildTreeBom(swModel, treeBomPath, log);
+
+            AssociatedFilesPayload payload = ReadAssociatedFiles(swModel, config.Name);
+            string partProp = _config != null ? _config.PartNumberProperty : "PartNumber";
+            string revProp = _config != null ? _config.RevisionProperty : "Revision";
+            if (string.IsNullOrWhiteSpace(partProp))
+            {
+                partProp = "PartNumber";
+            }
+            if (string.IsNullOrWhiteSpace(revProp))
+            {
+                revProp = "Revision";
+            }
+
+            string pn = payload.PartNumber;
+            if (string.IsNullOrWhiteSpace(pn))
+            {
+                pn = GetEvalProperty(swModel, config.Name, partProp);
+                if (string.IsNullOrWhiteSpace(pn))
+                {
+                    pn = GetEvalProperty(swModel, string.Empty, partProp);
+                }
+            }
+
+            string rev = payload.Revision;
+            if (string.IsNullOrWhiteSpace(rev))
+            {
+                rev = GetEvalProperty(swModel, config.Name, revProp);
+                if (string.IsNullOrWhiteSpace(rev))
+                {
+                    rev = GetEvalProperty(swModel, string.Empty, revProp);
+                }
+            }
+
+            string deliverablesRoot = EnsureTrailingSlash(options.DeliverablesFolder);
+            if (string.IsNullOrWhiteSpace(deliverablesRoot))
+            {
+                Log(log, "Upload pack skipped: deliverables folder missing.");
+                return;
+            }
+            deliverablesRoot = deliverablesRoot.TrimEnd('\\', '/');
+
+            string zipName = GetFileString(swModel, config.Name) + "_UPLOADPACK.zip";
+            string zipPath = Path.Combine(deliverablesRoot, zipName);
+
+            UploadPackBuilder.Build(
+                zipPath,
+                deliverablesRoot,
+                flatBomPath,
+                treeBomPath,
+                pn,
+                rev,
+                payload.Files,
+                log,
+                uploadPackBases);
+
+            Log(log, "Upload pack created: " + zipPath);
+        }
+
+        private AssociatedFilesPayload ReadAssociatedFiles(ModelDoc2 model, string configName)
+        {
+            if (model == null)
+            {
+                return new AssociatedFilesPayload();
+            }
+
+            string raw = GetEvalProperty(model, string.Empty, AssociatedFilesPayload.PropertyName);
+            AssociatedFilesPayload payload = AssociatedFilesPayload.FromJson(raw);
+            if (payload.Files == null)
+            {
+                payload.Files = new List<AssociatedFileEntry>();
+            }
+            return payload;
+        }
+
+        private string BuildTreeBomPath(string flatBomPath)
+        {
+            if (string.IsNullOrWhiteSpace(flatBomPath))
+            {
+                return string.Empty;
+            }
+
+            const string suffix = "_FLATBOM.txt";
+            if (flatBomPath.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return flatBomPath.Substring(0, flatBomPath.Length - suffix.Length) + "_TREEBOM.txt";
+            }
+            return flatBomPath + "_TREEBOM.txt";
+        }
+
+        private bool TryBuildTreeBom(ModelDoc2 rootModel, string treeBomPath, Action<string> log)
+        {
+            if (rootModel == null || string.IsNullOrWhiteSpace(treeBomPath))
+            {
+                return false;
+            }
+
+            string modelPath = rootModel.GetPathName();
+            if (string.IsNullOrWhiteSpace(modelPath))
+            {
+                Log(log, "Upload pack: active document must be saved to build TREEBOM.");
+                return false;
+            }
+
+            string template = _swApp.GetUserPreferenceStringValue(
+                (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly);
+            ModelDoc2 assyDoc = _swApp.NewDocument(template, 0, 0, 0) as ModelDoc2;
+            AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
+            if (assyDoc == null || swAssembly == null)
+            {
+                Log(log, "Upload pack: failed to create temp assembly for TREEBOM.");
+                return false;
+            }
+
+            try
+            {
+                _swApp.ActivateDoc(assyDoc.GetTitle());
+                swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
+                ModelDoc2 assyModel = _swApp.ActiveDoc as ModelDoc2;
+                if (assyModel == null)
+                {
+                    Log(log, "Upload pack: failed to activate temp assembly.");
+                    return false;
+                }
+
+                Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
+                if (assyConfig == null)
+                {
+                    Log(log, "Upload pack: failed to read assembly configuration.");
+                    return false;
+                }
+
+                SetUnitPreferences(rootModel);
+
+                string treeDir = Path.GetDirectoryName(treeBomPath);
+                if (!string.IsNullOrWhiteSpace(treeDir))
+                {
+                    Directory.CreateDirectory(treeDir);
+                }
+                int bomX = 69;
+                int bomY = 69;
+                BomTableAnnotation bomTable = assyModel.Extension.InsertBomTable3(
+                    _config.BomTemplatePath,
+                    bomX,
+                    bomY,
+                    (int)swBomType_e.swBomType_Indented,
+                    assyConfig.Name,
+                    true,
+                    (int)swNumberingType_e.swNumberingType_Detailed,
+                    true);
+
+                if (bomTable != null)
+                {
+                    ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
+                    tableAnn.SaveAsText(treeBomPath, "\t");
+                    return true;
+                }
+
+                Log(log, "Upload pack: failed to create BOM table.");
+                return false;
+            }
+            finally
+            {
+                _swApp.CloseDoc(assyDoc.GetTitle());
             }
         }
 
@@ -1725,7 +1939,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         }
 
         private void WriteFlatBom(string outputFile, List<BatchEntry> entries, Action<string> log,
-            Action<int, int> progress, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle)
+            Action<int, int> progress, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
+            HashSet<string> uploadPackBases)
         {
             using (var writer = new StreamWriter(outputFile, false, Encoding.UTF8))
             {
@@ -1744,6 +1959,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                     try
                     {
                         writer.WriteLine(GetDocDict(model, entry.ConfigurationName));
+                        if (uploadPackBases != null)
+                        {
+                            string fileKey = GetFileString(model, entry.ConfigurationName);
+                            if (!string.IsNullOrWhiteSpace(fileKey))
+                            {
+                                uploadPackBases.Add(fileKey);
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {

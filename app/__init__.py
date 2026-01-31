@@ -128,6 +128,13 @@ def create_app(config_object=None):
     app.config.setdefault("EXCEL_COMPILE_MAX_BYTES", int(os.getenv("EXCEL_COMPILE_MAX_BYTES") or "10485760"))
     app.config.setdefault("SECURITY_HEADERS_ENABLED", True)
     app.config.setdefault("FORCE_HTTPS", False)
+    app.config.setdefault("UPLOAD_PACK_MAX_ZIP_MB", int(os.getenv("UPLOAD_PACK_MAX_ZIP_MB") or "500"))
+    app.config.setdefault("UPLOAD_PACK_MAX_FILE_MB", int(os.getenv("UPLOAD_PACK_MAX_FILE_MB") or "200"))
+    app.config.setdefault("UPLOAD_PACK_MAX_FILES", int(os.getenv("UPLOAD_PACK_MAX_FILES") or "5000"))
+    app.config.setdefault(
+        "EXTRA_FILES_ALLOWED",
+        str(os.getenv("EXTRA_FILES_ALLOWED") or "true").strip().lower() in ("1", "true", "yes", "on"),
+    )
     
     app.config["TEMPLATES_AUTO_RELOAD"]=True # Enable auto-reload for templates in development
     
@@ -158,6 +165,11 @@ def create_app(config_object=None):
     # (prefer the canonical FILES_* keys in new code)
     app.config["FILE_ROOT_LOCAL"] = files_local_root
     app.config["FILE_ROOT_HTTP"]  = files_url_prefix
+
+    extra_root = (os.getenv("EXTRA_FILES_ROOT") or "").strip()
+    if not extra_root and files_local_root:
+        extra_root = files_local_root
+    app.config["EXTRA_FILES_ROOT"] = extra_root
 
     #print("FILES: local=", app.config["FILE_ROOT_LOCAL"], "http=", app.config["FILE_ROOT_HTTP"])
 
@@ -327,6 +339,14 @@ def create_app(config_object=None):
     # Importer views for BOM uploads
     from app.views.importer import bp as importer_bp
     app.register_blueprint(importer_bp)
+
+    # Upload Pack + extra files API
+    from app.views.upload_pack import bp as upload_pack_bp
+    app.register_blueprint(upload_pack_bp)
+    try:
+        csrf.exempt(upload_pack_bp)
+    except Exception:
+        pass
     
     # Register file serving blueprints
     from app.views.files import bp as files_api_bp
@@ -334,6 +354,9 @@ def create_app(config_object=None):
 
     from app.views.fileserve import bp as fileserve_bp
     app.register_blueprint(fileserve_bp)
+
+    from app.views.extra_fileserve import bp as extra_fileserve_bp
+    app.register_blueprint(extra_fileserve_bp)
     
     from app.views.processmeta import bp as processmeta_bp
     app.register_blueprint(processmeta_bp)

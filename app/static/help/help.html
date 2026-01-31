@@ -9,7 +9,7 @@
 <li>Run <code>flask help build</code> from the server project.</li>
 <li>Commit the generated files in <code>app/static/help/</code> so the help page is up to date.</li>
 </ol>
-<p>The reference section is auto-filled from the codebase using placeholders like <code>| Route | What it is for | Permissions | | --- | --- | --- | | </code>/ui/dashboard<code>| System dashboard and summary metrics. | Requires login | |</code>/ui/parts<code>| Inventory list and search. | Requires login | |</code>/ui/bom<code>| BOM tree view for parts and assemblies. | Requires login | |</code>/ui/bom/:pn<code>| BOM tree view for parts and assemblies. | Requires login | |</code>/ui/part/:pn<code>| Part detail view with files, previews, and doc packs. | Requires login | |</code>/ui/addin/tokens<code>| Create and manage add-in access tokens. | Requires login | |</code>/ui/admin/addin<code> | Admin tools for add-in settings and monitoring. | Admin only |</code> and `### app\views\importer.py</p>
+<p>The reference section is auto-filled from the codebase using placeholders like <code>| Route | What it is for | Permissions | | --- | --- | --- | | </code>/ui/dashboard<code>| System dashboard and summary metrics. | Requires login | |</code>/ui/parts<code>| Inventory list and search. | Requires login | |</code>/ui/bom<code>| BOM tree view for parts and assemblies. | Requires login | |</code>/ui/bom/:pn<code>| BOM tree view for parts and assemblies. | Requires login | |</code>/ui/part/:pn<code>| Part detail view with files, previews, and doc packs. | Requires login | |</code>/ui/addin/tokens<code>| Create and manage add-in access tokens. | Requires login | |</code>/ui/admin/addin<code>| Admin tools for add-in settings and monitoring. | Admin only | |</code>/ui/upload-pack<code> | See in app. | Requires login |</code> and `### app\views\importer.py</p>
 <table>
 <thead>
 <tr>
@@ -29,6 +29,8 @@
 <ul>
 <li>Search and browse parts and revisions.</li>
 <li>View deliverables (PDF, DXF, STEP, 3MF, PLY, STL, and more).</li>
+<li>Upload packs that bundle BOM, deliverables, and associated files.</li>
+<li>Attach extra files to parts (photos, scans, reports).</li>
 <li>Generate doc packs (binder, index, visuals, BOM spreadsheets).</li>
 <li>Share data with suppliers, customers, and internal teams.</li>
 <li>Manage users, roles, permissions, and branding.</li>
@@ -225,6 +227,14 @@
 <li>In the file groups section, click a file type (PDF, DXF, STEP, 3MF, PLY, STL).</li>
 <li>If multiple files exist, choose the one you need.</li>
 </ol>
+<h3 id="step-by-step-associated-files">Step-by-step: associated files</h3>
+<ol>
+<li>Open the &quot;Associated files&quot; tab.</li>
+<li>Click &quot;Upload files...&quot; to attach extra files (photos, scans, reports).</li>
+<li>Use Download to open a file.</li>
+<li>If you have edit permission, use Delete to remove a file.</li>
+</ol>
+<p><strong>Tip:</strong> Associated files are stored by Part Number + Revision. An empty revision is still valid.</p>
 <h3 id="step-by-step-generating-doc-packs">Step-by-step: generating doc packs</h3>
 <ol>
 <li>Open the Doc Pack panel.</li>
@@ -337,14 +347,14 @@
 </ol>
 <p><strong>What this affects:</strong> The logo appears in the app and doc packs. The timezone controls generated timestamps.</p>
 <h2 id="import-bom-and-deliverables">Import BOM and deliverables</h2>
-<p><strong>URL:</strong> <code>/import/upload</code></p>
+<p><strong>Recommended:</strong> <code>/ui/upload-pack</code></p>
 <h3 id="where-to-find-it-8">Where to find it</h3>
 <ul>
-<li>Top navbar: Import BOM (if you have permission)</li>
+<li>Top navbar: Upload Pack (if you have permission)</li>
 </ul>
 <h3 id="what-you-can-do-on-this-screen-8">What you can do on this screen</h3>
 <ul>
-<li>Upload a ZIP file containing deliverables and BOM data.</li>
+<li>Upload a ZIP file containing BOM, deliverables, and associated files.</li>
 <li>Trigger a scan and thumbnail build.</li>
 </ul>
 <h3 id="step-by-step-5">Step-by-step</h3>
@@ -359,6 +369,9 @@
 <li><strong>ZIP rejected:</strong> Check the folder structure and file naming.</li>
 <li><strong>No thumbnails:</strong> Run the thumbnail rebuild command or re-import.</li>
 </ul>
+<h3 id="legacy-bom-import-if-needed">Legacy BOM import (if needed)</h3>
+<p><strong>URL:</strong> <code>/import/upload</code></p>
+<p>Use this screen if you only need to import a BOM and do not need to upload deliverables or associated files.</p>
 <h1 id="solidworks-add-in-installation">SolidWorks add-in installation</h1>
 <p>This section explains how to install the TinyMRP SolidWorks add-in.</p>
 <h2 id="what-you-need">What you need</h2>
@@ -430,6 +443,21 @@
 <li>Wait for the process to complete.</li>
 </ol>
 <p><strong>What this button does:</strong> Publish creates files on disk. It does not automatically upload them; you upload or import them later.</p>
+<h3 id="associated-files-extra-files">Associated files (extra files)</h3>
+<ol>
+<li>In Publish/BOM, click &quot;Manage associated files...&quot;.</li>
+<li>Add one or more files (photos, scans, reports).</li>
+<li>Optional: add a label in the list.</li>
+<li>Click OK to save.</li>
+</ol>
+<p><strong>What this does:</strong> The list is stored inside the CAD file as a custom property (<code>TINYMPR_ASSOC_FILES</code>).</p>
+<h3 id="create-upload-pack-zip">Create Upload Pack (ZIP)</h3>
+<ol>
+<li>Check &quot;Create Upload Pack (ZIP)&quot; in the Publish/BOM options.</li>
+<li>Click Publish.</li>
+<li>The add-in writes a ZIP that contains BOM files, deliverables, and associated files.</li>
+</ol>
+<p><strong>Tip:</strong> If revision is blank, the ZIP uses the <code>__no_rev__</code> token in the extra files path.</p>
 <h3 id="step-by-step-export-bom">Step-by-step: export BOM</h3>
 <ol>
 <li>Open the top-level assembly.</li>
@@ -528,21 +556,29 @@
 <li>Open the Publish/BOM tab in the add-in.</li>
 <li>Select the outputs you need (PDF, DXF, STEP, 3MF, PLY, STL, PNG).</li>
 <li>Choose the deliverables folder.</li>
+<li>Optional: click &quot;Manage associated files...&quot; and add extra files (photos, scans, reports).</li>
+<li>Optional: enable &quot;Create Upload Pack (ZIP)&quot; if you want a ready-to-upload ZIP.</li>
 <li>Click Publish.</li>
 <li>Wait until the process finishes.</li>
 </ol>
 <p><strong>Expected result:</strong> Files appear in the correct deliverables subfolders.</p>
 <h2 id="step-4-package-for-import">Step 4: Package for import</h2>
 <ol>
-<li>Create a ZIP file that includes the deliverables folder structure.</li>
-<li>Keep the folder names exactly as expected (<code>pdf</code>, <code>png</code>, <code>dxf</code>, <code>step</code>, <code>3mf</code>, <code>ply</code>, <code>stl</code>, etc).</li>
-<li>Make sure file names match <code>PARTNUMBER_REV_REVISION.ext</code>.</li>
+<li>If you used &quot;Create Upload Pack (ZIP)&quot;, use that file.</li>
+<li>Otherwise, create a ZIP with the correct structure:
+<ul>
+<li><code>deliverables/&lt;group&gt;/...</code></li>
+<li><code>bom/</code> with <code>*_FLATBOM.txt</code> and <code>*_TREEBOM.txt</code></li>
+<li><code>extra/&lt;PN&gt;/&lt;REV_OR__no_rev__&gt;/...</code></li>
+</ul>
+</li>
+<li>Keep file names matching <code>PARTNUMBER_REV_REVISION.ext</code>.</li>
 </ol>
 <p><strong>Tip:</strong> If you are unsure, start by zipping one part and verify the import result.</p>
 <h2 id="step-5-import-into-tinymrp">Step 5: Import into TinyMRP</h2>
 <ol>
 <li>Log in to the web app.</li>
-<li>Go to Import BOM.</li>
+<li>Go to Upload Pack.</li>
 <li>Upload the ZIP file.</li>
 <li>Wait for the import summary.</li>
 <li>Open the part detail page to confirm files are visible.</li>
@@ -715,6 +751,7 @@
 <li><strong>ZIP rejected:</strong> Check the folder structure.</li>
 <li><strong>No parts created:</strong> Ensure the BOM file and deliverables exist.</li>
 <li><strong>Wrong revision:</strong> Check the revision value in file names.</li>
+<li><strong>Associated files missing:</strong> Check <code>extra/&lt;PN&gt;/&lt;REV_OR__no_rev__&gt;/...</code> paths in the ZIP.</li>
 </ul>
 <h2 id="add-in-connection-failed">Add-in connection failed</h2>
 <ul>
@@ -774,6 +811,11 @@
 <td><code>/ui/admin/addin</code></td>
 <td>Admin tools for add-in settings and monitoring.</td>
 <td>Admin only</td>
+</tr>
+<tr>
+<td><code>/ui/upload-pack</code></td>
+<td>See in app.</td>
+<td>Requires login</td>
 </tr>
 </tbody>
 </table>
@@ -919,6 +961,11 @@
 <td><code>TopLevelOnly</code></td>
 <td>Export only the top-level assembly.</td>
 <td>Publish/BOM tab</td>
+</tr>
+<tr>
+<td><code>CreateUploadPack</code></td>
+<td>Add-in option.</td>
+<td>Add-in UI</td>
 </tr>
 </tbody>
 </table>

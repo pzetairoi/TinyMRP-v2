@@ -30,6 +30,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         private CheckBox _removeModifiedNotesCheck;
         private CheckBox _topLevelOnlyCheck;
         private CheckBox _overwriteCheck;
+        private CheckBox _createUploadPackCheck;
+        private Button _assocFilesButton;
         private CheckBox _pngModelCheck;
         private CheckBox _stepCheck;
         private CheckBox _edrCheck;
@@ -288,9 +290,23 @@ namespace TinyMRP.SolidWorksAddin.UI
             };
             _overwriteCheck = CreateCheckBox("Overwrite files");
             _topLevelOnlyCheck = CreateCheckBox("Top level only");
+            _createUploadPackCheck = CreateCheckBox("Create Upload Pack (ZIP)");
             optionsPanel.Controls.Add(_overwriteCheck);
             optionsPanel.Controls.Add(_topLevelOnlyCheck);
+            optionsPanel.Controls.Add(_createUploadPackCheck);
             AddSection(panel, CreateGroupBox("Options", optionsPanel));
+
+            var assocPanel = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = true,
+                Dock = DockStyle.Fill
+            };
+            _assocFilesButton = new Button { Text = "Manage associated files...", AutoSize = true };
+            _assocFilesButton.Click += OnManageAssociatedFiles;
+            assocPanel.Controls.Add(_assocFilesButton);
+            AddSection(panel, CreateGroupBox("Associated files", assocPanel));
 
             var publishActions = new FlowLayoutPanel
             {
@@ -1814,7 +1830,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 ExportPdf = _pdfCheck != null && _pdfCheck.Checked,
                 ExportEdrawingDrawing = _edrDrawingCheck != null && _edrDrawingCheck.Checked,
                 OverwriteFiles = _overwriteCheck != null && _overwriteCheck.Checked,
-                TopLevelOnly = _topLevelOnlyCheck != null && _topLevelOnlyCheck.Checked
+                TopLevelOnly = _topLevelOnlyCheck != null && _topLevelOnlyCheck.Checked,
+                CreateUploadPack = _createUploadPackCheck != null && _createUploadPackCheck.Checked
             };
 
             return options;
@@ -1897,6 +1914,83 @@ namespace TinyMRP.SolidWorksAddin.UI
             publisher.ProcessFiles(options, Log, UpdatePublishProgress);
             SetStatus("Done.");
             ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
+        }
+
+        private void OnManageAssociatedFiles(object sender, EventArgs e)
+        {
+            ISldWorks app = AddinContext.SldWorks;
+            if (app == null)
+            {
+                MessageBox.Show("SolidWorks not available.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ActiveModelInfo info;
+            string error;
+            if (!SolidWorksDocumentHelper.TryGetActiveModel(app, out info, out error))
+            {
+                MessageBox.Show(error ?? "No active model.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string partProp = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
+            string revProp = AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision";
+            if (string.IsNullOrWhiteSpace(partProp))
+            {
+                partProp = "PartNumber";
+            }
+            if (string.IsNullOrWhiteSpace(revProp))
+            {
+                revProp = "Revision";
+            }
+
+            string pn = GetCustomProperty(info.Model, info.ActiveConfiguration, partProp);
+            if (string.IsNullOrWhiteSpace(pn))
+            {
+                pn = GetCustomProperty(info.Model, string.Empty, partProp);
+            }
+            string rev = GetCustomProperty(info.Model, info.ActiveConfiguration, revProp);
+            if (string.IsNullOrWhiteSpace(rev))
+            {
+                rev = GetCustomProperty(info.Model, string.Empty, revProp);
+            }
+
+            string raw = GetCustomProperty(info.Model, string.Empty, AssociatedFilesPayload.PropertyName);
+            AssociatedFilesPayload payload = AssociatedFilesPayload.FromJson(raw);
+            payload.PartNumber = pn ?? string.Empty;
+            payload.Revision = rev ?? string.Empty;
+
+            using (var dialog = new AssociatedFilesDialog(payload.Files))
+            {
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    payload.Files = dialog.Files ?? new List<AssociatedFileEntry>();
+                    string json = payload.ToJson();
+                    SolidWorksPropertyWriter.SetCustomProperty(
+                        info.Model,
+                        string.Empty,
+                        AssociatedFilesPayload.PropertyName,
+                        json);
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(info.Model.GetPathName()))
+                        {
+                            info.Model.Save2(true);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore save errors
+                    }
+                }
+            }
+
+            if (info.StartedFromDrawing)
+            {
+                app.ActivateDoc(info.StartTitle);
+            }
         }
 
         private void OnProcessBom(object sender, EventArgs e)

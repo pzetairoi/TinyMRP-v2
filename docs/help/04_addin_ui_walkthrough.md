@@ -25,6 +25,23 @@ This section explains each tab and option in the TinyMRP SolidWorks add-in.
 
 **What this button does:** Publish creates files on disk. It does not automatically upload them; you upload or import them later.
 
+### Associated files (extra files)
+
+1) In Publish/BOM, click "Manage associated files...".
+2) Add one or more files (photos, scans, reports).
+3) Optional: add a label in the list.
+4) Click OK to save.
+
+**What this does:** The list is stored inside the CAD file as a custom property (`TINYMPR_ASSOC_FILES`).
+
+### Create Upload Pack (ZIP)
+
+1) Check "Create Upload Pack (ZIP)" in the Publish/BOM options.
+2) Click Publish.
+3) The add-in writes a ZIP that contains BOM files, deliverables, and associated files.
+
+**Tip:** If revision is blank, the ZIP uses the `__no_rev__` token in the extra files path.
+
 ### Step-by-step: export BOM
 
 1) Open the top-level assembly.

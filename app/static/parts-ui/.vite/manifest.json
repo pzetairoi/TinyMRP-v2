@@ -1,6 +1,6 @@
 {
   "index.html": {
-    "file": "assets/index-CQntawWA.js",
+    "file": "assets/index-DZYBrRBT.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -8,7 +8,7 @@
       "src/components/ThreeMFViewer.tsx"
     ],
     "css": [
-      "assets/index-DdPyyM80.css"
+      "assets/index-gCIrO-lF.css"
     ],
     "assets": [
       "assets/InterVariable-CWi-zmRD.woff2",
@@ -49,7 +49,7 @@
     "src": "node_modules/primereact/resources/themes/lara-light-blue/fonts/InterVariable.woff2"
   },
   "src/components/ThreeMFViewer.tsx": {
-    "file": "assets/ThreeMFViewer-CphML3Dv.js",
+    "file": "assets/ThreeMFViewer-DCCKSgkK.js",
     "name": "ThreeMFViewer",
     "src": "src/components/ThreeMFViewer.tsx",
     "isDynamicEntry": true,

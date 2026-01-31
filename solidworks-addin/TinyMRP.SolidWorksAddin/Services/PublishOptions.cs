@@ -15,5 +15,6 @@ namespace TinyMRP.SolidWorksAddin.Services
         public bool ExportEdrawingDrawing { get; set; }
         public bool OverwriteFiles { get; set; }
         public bool TopLevelOnly { get; set; }
+        public bool CreateUploadPack { get; set; }
     }
 }
