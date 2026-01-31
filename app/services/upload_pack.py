@@ -65,32 +65,55 @@ def _base_pn(pn: str) -> str:
     return clean_pn(str(pn).split("^", 1)[0])
 
 
-def _parse_flatbom(txt: str) -> List[Dict[str, Any]]:
+def _parse_flatbom(
+    txt: str,
+    source_name: str = "",
+    max_warnings: int = 3,
+) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
-    for raw in txt.strip().splitlines():
-        if not raw.strip():
+    failures = 0
+    logger = None
+    try:
+        logger = current_app.logger
+    except Exception:
+        logger = None
+
+    txt = (txt or "").lstrip("\ufeff")
+    for raw in (txt or "").splitlines():
+        line = raw.strip()
+        if not line:
             continue
-        cleaned = raw.replace("...", "")
+        line = line.lstrip("\ufeff")
+        cleaned = line.replace("...", "")
         try:
             d = ast.literal_eval(cleaned)
             if isinstance(d, dict):
                 out.append(d)
         except Exception:
+            if logger and failures < max_warnings:
+                preview = line.replace("\t", " ")
+                preview = preview[:80]
+                label = source_name or "FLATBOM"
+                logger.warning("FLATBOM parse failed (%s): %s", label, preview)
+            failures += 1
             continue
     return out
 
 
 def _build_bom_rev_map(z: zipfile.ZipFile) -> Tuple[Dict[str, str], List[Tuple[str, str]]]:
-    flat_name = next((n for n in z.namelist() if n.endswith("_FLATBOM.txt")), None)
+    flat_name = next(
+        (n for n in z.namelist() if n.endswith("_FLATBOM.txt") and not n.endswith("/")),
+        None,
+    )
     if not flat_name:
         return {}, []
     try:
-        flat_txt = z.read(flat_name).decode("utf-8", errors="replace")
+        flat_txt = z.read(flat_name).decode("utf-8-sig", errors="replace")
     except Exception:
         return {}, []
     bom_map: Dict[str, str] = {}
     pairs: List[Tuple[str, str]] = []
-    for row in _parse_flatbom(flat_txt):
+    for row in _parse_flatbom(flat_txt, source_name=flat_name):
         pn = _base_pn(row.get("partnumber") or row.get("part_number") or row.get("pn") or "")
         rev = clean_rev(row.get("revision") or row.get("rev") or "")
         if not pn:

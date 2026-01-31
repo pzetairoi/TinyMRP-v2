@@ -224,6 +224,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
                         tableAnn.SaveAsText(bomFile, "\t");
+                        TextFileHelper.StripUtf8Bom(bomFile);
                     }
                     else
                     {
@@ -1573,6 +1574,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
                     tableAnn.SaveAsText(treeBomPath, "\t");
+                    TextFileHelper.StripUtf8Bom(treeBomPath);
                     return true;
                 }
 
@@ -2005,7 +2007,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             Action<int, int> progress, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
             HashSet<string> uploadPackBases, List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras)
         {
-            using (var writer = new StreamWriter(outputFile, false, Encoding.UTF8))
+            using (var writer = TextFileHelper.CreateUtf8NoBomWriter(outputFile))
             {
                 int processed = 0;
                 foreach (BatchEntry entry in entries)

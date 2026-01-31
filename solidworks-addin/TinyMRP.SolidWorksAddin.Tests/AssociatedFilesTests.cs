@@ -164,5 +164,42 @@ namespace TinyMRP.SolidWorksAddin.Tests
 
             Directory.Delete(root, true);
         }
+
+        [TestMethod]
+        public void TextFileHelper_WritesUtf8NoBom()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "tinymrp_text_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, "flatbom.txt");
+
+            TextFileHelper.WriteAllTextUtf8NoBom(path, "{'partnumber':'PN'}");
+
+            byte[] bytes = File.ReadAllBytes(path);
+            Assert.IsFalse(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF);
+            Assert.AreEqual((byte)'{', bytes[0]);
+
+            Directory.Delete(root, true);
+        }
+
+        [TestMethod]
+        public void TextFileHelper_StripsUtf8Bom()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "tinymrp_text_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, "treebom.txt");
+
+            byte[] payload = new byte[] { 0xEF, 0xBB, 0xBF, (byte)'I', (byte)'T', (byte)'E', (byte)'M' };
+            File.WriteAllBytes(path, payload);
+            Assert.IsTrue(TextFileHelper.HasUtf8Bom(path));
+
+            bool stripped = TextFileHelper.StripUtf8Bom(path);
+            Assert.IsTrue(stripped);
+            Assert.IsFalse(TextFileHelper.HasUtf8Bom(path));
+
+            byte[] bytes = File.ReadAllBytes(path);
+            Assert.AreEqual((byte)'I', bytes[0]);
+
+            Directory.Delete(root, true);
+        }
     }
 }

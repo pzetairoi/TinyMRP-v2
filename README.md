@@ -153,6 +153,7 @@ TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://
 - Task pane tabs: Publish/BOM, Tools, Numbering, Configuration.
 - Publish exports deliverables under `DeliverablesFolder`.
 - BOM exports `*_FLATBOM.txt` and `*_TREEBOM.txt`, then zips them into `BOM_Folder\bom`.
+- BOM text files are written as UTF-8 **without** a BOM; the TinyMRP importer tolerates UTF-8 BOM (`utf-8-sig`) for legacy files.
 - Publish/BOM includes "Manage associated files..." and an optional "Create Upload Pack (ZIP)" toggle.
 - Child documents opened during export are closed automatically; only the root stays open.
 - Numbering tab previews and allocates `PartNumber` + `Revision` via `/api/numbering/*`, then writes custom properties.

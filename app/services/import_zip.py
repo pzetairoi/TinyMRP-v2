@@ -41,23 +41,41 @@ def _pn_regex(pn: str) -> str:
         return ""
     return r"^\s*" + r"\s+".join(tokens) + r"\s*$"
 
-def _parse_flatbom(txt: str) -> List[Dict[str, Any]]:
+def _parse_flatbom(
+    txt: str,
+    source_name: str = "",
+    max_warnings: int = 3,
+) -> List[Dict[str, Any]]:
     """
     FLATBOM contains one Python-like dict per line with single quotes.
     We remove literal '...' sequences and ast.literal_eval each line safely.
     """
-    out = []
-    for raw in txt.strip().splitlines():
-        if not raw.strip():
+    out: List[Dict[str, Any]] = []
+    failures = 0
+    logger = None
+    try:
+        logger = current_app.logger
+    except Exception:
+        logger = None
+
+    txt = (txt or "").lstrip("\ufeff")
+    for raw in (txt or "").splitlines():
+        line = raw.strip()
+        if not line:
             continue
-        cleaned = raw.replace("...", "")
+        line = line.lstrip("\ufeff")
+        cleaned = line.replace("...", "")
         try:
             d = ast.literal_eval(cleaned)
             if isinstance(d, dict):
                 out.append(d)
         except Exception:
-            # ignore unparseable line
-            pass
+            if logger and failures < max_warnings:
+                preview = line.replace("\t", " ")
+                preview = preview[:80]
+                label = source_name or "FLATBOM"
+                logger.warning("FLATBOM parse failed (%s): %s", label, preview)
+            failures += 1
     return out
 
 def _attr_ci_value(attrs: Dict[str, Any], key: str) -> List[str]:
@@ -373,8 +391,14 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     with timed_span("import.bom.total"):
         z = zipfile.ZipFile(io.BytesIO(file_bytes))
         # find the first *_FLATBOM.txt and *_TREEBOM.txt
-        flat_name = next((n for n in z.namelist() if n.endswith("_FLATBOM.txt")), None)
-        tree_name = next((n for n in z.namelist() if n.endswith("_TREEBOM.txt")), None)
+        flat_name = next(
+            (n for n in z.namelist() if n.endswith("_FLATBOM.txt") and not n.endswith("/")),
+            None,
+        )
+        tree_name = next(
+            (n for n in z.namelist() if n.endswith("_TREEBOM.txt") and not n.endswith("/")),
+            None,
+        )
 
         created_parts = 0
         updated_parts = 0
@@ -390,8 +414,8 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         part_props: Dict[Tuple[str, str], Dict[str, Any]] = {}
         if flat_name:
             with timed_span("import.bom.flatbom.parse"):
-                flat_txt = z.read(flat_name).decode("utf-8", errors="replace")
-                for d in _parse_flatbom(flat_txt):
+                flat_txt = z.read(flat_name).decode("utf-8-sig", errors="replace")
+                for d in _parse_flatbom(flat_txt, source_name=flat_name):
                     norm = _normalize_part(d)
                     pn = norm["part_number"]
                     rev = clean_rev(norm.get("revision") or "")
@@ -460,7 +484,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
     # 2) Links from TREEBOM
         if tree_name:
             with timed_span("import.bom.tree.parse"):
-                tree_txt = z.read(tree_name).decode("utf-8", errors="replace")
+                tree_txt = z.read(tree_name).decode("utf-8-sig", errors="replace")
                 links = _aggregate_links(_parse_treebom(tree_txt))
             parent_pairs = {(p, clean_rev(r)) for p, r, _, _, _, _ in links if p}
             if parent_pairs:
@@ -563,7 +587,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         root_pn = None
         root_rev = ""
         if tree_name:
-            txt = z.read(tree_name).decode("utf-8", errors="replace")
+            txt = z.read(tree_name).decode("utf-8-sig", errors="replace")
             for line in txt.splitlines():
                 cols = line.split("\t")
                 if len(cols) >= 2 and cols[0].strip() not in ("", "ITEM NO."):
