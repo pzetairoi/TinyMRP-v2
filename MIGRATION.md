@@ -9,7 +9,7 @@
 Compat mode preserves existing behavior, but improves safety:
 - CORS is no longer wildcard + credentials.
 - Session-authenticated API requests are protected by an origin/referer CSRF guard.
-- If `SECRET_KEY`/`SECURITY_PASSWORD_SALT` is missing or weak, a temporary runtime secret is generated and a warning is logged (sessions/tokens reset on restart).
+- If `SECRET_KEY`/`SECURITY_PASSWORD_SALT` is missing or weak, a runtime secret is generated once and persisted to `instance/runtime_secrets.json` (sessions/tokens remain stable across restarts). A warning is logged to encourage explicit secrets.
 
 ## Enable Strict Mode (opt-in)
 
@@ -54,3 +54,18 @@ In compat mode, if `TINYMRP_SEED_ADMIN=true` and no password is provided, a one-
 2. Update environment and restart services.
 3. Revoke/rotate API tokens if needed.
 4. Verify login and token-based clients.
+
+## Recovery CLI
+
+```bash
+flask --app run.py user list
+flask --app run.py role list
+flask --app run.py user set-password --email user@example.com
+flask --app run.py user bootstrap-admin --email admin@example.com --password ChangeMe123!
+```
+
+Docker:
+
+```bash
+docker compose exec app flask --app run.py user list
+```

@@ -79,10 +79,8 @@ def create_app(config_object=None):
         pass
 
     # Security mode (compat by default)
-    security_mode = (os.getenv("TINYMRP_SECURITY_MODE") or app.config.get("TINYMRP_SECURITY_MODE") or "compat")
-    security_mode = str(security_mode).strip().lower()
-    if security_mode != "strict":
-        security_mode = "compat"
+    from app.services.security_mode import security_mode as _security_mode
+    security_mode = _security_mode()
     app.config["TINYMRP_SECURITY_MODE"] = security_mode
     
         
@@ -210,38 +208,26 @@ def create_app(config_object=None):
 
     #print("FILES: local=", app.config["FILE_ROOT_LOCAL"], "http=", app.config["FILE_ROOT_HTTP"])
 
-
-
-
-    csrf.init_app(app)
-
     # Then override from environment if set (non-empty)
     for k in ("MONGO_URI",):
         v = os.getenv(k)
-        if v:  # only override if not empty
+        if v and str(v).strip():  # only override if not empty
             app.config[k] = v
 
-    # Resolve secrets safely (avoid insecure defaults)
-    def _resolve_secret(name: str) -> str:
-        raw = (os.getenv(name) or app.config.get(name) or "").strip()
-        low = raw.lower()
-        if raw and low not in ("change-me", "changeme", "change-me-too"):
-            return raw
-        if security_mode == "strict":
-            raise RuntimeError(
-                f"{name} must be set to a strong value when TINYMRP_SECURITY_MODE=strict."
-            )
-        # Compat: warn and generate a temporary in-memory secret.
-        print(f"Warning: {name} missing or default. Using a temporary runtime value; set {name} in the environment.")
-        return secrets.token_urlsafe(32)
+    # Resolve secrets safely (persist in compat mode if missing/empty)
+    from app.services.runtime_secrets import resolve_runtime_secrets
+    try:
+        secret_key, password_salt = resolve_runtime_secrets(app, security_mode)
+    except RuntimeError as exc:
+        raise RuntimeError(str(exc))
 
-    app.config["SECRET_KEY"] = _resolve_secret("SECRET_KEY")
-    app.config["SECURITY_PASSWORD_SALT"] = _resolve_secret("SECURITY_PASSWORD_SALT")
+    app.config["SECRET_KEY"] = secret_key
+    app.config["SECURITY_PASSWORD_SALT"] = password_salt
 
     # Keep env in sync for services that resolve secrets outside app context (in-process only).
-    if not os.getenv("SECRET_KEY"):
+    if not (os.getenv("SECRET_KEY") or "").strip():
         os.environ["SECRET_KEY"] = str(app.config.get("SECRET_KEY"))
-    if not os.getenv("SECURITY_PASSWORD_SALT"):
+    if not (os.getenv("SECURITY_PASSWORD_SALT") or "").strip():
         os.environ["SECURITY_PASSWORD_SALT"] = str(app.config.get("SECURITY_PASSWORD_SALT"))
 
     # Plain MongoEngine connect – capture the connection object
@@ -263,7 +249,6 @@ def create_app(config_object=None):
     app.register_error_handler(CSRFError, handle_csrf_error)
     
     # CSRF
-    app.config.setdefault("WTF_CSRF_ENABLED", True)
     csrf.init_app(app)
 
     if bool(app.config.get("FORCE_HTTPS")):

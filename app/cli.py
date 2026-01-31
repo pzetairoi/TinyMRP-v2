@@ -26,6 +26,27 @@ from app.services.attrs import harvest_part_attrs, merge_save_part_attrs
 def user():
     """User management commands"""
 
+
+@click.group()
+def role():
+    """Role management commands"""
+
+
+@role.command("list")
+@with_appcontext
+def list_roles():
+    rows = []
+    for r in Role.objects.order_by("name"):
+        perms = list(r.permissions or [])
+        rows.append({
+            "name": r.name,
+            "permissions_count": len(perms),
+        })
+    click.echo(rows)
+
+def _get_user(email: str):
+    return User.objects(email=str(email or "").strip().lower()).first()
+
 @user.command("create")
 @click.option("--email", prompt=True)
 @click.option("--password", prompt=True, hide_input=True, confirmation_prompt=True)
@@ -37,19 +58,81 @@ def create_user(email, password):
     u = User(email=email, password=hash_password(password), fs_uniquifier=secrets.token_hex(16))
     u.save()
     click.echo("Created user")
+
+@user.command("list")
+@with_appcontext
+def list_users():
+    rows = []
+    for u in User.objects.order_by("email"):
+        rows.append({
+            "email": u.email,
+            "active": bool(u.active),
+            "roles": [r.name for r in (u.roles or [])],
+        })
+    click.echo(rows)
     
         
 @user.command("grant-admin")
 @click.option("--email", prompt=True)
 @with_appcontext
 def grant_admin(email):
-    u = User.objects(email=email.lower()).first()
+    u = _get_user(email)
     if not u:
-        click.echo("User not found"); return
+        click.echo("User not found")
+        raise SystemExit(1)
     r = Role.objects(name="admin").first() or Role(name="admin").save()
     if r not in u.roles:
         u.roles.append(r); u.save()
     click.echo("Granted admin role")    
+
+@user.command("set-password")
+@click.option("--email", prompt=True)
+@click.option("--password", prompt=True, hide_input=True, confirmation_prompt=True)
+@with_appcontext
+def set_password(email, password):
+    u = _get_user(email)
+    if not u:
+        click.echo("User not found")
+        raise SystemExit(1)
+    u.password = hash_password(password)
+    u.save()
+    click.echo("Password updated")
+
+@user.command("grant-role")
+@click.option("--email", prompt=True)
+@click.option("--role", "role_name", prompt=True)
+@with_appcontext
+def grant_role(email, role_name):
+    u = _get_user(email)
+    if not u:
+        click.echo("User not found")
+        raise SystemExit(1)
+    r = Role.objects(name=role_name).first()
+    if not r:
+        click.echo("Role not found")
+        raise SystemExit(1)
+    if r not in u.roles:
+        u.roles.append(r)
+        u.save()
+    click.echo("Role granted")
+
+@user.command("revoke-role")
+@click.option("--email", prompt=True)
+@click.option("--role", "role_name", prompt=True)
+@with_appcontext
+def revoke_role(email, role_name):
+    u = _get_user(email)
+    if not u:
+        click.echo("User not found")
+        raise SystemExit(1)
+    r = Role.objects(name=role_name).first()
+    if not r:
+        click.echo("Role not found")
+        raise SystemExit(1)
+    if r in (u.roles or []):
+        u.roles = [x for x in (u.roles or []) if x != r]
+        u.save()
+    click.echo("Role revoked")
     
 @user.command("seed-roles")
 @with_appcontext
@@ -84,6 +167,23 @@ def seed_roles():
         "items.view","bom.view","orders.view","suppliers.view"
     ])
     click.echo("Seeded roles.")
+
+@user.command("bootstrap-admin")
+@click.option("--email", prompt=True)
+@click.option("--password", prompt=True, hide_input=True, confirmation_prompt=True)
+@with_appcontext
+def bootstrap_admin(email, password):
+    seed_roles()
+    u = _get_user(email)
+    if not u:
+        u = User(email=email.lower(), fs_uniquifier=secrets.token_hex(16))
+    u.password = hash_password(password)
+    u.active = True
+    r = Role.objects(name="admin").first() or Role(name="admin").save()
+    if r not in (u.roles or []):
+        u.roles.append(r)
+    u.save()
+    click.echo("Admin user ready")
 
 @user.command("seed-combos")
 @click.option("--prefix", default="test", show_default=True, help="Email prefix for generated users")
@@ -640,6 +740,7 @@ def init_app(app):
     app.cli.add_command(importcmd, "import")
     app.cli.add_command(files)
     app.cli.add_command(user)
+    app.cli.add_command(role)
     app.cli.add_command(data)
     app.cli.add_command(attrs)
 

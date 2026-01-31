@@ -51,6 +51,7 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `TINYMRP_ALLOWED_ORIGINS`: comma-separated CORS allowlist (strict mode requires this).
   - `TINYMRP_CORS_CREDENTIALS=true`: allow credentials when using an explicit allowlist.
   - `TINYMRP_MAX_CONTENT_MB`: global request size cap (falls back to Upload Pack max).
+  - `TINYMRP_RUNTIME_SECRETS_PATH`: override runtime secrets file path (compat mode only).
   - `FILE_HASH_MAX_BYTES`: compute/verify file hashes up to this size (0 to disable).
   - `VITE_BACKEND_URL`: dev proxy target for Vite (`frontend/vite.config.ts`).
   - `FORCE_HTTPS=true`: enforce HTTPS and set secure cookies.
@@ -77,6 +78,16 @@ Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 - **strict**: /api is token-only, CORS is disabled unless `TINYMRP_ALLOWED_ORIGINS` is set, cookies are Secure + SameSite=Strict, and startup fails if secrets are missing/weak.
 
 See `SECURITY.md` for the full threat model and `MIGRATION.md` for a safe rollout checklist.
+
+### Runtime secrets (compat mode)
+
+If `SECRET_KEY`/`SECURITY_PASSWORD_SALT` are missing or empty in compat mode, the app persists them to:
+
+```
+instance/runtime_secrets.json
+```
+
+Set explicit secrets in production to avoid warning logs and to support strict mode.
 
 ## Admin Settings
 
@@ -438,6 +449,8 @@ Edit your local `.env` and set at minimum:
 
 - `DELIVERABLES_DIR=/srv/tinymrp/deliverables` (Linux absolute path)
 - `HTTP_PORT=80` (or another free port if 80 is taken)
+- Set strong `SECRET_KEY` and `SECURITY_PASSWORD_SALT`.
+- If these are left empty in compat mode, TinyMRP will generate and persist them to `instance/runtime_secrets.json`.
 - Optional first-run admin seed: `TINYMRP_SEED_ADMIN=true`, `TINYMRP_ADMIN_EMAIL`, `TINYMRP_ADMIN_PASSWORD`.
 
 5) Build and start
@@ -452,6 +465,30 @@ docker compose ps
 - App: `http://YOUR_SERVER_IP/` (or `http://YOUR_SERVER_IP:<HTTP_PORT>`)
 - Files: served through the app with `/files/view/<token>` (no public listing).
 - First login: only if you enabled `TINYMRP_SEED_ADMIN=true`; use `TINYMRP_ADMIN_EMAIL`/`TINYMRP_ADMIN_PASSWORD` (or the one-time password logged on first boot in compat mode).
+
+### Recovery CLI (user/role management)
+
+```powershell
+# List users and roles
+flask --app run.py user list
+flask --app run.py role list
+
+# Reset password
+flask --app run.py user set-password --email user@example.com
+
+# Grant/revoke roles
+flask --app run.py user grant-role --email user@example.com --role admin
+flask --app run.py user revoke-role --email user@example.com --role viewer
+
+# Bootstrap a new admin (creates user if missing)
+flask --app run.py user bootstrap-admin --email admin@example.com --password ChangeMe123!
+```
+
+Docker usage:
+
+```bash
+docker compose exec app flask --app run.py user list
+```
 
 ### Mappings & Paths (repo-specific)
 
