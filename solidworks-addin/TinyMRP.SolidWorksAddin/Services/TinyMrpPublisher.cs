@@ -1394,24 +1394,20 @@ namespace TinyMRP.SolidWorksAddin.Services
                 revProp = "Revision";
             }
 
-            string pn = payload.PartNumber;
+            string pn = GetEvalProperty(swModel, config.Name, partProp);
             if (string.IsNullOrWhiteSpace(pn))
             {
-                pn = GetEvalProperty(swModel, config.Name, partProp);
-                if (string.IsNullOrWhiteSpace(pn))
-                {
-                    pn = GetEvalProperty(swModel, string.Empty, partProp);
-                }
+                pn = GetEvalProperty(swModel, string.Empty, partProp);
+            }
+            if (string.IsNullOrWhiteSpace(pn))
+            {
+                pn = BomPartNumber(config, swModel);
             }
 
-            string rev = payload.Revision;
+            string rev = GetEvalProperty(swModel, config.Name, revProp);
             if (string.IsNullOrWhiteSpace(rev))
             {
-                rev = GetEvalProperty(swModel, config.Name, revProp);
-                if (string.IsNullOrWhiteSpace(rev))
-                {
-                    rev = GetEvalProperty(swModel, string.Empty, revProp);
-                }
+                rev = GetEvalProperty(swModel, string.Empty, revProp);
             }
 
             string deliverablesRoot = EnsureTrailingSlash(options.DeliverablesFolder);

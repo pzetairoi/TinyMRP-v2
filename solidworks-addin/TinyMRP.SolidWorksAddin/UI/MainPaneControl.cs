@@ -1988,33 +1988,11 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
-            string partProp = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
-            string revProp = AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision";
-            if (string.IsNullOrWhiteSpace(partProp))
-            {
-                partProp = "PartNumber";
-            }
-            if (string.IsNullOrWhiteSpace(revProp))
-            {
-                revProp = "Revision";
-            }
-
             string configName = info.ActiveConfiguration;
             if (string.IsNullOrWhiteSpace(configName))
             {
                 Configuration activeConfig = info.Model.GetActiveConfiguration() as Configuration;
                 configName = activeConfig != null ? activeConfig.Name : string.Empty;
-            }
-
-            string pn = GetCustomProperty(info.Model, configName, partProp);
-            if (string.IsNullOrWhiteSpace(pn))
-            {
-                pn = GetCustomProperty(info.Model, string.Empty, partProp);
-            }
-            string rev = GetCustomProperty(info.Model, configName, revProp);
-            if (string.IsNullOrWhiteSpace(rev))
-            {
-                rev = GetCustomProperty(info.Model, string.Empty, revProp);
             }
 
             string raw = GetCustomProperty(info.Model, configName, AssociatedFilesPayload.PropertyName);
@@ -2023,9 +2001,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 raw = GetCustomProperty(info.Model, string.Empty, AssociatedFilesPayload.PropertyName);
             }
             AssociatedFilesPayload payload = AssociatedFilesPayload.FromJson(raw);
-            payload.PartNumber = pn ?? string.Empty;
-            payload.Revision = rev ?? string.Empty;
-
             using (var dialog = new AssociatedFilesDialog(payload.Files))
             {
                 if (dialog.ShowDialog(this) == DialogResult.OK)
