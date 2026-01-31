@@ -34,7 +34,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             string revision,
             IEnumerable<AssociatedFileEntry> extraFiles,
             Action<string> log,
-            ICollection<string> allowedBaseNames = null)
+            ICollection<string> allowedBaseNames = null,
+            ICollection<string> allowedGroups = null)
         {
             if (string.IsNullOrWhiteSpace(zipPath))
             {
@@ -49,7 +50,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             using (var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create))
             {
                 AddBom(archive, flatBomPath, treeBomPath, log);
-                AddDeliverables(archive, deliverablesRoot, log, allowedBaseNames);
+                AddDeliverables(archive, deliverablesRoot, log, allowedBaseNames, allowedGroups);
                 AddExtras(archive, partNumber, revision, extraFiles, log);
             }
         }
@@ -81,11 +82,18 @@ namespace TinyMRP.SolidWorksAddin.Services
             ZipArchive archive,
             string deliverablesRoot,
             Action<string> log,
-            ICollection<string> allowedBaseNames)
+            ICollection<string> allowedBaseNames,
+            ICollection<string> allowedGroups)
         {
             if (string.IsNullOrWhiteSpace(deliverablesRoot) || !Directory.Exists(deliverablesRoot))
             {
                 Log(log, "Deliverables folder not found; skipping.");
+                return;
+            }
+
+            if (allowedGroups != null && allowedGroups.Count == 0)
+            {
+                Log(log, "Upload pack: no deliverable groups selected; skipping deliverables.");
                 return;
             }
 
@@ -97,6 +105,10 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             foreach (string group in DeliverableGroups)
             {
+                if (allowedGroups != null && !allowedGroups.Contains(group))
+                {
+                    continue;
+                }
                 string groupDir = Path.Combine(deliverablesRoot, group);
                 if (!Directory.Exists(groupDir))
                 {

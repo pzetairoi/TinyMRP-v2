@@ -30,7 +30,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         private CheckBox _removeModifiedNotesCheck;
         private CheckBox _topLevelOnlyCheck;
         private CheckBox _overwriteCheck;
-        private CheckBox _createUploadPackCheck;
+        private CheckBox _uploadPackIncludeDeliverablesCheck;
+        private CheckBox _uploadPackIncludeExtrasCheck;
         private Button _assocFilesButton;
         private CheckBox _pngModelCheck;
         private CheckBox _stepCheck;
@@ -290,10 +291,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             };
             _overwriteCheck = CreateCheckBox("Overwrite files");
             _topLevelOnlyCheck = CreateCheckBox("Top level only");
-            _createUploadPackCheck = CreateCheckBox("Create Upload Pack (ZIP)");
             optionsPanel.Controls.Add(_overwriteCheck);
             optionsPanel.Controls.Add(_topLevelOnlyCheck);
-            optionsPanel.Controls.Add(_createUploadPackCheck);
             AddSection(panel, CreateGroupBox("Options", optionsPanel));
 
             var assocPanel = new FlowLayoutPanel
@@ -307,6 +306,21 @@ namespace TinyMRP.SolidWorksAddin.UI
             _assocFilesButton.Click += OnManageAssociatedFiles;
             assocPanel.Controls.Add(_assocFilesButton);
             AddSection(panel, CreateGroupBox("Associated files", assocPanel));
+
+            var uploadPackOptions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            _uploadPackIncludeDeliverablesCheck = CreateCheckBox("Include deliverables (uses selections above)");
+            _uploadPackIncludeExtrasCheck = CreateCheckBox("Include associated files");
+            if (_uploadPackIncludeDeliverablesCheck != null) _uploadPackIncludeDeliverablesCheck.Checked = true;
+            if (_uploadPackIncludeExtrasCheck != null) _uploadPackIncludeExtrasCheck.Checked = true;
+            uploadPackOptions.Controls.Add(_uploadPackIncludeDeliverablesCheck);
+            uploadPackOptions.Controls.Add(_uploadPackIncludeExtrasCheck);
+            AddSection(panel, CreateGroupBox("Upload pack options", uploadPackOptions));
 
             var publishActions = new FlowLayoutPanel
             {
@@ -325,6 +339,18 @@ namespace TinyMRP.SolidWorksAddin.UI
             publishActions.Controls.Add(btnDeselectAll);
             publishActions.Controls.Add(btnCreate);
             AddSection(panel, CreateGroupBox("Publish actions", publishActions));
+
+            var uploadPackActions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            var btnUploadPack = new Button { Text = "Create upload pack", AutoSize = true };
+            btnUploadPack.Click += OnCreateUploadPack;
+            uploadPackActions.Controls.Add(btnUploadPack);
+            AddSection(panel, CreateGroupBox("Upload pack actions", uploadPackActions));
 
             var bomActions = new FlowLayoutPanel
             {
@@ -1831,9 +1857,20 @@ namespace TinyMRP.SolidWorksAddin.UI
                 ExportEdrawingDrawing = _edrDrawingCheck != null && _edrDrawingCheck.Checked,
                 OverwriteFiles = _overwriteCheck != null && _overwriteCheck.Checked,
                 TopLevelOnly = _topLevelOnlyCheck != null && _topLevelOnlyCheck.Checked,
-                CreateUploadPack = _createUploadPackCheck != null && _createUploadPackCheck.Checked
+                CreateUploadPack = false
             };
 
+            return options;
+        }
+
+        private PublishOptions BuildUploadPackOptions()
+        {
+            PublishOptions options = BuildOptions();
+            options.CreateUploadPack = true;
+            options.UploadPackIncludeDeliverables = _uploadPackIncludeDeliverablesCheck != null &&
+                _uploadPackIncludeDeliverablesCheck.Checked;
+            options.UploadPackIncludeExtras = _uploadPackIncludeExtrasCheck != null &&
+                _uploadPackIncludeExtrasCheck.Checked;
             return options;
         }
 
@@ -1916,6 +1953,22 @@ namespace TinyMRP.SolidWorksAddin.UI
             ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
         }
 
+        private void OnCreateUploadPack(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                MessageBox.Show("Publisher is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            PublishOptions options = BuildUploadPackOptions();
+            SetStatus("Creating upload pack...");
+            publisher.ProcessUploadPack(options, Log);
+            SetStatus("Done.");
+        }
+
         private void OnManageAssociatedFiles(object sender, EventArgs e)
         {
             ISldWorks app = AddinContext.SldWorks;
@@ -1946,18 +1999,29 @@ namespace TinyMRP.SolidWorksAddin.UI
                 revProp = "Revision";
             }
 
-            string pn = GetCustomProperty(info.Model, info.ActiveConfiguration, partProp);
+            string configName = info.ActiveConfiguration;
+            if (string.IsNullOrWhiteSpace(configName))
+            {
+                Configuration activeConfig = info.Model.GetActiveConfiguration() as Configuration;
+                configName = activeConfig != null ? activeConfig.Name : string.Empty;
+            }
+
+            string pn = GetCustomProperty(info.Model, configName, partProp);
             if (string.IsNullOrWhiteSpace(pn))
             {
                 pn = GetCustomProperty(info.Model, string.Empty, partProp);
             }
-            string rev = GetCustomProperty(info.Model, info.ActiveConfiguration, revProp);
+            string rev = GetCustomProperty(info.Model, configName, revProp);
             if (string.IsNullOrWhiteSpace(rev))
             {
                 rev = GetCustomProperty(info.Model, string.Empty, revProp);
             }
 
-            string raw = GetCustomProperty(info.Model, string.Empty, AssociatedFilesPayload.PropertyName);
+            string raw = GetCustomProperty(info.Model, configName, AssociatedFilesPayload.PropertyName);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                raw = GetCustomProperty(info.Model, string.Empty, AssociatedFilesPayload.PropertyName);
+            }
             AssociatedFilesPayload payload = AssociatedFilesPayload.FromJson(raw);
             payload.PartNumber = pn ?? string.Empty;
             payload.Revision = rev ?? string.Empty;
@@ -1970,7 +2034,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                     string json = payload.ToJson();
                     SolidWorksPropertyWriter.SetCustomProperty(
                         info.Model,
-                        string.Empty,
+                        configName,
                         AssociatedFilesPayload.PropertyName,
                         json);
                     try
