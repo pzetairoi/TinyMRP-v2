@@ -1407,26 +1407,64 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             deliverablesRoot = deliverablesRoot.TrimEnd('\\', '/');
 
+            string bomFolder = Path.GetDirectoryName(flatBomPath) ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(bomFolder))
+            {
+                bomFolder = EnsureTrailingSlash(options.BomFolder);
+                if (!string.IsNullOrWhiteSpace(bomFolder))
+                {
+                    bomFolder = bomFolder.TrimEnd('\\', '/');
+                }
+            }
+            if (string.IsNullOrWhiteSpace(bomFolder))
+            {
+                bomFolder = deliverablesRoot;
+            }
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(bomFolder))
+                {
+                    Directory.CreateDirectory(bomFolder);
+                }
+            }
+            catch
+            {
+                // ignore folder creation errors
+            }
+
             string zipName = GetFileString(swModel, config.Name) + "_UPLOADPACK_" +
                 DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss") + ".zip";
-            string zipPath = Path.Combine(deliverablesRoot, zipName);
+            string zipPath = Path.Combine(bomFolder, zipName);
 
             HashSet<string> allowedGroups = BuildUploadPackGroups(options);
             IEnumerable<UploadPackBuilder.AssociatedFilesBundle> extras = options.UploadPackIncludeExtras
                 ? uploadPackExtras
                 : null;
 
-            UploadPackBuilder.Build(
-                zipPath,
-                deliverablesRoot,
-                flatBomPath,
-                treeBomPath,
-                extras,
-                log,
-                uploadPackBases,
-                allowedGroups);
+            bool built = false;
+            try
+            {
+                UploadPackBuilder.Build(
+                    zipPath,
+                    deliverablesRoot,
+                    flatBomPath,
+                    treeBomPath,
+                    extras,
+                    log,
+                    uploadPackBases,
+                    allowedGroups);
+                built = true;
 
-            Log(log, "Upload pack created: " + zipPath);
+                Log(log, "Upload pack created: " + zipPath);
+            }
+            finally
+            {
+                if (built)
+                {
+                    TryDeleteFile(flatBomPath);
+                    TryDeleteFile(treeBomPath);
+                }
+            }
         }
 
         private AssociatedFilesPayload ReadAssociatedFiles(ModelDoc2 model, string configName)
@@ -3516,6 +3554,21 @@ namespace TinyMRP.SolidWorksAddin.Services
                 if (Directory.Exists(path))
                 {
                     Directory.Delete(path, true);
+                }
+            }
+            catch
+            {
+                // ignore cleanup errors
+            }
+        }
+
+        private void TryDeleteFile(string path)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                {
+                    File.Delete(path);
                 }
             }
             catch
