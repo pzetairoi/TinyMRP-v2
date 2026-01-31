@@ -49,6 +49,8 @@ def _expectations_for(pn: str, rev: str) -> List[Tuple[str, str, bool]]:
         ("step", ("step","stp")),
         ("edr",  ("edr","eprt","easm","EDR","EPRT","EASM")),
         ("3mf",  ("3mf",)),
+        ("ply",  ("ply",)),
+        ("stl",  ("stl",)),
         ("datasheet", ("pdf","jpg","jpeg","png")),
     ]:
         # store exactly one file per ext_group -> we’ll accept any of these concrete exts
@@ -113,9 +115,9 @@ def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
     local_root = Path(local)
 
     found: Dict[Tuple[str,bool], Dict] = {}
-    # We search by expected relative paths from the known subfolders (png, pdf, dxf, step, edr, 3mf, datasheet).
+    # We search by expected relative paths from the known subfolders (png, pdf, dxf, step, edr, 3mf, ply, stl, datasheet).
     # The repo uses subfolders named as ext_groups.
-    folders = ("png","pdf","dxf","step","edr","3mf","datasheet")
+    folders = ("png","pdf","dxf","step","edr","3mf","ply","stl","datasheet")
    #print(folders)
     for ext_group, leaf, is_dwg in _expectations_for(pn, rev):
         # try in the matching folder (png in png/, pdf in pdf/, …)
@@ -157,6 +159,8 @@ def _group_from_ext(ext: str) -> Optional[str]:
     if ext in {"step", "stp"}: return "step"
     if ext in {"eprt", "easm", "edrw"}: return "edr"
     if ext in {"3mf"}: return "3mf"
+    if ext in {"ply"}: return "ply"
+    if ext in {"stl"}: return "stl"
     return None
 # app/services/filescan.py
 

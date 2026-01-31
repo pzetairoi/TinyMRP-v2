@@ -2,13 +2,17 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { ThreeMFLoader } from "three/examples/jsm/loaders/3MFLoader.js";
+import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
-type Props = { url: string; height?: number };
+type MeshFormat = "3mf" | "ply" | "stl";
+type Props = { url: string; height?: number; format?: MeshFormat };
 type SectionRange = { min: number; max: number; step: number };
 type SectionAxis = "X" | "Y" | "Z";
 
-const ThreeMFViewer: React.FC<Props> = ({ url, height = 480 }) => {
+const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -26,9 +30,10 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480 }) => {
   const [err, setErr] = useState<string | null>(null);
   const [edgesOn, setEdgesOn] = useState(true);
   const [wireframeOn, setWireframeOn] = useState(false);
-  const [gridOn, setGridOn] = useState(true);
+  const [gridOn, setGridOn] = useState(false);
   const [axesOn, setAxesOn] = useState(false);
   const [autoRotate, setAutoRotate] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [sectionOn, setSectionOn] = useState(false);
   const [sectionAxis, setSectionAxis] = useState<SectionAxis>("Z");
   const [sectionOffset, setSectionOffset] = useState(0);
@@ -187,6 +192,16 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480 }) => {
     controls.update();
   };
 
+  const toggleFullscreen = () => {
+    const el = viewerRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  };
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -237,42 +252,75 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480 }) => {
     clipPlaneRef.current = clipPlane;
     updateClipPlane(sectionOn, sectionOffset, sectionAxis, sectionFlip);
 
-    const loader = new ThreeMFLoader();
     let model: THREE.Object3D | null = null;
     edgesRef.current = [];
 
-    loader.load(
-      url,
-      (obj) => {
-        model = obj;
-        modelRef.current = obj;
-        scene.add(obj);
+    const onModelLoaded = (obj: THREE.Object3D) => {
+      model = obj;
+      modelRef.current = obj;
+      scene.add(obj);
 
-        const thresholdAngle = 20;
-        obj.traverse((child: any) => {
-          if (child.isMesh && child.geometry) {
-            const edgeGeo = new THREE.EdgesGeometry(
-              child.geometry,
-              thresholdAngle
-            );
-            const edgeMat = new THREE.LineBasicMaterial({
-              color: 0x000000,
-              transparent: true,
-              opacity: 0.7,
-            });
-            const edges = new THREE.LineSegments(edgeGeo, edgeMat);
-            edges.visible = edgesOn;
-            child.add(edges);
-            edgesRef.current.push(edges);
-          }
-        });
+      const thresholdAngle = 20;
+      obj.traverse((child: any) => {
+        if (child.isMesh && child.geometry) {
+          const edgeGeo = new THREE.EdgesGeometry(
+            child.geometry,
+            thresholdAngle
+          );
+          const edgeMat = new THREE.LineBasicMaterial({
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.7,
+          });
+          const edges = new THREE.LineSegments(edgeGeo, edgeMat);
+          edges.visible = edgesOn;
+          child.add(edges);
+          edgesRef.current.push(edges);
+        }
+      });
 
-        applyWireframe(wireframeOn);
-        fitToView();
-      },
-      undefined,
-      (e) => setErr(`Failed to load 3D model: ${e?.message ?? "unknown error"}`)
-    );
+      applyWireframe(wireframeOn);
+      fitToView();
+    };
+
+    const buildMeshFromGeometry = (geometry: THREE.BufferGeometry) => {
+      const hasNormals = !!geometry.getAttribute("normal");
+      if (!hasNormals) {
+        geometry.computeVertexNormals();
+      }
+      const hasColors = !!geometry.getAttribute("color");
+      const material = new THREE.MeshStandardMaterial({
+        color: hasColors ? 0xffffff : 0x9aa3b2,
+        metalness: 0.1,
+        roughness: 0.6,
+        vertexColors: hasColors,
+      });
+      return new THREE.Mesh(geometry, material);
+    };
+
+    const onError = (e: any) =>
+      setErr(`Failed to load 3D model: ${e?.message ?? "unknown error"}`);
+
+    if (format === "3mf") {
+      const loader = new ThreeMFLoader();
+      loader.load(url, onModelLoaded, undefined, onError);
+    } else if (format === "ply") {
+      const loader = new PLYLoader();
+      loader.load(
+        url,
+        (geometry) => onModelLoaded(buildMeshFromGeometry(geometry)),
+        undefined,
+        onError
+      );
+    } else {
+      const loader = new STLLoader();
+      loader.load(
+        url,
+        (geometry) => onModelLoaded(buildMeshFromGeometry(geometry)),
+        undefined,
+        onError
+      );
+    }
 
     const onResize = () => {
       if (!containerRef.current || !rendererRef.current || !cameraRef.current) {
@@ -324,13 +372,21 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480 }) => {
       renderer.dispose();
       containerRef.current?.removeChild(renderer.domElement);
     };
-  }, [url, height]);
+  }, [url, height, format]);
 
   useEffect(() => {
     if (controlsRef.current) {
       controlsRef.current.autoRotate = autoRotate;
     }
   }, [autoRotate]);
+
+  useEffect(() => {
+    const onChange = () => {
+      setIsFullscreen(document.fullscreenElement === viewerRef.current);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
 
   useEffect(() => {
     if (gridRef.current) gridRef.current.visible = gridOn;
@@ -379,7 +435,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480 }) => {
           {err}
         </div>
       ) : (
-        <div style={{ position: "relative", width: "100%", height }}>
+        <div ref={viewerRef} style={{ position: "relative", width: "100%", height }}>
           <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
           <div
             style={{
@@ -521,6 +577,13 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480 }) => {
               onClick={() => setAutoRotate((v) => !v)}
             >
               Auto-rotate
+            </button>
+            <button
+              style={toggleStyle(isFullscreen)}
+              type="button"
+              onClick={toggleFullscreen}
+            >
+              Full screen
             </button>
             <span style={{ fontSize: 11, color: "#666" }}>
               Drag to rotate, right drag to pan, wheel to zoom

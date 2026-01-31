@@ -31,7 +31,7 @@ Rules:
   - `fabrication` fallback.
 - Normalized processes: uses `processmeta` aliases.
 - Missing fields: material, process, description.
-- Deliverables present: pdf/png/dxf/step/datasheet.
+- Deliverables present: pdf/png/dxf/step/3mf/ply/stl/datasheet.
 - Recommendations:
   - hardware/purchase: datasheet or link.
   - sheet_metal: pdf and dxf.

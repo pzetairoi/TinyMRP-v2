@@ -8,6 +8,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         public bool ExportStep { get; set; }
         public bool ExportEdrawing { get; set; }
         public bool Export3mf { get; set; }
+        public bool ExportPly { get; set; }
+        public bool ExportStl { get; set; }
         public bool ExportPngDrawing { get; set; }
         public bool ExportPdf { get; set; }
         public bool ExportEdrawingDrawing { get; set; }

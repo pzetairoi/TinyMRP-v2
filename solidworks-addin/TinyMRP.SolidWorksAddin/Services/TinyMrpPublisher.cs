@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using System.Globalization;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
 
@@ -1505,14 +1506,23 @@ namespace TinyMRP.SolidWorksAddin.Services
                                  ShouldExport(Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf"),
                                      options.OverwriteFiles);
 
+                bool createPly = options.ExportPly &&
+                                 ShouldExport(Path.Combine(deliverablesFolder, "ply", fileString + ".ply"),
+                                     options.OverwriteFiles);
+
+                bool createStl = options.ExportStl &&
+                                 ShouldExport(Path.Combine(deliverablesFolder, "stl", fileString + ".stl"),
+                                     options.OverwriteFiles);
+
                 bool createEdr = options.ExportEdrawing &&
                                  ShouldExport(Path.Combine(deliverablesFolder, "edr", fileString +
                                      (model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY ? ".easm" : ".eprt")),
                                      options.OverwriteFiles);
 
-                if (createPng || createStep || createEdr || create3mf)
+                if (createPng || createStep || createEdr || create3mf || createPly || createStl)
                 {
-                    ModelPublish(model, confName, fileString, deliverablesFolder, createPng, createStep, createEdr, create3mf);
+                    ModelPublish(model, confName, fileString, deliverablesFolder, createPng, createStep, createEdr,
+                        create3mf, createPly, createStl, log);
                 }
 
                 if (drawingExists)
@@ -1551,6 +1561,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 "dxf",
                 "edr",
                 "3mf",
+                "ply",
+                "stl",
                 "bom",
                 Path.Combine("temp", "upload")
             };
@@ -1567,7 +1579,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         }
 
         private void ModelPublish(ModelDoc2 model, string confName, string fileString, string deliverablesFolder,
-            bool png, bool step, bool edr, bool threeMf)
+            bool png, bool step, bool edr, bool threeMf, bool ply, bool stl, Action<string> log)
         {
             _swApp.ActivateDoc(model.GetTitle());
             model.ShowConfiguration(confName);
@@ -1589,6 +1601,65 @@ namespace TinyMRP.SolidWorksAddin.Services
                 string path = Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf");
                 model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+            }
+
+            bool stlExported = false;
+            string stlPath = Path.Combine(deliverablesFolder, "stl", fileString + ".stl");
+            if (stl)
+            {
+                stlExported = model.Extension.SaveAs(stlPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                stlExported = stlExported && File.Exists(stlPath);
+            }
+
+            if (ply)
+            {
+                string plyPath = Path.Combine(deliverablesFolder, "ply", fileString + ".ply");
+                bool plyExported = model.Extension.SaveAs(plyPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                plyExported = plyExported && File.Exists(plyPath);
+
+                if (!plyExported)
+                {
+                    string sourceStl = stlExported ? stlPath : string.Empty;
+                    string tempStl = string.Empty;
+
+                    if (string.IsNullOrWhiteSpace(sourceStl))
+                    {
+                        tempStl = Path.Combine(Path.GetTempPath(),
+                            fileString + "_" + Guid.NewGuid().ToString("N") + ".stl");
+                        bool tempOk = model.Extension.SaveAs(tempStl, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        if (tempOk && File.Exists(tempStl))
+                        {
+                            sourceStl = tempStl;
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(sourceStl) && File.Exists(sourceStl))
+                    {
+                        if (!TryConvertStlToPly(sourceStl, plyPath))
+                        {
+                            Log(log, "PLY export failed: STL conversion failed.");
+                        }
+                    }
+                    else
+                    {
+                        Log(log, "PLY export failed: STL source unavailable.");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(tempStl))
+                    {
+                        try
+                        {
+                            File.Delete(tempStl);
+                        }
+                        catch
+                        {
+                            // ignore cleanup errors
+                        }
+                    }
+                }
             }
 
             if (step)
@@ -1636,6 +1707,143 @@ namespace TinyMRP.SolidWorksAddin.Services
                 model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
             }
+        }
+
+        private bool TryConvertStlToPly(string stlPath, string plyPath)
+        {
+            try
+            {
+                List<float> vertices;
+                if (!TryReadBinaryStlVertices(stlPath, out vertices) &&
+                    !TryReadAsciiStlVertices(stlPath, out vertices))
+                {
+                    return false;
+                }
+
+                int vertexCount = vertices.Count / 3;
+                int faceCount = vertexCount / 3;
+                if (faceCount <= 0)
+                {
+                    return false;
+                }
+
+                vertexCount = faceCount * 3;
+                int floatCount = vertexCount * 3;
+
+                using (var stream = new FileStream(plyPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                using (var writer = new BinaryWriter(stream))
+                {
+                    string header = BuildPlyHeader(vertexCount, faceCount);
+                    writer.Write(Encoding.ASCII.GetBytes(header));
+
+                    for (int i = 0; i < floatCount; i++)
+                    {
+                        writer.Write(vertices[i]);
+                    }
+
+                    for (int i = 0; i < faceCount; i++)
+                    {
+                        writer.Write((byte)3);
+                        writer.Write(i * 3);
+                        writer.Write(i * 3 + 1);
+                        writer.Write(i * 3 + 2);
+                    }
+                }
+
+                return File.Exists(plyPath);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryReadBinaryStlVertices(string path, out List<float> vertices)
+        {
+            vertices = null;
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var reader = new BinaryReader(stream))
+            {
+                if (stream.Length < 84)
+                {
+                    return false;
+                }
+
+                reader.ReadBytes(80);
+                uint triCount = reader.ReadUInt32();
+                long expectedSize = 84L + (50L * triCount);
+                if (expectedSize != stream.Length)
+                {
+                    return false;
+                }
+
+                vertices = new List<float>(checked((int)triCount * 9));
+                for (uint i = 0; i < triCount; i++)
+                {
+                    reader.ReadSingle();
+                    reader.ReadSingle();
+                    reader.ReadSingle();
+
+                    for (int v = 0; v < 3; v++)
+                    {
+                        vertices.Add(reader.ReadSingle());
+                        vertices.Add(reader.ReadSingle());
+                        vertices.Add(reader.ReadSingle());
+                    }
+
+                    reader.ReadUInt16();
+                }
+            }
+
+            return vertices.Count >= 9;
+        }
+
+        private bool TryReadAsciiStlVertices(string path, out List<float> vertices)
+        {
+            vertices = new List<float>();
+            foreach (string raw in File.ReadLines(path))
+            {
+                string line = raw.Trim();
+                if (!line.StartsWith("vertex", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 4)
+                {
+                    continue;
+                }
+
+                float x;
+                float y;
+                float z;
+                if (float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out x) &&
+                    float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out y) &&
+                    float.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out z))
+                {
+                    vertices.Add(x);
+                    vertices.Add(y);
+                    vertices.Add(z);
+                }
+            }
+
+            return vertices.Count >= 9;
+        }
+
+        private string BuildPlyHeader(int vertexCount, int faceCount)
+        {
+            var sb = new StringBuilder();
+            sb.Append("ply\n");
+            sb.Append("format binary_little_endian 1.0\n");
+            sb.Append("element vertex ").Append(vertexCount).Append("\n");
+            sb.Append("property float x\n");
+            sb.Append("property float y\n");
+            sb.Append("property float z\n");
+            sb.Append("element face ").Append(faceCount).Append("\n");
+            sb.Append("property list uchar int vertex_indices\n");
+            sb.Append("end_header\n");
+            return sb.ToString();
         }
 
         private void DwgPublish(ModelDoc2 model, string fileString, string deliverablesFolder,

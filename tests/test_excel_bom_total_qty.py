@@ -37,3 +37,46 @@ def test_excel_bom_uses_total_qty_header(app):
 
     assert "total qty" in header
     assert all("approved" not in h for h in header)
+
+
+def test_excel_bom_all_fields_toggle(app):
+    root = Part(part_number="ASM-300", revision="", description="Root").save()
+    child = Part(part_number="C-2", revision="", description="Child", attrs={"custom_field": "X"}).save()
+    BOMLink(parent_pn=root.part_number, parent_rev="", child_pn=child.part_number, child_rev="", qty=1).save()
+
+    opts = DocPackOptions(
+        root_pn=root.part_number,
+        root_rev="",
+        depth="full",
+        include_consumed=True,
+        want_excel_bom=True,
+        excel_all_fields=False,
+        want_selected_files=False,
+        want_pdf_binder=False,
+        want_visual_list=False,
+    )
+
+    with app.app_context():
+        _, data_main, _ = build_docpack(opts)
+
+    zf = zipfile.ZipFile(io.BytesIO(data_main))
+    bom_name = next(n for n in zf.namelist() if n.lower().endswith(".xlsx"))
+    wb = load_workbook(io.BytesIO(zf.read(bom_name)))
+    ws = wb.active
+    header_row = next(ws.iter_rows(min_row=1, max_row=1))
+    header_main = [str(c.value or "").strip().lower() for c in header_row]
+
+    assert "custom_field" not in header_main
+
+    opts.excel_all_fields = True
+    with app.app_context():
+        _, data_full, _ = build_docpack(opts)
+
+    zf_full = zipfile.ZipFile(io.BytesIO(data_full))
+    bom_name_full = next(n for n in zf_full.namelist() if n.lower().endswith(".xlsx"))
+    wb_full = load_workbook(io.BytesIO(zf_full.read(bom_name_full)))
+    ws_full = wb_full.active
+    header_row_full = next(ws_full.iter_rows(min_row=1, max_row=1))
+    header_full = [str(c.value or "").strip().lower() for c in header_row_full]
+
+    assert "custom_field" in header_full
