@@ -44,6 +44,11 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
   const [sectionFlip, setSectionFlip] = useState(false);
   const [measureOn, setMeasureOn] = useState(false);
   const [measureValue, setMeasureValue] = useState<number | null>(null);
+  const [measureDelta, setMeasureDelta] = useState<{
+    x: number;
+    y: number;
+    z: number;
+  } | null>(null);
 
   const applyEdgesVisibility = (value: boolean) => {
     edgesRef.current.forEach((edge) => {
@@ -125,15 +130,20 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     }
     measurePointsRef.current = [];
     setMeasureValue(null);
+    setMeasureDelta(null);
   };
 
   const addMeasureMarker = (point: THREE.Vector3) => {
     const group = measureGroupRef.current;
     if (!group) return;
     const radius = fitRef.current?.radius ?? 1;
-    const markerSize = Math.max(radius * 0.01, 0.2);
+    const markerSize = Math.max(radius * 0.01, 0.2) * 0.6;
     const geom = new THREE.SphereGeometry(markerSize, 16, 16);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xff6b00 });
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff6b00,
+      transparent: true,
+      opacity: 0.6,
+    });
     const marker = new THREE.Mesh(geom, mat);
     marker.position.copy(point);
     group.add(marker);
@@ -270,6 +280,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     scene.add(measureGroup);
     measurePointsRef.current = [];
     setMeasureValue(null);
+    setMeasureDelta(null);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
@@ -518,8 +529,14 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
 
       if (measurePointsRef.current.length === 2) {
         const [p1, p2] = measurePointsRef.current;
+        const delta = new THREE.Vector3().subVectors(p2, p1);
         addMeasureLine(p1, p2);
-        setMeasureValue(p1.distanceTo(p2));
+        setMeasureValue(delta.length());
+        setMeasureDelta({
+          x: Math.abs(delta.x),
+          y: Math.abs(delta.y),
+          z: Math.abs(delta.z),
+        });
       }
     };
 
@@ -720,9 +737,13 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
             </button>
             {measureOn ? (
               <span style={{ fontSize: 12, color: "#333" }}>
-                {measureValue === null
+                {measureValue === null || !measureDelta
                   ? "Measure: click two points"
-                  : `Measure: ${measureValue.toFixed(2)}`}
+                  : `Measure: ${measureValue.toFixed(2)} (dX ${measureDelta.x.toFixed(
+                      2
+                    )}, dY ${measureDelta.y.toFixed(
+                      2
+                    )}, dZ ${measureDelta.z.toFixed(2)})`}
               </span>
             ) : null}
             <span style={{ fontSize: 11, color: "#666" }}>

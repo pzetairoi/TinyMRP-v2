@@ -45,7 +45,7 @@ def _needs_rebuild(src_abs: str, dst_abs: str) -> bool:
     except Exception:
         return True
 
-def _gen_one(src_abs: str, dst_abs: str):
+def _gen_one(src_abs: str, dst_abs: str, *, remove_bg: bool = True):
     fmt = _fmt()
     maxw, maxh = _max_size()
     _ensure_dir(os.path.dirname(dst_abs))
@@ -82,8 +82,8 @@ def _gen_one(src_abs: str, dst_abs: str):
         return rgba
 
     with Image.open(src_abs) as im:
-        # Apply crop + transparent background first, then scale
-        processed = _crop_and_background_pil(im)
+        # Apply crop + transparent background first, then scale (unless disabled)
+        processed = _crop_and_background_pil(im) if remove_bg else im.convert("RGBA")
         processed.thumbnail((maxw, maxh))   # preserves aspect ratio
 
         # Aggressive size control without touching config
@@ -200,7 +200,7 @@ def generate_thumbs_for_artifacts(docs: Iterable[PartFile]) -> int:
         thumb_abs = _abs(thumb_rel)
         if _needs_rebuild(src_abs, thumb_abs):
             try:
-                _gen_one(src_abs, thumb_abs)
+                _gen_one(src_abs, thumb_abs, remove_bg=not bool(getattr(d, "is_dwg", False)))
             except Exception as ex:
                 # optionally log ex
                 continue
