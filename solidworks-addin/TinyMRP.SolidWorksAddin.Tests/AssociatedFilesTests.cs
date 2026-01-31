@@ -75,9 +75,17 @@ namespace TinyMRP.SolidWorksAddin.Tests
             File.WriteAllText(assocPath, "scan");
 
             string zipPath = Path.Combine(root, "pack.zip");
-            var extras = new List<AssociatedFileEntry>
+            var extras = new List<UploadPackBuilder.AssociatedFilesBundle>
             {
-                new AssociatedFileEntry { Path = assocPath, Label = "scan" }
+                new UploadPackBuilder.AssociatedFilesBundle
+                {
+                    PartNumber = "PN-10",
+                    Revision = "",
+                    Files = new List<AssociatedFileEntry>
+                    {
+                        new AssociatedFileEntry { Path = assocPath, Label = "scan" }
+                    }
+                }
             };
             var allowedBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -93,8 +101,6 @@ namespace TinyMRP.SolidWorksAddin.Tests
                 deliverables,
                 flat,
                 tree,
-                "PN-10",
-                "",
                 extras,
                 null,
                 allowedBases,
@@ -120,9 +126,17 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Directory.CreateDirectory(deliverables);
 
             string zipPath = Path.Combine(root, "pack.zip");
-            var extras = new List<AssociatedFileEntry>
+            var extras = new List<UploadPackBuilder.AssociatedFilesBundle>
             {
-                new AssociatedFileEntry { Path = Path.Combine(root, "missing.dat"), Label = "missing" }
+                new UploadPackBuilder.AssociatedFilesBundle
+                {
+                    PartNumber = "PN-11",
+                    Revision = "A",
+                    Files = new List<AssociatedFileEntry>
+                    {
+                        new AssociatedFileEntry { Path = Path.Combine(root, "missing.dat"), Label = "missing" }
+                    }
+                }
             };
             var allowedBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -138,8 +152,6 @@ namespace TinyMRP.SolidWorksAddin.Tests
                 deliverables,
                 string.Empty,
                 string.Empty,
-                "PN-11",
-                "A",
                 extras,
                 null,
                 allowedBases,

@@ -7,6 +7,13 @@ namespace TinyMRP.SolidWorksAddin.Services
 {
     internal static class UploadPackBuilder
     {
+        internal sealed class AssociatedFilesBundle
+        {
+            public string PartNumber { get; set; }
+            public string Revision { get; set; }
+            public List<AssociatedFileEntry> Files { get; set; } = new List<AssociatedFileEntry>();
+        }
+
         private static readonly string[] DeliverableGroups = new[]
         {
             "png",
@@ -30,9 +37,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             string deliverablesRoot,
             string flatBomPath,
             string treeBomPath,
-            string partNumber,
-            string revision,
-            IEnumerable<AssociatedFileEntry> extraFiles,
+            IEnumerable<AssociatedFilesBundle> extraBundles,
             Action<string> log,
             ICollection<string> allowedBaseNames = null,
             ICollection<string> allowedGroups = null)
@@ -51,7 +56,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 AddBom(archive, flatBomPath, treeBomPath, log);
                 AddDeliverables(archive, deliverablesRoot, log, allowedBaseNames, allowedGroups);
-                AddExtras(archive, partNumber, revision, extraFiles, log);
+                AddExtras(archive, extraBundles, log);
             }
         }
 
@@ -131,40 +136,51 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private static void AddExtras(
             ZipArchive archive,
-            string partNumber,
-            string revision,
-            IEnumerable<AssociatedFileEntry> extraFiles,
+            IEnumerable<AssociatedFilesBundle> extraBundles,
             Action<string> log)
         {
-            if (extraFiles == null)
+            if (extraBundles == null)
             {
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(partNumber))
+            foreach (AssociatedFilesBundle bundle in extraBundles)
             {
-                Log(log, "Associated files missing part number; skipping extras.");
-                return;
-            }
-
-            string revToken = RevToken(revision);
-            foreach (AssociatedFileEntry entry in extraFiles)
-            {
-                if (entry == null || string.IsNullOrWhiteSpace(entry.Path))
+                if (bundle == null)
                 {
                     continue;
                 }
 
-                string path = entry.Path;
-                if (!File.Exists(path))
+                if (string.IsNullOrWhiteSpace(bundle.PartNumber))
                 {
-                    Log(log, "Missing associated file: " + path);
+                    Log(log, "Associated files missing part number; skipping extras.");
                     continue;
                 }
 
-                string name = Path.GetFileName(path);
-                string zipPath = ZipPath("extra", partNumber, revToken, name);
-                archive.CreateEntryFromFile(path, zipPath);
+                if (bundle.Files == null || bundle.Files.Count == 0)
+                {
+                    continue;
+                }
+
+                string revToken = RevToken(bundle.Revision);
+                foreach (AssociatedFileEntry entry in bundle.Files)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.Path))
+                    {
+                        continue;
+                    }
+
+                    string path = entry.Path;
+                    if (!File.Exists(path))
+                    {
+                        Log(log, "Missing associated file: " + path);
+                        continue;
+                    }
+
+                    string name = Path.GetFileName(path);
+                    string zipPath = ZipPath("extra", bundle.PartNumber, revToken, name);
+                    archive.CreateEntryFromFile(path, zipPath);
+                }
             }
         }
 
