@@ -60,12 +60,13 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 ResetCancel();
                 HashSet<string> uploadPackBases;
-                string flatFile = TraverseModel(true, string.Empty, effective, log, null, progress, out uploadPackBases);
+                List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
+                string flatFile = TraverseModel(true, string.Empty, effective, log, null, progress, out uploadPackBases, out uploadPackExtras);
                 if (effective.CreateUploadPack)
                 {
                     try
                     {
-                        CreateUploadPack(flatFile, uploadPackBases, effective, log);
+                        CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log);
                     }
                     catch (Exception ex)
                     {
@@ -287,8 +288,9 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 ResetCancel();
                 HashSet<string> uploadPackBases;
-                string flatFile = TraverseModel(false, string.Empty, effective, log, null, null, out uploadPackBases);
-                CreateUploadPack(flatFile, uploadPackBases, effective, log);
+                List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
+                string flatFile = TraverseModel(false, string.Empty, effective, log, null, null, out uploadPackBases, out uploadPackExtras);
+                CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log);
                 System.Windows.Forms.MessageBox.Show("Upload pack created.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
@@ -1201,13 +1203,16 @@ namespace TinyMRP.SolidWorksAddin.Services
             Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress)
         {
             HashSet<string> ignored;
-            return TraverseModel(createFiles, exportTag, options, log, flatBomProgress, deliverablesProgress, out ignored);
+            List<UploadPackBuilder.AssociatedFilesBundle> ignoredExtras;
+            return TraverseModel(createFiles, exportTag, options, log, flatBomProgress, deliverablesProgress, out ignored, out ignoredExtras);
         }
 
         private string TraverseModel(bool createFiles, string exportTag, PublishOptions options, Action<string> log,
-            Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress, out HashSet<string> uploadPackBases)
+            Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress, out HashSet<string> uploadPackBases,
+            out List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras)
         {
             uploadPackBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            uploadPackExtras = null;
             ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
             if (swModel == null)
             {
@@ -1306,8 +1311,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                     outputFile = exportTag + "_FLATBOM.txt";
                 }
 
+                if (options != null && options.CreateUploadPack && options.UploadPackIncludeExtras)
+                {
+                    uploadPackExtras = new List<UploadPackBuilder.AssociatedFilesBundle>();
+                }
+
                 UpdateProgress(flatBomProgress, 0, entries.Count);
-                WriteFlatBom(outputFile, entries, log, flatBomProgress, initialDocs, rootModel, rootTitle, uploadPackBases);
+                WriteFlatBom(outputFile, entries, log, flatBomProgress, initialDocs, rootModel, rootTitle,
+                    uploadPackBases, uploadPackExtras);
                 ThrowIfCancelled();
 
                 if (createFiles)
@@ -1357,7 +1368,12 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private void CreateUploadPack(string flatBomPath, HashSet<string> uploadPackBases, PublishOptions options, Action<string> log)
+        private void CreateUploadPack(
+            string flatBomPath,
+            HashSet<string> uploadPackBases,
+            List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras,
+            PublishOptions options,
+            Action<string> log)
         {
             if (string.IsNullOrWhiteSpace(flatBomPath))
             {
@@ -1382,34 +1398,6 @@ namespace TinyMRP.SolidWorksAddin.Services
             string treeBomPath = BuildTreeBomPath(flatBomPath);
             TryBuildTreeBom(swModel, treeBomPath, log);
 
-            AssociatedFilesPayload payload = ReadAssociatedFiles(swModel, config.Name);
-            string partProp = _config != null ? _config.PartNumberProperty : "PartNumber";
-            string revProp = _config != null ? _config.RevisionProperty : "Revision";
-            if (string.IsNullOrWhiteSpace(partProp))
-            {
-                partProp = "PartNumber";
-            }
-            if (string.IsNullOrWhiteSpace(revProp))
-            {
-                revProp = "Revision";
-            }
-
-            string pn = GetEvalProperty(swModel, config.Name, partProp);
-            if (string.IsNullOrWhiteSpace(pn))
-            {
-                pn = GetEvalProperty(swModel, string.Empty, partProp);
-            }
-            if (string.IsNullOrWhiteSpace(pn))
-            {
-                pn = BomPartNumber(config, swModel);
-            }
-
-            string rev = GetEvalProperty(swModel, config.Name, revProp);
-            if (string.IsNullOrWhiteSpace(rev))
-            {
-                rev = GetEvalProperty(swModel, string.Empty, revProp);
-            }
-
             string deliverablesRoot = EnsureTrailingSlash(options.DeliverablesFolder);
             if (string.IsNullOrWhiteSpace(deliverablesRoot))
             {
@@ -1423,8 +1411,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             string zipPath = Path.Combine(deliverablesRoot, zipName);
 
             HashSet<string> allowedGroups = BuildUploadPackGroups(options);
-            IEnumerable<AssociatedFileEntry> extras = options.UploadPackIncludeExtras
-                ? payload.Files
+            IEnumerable<UploadPackBuilder.AssociatedFilesBundle> extras = options.UploadPackIncludeExtras
+                ? uploadPackExtras
                 : null;
 
             UploadPackBuilder.Build(
@@ -1432,8 +1420,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                 deliverablesRoot,
                 flatBomPath,
                 treeBomPath,
-                pn,
-                rev,
                 extras,
                 log,
                 uploadPackBases,
@@ -2017,7 +2003,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private void WriteFlatBom(string outputFile, List<BatchEntry> entries, Action<string> log,
             Action<int, int> progress, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
-            HashSet<string> uploadPackBases)
+            HashSet<string> uploadPackBases, List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras)
         {
             using (var writer = new StreamWriter(outputFile, false, Encoding.UTF8))
             {
@@ -2060,10 +2046,126 @@ namespace TinyMRP.SolidWorksAddin.Services
                             writer.WriteLine("{'partnumber':''}");
                         }
                     }
+                    if (uploadPackExtras != null)
+                    {
+                        AddAssociatedFiles(uploadPackExtras, model, entry.ConfigurationName, log);
+                    }
 
                     processed++;
                     UpdateProgress(progress, processed, entries.Count);
                     CloseBatchModel(model, entry, initialDocs, rootModel, rootTitle, openedHere);
+                }
+            }
+        }
+
+        private void AddAssociatedFiles(
+            List<UploadPackBuilder.AssociatedFilesBundle> bundles,
+            ModelDoc2 model,
+            string configName,
+            Action<string> log)
+        {
+            if (bundles == null || model == null)
+            {
+                return;
+            }
+
+            AssociatedFilesPayload payload = ReadAssociatedFiles(model, configName);
+            if (payload == null || payload.Files == null || payload.Files.Count == 0)
+            {
+                return;
+            }
+
+            Configuration conf = model.GetConfigurationByName(configName) as Configuration;
+            string pn = BomPartNumber(conf, model);
+            if (string.IsNullOrWhiteSpace(pn))
+            {
+                string partProp = _config != null ? _config.PartNumberProperty : "PartNumber";
+                if (string.IsNullOrWhiteSpace(partProp))
+                {
+                    partProp = "PartNumber";
+                }
+                pn = GetEvalProperty(model, configName, partProp);
+                if (string.IsNullOrWhiteSpace(pn))
+                {
+                    pn = GetEvalProperty(model, string.Empty, partProp);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(pn))
+            {
+                Log(log, "Associated files skipped: part number not found.");
+                return;
+            }
+
+            string revProp = _config != null ? _config.RevisionProperty : "Revision";
+            if (string.IsNullOrWhiteSpace(revProp))
+            {
+                revProp = "Revision";
+            }
+            string rev = GetEvalProperty(model, configName, revProp);
+            if (string.IsNullOrWhiteSpace(rev) && !string.Equals(revProp, "revision", StringComparison.OrdinalIgnoreCase))
+            {
+                rev = GetEvalProperty(model, configName, "revision");
+            }
+            if (string.IsNullOrWhiteSpace(rev))
+            {
+                rev = GetEvalProperty(model, string.Empty, revProp);
+            }
+            if (string.IsNullOrWhiteSpace(rev) && !string.Equals(revProp, "revision", StringComparison.OrdinalIgnoreCase))
+            {
+                rev = GetEvalProperty(model, string.Empty, "revision");
+            }
+            rev = rev ?? string.Empty;
+
+            UploadPackBuilder.AssociatedFilesBundle existing = null;
+            foreach (UploadPackBuilder.AssociatedFilesBundle bundle in bundles)
+            {
+                if (bundle == null)
+                {
+                    continue;
+                }
+                if (string.Equals(bundle.PartNumber, pn, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(bundle.Revision ?? string.Empty, rev, StringComparison.OrdinalIgnoreCase))
+                {
+                    existing = bundle;
+                    break;
+                }
+            }
+
+            if (existing == null)
+            {
+                existing = new UploadPackBuilder.AssociatedFilesBundle
+                {
+                    PartNumber = pn,
+                    Revision = rev,
+                    Files = new List<AssociatedFileEntry>()
+                };
+                bundles.Add(existing);
+            }
+
+            foreach (AssociatedFileEntry entry in payload.Files)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.Path))
+                {
+                    continue;
+                }
+
+                bool already = false;
+                foreach (AssociatedFileEntry seen in existing.Files)
+                {
+                    if (seen == null)
+                    {
+                        continue;
+                    }
+                    if (string.Equals(seen.Path, entry.Path, StringComparison.OrdinalIgnoreCase))
+                    {
+                        already = true;
+                        break;
+                    }
+                }
+                if (!already)
+                {
+                    existing.Files.Add(entry);
                 }
             }
         }
