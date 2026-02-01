@@ -1,5 +1,5 @@
 from datetime import datetime
-from mongoengine import Document, StringField, DateTimeField
+from mongoengine import Document, StringField, DateTimeField, ListField
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -7,6 +7,7 @@ DB_ALIAS = "tinymrp-v2"
 class AppSettings(Document):
     brand_logo_rel_path = StringField(default="")
     timezone = StringField(default="")
+    hardware_folders = ListField(StringField(), default=list)
     updated_at = DateTimeField(default=datetime.utcnow)
 
     meta = {

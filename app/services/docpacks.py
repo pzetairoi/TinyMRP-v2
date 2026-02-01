@@ -571,11 +571,9 @@ def _excel_bom_bytes(
 
 
 def _part_detail_url(pn: str, rev: str) -> str:
-    rev_val = None if rev is None or str(rev).strip() == "" else rev
+    rev_val = _clean_rev(rev)
     try:
-        if rev_val is None:
-            return url_for("ui.part_ui", pn=pn, _external=True)
-        return url_for("ui.part_ui", pn=pn, rev=rev_val, _external=True)
+        base = url_for("ui.part_ui", pn=pn, _external=True)
     except Exception:
         try:
             root = (request.url_root or "").rstrip("/")
@@ -584,10 +582,12 @@ def _part_detail_url(pn: str, rev: str) -> str:
         if not root:
             root = (current_app.config.get("VITE_BACKEND_URL") or "http://localhost:5000").rstrip("/")
         pn_enc = quote(str(pn or ""), safe="")
-        if rev_val is None:
-            return f"{root}/ui/part/{pn_enc}"
-        rev_enc = quote(str(rev_val or ""), safe="")
-        return f"{root}/ui/part/{pn_enc}?rev={rev_enc}"
+        base = f"{root}/ui/part/{pn_enc}"
+    if rev_val:
+        rev_enc = quote(str(rev_val), safe="")
+        sep = "&" if "?" in base else "?"
+        return f"{base}{sep}rev={rev_enc}"
+    return base
 
 
 def _pil_to_rl_image(pil_img, width=None, height=None):
@@ -738,6 +738,32 @@ def _visual_list_pdf(
         while out and stringWidth(out, font, size) > max_w:
             out = out[:-1]
         return out.rstrip() + (suffix if out else "")
+    def _wrap_lines(text: str, font: str, size: float, max_w: float, max_lines: int) -> List[str]:
+        text = (text or "").strip()
+        if not text or max_lines <= 0:
+            return []
+        words = text.split()
+        lines: List[str] = []
+        cur = ""
+        truncated = False
+        for w in words:
+            cand = (cur + " " + w).strip()
+            if stringWidth(cand, font, size) <= max_w:
+                cur = cand
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+                if len(lines) >= max_lines:
+                    truncated = True
+                    cur = ""
+                    break
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+        if truncated and lines:
+            lines[-1] = _clip_line(lines[-1], font, size, max_w)
+        return lines
+
     # Build rows with: pn, rev, qty, imgpath
     # Ensure root appears first (alone) and children sorted by partnumber
     rows: List[Tuple[str,str,float,str|None]] = []
@@ -841,7 +867,7 @@ def _visual_list_pdf(
             c.rect(x+off, y+off, box_w-2*off, box_h-2*off, stroke=1, fill=0)
         # geometry: reserve top header (PN/REV/QTY) and bottom (desc + QR)
         top_space = 16*mm
-        bottom_space = 12*mm
+        bottom_space = 8*mm
         # image area (left side), vertically between top_space and bottom_space
         ix_x = x + 3*mm
         ix_y = y + bottom_space
@@ -876,10 +902,26 @@ def _visual_list_pdf(
         c.setFillGray(0.1)
         c.setFont("Helvetica-Bold", 11.5)
         c.drawString(hl_x, hl_y, _clip_line(title, "Helvetica-Bold", 11.5, max_title_w))
+        qr_size = 7*mm
+        icon_w = 8*mm
+        icon_h = 6*mm
+        desc_line_h = 0.0
+        desc_lines_count = 0
         if desc:
-            c.setFont("Helvetica", 8.8)
+            desc_font = 8.8
+            desc_line_h = desc_font * 1.25
+            icon_top = y + 4*mm + qr_size + 1*mm + icon_h
+            desc_y = hl_y - 12
+            desc_max_w = box_w - (hl_x - x) - (qr_size + 6*mm)
+            available_h = max(0.0, desc_y - (icon_top + 2*mm))
+            max_lines = max(1, int(available_h / desc_line_h) + 1)
+            max_lines = min(max_lines, 4)
+            lines = _wrap_lines(desc, "Helvetica", desc_font, desc_max_w, max_lines)
+            desc_lines_count = len(lines)
+            c.setFont("Helvetica", desc_font)
             c.setFillGray(0.35)
-            c.drawString(hl_x, hl_y - 12, _clip_line(desc, "Helvetica", 8.8, box_w - 8*mm))
+            for i, line in enumerate(lines):
+                c.drawString(hl_x, desc_y - (i * desc_line_h), line)
             c.setFillGray(0.1)
         # Qty at top-right in bold red
         try:
@@ -903,20 +945,27 @@ def _visual_list_pdf(
                     c.setFont("Helvetica", 8.5)
                     c.setFillGray(0.4)
                     tw = stringWidth(s, "Helvetica", 8.5)
-                    c.drawString(x + box_w - 4*mm - tw, hl_y - 12, s)
+                    icon_top = y + 4*mm + qr_size + 1*mm + icon_h
+                    desc_y = hl_y - 12
+                    lines_used = desc_lines_count or 1
+                    line_h = desc_line_h or (8.8 * 1.25)
+                    page_y = max(icon_top + 1*mm, desc_y - (line_h * (lines_used + 1)))
+                    c.drawString(x + box_w - 4*mm - tw, page_y, s)
                     c.setFillGray(0.1)
         except Exception:
             pass
         # QR code (links to part detail) — draw last to ensure it sits on top
         try:
-            qr_url = _part_detail_url(pn, rev)
+            rev_qr = rev
+            if (not rev_qr) and pdoc is not None:
+                rev_qr = _clean_rev(getattr(pdoc, "revision", "") or "")
+            qr_url = _part_detail_url(pn, rev_qr)
             qr = qrcode.QRCode(border=0, box_size=2)
             qr.add_data(qr_url)
             qr.make(fit=True)
             qimg = qr.make_image(fill_color="black", back_color="white").convert("RGB")
             from reportlab.lib.utils import ImageReader
             qbuf = io.BytesIO(); qimg.save(qbuf, format='PNG'); qbuf.seek(0)
-            qr_size = 12*mm
             c.drawImage(ImageReader(qbuf), x + box_w - qr_size - 4*mm, y + 4*mm, width=qr_size, height=qr_size, preserveAspectRatio=True, mask='auto')
         except Exception:
             pass
@@ -933,8 +982,6 @@ def _visual_list_pdf(
             show_notapproved = True
             if procs_lower and any(p in ('hardware', 'purchase', 'others') for p in procs_lower):
                 show_notapproved = False
-            icon_w = 10*mm
-            icon_h = 8*mm
             icon_x = x + box_w - icon_w - 4*mm
             icon_y = y + 4*mm + qr_size + 1*mm
             if approved:
@@ -991,10 +1038,22 @@ def _visual_list_pdf(
             c.setFillGray(0.1)
             c.setFont("Helvetica-Bold", 12.5)
             c.drawString(hl_x, hl_y, _clip_line(title, "Helvetica-Bold", 12.5, max_title_w))
+            desc_line_h = 0.0
+            desc_lines_count = 0
             if desc:
-                c.setFont("Helvetica", 9.0)
+                desc_font = 9.0
+                desc_line_h = desc_font * 1.25
+                desc_y = hl_y - 14
+                desc_max_w = r_w - (hl_x - r_x) - 20*mm
+                available_h = max(0.0, desc_y - (r_y + 6*mm + 10*mm))
+                max_lines = max(1, int(available_h / desc_line_h) + 1)
+                max_lines = min(max_lines, 4)
+                lines = _wrap_lines(desc, "Helvetica", desc_font, desc_max_w, max_lines)
+                desc_lines_count = len(lines)
+                c.setFont("Helvetica", desc_font)
                 c.setFillGray(0.35)
-                c.drawString(hl_x, hl_y - 14, _clip_line(desc, "Helvetica", 9.0, r_w - (hl_x - r_x) - 6*mm))
+                for i, line in enumerate(lines):
+                    c.drawString(hl_x, desc_y - (i * desc_line_h), line)
                 c.setFillGray(0.1)
             # qty at top-right in bold red
             try:
@@ -1004,7 +1063,7 @@ def _visual_list_pdf(
                 c.drawString(r_x + r_w - qty_margin - tw, hl_y, qty_str)
                 c.setFillGray(0.1)
                 c.setFillColorRGB(0.1, 0.1, 0.1)
-                # binder page below qty if available
+                # binder page below description if available
                 if page_map is not None:
                     key = (pn, _norm_rev(rev))
                     pg = page_map.get(key)
@@ -1012,20 +1071,26 @@ def _visual_list_pdf(
                         s = f"p. {pg}"
                         c.setFont("Helvetica", 9.0); c.setFillGray(0.4)
                         tw2 = stringWidth(s, "Helvetica", 9.0)
-                        c.drawString(r_x + r_w - qty_margin - tw2, hl_y - 12, s)
+                        lines_used = desc_lines_count or 1
+                        line_h = desc_line_h or (9.0 * 1.25)
+                        page_y = hl_y - 14 - (line_h * (lines_used + 1))
+                        c.drawString(r_x + r_w - qty_margin - tw2, page_y, s)
                         c.setFillGray(0.1)
             except Exception:
                 pass
             # QR bottom-right
             try:
-                qr_url = _part_detail_url(pn, rev)
+                rev_qr = rev
+                if (not rev_qr) and pdoc is not None:
+                    rev_qr = _clean_rev(getattr(pdoc, "revision", "") or "")
+                qr_url = _part_detail_url(pn, rev_qr)
                 qr = qrcode.QRCode(border=0, box_size=2)
                 qr.add_data(qr_url)
                 qr.make(fit=True)
                 qimg = qr.make_image(fill_color="black", back_color="white").convert("RGB")
                 from reportlab.lib.utils import ImageReader
                 qbuf = io.BytesIO(); qimg.save(qbuf, format='PNG'); qbuf.seek(0)
-                qr_size = 18*mm
+                qr_size = 10*mm
                 c.drawImage(ImageReader(qbuf), r_x + r_w - qr_size - 4*mm, r_y + 4*mm, width=qr_size, height=qr_size, preserveAspectRatio=True, mask='auto')
             except Exception:
                 pass
@@ -1925,6 +1990,110 @@ def _index_pdf_standalone(
         while out and stringWidth(out, font, size) > max_w:
             out = out[:-1]
         return out.rstrip() + (suffix if out else "")
+
+    def _wrap_lines(text: str, font: str, size: float, max_w: float, max_lines: int) -> List[str]:
+        text = (text or "").strip()
+        if not text or max_lines <= 0:
+            return []
+        words = text.split()
+        lines: List[str] = []
+        cur = ""
+        truncated = False
+        for w in words:
+            cand = (cur + " " + w).strip()
+            if stringWidth(cand, font, size) <= max_w:
+                cur = cand
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+                if len(lines) >= max_lines:
+                    truncated = True
+                    cur = ""
+                    break
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+        if truncated and lines:
+            lines[-1] = _clip_line(lines[-1], font, size, max_w)
+        return lines
+
+    def _wrap_lines(text: str, font: str, size: float, max_w: float, max_lines: int) -> List[str]:
+        text = (text or "").strip()
+        if not text or max_lines <= 0:
+            return []
+        words = text.split()
+        lines: List[str] = []
+        cur = ""
+        truncated = False
+        for w in words:
+            cand = (cur + " " + w).strip()
+            if stringWidth(cand, font, size) <= max_w:
+                cur = cand
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+                if len(lines) >= max_lines:
+                    truncated = True
+                    cur = ""
+                    break
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+        if truncated and lines:
+            lines[-1] = _clip_line(lines[-1], font, size, max_w)
+        return lines
+
+    def _wrap_lines(text: str, font: str, size: float, max_w: float, max_lines: int) -> List[str]:
+        text = (text or "").strip()
+        if not text or max_lines <= 0:
+            return []
+        words = text.split()
+        lines: List[str] = []
+        cur = ""
+        truncated = False
+        for w in words:
+            cand = (cur + " " + w).strip()
+            if stringWidth(cand, font, size) <= max_w:
+                cur = cand
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+                if len(lines) >= max_lines:
+                    truncated = True
+                    cur = ""
+                    break
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+        if truncated and lines:
+            lines[-1] = _clip_line(lines[-1], font, size, max_w)
+        return lines
+
+    def _wrap_lines(text: str, font: str, size: float, max_w: float, max_lines: int) -> List[str]:
+        text = (text or "").strip()
+        if not text or max_lines <= 0:
+            return []
+        words = text.split()
+        lines: List[str] = []
+        cur = ""
+        truncated = False
+        for w in words:
+            cand = (cur + " " + w).strip()
+            if stringWidth(cand, font, size) <= max_w:
+                cur = cand
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+                if len(lines) >= max_lines:
+                    truncated = True
+                    cur = ""
+                    break
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+        if truncated and lines:
+            lines[-1] = _clip_line(lines[-1], font, size, max_w)
+        return lines
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)

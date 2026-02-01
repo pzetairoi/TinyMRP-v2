@@ -15,6 +15,20 @@ from ..models.user_settings import UserSettings
 from app.services.app_settings import branding_root, get_app_settings
 from zoneinfo import ZoneInfo
 import os
+import re
+
+
+def _parse_hw_folders(value: str) -> list[str]:
+    raw = [p.strip() for p in re.split(r"[,;\r\n]+", value or "") if p.strip()]
+    seen = set()
+    out: list[str] = []
+    for item in raw:
+        token = item.strip().lower()
+        if not token or token in seen:
+            continue
+        out.append(token)
+        seen.add(token)
+    return out
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -48,6 +62,9 @@ def admin_settings():
                 flash("Invalid timezone. Use a valid IANA name like Australia/Melbourne.", "error")
                 return redirect(url_for("admin.admin_settings"))
         settings.timezone = tz
+
+        hw_raw = request.form.get("hardware_folders") or ""
+        settings.hardware_folders = _parse_hw_folders(hw_raw)
 
         remove_logo = bool(request.form.get("remove_logo") in ("on", "true", "1", True))
         upload = request.files.get("brand_logo")
@@ -86,13 +103,26 @@ def admin_settings():
         settings.updated_at = datetime.utcnow()
         settings.save()
         try:
+            current_app.config["HARDWARE_FOLDERS"] = settings.hardware_folders or []
+        except Exception:
+            pass
+        try:
             log_action("admin.settings.update", resource_type="settings", resource="app_settings")
         except Exception:
             pass
         flash("Settings updated.", "success")
         return redirect(url_for("admin.admin_settings"))
 
-    return render_template("admin/settings.html", settings=settings)
+    process_meta = current_app.config.get("PROCESS_META", {}) or {}
+    process_rows = [(k, v) for k, v in process_meta.items() if not str(k).startswith("_")]
+    process_rows.sort(key=lambda item: item[0])
+    hw_display = "\n".join(settings.hardware_folders or [])
+    return render_template(
+        "admin/settings.html",
+        settings=settings,
+        process_rows=process_rows,
+        hardware_folders_text=hw_display,
+    )
 
 @bp.route("/users")
 @roles_required("admin")

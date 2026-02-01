@@ -1436,6 +1436,7 @@ function bestUrl(f: FileRow): string {
                         <thead>
                           <tr>
                             <th>Name</th>
+                            <th>Label</th>
                             <th>Size</th>
                             <th>Type</th>
                             <th>Uploaded</th>
@@ -1446,6 +1447,7 @@ function bestUrl(f: FileRow): string {
                           {extraFiles.map((f) => (
                             <tr key={f.id || f.rel_path || f.original_name}>
                               <td>{f.original_name || f.rel_path || "file"}</td>
+                              <td>{f.label || "-"}</td>
                               <td>{formatBytes(f.size)}</td>
                               <td>{f.mime || "-"}</td>
                               <td>

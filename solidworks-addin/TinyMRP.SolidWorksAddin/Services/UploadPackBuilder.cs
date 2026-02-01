@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Text;
+using System.Web.Script.Serialization;
 
 namespace TinyMRP.SolidWorksAddin.Services
 {
@@ -144,6 +146,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
+            var manifest = new List<Dictionary<string, object>>();
             foreach (AssociatedFilesBundle bundle in extraBundles)
             {
                 if (bundle == null)
@@ -180,6 +183,46 @@ namespace TinyMRP.SolidWorksAddin.Services
                     string name = Path.GetFileName(path);
                     string zipPath = ZipPath("extra", bundle.PartNumber, revToken, name);
                     archive.CreateEntryFromFile(path, zipPath);
+
+                    string label = entry.Label ?? string.Empty;
+                    string ext = entry.Extension ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(ext))
+                    {
+                        ext = Path.GetExtension(name) ?? string.Empty;
+                    }
+                    ext = ext.TrimStart('.').ToLowerInvariant();
+                    manifest.Add(new Dictionary<string, object>
+                    {
+                        ["pn"] = bundle.PartNumber ?? string.Empty,
+                        ["rev"] = bundle.Revision ?? string.Empty,
+                        ["name"] = name ?? string.Empty,
+                        ["label"] = label,
+                        ["ext"] = ext
+                    });
+                }
+            }
+
+            if (manifest.Count > 0)
+            {
+                try
+                {
+                    var serializer = new JavaScriptSerializer();
+                    var payload = new Dictionary<string, object>
+                    {
+                        ["version"] = 1,
+                        ["files"] = manifest
+                    };
+                    string json = serializer.Serialize(payload);
+                    var entry = archive.CreateEntry(ZipPath("extra", "_manifest.json"));
+                    using (var stream = entry.Open())
+                    {
+                        byte[] bytes = new UTF8Encoding(false).GetBytes(json ?? string.Empty);
+                        stream.Write(bytes, 0, bytes.Length);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log(log, "Failed to write extra manifest: " + ex.Message);
                 }
             }
         }

@@ -36,6 +36,7 @@ def _node(pn: str, link=None, rev: str | None = None):
         p = Part.objects(part_number=pn).order_by("-updated_at").first()
     attrs = harvest_part_attrs(p) if p else {}
     effective_rev = _clean_rev(attrs.get("revision") or (p.revision if p else "") or (rev_clean or ""))
+    proc_label = _process_label(attrs)
     return {
         "key": f"{pn}::{effective_rev}",
         "leaf": not _has_children(pn, effective_rev),
@@ -48,11 +49,36 @@ def _node(pn: str, link=None, rev: str | None = None):
             "alt_group": getattr(link,"alt_group","") or "",
             "material":  attrs.get("material",""),
             "finish":    attrs.get("finish",""),
-            "process":   ", ".join([x for x in attrs.get("processes",[]) if x]) or (attrs.get("process","") or ""),
+            "process":   proc_label,
             "thumb_urls": preview_png_urls_for(pn, effective_rev),
             "attrs": attrs,
         }
     }
+
+
+def _process_label(attrs: dict) -> str:
+    if not isinstance(attrs, dict):
+        return ""
+    raw = []
+    procs = attrs.get("processes", [])
+    if isinstance(procs, (list, tuple)):
+        raw.extend(list(procs))
+    for key in ("process", "process2", "process3"):
+        val = attrs.get(key)
+        if val:
+            raw.append(val)
+    seen = set()
+    out = []
+    for item in raw:
+        text = str(item).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return ", ".join(out)
 
 def _is_hardware_node(node: dict) -> bool:
     try:

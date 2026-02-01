@@ -268,18 +268,19 @@ namespace TinyMRP.SolidWorksAddin.UI
             deliverablesLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var modelsBox = CreateGroupBox("Models", modelChecks);
-            modelsBox.AutoSize = false;
-            modelsBox.Dock = DockStyle.Fill;
-            modelsBox.MinimumSize = new Size(160, 200);
+            modelsBox.AutoSize = true;
+            modelsBox.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            modelsBox.Dock = DockStyle.Top;
+            modelsBox.MinimumSize = new Size(160, 0);
 
             var drawingsBox = CreateGroupBox("Drawings", drawingChecks);
-            drawingsBox.AutoSize = false;
-            drawingsBox.Dock = DockStyle.Fill;
-            drawingsBox.MinimumSize = new Size(160, 200);
+            drawingsBox.AutoSize = true;
+            drawingsBox.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            drawingsBox.Dock = DockStyle.Top;
+            drawingsBox.MinimumSize = new Size(160, 0);
 
             deliverablesLayout.Controls.Add(modelsBox, 0, 0);
             deliverablesLayout.Controls.Add(drawingsBox, 1, 0);
-            deliverablesLayout.MinimumSize = new Size(0, 200);
             AddSection(panel, CreateGroupBox("Deliverables", deliverablesLayout));
 
             var optionsPanel = new FlowLayoutPanel
