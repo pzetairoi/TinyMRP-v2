@@ -54,6 +54,7 @@ ALIASES: Dict[str, str] = {
     "oem_part_number": "oem_partnumber",
     "mfr_part": "oem_partnumber",
     "process": "process",
+    "comments": "process",
     "secondprocess": "process2",
     "thirdprocess": "process3",
     "process2": "process2",
