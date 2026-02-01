@@ -30,6 +30,13 @@ def _parse_hw_folders(value: str) -> list[str]:
         seen.add(token)
     return out
 
+
+def _parse_int(value: str, default_value: int) -> int:
+    try:
+        return max(0, int(str(value).strip()))
+    except Exception:
+        return default_value
+
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 @bp.get("/")
@@ -65,6 +72,16 @@ def admin_settings():
 
         hw_raw = request.form.get("hardware_folders") or ""
         settings.hardware_folders = _parse_hw_folders(hw_raw)
+
+        settings.upload_pack_max_zip_mb = _parse_int(
+            request.form.get("upload_pack_max_zip_mb"), settings.upload_pack_max_zip_mb or 1024
+        )
+        settings.upload_pack_max_file_mb = _parse_int(
+            request.form.get("upload_pack_max_file_mb"), settings.upload_pack_max_file_mb or 1024
+        )
+        settings.upload_pack_max_files = _parse_int(
+            request.form.get("upload_pack_max_files"), settings.upload_pack_max_files or 5000
+        )
 
         remove_logo = bool(request.form.get("remove_logo") in ("on", "true", "1", True))
         upload = request.files.get("brand_logo")
@@ -104,6 +121,9 @@ def admin_settings():
         settings.save()
         try:
             current_app.config["HARDWARE_FOLDERS"] = settings.hardware_folders or []
+            current_app.config["UPLOAD_PACK_MAX_ZIP_MB"] = settings.upload_pack_max_zip_mb or 0
+            current_app.config["UPLOAD_PACK_MAX_FILE_MB"] = settings.upload_pack_max_file_mb or 0
+            current_app.config["UPLOAD_PACK_MAX_FILES"] = settings.upload_pack_max_files or 0
         except Exception:
             pass
         try:
