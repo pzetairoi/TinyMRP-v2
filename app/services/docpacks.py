@@ -469,15 +469,12 @@ def _excel_bom_bytes(
         occ_list = _sorted_occ(key)
         levels_list = [l for l,_ in occ_list]
         qtys_list = [q for _,q in occ_list]
-        # processes as comma-separated
-        proc_list = []
-        if p and isinstance(getattr(p, 'processes', None), list):
-            proc_list = [str(x) for x in p.processes if x]
-        elif isinstance(attrs.get('processes'), list):
-            proc_list = [str(x) for x in attrs.get('processes') if x]
-        else:
-            for k in ('process','process2','secondprocess','process3','thirdprocess'):
-                if attrs.get(k): proc_list.append(str(attrs.get(k)))
+        # processes as ordered list from process/process2/process3 attributes
+        proc_list: List[str] = []
+        for k in ("process", "process2", "process3"):
+            val = attrs.get(k)
+            if val:
+                proc_list.append(str(val))
 
         full_qty = (full_qty_map or {}).get(key, qty)
         values = {
@@ -487,7 +484,7 @@ def _excel_bom_bytes(
             'description': _part_description(p, attrs) if p else attrs.get('description','') or '',
             qty_col: full_qty,
             'material': attrs.get('material',''),
-            'process': ", ".join(proc_list),
+            'process': repr(proc_list),
             'finish': attrs.get('finish',''),
             'mass': attrs.get('mass',''),
             'link': attrs.get('link',''),
