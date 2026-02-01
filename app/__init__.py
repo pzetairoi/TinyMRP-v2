@@ -90,22 +90,26 @@ def create_app(config_object=None):
     # Hardware folder keywords (legacy fastener/library folders)
     default_hw_folders = [
         "toolbox",
-        "browser",
-        "fasteners",
-        "fastener",
-        "hardware",
-        "bolts",
-        "nuts",
-        "washers",
-        "screws",
-        "rivets",
-        "pins",
-        "clips",
-        "studs",
-        "spacers",
-        "standoffs",
-        "inserts",
+
     ]
+ #   default_hw_folders = [
+ #       "toolbox",
+ #       "browser",
+ #       "fasteners",
+ #       "fastener",
+ #       "hardware",
+ #       "bolts",
+ ##       "nuts",
+  #      "washers",
+  #      "screws",
+  #      "rivets",
+  #      "pins",
+  #      "clips",
+  #      "studs",
+  #      "spacers",
+  #      "standoffs",
+  #      "inserts",
+  #  ]
     env_hw = os.getenv("HARDWARE_FOLDERS") or os.getenv("HARDWARE_FOLDER") or ""
     if env_hw.strip():
         parts = [p.strip().lower() for p in re.split(r"[;,]", env_hw) if p.strip()]
