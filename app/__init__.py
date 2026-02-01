@@ -411,13 +411,6 @@ def create_app(config_object=None):
 
     
     # Register blueprints
-    
-    # Legacy add-in API aliases
-    from app.views.legacy_addin_api import legacy
-    app.register_blueprint(legacy)
-
-    
-    
     from .views.main import bp as main_bp
     app.register_blueprint(main_bp)
 
