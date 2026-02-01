@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import io
+import json
 import os
 import re
 import shutil
@@ -123,6 +124,38 @@ def _build_bom_rev_map(z: zipfile.ZipFile) -> Tuple[Dict[str, str], List[Tuple[s
     return bom_map, pairs
 
 
+def _load_extra_manifest(z: zipfile.ZipFile) -> Dict[Tuple[str, str, str], Dict[str, str]]:
+    manifest_names = ("extra/_manifest.json", "extra/manifest.json")
+    name = next((n for n in manifest_names if n in z.namelist()), None)
+    if not name:
+        return {}
+    try:
+        raw = z.read(name)
+        data = json.loads(raw.decode("utf-8-sig", errors="replace") or "{}")
+    except Exception:
+        return {}
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, list):
+        return {}
+    out: Dict[Tuple[str, str, str], Dict[str, str]] = {}
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        pn = _base_pn(item.get("pn") or "")
+        if not pn:
+            continue
+        rev = clean_rev(rev_from_token(item.get("rev") or ""))
+        name = os.path.basename(item.get("name") or item.get("file") or "") or ""
+        if not name:
+            continue
+        key = (pn.casefold(), rev.casefold(), name.casefold())
+        out[key] = {
+            "label": (item.get("label") or "").strip(),
+            "ext": (item.get("ext") or item.get("extension") or "").strip(),
+        }
+    return out
+
+
 def _allowed_path(abs_path: str, base_root: str) -> bool:
     try:
         ap = os.path.abspath(abs_path)
@@ -188,6 +221,8 @@ def import_upload_pack(
             bom_names.add(_safe_zip_name(flat_name) or flat_name)
         if tree_name:
             bom_names.add(_safe_zip_name(tree_name) or tree_name)
+        extra_manifest = _load_extra_manifest(zf)
+        extra_manifest_names = {"extra/_manifest.json", "extra/manifest.json"}
 
         for info in infos:
             if max_file_mb and info.file_size > max_file_mb * 1024 * 1024:
@@ -197,6 +232,8 @@ def import_upload_pack(
             if not safe_name:
                 raise ValueError(f"Unsafe ZIP entry blocked: {info.filename}")
 
+            if safe_name in extra_manifest_names:
+                continue
             if safe_name in bom_names or safe_name.endswith("_FLATBOM.txt") or safe_name.endswith("_TREEBOM.txt"):
                 continue
 
@@ -306,6 +343,11 @@ def import_upload_pack(
                         raise ValueError(msg)
                     warnings.append(msg)
                     continue
+                label_key = (pn.casefold(), rev.casefold(), os.path.basename(file_name).casefold())
+                label = ""
+                meta = extra_manifest.get(label_key)
+                if meta:
+                    label = (meta.get("label") or "").strip()
 
                 if not dry_run:
                     _write_zip_entry(zf, info, abs_path)
@@ -322,6 +364,8 @@ def import_upload_pack(
                         existing.size = size
                         existing.mime = mime
                         existing.sha256 = sha
+                        if label:
+                            existing.label = label
                         existing.uploaded_by = uploaded_by or existing.uploaded_by
                         existing.uploaded_at = datetime.utcnow()
                         existing.source = seed_tag
@@ -335,6 +379,7 @@ def import_upload_pack(
                             size=size,
                             mime=mime,
                             sha256=sha,
+                            label=label,
                             uploaded_by=uploaded_by,
                             uploaded_at=datetime.utcnow(),
                             source=seed_tag,

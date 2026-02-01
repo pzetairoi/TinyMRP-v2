@@ -47,6 +47,63 @@
       </div>
     </div>
 
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <h5 class="card-title">Hardware classification</h5>
+        <p class="text-muted small">
+          These folder keywords are used to auto-classify parts as hardware during ZIP imports.
+          One keyword per line (or comma-separated). Matching is case-insensitive.
+        </p>
+        <textarea
+          class="form-control form-control-sm"
+          name="hardware_folders"
+          rows="6"
+          placeholder="hardware&#10;fasteners&#10;toolbox"
+        >{{ hardware_folders_text or '' }}</textarea>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <h5 class="card-title">Process library</h5>
+        <p class="text-muted small">Reference list of available processes and icons.</p>
+        {% if process_rows %}
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Process</th>
+                <th>Icon</th>
+                <th>Color</th>
+                <th>Aliases</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for name, meta in process_rows %}
+              <tr>
+                <td>{{ name }}</td>
+                <td>
+                  {% if meta.icon %}
+                  <img src="{{ url_for('static', filename='images/' + meta.icon) }}" alt="{{ name }}" style="height:20px;">
+                  {% else %}
+                  <span class="text-muted small">-</span>
+                  {% endif %}
+                </td>
+                <td>{{ meta.color or '-' }}</td>
+                <td class="text-muted small">
+                  {% if meta.aliases %}{{ meta.aliases | join(', ') }}{% else %}-{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+          <div class="text-muted small">No process metadata loaded.</div>
+        {% endif %}
+      </div>
+    </div>
+
     <button class="btn btn-primary" type="submit">Save settings</button>
   </form>
 </div>

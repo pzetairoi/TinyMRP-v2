@@ -319,9 +319,34 @@ export default function UploadPackPage() {
         </div>
 
         <div className="col-lg-5">
-          <div className="card p-3">
-            <h6 className="mb-2">Expected ZIP structure</h6>
-            <pre className="small mb-0">
+          {importSummary ? (
+            <div className="card p-3">
+              <h6 className="mb-2">Root part preview</h6>
+              {rootPreviewUrl ? (
+                <img
+                  src={rootPreviewUrl}
+                  alt={rootPn ? `${rootPn} preview` : "Root preview"}
+                  className="img-fluid border rounded"
+                />
+              ) : (
+                <div className="text-muted small">{rootPreviewStatus}</div>
+              )}
+              {rootPn ? (
+                <div className="small mt-2">
+                  <div>
+                    Root: <code>{rootPn}</code>
+                    {rootRev ? <span className="ms-2">REV {rootRev}</span> : null}
+                  </div>
+                  <a href={rootHref} target="_blank" rel="noreferrer">
+                    Open part details
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="card p-3">
+              <h6 className="mb-2">Expected ZIP structure</h6>
+              <pre className="small mb-0">
 {`bom/
   *_FLATBOM.txt
   *_TREEBOM.txt
@@ -331,11 +356,12 @@ deliverables/
 extra/
   PN/A/scan.e57
   PN/__no_rev__/photo.jpg`}
-            </pre>
-            <div className="text-muted small mt-2">
-              If revision is empty, use the <code>__no_rev__</code> token in paths.
+              </pre>
+              <div className="text-muted small mt-2">
+                If revision is empty, use the <code>__no_rev__</code> token in paths.
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 

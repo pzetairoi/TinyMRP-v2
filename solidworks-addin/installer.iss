@@ -176,6 +176,7 @@ var
   ExistingConfigLoaded: Boolean;
   DefaultBlankTemplate: string;
   DefaultBomTemplate: string;
+  HasParamOverride: Boolean;
 
 procedure OverrideSettingsCheckClick(Sender: TObject); forward;
 
@@ -210,10 +211,11 @@ begin
   if ExpandConstant('{param:AUTHTOKEN|}') <> '' then
     ConfigPage.Values[3] := ExpandConstant('{param:AUTHTOKEN|}');
 
+  HasParamOverride := (ExpandConstant('{param:BACKENDURL|}') <> '') or (ExpandConstant('{param:AUTHTOKEN|}') <> '');
   OverrideSettingsCheck := TNewCheckBox.Create(ConfigPage);
   OverrideSettingsCheck.Parent := ConfigPage.Surface;
   OverrideSettingsCheck.Caption := 'Override existing TinyMRP settings';
-  OverrideSettingsCheck.Checked := (ExistingConfigPath = '') or (ExpandConstant('{param:BACKENDURL|}') <> '') or (ExpandConstant('{param:AUTHTOKEN|}') <> '');
+  OverrideSettingsCheck.Checked := (ExistingConfigPath = '') or HasParamOverride;
   OverrideSettingsCheck.Left := 0;
   OverrideSettingsCheck.Top := ConfigPage.Edits[3].Top + ConfigPage.Edits[3].Height + ScaleY(8);
   OverrideSettingsCheck.Width := ConfigPage.SurfaceWidth;
@@ -245,6 +247,12 @@ begin
       ConfigPage.Values[0] := ReadConfigValue(ExistingConfigPath, 'BlankTemplatePath', DefaultBlankTemplate);
       ConfigPage.Values[1] := ReadConfigValue(ExistingConfigPath, 'BOMtemplate', DefaultBomTemplate);
       ConfigPage.Values[2] := ReadConfigValue(ExistingConfigPath, 'BackendUrl', ReadConfigValue(ExistingConfigPath, 'weblink', 'http://localhost:5000'));
+      if (OverrideSettingsCheck <> nil) and (not HasParamOverride) then
+      begin
+        OverrideSettingsCheck.Checked := False;
+        if ClearTokenCheck <> nil then
+          ClearTokenCheck.Enabled := OverrideSettingsCheck.Checked;
+      end;
     end;
     ExistingConfigLoaded := True;
   end;

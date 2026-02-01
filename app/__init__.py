@@ -238,6 +238,17 @@ def create_app(config_object=None):
     except Exception:
         db_conn = connect(host=app.config["MONGO_URI"], alias=app.config.get("MONGODB_ALIAS", "tinymrp-v2"))
 
+    # Override hardware folder tokens from persisted settings if available.
+    try:
+        from app.services.app_settings import get_app_settings
+        settings = get_app_settings(create=False)
+        if settings and getattr(settings, "hardware_folders", None):
+            hw_tokens = [str(x).strip().lower() for x in (settings.hardware_folders or []) if str(x).strip()]
+            if hw_tokens:
+                app.config["HARDWARE_FOLDERS"] = hw_tokens
+    except Exception:
+        pass
+
     # IMPORTANT: pass (db_connection, User, Role)
     datastore = MongoEngineUserDatastore(db_conn, User, Role)
     global security

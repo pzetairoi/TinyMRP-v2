@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import zipfile
 
@@ -161,6 +162,45 @@ def test_upload_pack_legacy_extra_uses_bom_rev(client, app, user, tmp_path):
 
     ef = PartExtraFile.objects(part_number=pn, revision=rev).first()
     assert ef is not None
+
+
+def test_upload_pack_extra_label_manifest(client, app, user, tmp_path):
+    role = Role(name="importer_label", permissions=["import.bom", "items.view", "items.edit"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    with app.app_context():
+        app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+        app.config["EXTRA_FILES_ALLOWED"] = True
+
+    pn = "PN-LABEL"
+    rev = "C"
+    extra_name = "report.pdf"
+    manifest = {
+        "version": 1,
+        "files": [
+            {"pn": pn, "rev": rev, "name": extra_name, "label": "Inspection report", "ext": "pdf"},
+        ],
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("TEST_FLATBOM.txt", repr({"partnumber": pn, "revision": rev}))
+        zf.writestr("TEST_TREEBOM.txt", f"ITEM NO.\tPART NUMBER\tRevision\tQTY.\n1\t{pn}\t{rev}\t1")
+        zf.writestr(f"extra/{pn}/{rev}/{extra_name}", b"data")
+        zf.writestr("extra/_manifest.json", json.dumps(manifest))
+
+    resp = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(buf.getvalue()), "pack.zip")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+
+    ef = PartExtraFile.objects(part_number=pn, revision=rev).first()
+    assert ef is not None
+    assert ef.label == "Inspection report"
 
 
 def test_direct_extra_upload_empty_rev(client, app, user, tmp_path):
