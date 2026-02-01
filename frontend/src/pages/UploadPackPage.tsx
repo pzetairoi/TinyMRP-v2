@@ -54,6 +54,11 @@ export default function UploadPackPage() {
   const [progressPct, setProgressPct] = useState(0);
   const [progressLabel, setProgressLabel] = useState("Waiting to start...");
   const [showProgress, setShowProgress] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadBytes, setUploadBytes] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
+  const [processingSeconds, setProcessingSeconds] = useState(0);
+  const processingTimer = useRef<number | null>(null);
   const [rootPreviewUrl, setRootPreviewUrl] = useState<string | null>(null);
   const [rootPreviewStatus, setRootPreviewStatus] = useState("Preview will appear after import.");
 
@@ -83,6 +88,10 @@ export default function UploadPackPage() {
       if (progressTimer.current) {
         window.clearInterval(progressTimer.current);
         progressTimer.current = null;
+      }
+      if (processingTimer.current) {
+        window.clearInterval(processingTimer.current);
+        processingTimer.current = null;
       }
     };
   }, []);
@@ -132,12 +141,23 @@ export default function UploadPackPage() {
     setShowProgress(false);
     setProgressPct(0);
     setProgressLabel("Waiting to start...");
+    setUploadPct(0);
+    setUploadBytes(0);
+    setUploadTotal(0);
+    setProcessingSeconds(0);
   }
 
   function stopProgressTimer() {
     if (progressTimer.current) {
       window.clearInterval(progressTimer.current);
       progressTimer.current = null;
+    }
+  }
+
+  function stopProcessingTimer() {
+    if (processingTimer.current) {
+      window.clearInterval(processingTimer.current);
+      processingTimer.current = null;
     }
   }
 
@@ -156,6 +176,14 @@ export default function UploadPackPage() {
     }, 700);
   }
 
+  function startProcessingTimer() {
+    stopProcessingTimer();
+    setProcessingSeconds(0);
+    processingTimer.current = window.setInterval(() => {
+      setProcessingSeconds((s) => s + 1);
+    }, 1000);
+  }
+
   function runImport() {
     if (!file) {
       setError("Select a ZIP file first.");
@@ -166,6 +194,10 @@ export default function UploadPackPage() {
     setResult(null);
     setShowProgress(true);
     setProgress(2, "Starting upload...");
+    setUploadPct(0);
+    setUploadBytes(0);
+    setUploadTotal(0);
+    setProcessingSeconds(0);
 
     const form = new FormData();
     form.append("file", file);
@@ -182,11 +214,16 @@ export default function UploadPackPage() {
         const pct = Math.min(95, Math.round((e.loaded / e.total) * 80));
         lastPct = pct;
         setProgress(pct, `Uploading... ${pct}%`);
+        const uploadP = Math.min(100, Math.round((e.loaded / e.total) * 100));
+        setUploadPct(uploadP);
+        setUploadBytes(e.loaded);
+        setUploadTotal(e.total);
       }
     };
 
     xhr.onload = () => {
       stopProgressTimer();
+      stopProcessingTimer();
       const ok = xhr.status >= 200 && xhr.status < 300;
       const data = parseJsonResponse(xhr) || {};
       if (!ok || data?.error) {
@@ -202,19 +239,32 @@ export default function UploadPackPage() {
 
     xhr.onerror = () => {
       stopProgressTimer();
+      stopProcessingTimer();
       setError("Network error.");
       setProgress(100, "Network error");
       setBusy(false);
     };
 
     xhr.upload.onloadend = () => {
+      if (uploadPct < 100) setUploadPct(100);
       startIndeterminate(Math.min(85, lastPct || 70));
+      startProcessingTimer();
     };
 
     xhr.send(form);
   }
 
   const thumbCount = importSummary?.thumbnails_generated ?? importSummary?.thumbnails_built ?? 0;
+  const processingStages = [
+    "Validating ZIP",
+    "Scanning BOM",
+    "Writing deliverables",
+    "Writing extra files",
+    "Importing BOM",
+    "Finalizing",
+  ];
+  const stageIndex = Math.min(Math.floor(processingSeconds / 4), processingStages.length - 1);
+  const processingStage = showProgress && busy ? processingStages[stageIndex] : "";
 
   return (
     <div className="container-xxl py-3">
@@ -302,6 +352,24 @@ export default function UploadPackPage() {
 
             {showProgress && (
               <div className="mt-3">
+                {uploadTotal > 0 ? (
+                  <>
+                    <div className="small text-muted mb-1">Upload progress</div>
+                    <div className="progress" style={{ height: 10 }}>
+                      <div
+                        className="progress-bar"
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={uploadPct}
+                        style={{ width: `${Math.max(1, uploadPct)}%` }}
+                      />
+                    </div>
+                    <div className="small text-muted mt-1">
+                      {formatBytes(uploadBytes)} / {formatBytes(uploadTotal)} ({uploadPct}%)
+                    </div>
+                  </>
+                ) : null}
                 <div className="progress" style={{ height: 10 }}>
                   <div
                     className="progress-bar progress-bar-striped progress-bar-animated"
@@ -312,7 +380,11 @@ export default function UploadPackPage() {
                     style={{ width: `${Math.max(1, progressPct)}%` }}
                   />
                 </div>
-                <div className="small text-muted mt-2">{progressLabel}</div>
+                <div className="small text-muted mt-2">
+                  {processingStage
+                    ? `${processingStage} • ${processingSeconds}s`
+                    : progressLabel}
+                </div>
               </div>
             )}
           </div>
