@@ -90,6 +90,10 @@ def create_app(config_object=None):
     # Hardware folder keywords (legacy fastener/library folders)
     default_hw_folders = [
         "toolbox",
+        "fasteners",
+        "fastener",
+        "hardware"
+        
 
     ]
  #   default_hw_folders = [
