@@ -65,6 +65,48 @@
 
     <div class="card shadow-sm mb-3">
       <div class="card-body">
+        <h5 class="card-title">Upload Pack limits</h5>
+        <p class="text-muted small">Set size limits for ZIP uploads and individual files (MB).</p>
+        <div class="row g-2">
+          <div class="col-md-4">
+            <label class="form-label small">Max ZIP size (MB)</label>
+            <input
+              class="form-control form-control-sm"
+              type="number"
+              name="upload_pack_max_zip_mb"
+              min="0"
+              value="{{ settings.upload_pack_max_zip_mb or 1024 }}"
+            >
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Max file size (MB)</label>
+            <input
+              class="form-control form-control-sm"
+              type="number"
+              name="upload_pack_max_file_mb"
+              min="0"
+              value="{{ settings.upload_pack_max_file_mb or 1024 }}"
+            >
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Max files in ZIP</label>
+            <input
+              class="form-control form-control-sm"
+              type="number"
+              name="upload_pack_max_files"
+              min="0"
+              value="{{ settings.upload_pack_max_files or 5000 }}"
+            >
+          </div>
+        </div>
+        <div class="text-muted small mt-2">
+          Set to 0 to disable a limit. Defaults: 1024 MB ZIP, 1024 MB file, 5000 files.
+        </div>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
         <h5 class="card-title">Process library</h5>
         <p class="text-muted small">Reference list of available processes and icons.</p>
         {% if process_rows %}

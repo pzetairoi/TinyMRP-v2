@@ -132,8 +132,8 @@ def create_app(config_object=None):
     app.config.setdefault("EXCEL_COMPILE_MAX_BYTES", int(os.getenv("EXCEL_COMPILE_MAX_BYTES") or "10485760"))
     app.config.setdefault("SECURITY_HEADERS_ENABLED", True)
     app.config.setdefault("FORCE_HTTPS", False)
-    app.config.setdefault("UPLOAD_PACK_MAX_ZIP_MB", int(os.getenv("UPLOAD_PACK_MAX_ZIP_MB") or "500"))
-    app.config.setdefault("UPLOAD_PACK_MAX_FILE_MB", int(os.getenv("UPLOAD_PACK_MAX_FILE_MB") or "200"))
+    app.config.setdefault("UPLOAD_PACK_MAX_ZIP_MB", int(os.getenv("UPLOAD_PACK_MAX_ZIP_MB") or "1024"))
+    app.config.setdefault("UPLOAD_PACK_MAX_FILE_MB", int(os.getenv("UPLOAD_PACK_MAX_FILE_MB") or "1024"))
     app.config.setdefault("UPLOAD_PACK_MAX_FILES", int(os.getenv("UPLOAD_PACK_MAX_FILES") or "5000"))
     app.config.setdefault(
         "EXTRA_FILES_ALLOWED",
@@ -238,7 +238,7 @@ def create_app(config_object=None):
     except Exception:
         db_conn = connect(host=app.config["MONGO_URI"], alias=app.config.get("MONGODB_ALIAS", "tinymrp-v2"))
 
-    # Override hardware folder tokens from persisted settings if available.
+    # Override settings from persisted app settings if available.
     try:
         from app.services.app_settings import get_app_settings
         settings = get_app_settings(create=False)
@@ -246,6 +246,13 @@ def create_app(config_object=None):
             hw_tokens = [str(x).strip().lower() for x in (settings.hardware_folders or []) if str(x).strip()]
             if hw_tokens:
                 app.config["HARDWARE_FOLDERS"] = hw_tokens
+        if settings:
+            if getattr(settings, "upload_pack_max_zip_mb", None) is not None:
+                app.config["UPLOAD_PACK_MAX_ZIP_MB"] = int(settings.upload_pack_max_zip_mb or 0)
+            if getattr(settings, "upload_pack_max_file_mb", None) is not None:
+                app.config["UPLOAD_PACK_MAX_FILE_MB"] = int(settings.upload_pack_max_file_mb or 0)
+            if getattr(settings, "upload_pack_max_files", None) is not None:
+                app.config["UPLOAD_PACK_MAX_FILES"] = int(settings.upload_pack_max_files or 0)
     except Exception:
         pass
 
