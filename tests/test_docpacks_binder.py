@@ -25,6 +25,32 @@ def _write_pdf(path: str, label: str) -> None:
     c.save()
 
 
+def _write_pdf_with_outline(path: str, labels: list[str]) -> None:
+    c = canvas.Canvas(path)
+    for label in labels:
+        c.drawString(100, 750, f"PAGE {label}")
+        c.showPage()
+    c.save()
+    try:
+        from PyPDF2 import PdfReader, PdfWriter
+    except Exception:
+        return
+    reader = PdfReader(path)
+    writer = PdfWriter()
+    for page in reader.pages:
+        writer.add_page(page)
+    for idx, label in enumerate(labels):
+        try:
+            writer.add_outline_item(label, idx)
+        except Exception:
+            try:
+                writer.addBookmark(label, idx)
+            except Exception:
+                pass
+    with open(path, "wb") as fh:
+        writer.write(fh)
+
+
 def _write_png(path: str) -> None:
     raw = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6X4Z6AAAAAASUVORK5CYII="
@@ -376,6 +402,66 @@ def test_flat_pattern_filtered_by_default(app, tmp_path):
         _, data2, _ = build_docpack(opts2)
     text2 = _page_text(PdfReader(io.BytesIO(data2)).pages[0])
     assert "pdf 2" in text2.lower()
+
+
+def test_binder_filters_flat_pattern_pages_by_label(app, tmp_path):
+    root_dir = tmp_path
+    app.config["FILE_ROOT_LOCAL"] = str(root_dir)
+
+    root = Part(part_number="ASM-FLATPAGE", revision="", description="Bracket", processes=["assembly"]).save()
+    pdf_path = os.path.join(root_dir, "ASM-FLATPAGE.pdf")
+    _write_pdf_with_outline(pdf_path, ["MainSheet", "FlatPattern"])
+    PartFile(
+        part_number=root.part_number,
+        revision="",
+        ext_group="pdf",
+        ext="pdf",
+        rel_path="ASM-FLATPAGE.pdf",
+        path=pdf_path,
+    ).save()
+
+    opts = DocPackOptions(
+        root_pn=root.part_number,
+        root_rev="",
+        want_selected_files=False,
+        want_pdf_binder=True,
+        binder_add_cover=False,
+        binder_add_index=False,
+        binder_add_visual_list=False,
+        binder_add_hardware_summary=False,
+        binder_add_whereused=False,
+        binder_page_numbers=False,
+    )
+    with app.app_context():
+        _, data, mime = build_docpack(opts)
+    assert mime == "application/pdf"
+    reader = PdfReader(io.BytesIO(data))
+    assert len(reader.pages) == 1
+    text = _page_text(reader.pages[0])
+    assert "FlatPattern" not in text
+    assert "MainSheet" in text
+
+    opts2 = DocPackOptions(
+        root_pn=root.part_number,
+        root_rev="",
+        want_selected_files=False,
+        want_pdf_binder=True,
+        binder_add_cover=False,
+        binder_add_index=False,
+        binder_add_visual_list=False,
+        binder_add_hardware_summary=False,
+        binder_add_whereused=False,
+        binder_page_numbers=False,
+        binder_include_flat_patterns=True,
+    )
+    with app.app_context():
+        _, data2, mime2 = build_docpack(opts2)
+    assert mime2 == "application/pdf"
+    reader2 = PdfReader(io.BytesIO(data2))
+    assert len(reader2.pages) == 2
+    text2 = "\n".join(_page_text(p) for p in reader2.pages)
+    assert "MainSheet" in text2
+    assert "FlatPattern" in text2
 
 
 def test_index_label_avoids_long_filenames(app, tmp_path):

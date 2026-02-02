@@ -186,6 +186,7 @@ def _collect_files(pn_rev_qty: Iterable[Tuple[str,str,float]], file_types: Optio
 
 
 _FLAT_PATTERN_RE = re.compile(r"(?:^|[^a-z0-9])(flatpattern|flat[-_ ]pattern|fp)(?:[^a-z0-9]|$)", re.IGNORECASE)
+_FP_LABEL_STRIP_RE = re.compile(r"[^a-z0-9]+", re.IGNORECASE)
 
 
 def _is_flat_pattern_name(name: str) -> bool:
@@ -200,6 +201,241 @@ def _is_flat_pattern_name(name: str) -> bool:
 def _is_flat_pattern_file(pf: PartFile) -> bool:
     name = pf.rel_path or pf.path or ""
     return _is_flat_pattern_name(name)
+
+
+def _normalize_fp_label(text: str) -> str:
+    return _FP_LABEL_STRIP_RE.sub("", (text or "").lower())
+
+
+def _flat_pattern_page_tokens() -> List[str]:
+    cfg = current_app.config.get("FLAT_PATTERN_PAGE_NAMES", None)
+    if cfg is None:
+        cfg = ["flatpattern"]
+    raw: List[str] = []
+    if isinstance(cfg, str):
+        raw = [p for p in re.split(r"[,;\r\n]+", cfg) if p.strip()]
+    else:
+        for item in cfg:
+            if item is None:
+                continue
+            raw.append(str(item))
+    tokens: List[str] = []
+    seen = set()
+    for item in raw:
+        token = _normalize_fp_label(item)
+        if not token or token in seen:
+            continue
+        tokens.append(token)
+        seen.add(token)
+    return tokens
+
+
+def _is_flat_pattern_page_label(label: str, tokens: List[str]) -> bool:
+    norm = _normalize_fp_label(label)
+    if not norm:
+        return False
+    for t in tokens:
+        if t and t in norm:
+            return True
+    return False
+
+
+def _int_to_roman(num: int) -> str:
+    if num <= 0:
+        return ""
+    vals = [
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ]
+    out = []
+    n = num
+    for v, s in vals:
+        while n >= v:
+            out.append(s)
+            n -= v
+    return "".join(out)
+
+
+def _int_to_letters(num: int) -> str:
+    if num <= 0:
+        return ""
+    out = []
+    n = num
+    while n > 0:
+        n -= 1
+        out.append(chr(ord("A") + (n % 26)))
+        n //= 26
+    return "".join(reversed(out))
+
+
+def _format_page_label(style: object, num: int) -> str:
+    if not style:
+        return ""
+    style_key = str(style)
+    if style_key == "/D":
+        return str(num)
+    if style_key == "/R":
+        return _int_to_roman(num)
+    if style_key == "/r":
+        return _int_to_roman(num).lower()
+    if style_key == "/A":
+        return _int_to_letters(num)
+    if style_key == "/a":
+        return _int_to_letters(num).lower()
+    return str(num)
+
+
+def _collect_page_labels_tree(node: object) -> Dict[int, object]:
+    out: Dict[int, object] = {}
+    if node is None:
+        return out
+    try:
+        node = node.get_object()
+    except Exception:
+        pass
+    try:
+        nums = node.get("/Nums")
+        if nums:
+            for i in range(0, len(nums), 2):
+                try:
+                    idx = int(nums[i])
+                except Exception:
+                    continue
+                out[idx] = nums[i + 1]
+    except Exception:
+        pass
+    try:
+        kids = node.get("/Kids")
+        if kids:
+            for kid in kids:
+                out.update(_collect_page_labels_tree(kid))
+    except Exception:
+        pass
+    return out
+
+
+def _page_labels_from_pagelabels(reader) -> List[str]:
+    try:
+        root = reader.trailer["/Root"]
+    except Exception:
+        return []
+    try:
+        labels_root = root.get("/PageLabels")
+    except Exception:
+        labels_root = None
+    if not labels_root:
+        return []
+    mapping = _collect_page_labels_tree(labels_root)
+    if not mapping:
+        return []
+    total = len(reader.pages)
+    labels = [""] * total
+    entries = sorted(mapping.items(), key=lambda item: item[0])
+    for i, (start_idx, info) in enumerate(entries):
+        if start_idx >= total:
+            continue
+        try:
+            info = info.get_object()
+        except Exception:
+            pass
+        try:
+            prefix = str(info.get("/P", "")) if info else ""
+        except Exception:
+            prefix = ""
+        try:
+            style = info.get("/S") if info else None
+        except Exception:
+            style = None
+        try:
+            start_num = int(info.get("/St", 1)) if info else 1
+        except Exception:
+            start_num = 1
+        end_idx = entries[i + 1][0] if i + 1 < len(entries) else total
+        end_idx = min(end_idx, total)
+        for page_idx in range(start_idx, end_idx):
+            label_num = _format_page_label(style, start_num + (page_idx - start_idx))
+            label = f"{prefix}{label_num}" if prefix or label_num else ""
+            if label:
+                labels[page_idx] = label
+    return labels
+
+
+def _page_labels_from_outline(reader) -> List[str]:
+    try:
+        outlines = reader.outline
+    except Exception:
+        try:
+            outlines = reader.outlines
+        except Exception:
+            return []
+    total = len(reader.pages)
+    labels = [""] * total
+
+    def _walk(items):
+        for item in items or []:
+            if isinstance(item, list):
+                _walk(item)
+                continue
+            title = None
+            try:
+                title = getattr(item, "title", None)
+            except Exception:
+                title = None
+            if title is None:
+                try:
+                    title = item.get("/Title")
+                except Exception:
+                    title = None
+            page_num = None
+            try:
+                page_num = reader.get_destination_page_number(item)
+            except Exception:
+                try:
+                    page_num = reader.getDestinationPageNumber(item)
+                except Exception:
+                    page_num = None
+            if title is None or page_num is None:
+                continue
+            try:
+                idx = int(page_num)
+            except Exception:
+                continue
+            if 0 <= idx < total and not labels[idx]:
+                labels[idx] = str(title)
+
+    _walk(outlines)
+    if any(labels):
+        return labels
+    return []
+
+
+def _page_labels(reader) -> List[str]:
+    total = len(reader.pages)
+    labels = _page_labels_from_pagelabels(reader)
+    if labels and len(labels) < total:
+        labels.extend([""] * (total - len(labels)))
+    if not labels:
+        labels = [""] * total
+    outlines = _page_labels_from_outline(reader)
+    if outlines:
+        for i, label in enumerate(outlines):
+            if label and (i >= len(labels) or not labels[i]):
+                if i >= len(labels):
+                    labels.append(label)
+                else:
+                    labels[i] = label
+    return labels if any(labels) else []
 
 
 def _pdf_items_for_pairs(
@@ -1910,6 +2146,41 @@ def _merge_pdfs(paths: List[str]) -> Tuple[bytes, List[int]]:
     return (buf.getvalue(), starts)
 
 
+def _merge_pdfs_filtered(paths: List[str], *, fp_tokens: List[str]) -> Tuple[bytes, List[int], List[int]]:
+    """Merge PDFs in order, skipping pages whose label matches fp_tokens.
+    Return (bytes, start_pages, kept_indices) where start_pages aligns to kept_indices.
+    """
+    try:
+        from PyPDF2 import PdfReader, PdfWriter
+    except Exception:
+        return b"", [], []
+    writer = PdfWriter()
+    starts: List[int] = []
+    kept: List[int] = []
+    total = 1
+    for idx, p in enumerate(paths):
+        try:
+            rdr = PdfReader(p)
+        except Exception:
+            continue
+        labels = _page_labels(rdr) if fp_tokens else []
+        start = total
+        kept_pages = 0
+        for page_idx, page in enumerate(rdr.pages):
+            label = labels[page_idx] if labels and page_idx < len(labels) else ""
+            if fp_tokens and label and _is_flat_pattern_page_label(label, fp_tokens):
+                continue
+            writer.add_page(page)
+            kept_pages += 1
+            total += 1
+        if kept_pages:
+            starts.append(start)
+            kept.append(idx)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return (buf.getvalue(), starts, kept)
+
+
 def _index_label_suffix(path: str, ext_group: str, seq: int) -> str:
     if (ext_group or "").lower() == "datasheet":
         return "datasheet"
@@ -2550,15 +2821,32 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             if hardware_pdf and hardware_rows:
                 preface_bytes.append(("HardwareSummary.pdf", hardware_pdf))
 
-        # Merge body first to measure page counts
-        body_bytes, body_starts = _merge_pdfs(pdf_paths)
+        # Merge body first to measure page counts (optionally filter flat pattern pages)
+        binder_pdf_items = list(pdf_items)
+        binder_pdf_paths = list(pdf_paths)
+        body_bytes = b""
+        body_starts: List[int] = []
+        if binder_pdf_paths:
+            if not opts.binder_include_flat_patterns:
+                fp_tokens = _flat_pattern_page_tokens()
+                if fp_tokens:
+                    body_bytes, body_starts, kept_idx = _merge_pdfs_filtered(
+                        binder_pdf_paths,
+                        fp_tokens=fp_tokens,
+                    )
+                    binder_pdf_items = [binder_pdf_items[i] for i in kept_idx]
+                    binder_pdf_paths = [binder_pdf_paths[i] for i in kept_idx]
+                else:
+                    body_bytes, body_starts = _merge_pdfs(binder_pdf_paths)
+            else:
+                body_bytes, body_starts = _merge_pdfs(binder_pdf_paths)
 
         # Build index in two passes to account for its own page count, include Visual Summary entry, dot leaders, and metadata
         # Skip index entirely if no harvested PDFs were found
         try:
             if not opts.binder_add_index:
                 raise RuntimeError("skip_index")
-            if not pdf_paths:
+            if not binder_pdf_paths:
                 raise RuntimeError("no_body_pdfs")
             from reportlab.pdfgen import canvas
             from reportlab.lib.pagesizes import A4
@@ -2568,7 +2856,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
             desc_cache: Dict[Tuple[str, str], str] = {}
             multi_by_pn: Dict[str, int] = {}
-            for item in pdf_items:
+            for item in binder_pdf_items:
                 pn = str(item.get("pn") or "")
                 multi_by_pn[pn] = multi_by_pn.get(pn, 0) + 1
 
@@ -2658,7 +2946,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     _entry("Hardware Summary", hw_start)
                 # Body entries: PN + Description
                 pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + where_pages + hardware_pages
-                for item, start in zip(pdf_items, body_starts):
+                for item, start in zip(binder_pdf_items, body_starts):
                     label = _index_label_for_item(item, desc_cache, multi_by_pn, seq_by_pn)
                     _entry(label, pre_body_offset + start)
                 c.save()
@@ -2676,7 +2964,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             pass
 
         # If we have body PDFs, compute part -> first page map and rebuild VisualList with page numbers
-        if pdf_paths and opts.binder_add_visual_list:
+        if binder_pdf_paths and opts.binder_add_visual_list:
             try:
                 # Compute cover/index/visual page counts now that index is finalized
                 from PyPDF2 import PdfReader
@@ -2699,10 +2987,10 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                         hardware_pages += len(PdfReader(io.BytesIO(b)).pages)
                 pre_body_offset = cover_pages + index_pages + vis_pages + where_pages + hardware_pages
                 # Map absolute path -> start page
-                start_by_path = {p: s for p, s in zip(pdf_paths, body_starts)}
+                start_by_path = {p: s for p, s in zip(binder_pdf_paths, body_starts)}
                 # For each part, pick earliest starting page among its PDFs
                 first_page: Dict[Tuple[str,str], int] = {}
-                for item in pdf_items:
+                for item in binder_pdf_items:
                     ap = str(item.get("path") or "")
                     sp = start_by_path.get(ap)
                     if sp is None:

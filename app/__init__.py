@@ -121,6 +121,17 @@ def create_app(config_object=None):
     else:
         app.config.setdefault("HARDWARE_FOLDERS", default_hw_folders)
 
+    # Flat pattern page label tokens (used to drop sheet metal flat pattern pages in binders)
+    default_flat_pattern_page_names = [
+        "flatpattern",
+    ]
+    env_flat = os.getenv("FLAT_PATTERN_PAGE_NAMES") or os.getenv("FLAT_PATTERN_PAGE_LABELS") or ""
+    if env_flat.strip():
+        parts = [p.strip().lower() for p in re.split(r"[;,]", env_flat) if p.strip()]
+        app.config["FLAT_PATTERN_PAGE_NAMES"] = parts
+    else:
+        app.config.setdefault("FLAT_PATTERN_PAGE_NAMES", default_flat_pattern_page_names)
+
 
     # Load default config if not set
     # (Secrets are resolved below to avoid shipping insecure defaults.)
@@ -254,6 +265,10 @@ def create_app(config_object=None):
             hw_tokens = [str(x).strip().lower() for x in (settings.hardware_folders or []) if str(x).strip()]
             if hw_tokens:
                 app.config["HARDWARE_FOLDERS"] = hw_tokens
+        if settings and getattr(settings, "flat_pattern_page_names", None):
+            fp_tokens = [str(x).strip().lower() for x in (settings.flat_pattern_page_names or []) if str(x).strip()]
+            if fp_tokens:
+                app.config["FLAT_PATTERN_PAGE_NAMES"] = fp_tokens
         if settings:
             if getattr(settings, "upload_pack_max_zip_mb", None) is not None:
                 app.config["UPLOAD_PACK_MAX_ZIP_MB"] = int(settings.upload_pack_max_zip_mb or 0)
