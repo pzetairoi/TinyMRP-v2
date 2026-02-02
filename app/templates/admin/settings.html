@@ -65,6 +65,22 @@
 
     <div class="card shadow-sm mb-3">
       <div class="card-body">
+        <h5 class="card-title">Flat pattern page filter</h5>
+        <p class="text-muted small">
+          Binder PDFs will drop pages whose sheet name matches these tokens.
+          One token per line (or comma-separated). Matching is case-insensitive and ignores separators.
+        </p>
+        <textarea
+          class="form-control form-control-sm"
+          name="flat_pattern_page_names"
+          rows="4"
+          placeholder="flatpattern"
+        >{{ flat_pattern_page_names_text or '' }}</textarea>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
         <h5 class="card-title">Upload Pack limits</h5>
         <p class="text-muted small">Set size limits for ZIP uploads and individual files (MB).</p>
         <div class="row g-2">

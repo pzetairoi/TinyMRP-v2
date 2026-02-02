@@ -31,6 +31,19 @@ def _parse_hw_folders(value: str) -> list[str]:
     return out
 
 
+def _parse_flat_pattern_names(value: str) -> list[str]:
+    raw = [p.strip() for p in re.split(r"[,;\r\n]+", value or "") if p.strip()]
+    seen = set()
+    out: list[str] = []
+    for item in raw:
+        token = item.strip().lower()
+        if not token or token in seen:
+            continue
+        out.append(token)
+        seen.add(token)
+    return out
+
+
 def _parse_int(value: str, default_value: int) -> int:
     try:
         return max(0, int(str(value).strip()))
@@ -72,6 +85,9 @@ def admin_settings():
 
         hw_raw = request.form.get("hardware_folders") or ""
         settings.hardware_folders = _parse_hw_folders(hw_raw)
+
+        fp_raw = request.form.get("flat_pattern_page_names") or ""
+        settings.flat_pattern_page_names = _parse_flat_pattern_names(fp_raw)
 
         settings.upload_pack_max_zip_mb = _parse_int(
             request.form.get("upload_pack_max_zip_mb"), settings.upload_pack_max_zip_mb or 1024
@@ -121,6 +137,7 @@ def admin_settings():
         settings.save()
         try:
             current_app.config["HARDWARE_FOLDERS"] = settings.hardware_folders or []
+            current_app.config["FLAT_PATTERN_PAGE_NAMES"] = settings.flat_pattern_page_names or []
             current_app.config["UPLOAD_PACK_MAX_ZIP_MB"] = settings.upload_pack_max_zip_mb or 0
             current_app.config["UPLOAD_PACK_MAX_FILE_MB"] = settings.upload_pack_max_file_mb or 0
             current_app.config["UPLOAD_PACK_MAX_FILES"] = settings.upload_pack_max_files or 0
@@ -137,11 +154,13 @@ def admin_settings():
     process_rows = [(k, v) for k, v in process_meta.items() if not str(k).startswith("_")]
     process_rows.sort(key=lambda item: item[0])
     hw_display = "\n".join(settings.hardware_folders or [])
+    fp_display = "\n".join(settings.flat_pattern_page_names or [])
     return render_template(
         "admin/settings.html",
         settings=settings,
         process_rows=process_rows,
         hardware_folders_text=hw_display,
+        flat_pattern_page_names_text=fp_display,
     )
 
 @bp.route("/users")
