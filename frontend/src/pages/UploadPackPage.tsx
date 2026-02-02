@@ -409,9 +409,7 @@ export default function UploadPackPage() {
                     Root: <code>{rootPn}</code>
                     {rootRev ? <span className="ms-2">REV {rootRev}</span> : null}
                   </div>
-                  <a href={rootHref} target="_blank" rel="noreferrer">
-                    Open part details
-                  </a>
+                  <a href={rootHref}>Open part details</a>
                 </div>
               ) : null}
             </div>
@@ -460,7 +458,7 @@ extra/
                   <div>
                     Root: <code>{rootPn || "-"}</code>
                     {rootPn ? (
-                      <a className="ms-2" href={rootHref} target="_blank" rel="noreferrer">
+                      <a className="ms-2" href={rootHref}>
                         Open part details
                       </a>
                     ) : null}
@@ -533,7 +531,7 @@ extra/
                   <div className="text-muted small mb-2">{rootPreviewStatus}</div>
                 ) : null}
                 {rootPreviewUrl && rootHref ? (
-                  <a className="d-inline-block" href={rootHref} target="_blank" rel="noreferrer">
+                  <a className="d-inline-block" href={rootHref}>
                     <img
                       src={rootPreviewUrl}
                       className="img-fluid border rounded"
