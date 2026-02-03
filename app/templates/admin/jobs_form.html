@@ -73,14 +73,20 @@
                 </div>
               {% else %}
                 {% set assigned = (job.participants | map(attribute='id') | map('string') | list) if job else [] %}
-                <select class="form-select" name="participants" id="participants" multiple size="6">
+                <div class="border rounded p-2" style="max-height: 220px; overflow:auto;">
                   {% for u in users %}
-                  <option value="{{ u.id }}" {% if job and (u.id|string) in assigned %}selected{% endif %}>{{ u.email }}</option>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="participants" id="participant-{{ u.id }}" value="{{ u.id }}" {% if job and (u.id|string) in assigned %}checked{% endif %}>
+                    <label class="form-check-label" for="participant-{{ u.id }}">{{ u.email }}</label>
+                  </div>
                   {% endfor %}
-                </select>
+                  {% if users|length == 0 %}
+                  <div class="text-muted small">No eligible internal users available.</div>
+                  {% endif %}
+                </div>
                 <div class="d-flex gap-2 mt-2">
-                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('participants')">Select all</button>
-                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('participants')">Clear</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setCheckboxGroup('participants', true)">Select all</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setCheckboxGroup('participants', false)">Clear</button>
                 </div>
               {% endif %}
             </div>
@@ -94,14 +100,20 @@
                 </div>
               {% else %}
                 {% set vend = (job.vendors | map(attribute='id') | map('string') | list) if job else [] %}
-                <select class="form-select" name="vendors" id="vendors" multiple size="6">
+                <div class="border rounded p-2" style="max-height: 220px; overflow:auto;">
                   {% for s in suppliers %}
-                  <option value="{{ s.id }}" {% if job and (s.id|string) in vend %}selected{% endif %}>{{ s.name }}</option>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="vendors" id="vendor-{{ s.id }}" value="{{ s.id }}" {% if job and (s.id|string) in vend %}checked{% endif %}>
+                    <label class="form-check-label" for="vendor-{{ s.id }}">{{ s.name }}</label>
+                  </div>
                   {% endfor %}
-                </select>
+                  {% if suppliers|length == 0 %}
+                  <div class="text-muted small">No suppliers found.</div>
+                  {% endif %}
+                </div>
                 <div class="d-flex gap-2 mt-2">
-                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('vendors')">Select all</button>
-                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('vendors')">Clear</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setCheckboxGroup('vendors', true)">Select all</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setCheckboxGroup('vendors', false)">Clear</button>
                 </div>
               {% endif %}
             </div>
@@ -437,6 +449,187 @@
           </div>
         {% endif %}
         </form>
+        {% if job %}
+        <div class="mt-4">
+          <h2 class="h6 mb-2 fw-bold">Docpack export</h2>
+          <form method="post" action="{{ url_for('docpacks_api.build_job') }}">
+            <input type="hidden" name="job_id" value="{{ job.id }}">
+            <div class="row g-2">
+              <div class="col-md-3">
+                <label class="form-label small">Depth</label>
+                <select class="form-select form-select-sm" name="depth">
+                  <option value="full" selected>Full BOM</option>
+                  <option value="top">Top level only</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Classified parts</label>
+                <select class="form-select form-select-sm" name="classified">
+                  <option value="show" selected>Show</option>
+                  <option value="hide">Hide</option>
+                  <option value="only">Only</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Process mode</label>
+                <select class="form-select form-select-sm" name="process_mode">
+                  <option value="all" selected>All</option>
+                  <option value="selected">Selected</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small">Output name</label>
+                <input class="form-control form-control-sm" type="text" name="output_name" placeholder="{{ job.job_number }}_docpack">
+              </div>
+            </div>
+            <div class="row g-2 mt-2">
+              <div class="col-md-6">
+                <label class="form-label small">Processes (comma-separated)</label>
+                <input class="form-control form-control-sm" type="text" name="processes" placeholder="welding, machine, purchase">
+              </div>
+              <div class="col-md-6">
+                <div class="form-label small">File types</div>
+                <div class="row row-cols-2 row-cols-md-4 g-1">
+                  {% for ft, label in [
+                    ('pdf','PDF'),
+                    ('datasheet','Datasheet'),
+                    ('png','PNG'),
+                    ('step','STEP'),
+                    ('dxf','DXF'),
+                    ('edr','eDrawings'),
+                    ('3mf','3MF')
+                  ] %}
+                  <div class="col">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" id="job_ft_{{ ft }}" name="file_types" value="{{ ft }}">
+                      <label class="form-check-label small" for="job_ft_{{ ft }}">{{ label }}</label>
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+            <div class="row g-2 mt-2">
+              <div class="col-md-4">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_selected_files" name="selected_files" checked>
+                  <label class="form-check-label small" for="job_selected_files">Include selected file types</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_excel_bom" name="excel_bom">
+                  <label class="form-check-label small" for="job_excel_bom">Excel BOM</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_pdf_binder" name="pdf_binder">
+                  <label class="form-check-label small" for="job_pdf_binder">PDF binder</label>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_visual_list" name="visual_list">
+                  <label class="form-check-label small" for="job_visual_list">Visual list</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_index_pdf" name="index_pdf">
+                  <label class="form-check-label small" for="job_index_pdf">Index PDF</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_whereused" name="whereused_report">
+                  <label class="form-check-label small" for="job_whereused">Where-used report</label>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_hardware_summary" name="hardware_summary">
+                  <label class="form-check-label small" for="job_hardware_summary">Hardware summary</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_cover_page" name="cover_page">
+                  <label class="form-check-label small" for="job_cover_page">Cover page</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="job_fab_pack" name="fabrication_pack">
+                  <label class="form-check-label small" for="job_fab_pack">Fabrication pack</label>
+                </div>
+              </div>
+            </div>
+            <details class="mt-2">
+              <summary class="small fw-semibold">Advanced options</summary>
+              <div class="row g-2 mt-2">
+                <div class="col-md-4">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_excel_all" name="excel_all_fields">
+                    <label class="form-check-label small" for="job_excel_all">Excel all fields</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_include_consumed" name="include_consumed">
+                    <label class="form-check-label small" for="job_include_consumed">Include consumed parts</label>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="small fw-semibold mb-1">Binder options</div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_binder_cover" name="binder_add_cover" checked>
+                    <label class="form-check-label small" for="job_binder_cover">Add cover page</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_binder_index" name="binder_add_index" checked>
+                    <label class="form-check-label small" for="job_binder_index">Add index</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_binder_visual" name="binder_add_visual_list" checked>
+                    <label class="form-check-label small" for="job_binder_visual">Visual list section</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_binder_where" name="binder_add_whereused">
+                    <label class="form-check-label small" for="job_binder_where">Where-used section</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_binder_datasheets" name="binder_add_datasheets">
+                    <label class="form-check-label small" for="job_binder_datasheets">Add datasheets</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_binder_hw" name="binder_add_hardware_summary" checked>
+                    <label class="form-check-label small" for="job_binder_hw">Hardware summary</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_binder_pages" name="binder_page_numbers" checked>
+                    <label class="form-check-label small" for="job_binder_pages">Page numbers</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_binder_flat" name="binder_include_flat_patterns">
+                    <label class="form-check-label small" for="job_binder_flat">Include flat patterns</label>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="small fw-semibold mb-1">Stamps</div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_stamp_quote" name="stamp_quote">
+                    <label class="form-check-label small" for="job_stamp_quote">Quote</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_stamp_conf" name="stamp_confidential">
+                    <label class="form-check-label small" for="job_stamp_conf">Confidential</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_stamp_app" name="stamp_approved">
+                    <label class="form-check-label small" for="job_stamp_app">Approved</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_stamp_wip" name="stamp_wip">
+                    <label class="form-check-label small" for="job_stamp_wip">WIP</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="job_stamp_inprog" name="stamp_inprogress">
+                    <label class="form-check-label small" for="job_stamp_inprog">In progress</label>
+                  </div>
+                </div>
+              </div>
+            </details>
+            <button class="btn btn-outline-primary btn-sm mt-2" type="submit">Download docpack</button>
+          </form>
+        </div>
+        {% endif %}
         {% if remaining_parts %}
         <form id="remaining-order-form" method="post" action="{{ url_for('admin_orders.orders_from_job', job_id=job.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -456,16 +649,8 @@
   const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
   const fallbackLogo = "{{ url_for('branding.logo') }}";
 
-  function selectAllOptions(id){
-    const el = document.getElementById(id);
-    if(!el) return;
-    for(const opt of el.options){ opt.selected = true; }
-  }
-
-  function clearOptions(id){
-    const el = document.getElementById(id);
-    if(!el) return;
-    for(const opt of el.options){ opt.selected = false; }
+  function setCheckboxGroup(name, checked){
+    document.querySelectorAll(`input[name="${name}"]`).forEach(cb => { cb.checked = checked; });
   }
 
   function parseBomText(txt){

@@ -17,6 +17,7 @@ class Customer(Document):
     tags        = ListField(StringField(), default=list)
     contact     = StringField()
     email       = StringField()
+    website     = StringField()
     phone       = StringField()
     billing_address = EmbeddedDocumentField(Address)
     shipping_addresses = ListField(EmbeddedDocumentField(Address), default=list)

@@ -23,116 +23,21 @@
           </div>
 
           <div class="row g-3 mt-2">
-            <div class="col-md-3">
-              <label class="form-label">Status</label>
-              {% set st = customer.status if customer else 'active' %}
-              <select class="form-select" name="status">
-                {% for s in ['active','inactive','prospect','on_hold'] %}
-                <option value="{{ s }}" {% if st==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Type</label>
-              {% set ct = customer.customer_type if customer else 'oem' %}
-              <select class="form-select" name="customer_type">
-                {% for s in ['retail','wholesale','oem','distributor'] %}
-                <option value="{{ s }}" {% if ct==s %}selected{% endif %}>{{ s.title() }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Segment</label>
-              <input class="form-control" type="text" name="segment" value="{{ customer.segment if customer else '' }}" placeholder="e.g. High value">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Company</label>
-              <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" name="is_company" id="is_company" {% if customer is none or customer.is_company %}checked{% endif %}>
-                <label class="form-check-label" for="is_company">Is company</label>
-              </div>
-            </div>
-          </div>
-
-          <div class="row g-3 mt-2">
-            <div class="col-md-6">
+            <div class="col-md-4">
               <label class="form-label">Primary contact</label>
               <input class="form-control" type="text" name="contact" value="{{ customer.contact if customer else '' }}">
             </div>
-            <div class="col-md-6">
-              <label class="form-label">Email</label>
+            <div class="col-md-4">
+              <label class="form-label">Contact email</label>
               <input class="form-control" type="email" name="email" value="{{ customer.email if customer else '' }}">
             </div>
-          </div>
-
-          <div class="row g-3 mt-2">
-            <div class="col-md-6">
-              <label class="form-label">Phone</label>
-              <input class="form-control" type="text" name="phone" value="{{ customer.phone if customer else '' }}">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label">Sales rep</label>
-              <input class="form-control" type="text" name="sales_rep" value="{{ customer.sales_rep if customer else '' }}">
+            <div class="col-md-4">
+              <label class="form-label">Website</label>
+              <input class="form-control" type="url" name="website" value="{{ customer.website if customer else '' }}">
             </div>
           </div>
 
-          <div class="mt-4">
-            <label class="form-label fw-bold">Additional contacts</label>
-            <div class="d-flex align-items-center gap-2 mb-2">
-              {% if not is_readonly %}
-              <button type="button" class="btn btn-sm btn-outline-primary" id="contact-add-btn">Add contact</button>
-              {% endif %}
-              <span class="text-muted small">Mark one as primary for quick reference.</span>
-            </div>
-            <div class="table-responsive">
-              <table class="table table-sm table-striped align-middle" id="contact-table">
-                <thead>
-                  <tr>
-                    <th style="width:20%;">Name</th>
-                    <th style="width:18%;">Title</th>
-                    <th style="width:22%;">Email</th>
-                    <th style="width:18%;">Phone</th>
-                    <th style="width:10%;">Primary</th>
-                    <th style="width:12%;">Actions</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <textarea id="contacts_text" class="form-control d-none" name="contacts_text" rows="4">{{ contacts_text if contacts_text is defined else '' }}</textarea>
-          </div>
-
-          <div class="row g-3 mt-2">
-            <div class="col-md-4">
-              <label class="form-label">Payment terms</label>
-              <input class="form-control" type="text" name="payment_terms" value="{{ customer.payment_terms if customer else '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Credit limit</label>
-              <input class="form-control" type="number" step="0.01" min="0" name="credit_limit" value="{{ customer.credit_limit if customer else '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Discount %</label>
-              <input class="form-control" type="number" step="0.01" min="0" name="discount_pct" value="{{ customer.discount_pct if customer else '' }}">
-            </div>
-          </div>
-
-          <div class="row g-3 mt-2">
-            <div class="col-md-4">
-              <label class="form-label">Currency</label>
-              <input class="form-control" type="text" name="currency" value="{{ customer.currency if customer else 'USD' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Tax ID</label>
-              <input class="form-control" type="text" name="tax_id" value="{{ customer.tax_id if customer else '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Industry</label>
-              <input class="form-control" type="text" name="industry" value="{{ customer.industry if customer else '' }}">
-            </div>
-          </div>
-
-          <h2 class="h6 mt-4">Billing address</h2>
+          <h2 class="h6 mt-4">Address</h2>
           <div class="row g-3">
             <div class="col-md-4">
               <label class="form-label">Label</label>
@@ -168,52 +73,25 @@
             </div>
           </div>
 
-          <div class="mt-4">
-            <label class="form-label fw-bold">Shipping addresses</label>
-            <div class="d-flex align-items-center gap-2 mb-2">
-              {% if not is_readonly %}
-              <button type="button" class="btn btn-sm btn-outline-primary" id="ship-add-btn">Add address</button>
-              {% endif %}
-              <span class="text-muted small">Use one default address for orders.</span>
-            </div>
-            <div class="table-responsive">
-              <table class="table table-sm table-striped align-middle" id="ship-table">
-                <thead>
-                  <tr>
-                    <th style="width:18%;">Label</th>
-                    <th style="width:28%;">Line 1</th>
-                    <th style="width:16%;">City</th>
-                    <th style="width:12%;">State</th>
-                    <th style="width:12%;">Postal</th>
-                    <th style="width:14%;">Country</th>
-                    <th style="width:8%;">Default</th>
-                    <th style="width:10%;">Actions</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <textarea id="shipping_text" class="form-control d-none" name="shipping_text" rows="6">{{ shipping_text if shipping_text is defined else '' }}</textarea>
-          </div>
-
-          <div class="mt-3">
-            <label class="form-label">Tags</label>
-            <input class="form-control" type="text" name="tags" value="{{ (customer.tags | join(', ')) if customer else '' }}">
-          </div>
-
           {% if not hide_user_links %}
           <div class="mt-3">
             <label class="form-label">Linked users</label>
             {% set linked = (customer.users | map(attribute='id') | map('string') | list) if customer else [] %}
-            <select class="form-select" name="users" id="customer-users" multiple size="6">
+            <div class="border rounded p-2" style="max-height: 220px; overflow:auto;">
               {% for u in users %}
-              <option value="{{ u.id }}" {% if customer and (u.id|string) in linked %}selected{% endif %}>{{ u.email }}</option>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="users" id="customer-user-{{ u.id }}" value="{{ u.id }}" {% if customer and (u.id|string) in linked %}checked{% endif %}>
+                <label class="form-check-label" for="customer-user-{{ u.id }}">{{ u.email }}</label>
+              </div>
               {% endfor %}
-            </select>
+              {% if users|length == 0 %}
+              <div class="text-muted small">No users found.</div>
+              {% endif %}
+            </div>
             {% if not is_readonly %}
             <div class="d-flex gap-2 mt-2">
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllOptions('customer-users')">Select all</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearOptions('customer-users')">Clear</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setCheckboxGroup('users', true)">Select all</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setCheckboxGroup('users', false)">Clear</button>
             </div>
             {% endif %}
           </div>
@@ -320,222 +198,9 @@
 {% endblock %}
 {% block extra_scripts %}
 <script>
-  let shipRows = [];
-  let contactRows = [];
-
-  function selectAllOptions(id){
-    const el = document.getElementById(id);
-    if(!el) return;
-    for(const opt of el.options){ opt.selected = true; }
+  function setCheckboxGroup(name, checked){
+    document.querySelectorAll(`input[name="${name}"]`).forEach(cb => { cb.checked = checked; });
   }
-
-  function clearOptions(id){
-    const el = document.getElementById(id);
-    if(!el) return;
-    for(const opt of el.options){ opt.selected = false; }
-  }
-
-  function parseShippingText(txt){
-    const out = [];
-    for(const raw of (txt || '').split(/\r?\n/)){
-      const line = raw.trim();
-      if(!line || line.startsWith('#')) continue;
-      const parts = line.split('|').map(s => s.trim());
-      if(parts.length === 0) continue;
-      out.push({
-        label: parts[0] || '',
-        line1: parts[1] || '',
-        line2: parts[2] || '',
-        city: parts[3] || '',
-        state: parts[4] || '',
-        postal: parts[5] || '',
-        country: parts[6] || '',
-        is_default: ['1','true','yes','y','default'].includes((parts[7] || '').toLowerCase())
-      });
-    }
-    return out;
-  }
-
-  function syncShippingText(){
-    const ta = document.getElementById('shipping_text');
-    if(!ta) return;
-    ta.value = shipRows.map(r => [
-      r.label || '',
-      r.line1 || '',
-      r.line2 || '',
-      r.city || '',
-      r.state || '',
-      r.postal || '',
-      r.country || '',
-      r.is_default ? '1' : '0'
-    ].join('|')).join('\n');
-  }
-
-  function parseContactsText(txt){
-    const out = [];
-    for(const raw of (txt || '').split(/\r?\n/)){
-      const line = raw.trim();
-      if(!line || line.startsWith('#')) continue;
-      const parts = line.split('|').map(s => s.trim());
-      const name = parts[0] || '';
-      if(!name) continue;
-      out.push({
-        name: name,
-        title: parts[1] || '',
-        email: parts[2] || '',
-        phone: parts[3] || '',
-        is_primary: ['1','true','yes','y','primary'].includes((parts[4] || '').toLowerCase())
-      });
-    }
-    return out;
-  }
-
-  function syncContactsText(){
-    const ta = document.getElementById('contacts_text');
-    if(!ta) return;
-    ta.value = contactRows.map(r => [
-      r.name || '',
-      r.title || '',
-      r.email || '',
-      r.phone || '',
-      r.is_primary ? '1' : '0'
-    ].join('|')).join('\n');
-  }
-
-  function renderShipTable(){
-    const tbody = document.querySelector('#ship-table tbody');
-    if(!tbody) return;
-    tbody.innerHTML = '';
-    shipRows.forEach((row, idx) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><input type="text" class="form-control form-control-sm ship-label" data-idx="${idx}" value="${row.label || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm ship-line1" data-idx="${idx}" value="${row.line1 || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm ship-city" data-idx="${idx}" value="${row.city || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm ship-state" data-idx="${idx}" value="${row.state || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm ship-postal" data-idx="${idx}" value="${row.postal || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm ship-country" data-idx="${idx}" value="${row.country || ''}"></td>
-        <td class="text-center"><input type="checkbox" class="form-check-input ship-default" data-idx="${idx}" ${row.is_default ? 'checked' : ''}></td>
-        <td><button type="button" class="btn btn-sm btn-outline-danger ship-remove" data-idx="${idx}">Remove</button></td>
-      `;
-      tbody.appendChild(tr);
-    });
-  }
-
-  function renderContactTable(){
-    const tbody = document.querySelector('#contact-table tbody');
-    if(!tbody) return;
-    tbody.innerHTML = '';
-    contactRows.forEach((row, idx) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td><input type="text" class="form-control form-control-sm contact-name" data-idx="${idx}" value="${row.name || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm contact-title" data-idx="${idx}" value="${row.title || ''}"></td>
-        <td><input type="email" class="form-control form-control-sm contact-email" data-idx="${idx}" value="${row.email || ''}"></td>
-        <td><input type="text" class="form-control form-control-sm contact-phone" data-idx="${idx}" value="${row.phone || ''}"></td>
-        <td class="text-center"><input type="checkbox" class="form-check-input contact-primary" data-idx="${idx}" ${row.is_primary ? 'checked' : ''}></td>
-        <td><button type="button" class="btn btn-sm btn-outline-danger contact-remove" data-idx="${idx}">Remove</button></td>
-      `;
-      tbody.appendChild(tr);
-    });
-  }
-
-  function attachShipHandlers(){
-    const tbody = document.querySelector('#ship-table tbody');
-    if(!tbody) return;
-    tbody.addEventListener('input', (ev) => {
-      const t = ev.target;
-      const idx = parseInt(t.getAttribute('data-idx'), 10);
-      if(Number.isNaN(idx) || !shipRows[idx]) return;
-      if(t.classList.contains('ship-label')) shipRows[idx].label = t.value || '';
-      if(t.classList.contains('ship-line1')) shipRows[idx].line1 = t.value || '';
-      if(t.classList.contains('ship-city')) shipRows[idx].city = t.value || '';
-      if(t.classList.contains('ship-state')) shipRows[idx].state = t.value || '';
-      if(t.classList.contains('ship-postal')) shipRows[idx].postal = t.value || '';
-      if(t.classList.contains('ship-country')) shipRows[idx].country = t.value || '';
-      syncShippingText();
-    });
-    tbody.addEventListener('change', (ev) => {
-      const t = ev.target;
-      const idx = parseInt(t.getAttribute('data-idx'), 10);
-      if(Number.isNaN(idx) || !shipRows[idx]) return;
-      if(t.classList.contains('ship-default')){
-        shipRows.forEach((r, i) => { r.is_default = (i === idx); });
-        renderShipTable();
-        syncShippingText();
-      }
-    });
-    tbody.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('.ship-remove');
-      if(!btn) return;
-      const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if(Number.isNaN(idx)) return;
-      shipRows.splice(idx, 1);
-      syncShippingText();
-      renderShipTable();
-    });
-  }
-
-  function attachContactHandlers(){
-    const tbody = document.querySelector('#contact-table tbody');
-    if(!tbody) return;
-    tbody.addEventListener('input', (ev) => {
-      const t = ev.target;
-      const idx = parseInt(t.getAttribute('data-idx'), 10);
-      if(Number.isNaN(idx) || !contactRows[idx]) return;
-      if(t.classList.contains('contact-name')) contactRows[idx].name = t.value || '';
-      if(t.classList.contains('contact-title')) contactRows[idx].title = t.value || '';
-      if(t.classList.contains('contact-email')) contactRows[idx].email = t.value || '';
-      if(t.classList.contains('contact-phone')) contactRows[idx].phone = t.value || '';
-      syncContactsText();
-    });
-    tbody.addEventListener('change', (ev) => {
-      const t = ev.target;
-      const idx = parseInt(t.getAttribute('data-idx'), 10);
-      if(Number.isNaN(idx) || !contactRows[idx]) return;
-      if(t.classList.contains('contact-primary')){
-        contactRows.forEach((r, i) => { r.is_primary = (i === idx); });
-        renderContactTable();
-        syncContactsText();
-      }
-    });
-    tbody.addEventListener('click', (ev) => {
-      const btn = ev.target.closest('.contact-remove');
-      if(!btn) return;
-      const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      if(Number.isNaN(idx)) return;
-      contactRows.splice(idx, 1);
-      syncContactsText();
-      renderContactTable();
-    });
-  }
-
-  document.addEventListener('DOMContentLoaded', function(){
-    const ta = document.getElementById('shipping_text');
-    shipRows = parseShippingText(ta ? ta.value : '');
-    if(shipRows.length === 0){
-      shipRows = [{ label: 'Main', line1: '', line2: '', city: '', state: '', postal: '', country: '', is_default: true }];
-    }
-    syncShippingText();
-    renderShipTable();
-    attachShipHandlers();
-    document.getElementById('ship-add-btn')?.addEventListener('click', () => {
-      shipRows.push({ label: '', line1: '', line2: '', city: '', state: '', postal: '', country: '', is_default: false });
-      syncShippingText();
-      renderShipTable();
-    });
-
-    const cta = document.getElementById('contacts_text');
-    contactRows = parseContactsText(cta ? cta.value : '');
-    syncContactsText();
-    renderContactTable();
-    attachContactHandlers();
-    document.getElementById('contact-add-btn')?.addEventListener('click', () => {
-      contactRows.push({ name: '', title: '', email: '', phone: '', is_primary: contactRows.length === 0 });
-      syncContactsText();
-      renderContactTable();
-    });
-  });
 </script>
 {% if is_readonly %}
 <script>

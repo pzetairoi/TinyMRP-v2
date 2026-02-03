@@ -88,25 +88,11 @@ def suppliers_view(sup_id):
     except (DoesNotExist, ValidationError):
         abort(404)
     users = User.objects().order_by("email")
-    contacts_text = ""
-    if s.contacts:
-        lines = []
-        for c in s.contacts:
-            line = "|".join([
-                c.name or "",
-                c.title or "",
-                c.email or "",
-                c.phone or "",
-                "1" if c.is_primary else "0",
-            ])
-            lines.append(line)
-        contacts_text = "\n".join(lines)
     orders = Order.objects(supplier=s).order_by("-order_date")
     return render_template(
         "admin/suppliers_form.html",
         users=users,
         supplier=s,
-        contacts_text=contacts_text,
         orders=orders,
         readonly=True,
         hide_user_links=is_external_scoped_user(current_user),
@@ -194,35 +180,51 @@ def suppliers_new():
         s = Supplier(
             code=(request.form.get("code") or "").strip() or generate_supplier_code(),
             name=name,
-            description=(request.form.get("description") or "").strip(),
-            status=(request.form.get("status") or "active").strip(),
-            rating=_parse_int(request.form.get("rating")),
             contact=(request.form.get("contact") or "").strip(),
             email=(request.form.get("email") or "").strip(),
-            phone=(request.form.get("phone") or "").strip(),
             website=(request.form.get("website") or "").strip(),
-            tax_id=(request.form.get("tax_id") or "").strip(),
-            payment_terms=(request.form.get("payment_terms") or "").strip(),
-            currency=(request.form.get("currency") or "USD").strip(),
-            min_order_value=_parse_float(request.form.get("min_order_value")),
-            lead_time_days=_parse_int(request.form.get("lead_time_days")),
+            status="active",
         )
-        s.address = _parse_address_from_form("address")
-        s.billing_address = _parse_address_from_form("billing")
-        contacts = _parse_contacts_text(request.form.get("contacts_text") or "")
-        s.contacts = contacts
-        if contacts and not (s.contact or s.email or s.phone):
-            primary = _primary_from_contacts(contacts)
-            if primary:
-                s.contact = primary.name or s.contact
-                s.email = primary.email or s.email
-                s.phone = primary.phone or s.phone
+        if "description" in request.form:
+            s.description = (request.form.get("description") or "").strip()
+        if "status" in request.form:
+            s.status = (request.form.get("status") or "active").strip()
+        if "rating" in request.form:
+            s.rating = _parse_int(request.form.get("rating"))
+        if "phone" in request.form:
+            s.phone = (request.form.get("phone") or "").strip()
+        if "tax_id" in request.form:
+            s.tax_id = (request.form.get("tax_id") or "").strip()
+        if "payment_terms" in request.form:
+            s.payment_terms = (request.form.get("payment_terms") or "").strip()
+        if "currency" in request.form:
+            s.currency = (request.form.get("currency") or "USD").strip()
+        if "min_order_value" in request.form:
+            s.min_order_value = _parse_float(request.form.get("min_order_value"))
+        if "lead_time_days" in request.form:
+            s.lead_time_days = _parse_int(request.form.get("lead_time_days"))
+        if any(k in request.form for k in ("address_label","address_line1","address_line2","address_city","address_state","address_postal","address_country")):
+            s.address = _parse_address_from_form("address")
+        if "billing_label" in request.form:
+            s.billing_address = _parse_address_from_form("billing")
+        if "contacts_text" in request.form:
+            contacts = _parse_contacts_text(request.form.get("contacts_text") or "")
+            s.contacts = contacts
+            if contacts and not (s.contact or s.email or s.phone):
+                primary = _primary_from_contacts(contacts)
+                if primary:
+                    s.contact = primary.name or s.contact
+                    s.email = primary.email or s.email
+                    s.phone = primary.phone or s.phone
         user_ids = request.form.getlist("users")
         if user_ids:
             s.users = list(User.objects(id__in=user_ids))
-        s.processes = [p.strip() for p in (request.form.get("processes") or "").split(",") if p.strip()]
-        s.categories = [c.strip() for c in (request.form.get("categories") or "").split(",") if c.strip()]
-        s.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
+        if "processes" in request.form:
+            s.processes = [p.strip() for p in (request.form.get("processes") or "").split(",") if p.strip()]
+        if "categories" in request.form:
+            s.categories = [c.strip() for c in (request.form.get("categories") or "").split(",") if c.strip()]
+        if "tags" in request.form:
+            s.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
         s.save()
         flash("Supplier created.", "success")
         return redirect(url_for("admin_suppliers.suppliers_list"))
@@ -240,51 +242,58 @@ def suppliers_edit(sup_id):
     except (DoesNotExist, ValidationError):
         abort(404)
     if request.method == "POST":
-        s.name = (request.form.get("name") or s.name).strip()
-        s.code = (request.form.get("code") or s.code or "").strip()
-        s.description = (request.form.get("description") or "").strip()
-        s.status = (request.form.get("status") or s.status or "active").strip()
-        s.rating = _parse_int(request.form.get("rating"))
-        s.contact = (request.form.get("contact") or "").strip()
-        s.email = (request.form.get("email") or "").strip()
-        s.phone = (request.form.get("phone") or "").strip()
-        s.website = (request.form.get("website") or "").strip()
-        s.tax_id = (request.form.get("tax_id") or "").strip()
-        s.payment_terms = (request.form.get("payment_terms") or "").strip()
-        s.currency = (request.form.get("currency") or "USD").strip()
-        s.min_order_value = _parse_float(request.form.get("min_order_value"))
-        s.lead_time_days = _parse_int(request.form.get("lead_time_days"))
-        s.address = _parse_address_from_form("address")
-        s.billing_address = _parse_address_from_form("billing")
-        contacts = _parse_contacts_text(request.form.get("contacts_text") or "")
-        s.contacts = contacts
-        if contacts and not (s.contact or s.email or s.phone):
-            primary = _primary_from_contacts(contacts)
-            if primary:
-                s.contact = primary.name or s.contact
-                s.email = primary.email or s.email
-                s.phone = primary.phone or s.phone
+        if "name" in request.form:
+            s.name = (request.form.get("name") or s.name).strip()
+        if "code" in request.form:
+            s.code = (request.form.get("code") or s.code or "").strip()
+        if "description" in request.form:
+            s.description = (request.form.get("description") or "").strip()
+        if "status" in request.form:
+            s.status = (request.form.get("status") or s.status or "active").strip()
+        if "rating" in request.form:
+            s.rating = _parse_int(request.form.get("rating"))
+        if "contact" in request.form:
+            s.contact = (request.form.get("contact") or "").strip()
+        if "email" in request.form:
+            s.email = (request.form.get("email") or "").strip()
+        if "phone" in request.form:
+            s.phone = (request.form.get("phone") or "").strip()
+        if "website" in request.form:
+            s.website = (request.form.get("website") or "").strip()
+        if "tax_id" in request.form:
+            s.tax_id = (request.form.get("tax_id") or "").strip()
+        if "payment_terms" in request.form:
+            s.payment_terms = (request.form.get("payment_terms") or "").strip()
+        if "currency" in request.form:
+            s.currency = (request.form.get("currency") or "USD").strip()
+        if "min_order_value" in request.form:
+            s.min_order_value = _parse_float(request.form.get("min_order_value"))
+        if "lead_time_days" in request.form:
+            s.lead_time_days = _parse_int(request.form.get("lead_time_days"))
+        if any(k in request.form for k in ("address_label","address_line1","address_line2","address_city","address_state","address_postal","address_country")):
+            s.address = _parse_address_from_form("address")
+        if "billing_label" in request.form:
+            s.billing_address = _parse_address_from_form("billing")
+        if "contacts_text" in request.form:
+            contacts = _parse_contacts_text(request.form.get("contacts_text") or "")
+            s.contacts = contacts
+            if contacts and not (s.contact or s.email or s.phone):
+                primary = _primary_from_contacts(contacts)
+                if primary:
+                    s.contact = primary.name or s.contact
+                    s.email = primary.email or s.email
+                    s.phone = primary.phone or s.phone
         user_ids = request.form.getlist("users")
         s.users = list(User.objects(id__in=user_ids)) if user_ids else []
-        s.processes = [p.strip() for p in (request.form.get("processes") or "").split(",") if p.strip()]
-        s.categories = [c.strip() for c in (request.form.get("categories") or "").split(",") if c.strip()]
-        s.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
+        if "processes" in request.form:
+            s.processes = [p.strip() for p in (request.form.get("processes") or "").split(",") if p.strip()]
+        if "categories" in request.form:
+            s.categories = [c.strip() for c in (request.form.get("categories") or "").split(",") if c.strip()]
+        if "tags" in request.form:
+            s.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
         s.save()
         flash("Supplier updated.", "success")
         return redirect(url_for("admin_suppliers.suppliers_list"))
     users = User.objects().order_by("email")
-    contacts_text = ""
-    if s.contacts:
-        lines = []
-        for c in s.contacts:
-            line = "|".join([
-                c.name or "",
-                c.title or "",
-                c.email or "",
-                c.phone or "",
-                "1" if c.is_primary else "0",
-            ])
-            lines.append(line)
-        contacts_text = "\n".join(lines)
     orders = Order.objects(supplier=s).order_by("-order_date")
-    return render_template("admin/suppliers_form.html", users=users, supplier=s, contacts_text=contacts_text, orders=orders)
+    return render_template("admin/suppliers_form.html", users=users, supplier=s, orders=orders)

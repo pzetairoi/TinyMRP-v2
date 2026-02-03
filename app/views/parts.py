@@ -11,8 +11,6 @@ from app.models.part import Part
 from app.models.job import Job
 from app.models.order import Order
 from app.models.bom import BOMLink
-from app.models.customer import Customer
-from app.models.supplier import Supplier
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
 from app.services.attrs import harvest_part_attrs, approved_value
@@ -28,7 +26,15 @@ from app.services.insights import (
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
 from app.services.filescan import discover_part_files, upsert_part_files
 from app.services.thumbs_gen import generate_thumbs_for_parts
-from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed, user_has_permission, permissions_required
+from app.services.acl import (
+    require_items_view,
+    allowed_parts_for,
+    part_is_allowed,
+    user_has_permission,
+    permissions_required,
+    apply_job_scope,
+    apply_order_scope,
+)
 from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.services.parts_delete import delete_part_and_refs
@@ -171,29 +177,21 @@ def _part_label(pn: str, rev: str | None) -> dict:
 
 def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
     paths = _ancestor_paths(pn, rev)
-    try:
-        roles = {getattr(r, "name", "") for r in (user.roles or [])}
-    except Exception:
-        roles = set()
-    is_customer_viewer = "customer_viewer" in roles
-    is_supplier_viewer = "supplier_viewer" in roles
-    is_admin = "admin" in roles
+    is_admin = "admin" in {getattr(r, "name", "") for r in (user.roles or [])}
     can_jobs = is_admin or user_has_permission(user, "jobs.view")
     can_orders = is_admin or user_has_permission(user, "orders.view")
 
     job_q = Job.objects()
-    if is_customer_viewer:
-        cust_ids = [c.id for c in Customer.objects(users=user).only("id")]
-        job_q = job_q.filter(customer__in=cust_ids) if cust_ids else Job.objects(id__in=[])
     if not can_jobs:
         job_q = Job.objects(id__in=[])
+    else:
+        job_q = apply_job_scope(job_q, user)
 
     order_q = Order.objects(status__ne="cancelled")
-    if is_supplier_viewer:
-        sup_ids = [s.id for s in Supplier.objects(users=user).only("id")]
-        order_q = order_q.filter(supplier__in=sup_ids) if sup_ids else Order.objects(id__in=[])
     if not can_orders:
         order_q = Order.objects(id__in=[])
+    else:
+        order_q = apply_order_scope(order_q, user)
 
     rows: list[dict] = []
     seen = set()
