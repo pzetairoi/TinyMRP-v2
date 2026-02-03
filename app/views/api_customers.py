@@ -60,6 +60,7 @@ def _customer_to_dict(c: Customer):
         "tags": c.tags or [],
         "primary_contact": c.contact or "",
         "email": c.email,
+        "website": c.website,
         "phone": c.phone,
         "billing_address": c.billing_address.to_mongo() if c.billing_address else None,
         "shipping_addresses": [a.to_mongo() for a in (c.shipping_addresses or [])],
@@ -135,6 +136,7 @@ def create_customer():
         tags=data.get("tags") or [],
         contact=(data.get("contact") or "").strip(),
         email=(data.get("email") or "").strip(),
+        website=(data.get("website") or "").strip(),
         phone=(data.get("phone") or "").strip(),
         billing_address=_parse_address(data.get("billing_address")),
         shipping_addresses=[_parse_address(a) for a in (data.get("shipping_addresses") or []) if a],
@@ -176,7 +178,7 @@ def update_customer(code):
     if not c:
         return json_error("not_found", "Customer not found.", 404)
     data = get_json()
-    for key in ("name", "description", "status", "customer_type", "segment", "contact", "email", "phone", "tax_id", "payment_terms", "currency", "sales_rep", "industry"):
+    for key in ("name", "description", "status", "customer_type", "segment", "contact", "email", "website", "phone", "tax_id", "payment_terms", "currency", "sales_rep", "industry"):
         if key in data:
             setattr(c, key, (data.get(key) or "").strip())
     if "is_company" in data:

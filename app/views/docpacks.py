@@ -3,10 +3,12 @@ from flask import Blueprint, request, send_file, jsonify
 from flask_login import login_required, current_user
 from io import BytesIO
 from typing import List
+import re
+import zipfile
 
 from app.services.docpacks import DocPackOptions, build_docpack
 from app.services.acl import allowed_parts_for, part_is_allowed
-from app.services.acl import require_items_view
+from app.services.acl import require_items_view, permissions_required
 from app.services.audit import log_action
 
 bp = Blueprint("docpacks_api", __name__, url_prefix="/api/docpacks")
@@ -63,10 +65,7 @@ def options():
         "processes": sorted(procs),
     })
 
-@bp.post("/build")
-@login_required
-@require_items_view
-def build():
+def _parse_docpack_request():
     # Accept JSON, form, or querystring inputs (robust for manual calls)
     payload = request.get_json(silent=True) or {}
     data = request.form or {}
@@ -89,17 +88,10 @@ def build():
     def _has_key(key: str) -> bool:
         return key in payload or key in data or key in args
 
-    # Robust PN/REV resolution (supports multiple legacy keys)
-    _pn = gv("pn") or gv("part_number") or gv("partnumber") or gv("root_pn") or gv("root")
-    _rev = gv("rev") if gv("rev") is not None else (gv("revision") if gv("revision") is not None else None)
-
     output_name = gv("output_name") if _has_key("output_name") else gv("filename") if _has_key("filename") else None
     if output_name is not None and not str(output_name).strip():
-        return jsonify({"error": "Requires a file name"}), 400
-
-    opts = DocPackOptions(
-        root_pn=str(_pn or "").strip(),
-        root_rev=_rev,
+        output_name = None
+    base_kwargs = dict(
         depth=(str(gv("depth") or "full")).lower(),
         include_consumed=bool(gv("include_consumed") in (True, "true", "1", 1, "on")),
         classified_filter=(str(gv("classified") or "show")).lower(),
@@ -136,7 +128,30 @@ def build():
 
     # Fabrication pack convenience
     fab = gv("fabrication_pack")
-    if fab in (True, "true", "1", 1, "on"):
+    fab_enabled = fab in (True, "true", "1", 1, "on")
+    return payload, data, args, gv, _list, _has_key, base_kwargs, output_name, fab_enabled
+
+
+@bp.post("/build")
+@login_required
+@require_items_view
+def build():
+    parsed = _parse_docpack_request()
+    if parsed and parsed[0] is None:
+        _, resp, status = parsed
+        return resp, status
+    payload, data, args, gv, _list, _has_key, base_kwargs, output_name, fab_enabled = parsed
+
+    # Robust PN/REV resolution (supports multiple legacy keys)
+    _pn = gv("pn") or gv("part_number") or gv("partnumber") or gv("root_pn") or gv("root")
+    _rev = gv("rev") if gv("rev") is not None else (gv("revision") if gv("revision") is not None else None)
+
+    opts = DocPackOptions(
+        root_pn=str(_pn or "").strip(),
+        root_rev=_rev,
+        **base_kwargs,
+    )
+    if fab_enabled:
         setattr(opts, "fabrication_pack", True)
 
     if not opts.root_pn:
@@ -172,3 +187,168 @@ def build():
         pass
     bio = BytesIO(data)
     return send_file(bio, mimetype=mime, as_attachment=True, download_name=name)
+
+
+def _safe_slug(text: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (text or "").strip())
+    cleaned = cleaned.strip("_")
+    return cleaned or "docpack"
+
+
+def _resolve_root_rev(pn: str, rev: str | None) -> str:
+    if rev is not None and str(rev).strip():
+        return str(rev).strip()
+    from app.models.part import Part
+    from app.services.attrs import harvest_part_attrs
+    p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+    if not p:
+        return ""
+    attrs = harvest_part_attrs(p)
+    return (attrs.get("revision") or p.revision or "").strip()
+
+
+def _job_roots(job) -> List[tuple[str, str]]:
+    roots: List[tuple[str, str]] = []
+    seen = set()
+    for line in (job.bom or []):
+        pn = (line.pn or "").strip()
+        if not pn:
+            continue
+        rev = _resolve_root_rev(pn, line.rev or "")
+        key = (pn.lower(), rev.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append((pn, rev))
+    if not roots and getattr(job, "part_number", None):
+        pn = (job.part_number or "").strip()
+        if pn:
+            rev = _resolve_root_rev(pn, getattr(job, "part_revision", "") or "")
+            roots.append((pn, rev))
+    return roots
+
+
+def _order_roots(order) -> List[tuple[str, str]]:
+    roots: List[tuple[str, str]] = []
+    seen = set()
+    for line in (order.lines or []):
+        pn = (line.pn or "").strip()
+        if not pn:
+            continue
+        rev = _resolve_root_rev(pn, line.rev or "")
+        key = (pn.lower(), rev.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append((pn, rev))
+    return roots
+
+
+def _multi_docpack_zip(roots: List[tuple[str, str]], base_kwargs: dict, fab_enabled: bool) -> tuple[bytes, List[str]]:
+    errors: List[str] = []
+    out = BytesIO()
+    added = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        for pn, rev in roots:
+            try:
+                opts = DocPackOptions(root_pn=pn, root_rev=rev, **{**base_kwargs, "output_name": None})
+                if fab_enabled:
+                    setattr(opts, "fabrication_pack", True)
+                name, data, mime = build_docpack(opts)
+            except RuntimeError as exc:
+                errors.append(f"{pn}:{rev or ''} -> {exc}")
+                continue
+            slug = _safe_slug(f"{pn}_{rev}" if rev else pn)
+            zf.writestr(f"{slug}/{name}", data)
+            added += 1
+        if errors:
+            zf.writestr("docpack_manifest.txt", "\n".join(errors))
+        if added == 0 and not errors:
+            zf.writestr("docpack_manifest.txt", "No docpacks were generated.\n")
+    return out.getvalue(), errors
+
+
+@bp.post("/build_job", endpoint="build_job")
+@login_required
+@require_items_view
+@permissions_required("jobs.view")
+def build_job_docpack():
+    parsed = _parse_docpack_request()
+    if parsed and parsed[0] is None:
+        _, resp, status = parsed
+        return resp, status
+    _, _, _, gv, _, _, base_kwargs, output_name, fab_enabled = parsed
+
+    job_id = (gv("job_id") or gv("job") or gv("job_number") or "").strip()
+    if not job_id:
+        return jsonify({"error": "Missing job_id"}), 400
+
+    from app.models.job import Job
+    from app.services.acl import apply_job_scope
+    job = apply_job_scope(Job.objects(id=job_id), current_user).first()
+    if not job:
+        job = apply_job_scope(Job.objects(job_number=job_id), current_user).first()
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    roots = _job_roots(job)
+    if not roots:
+        return jsonify({"error": "Job has no BOM lines to export"}), 400
+
+    allowed = allowed_parts_for(current_user)
+    if isinstance(allowed, set):
+        for pn, rev in roots:
+            if not part_is_allowed(allowed, pn, rev or ""):
+                return jsonify({"error": "forbidden"}), 403
+
+    zip_bytes, errors = _multi_docpack_zip(roots, base_kwargs, fab_enabled)
+    if not zip_bytes:
+        return jsonify({"error": "Failed to build docpack"}), 400
+
+    name = (output_name or f"{job.job_number}_docpack").strip()
+    if not name.lower().endswith(".zip"):
+        name = f"{name}.zip"
+    return send_file(BytesIO(zip_bytes), mimetype="application/zip", as_attachment=True, download_name=name)
+
+
+@bp.post("/build_order", endpoint="build_order")
+@login_required
+@require_items_view
+@permissions_required("orders.view")
+def build_order_docpack():
+    parsed = _parse_docpack_request()
+    if parsed and parsed[0] is None:
+        _, resp, status = parsed
+        return resp, status
+    _, _, _, gv, _, _, base_kwargs, output_name, fab_enabled = parsed
+
+    order_id = (gv("order_id") or gv("order") or gv("order_number") or "").strip()
+    if not order_id:
+        return jsonify({"error": "Missing order_id"}), 400
+
+    from app.models.order import Order
+    from app.services.acl import apply_order_scope
+    order = apply_order_scope(Order.objects(id=order_id), current_user).first()
+    if not order:
+        order = apply_order_scope(Order.objects(order_number=order_id), current_user).first()
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+
+    roots = _order_roots(order)
+    if not roots:
+        return jsonify({"error": "Order has no lines to export"}), 400
+
+    allowed = allowed_parts_for(current_user)
+    if isinstance(allowed, set):
+        for pn, rev in roots:
+            if not part_is_allowed(allowed, pn, rev or ""):
+                return jsonify({"error": "forbidden"}), 403
+
+    zip_bytes, errors = _multi_docpack_zip(roots, base_kwargs, fab_enabled)
+    if not zip_bytes:
+        return jsonify({"error": "Failed to build docpack"}), 400
+
+    name = (output_name or f"{order.order_number}_docpack").strip()
+    if not name.lower().endswith(".zip"):
+        name = f"{name}.zip"
+    return send_file(BytesIO(zip_bytes), mimetype="application/zip", as_attachment=True, download_name=name)

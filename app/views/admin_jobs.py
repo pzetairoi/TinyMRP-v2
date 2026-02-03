@@ -28,6 +28,49 @@ bp = Blueprint("admin_jobs", __name__, url_prefix="/admin/jobs")
 def _clean_rev(value: object) -> str:
     return clean_rev(value)
 
+def _external_user_ids() -> set[str]:
+    ids: set[str] = set()
+    for c in Customer.objects().only("users"):
+        for u in (c.users or []):
+            try:
+                ids.add(str(u.id))
+            except Exception:
+                continue
+    for s in Supplier.objects().only("users"):
+        for u in (s.users or []):
+            try:
+                ids.add(str(u.id))
+            except Exception:
+                continue
+    return ids
+
+def _eligible_job_users():
+    external_ids = _external_user_ids()
+    out = []
+    for u in User.objects().order_by("email"):
+        role_names = {getattr(r, "name", "") for r in (u.roles or [])}
+        if role_names & {"customer_viewer", "supplier_viewer"}:
+            continue
+        if str(u.id) in external_ids:
+            continue
+        out.append(u)
+    return out
+
+def _filter_job_participants(user_ids):
+    if not user_ids:
+        return []
+    external_ids = _external_user_ids()
+    users = list(User.objects(id__in=user_ids))
+    out = []
+    for u in users:
+        role_names = {getattr(r, "name", "") for r in (u.roles or [])}
+        if role_names & {"customer_viewer", "supplier_viewer"}:
+            continue
+        if str(u.id) in external_ids:
+            continue
+        out.append(u)
+    return out
+
 
 @bp.get("/")
 @permissions_required("jobs.view")
@@ -143,7 +186,7 @@ def jobs_view(job_id):
     supp_ids = supplier_scope_ids(current_user)
     if supp_ids and not cust_ids:
         abort(404)
-    users = User.objects().order_by("email")
+    users = _eligible_job_users()
     suppliers = Supplier.objects().order_by("name")
     customers = Customer.objects().order_by("name")
     bom_text = "\n".join([f"{l.pn},{l.rev},{l.qty:g}" for l in (j.bom or [])])
@@ -300,7 +343,7 @@ def jobs_new():
         # participants
         user_ids = request.form.getlist("participants")
         if user_ids:
-            j.participants = list(User.objects(id__in=user_ids))
+            j.participants = _filter_job_participants(user_ids)
         # vendors
         supp_ids = request.form.getlist("vendors")
         if supp_ids:
@@ -321,7 +364,7 @@ def jobs_new():
         j.save()
         flash("Job created.", "success")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=str(j.id)))
-    users = User.objects().order_by("email")
+    users = _eligible_job_users()
     suppliers = Supplier.objects().order_by("name")
     customers = Customer.objects().order_by("name")
     return render_template("admin/jobs_form.html", users=users, suppliers=suppliers, customers=customers, job=None)
@@ -345,7 +388,7 @@ def jobs_edit(job_id):
         cust_id = request.form.get("customer")
         j.customer = Customer.objects(id=cust_id).first() if cust_id else None
         user_ids = request.form.getlist("participants")
-        j.participants = list(User.objects(id__in=user_ids)) if user_ids else []
+        j.participants = _filter_job_participants(user_ids) if user_ids else []
         supp_ids = request.form.getlist("vendors")
         j.vendors = list(Supplier.objects(id__in=supp_ids)) if supp_ids else []
         bom_text = request.form.get("bom_text") or ""
@@ -354,7 +397,7 @@ def jobs_edit(job_id):
         j.save()
         flash("Job updated.", "success")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=str(j.id)))
-    users = User.objects().order_by("email")
+    users = _eligible_job_users()
     suppliers = Supplier.objects().order_by("name")
     customers = Customer.objects().order_by("name")
     # Clean up broken references to avoid deref errors

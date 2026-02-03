@@ -87,35 +87,6 @@ def customers_view(cust_id):
     except (DoesNotExist, ValidationError):
         abort(404)
     users = User.objects().order_by("email")
-    shipping_text = ""
-    if c.shipping_addresses:
-        lines = []
-        for a in c.shipping_addresses:
-            line = "|".join([
-                a.label or "",
-                a.line1 or "",
-                a.line2 or "",
-                a.city or "",
-                a.state or "",
-                a.postal or "",
-                a.country or "",
-                "1" if a.is_default else "0",
-            ])
-            lines.append(line)
-        shipping_text = "\n".join(lines)
-    contacts_text = ""
-    if c.contacts:
-        lines = []
-        for ct in c.contacts:
-            line = "|".join([
-                ct.name or "",
-                ct.title or "",
-                ct.email or "",
-                ct.phone or "",
-                "1" if ct.is_primary else "0",
-            ])
-            lines.append(line)
-        contacts_text = "\n".join(lines)
     jobs = list(Job.objects(customer=c).order_by("job_number"))
     job_ids = [j.id for j in jobs]
     q_orders = Q(customer=c)
@@ -126,8 +97,6 @@ def customers_view(cust_id):
         "admin/customers_form.html",
         users=users,
         customer=c,
-        shipping_text=shipping_text,
-        contacts_text=contacts_text,
         jobs=jobs,
         orders=orders,
         readonly=True,
@@ -245,38 +214,56 @@ def customers_new():
         c = Customer(
             code=(request.form.get("code") or "").strip() or generate_customer_code(),
             name=name,
-            description=(request.form.get("description") or "").strip(),
-            status=(request.form.get("status") or "active").strip(),
-            customer_type=(request.form.get("customer_type") or "oem").strip(),
-            is_company=True if request.form.get("is_company") == "on" else False,
-            segment=(request.form.get("segment") or "").strip(),
             contact=(request.form.get("contact") or "").strip(),
             email=(request.form.get("email") or "").strip(),
-            phone=(request.form.get("phone") or "").strip(),
-            tax_id=(request.form.get("tax_id") or "").strip(),
-            payment_terms=(request.form.get("payment_terms") or "").strip(),
-            currency=(request.form.get("currency") or "USD").strip(),
-            credit_limit=_parse_float(request.form.get("credit_limit")),
-            discount_pct=_parse_float(request.form.get("discount_pct")),
-            sales_rep=(request.form.get("sales_rep") or "").strip(),
-            industry=(request.form.get("industry") or "").strip(),
+            website=(request.form.get("website") or "").strip(),
+            status="active",
         )
+        if "description" in request.form:
+            c.description = (request.form.get("description") or "").strip()
+        if "status" in request.form:
+            c.status = (request.form.get("status") or "active").strip()
+        if "customer_type" in request.form:
+            c.customer_type = (request.form.get("customer_type") or "oem").strip()
+        if "is_company" in request.form:
+            c.is_company = True if request.form.get("is_company") == "on" else False
+        if "segment" in request.form:
+            c.segment = (request.form.get("segment") or "").strip()
+        if "phone" in request.form:
+            c.phone = (request.form.get("phone") or "").strip()
+        if "tax_id" in request.form:
+            c.tax_id = (request.form.get("tax_id") or "").strip()
+        if "payment_terms" in request.form:
+            c.payment_terms = (request.form.get("payment_terms") or "").strip()
+        if "currency" in request.form:
+            c.currency = (request.form.get("currency") or "USD").strip()
+        if "credit_limit" in request.form:
+            c.credit_limit = _parse_float(request.form.get("credit_limit"))
+        if "discount_pct" in request.form:
+            c.discount_pct = _parse_float(request.form.get("discount_pct"))
+        if "sales_rep" in request.form:
+            c.sales_rep = (request.form.get("sales_rep") or "").strip()
+        if "industry" in request.form:
+            c.industry = (request.form.get("industry") or "").strip()
         c.billing_address = _parse_address_from_form("billing")
-        shipping = _parse_shipping_text(request.form.get("shipping_text") or "")
-        c.shipping_addresses = shipping
-        c.default_shipping_label = _default_shipping_label(shipping)
-        contacts = _parse_contacts_text(request.form.get("contacts_text") or "")
-        c.contacts = contacts
-        if contacts and not (c.contact or c.email or c.phone):
-            primary = _primary_from_contacts(contacts)
-            if primary:
-                c.contact = primary.name or c.contact
-                c.email = primary.email or c.email
-                c.phone = primary.phone or c.phone
+        if "shipping_text" in request.form:
+            shipping = _parse_shipping_text(request.form.get("shipping_text") or "")
+            c.shipping_addresses = shipping
+            c.default_shipping_label = _default_shipping_label(shipping)
+        if "contacts_text" in request.form:
+            contacts = _parse_contacts_text(request.form.get("contacts_text") or "")
+            c.contacts = contacts
+            if contacts and not (c.contact or c.email or c.phone):
+                primary = _primary_from_contacts(contacts)
+                if primary:
+                    c.contact = primary.name or c.contact
+                    c.email = primary.email or c.email
+                    c.phone = primary.phone or c.phone
         user_ids = request.form.getlist("users")
         if user_ids:
             c.users = list(User.objects(id__in=user_ids))
-        c.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
+        if "tags" in request.form:
+            c.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
         c.save()
         flash("Customer created.", "success")
         return redirect(url_for("admin_customers.customers_list"))
@@ -294,36 +281,59 @@ def customers_edit(cust_id):
     except (DoesNotExist, ValidationError):
         abort(404)
     if request.method == "POST":
-        c.name = (request.form.get("name") or c.name).strip()
-        c.code = (request.form.get("code") or c.code or "").strip()
-        c.description = (request.form.get("description") or "").strip()
-        c.status = (request.form.get("status") or c.status or "active").strip()
-        c.customer_type = (request.form.get("customer_type") or c.customer_type or "oem").strip()
-        c.is_company = True if request.form.get("is_company") == "on" else False
-        c.segment = (request.form.get("segment") or "").strip()
-        c.contact = (request.form.get("contact") or "").strip()
-        c.email = (request.form.get("email") or "").strip()
-        c.phone = (request.form.get("phone") or "").strip()
-        c.tax_id = (request.form.get("tax_id") or "").strip()
-        c.payment_terms = (request.form.get("payment_terms") or "").strip()
-        c.currency = (request.form.get("currency") or "USD").strip()
-        c.credit_limit = _parse_float(request.form.get("credit_limit"))
-        c.discount_pct = _parse_float(request.form.get("discount_pct"))
-        c.sales_rep = (request.form.get("sales_rep") or "").strip()
-        c.industry = (request.form.get("industry") or "").strip()
-        c.billing_address = _parse_address_from_form("billing")
-        shipping = _parse_shipping_text(request.form.get("shipping_text") or "")
-        c.shipping_addresses = shipping
-        c.default_shipping_label = _default_shipping_label(shipping)
-        contacts = _parse_contacts_text(request.form.get("contacts_text") or "")
-        c.contacts = contacts
-        if contacts and not (c.contact or c.email or c.phone):
-            primary = _primary_from_contacts(contacts)
-            if primary:
-                c.contact = primary.name or c.contact
-                c.email = primary.email or c.email
-                c.phone = primary.phone or c.phone
-        c.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
+        if "name" in request.form:
+            c.name = (request.form.get("name") or c.name).strip()
+        if "code" in request.form:
+            c.code = (request.form.get("code") or c.code or "").strip()
+        if "description" in request.form:
+            c.description = (request.form.get("description") or "").strip()
+        if "status" in request.form:
+            c.status = (request.form.get("status") or c.status or "active").strip()
+        if "customer_type" in request.form:
+            c.customer_type = (request.form.get("customer_type") or c.customer_type or "oem").strip()
+        if "is_company" in request.form:
+            c.is_company = True if request.form.get("is_company") == "on" else False
+        if "segment" in request.form:
+            c.segment = (request.form.get("segment") or "").strip()
+        if "contact" in request.form:
+            c.contact = (request.form.get("contact") or "").strip()
+        if "email" in request.form:
+            c.email = (request.form.get("email") or "").strip()
+        if "website" in request.form:
+            c.website = (request.form.get("website") or "").strip()
+        if "phone" in request.form:
+            c.phone = (request.form.get("phone") or "").strip()
+        if "tax_id" in request.form:
+            c.tax_id = (request.form.get("tax_id") or "").strip()
+        if "payment_terms" in request.form:
+            c.payment_terms = (request.form.get("payment_terms") or "").strip()
+        if "currency" in request.form:
+            c.currency = (request.form.get("currency") or "USD").strip()
+        if "credit_limit" in request.form:
+            c.credit_limit = _parse_float(request.form.get("credit_limit"))
+        if "discount_pct" in request.form:
+            c.discount_pct = _parse_float(request.form.get("discount_pct"))
+        if "sales_rep" in request.form:
+            c.sales_rep = (request.form.get("sales_rep") or "").strip()
+        if "industry" in request.form:
+            c.industry = (request.form.get("industry") or "").strip()
+        if any(k in request.form for k in ("billing_label","billing_line1","billing_line2","billing_city","billing_state","billing_postal","billing_country")):
+            c.billing_address = _parse_address_from_form("billing")
+        if "shipping_text" in request.form:
+            shipping = _parse_shipping_text(request.form.get("shipping_text") or "")
+            c.shipping_addresses = shipping
+            c.default_shipping_label = _default_shipping_label(shipping)
+        if "contacts_text" in request.form:
+            contacts = _parse_contacts_text(request.form.get("contacts_text") or "")
+            c.contacts = contacts
+            if contacts and not (c.contact or c.email or c.phone):
+                primary = _primary_from_contacts(contacts)
+                if primary:
+                    c.contact = primary.name or c.contact
+                    c.email = primary.email or c.email
+                    c.phone = primary.phone or c.phone
+        if "tags" in request.form:
+            c.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
         user_ids = request.form.getlist("users")
         c.users = list(User.objects(id__in=user_ids)) if user_ids else []
         c.save()

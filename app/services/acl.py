@@ -48,6 +48,13 @@ def supplier_scope_ids(user) -> list:
     except Exception:
         return []
 
+def participant_job_ids(user) -> list:
+    from app.models.job import Job
+    try:
+        return [j.id for j in Job.objects(participants=user, is_deleted=False).only("id")]
+    except Exception:
+        return []
+
 
 def is_external_scoped_user(user) -> bool:
     if not getattr(user, "is_authenticated", False):
@@ -57,11 +64,12 @@ def is_external_scoped_user(user) -> bool:
     roles = _role_names(user)
     cust_ids = customer_scope_ids(user)
     supp_ids = supplier_scope_ids(user)
+    job_ids = participant_job_ids(user)
     if "customer_viewer" in roles or "supplier_viewer" in roles:
         return True
-    if "viewer" in roles and (cust_ids or supp_ids):
+    if "viewer" in roles and (cust_ids or supp_ids or job_ids):
         return True
-    if cust_ids or supp_ids:
+    if cust_ids or supp_ids or job_ids:
         return True
     return False
 
@@ -80,9 +88,10 @@ def apply_job_scope(qs, user):
         return qs
     cust_ids = customer_scope_ids(user)
     supp_ids = supplier_scope_ids(user)
-    if not cust_ids and not supp_ids:
+    job_ids = participant_job_ids(user)
+    if not cust_ids and not supp_ids and not job_ids:
         return qs.filter(id__in=[])
-    if supp_ids and not cust_ids:
+    if supp_ids and not cust_ids and not job_ids:
         return qs.filter(id__in=[])
 
     from mongoengine.queryset.visitor import Q
@@ -91,17 +100,19 @@ def apply_job_scope(qs, user):
     q = Q()
     if cust_ids:
         q = q | Q(customer__in=cust_ids)
+    if job_ids:
+        q = q | Q(id__in=job_ids)
     if supp_ids:
         q = q | Q(vendors__in=supp_ids)
-        job_ids = []
+        supplier_job_ids = []
         for o in Order.objects(supplier__in=supp_ids).only("job"):
             try:
                 if o.job:
-                    job_ids.append(o.job.id)
+                    supplier_job_ids.append(o.job.id)
             except Exception:
                 continue
-        if job_ids:
-            q = q | Q(id__in=list(set(job_ids)))
+        if supplier_job_ids:
+            q = q | Q(id__in=list(set(supplier_job_ids)))
     return qs.filter(q)
 
 
@@ -112,7 +123,8 @@ def apply_order_scope(qs, user):
         return qs
     cust_ids = customer_scope_ids(user)
     supp_ids = supplier_scope_ids(user)
-    if not cust_ids and not supp_ids:
+    participant_ids = participant_job_ids(user)
+    if not cust_ids and not supp_ids and not participant_ids:
         return qs.filter(id__in=[])
 
     from mongoengine.queryset.visitor import Q
@@ -123,9 +135,11 @@ def apply_order_scope(qs, user):
         q = q | Q(supplier__in=supp_ids)
     if cust_ids:
         q = q | Q(customer__in=cust_ids)
-        job_ids = [j.id for j in Job.objects(customer__in=cust_ids).only("id")]
-        if job_ids:
-            q = q | Q(job__in=job_ids)
+        cust_job_ids = [j.id for j in Job.objects(customer__in=cust_ids, is_deleted=False).only("id")]
+        if cust_job_ids:
+            q = q | Q(job__in=cust_job_ids)
+    if participant_ids:
+        q = q | Q(job__in=participant_ids)
     return qs.filter(q)
 
 
@@ -182,6 +196,12 @@ def can_access_job(user, job) -> bool:
         return True
     cust_ids = customer_scope_ids(user)
     supp_ids = supplier_scope_ids(user)
+    job_ids = participant_job_ids(user)
+    try:
+        if job_ids and job and job.id in job_ids:
+            return True
+    except Exception:
+        pass
     if supp_ids and not cust_ids:
         return False
     try:
@@ -212,6 +232,7 @@ def can_access_order(user, order) -> bool:
         return True
     cust_ids = customer_scope_ids(user)
     supp_ids = supplier_scope_ids(user)
+    job_ids = participant_job_ids(user)
     try:
         if supp_ids and getattr(order, "supplier", None) and order.supplier.id in supp_ids:
             return True
@@ -224,6 +245,11 @@ def can_access_order(user, order) -> bool:
         pass
     try:
         if cust_ids and getattr(order, "job", None) and order.job and order.job.customer and order.job.customer.id in cust_ids:
+            return True
+    except Exception:
+        pass
+    try:
+        if job_ids and getattr(order, "job", None) and order.job and order.job.id in job_ids:
             return True
     except Exception:
         pass
@@ -316,10 +342,27 @@ def allowed_parts_for(user) -> Optional[Set[Tuple[str, str]]]:
         allowed: Set[Tuple[str, str]] = set()
         customer_ids = [c.id for c in Customer.objects(users=user).only("id")]
         supplier_ids = [s.id for s in Supplier.objects(users=user).only("id")]
+        participant_ids = participant_job_ids(user)
+
+        job_ids = set(participant_ids)
         if customer_ids:
-            for j in Job.objects(customer__in=customer_ids):
+            job_ids.update([j.id for j in Job.objects(customer__in=customer_ids, is_deleted=False).only("id")])
+
+        if job_ids:
+            for j in Job.objects(id__in=list(job_ids), is_deleted=False):
                 for line in (j.bom or []):
                     add_with_children(line.pn or "", line.rev or "")
+
+        if customer_ids:
+            for o in Order.objects(customer__in=customer_ids):
+                for line in (o.lines or []):
+                    add_with_children(line.pn or "", line.rev or "")
+
+        if job_ids:
+            for o in Order.objects(job__in=list(job_ids)):
+                for line in (o.lines or []):
+                    add_with_children(line.pn or "", line.rev or "")
+
         if supplier_ids:
             for o in Order.objects(supplier__in=supplier_ids):
                 for line in (o.lines or []):

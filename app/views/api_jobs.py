@@ -19,6 +19,37 @@ from app.views.api_helpers import json_error, ensure_permissions, parse_paginati
 
 bp = Blueprint("jobs_api", __name__, url_prefix="/api/jobs")
 
+def _external_user_ids() -> set[str]:
+    ids: set[str] = set()
+    for c in Customer.objects().only("users"):
+        for u in (c.users or []):
+            try:
+                ids.add(str(u.id))
+            except Exception:
+                continue
+    for s in Supplier.objects().only("users"):
+        for u in (s.users or []):
+            try:
+                ids.add(str(u.id))
+            except Exception:
+                continue
+    return ids
+
+def _filter_participant_users(user_ids):
+    if not user_ids:
+        return []
+    external_ids = _external_user_ids()
+    users = list(User.objects(id__in=user_ids))
+    out = []
+    for u in users:
+        role_names = {getattr(r, "name", "") for r in (u.roles or [])}
+        if role_names & {"customer_viewer", "supplier_viewer"}:
+            continue
+        if str(u.id) in external_ids:
+            continue
+        out.append(u)
+    return out
+
 
 def _parse_date(value: str | None):
     if not value:
@@ -231,7 +262,7 @@ def create_job():
 
     participant_ids = data.get("participant_ids") or []
     if participant_ids:
-        job.participants = list(User.objects(id__in=participant_ids))
+        job.participants = _filter_participant_users(participant_ids)
 
     job.created_at = datetime.utcnow()
     job.updated_at = datetime.utcnow()
@@ -306,7 +337,7 @@ def update_job(job_number):
     if "vendor_ids" in data:
         job.vendors = list(Supplier.objects(id__in=(data.get("vendor_ids") or [])))
     if "participant_ids" in data:
-        job.participants = list(User.objects(id__in=(data.get("participant_ids") or [])))
+        job.participants = _filter_participant_users(data.get("participant_ids") or [])
 
     job.updated_at = datetime.utcnow()
     job.save()
