@@ -30,6 +30,102 @@ namespace TinyMRP.SolidWorksAddin.Services
             public bool IsRoot;
         }
 
+        private sealed class FlatBomEntry
+        {
+            public string ModelPath;
+            public string ModelTitle;
+            public string ConfigurationName;
+            public string PartNumber;
+            public string Revision;
+            public string Process;
+            public string Process2;
+            public string Process3;
+        }
+
+        private sealed class DeliverablePlan
+        {
+            public string ModelPath;
+            public string ModelTitle;
+            public string ConfigurationName;
+            public string FileString;
+            public string PartNumber;
+            public bool ExportPngModel;
+            public bool ExportStep;
+            public bool ExportEdrawing;
+            public bool Export3mf;
+            public bool ExportPly;
+            public bool ExportStl;
+            public bool ExportPdf;
+            public bool ExportPngDrawing;
+            public bool ExportEdrawingDrawing;
+            public bool DrawingExists;
+
+            public bool HasModelExports()
+            {
+                return ExportPngModel || ExportStep || ExportEdrawing || Export3mf || ExportPly || ExportStl;
+            }
+
+            public bool HasDrawingExports()
+            {
+                return DrawingExists && (ExportPdf || ExportPngDrawing || ExportEdrawingDrawing);
+            }
+        }
+
+        private sealed class DeliverableGroup
+        {
+            public string ModelPath;
+            public string ModelTitle;
+            public bool IsRoot;
+            public List<DeliverablePlan> Plans = new List<DeliverablePlan>();
+        }
+
+        private sealed class BatchGroup
+        {
+            public BatchEntry OpenEntry;
+            public List<BatchEntry> Entries = new List<BatchEntry>();
+        }
+
+        private sealed class ExportRunLog
+        {
+            private readonly object _lock = new object();
+
+            public ExportRunLog(string path)
+            {
+                Path = path;
+            }
+
+            public string Path { get; private set; }
+            public bool HasEntries { get; private set; }
+
+            public void Write(string message)
+            {
+                if (string.IsNullOrWhiteSpace(message) || string.IsNullOrWhiteSpace(Path))
+                {
+                    return;
+                }
+
+                try
+                {
+                    string dir = System.IO.Path.GetDirectoryName(Path);
+                    if (!string.IsNullOrWhiteSpace(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+
+                    string line = DateTime.UtcNow.ToString("s") + " " + message + System.Environment.NewLine;
+                    lock (_lock)
+                    {
+                        File.AppendAllText(Path, line);
+                        HasEntries = true;
+                    }
+                }
+                catch
+                {
+                    // ignore logging errors
+                }
+            }
+        }
+
         private struct DrawingReference
         {
             public ModelDoc2 Model;
@@ -56,12 +152,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
+            ExportRunLog runLog = CreateExportRunLog();
+            Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
+
             try
             {
                 ResetCancel();
                 HashSet<string> uploadPackBases;
                 List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
-                string flatFile = TraverseModel(true, string.Empty, effective, log, null, progress, out uploadPackBases, out uploadPackExtras);
+                string flatFile = TraverseModel(true, string.Empty, effective, log, null, progress, errorLog,
+                    out uploadPackBases, out uploadPackExtras);
                 if (effective.CreateUploadPack)
                 {
                     try
@@ -71,10 +171,15 @@ namespace TinyMRP.SolidWorksAddin.Services
                     catch (Exception ex)
                     {
                         Log(log, "Upload pack failed: " + ex.Message);
+                        LogExportFailure(log, errorLog, "Upload pack failed: " + ex.Message);
                     }
                 }
-                System.Windows.Forms.MessageBox.Show("File creation finished.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+                string message = BuildRunLogMessage("File creation finished.", runLog);
+                System.Windows.Forms.MessageBox.Show(message, "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    runLog != null && runLog.HasEntries
+                        ? System.Windows.Forms.MessageBoxIcon.Warning
+                        : System.Windows.Forms.MessageBoxIcon.Information);
             }
             catch (OperationCanceledException)
             {
@@ -83,7 +188,9 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show("File creation failed: " + ex.Message, "TinyMRP",
+                LogExportFailure(log, errorLog, "File creation failed: " + ex.Message);
+                string message = BuildRunLogMessage("File creation failed: " + ex.Message, runLog);
+                System.Windows.Forms.MessageBox.Show(message, "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
             }
         }
@@ -290,7 +397,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 ResetCancel();
                 HashSet<string> uploadPackBases;
                 List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
-                string flatFile = TraverseModel(false, string.Empty, effective, log, null, null, out uploadPackBases, out uploadPackExtras);
+                string flatFile = TraverseModel(false, string.Empty, effective, log, null, null, null,
+                    out uploadPackBases, out uploadPackExtras);
                 CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log);
                 System.Windows.Forms.MessageBox.Show("Upload pack created.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
@@ -1205,12 +1313,13 @@ namespace TinyMRP.SolidWorksAddin.Services
         {
             HashSet<string> ignored;
             List<UploadPackBuilder.AssociatedFilesBundle> ignoredExtras;
-            return TraverseModel(createFiles, exportTag, options, log, flatBomProgress, deliverablesProgress, out ignored, out ignoredExtras);
+            return TraverseModel(createFiles, exportTag, options, log, flatBomProgress, deliverablesProgress, null,
+                out ignored, out ignoredExtras);
         }
 
         private string TraverseModel(bool createFiles, string exportTag, PublishOptions options, Action<string> log,
-            Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress, out HashSet<string> uploadPackBases,
-            out List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras)
+            Action<int, int> flatBomProgress, Action<int, int> deliverablesProgress, Action<string> errorLog,
+            out HashSet<string> uploadPackBases, out List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras)
         {
             uploadPackBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             uploadPackExtras = null;
@@ -1324,21 +1433,27 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 if (createFiles)
                 {
-                    UpdateProgress(deliverablesProgress, 0, entries.Count);
-                    int processed = 0;
-                    foreach (BatchEntry entry in entries)
+                    if (!AnyDeliverablesSelected(options))
                     {
-                        ThrowIfCancelled();
-                        bool openedHere;
-                        ModelDoc2 model = ResolveBatchModel(entry, rootModel, out openedHere);
-                        if (model != null)
+                        UpdateProgress(deliverablesProgress, 0, 0);
+                    }
+                    else
+                    {
+                        List<FlatBomEntry> flatEntries = ReadFlatBomEntries(outputFile, log, errorLog);
+                        List<DeliverablePlan> plans = BuildDeliverablePlans(flatEntries, deliverablesFolder, options, log, errorLog);
+
+                        if ((flatEntries == null || flatEntries.Count == 0) && entries.Count > 0)
                         {
-                            ProcessDeliverables(model, entry.ConfigurationName, deliverablesFolder, options, log);
-                            CloseBatchModel(model, entry, initialDocs, rootModel, rootTitle, openedHere);
-                            CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                            LogExportFailure(log, errorLog,
+                                "Deliverables planning skipped: flat BOM parse empty; using direct traversal.");
+                            ProcessDeliverablesLegacy(entries, deliverablesFolder, options, log, errorLog,
+                                initialDocs, rootModel, rootTitle, deliverablesProgress);
                         }
-                        processed++;
-                        UpdateProgress(deliverablesProgress, processed, entries.Count);
+                        else
+                        {
+                            ProcessDeliverablePlans(plans ?? new List<DeliverablePlan>(), deliverablesFolder, options, log,
+                                errorLog, initialDocs, rootModel, rootTitle, deliverablesProgress);
+                        }
                     }
                 }
 
@@ -1767,11 +1882,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             if (modelType == (int)swDocumentTypes_e.swDocASSEMBLY)
             {
-                AssemblyDoc assy = rootModel as AssemblyDoc;
-                if (assy != null)
-                {
-                    assy.ResolveAllLightWeightComponents(true);
-                }
                 if (!topLevelOnly && rootConfig != null)
                 {
                     Component2 root = rootConfig.GetRootComponent() as Component2;
@@ -1997,17 +2107,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(title))
-                {
-                    _swApp.CloseDoc(title);
-                }
-            }
-            catch
-            {
-                // ignore close errors
-            }
+            ForceCloseDocNoSave(model);
         }
 
         private int DocumentTypeFromPath(string path)
@@ -2210,82 +2310,695 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private void ProcessDeliverables(ModelDoc2 model, string confName, string deliverablesFolder, PublishOptions options, Action<string> log)
+        private bool AnyDeliverablesSelected(PublishOptions options)
         {
-            ThrowIfCancelled();
+            if (options == null)
+            {
+                return false;
+            }
+
+            return options.ExportPngModel ||
+                   options.ExportStep ||
+                   options.ExportEdrawing ||
+                   options.Export3mf ||
+                   options.ExportPly ||
+                   options.ExportStl ||
+                   options.ExportPngDrawing ||
+                   options.ExportPdf ||
+                   options.ExportEdrawingDrawing;
+        }
+
+        private List<FlatBomEntry> ReadFlatBomEntries(string flatBomPath, Action<string> log, Action<string> errorLog)
+        {
+            var entries = new List<FlatBomEntry>();
+            if (string.IsNullOrWhiteSpace(flatBomPath) || !File.Exists(flatBomPath))
+            {
+                LogExportFailure(log, errorLog, "Flat BOM not found: " + (flatBomPath ?? string.Empty));
+                return entries;
+            }
 
             try
             {
-                string fileString = GetFileString(model, confName);
-                string modelPath = model.GetPathName();
-
-                bool drawingExists = false;
-                string drawingPath = string.Empty;
-                if (!string.IsNullOrWhiteSpace(modelPath))
+                foreach (string line in File.ReadLines(flatBomPath))
                 {
-                    Configuration modelConf = model.GetConfigurationByName(confName) as Configuration;
-                    drawingPath = OnlyFolder(modelPath) +
-                                  BomPartNumber(modelConf, model) + ".SLDDRW";
-                    drawingExists = File.Exists(drawingPath);
-                }
-
-                bool createPng = options.ExportPngModel &&
-                                 ShouldExport(Path.Combine(deliverablesFolder, "png", fileString + ".png"),
-                                     options.OverwriteFiles);
-
-                bool createStep = (options.ExportStep ||
-                                   HasProcess(model, confName, "FOLDING") ||
-                                   HasProcess(model, confName, "MACHINE") ||
-                                   HasProcess(model, confName, "3D Laser")) &&
-                                  ShouldExport(Path.Combine(deliverablesFolder, "step", fileString + ".step"),
-                                      options.OverwriteFiles);
-
-                bool create3mf = options.Export3mf &&
-                                 ShouldExport(Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf"),
-                                     options.OverwriteFiles);
-
-                bool createPly = options.ExportPly &&
-                                 ShouldExport(Path.Combine(deliverablesFolder, "ply", fileString + ".ply"),
-                                     options.OverwriteFiles);
-
-                bool createStl = options.ExportStl &&
-                                 ShouldExport(Path.Combine(deliverablesFolder, "stl", fileString + ".stl"),
-                                     options.OverwriteFiles);
-
-                bool createEdr = options.ExportEdrawing &&
-                                 ShouldExport(Path.Combine(deliverablesFolder, "edr", fileString +
-                                     (model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY ? ".easm" : ".eprt")),
-                                     options.OverwriteFiles);
-
-                if (createPng || createStep || createEdr || create3mf || createPly || createStl)
-                {
-                    ModelPublish(model, confName, fileString, deliverablesFolder, createPng, createStep, createEdr,
-                        create3mf, createPly, createStl, log);
-                }
-
-                if (drawingExists)
-                {
-                    bool createPdf = options.ExportPdf &&
-                                     ShouldExport(Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf"),
-                                         options.OverwriteFiles);
-
-                    bool createPngD = options.ExportPngDrawing &&
-                                      ShouldExport(Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png"),
-                                          options.OverwriteFiles);
-
-                    bool createEdrD = options.ExportEdrawingDrawing &&
-                                      ShouldExport(Path.Combine(deliverablesFolder, "edr", fileString + ".edrw"),
-                                          options.OverwriteFiles);
-
-                    if (createPdf || createPngD || createEdrD)
+                    if (string.IsNullOrWhiteSpace(line))
                     {
-                        DwgPublish(model, fileString, deliverablesFolder, createPdf, createPngD, createEdrD);
+                        continue;
                     }
+
+                    if (line.IndexOf("'partnumber':'", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        continue;
+                    }
+
+                    var entry = new FlatBomEntry
+                    {
+                        PartNumber = ExtractBomValue(line, "partnumber"),
+                        Revision = ExtractBomValue(line, "revision"),
+                        ConfigurationName = ExtractBomValue(line, "sw_configuration"),
+                        Process = ExtractBomValue(line, "process"),
+                        Process2 = ExtractBomValue(line, "process2"),
+                        Process3 = ExtractBomValue(line, "process3")
+                    };
+
+                    string rawPath = ExtractBomValue(line, "path");
+                    entry.ModelPath = NormalizeBomPath(rawPath);
+
+                    string file = ExtractBomValue(line, "file");
+                    if (!string.IsNullOrWhiteSpace(entry.ModelPath))
+                    {
+                        entry.ModelTitle = Path.GetFileName(entry.ModelPath);
+                    }
+                    else
+                    {
+                        entry.ModelTitle = file ?? string.Empty;
+                    }
+
+                    entries.Add(entry);
                 }
             }
             catch (Exception ex)
             {
-                Log(log, "Deliverables error: " + ex.Message);
+                LogExportFailure(log, errorLog, "Failed to read flat BOM: " + ex.Message);
+            }
+
+            return entries;
+        }
+
+        private string ExtractBomValue(string line, string key)
+        {
+            if (string.IsNullOrWhiteSpace(line) || string.IsNullOrWhiteSpace(key))
+            {
+                return string.Empty;
+            }
+
+            string token = "'" + key + "':'";
+            int start = line.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+            {
+                return string.Empty;
+            }
+
+            start += token.Length;
+            int end = line.IndexOf("'", start);
+            if (end < 0)
+            {
+                return string.Empty;
+            }
+
+            return line.Substring(start, end - start);
+        }
+
+        private string NormalizeBomPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            return path.Replace("/", "\\");
+        }
+
+        private string BuildFileString(string partNumber, string revision)
+        {
+            if (string.IsNullOrWhiteSpace(partNumber))
+            {
+                return string.Empty;
+            }
+
+            string rev = revision ?? string.Empty;
+            string fileString = partNumber + "_REV_" + rev;
+            return fileString.ToUpperInvariant();
+        }
+
+        private string GetEdrawingExtension(string modelPath, string modelTitle)
+        {
+            string ext = Path.GetExtension(!string.IsNullOrWhiteSpace(modelPath) ? modelPath : (modelTitle ?? string.Empty))
+                .ToLowerInvariant();
+            return ext == ".sldasm" ? ".easm" : ".eprt";
+        }
+
+        private bool HasProcess(FlatBomEntry entry, string process)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(process))
+            {
+                return false;
+            }
+
+            return ContainsIgnoreCase(entry.Process, process) ||
+                   ContainsIgnoreCase(entry.Process2, process) ||
+                   ContainsIgnoreCase(entry.Process3, process);
+        }
+
+        private DeliverablePlan BuildDeliverablePlanFromBomEntry(FlatBomEntry entry, string deliverablesFolder, PublishOptions options)
+        {
+            if (entry == null || options == null)
+            {
+                return null;
+            }
+
+            string fileString = BuildFileString(entry.PartNumber, entry.Revision);
+            if (string.IsNullOrWhiteSpace(fileString))
+            {
+                return null;
+            }
+
+            bool drawingExists = false;
+            if (!string.IsNullOrWhiteSpace(entry.ModelPath) && !string.IsNullOrWhiteSpace(entry.PartNumber))
+            {
+                string drawingPath = OnlyFolder(entry.ModelPath) + entry.PartNumber + ".SLDDRW";
+                drawingExists = File.Exists(drawingPath);
+            }
+
+            bool createPng = options.ExportPngModel &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "png", fileString + ".png"),
+                                 options.OverwriteFiles);
+
+            bool createStep = (options.ExportStep ||
+                               HasProcess(entry, "FOLDING") ||
+                               HasProcess(entry, "MACHINE") ||
+                               HasProcess(entry, "3D Laser")) &&
+                              ShouldExport(Path.Combine(deliverablesFolder, "step", fileString + ".step"),
+                                  options.OverwriteFiles);
+
+            bool create3mf = options.Export3mf &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf"),
+                                 options.OverwriteFiles);
+
+            bool createPly = options.ExportPly &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "ply", fileString + ".ply"),
+                                 options.OverwriteFiles);
+
+            bool createStl = options.ExportStl &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "stl", fileString + ".stl"),
+                                 options.OverwriteFiles);
+
+            bool createEdr = options.ExportEdrawing &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "edr",
+                                 fileString + GetEdrawingExtension(entry.ModelPath, entry.ModelTitle)),
+                                 options.OverwriteFiles);
+
+            bool createPdf = drawingExists && options.ExportPdf &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf"),
+                                 options.OverwriteFiles);
+
+            bool createPngD = drawingExists && options.ExportPngDrawing &&
+                              ShouldExport(Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png"),
+                                  options.OverwriteFiles);
+
+            bool createEdrD = drawingExists && options.ExportEdrawingDrawing &&
+                              ShouldExport(Path.Combine(deliverablesFolder, "edr", fileString + ".edrw"),
+                                  options.OverwriteFiles);
+
+            if (!createPng && !createStep && !create3mf && !createPly && !createStl && !createEdr &&
+                !createPdf && !createPngD && !createEdrD)
+            {
+                return null;
+            }
+
+            return new DeliverablePlan
+            {
+                ModelPath = entry.ModelPath ?? string.Empty,
+                ModelTitle = entry.ModelTitle ?? string.Empty,
+                ConfigurationName = entry.ConfigurationName ?? string.Empty,
+                FileString = fileString,
+                PartNumber = entry.PartNumber ?? string.Empty,
+                DrawingExists = drawingExists,
+                ExportPngModel = createPng,
+                ExportStep = createStep,
+                Export3mf = create3mf,
+                ExportPly = createPly,
+                ExportStl = createStl,
+                ExportEdrawing = createEdr,
+                ExportPdf = createPdf,
+                ExportPngDrawing = createPngD,
+                ExportEdrawingDrawing = createEdrD
+            };
+        }
+
+        private DeliverablePlan BuildDeliverablePlanFromModel(ModelDoc2 model, string confName, string deliverablesFolder,
+            PublishOptions options)
+        {
+            if (model == null || options == null)
+            {
+                return null;
+            }
+
+            string fileString = GetFileString(model, confName);
+            if (string.IsNullOrWhiteSpace(fileString))
+            {
+                return null;
+            }
+
+            string modelPath = model.GetPathName() ?? string.Empty;
+            string modelTitle = model.GetTitle() ?? string.Empty;
+            bool drawingExists = false;
+            string partNumber = string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(modelPath))
+            {
+                Configuration modelConf = model.GetConfigurationByName(confName) as Configuration;
+                partNumber = BomPartNumber(modelConf, model);
+                if (!string.IsNullOrWhiteSpace(partNumber))
+                {
+                    string drawingPath = OnlyFolder(modelPath) + partNumber + ".SLDDRW";
+                    drawingExists = File.Exists(drawingPath);
+                }
+            }
+
+            bool createPng = options.ExportPngModel &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "png", fileString + ".png"),
+                                 options.OverwriteFiles);
+
+            bool createStep = (options.ExportStep ||
+                               HasProcess(model, confName, "FOLDING") ||
+                               HasProcess(model, confName, "MACHINE") ||
+                               HasProcess(model, confName, "3D Laser")) &&
+                              ShouldExport(Path.Combine(deliverablesFolder, "step", fileString + ".step"),
+                                  options.OverwriteFiles);
+
+            bool create3mf = options.Export3mf &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf"),
+                                 options.OverwriteFiles);
+
+            bool createPly = options.ExportPly &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "ply", fileString + ".ply"),
+                                 options.OverwriteFiles);
+
+            bool createStl = options.ExportStl &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "stl", fileString + ".stl"),
+                                 options.OverwriteFiles);
+
+            string edrExt = model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY ? ".easm" : ".eprt";
+            bool createEdr = options.ExportEdrawing &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "edr", fileString + edrExt),
+                                 options.OverwriteFiles);
+
+            bool createPdf = drawingExists && options.ExportPdf &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf"),
+                                 options.OverwriteFiles);
+
+            bool createPngD = drawingExists && options.ExportPngDrawing &&
+                              ShouldExport(Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png"),
+                                  options.OverwriteFiles);
+
+            bool createEdrD = drawingExists && options.ExportEdrawingDrawing &&
+                              ShouldExport(Path.Combine(deliverablesFolder, "edr", fileString + ".edrw"),
+                                  options.OverwriteFiles);
+
+            if (!createPng && !createStep && !create3mf && !createPly && !createStl && !createEdr &&
+                !createPdf && !createPngD && !createEdrD)
+            {
+                return null;
+            }
+
+            return new DeliverablePlan
+            {
+                ModelPath = modelPath,
+                ModelTitle = modelTitle,
+                ConfigurationName = confName ?? string.Empty,
+                FileString = fileString,
+                PartNumber = partNumber ?? string.Empty,
+                DrawingExists = drawingExists,
+                ExportPngModel = createPng,
+                ExportStep = createStep,
+                Export3mf = create3mf,
+                ExportPly = createPly,
+                ExportStl = createStl,
+                ExportEdrawing = createEdr,
+                ExportPdf = createPdf,
+                ExportPngDrawing = createPngD,
+                ExportEdrawingDrawing = createEdrD
+            };
+        }
+
+        private List<DeliverablePlan> BuildDeliverablePlans(List<FlatBomEntry> entries, string deliverablesFolder,
+            PublishOptions options, Action<string> log, Action<string> errorLog)
+        {
+            var plans = new List<DeliverablePlan>();
+            if (entries == null || entries.Count == 0 || options == null)
+            {
+                return plans;
+            }
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (FlatBomEntry entry in entries)
+            {
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(entry.PartNumber))
+                {
+                    LogExportFailure(log, errorLog, "Flat BOM entry skipped: missing part number.");
+                    continue;
+                }
+
+                DeliverablePlan plan = BuildDeliverablePlanFromBomEntry(entry, deliverablesFolder, options);
+                if (plan == null)
+                {
+                    continue;
+                }
+
+                if (!seen.Add(plan.FileString ?? string.Empty))
+                {
+                    continue;
+                }
+
+                plans.Add(plan);
+            }
+
+            return plans;
+        }
+
+        private List<DeliverableGroup> BuildDeliverableGroups(List<DeliverablePlan> plans, ModelDoc2 rootModel, string rootTitle)
+        {
+            var groups = new List<DeliverableGroup>();
+            if (plans == null || plans.Count == 0)
+            {
+                return groups;
+            }
+
+            string rootPath = rootModel != null ? rootModel.GetPathName() : string.Empty;
+            string rootDocTitle = rootModel != null ? rootModel.GetTitle() : rootTitle ?? string.Empty;
+
+            var lookup = new Dictionary<string, DeliverableGroup>(StringComparer.OrdinalIgnoreCase);
+            foreach (DeliverablePlan plan in plans)
+            {
+                if (plan == null)
+                {
+                    continue;
+                }
+
+                string key = !string.IsNullOrWhiteSpace(plan.ModelPath)
+                    ? plan.ModelPath
+                    : (plan.ModelTitle ?? string.Empty);
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    if (!string.IsNullOrWhiteSpace(rootPath))
+                    {
+                        key = rootPath;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(rootDocTitle))
+                    {
+                        key = rootDocTitle;
+                    }
+                }
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                DeliverableGroup group;
+                if (!lookup.TryGetValue(key, out group))
+                {
+                    group = new DeliverableGroup
+                    {
+                        ModelPath = !string.IsNullOrWhiteSpace(plan.ModelPath) ? plan.ModelPath : (rootPath ?? string.Empty),
+                        ModelTitle = !string.IsNullOrWhiteSpace(plan.ModelTitle) ? plan.ModelTitle : (rootDocTitle ?? string.Empty),
+                        IsRoot = false
+                    };
+                    lookup[key] = group;
+                    groups.Add(group);
+                }
+
+                group.Plans.Add(plan);
+
+                if (!group.IsRoot)
+                {
+                    bool matchPath = !string.IsNullOrWhiteSpace(rootPath) &&
+                                     !string.IsNullOrWhiteSpace(plan.ModelPath) &&
+                                     string.Equals(rootPath, plan.ModelPath, StringComparison.OrdinalIgnoreCase);
+                    bool matchTitle = !string.IsNullOrWhiteSpace(rootDocTitle) &&
+                                      !string.IsNullOrWhiteSpace(plan.ModelTitle) &&
+                                      string.Equals(rootDocTitle, plan.ModelTitle, StringComparison.OrdinalIgnoreCase);
+                    bool matchKey = (!string.IsNullOrWhiteSpace(rootPath) &&
+                                     string.Equals(rootPath, key, StringComparison.OrdinalIgnoreCase)) ||
+                                    (!string.IsNullOrWhiteSpace(rootDocTitle) &&
+                                     string.Equals(rootDocTitle, key, StringComparison.OrdinalIgnoreCase));
+                    group.IsRoot = matchPath || matchTitle || matchKey;
+                }
+            }
+
+            return groups;
+        }
+
+        private List<BatchGroup> BuildBatchGroups(List<BatchEntry> entries)
+        {
+            var groups = new List<BatchGroup>();
+            if (entries == null || entries.Count == 0)
+            {
+                return groups;
+            }
+
+            var lookup = new Dictionary<string, BatchGroup>(StringComparer.OrdinalIgnoreCase);
+            foreach (BatchEntry entry in entries)
+            {
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                string key = !string.IsNullOrWhiteSpace(entry.ModelPath)
+                    ? entry.ModelPath
+                    : (entry.ModelTitle ?? string.Empty);
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                BatchGroup group;
+                if (!lookup.TryGetValue(key, out group))
+                {
+                    group = new BatchGroup
+                    {
+                        OpenEntry = entry
+                    };
+                    lookup[key] = group;
+                    groups.Add(group);
+                }
+
+                if (entry.IsRoot)
+                {
+                    group.OpenEntry = entry;
+                }
+
+                group.Entries.Add(entry);
+            }
+
+            return groups;
+        }
+
+        private BatchEntry BuildOpenEntry(DeliverableGroup group)
+        {
+            if (group == null)
+            {
+                return null;
+            }
+
+            string configName = string.Empty;
+            if (group.Plans != null && group.Plans.Count > 0 && group.Plans[0] != null)
+            {
+                configName = group.Plans[0].ConfigurationName;
+            }
+
+            return new BatchEntry
+            {
+                ModelPath = group.ModelPath ?? string.Empty,
+                ModelTitle = group.ModelTitle ?? string.Empty,
+                ConfigurationName = configName ?? string.Empty,
+                IsRoot = group.IsRoot
+            };
+        }
+
+        private string DescribeModel(string modelPath, string modelTitle)
+        {
+            if (!string.IsNullOrWhiteSpace(modelPath))
+            {
+                return modelPath;
+            }
+
+            if (!string.IsNullOrWhiteSpace(modelTitle))
+            {
+                return modelTitle;
+            }
+
+            return "<unknown>";
+        }
+
+        private void ProcessDeliverablePlans(List<DeliverablePlan> plans, string deliverablesFolder, PublishOptions options,
+            Action<string> log, Action<string> errorLog, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
+            Action<int, int> progress)
+        {
+            int total = plans != null ? plans.Count : 0;
+            UpdateProgress(progress, 0, total);
+
+            if (plans == null || plans.Count == 0)
+            {
+                return;
+            }
+
+            List<DeliverableGroup> groups = BuildDeliverableGroups(plans, rootModel, rootTitle);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int processed = 0;
+
+            foreach (DeliverableGroup group in groups)
+            {
+                ThrowIfCancelled();
+                BatchEntry openEntry = BuildOpenEntry(group);
+                bool openedHere = false;
+                ModelDoc2 model = null;
+                try
+                {
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                    model = ResolveBatchModel(openEntry, rootModel, out openedHere);
+                    if (model == null)
+                    {
+                        LogExportFailure(log, errorLog,
+                            "Deliverables skipped: unable to open model " + DescribeModel(group.ModelPath, group.ModelTitle));
+                        processed += group.Plans.Count;
+                        UpdateProgress(progress, processed, total);
+                        continue;
+                    }
+
+                    foreach (DeliverablePlan plan in group.Plans)
+                    {
+                        ThrowIfCancelled();
+                        DeliverablePlan actualPlan = BuildDeliverablePlanFromModel(model, plan.ConfigurationName,
+                            deliverablesFolder, options);
+                        if (actualPlan != null)
+                        {
+                            if (!seen.Add(actualPlan.FileString ?? string.Empty))
+                            {
+                                actualPlan = null;
+                            }
+                        }
+
+                        if (actualPlan != null)
+                        {
+                            ExecuteDeliverablePlan(model, actualPlan, deliverablesFolder, log, errorLog);
+                        }
+                        processed++;
+                        UpdateProgress(progress, processed, total);
+                    }
+                }
+                finally
+                {
+                    if (model != null && openEntry != null)
+                    {
+                        CloseBatchModel(model, openEntry, initialDocs, rootModel, rootTitle, openedHere);
+                    }
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                }
+            }
+        }
+
+        private void ProcessDeliverablesLegacy(List<BatchEntry> entries, string deliverablesFolder, PublishOptions options,
+            Action<string> log, Action<string> errorLog, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
+            Action<int, int> progress)
+        {
+            int total = entries != null ? entries.Count : 0;
+            UpdateProgress(progress, 0, total);
+
+            if (entries == null || entries.Count == 0)
+            {
+                return;
+            }
+
+            var groups = BuildBatchGroups(entries);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int processed = 0;
+
+            foreach (BatchGroup group in groups)
+            {
+                ThrowIfCancelled();
+                BatchEntry openEntry = group.OpenEntry;
+                bool openedHere = false;
+                ModelDoc2 model = null;
+                try
+                {
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                    model = ResolveBatchModel(openEntry, rootModel, out openedHere);
+                    if (model == null)
+                    {
+                        LogExportFailure(log, errorLog,
+                            "Deliverables skipped: unable to open model " + DescribeModel(openEntry.ModelPath, openEntry.ModelTitle));
+                        processed += group.Entries.Count;
+                        UpdateProgress(progress, processed, total);
+                        continue;
+                    }
+
+                    foreach (BatchEntry entry in group.Entries)
+                    {
+                        ThrowIfCancelled();
+                        DeliverablePlan plan = BuildDeliverablePlanFromModel(model, entry.ConfigurationName, deliverablesFolder, options);
+                        if (plan != null)
+                        {
+                            if (!seen.Add(plan.FileString ?? string.Empty))
+                            {
+                                plan = null;
+                            }
+                        }
+
+                        if (plan != null)
+                        {
+                            ExecuteDeliverablePlan(model, plan, deliverablesFolder, log, errorLog);
+                        }
+
+                        processed++;
+                        UpdateProgress(progress, processed, total);
+                    }
+                }
+                finally
+                {
+                    if (model != null && openEntry != null)
+                    {
+                        CloseBatchModel(model, openEntry, initialDocs, rootModel, rootTitle, openedHere);
+                    }
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                }
+            }
+        }
+
+        private void ExecuteDeliverablePlan(ModelDoc2 model, DeliverablePlan plan, string deliverablesFolder,
+            Action<string> log, Action<string> errorLog)
+        {
+            if (model == null || plan == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(plan.ConfigurationName))
+            {
+                TryShowConfiguration(model, plan.ConfigurationName);
+            }
+
+            if (plan.HasModelExports())
+            {
+                try
+                {
+                    ModelPublish(model, plan.ConfigurationName, plan.FileString, deliverablesFolder,
+                        plan.ExportPngModel, plan.ExportStep, plan.ExportEdrawing, plan.Export3mf,
+                        plan.ExportPly, plan.ExportStl, log, errorLog);
+                }
+                catch (Exception ex)
+                {
+                    LogExportFailure(log, errorLog, "Model export failed for " + plan.FileString + ": " + ex.Message);
+                }
+            }
+
+            if (plan.HasDrawingExports())
+            {
+                try
+                {
+                    DwgPublish(model, plan.FileString, deliverablesFolder,
+                        plan.ExportPdf, plan.ExportPngDrawing, plan.ExportEdrawingDrawing, log, errorLog);
+                }
+                catch (Exception ex)
+                {
+                    LogExportFailure(log, errorLog, "Drawing export failed for " + plan.FileString + ": " + ex.Message);
+                }
             }
         }
 
@@ -2317,7 +3030,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         }
 
         private void ModelPublish(ModelDoc2 model, string confName, string fileString, string deliverablesFolder,
-            bool png, bool step, bool edr, bool threeMf, bool ply, bool stl, Action<string> log)
+            bool png, bool step, bool edr, bool threeMf, bool ply, bool stl, Action<string> log, Action<string> errorLog)
         {
             _swApp.ActivateDoc(model.GetTitle());
             model.ShowConfiguration(confName);
@@ -2337,8 +3050,12 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (threeMf)
             {
                 string path = Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf");
-                model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                if (!ok || !File.Exists(path))
+                {
+                    LogExportFailure(log, errorLog, "3MF export failed: " + path);
+                }
             }
 
             bool stlExported = false;
@@ -2348,6 +3065,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                 stlExported = model.Extension.SaveAs(stlPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
                 stlExported = stlExported && File.Exists(stlPath);
+                if (!stlExported)
+                {
+                    LogExportFailure(log, errorLog, "STL export failed: " + stlPath);
+                }
             }
 
             if (ply)
@@ -2378,12 +3099,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         if (!TryConvertStlToPly(sourceStl, plyPath))
                         {
-                            Log(log, "PLY export failed: STL conversion failed.");
+                            LogExportFailure(log, errorLog, "PLY export failed: STL conversion failed.");
                         }
                     }
                     else
                     {
-                        Log(log, "PLY export failed: STL source unavailable.");
+                        LogExportFailure(log, errorLog, "PLY export failed: STL source unavailable.");
                     }
 
                     if (!string.IsNullOrWhiteSpace(tempStl))
@@ -2398,13 +3119,22 @@ namespace TinyMRP.SolidWorksAddin.Services
                         }
                     }
                 }
+
+                if (!File.Exists(plyPath))
+                {
+                    LogExportFailure(log, errorLog, "PLY export failed: " + plyPath);
+                }
             }
 
             if (step)
             {
                 string path = Path.Combine(deliverablesFolder, "step", fileString + ".step");
-                model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                if (!ok || !File.Exists(path))
+                {
+                    LogExportFailure(log, errorLog, "STEP export failed: " + path);
+                }
             }
 
             if (edr)
@@ -2415,8 +3145,12 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 string ext = model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY ? ".easm" : ".eprt";
                 string path = Path.Combine(deliverablesFolder, "edr", fileString + ext);
-                model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                if (!ok || !File.Exists(path))
+                {
+                    LogExportFailure(log, errorLog, "eDrawing export failed: " + path);
+                }
             }
 
             if (png)
@@ -2442,8 +3176,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
 
                 string path = Path.Combine(deliverablesFolder, "png", fileString + ".png");
-                model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                if (!ok || !File.Exists(path))
+                {
+                    LogExportFailure(log, errorLog, "PNG export failed: " + path);
+                }
             }
         }
 
@@ -2585,7 +3323,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         }
 
         private void DwgPublish(ModelDoc2 model, string fileString, string deliverablesFolder,
-            bool pdf, bool png, bool edr)
+            bool pdf, bool png, bool edr, Action<string> log, Action<string> errorLog)
         {
             Configuration conf = model.GetActiveConfiguration() as Configuration;
             if (conf == null)
@@ -2677,8 +3415,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
                             sheetNames);
-                        drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                        bool ok = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                             (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
+                        if (!ok || !File.Exists(pdfPath))
+                        {
+                            LogExportFailure(log, errorLog, "PDF export failed: " + pdfPath);
+                        }
+                    }
+                    else
+                    {
+                        LogExportFailure(log, errorLog, "PDF export failed: export data unavailable.");
                     }
                 }
 
@@ -2687,8 +3433,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                     _swApp.SetUserPreferenceIntegerValue(
                         (int)swUserPreferenceIntegerValue_e.swEdrawingsSaveAsSelectionOption,
                         (int)swEdrawingSaveAsOption_e.swEdrawingSaveAll);
-                    drawDoc.Extension.SaveAs(edrPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                    bool ok = drawDoc.Extension.SaveAs(edrPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                         (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                    if (!ok || !File.Exists(edrPath))
+                    {
+                        LogExportFailure(log, errorLog, "eDrawing export failed: " + edrPath);
+                    }
                 }
 
                 if (png)
@@ -2708,16 +3458,24 @@ namespace TinyMRP.SolidWorksAddin.Services
                     _swApp.SetUserPreferenceDoubleValue(
                         (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
 
-                    drawDoc.Extension.SaveAs(pngPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                    bool ok = drawDoc.Extension.SaveAs(pngPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                         (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                    if (!ok || !File.Exists(pngPath))
+                    {
+                        LogExportFailure(log, errorLog, "Drawing PNG export failed: " + pngPath);
+                    }
                 }
 
                 if (dxfNeeded && dxfSheet != null)
                 {
                     drawing.ActivateSheet(dxfSheetName);
                     ReplaceSheetFormat(drawing, dxfSheet, _config.BlankTemplatePath);
-                    drawDoc.SaveAs4(dxfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                    bool ok = drawDoc.SaveAs4(dxfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                         (int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref errors, ref warnings);
+                    if (!ok || !File.Exists(dxfPath))
+                    {
+                        LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
+                    }
                 }
                 else
                 {
@@ -2742,7 +3500,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             finally
             {
-                _swApp.CloseDoc(drawDoc.GetTitle());
+                ForceCloseDocNoSave(drawDoc);
             }
         }
 
@@ -2786,7 +3544,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 bool result = viewModel.Extension.SaveAs(dxfFilePath,
                     (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                     (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                _swApp.CloseDoc(viewModel.GetTitle());
+                ForceCloseDocNoSave(viewModel);
 
                 if (!result)
                 {
@@ -3460,6 +4218,45 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private void LogExportFailure(Action<string> log, Action<string> errorLog, string message)
+        {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            Log(log, message);
+            if (errorLog != null)
+            {
+                errorLog(message);
+            }
+        }
+
+        private ExportRunLog CreateExportRunLog()
+        {
+            try
+            {
+                string dir = Path.Combine(Path.GetTempPath(), "TinyMRP", "export-logs");
+                string name = "deliverables_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".log";
+                string path = Path.Combine(dir, name);
+                return new ExportRunLog(path);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private string BuildRunLogMessage(string baseMessage, ExportRunLog runLog)
+        {
+            if (runLog != null && runLog.HasEntries)
+            {
+                return baseMessage + " See log: " + runLog.Path;
+            }
+
+            return baseMessage;
+        }
+
         private void LogHideDebug(string path, string message)
         {
             if (!EnableHideDebugLog || string.IsNullOrWhiteSpace(path))
@@ -3577,6 +4374,107 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private void ForceCloseDocNoSave(ModelDoc2 doc)
+        {
+            if (doc == null)
+            {
+                return;
+            }
+
+            string title = string.Empty;
+            try
+            {
+                title = doc.GetTitle();
+            }
+            catch
+            {
+                title = string.Empty;
+            }
+
+            bool prevCommand = false;
+            bool prevUser = true;
+            bool prevUserBackground = true;
+
+            try
+            {
+                prevCommand = _swApp.CommandInProgress;
+                prevUser = _swApp.UserControl;
+                prevUserBackground = _swApp.UserControlBackground;
+            }
+            catch
+            {
+                // ignore state read errors
+            }
+
+            try
+            {
+                try
+                {
+                    _swApp.CommandInProgress = true;
+                }
+                catch
+                {
+                    // ignore state set errors
+                }
+                try
+                {
+                    _swApp.UserControl = false;
+                }
+                catch
+                {
+                    // ignore state set errors
+                }
+                try
+                {
+                    _swApp.UserControlBackground = true;
+                }
+                catch
+                {
+                    // ignore state set errors
+                }
+
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    _swApp.CloseDoc(title);
+                }
+                else
+                {
+                    doc.Close();
+                }
+            }
+            catch
+            {
+                // ignore close errors
+            }
+            finally
+            {
+                try
+                {
+                    _swApp.CommandInProgress = prevCommand;
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+                try
+                {
+                    _swApp.UserControl = prevUser;
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+                try
+                {
+                    _swApp.UserControlBackground = prevUserBackground;
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+            }
+        }
+
         private void CloseNonRootDocs(HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle)
         {
             if (rootModel == null)
@@ -3621,17 +4519,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     continue;
                 }
 
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(title))
-                    {
-                        _swApp.CloseDoc(title);
-                    }
-                }
-                catch
-                {
-                    // ignore close errors
-                }
+                ForceCloseDocNoSave(doc);
             }
         }
 
@@ -3670,7 +4558,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             try
             {
-                _swApp.CloseDoc(title);
+                ForceCloseDocNoSave(model);
             }
             catch
             {
