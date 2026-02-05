@@ -2008,8 +2008,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                 int errors = 0;
                 int warnings = 0;
                 int docType = DocumentTypeFromPath(entry.ModelPath);
+                int openOptions = (int)swOpenDocOptions_e.swOpenDocOptions_Silent |
+                                  (int)swOpenDocOptions_e.swOpenDocOptions_ReadOnly;
                 ModelDoc2 opened = _swApp.OpenDoc6(entry.ModelPath, docType,
-                    (int)swOpenDocOptions_e.swOpenDocOptions_Silent, string.Empty, ref errors, ref warnings) as ModelDoc2;
+                    openOptions, string.Empty, ref errors, ref warnings) as ModelDoc2;
                 if (opened != null)
                 {
                     openedHere = true;
@@ -2889,7 +2891,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         CloseBatchModel(model, openEntry, initialDocs, rootModel, rootTitle, openedHere);
                     }
-                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle, errorLog);
                 }
             }
         }
@@ -2956,7 +2958,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         CloseBatchModel(model, openEntry, initialDocs, rootModel, rootTitle, openedHere);
                     }
-                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                    CloseNonRootDocs(initialDocs, rootModel, rootTitle, errorLog);
                 }
             }
         }
@@ -4374,21 +4376,24 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private void ForceCloseDocNoSave(ModelDoc2 doc)
+        private bool ForceCloseDocNoSave(ModelDoc2 doc)
         {
             if (doc == null)
             {
-                return;
+                return true;
             }
 
             string title = string.Empty;
+            string path = string.Empty;
             try
             {
                 title = doc.GetTitle();
+                path = doc.GetPathName();
             }
             catch
             {
                 title = string.Empty;
+                path = string.Empty;
             }
 
             bool prevCommand = false;
@@ -4441,6 +4446,55 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     doc.Close();
                 }
+
+                if (!IsDocumentOpen(path, title))
+                {
+                    return true;
+                }
+
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(title))
+                    {
+                        _swApp.ActivateDoc(title);
+                        _swApp.CloseDoc(string.Empty);
+                    }
+                }
+                catch
+                {
+                    // ignore close errors
+                }
+
+                if (!IsDocumentOpen(path, title))
+                {
+                    return true;
+                }
+
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(title))
+                    {
+                        _swApp.QuitDoc(title);
+                    }
+                }
+                catch
+                {
+                    // ignore close errors
+                }
+
+                if (!IsDocumentOpen(path, title))
+                {
+                    return true;
+                }
+
+                try
+                {
+                    doc.Close();
+                }
+                catch
+                {
+                    // ignore close errors
+                }
             }
             catch
             {
@@ -4473,9 +4527,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                     // ignore restore errors
                 }
             }
+
+            return !IsDocumentOpen(path, title);
         }
 
-        private void CloseNonRootDocs(HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle)
+        private void CloseNonRootDocs(HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
+            Action<string> errorLog = null)
         {
             if (rootModel == null)
             {
@@ -4486,40 +4543,42 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
-            object docsObj = _swApp.GetDocuments();
-            object[] docs = docsObj as object[];
-            if (docs == null || docs.Length == 0)
+            const int maxPasses = 3;
+            for (int pass = 0; pass < maxPasses; pass++)
             {
-                return;
+                List<ModelDoc2> toClose = GetNonRootOpenDocs(initialDocs, rootModel, rootTitle);
+                if (toClose.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (ModelDoc2 doc in toClose)
+                {
+                    ForceCloseDocNoSave(doc);
+                }
             }
 
-            foreach (object obj in docs)
+            if (errorLog != null)
             {
-                ModelDoc2 doc = obj as ModelDoc2;
-                if (doc == null)
+                List<ModelDoc2> remaining = GetNonRootOpenDocs(initialDocs, rootModel, rootTitle);
+                if (remaining.Count > 0)
                 {
-                    continue;
+                    int sampleCount = Math.Min(remaining.Count, 5);
+                    var names = new List<string>();
+                    for (int i = 0; i < sampleCount; i++)
+                    {
+                        try
+                        {
+                            names.Add(remaining[i].GetTitle());
+                        }
+                        catch
+                        {
+                            names.Add("<unknown>");
+                        }
+                    }
+                    errorLog("Documents remained open after forced close (" + remaining.Count + "): " +
+                             string.Join(", ", names));
                 }
-
-                if (ReferenceEquals(doc, rootModel))
-                {
-                    continue;
-                }
-
-                string title = doc.GetTitle();
-                if (!string.IsNullOrWhiteSpace(rootTitle) &&
-                    string.Equals(title, rootTitle, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                string id = GetDocumentId(doc);
-                if (!string.IsNullOrWhiteSpace(id) && initialDocs.Contains(id))
-                {
-                    continue;
-                }
-
-                ForceCloseDocNoSave(doc);
             }
         }
 
@@ -4564,6 +4623,62 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 // ignore close errors
             }
+        }
+
+        private bool IsDocumentOpen(string path, string title)
+        {
+            return FindOpenDocument(path, title) != null;
+        }
+
+        private List<ModelDoc2> GetNonRootOpenDocs(HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle)
+        {
+            var docsToClose = new List<ModelDoc2>();
+            object docsObj = _swApp.GetDocuments();
+            object[] docs = docsObj as object[];
+            if (docs == null || docs.Length == 0)
+            {
+                return docsToClose;
+            }
+
+            foreach (object obj in docs)
+            {
+                ModelDoc2 doc = obj as ModelDoc2;
+                if (doc == null)
+                {
+                    continue;
+                }
+
+                if (ReferenceEquals(doc, rootModel))
+                {
+                    continue;
+                }
+
+                string title = string.Empty;
+                try
+                {
+                    title = doc.GetTitle();
+                }
+                catch
+                {
+                    title = string.Empty;
+                }
+
+                if (!string.IsNullOrWhiteSpace(rootTitle) &&
+                    string.Equals(title, rootTitle, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string id = GetDocumentId(doc);
+                if (!string.IsNullOrWhiteSpace(id) && initialDocs.Contains(id))
+                {
+                    continue;
+                }
+
+                docsToClose.Add(doc);
+            }
+
+            return docsToClose;
         }
 
         private HashSet<string> GetOpenDocumentIds()
