@@ -16,6 +16,9 @@ namespace TinyMRP.SolidWorksAddin.Services
         // Flip these to true when diagnosing hide-features issues.
         private static readonly bool EnableHideDebugLog = false;
         private static readonly bool EnableHideStatusLog = false;
+        // Writes additional structured entries into the export run log (errorLog) to help diagnose batch issues.
+        // Keep these entries terse and prefixed so they can be filtered easily.
+        private static readonly bool EnableExportDebugLog = true;
         private sealed class ModelEntry
         {
             public ModelDoc2 Model;
@@ -126,6 +129,227 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private sealed class UserPreferenceToggleScope : IDisposable
+        {
+            private readonly ISldWorks _swApp;
+            private readonly int _toggle;
+            private readonly bool _original;
+            private readonly bool _restore;
+            private readonly bool _changed;
+
+            public UserPreferenceToggleScope(ISldWorks swApp, swUserPreferenceToggle_e toggle, bool value)
+            {
+                _swApp = swApp;
+                _toggle = (int)toggle;
+
+                try
+                {
+                    _original = _swApp.GetUserPreferenceToggle(_toggle);
+                    _restore = true;
+                }
+                catch
+                {
+                    _original = false;
+                    _restore = false;
+                }
+
+                if (_restore)
+                {
+                    try
+                    {
+                        _swApp.SetUserPreferenceToggle(_toggle, value);
+                        _changed = true;
+                    }
+                    catch
+                    {
+                        _changed = false;
+                        // ignore preference set errors
+                    }
+                }
+                else
+                {
+                    _changed = false;
+                }
+            }
+
+            public void Dispose()
+            {
+                if (!_restore || !_changed || _swApp == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    _swApp.SetUserPreferenceToggle(_toggle, _original);
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+            }
+        }
+
+        private sealed class ExternalReferenceBatchOpenScope : IDisposable
+        {
+            private readonly UserPreferenceToggleScope _openReadOnly;
+            private readonly UserPreferenceToggleScope _noPromptOrSave;
+
+            public ExternalReferenceBatchOpenScope(ISldWorks swApp)
+            {
+                _openReadOnly = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.swExtRefOpenReadOnly, true);
+                _noPromptOrSave = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.swExtRefNoPromptOrSave, true);
+            }
+
+            public void Dispose()
+            {
+                if (_noPromptOrSave != null)
+                {
+                    _noPromptOrSave.Dispose();
+                }
+                if (_openReadOnly != null)
+                {
+                    _openReadOnly.Dispose();
+                }
+            }
+        }
+
+        private sealed class ExportDialogSuppressionScope : IDisposable
+        {
+            private readonly ISldWorks _swApp;
+            private readonly bool _prevCommand;
+            private readonly bool _prevUserControl;
+            private readonly bool _prevUserControlBackground;
+            private readonly UserPreferenceToggleScope _stlInfoOnSave;
+            private readonly UserPreferenceToggleScope _threeMfInfoOnSave;
+            private readonly UserPreferenceToggleScope _pdfViewOnSave;
+            private readonly UserPreferenceToggleScope _edrawSnlNotify;
+            private readonly UserPreferenceToggleScope _warnSaveUpdateErrors;
+            private readonly UserPreferenceToggleScope _warnSavingReferencedDoc;
+            private readonly UserPreferenceToggleScope _drawingShowSheetFormatDialog;
+            private readonly UserPreferenceToggleScope _autoDismissOpenMessages;
+
+            public ExportDialogSuppressionScope(ISldWorks swApp)
+            {
+                _swApp = swApp;
+
+                try
+                {
+                    _prevCommand = _swApp.CommandInProgress;
+                    _prevUserControl = _swApp.UserControl;
+                    _prevUserControlBackground = _swApp.UserControlBackground;
+                }
+                catch
+                {
+                    _prevCommand = false;
+                    _prevUserControl = true;
+                    _prevUserControlBackground = true;
+                }
+
+                try
+                {
+                    _swApp.CommandInProgress = true;
+                }
+                catch
+                {
+                    // ignore
+                }
+                try
+                {
+                    _swApp.UserControl = false;
+                }
+                catch
+                {
+                    // ignore
+                }
+                try
+                {
+                    _swApp.UserControlBackground = true;
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                // Disable common "info on save" / viewer prompts that can break unattended batch export.
+                _stlInfoOnSave = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.swSTLShowInfoOnSave, false);
+                _threeMfInfoOnSave = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.sw3MFShowInfoOnSave, false);
+                _pdfViewOnSave = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.swPDFViewOnSave, false);
+                _edrawSnlNotify = new UserPreferenceToggleScope(swApp,
+                    swUserPreferenceToggle_e.swNotifySNLNotObtainedForEDrawingsSave, false);
+                _warnSaveUpdateErrors = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.swWarnSaveUpdateErrors, false);
+                _warnSavingReferencedDoc = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.swWarnSavingReferencedDoc, false);
+                _drawingShowSheetFormatDialog = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.swDrawingShowSheetFormatDialog, false);
+                _autoDismissOpenMessages = new UserPreferenceToggleScope(swApp, swUserPreferenceToggle_e.swWhileOpeningAssembliesAutoDismissMessages, true);
+            }
+
+            public void Dispose()
+            {
+                if (_autoDismissOpenMessages != null)
+                {
+                    _autoDismissOpenMessages.Dispose();
+                }
+                if (_drawingShowSheetFormatDialog != null)
+                {
+                    _drawingShowSheetFormatDialog.Dispose();
+                }
+                if (_warnSavingReferencedDoc != null)
+                {
+                    _warnSavingReferencedDoc.Dispose();
+                }
+                if (_warnSaveUpdateErrors != null)
+                {
+                    _warnSaveUpdateErrors.Dispose();
+                }
+                if (_edrawSnlNotify != null)
+                {
+                    _edrawSnlNotify.Dispose();
+                }
+                if (_pdfViewOnSave != null)
+                {
+                    _pdfViewOnSave.Dispose();
+                }
+                if (_threeMfInfoOnSave != null)
+                {
+                    _threeMfInfoOnSave.Dispose();
+                }
+                if (_stlInfoOnSave != null)
+                {
+                    _stlInfoOnSave.Dispose();
+                }
+
+                if (_swApp == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    _swApp.CommandInProgress = _prevCommand;
+                }
+                catch
+                {
+                    // ignore
+                }
+                try
+                {
+                    _swApp.UserControl = _prevUserControl;
+                }
+                catch
+                {
+                    // ignore
+                }
+                try
+                {
+                    _swApp.UserControlBackground = _prevUserControlBackground;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+        }
+
         private struct DrawingReference
         {
             public ModelDoc2 Model;
@@ -137,6 +361,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         private readonly ISldWorks _swApp;
         private readonly TinyMrpConfig _config;
         private volatile bool _cancelRequested;
+        private readonly HashSet<string> _closeWarningOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _debugOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public TinyMrpPublisher(ISldWorks swApp, TinyMrpConfig config)
         {
@@ -158,6 +384,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             try
             {
                 ResetCancel();
+                _closeWarningOnce.Clear();
+                _debugOnce.Clear();
                 HashSet<string> uploadPackBases;
                 List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
                 string flatFile = TraverseModel(true, string.Empty, effective, log, null, progress, errorLog,
@@ -166,10 +394,18 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     try
                     {
-                        CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log);
+                        CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log, errorLog);
                     }
                     catch (Exception ex)
                     {
+                        if (ex is OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        if (IsBaselineAbortException(ex))
+                        {
+                            throw;
+                        }
                         Log(log, "Upload pack failed: " + ex.Message);
                         LogExportFailure(log, errorLog, "Upload pack failed: " + ex.Message);
                     }
@@ -212,7 +448,9 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             string startTitle = swModel.GetTitle();
-            HashSet<string> initialDocs = GetOpenDocumentIds();
+            // Baseline of documents the user actually has open (visible). Hidden docs are often opened by SW as
+            // references and should not be treated as "keep open forever" for batch export.
+            HashSet<string> initialDocs = GetOpenVisibleDocumentIds();
             Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
             int modelType = swModel.GetType();
 
@@ -280,6 +518,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
 
                 ThrowIfCancelled();
+
+                HashSet<string> baseline = SnapshotOpenDocIds();
 
                 string template = _swApp.GetUserPreferenceStringValue(
                     (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly);
@@ -364,8 +604,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     if (assyDoc != null)
                     {
-                        _swApp.CloseDoc(assyDoc.GetTitle());
+                        ForceCloseDocNoSave(assyDoc, null, "BOM temp assembly close");
                     }
+                    EnsureDocBaseline(baseline, log, null, "post BOM temp assembly cleanup");
                 }
 
                 System.Windows.Forms.MessageBox.Show("BOM file generation finished.", "TinyMRP",
@@ -375,6 +616,11 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                System.Windows.Forms.MessageBox.Show("BOM export failed: " + ex.Message, "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
             }
             finally
             {
@@ -399,7 +645,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
                 string flatFile = TraverseModel(false, string.Empty, effective, log, null, null, null,
                     out uploadPackBases, out uploadPackExtras);
-                CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log);
+                CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log, null);
                 System.Windows.Forms.MessageBox.Show("Upload pack created.", "TinyMRP",
                     System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
             }
@@ -773,7 +1019,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             model.Save2(true);
             if (closeAfter)
             {
-                _swApp.CloseDoc(model.GetTitle());
+                ForceCloseDocNoSave(model, null, "FreezePart close");
             }
         }
 
@@ -1330,7 +1576,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             string startTitle = swModel.GetTitle();
-            HashSet<string> initialDocs = GetOpenDocumentIds();
+            // Keep only user-visible docs as the baseline; hidden reference docs are aggressively closed by leak-guard.
+            HashSet<string> initialDocs = GetOpenVisibleDocumentIds();
 
             Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
             int modelType = swModel.GetType();
@@ -1387,6 +1634,14 @@ namespace TinyMRP.SolidWorksAddin.Services
             ModelDoc2 rootModel = swModel;
             string rootTitle = swModel.GetTitle();
 
+            DebugExport(errorLog,
+                "TraverseModel start createFiles=" + createFiles +
+                " startTitle=" + (startTitle ?? string.Empty) +
+                " rootTitle=" + (rootTitle ?? string.Empty) +
+                " rootPath=" + (rootModel != null ? (rootModel.GetPathName() ?? string.Empty) : string.Empty) +
+                " initialVisibleDocs=" + (initialDocs != null ? initialDocs.Count : 0) +
+                " openDocs=" + SnapshotOpenDocIds().Count);
+
             try
             {
                 if (view != null)
@@ -1406,6 +1661,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                     (int)swSystemColorsCurrentColorScheme_e.swSystemColorsCurrentColorSchemeBlueHighlight);
                 _swApp.SetUserPreferenceIntegerValue(
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, 16777215);
+
+                // Proactively unload references from any kept assemblies (esp. root) so leak-guard can close
+                // hidden reference docs quickly instead of fighting "resolved" state re-opening children.
+                var keepAtStart = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (initialDocs != null)
+                {
+                    keepAtStart.UnionWith(initialDocs);
+                }
+                AddDocToKeepSet(keepAtStart, rootModel, rootTitle);
+                TryLightweightAssembliesInKeepSet(keepAtStart, log, errorLog, "traverse start", allowCancel: true);
 
                 var entries = BuildBatchEntries(swModel, swConf, modelType, options.TopLevelOnly);
 
@@ -1428,7 +1693,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 UpdateProgress(flatBomProgress, 0, entries.Count);
                 WriteFlatBom(outputFile, entries, log, flatBomProgress, initialDocs, rootModel, rootTitle,
-                    uploadPackBases, uploadPackExtras);
+                    uploadPackBases, uploadPackExtras, errorLog);
                 ThrowIfCancelled();
 
                 if (createFiles)
@@ -1441,6 +1706,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         List<FlatBomEntry> flatEntries = ReadFlatBomEntries(outputFile, log, errorLog);
                         List<DeliverablePlan> plans = BuildDeliverablePlans(flatEntries, deliverablesFolder, options, log, errorLog);
+                        DebugExport(errorLog,
+                            "Deliverables planning: flatEntries=" + (flatEntries != null ? flatEntries.Count : 0) +
+                            " plans=" + (plans != null ? plans.Count : 0));
 
                         if ((flatEntries == null || flatEntries.Count == 0) && entries.Count > 0)
                         {
@@ -1448,6 +1716,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 "Deliverables planning skipped: flat BOM parse empty; using direct traversal.");
                             ProcessDeliverablesLegacy(entries, deliverablesFolder, options, log, errorLog,
                                 initialDocs, rootModel, rootTitle, deliverablesProgress);
+                        }
+                        else if (plans == null || plans.Count == 0)
+                        {
+                            Log(log, "No deliverables to export (all selected files already exist).");
+                            UpdateProgress(deliverablesProgress, 0, 0);
                         }
                         else
                         {
@@ -1478,9 +1751,33 @@ namespace TinyMRP.SolidWorksAddin.Services
                 _swApp.SetUserPreferenceIntegerValue(
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, prevViewport);
 
-                CloseNonRootDocs(initialDocs, rootModel, rootTitle);
+                Exception baselineError = null;
+                try
+                {
+                    var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (initialDocs != null)
+                    {
+                        keep.UnionWith(initialDocs);
+                    }
+                    AddDocToKeepSet(keep, rootModel, rootTitle);
+                    EnsureDocBaseline(keep, log, errorLog, "final cleanup");
+                }
+                catch (Exception ex)
+                {
+                    baselineError = ex;
+                }
+
                 CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
                 RestoreStartDocument(startTitle);
+
+                DebugExport(errorLog,
+                    "TraverseModel end startTitle=" + (startTitle ?? string.Empty) +
+                    " openDocs=" + SnapshotOpenDocIds().Count);
+
+                if (baselineError != null)
+                {
+                    throw baselineError;
+                }
             }
         }
 
@@ -1489,7 +1786,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             HashSet<string> uploadPackBases,
             List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras,
             PublishOptions options,
-            Action<string> log)
+            Action<string> log,
+            Action<string> errorLog)
         {
             if (string.IsNullOrWhiteSpace(flatBomPath))
             {
@@ -1512,7 +1810,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             string treeBomPath = BuildTreeBomPath(flatBomPath);
-            TryBuildTreeBom(swModel, treeBomPath, log);
+            TryBuildTreeBom(swModel, treeBomPath, log, errorLog);
 
             string deliverablesRoot = EnsureTrailingSlash(options.DeliverablesFolder);
             if (string.IsNullOrWhiteSpace(deliverablesRoot))
@@ -1662,7 +1960,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             return groups;
         }
 
-        private bool TryBuildTreeBom(ModelDoc2 rootModel, string treeBomPath, Action<string> log)
+        private bool TryBuildTreeBom(ModelDoc2 rootModel, string treeBomPath, Action<string> log, Action<string> errorLog)
         {
             if (rootModel == null || string.IsNullOrWhiteSpace(treeBomPath))
             {
@@ -1675,6 +1973,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 Log(log, "Upload pack: active document must be saved to build TREEBOM.");
                 return false;
             }
+
+            HashSet<string> baseline = SnapshotOpenDocIds();
 
             string template = _swApp.GetUserPreferenceStringValue(
                 (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly);
@@ -1704,7 +2004,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     return false;
                 }
 
-                SetUnitPreferences(rootModel);
+                SetUnitPreferences(assyModel);
 
                 string treeDir = Path.GetDirectoryName(treeBomPath);
                 if (!string.IsNullOrWhiteSpace(treeDir))
@@ -1736,7 +2036,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             finally
             {
-                _swApp.CloseDoc(assyDoc.GetTitle());
+                ForceCloseDocNoSave(assyDoc, errorLog, "TREEBOM temp assembly close");
+                EnsureDocBaseline(baseline, log, errorLog, "post TREEBOM temp assembly cleanup");
             }
         }
 
@@ -1752,7 +2053,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             startTitle = swModel.GetTitle();
-            initialDocs = GetOpenDocumentIds();
+            // Keep only user-visible docs as the baseline; hidden reference docs are aggressively closed by leak-guard.
+            initialDocs = GetOpenVisibleDocumentIds();
 
             Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
             int modelType = swModel.GetType();
@@ -1985,6 +2287,11 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private ModelDoc2 ResolveBatchModel(BatchEntry entry, ModelDoc2 rootModel, out bool openedHere)
         {
+            return ResolveBatchModel(entry, rootModel, null, out openedHere);
+        }
+
+        private ModelDoc2 ResolveBatchModel(BatchEntry entry, ModelDoc2 rootModel, Action<string> errorLog, out bool openedHere)
+        {
             openedHere = false;
             if (entry == null)
             {
@@ -1992,6 +2299,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             if (entry.IsRoot && rootModel != null)
             {
+                DebugExport(errorLog, "ResolveBatchModel: using root model: " + DescribeModel(rootModel.GetPathName(), rootModel.GetTitle()));
                 TryShowConfiguration(rootModel, entry.ConfigurationName);
                 return rootModel;
             }
@@ -1999,6 +2307,11 @@ namespace TinyMRP.SolidWorksAddin.Services
             ModelDoc2 openDoc = FindOpenDocument(entry.ModelPath, entry.ModelTitle);
             if (openDoc != null)
             {
+                string reuseKey = !string.IsNullOrWhiteSpace(entry.ModelPath)
+                    ? entry.ModelPath
+                    : (entry.ModelTitle ?? string.Empty);
+                DebugExportOnce(errorLog, "ResolveBatchModel: reuse|" + reuseKey,
+                    "ResolveBatchModel: reusing already-open model: " + DescribeModel(entry.ModelPath, entry.ModelTitle));
                 TryShowConfiguration(openDoc, entry.ConfigurationName);
                 return openDoc;
             }
@@ -2010,12 +2323,25 @@ namespace TinyMRP.SolidWorksAddin.Services
                 int docType = DocumentTypeFromPath(entry.ModelPath);
                 int openOptions = (int)swOpenDocOptions_e.swOpenDocOptions_Silent |
                                   (int)swOpenDocOptions_e.swOpenDocOptions_ReadOnly;
-                ModelDoc2 opened = _swApp.OpenDoc6(entry.ModelPath, docType,
-                    openOptions, string.Empty, ref errors, ref warnings) as ModelDoc2;
+                ModelDoc2 opened = null;
+                DebugExport(errorLog, "ResolveBatchModel: opening " + entry.ModelPath + " type=" + docType +
+                                     " options=" + openOptions);
+                using (new ExportDialogSuppressionScope(_swApp))
+                using (new ExternalReferenceBatchOpenScope(_swApp))
+                {
+                    opened = _swApp.OpenDoc6(entry.ModelPath, docType,
+                        openOptions, string.Empty, ref errors, ref warnings) as ModelDoc2;
+                }
                 if (opened != null)
                 {
                     openedHere = true;
+                    DebugExport(errorLog, "ResolveBatchModel: opened OK title=" + opened.GetTitle());
                     TryShowConfiguration(opened, entry.ConfigurationName);
+                }
+                else
+                {
+                    DebugExport(errorLog, "ResolveBatchModel: open FAILED " + entry.ModelPath +
+                                         " errors=" + errors + " warnings=" + warnings);
                 }
                 return opened;
             }
@@ -2025,21 +2351,8 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private ModelDoc2 FindOpenDocument(string path, string title)
         {
-            object docsObj = _swApp.GetDocuments();
-            object[] docs = docsObj as object[];
-            if (docs == null)
+            foreach (ModelDoc2 doc in EnumerateOpenDocuments())
             {
-                return null;
-            }
-
-            foreach (object obj in docs)
-            {
-                ModelDoc2 doc = obj as ModelDoc2;
-                if (doc == null)
-                {
-                    continue;
-                }
-
                 try
                 {
                     string docPath = doc.GetPathName();
@@ -2053,8 +2366,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                     if (string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(title))
                     {
                         string docTitle = doc.GetTitle();
-                        if (!string.IsNullOrWhiteSpace(docTitle) &&
-                            string.Equals(docTitle, title, StringComparison.OrdinalIgnoreCase))
+                        string docTitleNorm = NormalizeDocTitleForClose(docTitle);
+                        string titleNorm = NormalizeDocTitleForClose(title);
+                        if (!string.IsNullOrWhiteSpace(docTitleNorm) &&
+                            string.Equals(docTitleNorm, titleNorm, StringComparison.OrdinalIgnoreCase))
                         {
                             return doc;
                         }
@@ -2145,58 +2460,208 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private void WriteFlatBom(string outputFile, List<BatchEntry> entries, Action<string> log,
             Action<int, int> progress, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
-            HashSet<string> uploadPackBases, List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras)
+            HashSet<string> uploadPackBases, List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras,
+            Action<string> errorLog)
         {
+            // Capture a stable root identity up-front. Never call methods on rootModel after we start aggressively
+            // closing documents; if the root is closed/disconnected, those COM calls can throw RPC_E_DISCONNECTED.
+            string rootPathSnapshot = string.Empty;
+            string rootTitleSnapshot = rootTitle ?? string.Empty;
+            try
+            {
+                if (rootModel != null)
+                {
+                    try
+                    {
+                        rootPathSnapshot = rootModel.GetPathName() ?? string.Empty;
+                    }
+                    catch
+                    {
+                        rootPathSnapshot = string.Empty;
+                    }
+
+                    try
+                    {
+                        string t = rootModel.GetTitle();
+                        if (!string.IsNullOrWhiteSpace(t))
+                        {
+                            rootTitleSnapshot = t;
+                        }
+                    }
+                    catch
+                    {
+                        // ignore title snapshot errors
+                    }
+                }
+            }
+            catch
+            {
+                rootPathSnapshot = string.Empty;
+                rootTitleSnapshot = rootTitle ?? string.Empty;
+            }
+
             using (var writer = TextFileHelper.CreateUtf8NoBomWriter(outputFile))
             {
+                var keepBase = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (initialDocs != null)
+                {
+                    keepBase.UnionWith(initialDocs);
+                }
+                // Ensure the keep set contains stable root identifiers even if rootModel later disconnects.
+                if (!string.IsNullOrWhiteSpace(rootPathSnapshot))
+                {
+                    keepBase.Add(rootPathSnapshot);
+                }
+                if (!string.IsNullOrWhiteSpace(rootTitleSnapshot))
+                {
+                    keepBase.Add(rootTitleSnapshot);
+                    string norm = NormalizeDocTitleForClose(rootTitleSnapshot);
+                    if (!string.IsNullOrWhiteSpace(norm))
+                    {
+                        keepBase.Add(norm);
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(rootTitle))
+                {
+                    keepBase.Add(rootTitle);
+                    string norm = NormalizeDocTitleForClose(rootTitle);
+                    if (!string.IsNullOrWhiteSpace(norm))
+                    {
+                        keepBase.Add(norm);
+                    }
+                }
+
+                AddDocToKeepSet(keepBase, rootModel, rootTitle);
+                EnsureDocBaseline(keepBase, log, errorLog, "pre-flatbom", allowCancel: true);
+                // If the root/start document gets closed, any cached ModelDoc2 references become disconnected and
+                // SolidWorks automation becomes unstable. Fail fast with a clear message.
+                try
+                {
+                    if (!IsDocOpenByIdOrTitle(rootPathSnapshot, rootTitleSnapshot))
+                    {
+                        // Extra diagnostics on the failure path only (kept out of the normal log).
+                        try
+                        {
+                            string activeTitle = string.Empty;
+                            string activePath = string.Empty;
+                            try
+                            {
+                                ModelDoc2 active = _swApp.ActiveDoc as ModelDoc2;
+                                if (active != null)
+                                {
+                                    activeTitle = active.GetTitle();
+                                    activePath = active.GetPathName();
+                                }
+                            }
+                            catch
+                            {
+                                activeTitle = string.Empty;
+                                activePath = string.Empty;
+                            }
+
+                            DebugExport(errorLog,
+                                "Root check failed after baseline cleanup. " +
+                                "rootPathSnapshot=" + (rootPathSnapshot ?? string.Empty) +
+                                " rootTitleSnapshot=" + (rootTitleSnapshot ?? string.Empty) +
+                                " activeTitle=" + (activeTitle ?? string.Empty) +
+                                " activePath=" + (activePath ?? string.Empty) +
+                                " openDocs=" + SnapshotOpenDocIds().Count +
+                                " keepCount=" + (keepBase != null ? keepBase.Count : 0));
+                        }
+                        catch
+                        {
+                            // ignore debug errors
+                        }
+
+                        throw new InvalidOperationException("Root document was closed unexpectedly during baseline cleanup.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (IsBaselineAbortException(ex))
+                    {
+                        throw;
+                    }
+                    LogExportFailure(log, errorLog,
+                        "Root document disconnected/closed during baseline cleanup; aborting to prevent SolidWorks COM disconnect.");
+                    throw;
+                }
+                DebugExport(errorLog,
+                    "FlatBOM start entries=" + (entries != null ? entries.Count : 0) +
+                    " openDocs=" + SnapshotOpenDocIds().Count);
+
                 int processed = 0;
                 foreach (BatchEntry entry in entries)
                 {
                     ThrowIfCancelled();
-                    bool openedHere;
-                    ModelDoc2 model = ResolveBatchModel(entry, rootModel, out openedHere);
-                    if (model == null)
-                    {
-                        processed++;
-                        UpdateProgress(progress, processed, entries.Count);
-                        continue;
-                    }
+                    System.Windows.Forms.Application.DoEvents();
+
+                    // Enforce baseline before opening the next model so we never accumulate open docs.
+                    EnsureDocBaseline(keepBase, log, errorLog, "pre-open flatbom entry", allowCancel: true);
+                    ThrowIfCancelled();
+
+                    bool openedHere = false;
+                    ModelDoc2 model = null;
                     try
                     {
-                        writer.WriteLine(GetDocDict(model, entry.ConfigurationName));
-                        if (uploadPackBases != null)
+                        model = ResolveBatchModel(entry, rootModel, errorLog, out openedHere);
+                        if (model != null)
                         {
-                            string fileKey = GetFileString(model, entry.ConfigurationName);
-                            if (!string.IsNullOrWhiteSpace(fileKey))
+                            try
                             {
-                                uploadPackBases.Add(fileKey);
+                                writer.WriteLine(GetDocDict(model, entry.ConfigurationName));
+                                if (uploadPackBases != null)
+                                {
+                                    string fileKey = GetFileString(model, entry.ConfigurationName);
+                                    if (!string.IsNullOrWhiteSpace(fileKey))
+                                    {
+                                        uploadPackBases.Add(fileKey);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log(log, "Error building properties for model: " + ex.Message);
+                                try
+                                {
+                                    Configuration entryConf = model.GetConfigurationByName(entry.ConfigurationName) as Configuration;
+                                    string fallback = "{'partnumber':'" +
+                                                      SanitizeString(BomPartNumber(entryConf, model)) + "'}";
+                                    writer.WriteLine(fallback);
+                                }
+                                catch
+                                {
+                                    writer.WriteLine("{'partnumber':''}");
+                                }
+                            }
+
+                            if (uploadPackExtras != null)
+                            {
+                                AddAssociatedFiles(uploadPackExtras, model, entry.ConfigurationName, log);
                             }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log(log, "Error building properties for model: " + ex.Message);
-                        try
+                        else
                         {
-                            Configuration entryConf = model.GetConfigurationByName(entry.ConfigurationName) as Configuration;
-                            string fallback = "{'partnumber':'" +
-                                              SanitizeString(BomPartNumber(entryConf, model)) + "'}";
-                            writer.WriteLine(fallback);
-                        }
-                        catch
-                        {
-                            writer.WriteLine("{'partnumber':''}");
+                            LogExportFailure(log, errorLog,
+                                "Flat BOM entry skipped: unable to open model " +
+                                DescribeModel(entry != null ? entry.ModelPath : string.Empty,
+                                    entry != null ? entry.ModelTitle : string.Empty));
                         }
                     }
-                    if (uploadPackExtras != null)
+                    finally
                     {
-                        AddAssociatedFiles(uploadPackExtras, model, entry.ConfigurationName, log);
+                        if (openedHere && model != null)
+                        {
+                            ForceCloseDocNoSave(model, errorLog, "flatbom entry close");
+                        }
+                        EnsureDocBaseline(keepBase, log, errorLog, "post-close flatbom entry", allowCancel: true);
                     }
 
                     processed++;
                     UpdateProgress(progress, processed, entries.Count);
-                    CloseBatchModel(model, entry, initialDocs, rootModel, rootTitle, openedHere);
                 }
+
+                DebugExport(errorLog, "FlatBOM end openDocs=" + SnapshotOpenDocIds().Count);
             }
         }
 
@@ -2845,41 +3310,64 @@ namespace TinyMRP.SolidWorksAddin.Services
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int processed = 0;
 
+            var keepBase = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (initialDocs != null)
+            {
+                keepBase.UnionWith(initialDocs);
+            }
+            AddDocToKeepSet(keepBase, rootModel, rootTitle);
+
             foreach (DeliverableGroup group in groups)
             {
                 ThrowIfCancelled();
+                System.Windows.Forms.Application.DoEvents();
+
+                EnsureDocBaseline(keepBase, log, errorLog, "pre-open deliverable group", allowCancel: true);
+                ThrowIfCancelled();
+
                 BatchEntry openEntry = BuildOpenEntry(group);
+                string modelDesc = DescribeModel(group != null ? group.ModelPath : string.Empty,
+                    group != null ? group.ModelTitle : string.Empty);
+                Log(log, "Opening model for deliverables: " + modelDesc);
+                Log(log, "Open docs now: " + SnapshotOpenDocIds().Count);
+                DebugExport(errorLog,
+                    "DeliverablesGroup start model=" + modelDesc +
+                    " plans=" + (group != null && group.Plans != null ? group.Plans.Count : 0) +
+                    " openDocs=" + SnapshotOpenDocIds().Count);
+
                 bool openedHere = false;
                 ModelDoc2 model = null;
                 try
                 {
-                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
-                    model = ResolveBatchModel(openEntry, rootModel, out openedHere);
+                    model = ResolveBatchModel(openEntry, rootModel, errorLog, out openedHere);
                     if (model == null)
                     {
                         LogExportFailure(log, errorLog,
-                            "Deliverables skipped: unable to open model " + DescribeModel(group.ModelPath, group.ModelTitle));
-                        processed += group.Plans.Count;
+                            "Deliverables skipped: unable to open model " + modelDesc);
+                        processed += group != null && group.Plans != null ? group.Plans.Count : 0;
                         UpdateProgress(progress, processed, total);
                         continue;
                     }
 
+                    DebugExport(errorLog,
+                        "DeliverablesGroup openedHere=" + openedHere +
+                        " title=" + (model != null ? model.GetTitle() : string.Empty) +
+                        " path=" + (model != null ? model.GetPathName() : string.Empty));
+
                     foreach (DeliverablePlan plan in group.Plans)
                     {
                         ThrowIfCancelled();
-                        DeliverablePlan actualPlan = BuildDeliverablePlanFromModel(model, plan.ConfigurationName,
-                            deliverablesFolder, options);
-                        if (actualPlan != null)
-                        {
-                            if (!seen.Add(actualPlan.FileString ?? string.Empty))
-                            {
-                                actualPlan = null;
-                            }
-                        }
+                        System.Windows.Forms.Application.DoEvents();
 
-                        if (actualPlan != null)
+                        bool shouldExecute = plan != null && seen.Add(plan.FileString ?? string.Empty);
+                        if (shouldExecute)
                         {
-                            ExecuteDeliverablePlan(model, actualPlan, deliverablesFolder, log, errorLog);
+                            DebugExport(errorLog,
+                                "DeliverablesPlan file=" + (plan.FileString ?? string.Empty) +
+                                " conf=" + (plan.ConfigurationName ?? string.Empty) +
+                                " exports=" + DescribePlanExports(plan));
+                            ExecuteDeliverablePlan(model, plan, deliverablesFolder,
+                                options != null && options.OverwriteFiles, log, errorLog);
                         }
                         processed++;
                         UpdateProgress(progress, processed, total);
@@ -2887,11 +3375,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
                 finally
                 {
-                    if (model != null && openEntry != null)
+                    if (openedHere && model != null && openEntry != null && !openEntry.IsRoot &&
+                        (rootModel == null || !ReferenceEquals(model, rootModel)))
                     {
-                        CloseBatchModel(model, openEntry, initialDocs, rootModel, rootTitle, openedHere);
+                        ForceCloseDocNoSave(model, errorLog, "deliverable group close");
                     }
-                    CloseNonRootDocs(initialDocs, rootModel, rootTitle, errorLog);
+
+                    EnsureDocBaseline(keepBase, log, errorLog, "post-close deliverable group", allowCancel: true);
+                    Log(log, "Open docs now: " + SnapshotOpenDocIds().Count);
+                    DebugExport(errorLog, "DeliverablesGroup end model=" + modelDesc +
+                                         " openDocs=" + SnapshotOpenDocIds().Count);
                 }
             }
         }
@@ -2912,28 +3405,54 @@ namespace TinyMRP.SolidWorksAddin.Services
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int processed = 0;
 
+            var keepBase = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (initialDocs != null)
+            {
+                keepBase.UnionWith(initialDocs);
+            }
+            AddDocToKeepSet(keepBase, rootModel, rootTitle);
+
             foreach (BatchGroup group in groups)
             {
                 ThrowIfCancelled();
+                System.Windows.Forms.Application.DoEvents();
+
+                EnsureDocBaseline(keepBase, log, errorLog, "pre-open legacy deliverable group", allowCancel: true);
+                ThrowIfCancelled();
+
                 BatchEntry openEntry = group.OpenEntry;
+                string modelDesc = DescribeModel(openEntry != null ? openEntry.ModelPath : string.Empty,
+                    openEntry != null ? openEntry.ModelTitle : string.Empty);
+                Log(log, "Opening model for deliverables (legacy): " + modelDesc);
+                Log(log, "Open docs now: " + SnapshotOpenDocIds().Count);
+                DebugExport(errorLog,
+                    "LegacyGroup start model=" + modelDesc +
+                    " entries=" + (group != null && group.Entries != null ? group.Entries.Count : 0) +
+                    " openDocs=" + SnapshotOpenDocIds().Count);
+
                 bool openedHere = false;
                 ModelDoc2 model = null;
                 try
                 {
-                    CloseNonRootDocs(initialDocs, rootModel, rootTitle);
-                    model = ResolveBatchModel(openEntry, rootModel, out openedHere);
+                    model = ResolveBatchModel(openEntry, rootModel, errorLog, out openedHere);
                     if (model == null)
                     {
-                        LogExportFailure(log, errorLog,
-                            "Deliverables skipped: unable to open model " + DescribeModel(openEntry.ModelPath, openEntry.ModelTitle));
-                        processed += group.Entries.Count;
+                        LogExportFailure(log, errorLog, "Deliverables skipped: unable to open model " + modelDesc);
+                        processed += group != null && group.Entries != null ? group.Entries.Count : 0;
                         UpdateProgress(progress, processed, total);
                         continue;
                     }
 
+                    DebugExport(errorLog,
+                        "LegacyGroup openedHere=" + openedHere +
+                        " title=" + (model != null ? model.GetTitle() : string.Empty) +
+                        " path=" + (model != null ? model.GetPathName() : string.Empty));
+
                     foreach (BatchEntry entry in group.Entries)
                     {
                         ThrowIfCancelled();
+                        System.Windows.Forms.Application.DoEvents();
+
                         DeliverablePlan plan = BuildDeliverablePlanFromModel(model, entry.ConfigurationName, deliverablesFolder, options);
                         if (plan != null)
                         {
@@ -2945,7 +3464,12 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         if (plan != null)
                         {
-                            ExecuteDeliverablePlan(model, plan, deliverablesFolder, log, errorLog);
+                            DebugExport(errorLog,
+                                "LegacyPlan file=" + (plan.FileString ?? string.Empty) +
+                                " conf=" + (plan.ConfigurationName ?? string.Empty) +
+                                " exports=" + DescribePlanExports(plan));
+                            ExecuteDeliverablePlan(model, plan, deliverablesFolder,
+                                options != null && options.OverwriteFiles, log, errorLog);
                         }
 
                         processed++;
@@ -2954,16 +3478,21 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
                 finally
                 {
-                    if (model != null && openEntry != null)
+                    if (openedHere && model != null && openEntry != null && !openEntry.IsRoot &&
+                        (rootModel == null || !ReferenceEquals(model, rootModel)))
                     {
-                        CloseBatchModel(model, openEntry, initialDocs, rootModel, rootTitle, openedHere);
+                        ForceCloseDocNoSave(model, errorLog, "legacy deliverable group close");
                     }
-                    CloseNonRootDocs(initialDocs, rootModel, rootTitle, errorLog);
+
+                    EnsureDocBaseline(keepBase, log, errorLog, "post-close legacy deliverable group", allowCancel: true);
+                    Log(log, "Open docs now: " + SnapshotOpenDocIds().Count);
+                    DebugExport(errorLog, "LegacyGroup end model=" + modelDesc +
+                                         " openDocs=" + SnapshotOpenDocIds().Count);
                 }
             }
         }
 
-        private void ExecuteDeliverablePlan(ModelDoc2 model, DeliverablePlan plan, string deliverablesFolder,
+        private void ExecuteDeliverablePlan(ModelDoc2 model, DeliverablePlan plan, string deliverablesFolder, bool overwriteFiles,
             Action<string> log, Action<string> errorLog)
         {
             if (model == null || plan == null)
@@ -2986,6 +3515,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
                 catch (Exception ex)
                 {
+                    if (ex is OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    if (IsBaselineAbortException(ex))
+                    {
+                        throw;
+                    }
                     LogExportFailure(log, errorLog, "Model export failed for " + plan.FileString + ": " + ex.Message);
                 }
             }
@@ -2995,13 +3532,42 @@ namespace TinyMRP.SolidWorksAddin.Services
                 try
                 {
                     DwgPublish(model, plan.FileString, deliverablesFolder,
-                        plan.ExportPdf, plan.ExportPngDrawing, plan.ExportEdrawingDrawing, log, errorLog);
+                        overwriteFiles, plan.ExportPdf, plan.ExportPngDrawing, plan.ExportEdrawingDrawing, log, errorLog,
+                        plan.PartNumber);
                 }
                 catch (Exception ex)
                 {
+                    if (ex is OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    if (IsBaselineAbortException(ex))
+                    {
+                        throw;
+                    }
                     LogExportFailure(log, errorLog, "Drawing export failed for " + plan.FileString + ": " + ex.Message);
                 }
             }
+        }
+
+        private string DescribePlanExports(DeliverablePlan plan)
+        {
+            if (plan == null)
+            {
+                return string.Empty;
+            }
+
+            var parts = new List<string>();
+            if (plan.ExportPngModel) parts.Add("png");
+            if (plan.ExportStep) parts.Add("step");
+            if (plan.ExportEdrawing) parts.Add("edr");
+            if (plan.Export3mf) parts.Add("3mf");
+            if (plan.ExportPly) parts.Add("ply");
+            if (plan.ExportStl) parts.Add("stl");
+            if (plan.ExportPdf) parts.Add("pdf");
+            if (plan.ExportPngDrawing) parts.Add("pngDwg");
+            if (plan.ExportEdrawingDrawing) parts.Add("edrw");
+            return string.Join(",", parts.ToArray());
         }
 
         private void EnsureMediaFolders(string deliverablesFolder)
@@ -3034,155 +3600,206 @@ namespace TinyMRP.SolidWorksAddin.Services
         private void ModelPublish(ModelDoc2 model, string confName, string fileString, string deliverablesFolder,
             bool png, bool step, bool edr, bool threeMf, bool ply, bool stl, Action<string> log, Action<string> errorLog)
         {
-            _swApp.ActivateDoc(model.GetTitle());
-            model.ShowConfiguration(confName);
-
-            ModelView view = model.GetFirstModelView() as ModelView;
-            if (view != null)
+            using (new ExportDialogSuppressionScope(_swApp))
             {
-                view.EnableGraphicsUpdate = false;
-            }
-
-            model.SetUserPreferenceToggle((int)swUserPreferenceToggle_e.swViewDisplayHideAllTypes, true);
-            model.ForceRebuild3(true);
-
-            int errors = 0;
-            int warnings = 0;
-
-            if (threeMf)
-            {
-                string path = Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf");
-                bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                if (!ok || !File.Exists(path))
+                string modelTitle = string.Empty;
+                try
                 {
-                    LogExportFailure(log, errorLog, "3MF export failed: " + path);
+                    modelTitle = model.GetTitle();
                 }
-            }
-
-            bool stlExported = false;
-            string stlPath = Path.Combine(deliverablesFolder, "stl", fileString + ".stl");
-            if (stl)
-            {
-                stlExported = model.Extension.SaveAs(stlPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                stlExported = stlExported && File.Exists(stlPath);
-                if (!stlExported)
+                catch
                 {
-                    LogExportFailure(log, errorLog, "STL export failed: " + stlPath);
+                    modelTitle = string.Empty;
                 }
-            }
 
-            if (ply)
-            {
-                string plyPath = Path.Combine(deliverablesFolder, "ply", fileString + ".ply");
-                bool plyExported = model.Extension.SaveAs(plyPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                plyExported = plyExported && File.Exists(plyPath);
-
-                if (!plyExported)
+                string activateTitle = NormalizeDocTitleForClose(modelTitle);
+                if (!string.IsNullOrWhiteSpace(activateTitle))
                 {
-                    string sourceStl = stlExported ? stlPath : string.Empty;
-                    string tempStl = string.Empty;
+                    _swApp.ActivateDoc(activateTitle);
+                }
+                else if (!string.IsNullOrWhiteSpace(modelTitle))
+                {
+                    _swApp.ActivateDoc(modelTitle);
+                }
+                model.ShowConfiguration(confName);
+                ThrowIfCancelled();
 
-                    if (string.IsNullOrWhiteSpace(sourceStl))
+                ModelView view = model.GetFirstModelView() as ModelView;
+                bool prevGraphicsUpdate = true;
+                if (view != null)
+                {
+                    prevGraphicsUpdate = view.EnableGraphicsUpdate;
+                    view.EnableGraphicsUpdate = false;
+                }
+
+                // Avoid mutating document-level options or forcing rebuilds. These operations can dirty documents
+                // and trigger modal "Save?" prompts when closing during unattended batch export.
+                try
+                {
+                    ThrowIfCancelled();
+
+                    int errors = 0;
+                    int warnings = 0;
+
+                    if (threeMf)
                     {
-                        tempStl = Path.Combine(Path.GetTempPath(),
-                            fileString + "_" + Guid.NewGuid().ToString("N") + ".stl");
-                        bool tempOk = model.Extension.SaveAs(tempStl, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                        string path = Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf");
+                        bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                             (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        if (tempOk && File.Exists(tempStl))
+                        if (!ok || !File.Exists(path))
                         {
-                            sourceStl = tempStl;
+                            LogExportFailure(log, errorLog, "3MF export failed: " + path);
                         }
                     }
+                    ThrowIfCancelled();
 
-                    if (!string.IsNullOrWhiteSpace(sourceStl) && File.Exists(sourceStl))
+                    bool stlExported = false;
+                    string stlPath = Path.Combine(deliverablesFolder, "stl", fileString + ".stl");
+                    if (stl)
                     {
-                        if (!TryConvertStlToPly(sourceStl, plyPath))
+                        stlExported = model.Extension.SaveAs(stlPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        stlExported = stlExported && File.Exists(stlPath);
+                        if (!stlExported)
                         {
-                            LogExportFailure(log, errorLog, "PLY export failed: STL conversion failed.");
+                            LogExportFailure(log, errorLog, "STL export failed: " + stlPath);
                         }
                     }
-                    else
-                    {
-                        LogExportFailure(log, errorLog, "PLY export failed: STL source unavailable.");
-                    }
+                    ThrowIfCancelled();
 
-                    if (!string.IsNullOrWhiteSpace(tempStl))
+                    if (ply)
+                    {
+                        string plyPath = Path.Combine(deliverablesFolder, "ply", fileString + ".ply");
+                        bool plyExported = model.Extension.SaveAs(plyPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        plyExported = plyExported && File.Exists(plyPath);
+
+                        if (!plyExported)
+                        {
+                            ThrowIfCancelled();
+
+                            string sourceStl = stlExported ? stlPath : string.Empty;
+                            string tempStl = string.Empty;
+
+                            if (string.IsNullOrWhiteSpace(sourceStl))
+                            {
+                                tempStl = Path.Combine(Path.GetTempPath(),
+                                    fileString + "_" + Guid.NewGuid().ToString("N") + ".stl");
+                                bool tempOk = model.Extension.SaveAs(tempStl, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                                if (tempOk && File.Exists(tempStl))
+                                {
+                                    sourceStl = tempStl;
+                                }
+                            }
+
+                            ThrowIfCancelled();
+
+                            if (!string.IsNullOrWhiteSpace(sourceStl) && File.Exists(sourceStl))
+                            {
+                                if (!TryConvertStlToPly(sourceStl, plyPath))
+                                {
+                                    LogExportFailure(log, errorLog, "PLY export failed: STL conversion failed.");
+                                }
+                            }
+                            else
+                            {
+                                LogExportFailure(log, errorLog, "PLY export failed: STL source unavailable.");
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(tempStl))
+                            {
+                                try
+                                {
+                                    File.Delete(tempStl);
+                                }
+                                catch
+                                {
+                                    // ignore cleanup errors
+                                }
+                            }
+                        }
+
+                        if (!File.Exists(plyPath))
+                        {
+                            LogExportFailure(log, errorLog, "PLY export failed: " + plyPath);
+                        }
+                    }
+                    ThrowIfCancelled();
+
+                    if (step)
+                    {
+                        string path = Path.Combine(deliverablesFolder, "step", fileString + ".step");
+                        bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        if (!ok || !File.Exists(path))
+                        {
+                            LogExportFailure(log, errorLog, "STEP export failed: " + path);
+                        }
+                    }
+                    ThrowIfCancelled();
+
+                    if (edr)
+                    {
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swEdrawingsSaveAsSelectionOption,
+                            (int)swEdrawingSaveAsOption_e.swEdrawingSaveActive);
+
+                        string ext = model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY ? ".easm" : ".eprt";
+                        string path = Path.Combine(deliverablesFolder, "edr", fileString + ext);
+                        bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        if (!ok || !File.Exists(path))
+                        {
+                            LogExportFailure(log, errorLog, "eDrawing export failed: " + path);
+                        }
+                    }
+                    ThrowIfCancelled();
+
+                    if (png)
+                    {
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffScreenOrPrintCapture, 1);
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffPrintDPI, 150);
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffPrintPaperSize,
+                            (int)swDwgPaperSizes_e.swDwgPapersUserDefined);
+                        _swApp.SetUserPreferenceDoubleValue(
+                            (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperWidth, 0.297);
+                        _swApp.SetUserPreferenceDoubleValue(
+                            (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
+
+                        model.ShowNamedView2("Isometric", 7);
+                        model.ViewZoomtofit2();
+
+                        if (view != null)
+                        {
+                            view.EnableGraphicsUpdate = true;
+                        }
+
+                        string path = Path.Combine(deliverablesFolder, "png", fileString + ".png");
+                        bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        if (!ok || !File.Exists(path))
+                        {
+                            LogExportFailure(log, errorLog, "PNG export failed: " + path);
+                        }
+                    }
+                }
+                finally
+                {
+                    if (view != null)
                     {
                         try
                         {
-                            File.Delete(tempStl);
+                            view.EnableGraphicsUpdate = prevGraphicsUpdate;
                         }
                         catch
                         {
-                            // ignore cleanup errors
+                            // ignore restore errors
                         }
                     }
-                }
-
-                if (!File.Exists(plyPath))
-                {
-                    LogExportFailure(log, errorLog, "PLY export failed: " + plyPath);
-                }
-            }
-
-            if (step)
-            {
-                string path = Path.Combine(deliverablesFolder, "step", fileString + ".step");
-                bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                if (!ok || !File.Exists(path))
-                {
-                    LogExportFailure(log, errorLog, "STEP export failed: " + path);
-                }
-            }
-
-            if (edr)
-            {
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swEdrawingsSaveAsSelectionOption,
-                    (int)swEdrawingSaveAsOption_e.swEdrawingSaveActive);
-
-                string ext = model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY ? ".easm" : ".eprt";
-                string path = Path.Combine(deliverablesFolder, "edr", fileString + ext);
-                bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                if (!ok || !File.Exists(path))
-                {
-                    LogExportFailure(log, errorLog, "eDrawing export failed: " + path);
-                }
-            }
-
-            if (png)
-            {
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swTiffScreenOrPrintCapture, 1);
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swTiffPrintDPI, 150);
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swTiffPrintPaperSize,
-                    (int)swDwgPaperSizes_e.swDwgPapersUserDefined);
-                _swApp.SetUserPreferenceDoubleValue(
-                    (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperWidth, 0.297);
-                _swApp.SetUserPreferenceDoubleValue(
-                    (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
-
-                model.ShowNamedView2("Isometric", 7);
-                model.ViewZoomtofit2();
-
-                if (view != null)
-                {
-                    view.EnableGraphicsUpdate = true;
-                }
-
-                string path = Path.Combine(deliverablesFolder, "png", fileString + ".png");
-                bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                if (!ok || !File.Exists(path))
-                {
-                    LogExportFailure(log, errorLog, "PNG export failed: " + path);
                 }
             }
         }
@@ -3325,184 +3942,239 @@ namespace TinyMRP.SolidWorksAddin.Services
         }
 
         private void DwgPublish(ModelDoc2 model, string fileString, string deliverablesFolder,
-            bool pdf, bool png, bool edr, Action<string> log, Action<string> errorLog)
+            bool overwriteFiles, bool pdf, bool png, bool edr, Action<string> log, Action<string> errorLog, string partNumberOverride)
         {
-            Configuration conf = model.GetActiveConfiguration() as Configuration;
-            if (conf == null)
+            using (new ExportDialogSuppressionScope(_swApp))
             {
-                return;
-            }
-
-            string modelPath = model.GetPathName();
-            if (string.IsNullOrWhiteSpace(modelPath))
-            {
-                return;
-            }
-
-            string drawingPath = OnlyFolder(modelPath) + BomPartNumber(conf, model) + ".SLDDRW";
-            if (!File.Exists(drawingPath))
-            {
-                return;
-            }
-
-            string pdfPath = Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf");
-            string dxfPath = Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf");
-            string pngPath = Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png");
-            string edrPath = Path.Combine(deliverablesFolder, "edr", fileString + ".edrw");
-
-            DocumentSpecification spec = _swApp.GetOpenDocSpec(drawingPath) as DocumentSpecification;
-            if (spec == null)
-            {
-                return;
-            }
-            spec.DocumentType = (int)swDocumentTypes_e.swDocDRAWING;
-            spec.ReadOnly = true;
-            spec.Silent = true;
-
-            ModelDoc2 drawDoc = _swApp.OpenDoc7(spec) as ModelDoc2;
-            if (drawDoc == null)
-            {
-                return;
-            }
-
-            try
-            {
-                _swApp.ActivateDoc(drawDoc.GetTitle());
-
-                DrawingDoc drawing = drawDoc as DrawingDoc;
-                if (drawing == null)
+                Configuration conf = model.GetActiveConfiguration() as Configuration;
+                if (conf == null)
                 {
                     return;
                 }
 
-                object sheetNamesObj = drawing.GetSheetNames();
-                string[] sheetNames = ToStringArray(sheetNamesObj);
-                if (sheetNames == null || sheetNames.Length == 0)
+                string modelPath = model.GetPathName();
+                if (string.IsNullOrWhiteSpace(modelPath))
                 {
                     return;
                 }
 
-                bool dxfNeeded = false;
-                string dxfSheetName = string.Empty;
-                Sheet dxfSheet = null;
-
-                for (int i = 0; i < sheetNames.Length; i++)
+                string pn = !string.IsNullOrWhiteSpace(partNumberOverride)
+                    ? partNumberOverride
+                    : BomPartNumber(conf, model);
+                string drawingPath = OnlyFolder(modelPath) + pn + ".SLDDRW";
+                if (!File.Exists(drawingPath))
                 {
-                    Sheet sheet = drawing.get_Sheet(sheetNames[i]);
-                    drawDoc.ForceRebuild3(true);
-
-                    string lower = sheetNames[i].ToLowerInvariant();
-                    if (lower == "flatpattern" || lower == "dxf" || lower == "dxf sheet")
-                    {
-                        dxfNeeded = true;
-                        dxfSheetName = sheetNames[i];
-                        dxfSheet = sheet;
-                    }
+                    return;
                 }
 
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swDxfMultiSheetOption,
-                    (int)swDxfMultisheet_e.swDxfActiveSheetOnly);
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swDxfOutputNoScale, 1);
+                string pdfPath = Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf");
+                string dxfPath = Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf");
+                string pngPath = Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png");
+                string edrPath = Path.Combine(deliverablesFolder, "edr", fileString + ".edrw");
+                bool dxfRequested = ShouldExport(dxfPath, overwriteFiles);
 
-                int errors = 0;
-                int warnings = 0;
-
-                if (pdf)
+                HashSet<string> baseline = SnapshotOpenDocIds();
+                DocumentSpecification spec = _swApp.GetOpenDocSpec(drawingPath) as DocumentSpecification;
+                if (spec == null)
                 {
-                    ExportPdfData exportData = _swApp.GetExportFileData(
-                        (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
-                    if (exportData != null)
+                    EnsureDocBaseline(baseline, log, errorLog, "drawing open spec failed");
+                    return;
+                }
+                spec.DocumentType = (int)swDocumentTypes_e.swDocDRAWING;
+                spec.ReadOnly = true;
+                spec.Silent = true;
+
+                ModelDoc2 drawDoc = null;
+                using (new ExternalReferenceBatchOpenScope(_swApp))
+                {
+                    ThrowIfCancelled();
+                    drawDoc = _swApp.OpenDoc7(spec) as ModelDoc2;
+                }
+                if (drawDoc == null)
+                {
+                    EnsureDocBaseline(baseline, log, errorLog, "drawing open failed");
+                    return;
+                }
+
+                try
+                {
+                    string drawTitle = string.Empty;
+                    try
                     {
-                        exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
-                            sheetNames);
-                        bool ok = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
-                        if (!ok || !File.Exists(pdfPath))
+                        drawTitle = drawDoc.GetTitle();
+                    }
+                    catch
+                    {
+                        drawTitle = string.Empty;
+                    }
+
+                    string activateTitle = NormalizeDocTitleForClose(drawTitle);
+                    if (!string.IsNullOrWhiteSpace(activateTitle))
+                    {
+                        _swApp.ActivateDoc(activateTitle);
+                    }
+                    else if (!string.IsNullOrWhiteSpace(drawTitle))
+                    {
+                        _swApp.ActivateDoc(drawTitle);
+                    }
+                    ThrowIfCancelled();
+
+                    DrawingDoc drawing = drawDoc as DrawingDoc;
+                    if (drawing == null)
+                    {
+                        return;
+                    }
+
+                    object sheetNamesObj = drawing.GetSheetNames();
+                    string[] sheetNames = ToStringArray(sheetNamesObj);
+                    if (sheetNames == null || sheetNames.Length == 0)
+                    {
+                        return;
+                    }
+
+                    string dxfSheetName = string.Empty;
+                    if (dxfRequested)
+                    {
+                        for (int i = 0; i < sheetNames.Length; i++)
                         {
-                            LogExportFailure(log, errorLog, "PDF export failed: " + pdfPath);
+                            ThrowIfCancelled();
+                            string lower = (sheetNames[i] ?? string.Empty).Trim().ToLowerInvariant();
+                            if (lower == "flatpattern" || lower == "dxf" || lower == "dxf sheet")
+                            {
+                                dxfSheetName = sheetNames[i];
+                                break;
+                            }
                         }
                     }
-                    else
-                    {
-                        LogExportFailure(log, errorLog, "PDF export failed: export data unavailable.");
-                    }
-                }
-
-                if (edr)
-                {
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swEdrawingsSaveAsSelectionOption,
-                        (int)swEdrawingSaveAsOption_e.swEdrawingSaveAll);
-                    bool ok = drawDoc.Extension.SaveAs(edrPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                    if (!ok || !File.Exists(edrPath))
-                    {
-                        LogExportFailure(log, errorLog, "eDrawing export failed: " + edrPath);
-                    }
-                }
-
-                if (png)
-                {
-                    drawing.ActivateSheet(sheetNames[0]);
-                    drawing.ViewFullPage();
 
                     _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swTiffScreenOrPrintCapture, 1);
+                        (int)swUserPreferenceIntegerValue_e.swDxfMultiSheetOption,
+                        (int)swDxfMultisheet_e.swDxfActiveSheetOnly);
                     _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swTiffPrintDPI, 150);
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swTiffPrintPaperSize,
-                        (int)swDwgPaperSizes_e.swDwgPapersUserDefined);
-                    _swApp.SetUserPreferenceDoubleValue(
-                        (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperWidth, 0.297);
-                    _swApp.SetUserPreferenceDoubleValue(
-                        (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
+                        (int)swUserPreferenceIntegerValue_e.swDxfOutputNoScale, 1);
 
-                    bool ok = drawDoc.Extension.SaveAs(pngPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                    if (!ok || !File.Exists(pngPath))
-                    {
-                        LogExportFailure(log, errorLog, "Drawing PNG export failed: " + pngPath);
-                    }
-                }
+                    int errors = 0;
+                    int warnings = 0;
 
-                if (dxfNeeded && dxfSheet != null)
-                {
-                    drawing.ActivateSheet(dxfSheetName);
-                    ReplaceSheetFormat(drawing, dxfSheet, _config.BlankTemplatePath);
-                    bool ok = drawDoc.SaveAs4(dxfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref errors, ref warnings);
-                    if (!ok || !File.Exists(dxfPath))
+                    if (pdf)
                     {
-                        LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
-                    }
-                }
-                else
-                {
-                    View flatView = drawing.GetFirstView() as View;
-                    View flatPatternView = null;
-                    while (flatView != null)
-                    {
-                        if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                        ThrowIfCancelled();
+                        ExportPdfData exportData = _swApp.GetExportFileData(
+                            (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
+                        if (exportData != null)
                         {
-                            flatPatternView = flatView;
-                            break;
+                            exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
+                                sheetNames);
+                            bool ok = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
+                            if (!ok || !File.Exists(pdfPath))
+                            {
+                                LogExportFailure(log, errorLog, "PDF export failed: " + pdfPath);
+                            }
+                        }
+                        else
+                        {
+                            LogExportFailure(log, errorLog, "PDF export failed: export data unavailable.");
+                        }
+                    }
+
+                    if (edr)
+                    {
+                        ThrowIfCancelled();
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swEdrawingsSaveAsSelectionOption,
+                            (int)swEdrawingSaveAsOption_e.swEdrawingSaveAll);
+                        bool ok = drawDoc.Extension.SaveAs(edrPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        if (!ok || !File.Exists(edrPath))
+                        {
+                            LogExportFailure(log, errorLog, "eDrawing export failed: " + edrPath);
+                        }
+                    }
+
+                    if (png)
+                    {
+                        ThrowIfCancelled();
+                        drawing.ActivateSheet(sheetNames[0]);
+                        drawing.ViewFullPage();
+
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffScreenOrPrintCapture, 1);
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffPrintDPI, 150);
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffPrintPaperSize,
+                            (int)swDwgPaperSizes_e.swDwgPapersUserDefined);
+                        _swApp.SetUserPreferenceDoubleValue(
+                            (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperWidth, 0.297);
+                        _swApp.SetUserPreferenceDoubleValue(
+                            (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
+
+                        bool ok = drawDoc.Extension.SaveAs(pngPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        if (!ok || !File.Exists(pngPath))
+                        {
+                            LogExportFailure(log, errorLog, "Drawing PNG export failed: " + pngPath);
+                        }
+                    }
+
+                    if (dxfRequested)
+                    {
+                        ThrowIfCancelled();
+                        bool exported = false;
+
+                        // If the drawing has a dedicated DXF/flat pattern sheet, export it directly without
+                        // mutating the sheet format (mutations can dirty the doc and trigger save prompts).
+                        if (!string.IsNullOrWhiteSpace(dxfSheetName))
+                        {
+                            try
+                            {
+                                drawing.ActivateSheet(dxfSheetName);
+                                bool ok = drawDoc.SaveAs4(dxfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref errors, ref warnings);
+                                exported = ok && File.Exists(dxfPath);
+                            }
+                            catch
+                            {
+                                exported = false;
+                            }
                         }
 
-                        flatView = flatView.GetNextView() as View;
-                    }
+                        // Fallback: find a FLATPATTERN view and export it via a temporary doc.
+                        if (!exported)
+                        {
+                            View flatView = drawing.GetFirstView() as View;
+                            View flatPatternView = null;
+                            while (flatView != null)
+                            {
+                                ThrowIfCancelled();
+                                if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    flatPatternView = flatView;
+                                    break;
+                                }
 
-                    if (flatPatternView != null)
-                    {
-                        ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
+                                flatView = flatView.GetNextView() as View;
+                            }
+
+                            if (flatPatternView != null)
+                            {
+                                ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
+                                exported = File.Exists(dxfPath);
+                            }
+                        }
+
+                        if (!exported)
+                        {
+                            LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
+                        }
                     }
                 }
-            }
-            finally
-            {
-                ForceCloseDocNoSave(drawDoc);
+                finally
+                {
+                    ForceCloseDocNoSave(drawDoc, errorLog, "DwgPublish close");
+                    EnsureDocBaseline(baseline, log, errorLog, "post-close drawing publish");
+                }
             }
         }
 
@@ -3834,19 +4506,26 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (string.Equals(partNumber, "allocate", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(partNumber, "default", StringComparison.OrdinalIgnoreCase))
             {
-                string baseName = OnlyFile(document.GetPathName());
+                // Never mutate the document/config during batch export. Some models (toolbox, vendor parts,
+                // or "default"/"allocate" configs) can yield unusable BOM part numbers; generate a stable
+                // fallback purely for naming purposes.
+                string baseName = string.Empty;
+                try
+                {
+                    baseName = Path.GetFileNameWithoutExtension(document.GetPathName());
+                }
+                catch
+                {
+                    baseName = string.Empty;
+                }
                 if (string.IsNullOrWhiteSpace(baseName))
                 {
-                    baseName = document.GetTitle();
+                    baseName = Path.GetFileNameWithoutExtension(document.GetTitle());
                 }
 
-                partNumber = SanitizeFileName("FIX_" + baseName + "_" + config.Name);
-                partNumber = ReplaceNonAlphaNumeric(partNumber);
-
-                config.BOMPartNoSource = (int)swBOMPartNumberSource_e.swBOMPartNumber_UserSpecified;
-                config.AlternateName = partNumber;
-                config.UseAlternateNameInBOM = true;
-                config.AlternateName = partNumber;
+                string derived = SanitizeFileName("FIX_" + baseName + "_" + config.Name);
+                derived = ReplaceNonAlphaNumeric(derived);
+                partNumber = derived;
             }
 
             return partNumber;
@@ -4234,6 +4913,57 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private void DebugExport(Action<string> errorLog, string message)
+        {
+            if (!EnableExportDebugLog || errorLog == null || string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            try
+            {
+                errorLog("DBG: " + message);
+            }
+            catch
+            {
+                // ignore logging errors
+            }
+        }
+
+        private void DebugExportOnce(Action<string> errorLog, string key, string message)
+        {
+            if (!EnableExportDebugLog || errorLog == null || string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (!_debugOnce.Add(key))
+            {
+                return;
+            }
+
+            DebugExport(errorLog, message);
+        }
+
+        private void LogCloseWarningOnce(Action<string> errorLog, string context, string title, string path)
+        {
+            if (errorLog == null)
+            {
+                return;
+            }
+
+            string id = !string.IsNullOrWhiteSpace(path) ? path : (title ?? string.Empty);
+            string key = (context ?? string.Empty) + "|" + id;
+            if (!_closeWarningOnce.Add(key))
+            {
+                return;
+            }
+
+            errorLog("Warning: unable to close document (context: " + (context ?? string.Empty) + "): " +
+                     (string.IsNullOrWhiteSpace(title) ? "<no title>" : title) +
+                     " | " + (string.IsNullOrWhiteSpace(path) ? "<no path>" : path));
+        }
+
         private ExportRunLog CreateExportRunLog()
         {
             try
@@ -4376,11 +5106,581 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private bool ForceCloseDocNoSave(ModelDoc2 doc)
+        private IEnumerable<ModelDoc2> EnumerateOpenDocuments()
+        {
+            object docsObj = null;
+            try
+            {
+                docsObj = _swApp.GetDocuments();
+            }
+            catch
+            {
+                yield break;
+            }
+
+            if (docsObj == null)
+            {
+                yield break;
+            }
+
+            // SolidWorks may return a SAFEARRAY (Array) or, in some edge cases, a single COM object.
+            Array docsArray = docsObj as Array;
+            if (docsArray != null)
+            {
+                foreach (object obj in docsArray)
+                {
+                    ModelDoc2 doc = obj as ModelDoc2;
+                    if (doc != null)
+                    {
+                        yield return doc;
+                    }
+                }
+
+                yield break;
+            }
+
+            ModelDoc2 single = docsObj as ModelDoc2;
+            if (single != null)
+            {
+                yield return single;
+            }
+        }
+
+        // Snapshot of currently-open documents. Used to enforce "no doc leaks" during batch operations.
+        private HashSet<string> SnapshotOpenDocIds()
+        {
+            return GetOpenDocumentIds();
+        }
+
+        private void AddDocToKeepSet(HashSet<string> keep, ModelDoc2 doc, string fallbackTitle)
+        {
+            if (keep == null)
+            {
+                return;
+            }
+
+            if (doc != null)
+            {
+                try
+                {
+                    string path = doc.GetPathName();
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        keep.Add(path);
+                    }
+                }
+                catch
+                {
+                    // ignore keep-path errors
+                }
+
+                try
+                {
+                    string title = doc.GetTitle();
+                    if (!string.IsNullOrWhiteSpace(title))
+                    {
+                        keep.Add(title);
+                        string normalized = NormalizeDocTitleForClose(title);
+                        if (!string.IsNullOrWhiteSpace(normalized))
+                        {
+                            keep.Add(normalized);
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore keep-title errors
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(fallbackTitle))
+            {
+                keep.Add(fallbackTitle);
+                string normalized = NormalizeDocTitleForClose(fallbackTitle);
+                if (!string.IsNullOrWhiteSpace(normalized))
+                {
+                    keep.Add(normalized);
+                }
+            }
+        }
+
+        private bool IsBaselineAbortException(Exception ex)
+        {
+            while (ex != null)
+            {
+                InvalidOperationException invalid = ex as InvalidOperationException;
+                if (invalid != null &&
+                    !string.IsNullOrWhiteSpace(invalid.Message) &&
+                    invalid.Message.IndexOf("Unable to close leaked documents", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                ex = ex.InnerException;
+            }
+
+            return false;
+        }
+
+        private bool IsDocOpenByIdOrTitle(string id, string title)
+        {
+            if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(title))
+            {
+                return false;
+            }
+
+            foreach (ModelDoc2 doc in EnumerateOpenDocuments())
+            {
+                string docPath = string.Empty;
+                string docTitle = string.Empty;
+                try
+                {
+                    docPath = doc.GetPathName();
+                    docTitle = doc.GetTitle();
+                }
+                catch
+                {
+                    docPath = string.Empty;
+                    docTitle = string.Empty;
+                }
+
+                string docTitleNorm = NormalizeDocTitleForClose(docTitle);
+                string idNorm = NormalizeDocTitleForClose(id);
+                string titleNorm = NormalizeDocTitleForClose(title);
+
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    if ((!string.IsNullOrWhiteSpace(docPath) &&
+                         string.Equals(docPath, id, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(docTitleNorm) &&
+                         string.Equals(docTitleNorm, idNorm, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return true;
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    if ((!string.IsNullOrWhiteSpace(docPath) &&
+                         string.Equals(docPath, title, StringComparison.OrdinalIgnoreCase)) ||
+                        (!string.IsNullOrWhiteSpace(docTitleNorm) &&
+                         string.Equals(docTitleNorm, titleNorm, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsDocInKeepSet(ModelDoc2 doc, HashSet<string> keep)
         {
             if (doc == null)
             {
                 return true;
+            }
+            if (keep == null || keep.Count == 0)
+            {
+                return false;
+            }
+
+            string path = string.Empty;
+            string title = string.Empty;
+            bool gotIdentity = false;
+            try
+            {
+                path = doc.GetPathName();
+                gotIdentity = !string.IsNullOrWhiteSpace(path);
+            }
+            catch
+            {
+                path = string.Empty;
+            }
+            try
+            {
+                title = doc.GetTitle();
+                gotIdentity = gotIdentity || !string.IsNullOrWhiteSpace(title);
+            }
+            catch
+            {
+                title = string.Empty;
+            }
+
+            if (!gotIdentity)
+            {
+                // Defensive: if we cannot read a document's identity (path/title), do not attempt to close it.
+                // Mis-identifying and closing the root/start document causes RPC_E_DISCONNECTED.
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(path) && keep.Contains(path))
+            {
+                return true;
+            }
+            if (!string.IsNullOrWhiteSpace(title) && keep.Contains(title))
+            {
+                return true;
+            }
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                string normalized = NormalizeDocTitleForClose(title);
+                if (!string.IsNullOrWhiteSpace(normalized) && keep.Contains(normalized))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private List<ModelDoc2> GetOpenDocsNotInKeepSet(HashSet<string> keep)
+        {
+            var leaked = new List<ModelDoc2>();
+            foreach (ModelDoc2 doc in EnumerateOpenDocuments())
+            {
+                if (!IsDocInKeepSet(doc, keep))
+                {
+                    leaked.Add(doc);
+                }
+            }
+
+            return leaked;
+        }
+
+        private void EnsureDocBaseline(HashSet<string> keep, Action<string> log, Action<string> errorLog, string reason,
+            bool allowCancel = false)
+        {
+            using (new ExportDialogSuppressionScope(_swApp))
+            using (new ExternalReferenceBatchOpenScope(_swApp))
+            {
+                if (allowCancel)
+                {
+                    ThrowIfCancelled();
+                }
+
+                if (keep == null)
+                {
+                    keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                // If we have documents to close, pre-emptively lightweight kept assemblies (esp. root) so they
+                // don't immediately re-open resolved child documents while we are trying to close back to baseline.
+                List<ModelDoc2> preClose = GetOpenDocsNotInKeepSet(keep);
+                if (preClose.Count > 0)
+                {
+                    TryLightweightAssembliesInKeepSet(keep, log, errorLog, reason, allowCancel);
+                }
+
+                const int maxPasses = 3;
+                CloseOpenDocsToBaseline(keep, log, errorLog, reason, maxPasses, allowCancel);
+
+                List<ModelDoc2> remaining = GetOpenDocsNotInKeepSet(keep);
+                if (remaining.Count > 0)
+                {
+                    // Some documents cannot be closed while referenced by an open assembly. Try again after
+                    // switching any kept assemblies back to lightweight.
+                    if (allowCancel)
+                    {
+                        ThrowIfCancelled();
+                    }
+                    TryLightweightAssembliesInKeepSet(keep, log, errorLog, reason, allowCancel);
+                    CloseOpenDocsToBaseline(keep, log, errorLog, reason, maxPasses, allowCancel);
+                    remaining = GetOpenDocsNotInKeepSet(keep);
+                }
+
+                if (remaining.Count > 0)
+                {
+                    bool hasVirtualComponents = false;
+                    foreach (ModelDoc2 doc in remaining)
+                    {
+                        string path = string.Empty;
+                        try
+                        {
+                            path = doc.GetPathName();
+                        }
+                        catch
+                        {
+                            path = string.Empty;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(path) &&
+                            path.IndexOf("\\VC~~\\", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            hasVirtualComponents = true;
+                            break;
+                        }
+                    }
+
+                    if (hasVirtualComponents)
+                    {
+                        DebugExport(errorLog,
+                            "Leak-guard: remaining leaks include VC~~ virtual component temp docs. These often cannot " +
+                            "be closed while their owning assembly remains open/resolved.");
+                    }
+
+                    if (errorLog != null)
+                    {
+                        errorLog("Document leak detected after baseline enforcement (" + (reason ?? string.Empty) +
+                                 "). Leaked documents:");
+                        foreach (ModelDoc2 doc in remaining)
+                        {
+                            string title = string.Empty;
+                            string path = string.Empty;
+                            try
+                            {
+                                title = doc.GetTitle();
+                                path = doc.GetPathName();
+                            }
+                            catch
+                            {
+                                title = string.Empty;
+                                path = string.Empty;
+                            }
+
+                            errorLog(" - " + (string.IsNullOrWhiteSpace(title) ? "<no title>" : title) +
+                                     " | " + (string.IsNullOrWhiteSpace(path) ? "<no path>" : path));
+                        }
+                    }
+
+                    LogExportFailure(log, errorLog,
+                        "Unable to close leaked documents; aborting to prevent SolidWorks crash.");
+                    throw new InvalidOperationException(
+                        "Unable to close leaked documents; aborting to prevent SolidWorks crash.");
+                }
+            }
+        }
+
+        private int GetDocCloseOrder(ModelDoc2 doc)
+        {
+            if (doc == null)
+            {
+                return int.MaxValue;
+            }
+
+            int docType = 0;
+            try
+            {
+                docType = doc.GetType();
+            }
+            catch
+            {
+                docType = 0;
+            }
+
+            if (docType == (int)swDocumentTypes_e.swDocDRAWING)
+            {
+                return 0;
+            }
+            if (docType == (int)swDocumentTypes_e.swDocASSEMBLY)
+            {
+                return 1;
+            }
+            if (docType == (int)swDocumentTypes_e.swDocPART)
+            {
+                return 2;
+            }
+
+            return 3;
+        }
+
+        private void CloseOpenDocsToBaseline(HashSet<string> keep, Action<string> log, Action<string> errorLog,
+            string reason, int maxPasses, bool allowCancel)
+        {
+            int passes = maxPasses > 0 ? maxPasses : 1;
+            for (int pass = 0; pass < passes; pass++)
+            {
+                if (allowCancel)
+                {
+                    ThrowIfCancelled();
+                }
+                List<ModelDoc2> toClose = GetOpenDocsNotInKeepSet(keep);
+                if (toClose.Count == 0)
+                {
+                    return;
+                }
+
+                DebugExport(errorLog,
+                    "Baseline pass " + (pass + 1) + "/" + passes +
+                    " reason=" + (reason ?? string.Empty) +
+                    " closingDocs=" + toClose.Count);
+
+                toClose.Sort((a, b) => GetDocCloseOrder(a).CompareTo(GetDocCloseOrder(b)));
+                foreach (ModelDoc2 doc in toClose)
+                {
+                    if (allowCancel)
+                    {
+                        ThrowIfCancelled();
+                    }
+                    // Defensive: if the doc looks like it belongs to the keep set now (COM calls can be transient),
+                    // never attempt to close it. Closing the root/start document disconnects COM clients.
+                    if (IsDocInKeepSet(doc, keep))
+                    {
+                        DebugExportOnce(errorLog,
+                            "Baseline: skipKeep|" + GetDocumentId(doc),
+                            "Baseline: skip close because doc matched keep set reason=" + (reason ?? string.Empty));
+                        continue;
+                    }
+                    ForceCloseDocNoSave(doc, errorLog, reason, allowCancel);
+                }
+
+                System.Windows.Forms.Application.DoEvents();
+                // Give SolidWorks a brief moment to finish background operations (exports/rebuilds) before re-checking.
+                try
+                {
+                    System.Threading.Thread.Sleep(75);
+                }
+                catch
+                {
+                    // ignore sleep errors
+                }
+            }
+        }
+
+        private void TryLightweightAssembliesInKeepSet(HashSet<string> keep, Action<string> log, Action<string> errorLog,
+            string context, bool allowCancel)
+        {
+            if (allowCancel)
+            {
+                ThrowIfCancelled();
+            }
+            foreach (ModelDoc2 doc in EnumerateOpenDocuments())
+            {
+                if (allowCancel)
+                {
+                    ThrowIfCancelled();
+                }
+
+                if (!IsDocInKeepSet(doc, keep))
+                {
+                    continue;
+                }
+
+                int docType = 0;
+                try
+                {
+                    docType = doc.GetType();
+                }
+                catch
+                {
+                    docType = 0;
+                }
+
+                if (docType != (int)swDocumentTypes_e.swDocASSEMBLY)
+                {
+                    continue;
+                }
+
+                string title = string.Empty;
+                try
+                {
+                    title = doc.GetTitle();
+                }
+                catch
+                {
+                    title = string.Empty;
+                }
+
+                try
+                {
+                    string activateTitle = NormalizeDocTitleForClose(title);
+                    if (!string.IsNullOrWhiteSpace(activateTitle))
+                    {
+                        _swApp.ActivateDoc(activateTitle);
+                    }
+                }
+                catch
+                {
+                    // ignore activation errors
+                }
+
+                AssemblyDoc assy = doc as AssemblyDoc;
+                if (assy == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    try
+                    {
+                        // If anything is selected, SolidWorks applies LightweightAllResolved to the selection
+                        // instead of the whole assembly. Clear selection so we unload everything we can.
+                        doc.ClearSelection2(true);
+                    }
+                    catch
+                    {
+                        // ignore selection-clear errors
+                    }
+
+                    bool ok = false;
+                    try
+                    {
+                        ok = assy.LightweightAllResolved();
+                    }
+                    catch
+                    {
+                        ok = false;
+                    }
+                    try
+                    {
+                        assy.MakeLightWeight();
+                    }
+                    catch
+                    {
+                        // ignore make-lightweight errors
+                    }
+                    DebugExport(errorLog,
+                        "Leak-guard: lightweight kept assembly (" + (context ?? string.Empty) + "): " + title +
+                        (ok ? "" : " (partial/failed)"));
+                }
+                catch (Exception ex)
+                {
+                    LogExportFailure(log, errorLog,
+                        "Leak-guard: failed to lightweight assembly (" + title + "): " + ex.Message);
+                }
+
+                System.Windows.Forms.Application.DoEvents();
+                try
+                {
+                    System.Threading.Thread.Sleep(100);
+                }
+                catch
+                {
+                    // ignore sleep errors
+                }
+            }
+        }
+
+        private string NormalizeDocTitleForClose(string title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return string.Empty;
+            }
+
+            string normalized = title.Trim();
+
+            // SolidWorks shows dirty documents with a trailing "*" in the UI title, but API calls like CloseDoc/QuitDoc
+            // typically expect the base document title.
+            while (normalized.EndsWith("*", StringComparison.Ordinal))
+            {
+                normalized = normalized.Substring(0, normalized.Length - 1).TrimEnd();
+            }
+
+            return normalized;
+        }
+
+        private void ForceCloseDocNoSave(ModelDoc2 doc, Action<string> errorLog = null, string context = "", bool allowCancel = false)
+        {
+            if (doc == null)
+            {
+                return;
+            }
+
+            if (allowCancel)
+            {
+                ThrowIfCancelled();
             }
 
             string title = string.Empty;
@@ -4394,6 +5694,43 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 title = string.Empty;
                 path = string.Empty;
+            }
+
+            bool dirty = false;
+            int docType = 0;
+            try
+            {
+                dirty = doc.GetSaveFlag();
+            }
+            catch
+            {
+                dirty = false;
+            }
+            try
+            {
+                docType = doc.GetType();
+            }
+            catch
+            {
+                docType = 0;
+            }
+
+            string closeTitle = NormalizeDocTitleForClose(title);
+
+            bool IsStillOpen()
+            {
+                if (IsDocOpenByIdOrTitle(path, title))
+                {
+                    return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(closeTitle) &&
+                    !string.Equals(closeTitle, title, StringComparison.OrdinalIgnoreCase))
+                {
+                    return IsDocOpenByIdOrTitle(path, closeTitle);
+                }
+
+                return false;
             }
 
             bool prevCommand = false;
@@ -4438,67 +5775,293 @@ namespace TinyMRP.SolidWorksAddin.Services
                     // ignore state set errors
                 }
 
-                if (!string.IsNullOrWhiteSpace(title))
+                if (dirty)
                 {
-                    _swApp.CloseDoc(title);
-                }
-                else
-                {
-                    doc.Close();
-                }
-
-                if (!IsDocumentOpen(path, title))
-                {
-                    return true;
+                    DebugExport(errorLog,
+                        "ForceClose: closing dirty doc context=" + (context ?? string.Empty) +
+                        " type=" + docType +
+                        " title=" + (title ?? string.Empty) +
+                        " path=" + (path ?? string.Empty));
                 }
 
-                try
+                const int maxPasses = 3;
+                for (int pass = 0; pass < maxPasses; pass++)
                 {
-                    if (!string.IsNullOrWhiteSpace(title))
+                    if (allowCancel)
                     {
-                        _swApp.ActivateDoc(title);
-                        _swApp.CloseDoc(string.Empty);
+                        ThrowIfCancelled();
+                    }
+                    if (!IsStillOpen())
+                    {
+                        return;
+                    }
+
+                    // Assemblies can keep children open; try light-weighting before closing. This also reduces the
+                    // chance that SOLIDWORKS keeps re-opening referenced docs while we're closing back to baseline.
+                    try
+                    {
+                        if (doc.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY)
+                        {
+                            try
+                            {
+                                doc.ClearSelection2(true);
+                            }
+                            catch
+                            {
+                                // ignore selection errors
+                            }
+
+                            AssemblyDoc assy = doc as AssemblyDoc;
+                            if (assy != null)
+                            {
+                                try
+                                {
+                                    assy.LightweightAllResolved();
+                                }
+                                catch
+                                {
+                                    // ignore lightweight errors
+                                }
+                                try
+                                {
+                                    assy.MakeLightWeight();
+                                }
+                                catch
+                                {
+                                    // ignore lightweight errors
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // ignore type/lightweight errors
+                    }
+
+                    // a) QuitDoc (discard changes, no UI)
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(closeTitle))
+                        {
+                            _swApp.QuitDoc(closeTitle);
+                        }
+                        else if (!string.IsNullOrWhiteSpace(title))
+                        {
+                            _swApp.QuitDoc(title);
+                        }
+
+                        if (IsStillOpen() && !string.IsNullOrWhiteSpace(title) &&
+                            !string.Equals(title, closeTitle, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _swApp.QuitDoc(title);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore quit errors
+                    }
+
+                    System.Windows.Forms.Application.DoEvents();
+                    try
+                    {
+                        System.Threading.Thread.Sleep(50);
+                    }
+                    catch
+                    {
+                        // ignore sleep errors
+                    }
+                    if (!IsStillOpen())
+                    {
+                        return;
+                    }
+
+                    if (allowCancel)
+                    {
+                        ThrowIfCancelled();
+                    }
+                    // b) CloseDoc (releases UI resources; may keep model data loaded if referenced)
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(closeTitle))
+                        {
+                            _swApp.CloseDoc(closeTitle);
+                        }
+                        else if (!string.IsNullOrWhiteSpace(title))
+                        {
+                            _swApp.CloseDoc(title);
+                        }
+
+                        if (IsStillOpen() && !string.IsNullOrWhiteSpace(title) &&
+                            !string.Equals(title, closeTitle, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _swApp.CloseDoc(title);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore close errors
+                    }
+
+                    System.Windows.Forms.Application.DoEvents();
+                    try
+                    {
+                        System.Threading.Thread.Sleep(50);
+                    }
+                    catch
+                    {
+                        // ignore sleep errors
+                    }
+                    if (!IsStillOpen())
+                    {
+                        return;
+                    }
+
+                    if (allowCancel)
+                    {
+                        ThrowIfCancelled();
+                    }
+                    // c) Close active doc after activation (some scenarios only close when active)
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(closeTitle) || !string.IsNullOrWhiteSpace(title))
+                        {
+                            string desiredTitle = !string.IsNullOrWhiteSpace(closeTitle) ? closeTitle : title;
+                            string desiredNorm = NormalizeDocTitleForClose(desiredTitle);
+                            int errors = 0;
+                            _swApp.ActivateDoc2(desiredTitle, false, ref errors);
+
+                            // CloseDoc("") closes the active document. Only do that if we can verify the activation
+                            // succeeded for the target doc; otherwise we risk closing the root/start doc and
+                            // disconnecting COM clients (RPC_E_DISCONNECTED).
+                            bool activeMatches = false;
+                            try
+                            {
+                                ModelDoc2 active = _swApp.ActiveDoc as ModelDoc2;
+                                if (active != null)
+                                {
+                                    string activePath = string.Empty;
+                                    string activeTitle = string.Empty;
+                                    try
+                                    {
+                                        activePath = active.GetPathName();
+                                        activeTitle = active.GetTitle();
+                                    }
+                                    catch
+                                    {
+                                        activePath = string.Empty;
+                                        activeTitle = string.Empty;
+                                    }
+
+                                    if (!string.IsNullOrWhiteSpace(path) &&
+                                        !string.IsNullOrWhiteSpace(activePath) &&
+                                        string.Equals(activePath, path, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        activeMatches = true;
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(desiredNorm))
+                                    {
+                                        string activeNorm = NormalizeDocTitleForClose(activeTitle);
+                                        activeMatches = !string.IsNullOrWhiteSpace(activeNorm) &&
+                                                        string.Equals(activeNorm, desiredNorm, StringComparison.OrdinalIgnoreCase);
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                activeMatches = false;
+                            }
+
+                            if (activeMatches)
+                            {
+                                _swApp.CloseDoc(string.Empty);
+                            }
+                            else
+                            {
+                                DebugExportOnce(errorLog,
+                                    "ForceClose: skippedCloseActive|" + (!string.IsNullOrWhiteSpace(path) ? path : (title ?? string.Empty)),
+                                    "ForceClose: skipped CloseDoc(\"\") because active doc didn't match target context=" +
+                                    (context ?? string.Empty) + " title=" + (title ?? string.Empty) + " path=" + (path ?? string.Empty));
+                            }
+
+                            if (IsStillOpen() && !string.IsNullOrWhiteSpace(title) &&
+                                !string.Equals(title, closeTitle, StringComparison.OrdinalIgnoreCase))
+                            {
+                                errors = 0;
+                                _swApp.ActivateDoc2(title, false, ref errors);
+
+                                bool activeMatches2 = false;
+                                try
+                                {
+                                    ModelDoc2 active2 = _swApp.ActiveDoc as ModelDoc2;
+                                    if (active2 != null)
+                                    {
+                                        string activePath2 = string.Empty;
+                                        string activeTitle2 = string.Empty;
+                                        try
+                                        {
+                                            activePath2 = active2.GetPathName();
+                                            activeTitle2 = active2.GetTitle();
+                                        }
+                                        catch
+                                        {
+                                            activePath2 = string.Empty;
+                                            activeTitle2 = string.Empty;
+                                        }
+
+                                        if (!string.IsNullOrWhiteSpace(path) &&
+                                            !string.IsNullOrWhiteSpace(activePath2) &&
+                                            string.Equals(activePath2, path, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            activeMatches2 = true;
+                                        }
+                                        else
+                                        {
+                                            string activeNorm2 = NormalizeDocTitleForClose(activeTitle2);
+                                            string desiredNorm2 = NormalizeDocTitleForClose(title);
+                                            activeMatches2 = !string.IsNullOrWhiteSpace(activeNorm2) &&
+                                                             !string.IsNullOrWhiteSpace(desiredNorm2) &&
+                                                             string.Equals(activeNorm2, desiredNorm2, StringComparison.OrdinalIgnoreCase);
+                                        }
+                                    }
+                                }
+                                catch
+                                {
+                                    activeMatches2 = false;
+                                }
+
+                                if (activeMatches2)
+                                {
+                                    _swApp.CloseDoc(string.Empty);
+                                }
+                                else
+                                {
+                                    DebugExportOnce(errorLog,
+                                        "ForceClose: skippedCloseActive2|" + (!string.IsNullOrWhiteSpace(path) ? path : (title ?? string.Empty)),
+                                        "ForceClose: skipped CloseDoc(\"\") (retry) because active doc didn't match target context=" +
+                                        (context ?? string.Empty) + " title=" + (title ?? string.Empty) + " path=" + (path ?? string.Empty));
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // ignore close errors
+                    }
+
+                    System.Windows.Forms.Application.DoEvents();
+                    try
+                    {
+                        System.Threading.Thread.Sleep(50);
+                    }
+                    catch
+                    {
+                        // ignore sleep errors
+                    }
+                    if (!IsStillOpen())
+                    {
+                        return;
                     }
                 }
-                catch
-                {
-                    // ignore close errors
-                }
-
-                if (!IsDocumentOpen(path, title))
-                {
-                    return true;
-                }
-
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(title))
-                    {
-                        _swApp.QuitDoc(title);
-                    }
-                }
-                catch
-                {
-                    // ignore close errors
-                }
-
-                if (!IsDocumentOpen(path, title))
-                {
-                    return true;
-                }
-
-                try
-                {
-                    doc.Close();
-                }
-                catch
-                {
-                    // ignore close errors
-                }
-            }
-            catch
-            {
-                // ignore close errors
             }
             finally
             {
@@ -4528,11 +6091,13 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
             }
 
-            return !IsDocumentOpen(path, title);
+            if (IsStillOpen() && errorLog != null)
+            {
+                LogCloseWarningOnce(errorLog, context, title, path);
+            }
         }
 
-        private void CloseNonRootDocs(HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
-            Action<string> errorLog = null)
+        private void CloseNonRootDocs(HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle)
         {
             if (rootModel == null)
             {
@@ -4543,10 +6108,36 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
+            HashSet<string> keep = new HashSet<string>(initialDocs, StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                string rootPath = rootModel.GetPathName();
+                if (!string.IsNullOrWhiteSpace(rootPath))
+                {
+                    keep.Add(rootPath);
+                }
+            }
+            catch
+            {
+                // ignore root path errors
+            }
+            try
+            {
+                string title = rootModel.GetTitle();
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    keep.Add(title);
+                }
+            }
+            catch
+            {
+                // ignore root title errors
+            }
+
             const int maxPasses = 3;
             for (int pass = 0; pass < maxPasses; pass++)
             {
-                List<ModelDoc2> toClose = GetNonRootOpenDocs(initialDocs, rootModel, rootTitle);
+                List<ModelDoc2> toClose = GetOpenDocsNotInKeepSet(keep);
                 if (toClose.Count == 0)
                 {
                     return;
@@ -4556,35 +6147,19 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     ForceCloseDocNoSave(doc);
                 }
-            }
 
-            if (errorLog != null)
-            {
-                List<ModelDoc2> remaining = GetNonRootOpenDocs(initialDocs, rootModel, rootTitle);
-                if (remaining.Count > 0)
-                {
-                    int sampleCount = Math.Min(remaining.Count, 5);
-                    var names = new List<string>();
-                    for (int i = 0; i < sampleCount; i++)
-                    {
-                        try
-                        {
-                            names.Add(remaining[i].GetTitle());
-                        }
-                        catch
-                        {
-                            names.Add("<unknown>");
-                        }
-                    }
-                    errorLog("Documents remained open after forced close (" + remaining.Count + "): " +
-                             string.Join(", ", names));
-                }
+                System.Windows.Forms.Application.DoEvents();
             }
         }
 
         private void RestoreStartDocument(string startTitle)
         {
-            if (!string.IsNullOrWhiteSpace(startTitle))
+            string activateTitle = NormalizeDocTitleForClose(startTitle);
+            if (!string.IsNullOrWhiteSpace(activateTitle))
+            {
+                _swApp.ActivateDoc(activateTitle);
+            }
+            else if (!string.IsNullOrWhiteSpace(startTitle))
             {
                 _swApp.ActivateDoc(startTitle);
             }
@@ -4625,76 +6200,37 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private bool IsDocumentOpen(string path, string title)
-        {
-            return FindOpenDocument(path, title) != null;
-        }
-
-        private List<ModelDoc2> GetNonRootOpenDocs(HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle)
-        {
-            var docsToClose = new List<ModelDoc2>();
-            object docsObj = _swApp.GetDocuments();
-            object[] docs = docsObj as object[];
-            if (docs == null || docs.Length == 0)
-            {
-                return docsToClose;
-            }
-
-            foreach (object obj in docs)
-            {
-                ModelDoc2 doc = obj as ModelDoc2;
-                if (doc == null)
-                {
-                    continue;
-                }
-
-                if (ReferenceEquals(doc, rootModel))
-                {
-                    continue;
-                }
-
-                string title = string.Empty;
-                try
-                {
-                    title = doc.GetTitle();
-                }
-                catch
-                {
-                    title = string.Empty;
-                }
-
-                if (!string.IsNullOrWhiteSpace(rootTitle) &&
-                    string.Equals(title, rootTitle, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                string id = GetDocumentId(doc);
-                if (!string.IsNullOrWhiteSpace(id) && initialDocs.Contains(id))
-                {
-                    continue;
-                }
-
-                docsToClose.Add(doc);
-            }
-
-            return docsToClose;
-        }
-
         private HashSet<string> GetOpenDocumentIds()
         {
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            object docsObj = _swApp.GetDocuments();
-            object[] docs = docsObj as object[];
-            if (docs == null)
+            foreach (ModelDoc2 doc in EnumerateOpenDocuments())
             {
-                return ids;
+                string id = GetDocumentId(doc);
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    ids.Add(id);
+                }
             }
 
-            foreach (object obj in docs)
+            return ids;
+        }
+
+        private HashSet<string> GetOpenVisibleDocumentIds()
+        {
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ModelDoc2 doc in EnumerateOpenDocuments())
             {
-                ModelDoc2 doc = obj as ModelDoc2;
-                if (doc == null)
+                bool visible = true;
+                try
+                {
+                    visible = doc.Visible;
+                }
+                catch
+                {
+                    visible = true;
+                }
+
+                if (!visible)
                 {
                     continue;
                 }
@@ -4716,13 +6252,31 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return string.Empty;
             }
 
-            string path = doc.GetPathName();
+            string path = string.Empty;
+            try
+            {
+                path = doc.GetPathName();
+            }
+            catch
+            {
+                path = string.Empty;
+            }
             if (!string.IsNullOrWhiteSpace(path))
             {
                 return path;
             }
 
-            return doc.GetTitle();
+            string title = string.Empty;
+            try
+            {
+                title = doc.GetTitle();
+            }
+            catch
+            {
+                title = string.Empty;
+            }
+
+            return NormalizeDocTitleForClose(title);
         }
     }
 }
