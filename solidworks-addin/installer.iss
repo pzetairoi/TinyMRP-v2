@@ -22,8 +22,8 @@
 AppName=TinyMRP SolidWorks Add-in
 AppVersion={#AppVersion}
 OutputDir={#OutputDirName}
-DefaultDirName={pf}\TinyMRP\SolidWorksAddin
-ArchitecturesInstallIn64BitMode=x64
+DefaultDirName={commonpf}\TinyMRP\SolidWorksAddin
+ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 WizardStyle=modern
 WizardImageFile=InstallerAssets\wizard.bmp
@@ -44,7 +44,7 @@ Type: filesandordirs; Name: "{app}\net48"
 Filename: "{win}\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe"; Parameters: """{app}\TinyMRP.SolidWorksAddin.dll"" /codebase /tlb"; Flags: runhidden waituntilterminated
 
 [UninstallRun]
-Filename: "{win}\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe"; Parameters: """{app}\TinyMRP.SolidWorksAddin.dll"" /unregister"; Flags: runhidden waituntilterminated
+Filename: "{win}\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe"; Parameters: """{app}\TinyMRP.SolidWorksAddin.dll"" /unregister"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterAddin"
 
 [Code]
 const
@@ -315,7 +315,7 @@ begin
     if (CompareText(ExistingConfigPath, GetMachineConfigPath) <> 0) and (not FileExists(GetMachineConfigPath)) then
     begin
       ForceDirectories(ExtractFileDir(GetMachineConfigPath));
-      FileCopy(ExistingConfigPath, GetMachineConfigPath, False);
+      CopyFile(ExistingConfigPath, GetMachineConfigPath, False);
     end;
     Exit;
   end;
