@@ -5666,7 +5666,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private void FitSheetToView(Sheet sheet, View view)
         {
-            double[] outline = view.GetOutline() as double[];
+            double[] outline = ToDoubleArray(view.GetOutline());
             if (outline == null || outline.Length < 4)
             {
                 return;
@@ -5676,7 +5676,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             double height = outline[3] - outline[1];
             sheet.SetSize((int)swDwgPaperSizes_e.swDwgPapersUserDefined, width, height);
 
-            double[] position = view.Position as double[];
+            double[] position = ToDoubleArray(view.Position);
             if (position == null || position.Length < 2)
             {
                 return;
@@ -6049,6 +6049,62 @@ namespace TinyMRP.SolidWorksAddin.Services
             foreach (object obj in ComInteropUtil.EnumerateCom(values))
             {
                 result.Add(obj != null ? obj.ToString() : string.Empty);
+            }
+
+            return result.Count > 0 ? result.ToArray() : null;
+        }
+
+        private static double[] ToDoubleArray(object values)
+        {
+            double[] doubles = values as double[];
+            if (doubles != null)
+            {
+                return doubles;
+            }
+
+            if (values == null)
+            {
+                return null;
+            }
+
+            var result = new List<double>();
+            foreach (object obj in ComInteropUtil.EnumerateCom(values))
+            {
+                if (obj == null)
+                {
+                    continue;
+                }
+
+                if (obj is double)
+                {
+                    result.Add((double)obj);
+                }
+                else if (obj is float)
+                {
+                    result.Add((double)(float)obj);
+                }
+                else if (obj is int)
+                {
+                    result.Add((int)obj);
+                }
+                else if (obj is short)
+                {
+                    result.Add((short)obj);
+                }
+                else if (obj is long)
+                {
+                    result.Add((long)obj);
+                }
+                else
+                {
+                    double parsed;
+                    string text = obj.ToString();
+                    if (double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out parsed) ||
+                        double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out parsed))
+                    {
+                        result.Add(parsed);
+                    }
+                }
             }
 
             return result.Count > 0 ? result.ToArray() : null;
