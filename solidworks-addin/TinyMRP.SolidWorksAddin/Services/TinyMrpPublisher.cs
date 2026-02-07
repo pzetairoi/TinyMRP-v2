@@ -444,6 +444,10 @@ namespace TinyMRP.SolidWorksAddin.Services
             private readonly ISldWorks _swApp;
             private readonly int _docType;
             private readonly string _rootTitle;
+            private readonly string _targetTitle;
+            private readonly string _targetTitleNormalized;
+            private readonly string _targetIdBefore;
+            private readonly bool _targetWasVisibleBefore;
             private readonly Action<string> _errorLog;
             private readonly bool _restoreVisibility;
             private readonly bool _previousVisible;
@@ -466,8 +470,72 @@ namespace TinyMRP.SolidWorksAddin.Services
                 _rootTitle = rootTitle ?? string.Empty;
                 _errorLog = errorLog;
                 _context = context ?? string.Empty;
+                _targetTitle = targetDocTitle ?? string.Empty;
+                _targetTitleNormalized = NormalizeDocTitle(_targetTitle);
+                _targetIdBefore = string.Empty;
+                _targetWasVisibleBefore = true;
 
-                if (_swApp == null || string.IsNullOrWhiteSpace(targetDocTitle) || _docType <= 0)
+                if (_swApp != null && !string.IsNullOrWhiteSpace(_targetTitle) && _docType > 0)
+                {
+                    // Capture whether the target document was visible BEFORE any activation/visibility changes.
+                    // SolidWorks can return documents as SAFEARRAY (Array) vs a single COM object; do not use "as object[]".
+                    try
+                    {
+                        ModelDoc2 targetDoc = FindOpenDocByTitle(_targetTitle);
+                        if (targetDoc != null)
+                        {
+                            bool wasVisible = true;
+                            try
+                            {
+                                wasVisible = targetDoc.Visible;
+                            }
+                            catch
+                            {
+                                wasVisible = true;
+                            }
+
+                            _targetWasVisibleBefore = wasVisible;
+
+                            string path = string.Empty;
+                            try
+                            {
+                                path = targetDoc.GetPathName();
+                            }
+                            catch
+                            {
+                                path = string.Empty;
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(path))
+                            {
+                                _targetIdBefore = path;
+                            }
+                            else
+                            {
+                                _targetIdBefore = !string.IsNullOrWhiteSpace(_targetTitleNormalized)
+                                    ? _targetTitleNormalized
+                                    : _targetTitle;
+                            }
+                        }
+                        else
+                        {
+                            // Not found (should be rare). Default to "not visible" so Dispose will attempt to hide it if it appears.
+                            _targetWasVisibleBefore = false;
+                            _targetIdBefore = !string.IsNullOrWhiteSpace(_targetTitleNormalized)
+                                ? _targetTitleNormalized
+                                : _targetTitle;
+                        }
+                    }
+                    catch
+                    {
+                        _targetWasVisibleBefore = true;
+                        _targetIdBefore = !string.IsNullOrWhiteSpace(_targetTitleNormalized)
+                            ? _targetTitleNormalized
+                            : _targetTitle;
+                    }
+                }
+
+                if (_swApp == null || string.IsNullOrWhiteSpace(_targetTitle) || _docType <= 0)
                 {
                     Activated = false;
                     ActivateErrors = 0;
@@ -505,15 +573,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
 
                 string activeBefore = SafeActiveDocTitle(_swApp);
+                int visibleBefore = SafeVisibleDocCount(_swApp);
 
                 int errors = 0;
                 object activated = null;
                 try
                 {
-                    string title = NormalizeDocTitle(targetDocTitle);
+                    string title = _targetTitleNormalized;
                     if (string.IsNullOrWhiteSpace(title))
                     {
-                        title = targetDocTitle;
+                        title = _targetTitle;
                     }
 
                     activated = _swApp.ActivateDoc3(title, true,
@@ -531,8 +600,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                     "ACTIVATE start context=" + _context +
                     " docType=" + _docType +
                     " prevDocVisible=" + (_restoreVisibility ? _previousVisible.ToString() : "<unknown>") +
+                    " targetWasVisibleBefore=" + _targetWasVisibleBefore +
                     " activeBefore=" + activeBefore +
-                    " target=" + (targetDocTitle ?? string.Empty) +
+                    " visibleBefore=" + visibleBefore +
+                    " target=" + _targetTitle +
                     " ok=" + Activated +
                     " errors=" + errors);
             }
@@ -543,6 +614,15 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     return;
                 }
+
+                string activeBefore = SafeActiveDocTitle(_swApp);
+                int visibleBefore = SafeVisibleDocCount(_swApp);
+
+                int rootActivateErrors = 0;
+                bool hideAttempted = false;
+                bool afterHideVisible = false;
+                bool restoredVisible = false;
+                bool closeFallback = false;
 
                 try
                 {
@@ -557,17 +637,29 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         _swApp.ActivateDoc3(root, true,
                             (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors);
-
-                        SafeWrite(
-                            "ACTIVATE end context=" + _context +
-                            " root=" + (_rootTitle ?? string.Empty) +
-                            " errors=" + errors +
-                            " activeNow=" + SafeActiveDocTitle(_swApp));
+                        rootActivateErrors = errors;
                     }
                 }
                 catch
                 {
                     // ignore activation errors
+                }
+
+                try
+                {
+                    // Hide/close any document that became visible due to activation/export.
+                    // Do this BEFORE restoring DocumentVisible, otherwise restore can re-show activated docs.
+                    if (!_targetWasVisibleBefore &&
+                        !string.IsNullOrWhiteSpace(_targetTitle) &&
+                        !TitlesMatch(_targetTitle, _rootTitle))
+                    {
+                        hideAttempted = true;
+                        afterHideVisible = TryHideTargetDoc(_context + "|preRestore", out closeFallback);
+                    }
+                }
+                catch
+                {
+                    // ignore hide errors
                 }
 
                 try
@@ -584,6 +676,45 @@ namespace TinyMRP.SolidWorksAddin.Services
                 catch
                 {
                     // ignore visibility restore errors
+                }
+
+                try
+                {
+                    // Restoring DocumentVisible can re-show docs that were activated while hidden.
+                    // If the target wasn't visible before the scope, ensure it isn't left visible after restore.
+                    if (!_targetWasVisibleBefore &&
+                        !string.IsNullOrWhiteSpace(_targetTitle) &&
+                        !TitlesMatch(_targetTitle, _rootTitle))
+                    {
+                        bool closeFallback2;
+                        restoredVisible = TryHideTargetDoc(_context + "|postRestore", out closeFallback2);
+                        closeFallback = closeFallback || closeFallback2;
+                    }
+                }
+                catch
+                {
+                    // ignore post-restore hide errors
+                }
+
+                try
+                {
+                    SafeWrite(
+                        "ACTIVATION dispose context=" + _context +
+                        " docType=" + _docType +
+                        " targetWasVisibleBefore=" + _targetWasVisibleBefore +
+                        " rootActivateErrors=" + rootActivateErrors +
+                        " hideAttempted=" + hideAttempted +
+                        " afterHideVisible=" + afterHideVisible +
+                        " restoredDocVisible=" + restoredVisible +
+                        " closeFallback=" + closeFallback +
+                        " activeBefore=" + activeBefore +
+                        " activeAfter=" + SafeActiveDocTitle(_swApp) +
+                        " visibleBefore=" + visibleBefore +
+                        " visibleAfter=" + SafeVisibleDocCount(_swApp));
+                }
+                catch
+                {
+                    // ignore log errors
                 }
             }
 
@@ -618,6 +749,316 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
 
                 return normalized;
+            }
+
+            private ModelDoc2 FindOpenDocByTitle(string title)
+            {
+                if (_swApp == null || string.IsNullOrWhiteSpace(title))
+                {
+                    return null;
+                }
+
+                string expectedNorm = NormalizeDocTitle(title);
+                foreach (ModelDoc2 doc in EnumerateOpenDocuments())
+                {
+                    if (doc == null)
+                    {
+                        continue;
+                    }
+
+                    string docTitle = string.Empty;
+                    try
+                    {
+                        docTitle = doc.GetTitle();
+                    }
+                    catch
+                    {
+                        docTitle = string.Empty;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(docTitle))
+                    {
+                        continue;
+                    }
+
+                    if (TitlesMatch(docTitle, expectedNorm) || TitlesMatch(docTitle, title))
+                    {
+                        return doc;
+                    }
+                }
+
+                return null;
+            }
+
+            private IEnumerable<ModelDoc2> EnumerateOpenDocuments()
+            {
+                object docsObj = null;
+                try
+                {
+                    docsObj = _swApp.GetDocuments();
+                }
+                catch
+                {
+                    yield break;
+                }
+
+                if (docsObj == null)
+                {
+                    yield break;
+                }
+
+                Array docsArray = docsObj as Array;
+                if (docsArray != null)
+                {
+                    foreach (object obj in docsArray)
+                    {
+                        ModelDoc2 doc = obj as ModelDoc2;
+                        if (doc != null)
+                        {
+                            yield return doc;
+                        }
+                    }
+
+                    yield break;
+                }
+
+                ModelDoc2 single = docsObj as ModelDoc2;
+                if (single != null)
+                {
+                    yield return single;
+                }
+            }
+
+            private bool TryHideTargetDoc(string hideContext, out bool closeFallback)
+            {
+                closeFallback = false;
+
+                if (_swApp == null)
+                {
+                    return false;
+                }
+
+                ModelDoc2 doc = null;
+                try
+                {
+                    doc = FindOpenTargetDoc();
+                }
+                catch
+                {
+                    doc = null;
+                }
+
+                if (doc == null)
+                {
+                    SafeWrite("ACTIVATION hide context=" + (hideContext ?? string.Empty) + " targetNotFound title=" + _targetTitle);
+                    return false;
+                }
+
+                bool beforeVisible = true;
+                try
+                {
+                    beforeVisible = doc.Visible;
+                }
+                catch
+                {
+                    beforeVisible = true;
+                }
+
+                bool afterVisible = beforeVisible;
+                try
+                {
+                    doc.Visible = false;
+                }
+                catch
+                {
+                    // ignore hide errors
+                }
+
+                try
+                {
+                    afterVisible = doc.Visible;
+                }
+                catch
+                {
+                    afterVisible = beforeVisible;
+                }
+
+                if (afterVisible)
+                {
+                    string closeTitle = _targetTitleNormalized;
+                    if (string.IsNullOrWhiteSpace(closeTitle))
+                    {
+                        closeTitle = _targetTitle;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(closeTitle))
+                    {
+                        try
+                        {
+                            closeFallback = true;
+                            _swApp.CloseDoc(closeTitle);
+                        }
+                        catch
+                        {
+                            // ignore close errors
+                        }
+
+                        try
+                        {
+                            afterVisible = doc.Visible;
+                        }
+                        catch
+                        {
+                            // ignore visible read errors
+                        }
+                    }
+                }
+
+                SafeWrite(
+                    "ACTIVATION hide context=" + (hideContext ?? string.Empty) +
+                    " targetWasVisibleBefore=" + _targetWasVisibleBefore +
+                    " beforeVisible=" + beforeVisible +
+                    " afterVisible=" + afterVisible +
+                    " closeFallback=" + closeFallback +
+                    " title=" + _targetTitle);
+
+                return afterVisible;
+            }
+
+            private ModelDoc2 FindOpenTargetDoc()
+            {
+                string targetId = _targetIdBefore ?? string.Empty;
+                bool wantsPathMatch = !string.IsNullOrWhiteSpace(targetId) &&
+                                      (targetId.IndexOf("\\", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                       targetId.IndexOf(":", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                foreach (ModelDoc2 doc in EnumerateOpenDocuments())
+                {
+                    if (doc == null)
+                    {
+                        continue;
+                    }
+
+                    if (wantsPathMatch)
+                    {
+                        string path = string.Empty;
+                        try
+                        {
+                            path = doc.GetPathName();
+                        }
+                        catch
+                        {
+                            path = string.Empty;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(path) &&
+                            string.Equals(path, targetId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return doc;
+                        }
+                    }
+
+                    string title = string.Empty;
+                    try
+                    {
+                        title = doc.GetTitle();
+                    }
+                    catch
+                    {
+                        title = string.Empty;
+                    }
+
+                    if (TitlesMatch(title, _targetTitle) || TitlesMatch(title, _targetTitleNormalized))
+                    {
+                        return doc;
+                    }
+                }
+
+                return null;
+            }
+
+            private static bool TitlesMatch(string left, string right)
+            {
+                if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+                {
+                    return false;
+                }
+
+                string ln = NormalizeDocTitle(left);
+                string rn = NormalizeDocTitle(right);
+                if (!string.IsNullOrWhiteSpace(ln) && !string.IsNullOrWhiteSpace(rn) &&
+                    string.Equals(ln, rn, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                return string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+            }
+
+            private static int SafeVisibleDocCount(ISldWorks swApp)
+            {
+                if (swApp == null)
+                {
+                    return 0;
+                }
+
+                object docsObj = null;
+                try
+                {
+                    docsObj = swApp.GetDocuments();
+                }
+                catch
+                {
+                    return 0;
+                }
+
+                if (docsObj == null)
+                {
+                    return 0;
+                }
+
+                Array docsArray = docsObj as Array;
+                if (docsArray == null)
+                {
+                    ModelDoc2 single = docsObj as ModelDoc2;
+                    if (single == null)
+                    {
+                        return 0;
+                    }
+
+                    try
+                    {
+                        return single.Visible ? 1 : 0;
+                    }
+                    catch
+                    {
+                        return 1;
+                    }
+                }
+
+                int count = 0;
+                foreach (object obj in docsArray)
+                {
+                    ModelDoc2 doc = obj as ModelDoc2;
+                    if (doc == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        if (doc.Visible)
+                        {
+                            count++;
+                        }
+                    }
+                    catch
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
             }
 
             private static string SafeActiveDocTitle(ISldWorks swApp)
@@ -4866,8 +5307,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 foreach (DeliverableGroup group in groups)
                 {
-                    ThrowIfCancelled();
-                    System.Windows.Forms.Application.DoEvents();
+                    YieldAndCheckCancel();
 
                     if (group == null || group.Plans == null || group.Plans.Count == 0)
                     {
@@ -4913,10 +5353,14 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     foreach (DeliverablePlan plan in group.Plans)
                     {
-                        ThrowIfCancelled();
-                        System.Windows.Forms.Application.DoEvents();
+                        YieldAndCheckCancel();
 
                         string planKey = plan != null ? (plan.FileString ?? string.Empty) : string.Empty;
+
+                        // Resilience: if any previous operation left extra visible tabs open, hide them now so
+                        // we never start a plan above the baseline UI state.
+                        EnforceVisibleDocBudget(baselineVisibleDocs, rootTitle, "before plan " + planKey, errorLog, 0);
+
                         SafeLog(errorLog,
                             "PLAN start key=" + planKey +
                             " path=" + (plan != null ? (plan.ModelPath ?? string.Empty) : string.Empty) +
@@ -4959,6 +5403,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 // ignore activate errors
                             }
 
+                            // Enforce "no visible doc creep": only manage VISIBLE tabs, never close in-memory
+                            // referenced documents loaded by the root assembly.
+                            EnforceVisibleDocBudget(baselineVisibleDocs, rootTitle, "after plan " + planKey, errorLog, 0);
                             LogVisibleDocDelta(baselineVisibleDocs, errorLog, "after plan " + planKey);
                         }
 
@@ -5580,7 +6027,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
 
                     TryShowConfiguration(model, confName);
-                    ThrowIfCancelled();
+                    YieldAndCheckCancel();
 
                     if (png)
                     {
@@ -5639,7 +6086,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             LogExportFailure(log, errorLog, "3MF export failed: " + path);
                         }
                     }
-                    ThrowIfCancelled();
+                    YieldAndCheckCancel();
 
                     bool stlExported = false;
                     string stlPath = Path.Combine(deliverablesFolder, "stl", fileString + ".stl");
@@ -5686,7 +6133,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             LogExportFailure(log, errorLog, "STL export failed: " + stlPath);
                         }
                     }
-                    ThrowIfCancelled();
+                    YieldAndCheckCancel();
 
                     if (ply)
                     {
@@ -5707,7 +6154,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         if (!plyExported)
                         {
-                            ThrowIfCancelled();
+                            YieldAndCheckCancel();
                             viaStlConversion = true;
 
                             string sourceStl = stlExported ? stlPath : string.Empty;
@@ -5727,7 +6174,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 }
                             }
 
-                            ThrowIfCancelled();
+                            YieldAndCheckCancel();
 
                             if (!string.IsNullOrWhiteSpace(sourceStl) && File.Exists(sourceStl))
                             {
@@ -5786,7 +6233,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             LogExportFailure(log, errorLog, "PLY export failed: " + plyPath);
                         }
                     }
-                    ThrowIfCancelled();
+                    YieldAndCheckCancel();
 
                     if (step)
                     {
@@ -5832,7 +6279,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             LogExportFailure(log, errorLog, "STEP export failed: " + path);
                         }
                     }
-                    ThrowIfCancelled();
+                    YieldAndCheckCancel();
 
                     if (edr)
                     {
@@ -5883,7 +6330,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             LogExportFailure(log, errorLog, "eDrawing export failed: " + path);
                         }
                     }
-                    ThrowIfCancelled();
+                    YieldAndCheckCancel();
 
                     if (png)
                     {
@@ -6267,7 +6714,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     using (new ExternalReferenceBatchOpenScope(_swApp))
                     {
-                        ThrowIfCancelled();
+                        YieldAndCheckCancel();
                         drawDoc = _swApp.OpenDoc7(spec) as ModelDoc2;
                     }
                     if (drawDoc == null)
@@ -6358,7 +6805,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             summary.DwgAttemptPdf++;
                         }
 
-                        ThrowIfCancelled();
+                        YieldAndCheckCancel();
                         ExportPdfData exportData = _swApp.GetExportFileData(
                             (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
                         errors = 0;
@@ -6433,7 +6880,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             summary.DwgAttemptEdraw++;
                         }
 
-                        ThrowIfCancelled();
+                        YieldAndCheckCancel();
                         _swApp.SetUserPreferenceIntegerValue(
                             (int)swUserPreferenceIntegerValue_e.swEdrawingsSaveAsSelectionOption,
                             (int)swEdrawingSaveAsOption_e.swEdrawingSaveAll);
@@ -6482,7 +6929,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             summary.DwgAttemptPng++;
                         }
 
-                        ThrowIfCancelled();
+                        YieldAndCheckCancel();
                         errors = 0;
                         warnings = 0;
                         string activeBefore = ActiveDocTitle();
@@ -6554,7 +7001,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             summary.DwgAttemptDxf++;
                         }
 
-                        ThrowIfCancelled();
+                        YieldAndCheckCancel();
                         bool exported = false;
 
                         if (!string.IsNullOrWhiteSpace(dxfSheetName))
@@ -8139,6 +8586,20 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private void YieldAndCheckCancel()
+        {
+            ThrowIfCancelled();
+            try
+            {
+                System.Windows.Forms.Application.DoEvents();
+            }
+            catch
+            {
+                // ignore UI pump errors
+            }
+            ThrowIfCancelled();
+        }
+
         private void CreateZipWithFolder(string zipPath, string folderName, params string[] filePaths)
         {
             string normalizedFolder = (folderName ?? string.Empty).Trim();
@@ -8952,6 +9413,283 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 LogVisibleDocuments(errorLog, "VISIBLE");
             }
+        }
+
+        private void EnforceVisibleDocBudget(
+            HashSet<string> baselineVisibleIds,
+            string rootTitle,
+            string currentContext,
+            Action<string> errorLog,
+            int maxExtraVisibleDocs = 5)
+        {
+            if (baselineVisibleIds == null || errorLog == null)
+            {
+                return;
+            }
+
+            string ActiveDocTitle()
+            {
+                try
+                {
+                    ModelDoc2 active = _swApp.ActiveDoc as ModelDoc2;
+                    return active != null ? (active.GetTitle() ?? string.Empty) : "<null>";
+                }
+                catch
+                {
+                    return "<error>";
+                }
+            }
+
+            string rootId = string.Empty;
+            try
+            {
+                ModelDoc2 rootDoc = FindOpenDocument(string.Empty, rootTitle);
+                if (rootDoc != null)
+                {
+                    rootId = GetDocumentId(rootDoc);
+                }
+            }
+            catch
+            {
+                rootId = string.Empty;
+            }
+
+            var extras = new List<ModelDoc2>();
+            foreach (ModelDoc2 doc in EnumerateOpenDocuments())
+            {
+                if (doc == null)
+                {
+                    continue;
+                }
+
+                bool visible = true;
+                try
+                {
+                    visible = doc.Visible;
+                }
+                catch
+                {
+                    visible = true;
+                }
+
+                if (!visible)
+                {
+                    continue;
+                }
+
+                string id = GetDocumentId(doc);
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                if (baselineVisibleIds.Contains(id))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(rootId) &&
+                    string.Equals(id, rootId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                extras.Add(doc);
+            }
+
+            if (extras.Count <= maxExtraVisibleDocs)
+            {
+                return;
+            }
+
+            HashSet<string> visibleBefore = GetOpenVisibleDocumentIds();
+            var visibleAddedBefore = new HashSet<string>(visibleBefore, StringComparer.OrdinalIgnoreCase);
+            visibleAddedBefore.ExceptWith(baselineVisibleIds);
+
+            SafeLog(errorLog,
+                "WATCHDOG TRIGGERED context=" + (currentContext ?? string.Empty) +
+                " extras=" + extras.Count +
+                " threshold=" + maxExtraVisibleDocs +
+                " active=" + ActiveDocTitle() +
+                " visibleNow=" + visibleBefore.Count +
+                " addedNow=" + visibleAddedBefore.Count);
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(rootTitle))
+                {
+                    string activateTitle = NormalizeDocTitleForClose(rootTitle);
+                    if (string.IsNullOrWhiteSpace(activateTitle))
+                    {
+                        activateTitle = rootTitle;
+                    }
+
+                    int errors = 0;
+                    _swApp.ActivateDoc3(activateTitle, true,
+                        (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors);
+
+                    SafeLog(errorLog,
+                        "WATCHDOG activateRoot errors=" + errors +
+                        " activeNow=" + ActiveDocTitle());
+                }
+            }
+            catch
+            {
+                // ignore activation errors
+            }
+
+            bool IsVisibleById(string id)
+            {
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    return false;
+                }
+
+                foreach (ModelDoc2 d in EnumerateOpenDocuments())
+                {
+                    if (d == null)
+                    {
+                        continue;
+                    }
+
+                    string did = GetDocumentId(d);
+                    if (string.IsNullOrWhiteSpace(did) || !string.Equals(did, id, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    bool vis = true;
+                    try
+                    {
+                        vis = d.Visible;
+                    }
+                    catch
+                    {
+                        vis = true;
+                    }
+
+                    return vis;
+                }
+
+                return false;
+            }
+
+            int hiddenCount = 0;
+            foreach (ModelDoc2 doc in extras)
+            {
+                YieldAndCheckCancel();
+
+                string id = string.Empty;
+                string title = string.Empty;
+                string path = string.Empty;
+                try
+                {
+                    id = GetDocumentId(doc);
+                    title = doc.GetTitle();
+                    path = doc.GetPathName();
+                }
+                catch
+                {
+                    id = string.Empty;
+                    title = string.Empty;
+                    path = string.Empty;
+                }
+
+                bool visibleBeforeHide = true;
+                try
+                {
+                    visibleBeforeHide = doc.Visible;
+                }
+                catch
+                {
+                    visibleBeforeHide = true;
+                }
+
+                bool hideOk = false;
+                bool closed = false;
+                try
+                {
+                    doc.Visible = false;
+                }
+                catch
+                {
+                    // ignore hide errors
+                }
+
+                bool visibleAfterHide = IsVisibleById(id);
+                hideOk = !visibleAfterHide;
+
+                if (!hideOk)
+                {
+                    string closeTitle = NormalizeDocTitleForClose(title);
+                    if (string.IsNullOrWhiteSpace(closeTitle))
+                    {
+                        closeTitle = title;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(closeTitle))
+                    {
+                        try
+                        {
+                            _swApp.CloseDoc(closeTitle);
+                            closed = true;
+                        }
+                        catch
+                        {
+                            closed = false;
+                        }
+                    }
+
+                    visibleAfterHide = IsVisibleById(id);
+                    hideOk = !visibleAfterHide;
+                }
+
+                if (hideOk)
+                {
+                    hiddenCount++;
+                }
+
+                SafeLog(errorLog,
+                    "WATCHDOG hide/close context=" + (currentContext ?? string.Empty) +
+                    " id=" + (id ?? string.Empty) +
+                    " title=" + (title ?? string.Empty) +
+                    " path=" + (path ?? string.Empty) +
+                    " wasVisible=" + visibleBeforeHide +
+                    " ok=" + hideOk +
+                    " closed=" + closed +
+                    " visibleNow=" + IsVisibleById(id));
+            }
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(rootTitle))
+                {
+                    string activateTitle = NormalizeDocTitleForClose(rootTitle);
+                    if (string.IsNullOrWhiteSpace(activateTitle))
+                    {
+                        activateTitle = rootTitle;
+                    }
+
+                    int errors = 0;
+                    _swApp.ActivateDoc3(activateTitle, true,
+                        (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors);
+                }
+            }
+            catch
+            {
+                // ignore activation errors
+            }
+
+            HashSet<string> visibleAfter = GetOpenVisibleDocumentIds();
+            var visibleAddedAfter = new HashSet<string>(visibleAfter, StringComparer.OrdinalIgnoreCase);
+            visibleAddedAfter.ExceptWith(baselineVisibleIds);
+
+            SafeLog(errorLog,
+                "WATCHDOG end context=" + (currentContext ?? string.Empty) +
+                " hidden=" + hiddenCount +
+                " visibleNow=" + visibleAfter.Count +
+                " addedNow=" + visibleAddedAfter.Count +
+                " active=" + ActiveDocTitle());
         }
 
         private void EnsureDocBaseline(HashSet<string> keep, Action<string> log, Action<string> errorLog, string reason,
