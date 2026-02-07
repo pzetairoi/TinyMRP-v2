@@ -29,14 +29,13 @@ namespace TinyMRP.SolidWorksAddin.Services
             yield return comValue;
         }
 
-        public static IEnumerable<T> EnumerateComAs<T>(object comValue) where T : class
+        public static IEnumerable<T> EnumerateComAs<T>(object comValue)
         {
             foreach (object obj in EnumerateCom(comValue))
             {
-                T item = obj as T;
-                if (item != null)
+                if (obj is T)
                 {
-                    yield return item;
+                    yield return (T)obj;
                 }
             }
         }
