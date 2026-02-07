@@ -84,13 +84,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return result;
             }
 
-            object[] objs = namesObj as object[];
-            if (objs == null)
-            {
-                return result;
-            }
-
-            foreach (object obj in objs)
+            foreach (object obj in ComInteropUtil.EnumerateCom(namesObj))
             {
                 if (obj != null)
                 {
