@@ -167,8 +167,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 if (method != null)
                 {
                     object refsObj = method.Invoke(ext, null);
-                    object[] refs = refsObj as object[];
-                    if (refs != null && refs.Length > 0)
+                    if (ComInteropUtil.GetComLength(refsObj) > 0)
                     {
                         note = "(External references detected.)";
                         return true;

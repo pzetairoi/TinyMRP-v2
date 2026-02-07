@@ -2948,8 +2948,17 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
-            object[] components = assembly.GetComponents(false) as object[];
-            if (components == null || components.Length == 0)
+            object componentsObj = null;
+            try
+            {
+                componentsObj = assembly.GetComponents(false);
+            }
+            catch
+            {
+                componentsObj = null;
+            }
+
+            if (ComInteropUtil.GetComLength(componentsObj) == 0)
             {
                 return;
             }
@@ -2959,7 +2968,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var service = new SolidWorksRenameService();
 
-            foreach (object item in components)
+            foreach (object item in ComInteropUtil.EnumerateCom(componentsObj))
             {
                 Component2 component = item as Component2;
                 if (component == null || component.IsSuppressed())
