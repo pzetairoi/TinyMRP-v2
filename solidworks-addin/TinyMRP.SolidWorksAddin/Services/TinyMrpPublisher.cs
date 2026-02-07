@@ -15,9 +15,9 @@ namespace TinyMRP.SolidWorksAddin.Services
     {
         // What changed (batch deliverables export reliability):
         // - Fixed SolidWorks COM SAFEARRAY handling (System.Array vs object[]) via ComInteropUtil.EnumerateCom/EnumerateComAs.
-        // - Removed dangerous global leak-guard/baseline cleanup paths that could close the active/root doc (no CloseDoc("")).
-        // - FlatBOM generation now scans the already-open root assembly tree without opening component documents.
-        // - Export opens models via OpenDoc7 (Silent + ReadOnly) and enforces strict per-step open/close cleanup (DocScope).
+        // - Removed baseline GetDocuments()-driven cleanup (it was closing invisible in-memory docs and causing minute-long close loops/cancel lag).
+        // - Traverse now mirrors the working VBA macro: ResolveAllLightWeightComponents once, then walk the root tree via GetComponents/GetChildren (no OpenDoc for parts/assemblies).
+        // - Export uses traversed ModelDoc2 pointers for model deliverables; only drawings are opened (invisibly, read-only, silent) and explicitly closed (OpenTracker).
         // Flip these to true when diagnosing hide-features issues.
         private static readonly bool EnableHideDebugLog = false;
         private static readonly bool EnableHideStatusLog = false;
@@ -36,6 +36,29 @@ namespace TinyMRP.SolidWorksAddin.Services
             public string ModelTitle;
             public string ConfigurationName;
             public bool IsRoot;
+        }
+
+        private sealed class TraversedModel
+        {
+            public ModelDoc2 Model;
+            public string ModelPath;
+            public string ModelTitle;
+            public string ConfigurationName;
+            public string Revision;
+            public int DocType;
+            public bool IsRoot;
+
+            public string Key;
+        }
+
+        private sealed class BatchTraverseResult
+        {
+            public readonly List<TraversedModel> Unique = new List<TraversedModel>();
+            public readonly Dictionary<string, TraversedModel> ByKey = new Dictionary<string, TraversedModel>(StringComparer.OrdinalIgnoreCase);
+            public readonly Dictionary<string, ModelDoc2> ModelByPath = new Dictionary<string, ModelDoc2>(StringComparer.OrdinalIgnoreCase);
+
+            public int ComponentsScanned;
+            public int UnresolvedComponents;
         }
 
         private sealed class FlatBomEntry
@@ -1722,8 +1745,11 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 startPathSnapshot = string.Empty;
             }
-            // Baseline of documents the user has open at the start of the run. Batch export must never close these.
-            HashSet<string> initialDocs = SnapshotOpenDocIds();
+
+            // Baseline of VISIBLE docs/tabs the user has open at the start of the run.
+            // Batch export must not leave extra visible documents behind.
+            HashSet<string> initialVisibleDocs = GetOpenVisibleDocumentIds();
+            LogVisibleDocuments(errorLog, "VisibleBaseline");
 
             Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
             int modelType = swModel.GetType();
@@ -1736,7 +1762,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                     swModel = reference.Model;
                     swConf = reference.Configuration;
                     modelType = swModel.GetType();
-                    _swApp.ActivateDoc(swModel.GetTitle());
                 }
             }
 
@@ -1785,8 +1810,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 " startTitle=" + (startTitle ?? string.Empty) +
                 " rootTitle=" + (rootTitle ?? string.Empty) +
                 " rootPath=" + (rootModel != null ? (rootModel.GetPathName() ?? string.Empty) : string.Empty) +
-                " initialVisibleDocs=" + (initialDocs != null ? initialDocs.Count : 0) +
-                " openDocs=" + SnapshotOpenDocIds().Count);
+                " initialVisibleDocs=" + (initialVisibleDocs != null ? initialVisibleDocs.Count : 0) +
+                " visibleDocs=" + GetOpenVisibleDocumentIds().Count);
 
             try
             {
@@ -1808,15 +1833,13 @@ namespace TinyMRP.SolidWorksAddin.Services
                 _swApp.SetUserPreferenceIntegerValue(
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, 16777215);
 
-                var entries = BuildBatchEntries(swModel, swConf, modelType, options.TopLevelOnly);
-                Log(log, "Planned unique model-config pairs: " + entries.Count);
-                if (errorLog != null)
-                {
-                    errorLog("Planned unique model-config pairs: " + entries.Count);
-                }
+                BatchTraverseResult traverse = TraverseModelsForBatch(swModel, swConf, modelType, options.TopLevelOnly, log, errorLog);
+                int planned = traverse != null && traverse.Unique != null ? traverse.Unique.Count : 0;
+                Log(log, "Planned unique model-config pairs: " + planned);
+                SafeLog(errorLog, "Planned unique model-config pairs: " + planned);
                 if (_currentExportSummary != null)
                 {
-                    _currentExportSummary.PlannedModelConfigPairs = entries.Count;
+                    _currentExportSummary.PlannedModelConfigPairs = planned;
                 }
 
                 string outputFile;
@@ -1836,9 +1859,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                     uploadPackExtras = new List<UploadPackBuilder.AssociatedFilesBundle>();
                 }
 
-                UpdateProgress(flatBomProgress, 0, entries.Count);
-                WriteFlatBom(outputFile, entries, log, flatBomProgress, initialDocs, rootModel, rootTitle,
-                    uploadPackBases, uploadPackExtras, errorLog);
+                UpdateProgress(flatBomProgress, 0, planned);
+                WriteFlatBomFromTraverse(outputFile, traverse, log, flatBomProgress, uploadPackBases, uploadPackExtras, errorLog);
                 ThrowIfCancelled();
 
                 if (createFiles)
@@ -1855,22 +1877,15 @@ namespace TinyMRP.SolidWorksAddin.Services
                             "Deliverables planning: flatEntries=" + (flatEntries != null ? flatEntries.Count : 0) +
                             " plans=" + (plans != null ? plans.Count : 0));
 
-                        if ((flatEntries == null || flatEntries.Count == 0) && entries.Count > 0)
-                        {
-                            LogExportFailure(log, errorLog,
-                                "Deliverables planning skipped: flat BOM parse empty; using direct traversal.");
-                            ProcessDeliverablesLegacy(entries, deliverablesFolder, options, log, errorLog,
-                                initialDocs, rootModel, rootTitle, deliverablesProgress);
-                        }
-                        else if (plans == null || plans.Count == 0)
+                        if (plans == null || plans.Count == 0)
                         {
                             Log(log, "No deliverables to export (all selected files already exist).");
                             UpdateProgress(deliverablesProgress, 0, 0);
                         }
                         else
                         {
-                            ProcessDeliverablePlans(plans ?? new List<DeliverablePlan>(), deliverablesFolder, options, log,
-                                errorLog, initialDocs, rootModel, rootTitle, deliverablesProgress);
+                            ProcessDeliverablePlansFast(plans ?? new List<DeliverablePlan>(), traverse, deliverablesFolder,
+                                options, log, errorLog, initialVisibleDocs, rootModel, rootTitle, deliverablesProgress);
                         }
                     }
                 }
@@ -1896,7 +1911,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                 _swApp.SetUserPreferenceIntegerValue(
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, prevViewport);
 
-                CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
                 RestoreStartDocument(startTitle);
 
                 try
@@ -1917,7 +1931,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 DebugExport(errorLog,
                     "TraverseModel end startTitle=" + (startTitle ?? string.Empty) +
-                    " openDocs=" + SnapshotOpenDocIds().Count);
+                    " visibleDocs=" + GetOpenVisibleDocumentIds().Count);
 
             }
         }
@@ -2356,6 +2370,227 @@ namespace TinyMRP.SolidWorksAddin.Services
             return entries;
         }
 
+        private BatchTraverseResult TraverseModelsForBatch(ModelDoc2 rootModel, Configuration rootConfig, int modelType, bool topLevelOnly,
+            Action<string> log, Action<string> errorLog)
+        {
+            var result = new BatchTraverseResult();
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            SafeLog(errorLog,
+                "PHASE TRAVERSE start modelType=" + modelType +
+                " topLevelOnly=" + topLevelOnly);
+
+            if (rootModel == null)
+            {
+                SafeLog(errorLog, "PHASE TRAVERSE abort: root model is null.");
+                return result;
+            }
+
+            string rootConfigName = rootConfig != null ? rootConfig.Name : string.Empty;
+            AddTraversedModel(result, rootModel, rootConfigName, isRoot: true, errorLog: errorLog);
+
+            if (modelType == (int)swDocumentTypes_e.swDocASSEMBLY &&
+                !topLevelOnly &&
+                rootConfig != null)
+            {
+                AssemblyDoc rootAssy = rootModel as AssemblyDoc;
+                Component2 rootComp = null;
+                try
+                {
+                    rootComp = rootConfig.GetRootComponent() as Component2;
+                }
+                catch
+                {
+                    rootComp = null;
+                }
+
+                if (rootAssy != null)
+                {
+                    try
+                    {
+                        rootAssy.ResolveAllLightWeightComponents(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        SafeLog(errorLog, "Traverse: ResolveAllLightWeightComponents failed: " + ex.Message);
+                    }
+                }
+
+                int skippedEmptyPaths = 0;
+                Dictionary<string, Component2> uniqueComponents;
+                try
+                {
+                    uniqueComponents = PlanUniqueComponentRefsForFlatBom(rootAssy, rootComp, errorLog, out skippedEmptyPaths);
+                }
+                catch (Exception ex)
+                {
+                    if (ex is OperationCanceledException)
+                    {
+                        throw;
+                    }
+
+                    SafeLog(errorLog, "Traverse: planning component refs failed: " + ex.Message);
+                    uniqueComponents = new Dictionary<string, Component2>(StringComparer.OrdinalIgnoreCase);
+                }
+
+                if (skippedEmptyPaths > 0)
+                {
+                    SafeLog(errorLog, "Traverse: skipped components with empty path count=" + skippedEmptyPaths);
+                }
+
+                if (uniqueComponents != null && uniqueComponents.Count > 0)
+                {
+                    var keys = new List<string>(uniqueComponents.Keys);
+                    keys.Sort(StringComparer.OrdinalIgnoreCase);
+
+                    int scanned = 0;
+                    int unresolved = 0;
+                    foreach (string key in keys)
+                    {
+                        scanned++;
+                        if (scanned % 50 == 0)
+                        {
+                            ThrowIfCancelled();
+                            System.Windows.Forms.Application.DoEvents();
+                        }
+                        if (scanned % 200 == 0)
+                        {
+                            SafeLog(errorLog,
+                                "heartbeat componentsScanned=" + scanned +
+                                " unresolved=" + unresolved +
+                                " elapsedMs=" + timer.ElapsedMilliseconds);
+                        }
+
+                        Component2 comp = uniqueComponents[key];
+                        if (comp == null)
+                        {
+                            continue;
+                        }
+
+                        int sep = key != null ? key.LastIndexOf('|') : -1;
+                        string modelPath = sep >= 0 ? key.Substring(0, sep) : (key ?? string.Empty);
+                        string confName = sep >= 0 && key != null && sep + 1 < key.Length ? key.Substring(sep + 1) : string.Empty;
+
+                        ModelDoc2 model = null;
+                        try
+                        {
+                            model = comp.GetModelDoc2() as ModelDoc2;
+                        }
+                        catch
+                        {
+                            model = null;
+                        }
+
+                        if (model == null)
+                        {
+                            unresolved++;
+                            result.UnresolvedComponents = unresolved;
+                            SafeLog(errorLog,
+                                "UNRESOLVED component path=\"" + (modelPath ?? string.Empty) +
+                                "\" conf=\"" + (confName ?? string.Empty) + "\"");
+                            continue;
+                        }
+
+                        AddTraversedModel(result, model, confName, isRoot: false, errorLog: errorLog, preferredPath: modelPath);
+                    }
+
+                    result.ComponentsScanned = scanned;
+                    result.UnresolvedComponents = unresolved;
+                }
+            }
+
+            SafeLog(errorLog,
+                "PHASE TRAVERSE end unique=" + result.Unique.Count +
+                " componentsScanned=" + result.ComponentsScanned +
+                " unresolved=" + result.UnresolvedComponents +
+                " elapsedMs=" + timer.ElapsedMilliseconds);
+
+            return result;
+        }
+
+        private void AddTraversedModel(BatchTraverseResult result, ModelDoc2 model, string configName, bool isRoot,
+            Action<string> errorLog, string preferredPath = null)
+        {
+            if (result == null || model == null)
+            {
+                return;
+            }
+
+            string path = preferredPath ?? string.Empty;
+            string title = string.Empty;
+            try
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    path = model.GetPathName() ?? string.Empty;
+                }
+            }
+            catch
+            {
+                path = preferredPath ?? string.Empty;
+            }
+
+            try
+            {
+                title = model.GetTitle() ?? string.Empty;
+            }
+            catch
+            {
+                title = string.Empty;
+            }
+
+            int docType = 0;
+            try
+            {
+                docType = model.GetType();
+            }
+            catch
+            {
+                docType = 0;
+            }
+
+            string revision = string.Empty;
+            try
+            {
+                revision = (GetEvalProperty(model, configName, "revision") ?? string.Empty).Trim();
+            }
+            catch
+            {
+                revision = string.Empty;
+            }
+
+            string identity = !string.IsNullOrWhiteSpace(path) ? path : title;
+            string key = BuildComponentTag(identity, configName, revision);
+            if (result.ByKey.ContainsKey(key))
+            {
+                return;
+            }
+
+            var entry = new TraversedModel
+            {
+                Model = model,
+                ModelPath = path ?? string.Empty,
+                ModelTitle = title ?? string.Empty,
+                ConfigurationName = configName ?? string.Empty,
+                Revision = revision ?? string.Empty,
+                DocType = docType,
+                IsRoot = isRoot,
+                Key = key
+            };
+
+            result.ByKey[key] = entry;
+            result.Unique.Add(entry);
+
+            if (!string.IsNullOrWhiteSpace(path) && !result.ModelByPath.ContainsKey(path))
+            {
+                result.ModelByPath[path] = model;
+            }
+        }
+
+        private string BuildComponentTag(string identity, string configName, string revision)
+        {
+            return (identity ?? string.Empty) + "|" + (configName ?? string.Empty) + "|" + (revision ?? string.Empty);
+        }
+
         private List<BatchEntry> PlanAssemblyComponentRefs(AssemblyDoc assembly, Component2 rootComponent)
         {
             if (assembly == null)
@@ -2555,10 +2790,15 @@ namespace TinyMRP.SolidWorksAddin.Services
         {
             var planned = new Dictionary<string, Component2>(StringComparer.OrdinalIgnoreCase);
 
+            int scanned = 0;
             foreach (Component2 comp in ComInteropUtil.EnumerateComAs<Component2>(componentsObj))
             {
-                ThrowIfCancelled();
-                System.Windows.Forms.Application.DoEvents();
+                scanned++;
+                if (scanned % 50 == 0)
+                {
+                    ThrowIfCancelled();
+                    System.Windows.Forms.Application.DoEvents();
+                }
 
                 if (IsComponentSuppressedOrExcluded(comp))
                 {
@@ -2596,11 +2836,9 @@ namespace TinyMRP.SolidWorksAddin.Services
             var stack = new Stack<Component2>();
             stack.Push(rootComponent);
 
+            int scanned = 0;
             while (stack.Count > 0)
             {
-                ThrowIfCancelled();
-                System.Windows.Forms.Application.DoEvents();
-
                 Component2 parent = stack.Pop();
                 object childrenObj = null;
                 try
@@ -2614,6 +2852,13 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 foreach (Component2 child in ComInteropUtil.EnumerateComAs<Component2>(childrenObj))
                 {
+                    scanned++;
+                    if (scanned % 50 == 0)
+                    {
+                        ThrowIfCancelled();
+                        System.Windows.Forms.Application.DoEvents();
+                    }
+
                     if (child == null)
                     {
                         continue;
@@ -3037,6 +3282,102 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 // ignore config switch errors
             }
+        }
+
+        private void WriteFlatBomFromTraverse(string outputFile, BatchTraverseResult traverse, Action<string> log,
+            Action<int, int> progress, HashSet<string> uploadPackBases, List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras,
+            Action<string> errorLog)
+        {
+            if (string.IsNullOrWhiteSpace(outputFile))
+            {
+                throw new InvalidOperationException("FlatBOM output file path is empty.");
+            }
+
+            int total = traverse != null && traverse.Unique != null ? traverse.Unique.Count : 0;
+            UpdateProgress(progress, 0, total);
+            SafeLog(errorLog, "PHASE FLATBOM start entries=" + total);
+
+            int processed = 0;
+            using (var writer = TextFileHelper.CreateUtf8NoBomWriter(outputFile))
+            {
+                if (traverse != null && traverse.Unique != null)
+                {
+                    foreach (TraversedModel entry in traverse.Unique)
+                    {
+                        if (processed % 50 == 0)
+                        {
+                            ThrowIfCancelled();
+                            System.Windows.Forms.Application.DoEvents();
+                        }
+
+                        if (entry == null || entry.Model == null)
+                        {
+                            processed++;
+                            UpdateProgress(progress, processed, total);
+                            continue;
+                        }
+
+                        string confName = entry.ConfigurationName ?? string.Empty;
+                        try
+                        {
+                            writer.WriteLine(GetDocDict(entry.Model, confName, errorLog));
+
+                            if (uploadPackBases != null)
+                            {
+                                string fileKey = GetFileString(entry.Model, confName, errorLog);
+                                if (!string.IsNullOrWhiteSpace(fileKey))
+                                {
+                                    uploadPackBases.Add(fileKey);
+                                }
+                            }
+
+                            if (uploadPackExtras != null)
+                            {
+                                try
+                                {
+                                    AddAssociatedFiles(uploadPackExtras, entry.Model, confName, log);
+                                }
+                                catch
+                                {
+                                    // ignore associated-files errors
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LogExportFailure(log, errorLog,
+                                "FlatBOM: error building properties for model: " +
+                                DescribeModel(entry.ModelPath, entry.ModelTitle) + " (" + ex.Message + ")");
+
+                            try
+                            {
+                                Configuration entryConf = entry.Model.GetConfigurationByName(confName) as Configuration;
+                                string fallback = "{'partnumber':'" +
+                                                  SanitizeString(BomPartNumber(entryConf, entry.Model, errorLog)) + "'}";
+                                writer.WriteLine(fallback);
+                            }
+                            catch
+                            {
+                                writer.WriteLine("{'partnumber':''}");
+                            }
+                        }
+
+                        processed++;
+                        UpdateProgress(progress, processed, total);
+                    }
+                }
+            }
+
+            if (traverse != null && traverse.UnresolvedComponents > 0)
+            {
+                LogExportFailure(log, errorLog, "FlatBOM unresolved components count=" + traverse.UnresolvedComponents);
+                if (_currentExportSummary != null)
+                {
+                    _currentExportSummary.FlatBomUnresolvedComponents = traverse.UnresolvedComponents;
+                }
+            }
+
+            SafeLog(errorLog, "PHASE FLATBOM end processed=" + processed);
         }
 
         private void WriteFlatBom(string outputFile, List<BatchEntry> entries, Action<string> log,
@@ -4184,6 +4525,177 @@ namespace TinyMRP.SolidWorksAddin.Services
             return "<unknown>";
         }
 
+        private void ProcessDeliverablePlansFast(List<DeliverablePlan> plans, BatchTraverseResult traverse, string deliverablesFolder,
+            PublishOptions options, Action<string> log, Action<string> errorLog, HashSet<string> baselineVisibleDocs,
+            ModelDoc2 rootModel, string rootTitle, Action<int, int> progress)
+        {
+            int total = plans != null ? plans.Count : 0;
+            UpdateProgress(progress, 0, total);
+
+            if (plans == null || plans.Count == 0)
+            {
+                return;
+            }
+
+            if (baselineVisibleDocs == null)
+            {
+                baselineVisibleDocs = GetOpenVisibleDocumentIds();
+            }
+
+            List<DeliverableGroup> groups = BuildDeliverableGroups(plans, rootModel, rootTitle);
+            if (_currentExportSummary != null)
+            {
+                _currentExportSummary.DeliverablePlansPlanned = total;
+                _currentExportSummary.DeliverableGroupsPlanned = groups != null ? groups.Count : 0;
+            }
+
+            SafeLog(errorLog,
+                "PHASE EXPORT start groups=" + (groups != null ? groups.Count : 0) +
+                " plans=" + total +
+                " visibleBaseline=" + baselineVisibleDocs.Count);
+
+            bool overwrite = options != null && options.OverwriteFiles;
+            int processed = 0;
+
+            using (var openedDocs = new OpenTracker(this, errorLog))
+            {
+                foreach (DeliverableGroup group in groups)
+                {
+                    ThrowIfCancelled();
+                    System.Windows.Forms.Application.DoEvents();
+
+                    if (group == null || group.Plans == null || group.Plans.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    ModelDoc2 model = null;
+                    if (group.IsRoot)
+                    {
+                        model = rootModel;
+                    }
+                    else if (traverse != null && !string.IsNullOrWhiteSpace(group.ModelPath))
+                    {
+                        traverse.ModelByPath.TryGetValue(group.ModelPath, out model);
+                    }
+
+                    if (model == null)
+                    {
+                        SafeLog(errorLog,
+                            "UNRESOLVED export model group: " +
+                            DescribeModel(group.ModelPath, group.ModelTitle));
+
+                        if (_currentExportSummary != null)
+                        {
+                            _currentExportSummary.DeliverableGroupsSkipped++;
+                            _currentExportSummary.DeliverablePlansSkipped += group.Plans.Count;
+                        }
+
+                        processed += group.Plans.Count;
+                        UpdateProgress(progress, processed, total);
+                        continue;
+                    }
+
+                    if (_currentExportSummary != null)
+                    {
+                        _currentExportSummary.DeliverableGroupsProcessed++;
+                    }
+
+                    string modelDesc = DescribeModel(group.ModelPath, group.ModelTitle);
+                    SafeLog(errorLog,
+                        "EXPORT model=" + modelDesc +
+                        " plans=" + group.Plans.Count);
+
+                    foreach (DeliverablePlan plan in group.Plans)
+                    {
+                        ThrowIfCancelled();
+                        System.Windows.Forms.Application.DoEvents();
+
+                        string planKey = plan != null ? (plan.FileString ?? string.Empty) : string.Empty;
+                        SafeLog(errorLog,
+                            "PLAN start key=" + planKey +
+                            " path=" + (plan != null ? (plan.ModelPath ?? string.Empty) : string.Empty) +
+                            " conf=" + (plan != null ? (plan.ConfigurationName ?? string.Empty) : string.Empty) +
+                            " exports=" + DescribePlanExports(plan));
+
+                        var planTimer = System.Diagnostics.Stopwatch.StartNew();
+                        try
+                        {
+                            ExecuteDeliverablePlanFast(model, plan, deliverablesFolder, overwrite, log, errorLog, openedDocs);
+                            if (_currentExportSummary != null)
+                            {
+                                _currentExportSummary.DeliverablePlansExecuted++;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            if (ex is OperationCanceledException)
+                            {
+                                throw;
+                            }
+
+                            LogExportFailure(log, errorLog, "Deliverables plan failed: " + planKey + " (" + ex.Message + ")");
+                            if (ex is System.Runtime.InteropServices.COMException ||
+                                (ex.InnerException is System.Runtime.InteropServices.COMException))
+                            {
+                                LogExceptionDetails(errorLog, "DeliverablesPlan|" + planKey, ex);
+                            }
+                        }
+                        finally
+                        {
+                            openedDocs.CloseAll("deliverables-plan-finally");
+
+                            try
+                            {
+                                RestoreStartDocument(rootTitle);
+                            }
+                            catch
+                            {
+                                // ignore activate errors
+                            }
+
+                            LogVisibleDocDelta(baselineVisibleDocs, errorLog, "after plan " + planKey);
+                        }
+
+                        SafeLog(errorLog, "PLAN end key=" + planKey + " elapsedMs=" + planTimer.ElapsedMilliseconds);
+
+                        processed++;
+                        UpdateProgress(progress, processed, total);
+                    }
+                }
+            }
+
+            SafeLog(errorLog, "PHASE EXPORT end processed=" + processed + " plans=" + total);
+        }
+
+        private void ExecuteDeliverablePlanFast(ModelDoc2 model, DeliverablePlan plan, string deliverablesFolder, bool overwriteFiles,
+            Action<string> log, Action<string> errorLog, OpenTracker openedDocs)
+        {
+            if (model == null || plan == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(plan.ConfigurationName))
+            {
+                TryShowConfiguration(model, plan.ConfigurationName);
+            }
+
+            if (plan.HasModelExports())
+            {
+                ModelPublish(model, plan.ConfigurationName, plan.FileString, deliverablesFolder,
+                    plan.ExportPngModel, plan.ExportStep, plan.ExportEdrawing, plan.Export3mf,
+                    plan.ExportPly, plan.ExportStl, log, errorLog);
+            }
+
+            if (plan.HasDrawingExports())
+            {
+                DwgPublishFast(model, plan.FileString, deliverablesFolder,
+                    overwriteFiles, plan.ExportPdf, plan.ExportPngDrawing, plan.ExportEdrawingDrawing,
+                    log, errorLog, plan.PartNumber, openedDocs);
+            }
+        }
+
         private void ProcessDeliverablePlans(List<DeliverablePlan> plans, string deliverablesFolder, PublishOptions options,
             Action<string> log, Action<string> errorLog, HashSet<string> initialDocs, ModelDoc2 rootModel, string rootTitle,
             Action<int, int> progress)
@@ -4706,24 +5218,29 @@ namespace TinyMRP.SolidWorksAddin.Services
                     modelTitle = string.Empty;
                 }
 
-                string activateTitle = NormalizeDocTitleForClose(modelTitle);
-                if (!string.IsNullOrWhiteSpace(activateTitle))
+                bool modelWasVisible = true;
+                try
                 {
-                    _swApp.ActivateDoc(activateTitle);
+                    modelWasVisible = model.Visible;
                 }
-                else if (!string.IsNullOrWhiteSpace(modelTitle))
+                catch
                 {
-                    _swApp.ActivateDoc(modelTitle);
+                    modelWasVisible = true;
                 }
-                model.ShowConfiguration(confName);
+
+                TryShowConfiguration(model, confName);
                 ThrowIfCancelled();
 
-                ModelView view = model.GetFirstModelView() as ModelView;
+                ModelView view = null;
                 bool prevGraphicsUpdate = true;
-                if (view != null)
+                if (png)
                 {
-                    prevGraphicsUpdate = view.EnableGraphicsUpdate;
-                    view.EnableGraphicsUpdate = false;
+                    view = model.GetFirstModelView() as ModelView;
+                    if (view != null)
+                    {
+                        prevGraphicsUpdate = view.EnableGraphicsUpdate;
+                        view.EnableGraphicsUpdate = false;
+                    }
                 }
 
                 ExportSummary summary = _currentExportSummary;
@@ -4739,6 +5256,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (threeMf)
                     {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
                         if (summary != null)
                         {
                             summary.ModelAttempt3mf++;
@@ -4748,6 +5266,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                         bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                             (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
                         ok = ok && File.Exists(path);
+                        t.Stop();
+                        SafeLog(errorLog, "MODEL 3MF ms=" + t.ElapsedMilliseconds + " ok=" + ok + " path=" + path);
                         if (ok)
                         {
                             if (summary != null)
@@ -4770,6 +5290,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     string stlPath = Path.Combine(deliverablesFolder, "stl", fileString + ".stl");
                     if (stl)
                     {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
                         if (summary != null)
                         {
                             summary.ModelAttemptStl++;
@@ -4778,6 +5299,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                         stlExported = model.Extension.SaveAs(stlPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                             (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
                         stlExported = stlExported && File.Exists(stlPath);
+                        t.Stop();
+                        SafeLog(errorLog, "MODEL STL ms=" + t.ElapsedMilliseconds + " ok=" + stlExported + " path=" + stlPath);
                         if (stlExported)
                         {
                             if (summary != null)
@@ -4798,6 +5321,8 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (ply)
                     {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
+                        bool viaStlConversion = false;
                         if (summary != null)
                         {
                             summary.ModelAttemptPly++;
@@ -4811,6 +5336,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                         if (!plyExported)
                         {
                             ThrowIfCancelled();
+                            viaStlConversion = true;
 
                             string sourceStl = stlExported ? stlPath : string.Empty;
                             string tempStl = string.Empty;
@@ -4855,6 +5381,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                         }
 
                         bool plyOk = File.Exists(plyPath);
+                        t.Stop();
+                        SafeLog(errorLog,
+                            "MODEL PLY ms=" + t.ElapsedMilliseconds +
+                            " ok=" + plyOk +
+                            " viaStl=" + viaStlConversion +
+                            " path=" + plyPath);
                         if (summary != null)
                         {
                             if (plyOk)
@@ -4876,6 +5408,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (step)
                     {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
                         if (summary != null)
                         {
                             summary.ModelAttemptStep++;
@@ -4885,6 +5418,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                         bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                             (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
                         ok = ok && File.Exists(path);
+                        t.Stop();
+                        SafeLog(errorLog, "MODEL STEP ms=" + t.ElapsedMilliseconds + " ok=" + ok + " path=" + path);
                         if (ok)
                         {
                             if (summary != null)
@@ -4905,6 +5440,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (edr)
                     {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
                         if (summary != null)
                         {
                             summary.ModelAttemptEdraw++;
@@ -4919,6 +5455,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                         bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                             (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
                         ok = ok && File.Exists(path);
+                        t.Stop();
+                        SafeLog(errorLog, "MODEL EDR ms=" + t.ElapsedMilliseconds + " ok=" + ok + " path=" + path);
                         if (ok)
                         {
                             if (summary != null)
@@ -4939,6 +5477,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (png)
                     {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
                         if (summary != null)
                         {
                             summary.ModelAttemptPng++;
@@ -4956,18 +5495,95 @@ namespace TinyMRP.SolidWorksAddin.Services
                         _swApp.SetUserPreferenceDoubleValue(
                             (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
 
-                        model.ShowNamedView2("Isometric", 7);
-                        model.ViewZoomtofit2();
+                        string path = Path.Combine(deliverablesFolder, "png", fileString + ".png");
 
-                        if (view != null)
+                        bool ok = false;
+                        bool activated = false;
+                        try
                         {
-                            view.EnableGraphicsUpdate = true;
+                            model.ShowNamedView2("Isometric", 7);
+                            model.ViewZoomtofit2();
+
+                            if (view != null)
+                            {
+                                view.EnableGraphicsUpdate = true;
+                            }
+
+                            ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                            ok = ok && File.Exists(path);
+                        }
+                        catch (Exception ex)
+                        {
+                            ok = ok && File.Exists(path);
+                            SafeLog(errorLog, "MODEL PNG first attempt failed: " + ex.Message);
                         }
 
-                        string path = Path.Combine(deliverablesFolder, "png", fileString + ".png");
-                        bool ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        ok = ok && File.Exists(path);
+                        if (!ok)
+                        {
+                            ThrowIfCancelled();
+
+                            try
+                            {
+                                string activateTitle = NormalizeDocTitleForClose(modelTitle);
+                                if (!string.IsNullOrWhiteSpace(activateTitle))
+                                {
+                                    _swApp.ActivateDoc(activateTitle);
+                                }
+                                else if (!string.IsNullOrWhiteSpace(modelTitle))
+                                {
+                                    _swApp.ActivateDoc(modelTitle);
+                                }
+                                activated = true;
+
+                                model.ShowNamedView2("Isometric", 7);
+                                model.ViewZoomtofit2();
+
+                                if (view != null)
+                                {
+                                    view.EnableGraphicsUpdate = true;
+                                }
+
+                                ok = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                                ok = ok && File.Exists(path);
+                            }
+                            catch (Exception ex)
+                            {
+                                ok = ok && File.Exists(path);
+                                SafeLog(errorLog, "MODEL PNG fallback activate failed: " + ex.Message);
+                            }
+                            finally
+                            {
+                                try
+                                {
+                                    if (activated)
+                                    {
+                                        bool nowVisible = true;
+                                        try
+                                        {
+                                            nowVisible = model.Visible;
+                                        }
+                                        catch
+                                        {
+                                            nowVisible = true;
+                                        }
+
+                                        if (!modelWasVisible && nowVisible)
+                                        {
+                                            TrySetMember(((object)model).GetType(), model, "Visible", false);
+                                        }
+                                    }
+                                }
+                                catch
+                                {
+                                    // ignore visibility restore errors
+                                }
+                            }
+                        }
+
+                        t.Stop();
+                        SafeLog(errorLog, "MODEL PNG ms=" + t.ElapsedMilliseconds + " ok=" + ok + " activated=" + activated + " path=" + path);
                         if (ok)
                         {
                             if (summary != null)
@@ -5137,6 +5753,380 @@ namespace TinyMRP.SolidWorksAddin.Services
             sb.Append("property list uchar int vertex_indices\n");
             sb.Append("end_header\n");
             return sb.ToString();
+        }
+
+        private void DwgPublishFast(ModelDoc2 model, string fileString, string deliverablesFolder,
+            bool overwriteFiles, bool pdf, bool png, bool edr, Action<string> log, Action<string> errorLog, string partNumberOverride,
+            OpenTracker openedDocs)
+        {
+            using (new ExportDialogSuppressionScope(_swApp))
+            {
+                if (model == null)
+                {
+                    return;
+                }
+
+                Configuration conf = null;
+                try
+                {
+                    conf = model.GetActiveConfiguration() as Configuration;
+                }
+                catch
+                {
+                    conf = null;
+                }
+                if (conf == null)
+                {
+                    return;
+                }
+
+                string modelPath = string.Empty;
+                try
+                {
+                    modelPath = model.GetPathName();
+                }
+                catch
+                {
+                    modelPath = string.Empty;
+                }
+                if (string.IsNullOrWhiteSpace(modelPath))
+                {
+                    return;
+                }
+
+                string pn = !string.IsNullOrWhiteSpace(partNumberOverride)
+                    ? partNumberOverride
+                    : BomPartNumber(conf, model, errorLog);
+                string drawingPath = OnlyFolder(modelPath) + pn + ".SLDDRW";
+                if (!File.Exists(drawingPath))
+                {
+                    return;
+                }
+
+                string pdfPath = Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf");
+                string dxfPath = Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf");
+                string pngPath = Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png");
+                string edrPath = Path.Combine(deliverablesFolder, "edr", fileString + ".edrw");
+                bool dxfRequested = ShouldExport(dxfPath, overwriteFiles);
+
+                SafeLog(errorLog, "DWG OPEN start path=" + drawingPath + " visibleDocs=" + GetOpenVisibleDocumentIds().Count);
+
+                DocumentSpecification spec = null;
+                ModelDoc2 drawDoc = null;
+                DrawingDoc drawing = null;
+                try
+                {
+                    try
+                    {
+                        _swApp.DocumentVisible(false, (int)swDocumentTypes_e.swDocDRAWING);
+                    }
+                    catch
+                    {
+                        // ignore visibility errors
+                    }
+
+                    spec = _swApp.GetOpenDocSpec(drawingPath) as DocumentSpecification;
+                    if (spec == null)
+                    {
+                        SafeLog(errorLog, "DwgPublishFast: open spec failed: " + drawingPath);
+                        return;
+                    }
+                    spec.DocumentType = (int)swDocumentTypes_e.swDocDRAWING;
+                    spec.ReadOnly = true;
+                    spec.Silent = true;
+
+                    using (new ExternalReferenceBatchOpenScope(_swApp))
+                    {
+                        ThrowIfCancelled();
+                        drawDoc = _swApp.OpenDoc7(spec) as ModelDoc2;
+                    }
+                    if (drawDoc == null)
+                    {
+                        SafeLog(errorLog, "DwgPublishFast: open failed: " + drawingPath);
+                        return;
+                    }
+
+                    if (openedDocs != null)
+                    {
+                        openedDocs.Track(drawDoc, "drawing|" + drawingPath);
+                    }
+
+                    drawing = drawDoc as DrawingDoc;
+                    if (drawing == null)
+                    {
+                        return;
+                    }
+
+                    object sheetNamesObj = null;
+                    try
+                    {
+                        sheetNamesObj = drawing.GetSheetNames();
+                    }
+                    catch
+                    {
+                        sheetNamesObj = null;
+                    }
+
+                    string[] sheetNames = ToStringArray(sheetNamesObj);
+                    if (sheetNames == null || sheetNames.Length == 0)
+                    {
+                        return;
+                    }
+
+                    string dxfSheetName = string.Empty;
+                    if (dxfRequested)
+                    {
+                        for (int i = 0; i < sheetNames.Length; i++)
+                        {
+                            ThrowIfCancelled();
+                            string lower = (sheetNames[i] ?? string.Empty).Trim().ToLowerInvariant();
+                            if (lower == "flatpattern" || lower == "dxf" || lower == "dxf sheet")
+                            {
+                                dxfSheetName = sheetNames[i];
+                                break;
+                            }
+                        }
+                    }
+
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swDxfMultiSheetOption,
+                        (int)swDxfMultisheet_e.swDxfActiveSheetOnly);
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swDxfOutputNoScale, 1);
+
+                    int errors = 0;
+                    int warnings = 0;
+                    ExportSummary summary = _currentExportSummary;
+
+                    if (pdf)
+                    {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
+                        if (summary != null)
+                        {
+                            summary.DwgAttemptPdf++;
+                        }
+
+                        ThrowIfCancelled();
+                        ExportPdfData exportData = _swApp.GetExportFileData(
+                            (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
+                        bool ok = false;
+                        if (exportData != null)
+                        {
+                            exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
+                                sheetNames);
+                            ok = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
+                            ok = ok && File.Exists(pdfPath);
+                        }
+
+                        t.Stop();
+                        SafeLog(errorLog, "DWG PDF ms=" + t.ElapsedMilliseconds + " ok=" + ok + " path=" + pdfPath);
+
+                        if (ok)
+                        {
+                            if (summary != null)
+                            {
+                                summary.DwgOkPdf++;
+                            }
+                        }
+                        else
+                        {
+                            if (summary != null)
+                            {
+                                summary.DwgFailPdf++;
+                            }
+                            LogExportFailure(log, errorLog, exportData != null
+                                ? ("PDF export failed: " + pdfPath)
+                                : "PDF export failed: export data unavailable.");
+                        }
+                    }
+
+                    if (edr)
+                    {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
+                        if (summary != null)
+                        {
+                            summary.DwgAttemptEdraw++;
+                        }
+
+                        ThrowIfCancelled();
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swEdrawingsSaveAsSelectionOption,
+                            (int)swEdrawingSaveAsOption_e.swEdrawingSaveAll);
+                        bool ok = drawDoc.Extension.SaveAs(edrPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        ok = ok && File.Exists(edrPath);
+                        t.Stop();
+                        SafeLog(errorLog, "DWG EDRW ms=" + t.ElapsedMilliseconds + " ok=" + ok + " path=" + edrPath);
+
+                        if (ok)
+                        {
+                            if (summary != null)
+                            {
+                                summary.DwgOkEdraw++;
+                            }
+                        }
+                        else
+                        {
+                            if (summary != null)
+                            {
+                                summary.DwgFailEdraw++;
+                            }
+                            LogExportFailure(log, errorLog, "eDrawing export failed: " + edrPath);
+                        }
+                    }
+
+                    if (png)
+                    {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
+                        if (summary != null)
+                        {
+                            summary.DwgAttemptPng++;
+                        }
+
+                        ThrowIfCancelled();
+                        try
+                        {
+                            drawing.ActivateSheet(sheetNames[0]);
+                            drawing.ViewFullPage();
+                        }
+                        catch
+                        {
+                            // ignore view activation errors
+                        }
+
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffScreenOrPrintCapture, 1);
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffPrintDPI, 150);
+                        _swApp.SetUserPreferenceIntegerValue(
+                            (int)swUserPreferenceIntegerValue_e.swTiffPrintPaperSize,
+                            (int)swDwgPaperSizes_e.swDwgPapersUserDefined);
+                        _swApp.SetUserPreferenceDoubleValue(
+                            (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperWidth, 0.297);
+                        _swApp.SetUserPreferenceDoubleValue(
+                            (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
+
+                        bool ok = drawDoc.Extension.SaveAs(pngPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        ok = ok && File.Exists(pngPath);
+                        t.Stop();
+                        SafeLog(errorLog, "DWG PNG ms=" + t.ElapsedMilliseconds + " ok=" + ok + " path=" + pngPath);
+
+                        if (ok)
+                        {
+                            if (summary != null)
+                            {
+                                summary.DwgOkPng++;
+                            }
+                        }
+                        else
+                        {
+                            if (summary != null)
+                            {
+                                summary.DwgFailPng++;
+                            }
+                            LogExportFailure(log, errorLog, "Drawing PNG export failed: " + pngPath);
+                        }
+                    }
+
+                    if (dxfRequested)
+                    {
+                        var t = System.Diagnostics.Stopwatch.StartNew();
+                        if (summary != null)
+                        {
+                            summary.DwgAttemptDxf++;
+                        }
+
+                        ThrowIfCancelled();
+                        bool exported = false;
+
+                        if (!string.IsNullOrWhiteSpace(dxfSheetName))
+                        {
+                            try
+                            {
+                                drawing.ActivateSheet(dxfSheetName);
+                                bool ok = drawDoc.SaveAs4(dxfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref errors, ref warnings);
+                                exported = ok && File.Exists(dxfPath);
+                            }
+                            catch
+                            {
+                                exported = false;
+                            }
+                        }
+
+                        if (!exported)
+                        {
+                            View flatView = drawing.GetFirstView() as View;
+                            View flatPatternView = null;
+                            while (flatView != null)
+                            {
+                                ThrowIfCancelled();
+                                if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    flatPatternView = flatView;
+                                    break;
+                                }
+
+                                flatView = flatView.GetNextView() as View;
+                            }
+
+                            if (flatPatternView != null)
+                            {
+                                ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
+                                exported = File.Exists(dxfPath);
+                            }
+                        }
+
+                        t.Stop();
+                        SafeLog(errorLog, "DWG DXF ms=" + t.ElapsedMilliseconds + " ok=" + exported + " path=" + dxfPath);
+
+                        if (!exported)
+                        {
+                            if (summary != null)
+                            {
+                                summary.DwgFailDxf++;
+                            }
+                            LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
+                        }
+                        else
+                        {
+                            if (summary != null)
+                            {
+                                summary.DwgOkDxf++;
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    if (drawDoc != null)
+                    {
+                        ForceCloseDocNoSave(drawDoc, errorLog, "DwgPublishFast close");
+                    }
+
+                    if (openedDocs != null)
+                    {
+                        openedDocs.Untrack(drawDoc);
+                    }
+
+                    try
+                    {
+                        _swApp.DocumentVisible(true, (int)swDocumentTypes_e.swDocDRAWING);
+                    }
+                    catch
+                    {
+                        // ignore visibility errors
+                    }
+
+                    ComInteropUtil.TryFinalReleaseComObject(drawing);
+                    ComInteropUtil.TryFinalReleaseComObject(drawDoc);
+                    ComInteropUtil.TryFinalReleaseComObject(spec);
+                }
+
+                SafeLog(errorLog, "DWG OPEN end path=" + drawingPath + " visibleDocs=" + GetOpenVisibleDocumentIds().Count);
+            }
         }
 
         private void DwgPublish(ModelDoc2 model, string fileString, string deliverablesFolder,
@@ -6331,6 +7321,23 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private void SafeLog(Action<string> errorLog, string message)
+        {
+            if (errorLog == null || string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            try
+            {
+                errorLog(message);
+            }
+            catch
+            {
+                // ignore logging errors
+            }
+        }
+
         private void DebugExport(Action<string> errorLog, string message)
         {
             if (!EnableExportDebugLog || errorLog == null || string.IsNullOrWhiteSpace(message))
@@ -6428,7 +7435,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     // ignore active-doc lookup errors
                 }
 
-                LogOpenDocuments(errorLog, "OpenDoc");
+                LogVisibleDocuments(errorLog, "VisibleDoc");
             }
             catch
             {
@@ -6982,6 +7989,147 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private sealed class OpenTracker : IDisposable
+        {
+            private sealed class OpenedDoc
+            {
+                public ModelDoc2 Doc;
+                public string Id;
+                public string Title;
+            }
+
+            private readonly TinyMrpPublisher _owner;
+            private readonly Action<string> _errorLog;
+            private readonly Dictionary<string, OpenedDoc> _opened = new Dictionary<string, OpenedDoc>(StringComparer.OrdinalIgnoreCase);
+
+            public OpenTracker(TinyMrpPublisher owner, Action<string> errorLog)
+            {
+                _owner = owner;
+                _errorLog = errorLog;
+            }
+
+            public void Track(ModelDoc2 doc, string context)
+            {
+                if (_owner == null || doc == null)
+                {
+                    return;
+                }
+
+                string id = string.Empty;
+                string title = string.Empty;
+                try
+                {
+                    id = _owner.GetDocumentId(doc);
+                }
+                catch
+                {
+                    id = string.Empty;
+                }
+
+                try
+                {
+                    title = doc.GetTitle() ?? string.Empty;
+                }
+                catch
+                {
+                    title = string.Empty;
+                }
+
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    id = !string.IsNullOrWhiteSpace(title) ? title : Guid.NewGuid().ToString("N");
+                }
+
+                if (_opened.ContainsKey(id))
+                {
+                    return;
+                }
+
+                _opened[id] = new OpenedDoc { Doc = doc, Id = id, Title = title };
+                if (_errorLog != null)
+                {
+                    _owner.SafeLog(_errorLog, "TRACK: " + (context ?? string.Empty) + " id=" + id + " title=" + (title ?? string.Empty));
+                }
+            }
+
+            public void Untrack(ModelDoc2 doc)
+            {
+                if (_owner == null || doc == null)
+                {
+                    return;
+                }
+
+                string id = string.Empty;
+                try
+                {
+                    id = _owner.GetDocumentId(doc);
+                }
+                catch
+                {
+                    id = string.Empty;
+                }
+
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    return;
+                }
+
+                _opened.Remove(id);
+            }
+
+            public void CloseAll(string context)
+            {
+                if (_owner == null || _opened.Count == 0)
+                {
+                    return;
+                }
+
+                var docs = new List<OpenedDoc>(_opened.Values);
+                _opened.Clear();
+
+                foreach (OpenedDoc opened in docs)
+                {
+                    if (opened == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        _owner.ForceCloseDocNoSave(opened.Doc, _errorLog, context);
+                    }
+                    catch
+                    {
+                        try
+                        {
+                            if (!string.IsNullOrWhiteSpace(opened.Title))
+                            {
+                                _owner._swApp.QuitDoc(opened.Title);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore close errors
+                        }
+                    }
+
+                    ComInteropUtil.TryFinalReleaseComObject(opened.Doc);
+                }
+            }
+
+            public void Dispose()
+            {
+                try
+                {
+                    CloseAll("dispose");
+                }
+                catch
+                {
+                    // ignore dispose close errors
+                }
+            }
+        }
+
         private void CloseDocsByIdSet(HashSet<string> idsToClose, HashSet<string> keep, Action<string> errorLog, string context)
         {
             if (idsToClose == null || idsToClose.Count == 0)
@@ -7187,6 +8335,86 @@ namespace TinyMRP.SolidWorksAddin.Services
             catch
             {
                 // ignore enumeration errors
+            }
+        }
+
+        private void LogVisibleDocuments(Action<string> errorLog, string prefix)
+        {
+            if (errorLog == null)
+            {
+                return;
+            }
+
+            try
+            {
+                foreach (ModelDoc2 doc in EnumerateOpenDocuments())
+                {
+                    if (doc == null)
+                    {
+                        continue;
+                    }
+
+                    bool visible = true;
+                    try
+                    {
+                        visible = doc.Visible;
+                    }
+                    catch
+                    {
+                        visible = true;
+                    }
+
+                    if (!visible)
+                    {
+                        continue;
+                    }
+
+                    string title = string.Empty;
+                    string path = string.Empty;
+                    try
+                    {
+                        title = doc.GetTitle();
+                        path = doc.GetPathName();
+                    }
+                    catch
+                    {
+                        title = string.Empty;
+                        path = string.Empty;
+                    }
+
+                    SafeLog(errorLog,
+                        (prefix ?? string.Empty) + ": title=" + (title ?? string.Empty) +
+                        " | path=" + (path ?? string.Empty));
+                }
+            }
+            catch
+            {
+                // ignore enumeration errors
+            }
+        }
+
+        private void LogVisibleDocDelta(HashSet<string> baselineVisibleDocs, Action<string> errorLog, string context)
+        {
+            if (errorLog == null || baselineVisibleDocs == null)
+            {
+                return;
+            }
+
+            HashSet<string> currentVisible = GetOpenVisibleDocumentIds();
+            var added = new HashSet<string>(currentVisible, StringComparer.OrdinalIgnoreCase);
+            added.ExceptWith(baselineVisibleDocs);
+            var removed = new HashSet<string>(baselineVisibleDocs, StringComparer.OrdinalIgnoreCase);
+            removed.ExceptWith(currentVisible);
+
+            SafeLog(errorLog,
+                "VISIBLE delta context=" + (context ?? string.Empty) +
+                " added=" + added.Count +
+                " removed=" + removed.Count +
+                " currentVisible=" + currentVisible.Count);
+
+            if (added.Count > 0 || removed.Count > 0)
+            {
+                LogVisibleDocuments(errorLog, "VISIBLE");
             }
         }
 
