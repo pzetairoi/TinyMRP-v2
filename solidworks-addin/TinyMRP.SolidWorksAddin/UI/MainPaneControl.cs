@@ -1962,8 +1962,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
             SetStatus("Creating files...");
             publisher.ProcessFiles(options, Log, UpdatePublishProgress);
-            SetStatus("Done.");
-            ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
+            // Keep the final status/progress from the publisher (includes per-run log path).
         }
 
         private void OnCreateUploadPack(object sender, EventArgs e)
