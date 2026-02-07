@@ -1015,6 +1015,18 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(schemeLayout, "Preset scheme", CreateInlineField(_quickSchemeCombo, _quickRefreshSchemesButton));
             AddSection(panel, CreateGroupBox("Preset scheme", schemeLayout));
 
+            var defaultsLayout = CreateFormLayout();
+            _quickApplyModeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            _quickApplyModeCombo.Items.AddRange(new object[] { "Active configuration", "All configurations", "Selected configurations" });
+            AddField(defaultsLayout, "Apply mode", _quickApplyModeCombo);
+            _quickPartNumberPropText = new TextBox { Width = 200 };
+            AddField(defaultsLayout, "Part number property", _quickPartNumberPropText);
+            _quickRevisionPropText = new TextBox { Width = 200 };
+            AddField(defaultsLayout, "Revision property", _quickRevisionPropText);
+            _quickDisplayCodePropText = new TextBox { Width = 200 };
+            AddField(defaultsLayout, "Display code property", _quickDisplayCodePropText);
+            AddSection(panel, CreateGroupBox("Numbering defaults", defaultsLayout));
+
             var contextLayout = new TableLayoutPanel
             {
                 ColumnCount = 2,
