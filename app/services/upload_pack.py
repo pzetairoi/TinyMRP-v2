@@ -87,7 +87,11 @@ def _parse_flatbom(
         line = line.lstrip("\ufeff")
         cleaned = line.replace("...", "")
         try:
-            d = ast.literal_eval(cleaned)
+            d = None
+            try:
+                d = json.loads(cleaned)
+            except Exception:
+                d = ast.literal_eval(cleaned)
             if isinstance(d, dict):
                 out.append(d)
         except Exception:

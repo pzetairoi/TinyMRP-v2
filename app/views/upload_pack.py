@@ -95,8 +95,21 @@ def upload_pack():
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    except Exception:
-        return jsonify({"error": "upload failed"}), 500
+    except Exception as exc:
+        try:
+            current_app.logger.exception("Upload pack failed: %s", filename)
+        except Exception:
+            pass
+        return (
+            jsonify(
+                {
+                    "error": "upload failed",
+                    "detail": str(exc),
+                    "exception_type": type(exc).__name__,
+                }
+            ),
+            500,
+        )
     return jsonify(result)
 
 

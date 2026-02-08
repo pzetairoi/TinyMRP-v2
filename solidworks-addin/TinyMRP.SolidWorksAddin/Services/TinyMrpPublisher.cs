@@ -43,6 +43,26 @@ namespace TinyMRP.SolidWorksAddin.Services
             public bool IsRoot;
         }
 
+        private sealed class PlannedRef
+        {
+            public string ModelPath;
+            public string ConfigurationName;
+            public bool IsAssembly;
+            public int MaxDepth;
+            public int SubtreeEstimate;
+            public bool IsRoot;
+        }
+
+        private sealed class ReopenDocInfo
+        {
+            public string Path;
+            public int DocType;
+            public string ConfigurationName;
+            public int Order;
+
+            public string Title;
+        }
+
         private sealed class TraversedModel
         {
             public ModelDoc2 Model;
@@ -1092,10 +1112,24 @@ namespace TinyMRP.SolidWorksAddin.Services
         private string _activeBatchRootTitle = string.Empty;
         private int _activeBatchRootDocType = 0;
 
+        public string LastRunLogPath { get; private set; } = string.Empty;
+
         public TinyMrpPublisher(ISldWorks swApp, TinyMrpConfig config)
         {
             _swApp = swApp;
             _config = config;
+        }
+
+        private void SetLastRunLogPath(ExportRunLog runLog)
+        {
+            try
+            {
+                LastRunLogPath = (runLog != null ? runLog.Path : string.Empty) ?? string.Empty;
+            }
+            catch
+            {
+                LastRunLogPath = string.Empty;
+            }
         }
 
         public void ProcessFiles(PublishOptions options, Action<string> log, Action<int, int> progress)
@@ -1108,6 +1142,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             ExportRunLog runLog = CreateExportRunLog();
             Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
+            SetLastRunLogPath(runLog);
 
             _currentExportSummary = new ExportSummary();
 
@@ -1174,7 +1209,27 @@ namespace TinyMRP.SolidWorksAddin.Services
                         }
                     }
                 }
-                Log(log, BuildCompletionMessage("Export completed"));
+
+                string completedLabel = "Export completed";
+                try
+                {
+                    ExportSummary s = _currentExportSummary;
+                    if (s != null)
+                    {
+                        int fail = s.ModelFail3mf + s.ModelFailStl + s.ModelFailPly + s.ModelFailStep + s.ModelFailEdraw + s.ModelFailPng +
+                                   s.DwgFailPdf + s.DwgFailEdraw + s.DwgFailPng + s.DwgFailDxf;
+                        if (fail > 0)
+                        {
+                            completedLabel = "Export completed with warnings";
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore label errors
+                }
+
+                Log(log, BuildCompletionMessage(completedLabel));
             }
             catch (OperationCanceledException)
             {
@@ -1251,11 +1306,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
+            ExportRunLog runLog = CreateRunLog("bom");
+            Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
+            SetLastRunLogPath(runLog);
+
             ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
             if (swModel == null)
             {
-                System.Windows.Forms.MessageBox.Show("No active document.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                Log(log, BuildRunLogMessage("BOM export aborted: no active document.", runLog));
                 return;
             }
 
@@ -1280,16 +1338,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
                 else
                 {
-                    System.Windows.Forms.MessageBox.Show("No reference model found in the drawing.", "TinyMRP",
-                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                    Log(log, BuildRunLogMessage("BOM export aborted: no reference model found in the drawing.", runLog));
                     return;
                 }
             }
 
             if (swConf == null)
             {
-                System.Windows.Forms.MessageBox.Show("No active configuration.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                Log(log, BuildRunLogMessage("BOM export aborted: no active configuration.", runLog));
                 return;
             }
 
@@ -1307,11 +1363,12 @@ namespace TinyMRP.SolidWorksAddin.Services
             ResetCancel();
             try
             {
+                errorLog?.Invoke("BOM start: title=" + (rootTitle ?? string.Empty) +
+                                 " path=" + (rootModel != null ? (rootModel.GetPathName() ?? string.Empty) : string.Empty));
                 string pubFolder = EnsureTrailingSlash(effective.BomFolder);
                 if (string.IsNullOrWhiteSpace(pubFolder))
                 {
-                    System.Windows.Forms.MessageBox.Show("BOM output folder is empty.", "TinyMRP",
-                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                    Log(log, BuildRunLogMessage("BOM export aborted: BOM output folder is empty.", runLog));
                     return;
                 }
 
@@ -1327,8 +1384,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 string modelPath = swModel.GetPathName();
                 if (string.IsNullOrWhiteSpace(modelPath))
                 {
-                    System.Windows.Forms.MessageBox.Show("Active document must be saved before exporting BOM.", "TinyMRP",
-                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Warning);
+                    Log(log, BuildRunLogMessage("BOM export aborted: active document must be saved before exporting BOM.", runLog));
                     return;
                 }
 
@@ -1342,32 +1398,85 @@ namespace TinyMRP.SolidWorksAddin.Services
                 AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
                 if (assyDoc == null || swAssembly == null)
                 {
-                    System.Windows.Forms.MessageBox.Show("Failed to create temporary assembly.", "TinyMRP",
-                        System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                    Log(log, "BOM export aborted: failed to create temporary assembly.");
                     return;
                 }
 
+                string activeBeforeTempNorm = string.Empty;
+
                 try
                 {
-                    _swApp.ActivateDoc(assyDoc.GetTitle());
-                    swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
-                    ModelDoc2 assyModel = _swApp.ActiveDoc as ModelDoc2;
-                    if (assyModel == null)
+                    string activeBeforeTemp = string.Empty;
+                    try
                     {
-                        System.Windows.Forms.MessageBox.Show("Failed to activate temporary assembly.", "TinyMRP",
-                            System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
-                        return;
+                        ModelDoc2 activeDoc = _swApp.ActiveDoc as ModelDoc2;
+                        activeBeforeTemp = activeDoc != null ? (activeDoc.GetTitle() ?? string.Empty) : string.Empty;
+                    }
+                    catch
+                    {
+                        activeBeforeTemp = string.Empty;
                     }
 
-                    Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
+                    activeBeforeTempNorm = NormalizeDocTitleForClose(activeBeforeTemp);
+                    if (string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+                    {
+                        activeBeforeTempNorm = activeBeforeTemp ?? string.Empty;
+                    }
+
+                    using (new ExportDialogSuppressionScope(_swApp))
+                    using (new ExternalReferenceBatchOpenScope(_swApp))
+                    {
+                        try
+                        {
+                            // Temp assembly must never show UI tabs during BOM operations.
+                            assyDoc.Visible = false;
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+
+                        try
+                        {
+                            string tempTitle = assyDoc.GetTitle() ?? string.Empty;
+                            string activateTitle = NormalizeDocTitleForClose(tempTitle);
+                            if (string.IsNullOrWhiteSpace(activateTitle))
+                            {
+                                activateTitle = tempTitle;
+                            }
+
+                            int errors = 0;
+                            if (!string.IsNullOrWhiteSpace(activateTitle))
+                            {
+                                _swApp.ActivateDoc3(activateTitle, true,
+                                    (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore activation errors
+                        }
+
+                        try
+                        {
+                            assyDoc.Visible = false;
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+
+                        swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
+                        ModelDoc2 assyModel = assyDoc;
+
+                        Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
                     if (assyConfig == null)
                     {
-                        System.Windows.Forms.MessageBox.Show("Failed to read assembly configuration.", "TinyMRP",
-                            System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                        Log(log, "BOM export aborted: failed to read temporary assembly configuration.");
                         return;
                     }
 
-                    SetUnitPreferences(swModel);
+                    SetUnitPreferences(assyModel);
                     ThrowIfCancelled();
 
                     int bomX = 69;
@@ -1391,6 +1500,29 @@ namespace TinyMRP.SolidWorksAddin.Services
                     else
                     {
                         Log(log, "Failed to create BOM table.");
+                    }
+
+                        // Restore previously active document as soon as the BOM table is generated.
+                        try
+                        {
+                            if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+                            {
+                                _swApp.ActivateDoc(activeBeforeTempNorm);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore restore errors
+                        }
+
+                        try
+                        {
+                            assyDoc.Visible = false;
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
                     }
 
                     string zipPath = exportTag + ".zip";
@@ -1419,23 +1551,42 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     if (assyDoc != null)
                     {
+                        try
+                        {
+                            if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+                            {
+                                _swApp.ActivateDoc(activeBeforeTempNorm);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore restore errors
+                        }
+
+                        try
+                        {
+                            assyDoc.SetSaveFlag();
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+
                         ForceCloseDocNoSave(assyDoc, null, "BOM temp assembly close");
                     }
                     CloseDocsNotInKeepSet(baseline, null, "post BOM temp assembly cleanup");
                 }
 
-                System.Windows.Forms.MessageBox.Show("BOM file generation finished.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+                Log(log, BuildRunLogMessage("BOM file generation finished.", runLog));
             }
             catch (OperationCanceledException)
             {
-                System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+                Log(log, BuildRunLogMessage("BOM export cancelled.", runLog));
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show("BOM export failed: " + ex.Message, "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                errorLog?.Invoke("BOM export failed: " + ex);
+                Log(log, BuildRunLogMessage("BOM export failed: " + ex.Message, runLog));
             }
             finally
             {
@@ -1453,26 +1604,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return;
             }
 
+            ExportRunLog runLog = CreateRunLog("upload_pack");
+            Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
+            SetLastRunLogPath(runLog);
+
             try
             {
                 ResetCancel();
                 HashSet<string> uploadPackBases;
                 List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
-                string flatFile = TraverseModel(false, string.Empty, effective, log, null, null, null,
+                string flatFile = TraverseModel(false, string.Empty, effective, log, null, null, errorLog,
                     out uploadPackBases, out uploadPackExtras);
-                CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log, null);
-                System.Windows.Forms.MessageBox.Show("Upload pack created.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+                CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log, errorLog);
+                Log(log, BuildRunLogMessage("Upload pack created.", runLog));
             }
             catch (OperationCanceledException)
             {
-                System.Windows.Forms.MessageBox.Show("Operation cancelled.", "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+                Log(log, BuildRunLogMessage("Upload pack cancelled.", runLog));
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show("Upload pack failed: " + ex.Message, "TinyMRP",
-                    System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                errorLog?.Invoke("Upload pack failed: " + ex);
+                Log(log, BuildRunLogMessage("Upload pack failed: " + ex.Message, runLog));
             }
         }
 
@@ -2536,14 +2689,62 @@ namespace TinyMRP.SolidWorksAddin.Services
                 _swApp.SetUserPreferenceIntegerValue(
                     (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, 16777215);
 
-                BatchTraverseResult traverse = TraverseModelsForBatch(swModel, swConf, modelType, options.TopLevelOnly, log, errorLog);
-                int planned = traverse != null && traverse.Unique != null ? traverse.Unique.Count : 0;
+                BatchTraverseResult traverse = null;
+                List<PlannedRef> plannedRefs = null;
+
+                int planned = 0;
+                if (!createFiles)
+                {
+                    traverse = TraverseModelsForBatch(swModel, swConf, modelType, options.TopLevelOnly, log, errorLog);
+                    planned = traverse != null && traverse.Unique != null ? traverse.Unique.Count : 0;
+                }
+                else
+                {
+                    // Deliverables planning must not call GetModelDoc2. Resolve lightweight components up-front so all
+                    // children are discoverable during planning.
+                    if (options != null && options.TopLevelOnly)
+                    {
+                        string rootPathOnly = string.Empty;
+                        try
+                        {
+                            rootPathOnly = rootModel != null ? (rootModel.GetPathName() ?? string.Empty) : string.Empty;
+                        }
+                        catch
+                        {
+                            rootPathOnly = string.Empty;
+                        }
+
+                        plannedRefs = new List<PlannedRef>
+                        {
+                            new PlannedRef
+                            {
+                                ModelPath = rootPathOnly ?? string.Empty,
+                                ConfigurationName = swConf != null ? (swConf.Name ?? string.Empty) : string.Empty,
+                                IsAssembly = modelType == (int)swDocumentTypes_e.swDocASSEMBLY,
+                                MaxDepth = 0,
+                                SubtreeEstimate = 0,
+                                IsRoot = true
+                            }
+                        };
+                    }
+                    else
+                    {
+                        SafeLog(errorLog, "PHASE PLAN start (deliverables, no doc opens)");
+                        ResolveAllLightweightComponentsForDeliverablesPlanning(swModel, rootTitle, errorLog);
+                        plannedRefs = PlanRefsForDeliverables(swModel, swConf, errorLog);
+                        SafeLog(errorLog, "PHASE PLAN end (deliverables) plannedRefs=" + (plannedRefs != null ? plannedRefs.Count : 0));
+                    }
+
+                    planned = plannedRefs != null ? plannedRefs.Count : 0;
+                }
+
                 Log(log, "Planned unique model-config pairs: " + planned);
                 SafeLog(errorLog, "Planned unique model-config pairs: " + planned);
                 if (_currentExportSummary != null)
                 {
                     _currentExportSummary.PlannedModelConfigPairs = planned;
-                    _currentExportSummary.FlatBomUnresolvedComponents = traverse != null ? traverse.UnresolvedComponents : 0;
+                    _currentExportSummary.FlatBomUnresolvedComponents =
+                        !createFiles && traverse != null ? traverse.UnresolvedComponents : 0;
                 }
 
                 bool shouldWriteFlatBomFile = !createFiles;
@@ -2584,22 +2785,86 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
                     else
                     {
-                        SafeLog(errorLog, "PHASE PLAN start unique=" + planned);
-                        List<DeliverablePlan> plans = BuildDeliverablePlansFromTraverse(traverse, deliverablesFolder, options, log, errorLog);
-                        SafeLog(errorLog, "PHASE PLAN end plans=" + (plans != null ? plans.Count : 0));
-                        DebugExport(errorLog,
-                            "Deliverables planning: traverseUnique=" + planned +
-                            " plans=" + (plans != null ? plans.Count : 0));
-
-                        if (plans == null || plans.Count == 0)
+                        if (plannedRefs == null)
                         {
-                            Log(log, "No deliverables to export (all selected files already exist).");
+                            ResolveAllLightweightComponentsForDeliverablesPlanning(swModel, rootTitle, errorLog);
+                            plannedRefs = PlanRefsForDeliverables(swModel, swConf, errorLog);
+                        }
+
+                        if (plannedRefs == null || plannedRefs.Count == 0)
+                        {
+                            Log(log, "No deliverables to export (planning yielded no references).");
                             UpdateProgress(deliverablesProgress, 0, 0);
                         }
                         else
                         {
-                            ProcessDeliverablePlansFast(plans ?? new List<DeliverablePlan>(), traverse, deliverablesFolder,
-                                options, log, errorLog, initialVisibleDocs, rootModel, rootTitle, deliverablesProgress);
+                            string planPath = SaveDeliverablesPlanToTempFile(plannedRefs, errorLog);
+                            SafeLog(errorLog,
+                                "PLAN file: " + (planPath ?? string.Empty) +
+                                " items=" + plannedRefs.Count);
+
+                            SortDeliverablesQueue(plannedRefs);
+
+                            string rootPathSnapshot = string.Empty;
+                            try
+                            {
+                                rootPathSnapshot = rootModel != null ? (rootModel.GetPathName() ?? string.Empty) : string.Empty;
+                            }
+                            catch
+                            {
+                                rootPathSnapshot = string.Empty;
+                            }
+
+                            string rootConfigName = swConf != null ? (swConf.Name ?? string.Empty) : string.Empty;
+                            List<ReopenDocInfo> cleanRoomReopen = null;
+                            try
+                            {
+                                bool closeAndReopenRoot = true;
+                                string rootReason = string.Empty;
+                                try
+                                {
+                                    if (IsDocDirtyOrUnsaved(rootModel, out rootReason) &&
+                                        string.Equals(rootReason, "modified", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        closeAndReopenRoot = false;
+                                        SafeLog(errorLog,
+                                            "WARN: root document is modified; running in-place export mode (will not close/reopen root; edits preserved; memory isolation reduced).");
+                                    }
+                                }
+                                catch
+                                {
+                                    closeAndReopenRoot = true;
+                                }
+
+                                if (closeAndReopenRoot)
+                                {
+                                    EnsureRootDocSafeToCloseNoSave(rootModel, log, errorLog);
+                                }
+
+                                cleanRoomReopen = CleanRoomCloseOtherVisibleDocuments(rootModel, log, errorLog);
+
+                                ProcessDeliverablesIsolated(
+                                    plannedRefs,
+                                    deliverablesFolder,
+                                    options,
+                                    log,
+                                    errorLog,
+                                    deliverablesProgress,
+                                    rootPathSnapshot,
+                                    rootConfigName,
+                                    closeAndReopenRoot);
+                            }
+                            finally
+                            {
+                                try
+                                {
+                                    ReopenDocumentsSilent(cleanRoomReopen, errorLog);
+                                }
+                                catch
+                                {
+                                    // ignore reopen errors
+                                }
+                            }
                         }
                     }
                 }
@@ -2611,14 +2876,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                 _activeBatchRootTitle = string.Empty;
                 _activeBatchRootDocType = 0;
 
-                if (swModel.FeatureManager != null)
+                try
                 {
-                    swModel.FeatureManager.EnableFeatureTree = true;
+                    if (swModel != null && swModel.FeatureManager != null)
+                    {
+                        swModel.FeatureManager.EnableFeatureTree = true;
+                    }
+                }
+                catch
+                {
+                    // ignore (root doc may have been closed/reopened during isolated export)
                 }
 
-                if (view != null)
+                try
                 {
-                    view.EnableGraphicsUpdate = prevGraphics;
+                    if (view != null)
+                    {
+                        view.EnableGraphicsUpdate = prevGraphics;
+                    }
+                }
+                catch
+                {
+                    // ignore (view may be invalid after doc close/reopen)
                 }
 
                 _swApp.SetUserPreferenceIntegerValue(
@@ -2872,56 +3151,141 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return false;
             }
 
+            string activeBeforeTemp = string.Empty;
             try
             {
-                _swApp.ActivateDoc(assyDoc.GetTitle());
-                swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
-                ModelDoc2 assyModel = _swApp.ActiveDoc as ModelDoc2;
-                if (assyModel == null)
+                ModelDoc2 activeDoc = _swApp.ActiveDoc as ModelDoc2;
+                activeBeforeTemp = activeDoc != null ? (activeDoc.GetTitle() ?? string.Empty) : string.Empty;
+            }
+            catch
+            {
+                activeBeforeTemp = string.Empty;
+            }
+
+            string activeBeforeTempNorm = NormalizeDocTitleForClose(activeBeforeTemp);
+            if (string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+            {
+                activeBeforeTempNorm = activeBeforeTemp ?? string.Empty;
+            }
+
+            try
+            {
+                using (new ExportDialogSuppressionScope(_swApp))
+                using (new ExternalReferenceBatchOpenScope(_swApp))
                 {
-                    Log(log, "Upload pack: failed to activate temp assembly.");
+                    try
+                    {
+                        // Temp assembly must never show UI tabs during TREEBOM operations.
+                        assyDoc.Visible = false;
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    try
+                    {
+                        string tempTitle = assyDoc.GetTitle() ?? string.Empty;
+                        string activateTitle = NormalizeDocTitleForClose(tempTitle);
+                        if (string.IsNullOrWhiteSpace(activateTitle))
+                        {
+                            activateTitle = tempTitle;
+                        }
+
+                        int errors = 0;
+                        if (!string.IsNullOrWhiteSpace(activateTitle))
+                        {
+                            _swApp.ActivateDoc3(activateTitle, true,
+                                (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore activation errors
+                    }
+
+                    try
+                    {
+                        assyDoc.Visible = false;
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
+                    ModelDoc2 assyModel = assyDoc;
+
+                    Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
+                    if (assyConfig == null)
+                    {
+                        Log(log, "Upload pack: failed to read assembly configuration.");
+                        return false;
+                    }
+
+                    SetUnitPreferences(assyModel);
+
+                    string treeDir = Path.GetDirectoryName(treeBomPath);
+                    if (!string.IsNullOrWhiteSpace(treeDir))
+                    {
+                        Directory.CreateDirectory(treeDir);
+                    }
+                    int bomX = 69;
+                    int bomY = 69;
+                    BomTableAnnotation bomTable = assyModel.Extension.InsertBomTable3(
+                        _config.BomTemplatePath,
+                        bomX,
+                        bomY,
+                        (int)swBomType_e.swBomType_Indented,
+                        assyConfig.Name,
+                        true,
+                        (int)swNumberingType_e.swNumberingType_Detailed,
+                        true);
+
+                    if (bomTable != null)
+                    {
+                        ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
+                        tableAnn.SaveAsText(treeBomPath, "\t");
+                        TextFileHelper.StripUtf8Bom(treeBomPath);
+                        return true;
+                    }
+
+                    Log(log, "Upload pack: failed to create BOM table.");
                     return false;
                 }
-
-                Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
-                if (assyConfig == null)
-                {
-                    Log(log, "Upload pack: failed to read assembly configuration.");
-                    return false;
-                }
-
-                SetUnitPreferences(assyModel);
-
-                string treeDir = Path.GetDirectoryName(treeBomPath);
-                if (!string.IsNullOrWhiteSpace(treeDir))
-                {
-                    Directory.CreateDirectory(treeDir);
-                }
-                int bomX = 69;
-                int bomY = 69;
-                BomTableAnnotation bomTable = assyModel.Extension.InsertBomTable3(
-                    _config.BomTemplatePath,
-                    bomX,
-                    bomY,
-                    (int)swBomType_e.swBomType_Indented,
-                    assyConfig.Name,
-                    true,
-                    (int)swNumberingType_e.swNumberingType_Detailed,
-                    true);
-
-                if (bomTable != null)
-                {
-                    ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
-                    tableAnn.SaveAsText(treeBomPath, "\t");
-                    TextFileHelper.StripUtf8Bom(treeBomPath);
-                    return true;
-                }
-
-                Log(log, "Upload pack: failed to create BOM table.");
-                return false;
             }
             finally
             {
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+                    {
+                        _swApp.ActivateDoc(activeBeforeTempNorm);
+                    }
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+
+                try
+                {
+                    assyDoc.Visible = false;
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    assyDoc.SetSaveFlag();
+                }
+                catch
+                {
+                    // ignore
+                }
+
                 ForceCloseDocNoSave(assyDoc, errorLog, "TREEBOM temp assembly close");
                 CloseDocsNotInKeepSet(baseline, errorLog, "post TREEBOM temp assembly cleanup");
             }
@@ -3352,6 +3716,263 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             return planned;
+        }
+
+        private struct ComponentDepthFrame
+        {
+            public Component2 Component;
+            public int Depth;
+        }
+
+        private string BuildPlannedRefKey(string modelPath, string configurationName)
+        {
+            return (modelPath ?? string.Empty) + "|" + (configurationName ?? string.Empty);
+        }
+
+        private List<PlannedRef> PlanRefsForDeliverables(ModelDoc2 rootModel, Configuration rootConfig, Action<string> errorLog)
+        {
+            var planned = new Dictionary<string, PlannedRef>(StringComparer.OrdinalIgnoreCase);
+
+            if (rootModel == null)
+            {
+                return new List<PlannedRef>();
+            }
+
+            string rootPath = string.Empty;
+            string rootTitle = string.Empty;
+            try
+            {
+                rootPath = rootModel.GetPathName() ?? string.Empty;
+            }
+            catch
+            {
+                rootPath = string.Empty;
+            }
+
+            try
+            {
+                rootTitle = rootModel.GetTitle() ?? string.Empty;
+            }
+            catch
+            {
+                rootTitle = string.Empty;
+            }
+
+            string rootConfigName = rootConfig != null ? (rootConfig.Name ?? string.Empty) : string.Empty;
+
+            bool rootIsAssembly = false;
+            try
+            {
+                rootIsAssembly = rootModel.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY;
+            }
+            catch
+            {
+                rootIsAssembly = DocumentTypeFromPath(rootPath) == (int)swDocumentTypes_e.swDocASSEMBLY;
+            }
+
+            var rootRef = new PlannedRef
+            {
+                ModelPath = rootPath ?? string.Empty,
+                ConfigurationName = rootConfigName ?? string.Empty,
+                IsAssembly = rootIsAssembly,
+                MaxDepth = 0,
+                SubtreeEstimate = 0,
+                IsRoot = true
+            };
+
+            planned[BuildPlannedRefKey(rootRef.ModelPath, rootRef.ConfigurationName)] = rootRef;
+
+            int modelType = 0;
+            try
+            {
+                modelType = rootModel.GetType();
+            }
+            catch
+            {
+                modelType = 0;
+            }
+
+            if (modelType != (int)swDocumentTypes_e.swDocASSEMBLY || rootConfig == null)
+            {
+                return new List<PlannedRef>(planned.Values);
+            }
+
+            AssemblyDoc rootAssy = rootModel as AssemblyDoc;
+            Component2 rootComp = null;
+            try
+            {
+                rootComp = rootConfig.GetRootComponent() as Component2;
+            }
+            catch
+            {
+                rootComp = null;
+            }
+
+            // Base planning (no doc opens): GetComponents + fallback tree walk; depth not available here -> default 1.
+            try
+            {
+                List<BatchEntry> refs = PlanAssemblyComponentRefs(rootAssy, rootComp);
+                foreach (BatchEntry entry in refs)
+                {
+                    if (entry == null)
+                    {
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(entry.ModelPath))
+                    {
+                        continue;
+                    }
+
+                    string key = BuildPlannedRefKey(entry.ModelPath, entry.ConfigurationName);
+                    if (planned.ContainsKey(key))
+                    {
+                        continue;
+                    }
+
+                    planned[key] = new PlannedRef
+                    {
+                        ModelPath = entry.ModelPath ?? string.Empty,
+                        ConfigurationName = entry.ConfigurationName ?? string.Empty,
+                        IsAssembly = DocumentTypeFromPath(entry.ModelPath) == (int)swDocumentTypes_e.swDocASSEMBLY,
+                        MaxDepth = 1,
+                        SubtreeEstimate = 0,
+                        IsRoot = false
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                if (ex is OperationCanceledException)
+                {
+                    throw;
+                }
+
+                SafeLog(errorLog,
+                    "PlanRefsForDeliverables: PlanAssemblyComponentRefs failed root=" + DescribeModel(rootPath, rootTitle) +
+                    " (" + ex.Message + ")");
+            }
+
+            // Prefer explicit tree walk for depth/subtree estimates where available.
+            try
+            {
+                UpdatePlannedRefsFromTree(rootComp, planned, rootRef);
+            }
+            catch (Exception ex)
+            {
+                if (ex is OperationCanceledException)
+                {
+                    throw;
+                }
+
+                SafeLog(errorLog,
+                    "PlanRefsForDeliverables: depth walk failed root=" + DescribeModel(rootPath, rootTitle) +
+                    " (" + ex.Message + ")");
+            }
+
+            return new List<PlannedRef>(planned.Values);
+        }
+
+        private void UpdatePlannedRefsFromTree(Component2 rootComponent, Dictionary<string, PlannedRef> plannedByKey, PlannedRef rootRef)
+        {
+            if (rootComponent == null || plannedByKey == null)
+            {
+                return;
+            }
+
+            var stack = new Stack<ComponentDepthFrame>();
+            stack.Push(new ComponentDepthFrame { Component = rootComponent, Depth = 0 });
+
+            while (stack.Count > 0)
+            {
+                ThrowIfCancelled();
+                System.Windows.Forms.Application.DoEvents();
+
+                ComponentDepthFrame frame = stack.Pop();
+                Component2 parent = frame.Component;
+                int parentDepth = frame.Depth;
+
+                object childrenObj = null;
+                try
+                {
+                    childrenObj = parent.GetChildren();
+                }
+                catch
+                {
+                    childrenObj = null;
+                }
+
+                int includedChildCount = 0;
+                foreach (object obj in ComInteropUtil.EnumerateCom(childrenObj))
+                {
+                    Component2 child = obj as Component2;
+                    if (child == null)
+                    {
+                        continue;
+                    }
+
+                    if (IsComponentSuppressedOrExcluded(child))
+                    {
+                        continue;
+                    }
+
+                    includedChildCount++;
+                    int childDepth = parentDepth + 1;
+
+                    string path = SafeGetComponentPath(child);
+                    string confName = SafeGetReferencedConfiguration(child);
+
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        string key = BuildPlannedRefKey(path, confName);
+                        PlannedRef planned;
+                        if (!plannedByKey.TryGetValue(key, out planned) || planned == null)
+                        {
+                            planned = new PlannedRef
+                            {
+                                ModelPath = path ?? string.Empty,
+                                ConfigurationName = confName ?? string.Empty,
+                                IsAssembly = DocumentTypeFromPath(path) == (int)swDocumentTypes_e.swDocASSEMBLY,
+                                MaxDepth = childDepth,
+                                SubtreeEstimate = 0,
+                                IsRoot = false
+                            };
+                            plannedByKey[key] = planned;
+                        }
+                        else if (childDepth > planned.MaxDepth)
+                        {
+                            planned.MaxDepth = childDepth;
+                        }
+                    }
+
+                    // Continue traversal even if path is empty; nested components may still be saved.
+                    stack.Push(new ComponentDepthFrame { Component = child, Depth = childDepth });
+                }
+
+                // SubtreeEstimate: cheap estimate based on immediate child count (max over occurrences).
+                if (parentDepth == 0 && rootRef != null)
+                {
+                    if (includedChildCount > rootRef.SubtreeEstimate)
+                    {
+                        rootRef.SubtreeEstimate = includedChildCount;
+                    }
+                }
+                else
+                {
+                    string parentPath = SafeGetComponentPath(parent);
+                    if (!string.IsNullOrWhiteSpace(parentPath))
+                    {
+                        string parentConf = SafeGetReferencedConfiguration(parent);
+                        string parentKey = BuildPlannedRefKey(parentPath, parentConf);
+                        PlannedRef parentPlanned;
+                        if (plannedByKey.TryGetValue(parentKey, out parentPlanned) && parentPlanned != null &&
+                            includedChildCount > parentPlanned.SubtreeEstimate)
+                        {
+                            parentPlanned.SubtreeEstimate = includedChildCount;
+                        }
+                    }
+                }
+            }
         }
 
         private void GetTopLevelComponentStats(Component2 rootComponent, out int topLevelCount, out bool anyTopLevelAssembly)
@@ -5462,6 +6083,1650 @@ namespace TinyMRP.SolidWorksAddin.Services
             return "<unknown>";
         }
 
+        private void TrySetComProperty(object target, string propertyName, object value)
+        {
+            if (target == null || string.IsNullOrWhiteSpace(propertyName))
+            {
+                return;
+            }
+
+            try
+            {
+                target.GetType().InvokeMember(
+                    propertyName,
+                    BindingFlags.SetProperty,
+                    null,
+                    target,
+                    new[] { value },
+                    CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                // ignore missing property / reflection errors
+            }
+        }
+
+        private long GetPrivateMemoryBytes()
+        {
+            try
+            {
+                return System.Diagnostics.Process.GetCurrentProcess().PrivateMemorySize64;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private string SaveDeliverablesPlanToTempFile(List<PlannedRef> planned, Action<string> errorLog)
+        {
+            if (planned == null)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                string dir = Path.Combine(Path.GetTempPath(), "TinyMRP");
+                Directory.CreateDirectory(dir);
+
+                string name = "deliverables_plan_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".json";
+                string path = Path.Combine(dir, name);
+
+                var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                try
+                {
+                    serializer.MaxJsonLength = int.MaxValue;
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                using (var writer = TextFileHelper.CreateUtf8NoBomWriter(path))
+                {
+                    writer.WriteLine("[");
+                    for (int i = 0; i < planned.Count; i++)
+                    {
+                        PlannedRef r = planned[i];
+                        string line = serializer.Serialize(new
+                        {
+                            path = r != null ? (r.ModelPath ?? string.Empty) : string.Empty,
+                            config = r != null ? (r.ConfigurationName ?? string.Empty) : string.Empty,
+                            isAssembly = r != null && r.IsAssembly,
+                            depth = r != null ? r.MaxDepth : 0,
+                            subtreeEstimate = r != null ? r.SubtreeEstimate : 0,
+                            isRoot = r != null && r.IsRoot
+                        });
+
+                        if (i < planned.Count - 1)
+                        {
+                            line += ",";
+                        }
+
+                        writer.WriteLine(line);
+                    }
+                    writer.WriteLine("]");
+                }
+
+                return path;
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "PLAN file write failed: " + ex.Message);
+                return string.Empty;
+            }
+        }
+
+        private void SortDeliverablesQueue(List<PlannedRef> queue)
+        {
+            if (queue == null || queue.Count <= 1)
+            {
+                return;
+            }
+
+            queue.Sort((a, b) =>
+            {
+                if (ReferenceEquals(a, b))
+                {
+                    return 0;
+                }
+
+                if (a == null)
+                {
+                    return 1;
+                }
+
+                if (b == null)
+                {
+                    return -1;
+                }
+
+                // Root last.
+                int cmp = a.IsRoot.CompareTo(b.IsRoot);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+
+                // Parts before assemblies.
+                cmp = a.IsAssembly.CompareTo(b.IsAssembly);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+
+                // Deeper first (leaf-ish first).
+                cmp = b.MaxDepth.CompareTo(a.MaxDepth);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+
+                // Smaller subtrees first (if available).
+                cmp = a.SubtreeEstimate.CompareTo(b.SubtreeEstimate);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+
+                // Stable path/config tie-breakers.
+                cmp = string.Compare(a.ModelPath ?? string.Empty, b.ModelPath ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+                if (cmp != 0)
+                {
+                    return cmp;
+                }
+
+                return string.Compare(a.ConfigurationName ?? string.Empty, b.ConfigurationName ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            });
+        }
+
+        private void ResolveAllLightweightComponentsForDeliverablesPlanning(ModelDoc2 rootModel, string rootTitle, Action<string> errorLog)
+        {
+            if (rootModel == null)
+            {
+                return;
+            }
+
+            bool wasDirty = false;
+            try
+            {
+                wasDirty = rootModel.GetSaveFlag();
+            }
+            catch
+            {
+                wasDirty = false;
+            }
+
+            int docType = 0;
+            try
+            {
+                docType = rootModel.GetType();
+            }
+            catch
+            {
+                docType = 0;
+            }
+
+            if (docType != (int)swDocumentTypes_e.swDocASSEMBLY)
+            {
+                return;
+            }
+
+            AssemblyDoc assy = rootModel as AssemblyDoc;
+            if (assy == null)
+            {
+                return;
+            }
+
+            string title = string.Empty;
+            try
+            {
+                title = rootModel.GetTitle() ?? string.Empty;
+            }
+            catch
+            {
+                title = string.Empty;
+            }
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                title = rootTitle ?? string.Empty;
+            }
+
+            string activateTitle = NormalizeDocTitleForClose(title);
+            if (string.IsNullOrWhiteSpace(activateTitle))
+            {
+                activateTitle = title;
+            }
+
+            bool wasVisible = true;
+            try
+            {
+                wasVisible = rootModel.Visible;
+            }
+            catch
+            {
+                wasVisible = true;
+            }
+
+            var t = System.Diagnostics.Stopwatch.StartNew();
+            SafeLog(errorLog,
+                "LWT resolve start: title=" + (activateTitle ?? string.Empty) +
+                " visibleBefore=" + wasVisible);
+
+            using (new ExportDialogSuppressionScope(_swApp))
+            using (new ExternalReferenceBatchOpenScope(_swApp))
+            {
+                YieldAndCheckCancel();
+
+                try
+                {
+                    rootModel.Visible = true;
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    int errors = 0;
+                    if (!string.IsNullOrWhiteSpace(activateTitle))
+                    {
+                        _swApp.ActivateDoc3(activateTitle, true,
+                            (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors);
+                    }
+
+                    SafeLog(errorLog,
+                        "LWT activate: title=" + (activateTitle ?? string.Empty) +
+                        " errors=" + errors);
+                }
+                catch
+                {
+                    // ignore activation errors
+                }
+
+                YieldAndCheckCancel();
+
+                try
+                {
+                    assy.ResolveAllLightWeightComponents(true);
+                }
+                catch (Exception ex)
+                {
+                    SafeLog(errorLog, "LWT resolve failed: " + ex.Message);
+                    if (ex is System.Runtime.InteropServices.COMException ||
+                        (ex.InnerException is System.Runtime.InteropServices.COMException))
+                    {
+                        LogExceptionDetails(errorLog, "ResolveAllLightWeightComponents", ex);
+                    }
+                }
+
+                // ResolveAllLightWeightComponents can dirty the root assembly even when the user hasn't changed it.
+                // Preserve the user's dirty state: clear only if it was clean before this step.
+                if (!wasDirty)
+                {
+                    bool nowDirty = false;
+                    try
+                    {
+                        nowDirty = rootModel.GetSaveFlag();
+                    }
+                    catch
+                    {
+                        nowDirty = false;
+                    }
+
+                    if (nowDirty)
+                    {
+                        try
+                        {
+                            rootModel.SetSaveFlag();
+                            SafeLog(errorLog, "LWT resolve: cleared root dirty flag (was clean before resolve).");
+                        }
+                        catch (Exception ex)
+                        {
+                            SafeLog(errorLog, "LWT resolve: failed to clear root dirty flag: " + ex.Message);
+                        }
+                    }
+                }
+
+                YieldAndCheckCancel();
+            }
+
+            t.Stop();
+
+            try
+            {
+                if (!wasVisible)
+                {
+                    rootModel.Visible = false;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            if (!wasDirty)
+            {
+                bool nowDirty = false;
+                try
+                {
+                    nowDirty = rootModel.GetSaveFlag();
+                }
+                catch
+                {
+                    nowDirty = false;
+                }
+
+                if (nowDirty)
+                {
+                    try
+                    {
+                        rootModel.SetSaveFlag();
+                        SafeLog(errorLog, "LWT resolve: cleared root dirty flag (post-resolve).");
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+            }
+
+            SafeLog(errorLog,
+                "LWT resolve end: ms=" + t.ElapsedMilliseconds +
+                " visibleAfter=" + GetOpenVisibleDocumentIds().Count);
+        }
+
+        private List<ModelDoc2> GetOpenVisibleDocuments()
+        {
+            var docs = new List<ModelDoc2>();
+            foreach (ModelDoc2 doc in EnumerateOpenDocuments())
+            {
+                if (doc == null)
+                {
+                    continue;
+                }
+
+                bool visible = true;
+                try
+                {
+                    visible = doc.Visible;
+                }
+                catch
+                {
+                    visible = true;
+                }
+
+                if (visible)
+                {
+                    docs.Add(doc);
+                }
+            }
+
+            return docs;
+        }
+
+        private bool IsDocDirtyOrUnsaved(ModelDoc2 doc, out string reason)
+        {
+            reason = string.Empty;
+            if (doc == null)
+            {
+                return false;
+            }
+
+            string path = string.Empty;
+            try
+            {
+                path = doc.GetPathName() ?? string.Empty;
+            }
+            catch
+            {
+                path = string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                reason = "unsaved";
+                return true;
+            }
+
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    reason = "missingFile";
+                    return true;
+                }
+            }
+            catch
+            {
+                reason = "missingFile";
+                return true;
+            }
+
+            bool dirty = false;
+            try
+            {
+                dirty = doc.GetSaveFlag();
+            }
+            catch
+            {
+                dirty = false;
+            }
+
+            if (dirty)
+            {
+                reason = "modified";
+                return true;
+            }
+
+            return false;
+        }
+
+        private ReopenDocInfo CaptureReopenInfo(ModelDoc2 doc, int order)
+        {
+            if (doc == null)
+            {
+                return null;
+            }
+
+            string path = string.Empty;
+            string title = string.Empty;
+            int docType = 0;
+            try
+            {
+                path = doc.GetPathName() ?? string.Empty;
+                title = doc.GetTitle() ?? string.Empty;
+                docType = doc.GetType();
+            }
+            catch
+            {
+                path = string.Empty;
+                title = string.Empty;
+                docType = 0;
+            }
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return null;
+            }
+
+            string configName = string.Empty;
+            if (docType != (int)swDocumentTypes_e.swDocDRAWING)
+            {
+                try
+                {
+                    Configuration conf = doc.GetActiveConfiguration() as Configuration;
+                    configName = conf != null ? (conf.Name ?? string.Empty) : string.Empty;
+                }
+                catch
+                {
+                    configName = string.Empty;
+                }
+            }
+
+            return new ReopenDocInfo
+            {
+                Path = path ?? string.Empty,
+                DocType = docType,
+                ConfigurationName = configName ?? string.Empty,
+                Order = order,
+                Title = title ?? string.Empty
+            };
+        }
+
+        private void EnsureRootDocSafeToCloseNoSave(ModelDoc2 rootModel, Action<string> log, Action<string> errorLog)
+        {
+            if (rootModel == null)
+            {
+                throw new InvalidOperationException("No active document.");
+            }
+
+            string reason;
+            if (IsDocDirtyOrUnsaved(rootModel, out reason))
+            {
+                string title = string.Empty;
+                string path = string.Empty;
+                try
+                {
+                    title = rootModel.GetTitle() ?? string.Empty;
+                    path = rootModel.GetPathName() ?? string.Empty;
+                }
+                catch
+                {
+                    title = string.Empty;
+                    path = string.Empty;
+                }
+
+                LogExportFailure(log, errorLog,
+                    "Batch export aborted: root document is " + reason +
+                    " (must be saved and unmodified because the exporter closes/reopens it). title=" +
+                    (title ?? string.Empty) + " path=" + (path ?? string.Empty));
+                throw new InvalidOperationException("Batch export aborted: root document is " + reason + ".");
+            }
+        }
+
+        private List<ReopenDocInfo> CleanRoomCloseOtherVisibleDocuments(ModelDoc2 rootModel, Action<string> log, Action<string> errorLog)
+        {
+            var reopen = new List<ReopenDocInfo>();
+            if (rootModel == null)
+            {
+                return reopen;
+            }
+
+            string rootId = GetDocumentId(rootModel);
+            string rootPath = string.Empty;
+            string rootTitle = string.Empty;
+            try
+            {
+                rootPath = rootModel.GetPathName() ?? string.Empty;
+                rootTitle = rootModel.GetTitle() ?? string.Empty;
+            }
+            catch
+            {
+                rootPath = string.Empty;
+                rootTitle = string.Empty;
+            }
+
+            string rootTitleNorm = NormalizeDocTitleForClose(rootTitle);
+
+            List<ModelDoc2> visible = GetOpenVisibleDocuments();
+            var toClose = new List<ModelDoc2>();
+            var dirty = new List<string>();
+            int order = 0;
+
+            foreach (ModelDoc2 doc in visible)
+            {
+                order++;
+                if (doc == null)
+                {
+                    continue;
+                }
+
+                string docId = GetDocumentId(doc);
+                if (!string.IsNullOrWhiteSpace(rootId) &&
+                    !string.IsNullOrWhiteSpace(docId) &&
+                    string.Equals(docId, rootId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string path = string.Empty;
+                string title = string.Empty;
+                int docType = 0;
+                try
+                {
+                    path = doc.GetPathName() ?? string.Empty;
+                    title = doc.GetTitle() ?? string.Empty;
+                    docType = doc.GetType();
+                }
+                catch
+                {
+                    path = string.Empty;
+                    title = string.Empty;
+                    docType = 0;
+                }
+
+                string titleNorm = NormalizeDocTitleForClose(title);
+                if ((!string.IsNullOrWhiteSpace(rootPath) && string.Equals(path, rootPath, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(rootTitleNorm) && string.Equals(titleNorm, rootTitleNorm, StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrWhiteSpace(rootTitle) && string.Equals(title, rootTitle, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                string dirtyReason;
+                if (IsDocDirtyOrUnsaved(doc, out dirtyReason))
+                {
+                    dirty.Add((string.IsNullOrWhiteSpace(title) ? "<untitled>" : title) +
+                              " | " + (string.IsNullOrWhiteSpace(path) ? "<no path>" : path) +
+                              " | type=" + docType +
+                              " | " + dirtyReason);
+                    continue;
+                }
+
+                ReopenDocInfo info = CaptureReopenInfo(doc, order);
+                if (info != null)
+                {
+                    reopen.Add(info);
+                    toClose.Add(doc);
+                }
+            }
+
+            if (dirty.Count > 0)
+            {
+                var shown = new List<string>();
+                for (int i = 0; i < dirty.Count && i < 15; i++)
+                {
+                    shown.Add(dirty[i]);
+                }
+
+                LogExportFailure(log, errorLog,
+                    "Batch export aborted: other modified/unsaved documents are open (won't auto-close to avoid data loss): " +
+                    "count=" + dirty.Count +
+                    " items=[" + string.Join("; ", shown.ToArray()) + "]");
+
+                throw new InvalidOperationException("Batch export aborted: other modified/unsaved documents are open.");
+            }
+
+            if (toClose.Count == 0)
+            {
+                return reopen;
+            }
+
+            using (new ExportDialogSuppressionScope(_swApp))
+            using (new ExternalReferenceBatchOpenScope(_swApp))
+            {
+                for (int i = 0; i < toClose.Count; i++)
+                {
+                    YieldAndCheckCancel();
+
+                    ModelDoc2 doc = toClose[i];
+                    if (doc == null)
+                    {
+                        continue;
+                    }
+
+                    string title = string.Empty;
+                    string path = string.Empty;
+                    try
+                    {
+                        title = doc.GetTitle() ?? string.Empty;
+                        path = doc.GetPathName() ?? string.Empty;
+                    }
+                    catch
+                    {
+                        title = string.Empty;
+                        path = string.Empty;
+                    }
+
+                    SafeLog(errorLog,
+                        "CLEANROOM close: " +
+                        (string.IsNullOrWhiteSpace(title) ? "<untitled>" : title) +
+                        " | " + (string.IsNullOrWhiteSpace(path) ? "<no path>" : path));
+
+                    try
+                    {
+                        ForceCloseDocNoSave(doc, errorLog, "clean-room-preflight", allowCancel: true);
+                    }
+                    catch
+                    {
+                        // ignore close errors
+                    }
+
+                    try
+                    {
+                        ComInteropUtil.TryFinalReleaseComObject(doc);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+                }
+            }
+
+            return reopen;
+        }
+
+        private void ReopenDocumentsSilent(List<ReopenDocInfo> reopen, Action<string> errorLog)
+        {
+            if (reopen == null || reopen.Count == 0)
+            {
+                return;
+            }
+
+            reopen.Sort((a, b) =>
+            {
+                if (ReferenceEquals(a, b))
+                {
+                    return 0;
+                }
+
+                if (a == null)
+                {
+                    return 1;
+                }
+
+                if (b == null)
+                {
+                    return -1;
+                }
+
+                return a.Order.CompareTo(b.Order);
+            });
+
+            using (new ExportDialogSuppressionScope(_swApp))
+            using (new ExternalReferenceBatchOpenScope(_swApp))
+            {
+                foreach (ReopenDocInfo info in reopen)
+                {
+                    if (info == null || string.IsNullOrWhiteSpace(info.Path))
+                    {
+                        continue;
+                    }
+
+                    if (!File.Exists(info.Path))
+                    {
+                        SafeLog(errorLog, "CLEANROOM reopen skipped (missing file): " + info.Path);
+                        continue;
+                    }
+
+                    if (IsDocOpenByIdOrTitle(info.Path, info.Title))
+                    {
+                        continue;
+                    }
+
+                    DocumentSpecification spec = null;
+                    try
+                    {
+                        spec = _swApp.GetOpenDocSpec(info.Path) as DocumentSpecification;
+                    }
+                    catch
+                    {
+                        spec = null;
+                    }
+
+                    if (spec == null)
+                    {
+                        SafeLog(errorLog, "CLEANROOM reopen spec failed: " + info.Path);
+                        continue;
+                    }
+
+                    try
+                    {
+                        spec.DocumentType = info.DocType;
+                        spec.ReadOnly = false;
+                        spec.Silent = true;
+                        if (!string.IsNullOrWhiteSpace(info.ConfigurationName))
+                        {
+                            try
+                            {
+                                spec.ConfigurationName = info.ConfigurationName;
+                            }
+                            catch
+                            {
+                                // ignore
+                            }
+                        }
+
+                        TrySetComProperty(spec, "DocumentVisible", true);
+
+                        YieldAndCheckCancel();
+                        ModelDoc2 opened = _swApp.OpenDoc7(spec) as ModelDoc2;
+                        if (opened != null && !string.IsNullOrWhiteSpace(info.ConfigurationName) &&
+                            info.DocType != (int)swDocumentTypes_e.swDocDRAWING)
+                        {
+                            TryShowConfiguration(opened, info.ConfigurationName);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        SafeLog(errorLog, "CLEANROOM reopen failed: " + info.Path + " (" + ex.Message + ")");
+                        if (ex is System.Runtime.InteropServices.COMException ||
+                            (ex.InnerException is System.Runtime.InteropServices.COMException))
+                        {
+                            LogExceptionDetails(errorLog, "CleanRoomReopen|" + info.Path, ex);
+                        }
+                    }
+                    finally
+                    {
+                        ComInteropUtil.TryFinalReleaseComObject(spec);
+                    }
+                }
+            }
+        }
+
+        private ModelDoc2 OpenDocReadOnlySilent(string path, int docType, string configurationName, Action<string> errorLog,
+            string context, out int specErr, out int specWarn)
+        {
+            specErr = 0;
+            specWarn = 0;
+
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                SafeLog(errorLog, "OPEN skipped (missing file) context=" + (context ?? string.Empty) + " path=" + (path ?? string.Empty));
+                return null;
+            }
+
+            DocumentSpecification spec = null;
+            try
+            {
+                spec = _swApp.GetOpenDocSpec(path) as DocumentSpecification;
+            }
+            catch
+            {
+                spec = null;
+            }
+
+            if (spec == null)
+            {
+                SafeLog(errorLog, "OPEN spec failed context=" + (context ?? string.Empty) + " path=" + (path ?? string.Empty));
+                return null;
+            }
+
+            spec.DocumentType = docType;
+            spec.ReadOnly = true;
+            spec.Silent = true;
+            if (!string.IsNullOrWhiteSpace(configurationName))
+            {
+                try
+                {
+                    spec.ConfigurationName = configurationName;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            // If available in this API version, request an invisible open (avoid UI/tab churn).
+            TrySetComProperty(spec, "DocumentVisible", false);
+
+            try
+            {
+                specErr = spec.Error;
+            }
+            catch
+            {
+                specErr = 0;
+            }
+            try
+            {
+                specWarn = spec.Warning;
+            }
+            catch
+            {
+                specWarn = 0;
+            }
+
+            ModelDoc2 opened = null;
+            try
+            {
+                using (new ExportDialogSuppressionScope(_swApp))
+                using (new ExternalReferenceBatchOpenScope(_swApp))
+                {
+                    YieldAndCheckCancel();
+                    opened = _swApp.OpenDoc7(spec) as ModelDoc2;
+                }
+            }
+            finally
+            {
+                ComInteropUtil.TryFinalReleaseComObject(spec);
+            }
+
+            if (opened != null)
+            {
+                try
+                {
+                    opened.Visible = false;
+                }
+                catch
+                {
+                    // ignore hide errors
+                }
+            }
+
+            return opened;
+        }
+
+        private void LogAndCloseAllNonEssentialDocs(HashSet<string> keep, Action<string> errorLog, string context)
+        {
+            if (keep == null)
+            {
+                keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            if (errorLog != null)
+            {
+                try
+                {
+                    List<ModelDoc2> toClose = GetOpenDocsNotInKeepSet(keep);
+                    if (toClose.Count > 0)
+                    {
+                        errorLog("WATCHDOG cleanup: context=" + (context ?? string.Empty) + " closing=" + toClose.Count);
+                        foreach (ModelDoc2 doc in toClose)
+                        {
+                            if (doc == null)
+                            {
+                                continue;
+                            }
+
+                            string title = string.Empty;
+                            string path = string.Empty;
+                            bool visible = true;
+                            try
+                            {
+                                title = doc.GetTitle();
+                                path = doc.GetPathName();
+                            }
+                            catch
+                            {
+                                title = string.Empty;
+                                path = string.Empty;
+                            }
+                            try
+                            {
+                                visible = doc.Visible;
+                            }
+                            catch
+                            {
+                                visible = true;
+                            }
+
+                            errorLog("WATCHDOG close: title=" + (title ?? string.Empty) +
+                                     " | path=" + (path ?? string.Empty) +
+                                     " | visible=" + visible);
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            CloseDocsNotInKeepSet(keep, errorLog, context);
+        }
+
+        private void ProcessDeliverablesIsolated(
+            List<PlannedRef> queue,
+            string deliverablesFolder,
+            PublishOptions options,
+            Action<string> log,
+            Action<string> errorLog,
+            Action<int, int> progress,
+            string rootPath,
+            string rootConfigName,
+            bool closeAndReopenRoot)
+        {
+            int total = queue != null ? queue.Count : 0;
+            UpdateProgress(progress, 0, total);
+
+            if (queue == null || queue.Count == 0)
+            {
+                return;
+            }
+
+            bool overwrite = options != null && options.OverwriteFiles;
+
+            int visibleDocsStart = 0;
+            try
+            {
+                visibleDocsStart = GetOpenVisibleDocumentIds().Count;
+            }
+            catch
+            {
+                visibleDocsStart = 0;
+            }
+
+            // Baseline keep-set:
+            // - close+reopen mode: keep only user-visible docs (hidden refs should be closed aggressively after root close).
+            // - in-place mode: keep all currently open docs (including hidden refs owned by the still-open root) to avoid
+            //   fighting SolidWorks' reference loading while preserving user edits.
+            HashSet<string> keepBase = null;
+            try
+            {
+                keepBase = closeAndReopenRoot ? GetOpenVisibleDocumentIds() : SnapshotOpenDocIds();
+            }
+            catch
+            {
+                keepBase = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            int openDocsStart = 0;
+            try
+            {
+                openDocsStart = SnapshotOpenDocIds().Count;
+            }
+            catch
+            {
+                openDocsStart = 0;
+            }
+
+            SafeLog(errorLog,
+                "ISOLATED baseline: closeRoot=" + closeAndReopenRoot +
+                " openDocs=" + openDocsStart +
+                " visibleDocs=" + visibleDocsStart +
+                " keepSet=" + keepBase.Count +
+                " mem=" + GetPrivateMemoryBytes());
+
+            // Close the starting/root model so referenced model data can be released between items.
+            string rootTitle = string.Empty;
+            ModelDoc2 rootDoc = null;
+            try
+            {
+                rootDoc = FindOpenDocument(rootPath, null);
+            }
+            catch
+            {
+                rootDoc = null;
+            }
+            if (rootDoc == null)
+            {
+                try
+                {
+                    rootDoc = _swApp.ActiveDoc as ModelDoc2;
+                }
+                catch
+                {
+                    rootDoc = null;
+                }
+            }
+
+            try
+            {
+                if (rootDoc != null)
+                {
+                    rootTitle = rootDoc.GetTitle() ?? string.Empty;
+                }
+            }
+            catch
+            {
+                rootTitle = string.Empty;
+            }
+
+            string rootTitleNorm = NormalizeDocTitleForClose(rootTitle);
+            if (closeAndReopenRoot)
+            {
+                if (!string.IsNullOrWhiteSpace(rootPath))
+                {
+                    keepBase.Remove(rootPath);
+                }
+                if (!string.IsNullOrWhiteSpace(rootTitle))
+                {
+                    keepBase.Remove(rootTitle);
+                }
+                if (!string.IsNullOrWhiteSpace(rootTitleNorm))
+                {
+                    keepBase.Remove(rootTitleNorm);
+                }
+            }
+
+            try
+            {
+                int baselineAfterRootClose = openDocsStart;
+
+                if (!closeAndReopenRoot)
+                {
+                    SafeLog(errorLog,
+                        "ISOLATED: in-place mode (root not closed). title=" + (rootTitle ?? string.Empty) +
+                        " path=" + (rootPath ?? string.Empty));
+                }
+                else if (string.IsNullOrWhiteSpace(rootPath) || !File.Exists(rootPath))
+                {
+                    SafeLog(errorLog,
+                        "ISOLATED: root path missing; skipping root close/reopen. title=" + (rootTitle ?? string.Empty) +
+                        " path=" + (rootPath ?? string.Empty));
+                }
+                else
+                {
+                    SafeLog(errorLog,
+                        "ROOT close start: title=" + (rootTitle ?? string.Empty) +
+                        " path=" + (rootPath ?? string.Empty) +
+                        " openDocsBefore=" + SnapshotOpenDocIds().Count +
+                        " mem=" + GetPrivateMemoryBytes());
+
+                    try
+                    {
+                        ForceCloseDocNoSave(rootDoc, errorLog, "isolated-root-close");
+                    }
+                    catch
+                    {
+                        // ignore close errors; verification below will log warnings
+                    }
+
+                    bool stillOpen = false;
+                    try
+                    {
+                        stillOpen = IsDocOpenByIdOrTitle(rootPath, rootTitle);
+                    }
+                    catch
+                    {
+                        stillOpen = false;
+                    }
+
+                    SafeLog(errorLog,
+                        "ROOT close end: stillOpen=" + stillOpen +
+                        " openDocsAfter=" + SnapshotOpenDocIds().Count +
+                        " mem=" + GetPrivateMemoryBytes());
+
+                    // Close any leaked hidden reference docs now that the root is closed.
+                    LogAndCloseAllNonEssentialDocs(keepBase, errorLog, "isolated-post-root-close");
+                }
+
+                try
+                {
+                    baselineAfterRootClose = SnapshotOpenDocIds().Count;
+                }
+                catch
+                {
+                    baselineAfterRootClose = 0;
+                }
+
+                SafeLog(errorLog,
+                    (closeAndReopenRoot ? "ISOLATED after root close: " : "ISOLATED baseline (in-place): ") +
+                    "openDocs=" + baselineAfterRootClose +
+                    " visibleDocs=" + GetOpenVisibleDocumentIds().Count +
+                    " keepVisible=" + keepBase.Count +
+                    " mem=" + GetPrivateMemoryBytes());
+
+                if (closeAndReopenRoot && baselineAfterRootClose > keepBase.Count + 3)
+                {
+                    SafeLog(errorLog,
+                        "WARN: baseline openDocs still high after root close: openDocs=" + baselineAfterRootClose +
+                        " keepVisible=" + keepBase.Count +
+                        " running cleanup pass.");
+
+                    LogAndCloseAllNonEssentialDocs(keepBase, errorLog, "isolated-baseline-watchdog");
+
+                    try
+                    {
+                        baselineAfterRootClose = SnapshotOpenDocIds().Count;
+                    }
+                    catch
+                    {
+                        baselineAfterRootClose = 0;
+                    }
+
+                    SafeLog(errorLog,
+                        "ISOLATED baseline after cleanup: openDocs=" + baselineAfterRootClose +
+                        " visibleDocs=" + GetOpenVisibleDocumentIds().Count +
+                        " keepVisible=" + keepBase.Count +
+                        " mem=" + GetPrivateMemoryBytes());
+                }
+
+                int watchdogThreshold = baselineAfterRootClose + 3;
+
+                ExportSummary summary = _currentExportSummary;
+                if (summary != null)
+                {
+                    summary.DeliverablePlansPlanned = total;
+                }
+
+                int processed = 0;
+
+                foreach (PlannedRef item in queue)
+                {
+                    var itemTimer = System.Diagnostics.Stopwatch.StartNew();
+                    string modelDesc = string.Empty;
+                    ModelDoc2 model = null;
+                    bool modelWasOpenBefore = false;
+
+                    try
+                    {
+                        YieldAndCheckCancel();
+
+                        if (item == null)
+                        {
+                            continue;
+                        }
+
+                        modelDesc = (item.ModelPath ?? string.Empty) + "|" + (item.ConfigurationName ?? string.Empty);
+
+                        SafeLog(errorLog,
+                            "ITEM start: " + modelDesc +
+                            " isAsm=" + item.IsAssembly +
+                            " depth=" + item.MaxDepth +
+                            " subtree=" + item.SubtreeEstimate +
+                            " isRoot=" + item.IsRoot +
+                            " openDocs=" + SnapshotOpenDocIds().Count +
+                            " visibleDocs=" + GetOpenVisibleDocumentIds().Count +
+                            " mem=" + GetPrivateMemoryBytes());
+
+                        // Enforce a tight doc budget between items.
+                        LogAndCloseAllNonEssentialDocs(keepBase, errorLog, "isolated-pre-open|" + modelDesc);
+
+                        // Reuse a user-visible document if it was open at baseline; never close those.
+                        try
+                        {
+                            model = FindOpenDocument(item.ModelPath, null);
+                        }
+                        catch
+                        {
+                            model = null;
+                        }
+
+                        // If the model is open but NOT part of the visible-baseline keep set, close it now so we don't accumulate hidden docs.
+                        if (model != null && !IsDocInKeepSet(model, keepBase))
+                        {
+                            try
+                            {
+                                ForceCloseDocNoSave(model, errorLog, "isolated-preexisting-close");
+                            }
+                            catch
+                            {
+                                // ignore close errors
+                            }
+
+                            try
+                            {
+                                ComInteropUtil.TryFinalReleaseComObject(model);
+                            }
+                            catch
+                            {
+                                // ignore
+                            }
+
+                            model = null;
+                        }
+
+                        modelWasOpenBefore = model != null;
+                        if (modelWasOpenBefore)
+                        {
+                            string reuseTitle = string.Empty;
+                            try
+                            {
+                                reuseTitle = model.GetTitle() ?? string.Empty;
+                            }
+                            catch
+                            {
+                                reuseTitle = string.Empty;
+                            }
+
+                            SafeLog(errorLog, "OPEN reuse: " + modelDesc + " title=" + (reuseTitle ?? string.Empty));
+                        }
+                        else
+                        {
+                            model = null;
+                        }
+
+                        int docType = item.IsAssembly ? (int)swDocumentTypes_e.swDocASSEMBLY : (int)swDocumentTypes_e.swDocPART;
+                        int specErr = 0;
+                        int specWarn = 0;
+                        long openMs = 0;
+
+                        if (model == null)
+                        {
+                            var openTimer = System.Diagnostics.Stopwatch.StartNew();
+                            try
+                            {
+                                SafeLog(errorLog,
+                                    "OPEN start: path=" + (item.ModelPath ?? string.Empty) +
+                                    " type=" + docType +
+                                    " conf=" + (item.ConfigurationName ?? string.Empty));
+
+                                model = OpenDocReadOnlySilent(item.ModelPath, docType, item.ConfigurationName, errorLog,
+                                    "isolated-open|" + modelDesc, out specErr, out specWarn);
+                            }
+                            catch (Exception ex)
+                            {
+                                if (ex is OperationCanceledException)
+                                {
+                                    throw;
+                                }
+
+                                SafeLog(errorLog, "OPEN exception: " + modelDesc + " (" + ex.Message + ")");
+                                if (ex is System.Runtime.InteropServices.COMException ||
+                                    (ex.InnerException is System.Runtime.InteropServices.COMException))
+                                {
+                                    LogExceptionDetails(errorLog, "IsolatedOpen|" + modelDesc, ex);
+                                }
+
+                                model = null;
+                                specErr = 0;
+                                specWarn = 0;
+                            }
+                            finally
+                            {
+                                openTimer.Stop();
+                                openMs = openTimer.ElapsedMilliseconds;
+                            }
+
+                            string openedTitle = string.Empty;
+                            try
+                            {
+                                openedTitle = model != null ? (model.GetTitle() ?? string.Empty) : string.Empty;
+                            }
+                            catch
+                            {
+                                openedTitle = string.Empty;
+                            }
+
+                            SafeLog(errorLog,
+                                "OPEN end: ok=" + (model != null) +
+                                " ms=" + openMs +
+                                " specErr=" + specErr +
+                                " specWarn=" + specWarn +
+                                " title=" + (openedTitle ?? string.Empty) +
+                                " openDocsNow=" + SnapshotOpenDocIds().Count +
+                                " mem=" + GetPrivateMemoryBytes());
+                        }
+
+                        if (model == null)
+                        {
+                            if (summary != null)
+                            {
+                                summary.DeliverablePlansSkipped++;
+                            }
+                            continue;
+                        }
+
+                        try
+                        {
+                            if (!string.IsNullOrWhiteSpace(item.ConfigurationName))
+                            {
+                                string activeConfName = string.Empty;
+                                try
+                                {
+                                    Configuration active = model.GetActiveConfiguration() as Configuration;
+                                    activeConfName = active != null ? (active.Name ?? string.Empty) : string.Empty;
+                                }
+                                catch
+                                {
+                                    activeConfName = string.Empty;
+                                }
+
+                                if (!string.Equals(activeConfName, item.ConfigurationName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    model.ShowConfiguration2(item.ConfigurationName);
+                                }
+                            }
+                        }
+                        catch
+                        {
+                            // ignore config switch errors
+                        }
+
+                        // Pre-export watchdog: if opening this model caused extra documents to open, close them now (keep baseline-visible + current model).
+                        try
+                        {
+                            var keepWithCurrent = new HashSet<string>(keepBase, StringComparer.OrdinalIgnoreCase);
+                            AddDocToKeepSet(keepWithCurrent, model, null);
+
+                            int openWithCurrent = 0;
+                            try
+                            {
+                                openWithCurrent = SnapshotOpenDocIds().Count;
+                            }
+                            catch
+                            {
+                                openWithCurrent = 0;
+                            }
+
+                            if (openWithCurrent > watchdogThreshold)
+                            {
+                                SafeLog(errorLog,
+                                    "WATCHDOG pre-export: openDocs=" + openWithCurrent +
+                                    " threshold=" + watchdogThreshold +
+                                    " context=" + modelDesc);
+                                LogAndCloseAllNonEssentialDocs(keepWithCurrent, errorLog, "isolated-pre-export|" + modelDesc);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore watchdog errors
+                        }
+
+                        DeliverablePlan plan = null;
+                        try
+                        {
+                            plan = BuildDeliverablePlanFromModel(model, item.ConfigurationName, deliverablesFolder, options, errorLog);
+                        }
+                        catch (Exception ex)
+                        {
+                            if (ex is OperationCanceledException)
+                            {
+                                throw;
+                            }
+
+                            LogExportFailure(log, errorLog, "Deliverables planning failed: " + modelDesc + " (" + ex.Message + ")");
+                            if (ex is System.Runtime.InteropServices.COMException ||
+                                (ex.InnerException is System.Runtime.InteropServices.COMException))
+                            {
+                                LogExceptionDetails(errorLog, "IsolatedPlanBuild|" + modelDesc, ex);
+                            }
+
+                            plan = null;
+                        }
+
+                        bool hasExports = plan != null && (plan.HasModelExports() || plan.HasDrawingExports());
+                        if (!hasExports)
+                        {
+                            SafeLog(errorLog, "SKIP: no exports needed: " + modelDesc);
+                            if (summary != null)
+                            {
+                                summary.DeliverablePlansSkipped++;
+                            }
+                            continue;
+                        }
+
+                        SafeLog(errorLog,
+                            "EXPORT start: " + (plan.FileString ?? string.Empty) +
+                            " exports=" + DescribePlanExports(plan) +
+                            " openDocs=" + SnapshotOpenDocIds().Count +
+                            " mem=" + GetPrivateMemoryBytes());
+
+                        var exportTimer = System.Diagnostics.Stopwatch.StartNew();
+                        try
+                        {
+                            ExecuteDeliverablePlan(model, plan, deliverablesFolder, overwrite, log, errorLog);
+                        }
+                        finally
+                        {
+                            exportTimer.Stop();
+                        }
+
+                        SafeLog(errorLog,
+                            "EXPORT end: " + (plan.FileString ?? string.Empty) +
+                            " ms=" + exportTimer.ElapsedMilliseconds +
+                            " openDocs=" + SnapshotOpenDocIds().Count +
+                            " mem=" + GetPrivateMemoryBytes());
+
+                        if (summary != null)
+                        {
+                            summary.DeliverablePlansExecuted++;
+                        }
+                    }
+                    finally
+                    {
+                        // Close model if we opened it (never close baseline-visible docs).
+                        if (model != null && !modelWasOpenBefore)
+                        {
+                            var closeTimer = System.Diagnostics.Stopwatch.StartNew();
+                            try
+                            {
+                                ForceCloseDocNoSave(model, errorLog, "isolated-model-close");
+                            }
+                            catch
+                            {
+                                // ignore close errors; watchdog below will log warnings if it remains open
+                            }
+                            finally
+                            {
+                                closeTimer.Stop();
+                            }
+
+                            try
+                            {
+                                ComInteropUtil.TryFinalReleaseComObject(model);
+                            }
+                            catch
+                            {
+                                // ignore
+                            }
+
+                            SafeLog(errorLog,
+                                "MODEL close end: " + (modelDesc ?? string.Empty) +
+                                " ms=" + closeTimer.ElapsedMilliseconds +
+                                " openDocs=" + SnapshotOpenDocIds().Count +
+                                " mem=" + GetPrivateMemoryBytes());
+                        }
+
+                        // Watchdog: close anything not in the visible-baseline keep set.
+                        int openNow = 0;
+                        try
+                        {
+                            openNow = SnapshotOpenDocIds().Count;
+                        }
+                        catch
+                        {
+                            openNow = 0;
+                        }
+
+                        if (openNow > watchdogThreshold)
+                        {
+                            SafeLog(errorLog,
+                                "WATCHDOG trigger: openDocs=" + openNow +
+                                " threshold=" + watchdogThreshold +
+                                " context=" + (modelDesc ?? string.Empty));
+                            LogAndCloseAllNonEssentialDocs(keepBase, errorLog, "isolated-watchdog|" + (modelDesc ?? string.Empty));
+                        }
+                        else
+                        {
+                            CloseDocsNotInKeepSet(keepBase, errorLog, "isolated-post-item|" + (modelDesc ?? string.Empty));
+                        }
+
+                        itemTimer.Stop();
+
+                        processed++;
+                        UpdateProgress(progress, processed, total);
+
+                        SafeLog(errorLog,
+                            "ITEM end: idx=" + processed + "/" + total +
+                            " elapsedMs=" + itemTimer.ElapsedMilliseconds +
+                            " openDocs=" + SnapshotOpenDocIds().Count +
+                            " visibleDocs=" + GetOpenVisibleDocumentIds().Count +
+                            " mem=" + GetPrivateMemoryBytes());
+                    }
+                }
+            }
+            finally
+            {
+                // Always restore the root/active doc on completion/cancel/error.
+                if (!closeAndReopenRoot)
+                {
+                    try
+                    {
+                        // Root was never closed; just re-activate and restore configuration if possible.
+                        ModelDoc2 rootOpen = FindOpenDocument(rootPath, rootTitle) ?? rootDoc;
+                        if (rootOpen != null)
+                        {
+                            string activateTitle = string.Empty;
+                            try
+                            {
+                                activateTitle = NormalizeDocTitleForClose(rootOpen.GetTitle());
+                                if (string.IsNullOrWhiteSpace(activateTitle))
+                                {
+                                    activateTitle = rootOpen.GetTitle();
+                                }
+                            }
+                            catch
+                            {
+                                activateTitle = rootTitleNorm;
+                            }
+
+                            try
+                            {
+                                if (!string.IsNullOrWhiteSpace(activateTitle))
+                                {
+                                    _swApp.ActivateDoc(activateTitle);
+                                }
+                            }
+                            catch
+                            {
+                                // ignore activate errors
+                            }
+
+                            TryShowConfiguration(rootOpen, rootConfigName);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore root-restore errors
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(rootPath) && File.Exists(rootPath))
+                {
+                    try
+                    {
+                        if (!IsDocOpenByIdOrTitle(rootPath, rootTitle))
+                        {
+                            int docType = DocumentTypeFromPath(rootPath);
+                            DocumentSpecification spec = null;
+                            try
+                            {
+                                spec = _swApp.GetOpenDocSpec(rootPath) as DocumentSpecification;
+                            }
+                            catch
+                            {
+                                spec = null;
+                            }
+
+                            if (spec != null)
+                            {
+                                spec.DocumentType = docType;
+                                spec.ReadOnly = false;
+                                spec.Silent = true;
+                                if (!string.IsNullOrWhiteSpace(rootConfigName))
+                                {
+                                    try
+                                    {
+                                        spec.ConfigurationName = rootConfigName;
+                                    }
+                                    catch
+                                    {
+                                        // ignore
+                                    }
+                                }
+
+                                using (new ExternalReferenceBatchOpenScope(_swApp))
+                                {
+                                    try
+                                    {
+                                        _swApp.OpenDoc7(spec);
+                                    }
+                                    catch
+                                    {
+                                        // ignore open errors
+                                    }
+                                }
+                            }
+
+                            ComInteropUtil.TryFinalReleaseComObject(spec);
+                        }
+
+                        // Activate + restore configuration if possible.
+                        ModelDoc2 rootOpen = FindOpenDocument(rootPath, rootTitle);
+                        if (rootOpen != null)
+                        {
+                            string activateTitle = string.Empty;
+                            try
+                            {
+                                activateTitle = NormalizeDocTitleForClose(rootOpen.GetTitle());
+                                if (string.IsNullOrWhiteSpace(activateTitle))
+                                {
+                                    activateTitle = rootOpen.GetTitle();
+                                }
+                            }
+                            catch
+                            {
+                                activateTitle = rootTitleNorm;
+                            }
+
+                            try
+                            {
+                                if (!string.IsNullOrWhiteSpace(activateTitle))
+                                {
+                                    _swApp.ActivateDoc(activateTitle);
+                                }
+                            }
+                            catch
+                            {
+                                // ignore activate errors
+                            }
+
+                            TryShowConfiguration(rootOpen, rootConfigName);
+                        }
+                    }
+                    catch
+                    {
+                        // ignore root-reopen errors
+                    }
+                }
+            }
+        }
+
         private void ProcessDeliverablePlansFast(List<DeliverablePlan> plans, BatchTraverseResult traverse, string deliverablesFolder,
             PublishOptions options, Action<string> log, Action<string> errorLog, HashSet<string> baselineVisibleDocs,
             ModelDoc2 rootModel, string rootTitle, Action<int, int> progress)
@@ -5698,7 +7963,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
                     finally
                     {
-                        if (openedHere && model != null)
+                        if (model != null)
                         {
                             CloseExplicitlyOpenedDoc(model, errorLog);
                         }
@@ -6319,14 +8584,44 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 ModelView view = null;
                 bool prevGraphicsUpdate = true;
+                ExportActivationScope activation = null;
 
                 ExportSummary summary = _currentExportSummary;
 
-                // Batch export must avoid activating component models as top-level docs. Activating models can
-                // force SOLIDWORKS to fully load and keep many ModelDoc2 instances open, leading to memory growth
-                // and eventual disconnect/crash on large assemblies. Export directly from the provided ModelDoc2.
+                // Model exports generally do not require activating the document. However, view-dependent PNG
+                // export frequently requires the target model to be ACTIVE to avoid blank captures.
                 try
                 {
+                    if (png)
+                    {
+                        string modelTitle = string.Empty;
+                        try
+                        {
+                            modelTitle = model.GetTitle() ?? string.Empty;
+                        }
+                        catch
+                        {
+                            modelTitle = string.Empty;
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(modelTitle))
+                        {
+                            activation = new ExportActivationScope(_swApp, _activeBatchRootTitle, modelTitle, docType, errorLog,
+                                "MODEL PNG|" + (fileString ?? string.Empty));
+                        }
+                        try
+                        {
+                            // Ensure the model is visible while capturing; activation alone may not force a window refresh.
+                            model.Visible = true;
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+
+                        YieldAndCheckCancel();
+                    }
+
                     TryShowConfiguration(model, confName);
                     YieldAndCheckCancel();
 
@@ -6657,11 +8952,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                             model.ForceRebuild3(true);
                             model.ShowNamedView2("Isometric", 7);
                             model.ViewZoomtofit2();
-                            model.GraphicsRedraw2();
 
                             if (view != null)
                             {
                                 view.EnableGraphicsUpdate = true;
+                            }
+
+                            model.GraphicsRedraw2();
+                            try
+                            {
+                                System.Windows.Forms.Application.DoEvents();
+                            }
+                            catch
+                            {
+                                // ignore
+                            }
+                            try
+                            {
+                                System.Threading.Thread.Sleep(50);
+                            }
+                            catch
+                            {
+                                // ignore
                             }
 
                             saveOk = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
@@ -6681,6 +8993,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                                           " ok=" + ok +
                                           " saveOk=" + saveOk +
                                           " blankSuspect=" + blankSuspect +
+                                          " activated=" + (activation != null && activation.Activated) +
+                                          " actErr=" + (activation != null ? activation.ActivateErrors : 0) +
                                           " activeBefore=" + activeBefore +
                                           " activeAfter=" + ActiveDocTitle() +
                                           " errors=" + errors +
@@ -6725,6 +9039,18 @@ namespace TinyMRP.SolidWorksAddin.Services
                         catch
                         {
                             // ignore restore errors
+                        }
+                    }
+
+                    if (activation != null)
+                    {
+                        try
+                        {
+                            activation.Dispose();
+                        }
+                        catch
+                        {
+                            // ignore activation-scope errors
                         }
                     }
                 }
@@ -8969,8 +11295,21 @@ namespace TinyMRP.SolidWorksAddin.Services
         {
             try
             {
+                return CreateRunLog("deliverables");
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private ExportRunLog CreateRunLog(string prefix)
+        {
+            try
+            {
                 string dir = Path.Combine(Path.GetTempPath(), "TinyMRP", "export-logs");
-                string name = "deliverables_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".log";
+                string safePrefix = string.IsNullOrWhiteSpace(prefix) ? "run" : prefix.Trim();
+                string name = safePrefix + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".log";
                 string path = Path.Combine(dir, name);
                 return new ExportRunLog(path);
             }
@@ -10660,6 +12999,35 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             string closeTitle = NormalizeDocTitleForClose(title);
+            bool tempOrMissingFile = false;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                tempOrMissingFile = true;
+            }
+            else
+            {
+                try
+                {
+                    tempOrMissingFile = !File.Exists(path);
+                }
+                catch
+                {
+                    tempOrMissingFile = true;
+                }
+            }
+
+            string pathFileName = string.Empty;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    pathFileName = Path.GetFileName(path) ?? string.Empty;
+                }
+            }
+            catch
+            {
+                pathFileName = string.Empty;
+            }
 
             bool IsStillOpen()
             {
@@ -10782,6 +13150,95 @@ namespace TinyMRP.SolidWorksAddin.Services
                         // ignore type/lightweight errors
                     }
 
+                    if (tempOrMissingFile)
+                    {
+                        try
+                        {
+                            doc.SetSaveFlag();
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+
+                        string[] candidates = new[] { title, closeTitle, pathFileName };
+                        string used = string.Empty;
+                        for (int i = 0; i < candidates.Length; i++)
+                        {
+                            string cand = candidates[i] ?? string.Empty;
+                            if (string.IsNullOrWhiteSpace(cand))
+                            {
+                                continue;
+                            }
+
+                            // Skip duplicates (case-insensitive).
+                            bool dup = false;
+                            for (int j = 0; j < i; j++)
+                            {
+                                string prev = candidates[j] ?? string.Empty;
+                                if (!string.IsNullOrWhiteSpace(prev) &&
+                                    string.Equals(prev, cand, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    dup = true;
+                                    break;
+                                }
+                            }
+                            if (dup)
+                            {
+                                continue;
+                            }
+
+                            SafeLog(errorLog,
+                                "ForceClose: QuitDoc temp candidate pass=" + pass +
+                                " context=" + (context ?? string.Empty) +
+                                " cand=" + cand +
+                                " title=" + (title ?? string.Empty) +
+                                " closeTitle=" + (closeTitle ?? string.Empty) +
+                                " fileName=" + (pathFileName ?? string.Empty) +
+                                " path=" + (path ?? string.Empty));
+
+                            try
+                            {
+                                _swApp.QuitDoc(cand);
+                            }
+                            catch
+                            {
+                                // ignore quit errors
+                            }
+
+                            System.Windows.Forms.Application.DoEvents();
+                            try
+                            {
+                                System.Threading.Thread.Sleep(50);
+                            }
+                            catch
+                            {
+                                // ignore sleep errors
+                            }
+
+                            if (!IsStillOpen())
+                            {
+                                used = cand;
+                                break;
+                            }
+                        }
+
+                        SafeLog(errorLog,
+                            "ForceClose: temp close result context=" + (context ?? string.Empty) +
+                            " used=" + (used ?? string.Empty) +
+                            " stillOpen=" + IsStillOpen() +
+                            " title=" + (title ?? string.Empty) +
+                            " path=" + (path ?? string.Empty));
+
+                        if (!IsStillOpen())
+                        {
+                            return;
+                        }
+
+                        // Temp/unsaved docs must never fall back to CloseDoc (can trigger save UI).
+                        continue;
+                    }
+
                     // a) QuitDoc (discard changes, no UI)
                     try
                     {
@@ -10814,6 +13271,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         // ignore sleep errors
                     }
+
                     if (!IsStillOpen())
                     {
                         return;

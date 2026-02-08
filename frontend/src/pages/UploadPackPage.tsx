@@ -9,6 +9,45 @@ type UploadItem = {
   warnings?: string[];
 };
 
+type ImportIssue = {
+  stage?: string;
+  file?: string;
+  line_number?: number;
+  part_number?: string;
+  path?: string;
+  message?: string;
+  exception_type?: string;
+  exception_message?: string;
+  traceback?: string;
+};
+
+type ImportReport = {
+  zip?: string;
+  flatbom_file?: string;
+  treebom_file?: string;
+  root?: string;
+  root_revision?: string;
+  parts_created?: number;
+  parts_updated?: number;
+  links_created?: number;
+  links_skipped?: number;
+  links_removed?: number;
+  parts_seeded?: number;
+  parts_seeded_list?: Array<{ part_number?: string; revision?: string }>;
+  parts_with_props?: number;
+  artifacts_added?: number;
+  artifacts_found_by_type?: Record<string, number>;
+  thumbnails_built?: number;
+  thumbnails_generated?: number;
+  rows_skipped_blank_part?: number;
+  flat_lines_failed_parse?: number;
+  flat_lines_skipped_not_dict?: number;
+  flat_lines_failed_normalize?: number;
+  tree_rows_failed_qty?: number;
+  errors?: ImportIssue[];
+  warnings?: ImportIssue[];
+};
+
 type UploadResult = {
   zip?: string;
   dry_run?: boolean;
@@ -16,7 +55,7 @@ type UploadResult = {
   warnings?: string[];
   deliverables_written?: number;
   extra_files_written?: number;
-  import?: any;
+  import?: ImportReport | null;
 };
 
 function formatBytes(value?: number): string {
@@ -38,6 +77,35 @@ function parseJsonResponse(xhr: XMLHttpRequest): any {
     return JSON.parse(xhr.responseText || "{}");
   } catch {
     return {};
+  }
+}
+
+function formatImportIssue(issue: ImportIssue): string {
+  const bits: string[] = [];
+  if (issue.stage) bits.push(issue.stage);
+  if (issue.file) bits.push(issue.file);
+  if (issue.line_number) bits.push(`line ${issue.line_number}`);
+  if (issue.part_number) bits.push(`pn ${issue.part_number}`);
+  if (issue.path) bits.push(issue.path);
+  const head = bits.length ? `[${bits.join(" | ")}] ` : "";
+  const msg = issue.message || "";
+  const exc = issue.exception_message ? ` (${issue.exception_message})` : "";
+  return `${head}${msg}${exc}`.trim() || "Unknown issue";
+}
+
+function downloadJson(filename: string, data: unknown) {
+  try {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    // ignore
   }
 }
 
@@ -64,6 +132,25 @@ export default function UploadPackPage() {
 
   const items = useMemo(() => result?.items || [], [result]);
   const importSummary = result?.import || null;
+  const importErrors = useMemo(
+    () => (Array.isArray(importSummary?.errors) ? importSummary?.errors || [] : []),
+    [importSummary],
+  );
+  const importWarnings = useMemo(
+    () => (Array.isArray(importSummary?.warnings) ? importSummary?.warnings || [] : []),
+    [importSummary],
+  );
+  const importErrorCount = importErrors.length;
+  const importWarningCount = importWarnings.length;
+  const importHasIssues = importErrorCount > 0 || importWarningCount > 0;
+
+  const skippedBlankParts = Number(importSummary?.rows_skipped_blank_part ?? 0);
+  const flatParseFailures = Number(importSummary?.flat_lines_failed_parse ?? 0);
+  const flatNormalizeFailures = Number(importSummary?.flat_lines_failed_normalize ?? 0);
+  const treeQtyFailures = Number(importSummary?.tree_rows_failed_qty ?? 0);
+  const reportHasDiagnostics =
+    skippedBlankParts > 0 || flatParseFailures > 0 || flatNormalizeFailures > 0 || treeQtyFailures > 0;
+
   const rootPn = importSummary?.root || "";
   const rootRev = importSummary?.root_revision || "";
   const rootHref = rootPn
@@ -227,12 +314,19 @@ export default function UploadPackPage() {
       const ok = xhr.status >= 200 && xhr.status < 300;
       const data = parseJsonResponse(xhr) || {};
       if (!ok || data?.error) {
-        const msg = data?.error || `HTTP ${xhr.status}`;
+        const base = data?.error || `HTTP ${xhr.status}`;
+        const detail = data?.detail ? ` (${data.detail})` : "";
+        const msg = `${base}${detail}`;
         setError(msg);
         setProgress(100, `Failed: ${msg}`);
       } else {
         setResult(data || {});
-        setProgress(100, "Done");
+        const imp = data?.import;
+        const errCount = Array.isArray(imp?.errors) ? imp.errors.length : 0;
+        const warnCount = Array.isArray(imp?.warnings) ? imp.warnings.length : 0;
+        if (errCount > 0) setProgress(100, `Done (errors: ${errCount})`);
+        else if (warnCount > 0) setProgress(100, `Done (warnings: ${warnCount})`);
+        else setProgress(100, "Done");
       }
       setBusy(false);
     };
@@ -542,6 +636,70 @@ extra/
                 ) : null}
               </div>
             )}
+
+            {importSummary && (importHasIssues || reportHasDiagnostics) ? (
+              <div className={`alert ${importErrorCount ? "alert-danger" : "alert-warning"} small mt-3`}>
+                <div className="fw-semibold mb-1">
+                  Import completed
+                  {importErrorCount ? ` with ${importErrorCount} error${importErrorCount === 1 ? "" : "s"}` : ""}
+                  {importWarningCount
+                    ? `${importErrorCount ? " and " : " with "}${importWarningCount} warning${
+                        importWarningCount === 1 ? "" : "s"
+                      }`
+                    : ""}
+                  {!importErrorCount && !importWarningCount ? " (with warnings)" : ""}.
+                </div>
+                {reportHasDiagnostics ? (
+                  <div className="text-muted">
+                    Skipped blank PN rows: <b>{skippedBlankParts}</b>. FLATBOM parse failures:{" "}
+                    <b>{flatParseFailures}</b>. FLATBOM normalize failures: <b>{flatNormalizeFailures}</b>. TREEBOM qty
+                    failures: <b>{treeQtyFailures}</b>.
+                  </div>
+                ) : null}
+                <div className="mt-2">
+                  <button
+                    className="btn btn-sm btn-outline-secondary"
+                    type="button"
+                    onClick={() => downloadJson(`import_report_${result?.zip || "report"}.json`, importSummary)}
+                  >
+                    Download report JSON
+                  </button>
+                </div>
+                {importHasIssues ? (
+                  <div className="mt-2">
+                    <details>
+                      <summary>Show import issues</summary>
+                      {importErrorCount ? (
+                        <div className="mt-2">
+                          <div className="fw-semibold">Errors</div>
+                          <ul className="mb-0">
+                            {importErrors.slice(0, 50).map((it, idx) => (
+                              <li key={`err-${idx}`}>{formatImportIssue(it)}</li>
+                            ))}
+                          </ul>
+                          {importErrorCount > 50 ? (
+                            <div className="text-muted mt-1">Showing first 50 errors.</div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {importWarningCount ? (
+                        <div className="mt-2">
+                          <div className="fw-semibold">Warnings</div>
+                          <ul className="mb-0">
+                            {importWarnings.slice(0, 50).map((it, idx) => (
+                              <li key={`warn-${idx}`}>{formatImportIssue(it)}</li>
+                            ))}
+                          </ul>
+                          {importWarningCount > 50 ? (
+                            <div className="text-muted mt-1">Showing first 50 warnings.</div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </details>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             {result.warnings && result.warnings.length ? (
               <div className="alert alert-warning small mt-3">
