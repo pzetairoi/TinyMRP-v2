@@ -909,26 +909,68 @@ def part_refresh_files(pn):
     pn = (pn or "").strip()
     data = request.get_json(silent=True) or {}
     rev_in = data.get("rev") if "rev" in data else request.args.get("rev")
+    recursive_in = data.get("recursive") if "recursive" in data else request.args.get("recursive")
     rev_clean = _clean_rev_input(rev_in)
     p = _find_part_doc(pn, rev_clean)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
     target_rev = _clean_rev_value(p.revision or "")
-    found = discover_part_files(p.part_number, target_rev)
-    recs = []
-    for (group, is_dwg), meta in found.items():
-        rec = dict(meta)
-        rec["ext_group"] = group
-        rec["is_dwg"] = bool(is_dwg)
-        recs.append(rec)
-    upserts = upsert_part_files(recs, p.part_number, target_rev)
-    thumbs = generate_thumbs_for_parts([(p.part_number, target_rev)])
+
+    def _parse_bool(v: object) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+    recursive = _parse_bool(recursive_in)
+
+    pairs: list[tuple[str, str]] = [(p.part_number, target_rev)]
+    if recursive:
+        visited: set[tuple[str, str]] = set()
+        queue: list[tuple[str, str]] = [(p.part_number, target_rev)]
+        max_nodes = 5000
+        while queue and len(visited) < max_nodes:
+            parent_pn, parent_rev = queue.pop(0)
+            key = (parent_pn, parent_rev)
+            if key in visited:
+                continue
+            visited.add(key)
+            for link in BOMLink.objects(parent_pn__iexact=parent_pn, parent_rev__iexact=parent_rev).only(
+                "child_pn", "child_rev"
+            ):
+                cpn = (getattr(link, "child_pn", "") or "").strip()
+                crev = _clean_rev_value(getattr(link, "child_rev", "") or "")
+                if not cpn:
+                    continue
+                ckey = (cpn, crev)
+                if ckey in visited:
+                    continue
+                queue.append(ckey)
+        pairs = list(visited) if visited else pairs
+
+    files_found_total = 0
+    upserts_total = 0
+    refreshed: list[dict] = []
+    for pn_i, rev_i in pairs:
+        found = discover_part_files(pn_i, rev_i)
+        recs = []
+        for (group, is_dwg), meta in (found or {}).items():
+            rec = dict(meta)
+            rec["ext_group"] = group
+            rec["is_dwg"] = bool(is_dwg)
+            recs.append(rec)
+        files_found_total += len(recs)
+        upserts_total += upsert_part_files(recs, pn_i, rev_i)
+        refreshed.append({"pn": pn_i, "rev": rev_i, "files_found": len(recs)})
+
+    thumbs = generate_thumbs_for_parts(pairs)
     try:
         log_action(
             "part.files.refresh",
             resource_type="part",
             resource=f"{p.part_number}:{target_rev}",
-            meta={"found": len(recs), "upserts": upserts, "thumbs": thumbs},
+            meta={"recursive": recursive, "parts": len(pairs), "found": files_found_total, "upserts": upserts_total, "thumbs": thumbs},
         )
     except Exception:
         pass
@@ -937,9 +979,12 @@ def part_refresh_files(pn):
             "ok": True,
             "part_number": p.part_number,
             "revision": target_rev,
-            "files_found": len(recs),
-            "artifacts_upserted": upserts,
+            "recursive": recursive,
+            "parts_refreshed": len(pairs),
+            "files_found": files_found_total,
+            "artifacts_upserted": upserts_total,
             "thumbnails_generated": thumbs,
+            "refreshed": refreshed[:200],
         }
     )
 

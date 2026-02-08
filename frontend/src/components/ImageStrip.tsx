@@ -8,9 +8,10 @@ type Props = {
   mode?: 'preview' | 'drawing'
   limit?: number         // render first N only when provided
   fit?: boolean          // when true, image fills parent (hero use)
+  cacheBust?: string | number
 }
 
-export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit = false }: Props) {
+export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit = false, cacheBust }: Props) {
   const [rows, setRows] = useState<ApiRow[]>([])
   useEffect(() => {
     let cancelled = false
@@ -22,7 +23,7 @@ export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit 
       if (!cancelled) setRows(Array.isArray(j) ? j : [])
     })()
     return ()=>{cancelled=true}
-  }, [pn, rev, mode])
+  }, [pn, rev, mode, cacheBust])
 
   const list = rows.length
     ? (typeof limit === 'number' ? rows.slice(0, Math.max(0, limit)) : rows)
@@ -32,15 +33,22 @@ export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit 
     : { display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }
   return (
     <div style={wrapStyle as any}>
-      {list.map((row, i) => <FallbackImg key={i} urls={row.urls} fit={fit} />)}
+      {list.map((row, i) => <FallbackImg key={i} urls={row.urls} fit={fit} cacheBust={cacheBust} />)}
     </div>
   )
 }
 
-function FallbackImg({ urls, fit }:{ urls:string[]; fit?: boolean }) {
+function withCacheBust(url: string, cacheBust: string | number | undefined): string {
+  if (!url || cacheBust === undefined || cacheBust === null || url.startsWith("/branding/")) return url
+  const cb = encodeURIComponent(String(cacheBust))
+  return url + (url.includes("?") ? "&" : "?") + "t=" + cb
+}
+
+function FallbackImg({ urls, fit, cacheBust }:{ urls:string[]; fit?: boolean; cacheBust?: string | number }) {
   const [idx, setIdx] = useState(0)
   const fallback = "/branding/logo"
-  const src = urls.length && idx < urls.length ? urls[idx] : fallback
+  const rawSrc = urls.length && idx < urls.length ? urls[idx] : fallback
+  const src = withCacheBust(rawSrc, cacheBust)
   const baseStyle = fit
     ? { height:'100%', width:'100%', objectFit:'contain', display:'block' }
     : { maxHeight:160, maxWidth:240, objectFit:'contain', border:'1px solid rgba(0,0,0,.08)', borderRadius:8, padding:6 }

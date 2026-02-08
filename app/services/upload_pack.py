@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import time
 import zipfile
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
@@ -14,6 +15,8 @@ from flask import current_app
 
 from app.models.extra_file import PartExtraFile
 from app.services.import_zip import import_bom_zip
+from app.services.filescan import upsert_part_files
+from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.part_norm import clean_pn, clean_rev
 from app.services.extra_files import (
     REV_EMPTY_TOKEN,
@@ -38,6 +41,67 @@ _DELIVERABLE_GROUPS = {
     "stl",
     "datasheet",
 }
+
+
+def _stage_start() -> Tuple[float, float]:
+    return (time.perf_counter(), time.process_time())
+
+
+def _stage_end(timings: Dict[str, Any], name: str, start: Tuple[float, float]) -> None:
+    if not name:
+        return
+    try:
+        t0, c0 = start
+        t1 = time.perf_counter()
+        c1 = time.process_time()
+        elapsed = float(t1 - t0)
+        cpu = float(c1 - c0)
+        idle = float(max(0.0, elapsed - cpu))
+        timings[name] = {"elapsed_s": elapsed, "cpu_s": cpu, "idle_s": idle}
+    except Exception:
+        pass
+
+
+def _snapshot_resources() -> Dict[str, Any]:
+    snap: Dict[str, Any] = {
+        "utc": datetime.utcnow().isoformat(),
+        "cpu_s": float(time.process_time()),
+    }
+    try:
+        import psutil  # type: ignore
+
+        snap["rss_bytes"] = int(psutil.Process().memory_info().rss)
+    except Exception:
+        snap["rss_bytes"] = None
+    return snap
+
+
+def _try_parse_pn_rev_from_deliverable_filename(filename_only: str) -> Tuple[str, str, bool] | None:
+    """
+    Parse <PN>_REV_<REV> from a deliverable filename. Handles optional _DWG suffix for PNG drawing images.
+    Returns (pn, rev, is_dwg).
+    """
+    name = os.path.basename(filename_only or "")
+    if not name:
+        return None
+    base, _ext = os.path.splitext(name)
+    if not base:
+        return None
+
+    is_dwg = False
+    if base.upper().endswith("_DWG"):
+        is_dwg = True
+        base = base[:-4]
+    idx = base.upper().rfind("_REV_")
+    if idx <= 0:
+        return None
+    pn_raw = base[:idx]
+    rev_raw = base[idx + 5 :]
+    pn = clean_pn(pn_raw)
+    rev = clean_rev(rev_raw)
+    if not pn:
+        return None
+    return pn, rev, is_dwg
 
 _DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
@@ -189,6 +253,10 @@ def import_upload_pack(
     allow_extra: bool = True,
     seed_tag: str = "upload-pack",
 ) -> Dict[str, Any]:
+    timings: Dict[str, Any] = {}
+    resources_start = _snapshot_resources()
+    total_start = _stage_start()
+
     cfg = current_app.config
     max_zip_mb = int(cfg.get("UPLOAD_PACK_MAX_ZIP_MB") or 0)
     max_file_mb = int(cfg.get("UPLOAD_PACK_MAX_FILE_MB") or 0)
@@ -207,13 +275,19 @@ def import_upload_pack(
 
     deliverables_written = 0
     extras_written = 0
+    deliverable_artifact_recs: List[Dict[str, Any]] = []
+    deliverable_pairs: set[Tuple[str, str]] = set()
 
+    zip_open_start = _stage_start()
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+        _stage_end(timings, "zip.open", zip_open_start)
         infos = [i for i in zf.infolist() if not i.is_dir()]
         if max_files and len(infos) > max_files:
             raise ValueError("ZIP exceeds configured file count limit")
 
+        bom_map_start = _stage_start()
         bom_map, bom_pairs_list = _build_bom_rev_map(zf)
+        _stage_end(timings, "bom.rev_map", bom_map_start)
         bom_pairs = set(bom_pairs_list)
         if not bom_pairs:
             warnings.append("BOM files not found in ZIP.")
@@ -228,6 +302,7 @@ def import_upload_pack(
         extra_manifest = _load_extra_manifest(zf)
         extra_manifest_names = {"extra/_manifest.json", "extra/manifest.json"}
 
+        scan_entries_start = _stage_start()
         for info in infos:
             if max_file_mb and info.file_size > max_file_mb * 1024 * 1024:
                 raise ValueError(f"ZIP entry too large: {info.filename}")
@@ -289,6 +364,27 @@ def import_upload_pack(
                     continue
                 if not dry_run:
                     _write_zip_entry(zf, info, dest_abs)
+                    try:
+                        parsed = _try_parse_pn_rev_from_deliverable_filename(filename_only)
+                        if parsed:
+                            pn_parsed, rev_parsed, is_dwg = parsed
+                            ext = os.path.splitext(filename_only)[1].lstrip(".").lower()
+                            if ext:
+                                deliverable_pairs.add((pn_parsed, rev_parsed))
+                                deliverable_artifact_recs.append(
+                                    {
+                                        "part_number": pn_parsed,
+                                        "revision": rev_parsed,
+                                        "ext_group": group,
+                                        "ext": ext,
+                                        "rel_path": dest_rel,
+                                        "is_dwg": bool(is_dwg) if group == "png" else False,
+                                        "mtime_iso": datetime.utcnow(),
+                                        "size": float(os.path.getsize(dest_abs)),
+                                    }
+                                )
+                    except Exception:
+                        pass
                 deliverables_written += 1
                 continue
 
@@ -397,10 +493,44 @@ def import_upload_pack(
             if strict_structure:
                 raise ValueError(msg)
             warnings.append(msg)
+        _stage_end(timings, "zip.entries", scan_entries_start)
 
     bom_result = None
     if not dry_run:
-        bom_result = import_bom_zip(file_bytes, filename, seed_tag=seed_tag)
+        bom_start = _stage_start()
+        bom_result = import_bom_zip(
+            file_bytes,
+            filename,
+            seed_tag=seed_tag,
+            scan_artifacts=False,
+            generate_thumbs=False,
+        )
+        _stage_end(timings, "bom.import", bom_start)
+
+        # Upsert deliverable artifacts directly (avoid expensive filesystem scan during BOM import).
+        artifacts_upserted = 0
+        thumbs = 0
+        artifacts_found_by_type: Dict[str, int] = {}
+        artifacts_start = _stage_start()
+        try:
+            artifacts_upserted = upsert_part_files(deliverable_artifact_recs)
+            for rec in deliverable_artifact_recs:
+                grp = str(rec.get("ext_group") or "unknown")
+                artifacts_found_by_type[grp] = artifacts_found_by_type.get(grp, 0) + 1
+        except Exception:
+            artifacts_upserted = 0
+        try:
+            thumbs = generate_thumbs_for_parts(list(deliverable_pairs))
+        except Exception:
+            thumbs = 0
+        _stage_end(timings, "artifacts.upsert", artifacts_start)
+
+        if isinstance(bom_result, dict):
+            # Preserve existing report keys expected by UI/tests.
+            bom_result["artifacts_added"] = int(bom_result.get("artifacts_added") or 0) + int(artifacts_upserted)
+            bom_result["artifacts_found_by_type"] = artifacts_found_by_type or (bom_result.get("artifacts_found_by_type") or {})
+            bom_result["thumbnails_generated"] = int(bom_result.get("thumbnails_generated") or 0) + int(thumbs)
+            bom_result["thumbnails_built"] = int(bom_result.get("thumbnails_built") or 0) + int(thumbs)
 
     items: List[Dict[str, Any]] = []
     pairs = set(bom_pairs) | set(extra_pairs)
@@ -415,6 +545,7 @@ def import_upload_pack(
             }
         )
 
+    _stage_end(timings, "total", total_start)
     return {
         "zip": filename,
         "dry_run": bool(dry_run),
@@ -423,4 +554,7 @@ def import_upload_pack(
         "deliverables_written": deliverables_written,
         "extra_files_written": extras_written,
         "import": bom_result,
+        "timings": timings,
+        "resources_start": resources_start,
+        "resources_end": _snapshot_resources(),
     }

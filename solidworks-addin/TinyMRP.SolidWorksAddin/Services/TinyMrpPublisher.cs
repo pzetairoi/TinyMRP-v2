@@ -1143,6 +1143,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             ExportRunLog runLog = CreateExportRunLog();
             Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
             SetLastRunLogPath(runLog);
+            errorLog?.Invoke("START deliverables export");
 
             _currentExportSummary = new ExportSummary();
 
@@ -1309,6 +1310,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             ExportRunLog runLog = CreateRunLog("bom");
             Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
             SetLastRunLogPath(runLog);
+            errorLog?.Invoke("START BOM export");
 
             ModelDoc2 swModel = _swApp.ActiveDoc as ModelDoc2;
             if (swModel == null)
@@ -1607,6 +1609,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             ExportRunLog runLog = CreateRunLog("upload_pack");
             Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
             SetLastRunLogPath(runLog);
+            errorLog?.Invoke("START upload pack");
 
             try
             {
@@ -9646,17 +9649,23 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (dxfRequested)
                     {
-                        var t = System.Diagnostics.Stopwatch.StartNew();
-                        if (summary != null)
+                        // DXF is only required when the drawing has a designated DXF/flatpattern sheet.
+                        // Do not treat "no drawing DXF page" as an export error.
+                        if (string.IsNullOrWhiteSpace(dxfSheetName))
                         {
-                            summary.DwgAttemptDxf++;
+                            SafeLog(errorLog, "DWG DXF skipped: no designated DXF sheet found (expected sheet name 'DXF'/'DXF Sheet'/'FlatPattern').");
                         }
-
-                        YieldAndCheckCancel();
-                        bool exported = false;
-
-                        if (!string.IsNullOrWhiteSpace(dxfSheetName))
+                        else
                         {
+                            var t = System.Diagnostics.Stopwatch.StartNew();
+                            if (summary != null)
+                            {
+                                summary.DwgAttemptDxf++;
+                            }
+
+                            YieldAndCheckCancel();
+                            bool exported = false;
+
                             try
                             {
                                 errors = 0;
@@ -9680,47 +9689,48 @@ namespace TinyMRP.SolidWorksAddin.Services
                             {
                                 exported = false;
                             }
-                        }
 
-                        if (!exported)
-                        {
-                            View flatView = drawing.GetFirstView() as View;
-                            View flatPatternView = null;
-                            while (flatView != null)
+                            // Fallback: if direct export fails, try exporting the FLATPATTERN view.
+                            if (!exported)
                             {
-                                ThrowIfCancelled();
-                                if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                                View flatView = drawing.GetFirstView() as View;
+                                View flatPatternView = null;
+                                while (flatView != null)
                                 {
-                                    flatPatternView = flatView;
-                                    break;
+                                    ThrowIfCancelled();
+                                    if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        flatPatternView = flatView;
+                                        break;
+                                    }
+
+                                    flatView = flatView.GetNextView() as View;
                                 }
 
-                                flatView = flatView.GetNextView() as View;
+                                if (flatPatternView != null)
+                                {
+                                    ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
+                                    exported = File.Exists(dxfPath);
+                                }
                             }
 
-                            if (flatPatternView != null)
-                            {
-                                ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
-                                exported = File.Exists(dxfPath);
-                            }
-                        }
+                            t.Stop();
+                            SafeLog(errorLog, "DWG DXF ms=" + t.ElapsedMilliseconds + " ok=" + exported + " path=" + dxfPath);
 
-                        t.Stop();
-                        SafeLog(errorLog, "DWG DXF ms=" + t.ElapsedMilliseconds + " ok=" + exported + " path=" + dxfPath);
-
-                        if (!exported)
-                        {
-                            if (summary != null)
+                            if (!exported)
                             {
-                                summary.DwgFailDxf++;
+                                if (summary != null)
+                                {
+                                    summary.DwgFailDxf++;
+                                }
+                                LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
                             }
-                            LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
-                        }
-                        else
-                        {
-                            if (summary != null)
+                            else
                             {
-                                summary.DwgOkDxf++;
+                                if (summary != null)
+                                {
+                                    summary.DwgOkDxf++;
+                                }
                             }
                         }
                     }
@@ -10197,18 +10207,24 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (dxfRequested)
                     {
-                        if (summary != null)
+                        // DXF is only required when the drawing has a designated DXF/flatpattern sheet.
+                        // Do not treat "no drawing DXF page" as an export error.
+                        if (string.IsNullOrWhiteSpace(dxfSheetName))
                         {
-                            summary.DwgAttemptDxf++;
+                            SafeLog(errorLog, "DWG DXF skipped: no designated DXF sheet found (expected sheet name 'DXF'/'DXF Sheet'/'FlatPattern').");
                         }
-
-                        ThrowIfCancelled();
-                        bool exported = false;
-
-                        // If the drawing has a dedicated DXF/flat pattern sheet, export it directly without
-                        // mutating the sheet format (mutations can dirty the doc and trigger save prompts).
-                        if (!string.IsNullOrWhiteSpace(dxfSheetName))
+                        else
                         {
+                            if (summary != null)
+                            {
+                                summary.DwgAttemptDxf++;
+                            }
+
+                            ThrowIfCancelled();
+                            bool exported = false;
+
+                            // If the drawing has a dedicated DXF/flat pattern sheet, export it directly without
+                            // mutating the sheet format (mutations can dirty the doc and trigger save prompts).
                             try
                             {
                                 drawing.ActivateSheet(dxfSheetName);
@@ -10220,45 +10236,45 @@ namespace TinyMRP.SolidWorksAddin.Services
                             {
                                 exported = false;
                             }
-                        }
 
-                        // Fallback: find a FLATPATTERN view and export it via a temporary doc.
-                        if (!exported)
-                        {
-                            View flatView = drawing.GetFirstView() as View;
-                            View flatPatternView = null;
-                            while (flatView != null)
+                            // Fallback: if direct export fails, try exporting the FLATPATTERN view.
+                            if (!exported)
                             {
-                                ThrowIfCancelled();
-                                if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                                View flatView = drawing.GetFirstView() as View;
+                                View flatPatternView = null;
+                                while (flatView != null)
                                 {
-                                    flatPatternView = flatView;
-                                    break;
+                                    ThrowIfCancelled();
+                                    if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        flatPatternView = flatView;
+                                        break;
+                                    }
+
+                                    flatView = flatView.GetNextView() as View;
                                 }
 
-                                flatView = flatView.GetNextView() as View;
+                                if (flatPatternView != null)
+                                {
+                                    ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
+                                    exported = File.Exists(dxfPath);
+                                }
                             }
 
-                            if (flatPatternView != null)
+                            if (!exported)
                             {
-                                ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
-                                exported = File.Exists(dxfPath);
+                                if (summary != null)
+                                {
+                                    summary.DwgFailDxf++;
+                                }
+                                LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
                             }
-                        }
-
-                        if (!exported)
-                        {
-                            if (summary != null)
+                            else
                             {
-                                summary.DwgFailDxf++;
-                            }
-                            LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
-                        }
-                        else
-                        {
-                            if (summary != null)
-                            {
-                                summary.DwgOkDxf++;
+                                if (summary != null)
+                                {
+                                    summary.DwgOkDxf++;
+                                }
                             }
                         }
                     }
