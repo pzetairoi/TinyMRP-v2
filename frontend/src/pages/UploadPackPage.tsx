@@ -46,6 +46,9 @@ type ImportReport = {
   tree_rows_failed_qty?: number;
   errors?: ImportIssue[];
   warnings?: ImportIssue[];
+  timings?: Record<string, { elapsed_s?: number; cpu_s?: number; idle_s?: number }>;
+  resources_start?: any;
+  resources_end?: any;
 };
 
 type UploadResult = {
@@ -56,6 +59,9 @@ type UploadResult = {
   deliverables_written?: number;
   extra_files_written?: number;
   import?: ImportReport | null;
+  timings?: Record<string, { elapsed_s?: number; cpu_s?: number; idle_s?: number }>;
+  resources_start?: any;
+  resources_end?: any;
 };
 
 function formatBytes(value?: number): string {
@@ -107,6 +113,13 @@ function downloadJson(filename: string, data: unknown) {
   } catch {
     // ignore
   }
+}
+
+function formatSeconds(value: any): string {
+  const n = Number(value || 0);
+  if (!isFinite(n) || n <= 0) return "0.00s";
+  if (n < 1) return `${(n * 1000).toFixed(0)}ms`;
+  return `${n.toFixed(2)}s`;
 }
 
 export default function UploadPackPage() {
@@ -168,6 +181,18 @@ export default function UploadPackPage() {
   const seededParts = useMemo(() => {
     const list = importSummary?.parts_seeded_list || [];
     return Array.isArray(list) ? list : [];
+  }, [importSummary]);
+
+  const topTimings = useMemo(() => {
+    const t = result?.timings;
+    if (!t || typeof t !== "object") return [] as Array<[string, any]>;
+    return Object.entries(t).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [result]);
+
+  const bomTimings = useMemo(() => {
+    const t = importSummary?.timings;
+    if (!t || typeof t !== "object") return [] as Array<[string, any]>;
+    return Object.entries(t).sort((a, b) => a[0].localeCompare(b[0]));
   }, [importSummary]);
 
   useEffect(() => {
@@ -547,8 +572,8 @@ extra/
               <div>
                 ZIP: <code>{result.zip || "-"}</code>
               </div>
-              {importSummary ? (
-                <>
+            {importSummary ? (
+              <>
                   <div>
                     Root: <code>{rootPn || "-"}</code>
                     {rootPn ? (
@@ -580,6 +605,64 @@ extra/
                 <div className="text-muted">Import summary is available after a non-dry run upload.</div>
               )}
             </div>
+
+            {(topTimings.length > 0 || bomTimings.length > 0) && (
+              <div className="mt-2">
+                <details>
+                  <summary>Timing diagnostics</summary>
+                  {topTimings.length > 0 && (
+                    <div className="mt-2">
+                      <div className="fw-semibold">Upload pack</div>
+                      <table className="table table-sm w-auto mb-0">
+                        <thead>
+                          <tr>
+                            <th>Stage</th>
+                            <th>Elapsed</th>
+                            <th>CPU</th>
+                            <th>Idle</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {topTimings.map(([k, v]) => (
+                            <tr key={k}>
+                              <td>{k}</td>
+                              <td>{formatSeconds(v?.elapsed_s)}</td>
+                              <td>{formatSeconds(v?.cpu_s)}</td>
+                              <td>{formatSeconds(v?.idle_s)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {bomTimings.length > 0 && (
+                    <div className="mt-2">
+                      <div className="fw-semibold">BOM import</div>
+                      <table className="table table-sm w-auto mb-0">
+                        <thead>
+                          <tr>
+                            <th>Stage</th>
+                            <th>Elapsed</th>
+                            <th>CPU</th>
+                            <th>Idle</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bomTimings.map(([k, v]) => (
+                            <tr key={k}>
+                              <td>{k}</td>
+                              <td>{formatSeconds(v?.elapsed_s)}</td>
+                              <td>{formatSeconds(v?.cpu_s)}</td>
+                              <td>{formatSeconds(v?.idle_s)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </details>
+              </div>
+            )}
 
             {seededParts.length > 0 && (
               <div className="mt-2">

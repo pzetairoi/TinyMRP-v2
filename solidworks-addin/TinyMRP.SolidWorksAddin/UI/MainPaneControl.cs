@@ -1966,6 +1966,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             PublishOptions options = BuildOptions();
             ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
             SetStatus("Creating files...");
+            UpdateRunLogLink(string.Empty);
             publisher.ProcessFiles(options, Log, UpdatePublishProgress);
             UpdateRunLogLink(publisher.LastRunLogPath);
             // Keep the final status/progress from the publisher (includes per-run log path).
@@ -1983,6 +1984,7 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             PublishOptions options = BuildUploadPackOptions();
             SetStatus("Creating upload pack...");
+            UpdateRunLogLink(string.Empty);
             publisher.ProcessUploadPack(options, Log);
             UpdateRunLogLink(publisher.LastRunLogPath);
             SetStatus("Done.");
@@ -2064,6 +2066,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             PublishOptions options = BuildOptions();
             ResetProgress(_bomProgressBar, _bomProgressLabel, "Process BOM");
             SetStatus("Processing BOM...");
+            UpdateRunLogLink(string.Empty);
             publisher.ProcessBom(options, Log, UpdateBomProgress);
             UpdateRunLogLink(publisher.LastRunLogPath);
             SetStatus("Done.");
@@ -4993,6 +4996,22 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             SetStatus(message);
             AddinLogger.Write(message);
+            try
+            {
+                TinyMrpPublisher publisher = AddinContext.Publisher;
+                if (publisher != null)
+                {
+                    string p = publisher.LastRunLogPath;
+                    if (!string.IsNullOrWhiteSpace(p) && !string.Equals(p, _lastRunLogPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        UpdateRunLogLink(p);
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
         }
 
         private void UpdateRunLogLink(string path)
@@ -5005,7 +5024,12 @@ namespace TinyMRP.SolidWorksAddin.UI
                     return;
                 }
 
-                _lastRunLogPath = path ?? string.Empty;
+                string next = path ?? string.Empty;
+                if (string.Equals(next, _lastRunLogPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+                _lastRunLogPath = next;
                 if (_openLogLink == null)
                 {
                     return;

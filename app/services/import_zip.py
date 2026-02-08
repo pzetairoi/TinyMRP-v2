@@ -1,5 +1,5 @@
 # app/services/import_zip.py
-import ast, io, json, zipfile, re, traceback
+import ast, io, json, zipfile, re, traceback, os, time
 from datetime import datetime
 from typing import Dict, Any, List, Tuple, Iterable, Set
 from mongoengine import NotUniqueError
@@ -26,6 +26,46 @@ except Exception:
     def timed_span(_name: str):
         yield
 
+
+def _stage_start() -> Tuple[float, float]:
+    return (time.perf_counter(), time.process_time())
+
+
+def _stage_end(report: Dict[str, Any], name: str, start: Tuple[float, float]) -> None:
+    if report is None or not name:
+        return
+    try:
+        t0, c0 = start
+        t1 = time.perf_counter()
+        c1 = time.process_time()
+        elapsed = float(t1 - t0)
+        cpu = float(c1 - c0)
+        idle = float(max(0.0, elapsed - cpu))
+        timings = report.get("timings")
+        if not isinstance(timings, dict):
+            timings = {}
+            report["timings"] = timings
+        timings[name] = {"elapsed_s": elapsed, "cpu_s": cpu, "idle_s": idle}
+    except Exception:
+        pass
+
+
+def _snapshot_resources() -> Dict[str, Any]:
+    snap: Dict[str, Any] = {
+        "utc": datetime.utcnow().isoformat(),
+        "cpu_s": float(time.process_time()),
+    }
+    try:
+        snap["pid"] = int(os.getpid())
+    except Exception:
+        pass
+    try:
+        import psutil  # type: ignore
+
+        snap["rss_bytes"] = int(psutil.Process().memory_info().rss)
+    except Exception:
+        snap["rss_bytes"] = None
+    return snap
 
 def _report_inc(report: Dict[str, Any], key: str, delta: int = 1) -> None:
     if report is None:
@@ -527,7 +567,14 @@ def _dedupe_links_for_parents(parents: Iterable[Tuple[str, str]]) -> int:
                 keep.save()
     return removed
 
-def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -> Dict[str, Any]:
+def import_bom_zip(
+    file_bytes: bytes,
+    filename: str,
+    seed_tag: str = "upload",
+    *,
+    scan_artifacts: bool = True,
+    generate_thumbs: bool = True,
+) -> Dict[str, Any]:
     """
     Main entry: import a single ZIP file.
     Creates/updates Parts from FLATBOM and links from TREEBOM.
@@ -559,7 +606,13 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
         "tree_rows_failed_qty": 0,
         "errors": [],
         "warnings": [],
+        "timings": {},
+        "resources_start": {},
+        "resources_end": {},
     }
+
+    report["resources_start"] = _snapshot_resources()
+    total_start = _stage_start()
 
     with timed_span("import.bom.total"):
         try:
@@ -577,6 +630,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             raise ValueError("invalid zip")
 
         with zf:
+            scan_start = _stage_start()
             # find the first *_FLATBOM.txt and *_TREEBOM.txt
             try:
                 flat_name = next(
@@ -600,6 +654,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 _report_issue(report, "warning", stage="zip.scan", message="No *_FLATBOM.txt found in ZIP.")
             if not tree_name:
                 _report_issue(report, "warning", stage="zip.scan", message="No *_TREEBOM.txt found in ZIP.")
+            _stage_end(report, "zip.scan", scan_start)
 
             created_parts = 0
             updated_parts = 0
@@ -613,6 +668,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             part_props: Dict[Tuple[str, str], Dict[str, Any]] = {}
             part_line: Dict[Tuple[str, str], int] = {}
             if flat_name:
+                flat_read_start = _stage_start()
                 flat_txt = ""
                 try:
                     with timed_span("import.bom.flatbom.read"):
@@ -627,7 +683,9 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                         exc=exc,
                     )
                     flat_txt = ""
+                _stage_end(report, "flatbom.read", flat_read_start)
 
+                flat_parse_start = _stage_start()
                 with timed_span("import.bom.flatbom.parse"):
                     for line_no, d in _parse_flatbom(flat_txt, source_name=flat_name, report=report):
                         try:
@@ -661,8 +719,10 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                         key = (pn, rev)
                         part_props[key] = norm
                         part_line[key] = line_no
+                _stage_end(report, "flatbom.parse", flat_parse_start)
 
             # Upsert parts (best effort)
+            parts_upsert_start = _stage_start()
             with timed_span("import.bom.parts.upsert"):
                 for (pn, rev), norm in part_props.items():
                     pn = _norm_pn(pn)
@@ -730,10 +790,12 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                             message="Failed to upsert part.",
                             exc=exc,
                         )
+            _stage_end(report, "parts.upsert", parts_upsert_start)
 
             # 2) Links from TREEBOM (best effort)
             links: List[Tuple[str, str, str, str, float, List[Dict[str, Any]]]] = []
             if tree_name:
+                tree_read_start = _stage_start()
                 tree_txt = ""
                 try:
                     with timed_span("import.bom.tree.read"):
@@ -748,10 +810,13 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                         exc=exc,
                     )
                     tree_txt = ""
+                _stage_end(report, "treebom.read", tree_read_start)
 
                 try:
+                    tree_parse_start = _stage_start()
                     with timed_span("import.bom.tree.parse"):
                         links = _aggregate_links(_parse_treebom(tree_txt, source_name=tree_name, report=report))
+                    _stage_end(report, "treebom.parse", tree_parse_start)
                 except Exception as exc:
                     _report_issue(
                         report,
@@ -767,7 +832,9 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 parent_pairs = {(p, clean_rev(r)) for p, r, _, _, _, _ in links if p}
                 if parent_pairs:
                     try:
+                        clear_links_start = _stage_start()
                         removed_links = _clear_existing_links(parent_pairs)
+                        _stage_end(report, "links.clear", clear_links_start)
                     except Exception as exc:
                         _report_issue(
                             report,
@@ -777,6 +844,7 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                             exc=exc,
                         )
 
+                links_save_start = _stage_start()
                 with timed_span("import.bom.links.save"):
                     for parent_pn, parent_rev, child_pn, child_rev, qty, occs in links:
                         if not parent_pn or not child_pn:
@@ -850,10 +918,13 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                                 message=f"Failed to save BOM link {parent_pn} -> {child_pn}.",
                                 exc=exc,
                             )
+                _stage_end(report, "links.save", links_save_start)
 
                 if parent_pairs:
                     try:
+                        dedupe_start = _stage_start()
                         removed_links += _dedupe_links_for_parents(parent_pairs)
+                        _stage_end(report, "links.dedupe", dedupe_start)
                     except Exception as exc:
                         _report_issue(
                             report,
@@ -879,64 +950,70 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
             artifact_inserts = 0
             artifacts_found_by_type = defaultdict(int)
             seen: Set[Tuple[str, str]] = set()
-            with timed_span("import.bom.artifacts"):
-                for _key, norm in part_props.items():
-                    pn = _norm_pn(norm.get("part_number") or "")
-                    rev = clean_rev(norm.get("revision") or "")
-                    key = (pn, rev)
-                    if not pn or key in seen:
-                        continue
-                    seen.add(key)
+            if scan_artifacts:
+                artifacts_total_start = _stage_start()
+                with timed_span("import.bom.artifacts"):
+                    for _key, norm in part_props.items():
+                        pn = _norm_pn(norm.get("part_number") or "")
+                        rev = clean_rev(norm.get("revision") or "")
+                        key = (pn, rev)
+                        if not pn or key in seen:
+                            continue
+                        seen.add(key)
 
-                    try:
-                        found = discover_part_files(pn, rev)
-                    except Exception as exc:
-                        _report_issue(
-                            report,
-                            "warning",
-                            stage="artifacts.scan",
-                            part_number=pn,
-                            message="Failed to discover part files.",
-                            exc=exc,
-                        )
-                        continue
+                        try:
+                            found = discover_part_files(pn, rev)
+                        except Exception as exc:
+                            _report_issue(
+                                report,
+                                "warning",
+                                stage="artifacts.scan",
+                                part_number=pn,
+                                message="Failed to discover part files.",
+                                exc=exc,
+                            )
+                            continue
 
-                    recs = []
-                    try:
-                        for (group, is_dwg), meta in (found or {}).items():
-                            rec = dict(meta)
-                            rec["ext_group"] = group
-                            rec["is_dwg"] = bool(is_dwg)
-                            recs.append(rec)
-                            artifacts_found_by_type[str(group or "unknown")] += 1
-                    except Exception:
-                        pass
+                        recs = []
+                        try:
+                            for (group, is_dwg), meta in (found or {}).items():
+                                rec = dict(meta)
+                                rec["ext_group"] = group
+                                rec["is_dwg"] = bool(is_dwg)
+                                recs.append(rec)
+                                artifacts_found_by_type[str(group or "unknown")] += 1
+                        except Exception:
+                            pass
 
-                    try:
-                        artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
-                    except Exception as exc:
-                        _report_issue(
-                            report,
-                            "warning",
-                            stage="artifacts.upsert",
-                            part_number=pn,
-                            message="Failed to upsert discovered part files.",
-                            exc=exc,
-                        )
+                        try:
+                            artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
+                        except Exception as exc:
+                            _report_issue(
+                                report,
+                                "warning",
+                                stage="artifacts.upsert",
+                                part_number=pn,
+                                message="Failed to upsert discovered part files.",
+                                exc=exc,
+                            )
+                _stage_end(report, "artifacts.total", artifacts_total_start)
 
             thumbs = 0
-            with timed_span("import.bom.thumbnails"):
-                try:
-                    thumbs = generate_thumbs_for_parts(seen)
-                except Exception as exc:
-                    thumbs = 0
-                    _report_issue(
-                        report,
-                        "warning",
-                        stage="thumbnails",
-                        message="Failed to generate thumbnails.",
-                        exc=exc,
-                    )
+            if generate_thumbs:
+                thumbs_start = _stage_start()
+                with timed_span("import.bom.thumbnails"):
+                    try:
+                        thumbs = generate_thumbs_for_parts(seen)
+                    except Exception as exc:
+                        thumbs = 0
+                        _report_issue(
+                            report,
+                            "warning",
+                            stage="thumbnails",
+                            message="Failed to generate thumbnails.",
+                            exc=exc,
+                        )
+                _stage_end(report, "thumbnails", thumbs_start)
 
             # root guess for convenience (top item in TREEBOM)
             root_pn = None
@@ -984,4 +1061,6 @@ def import_bom_zip(file_bytes: bytes, filename: str, seed_tag: str = "upload") -
                 }
             )
 
+    report["resources_end"] = _snapshot_resources()
+    _stage_end(report, "total", total_start)
     return report

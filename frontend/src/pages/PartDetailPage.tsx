@@ -179,6 +179,7 @@ export default function PartDetailPage() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [refreshIncludeChildren, setRefreshIncludeChildren] = useState(false);
   const [canPartsEdit, setCanPartsEdit] = useState(false);
   const insightsLoading = false;
   const [notes, setNotes] = useState("");
@@ -1042,10 +1043,12 @@ function bestUrl(f: FileRow): string {
     setRefreshError(null)
     setRefreshMsg(null)
     try {
-      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/refresh_files?rev=${encodeURIComponent(part.revision || "")}`, {
+      const qs = new URLSearchParams({ rev: part.revision || "" })
+      if (refreshIncludeChildren) qs.set("recursive", "1")
+      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/refresh_files?${qs.toString()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rev: part.revision || "" }),
+        body: JSON.stringify({ rev: part.revision || "", recursive: refreshIncludeChildren }),
       })
       const j = await resp.json().catch(() => ({}))
       if (!resp.ok) {
@@ -1055,12 +1058,17 @@ function bestUrl(f: FileRow): string {
       const found = j?.files_found ?? 0
       const upserts = j?.artifacts_upserted ?? 0
       const thumbs = j?.thumbnails_generated ?? 0
+      const partsRefreshed = j?.parts_refreshed ?? 1
       if (found <= 0) {
-        setRefreshMsg("No matching files found for this part.")
+        setRefreshMsg(
+          refreshIncludeChildren
+            ? `No matching files found. Parts refreshed: ${partsRefreshed}.`
+            : "No matching files found for this part."
+        )
       } else if (upserts <= 0) {
-        setRefreshMsg(`No new files found. ${found} file(s) already registered.`)
+        setRefreshMsg(`No new files found. ${found} file(s) already registered. Parts refreshed: ${partsRefreshed}.`)
       } else {
-        setRefreshMsg(`Found ${found} file(s). Updated ${upserts}. Thumbs ${thumbs}.`)
+        setRefreshMsg(`Found ${found} file(s). Updated ${upserts}. Thumbs ${thumbs}. Parts refreshed: ${partsRefreshed}.`)
       }
       setRefreshTick((t) => t + 1)
     } catch (err: any) {
@@ -1168,7 +1176,7 @@ function bestUrl(f: FileRow): string {
         <div className="col-lg-4">
             <div className="pd-card">
             <div className="pd-hero">
-              <ImageStrip pn={pn} rev={rev || ""} mode="preview" limit={1} fit />
+              <ImageStrip pn={pn} rev={rev || ""} mode="preview" limit={1} fit cacheBust={refreshTick} />
             </div>
 
             <div className="pd-info-rows">
@@ -1320,12 +1328,12 @@ function bestUrl(f: FileRow): string {
                     className="pd-drawing-link"
                     title="Open PDF drawing"
                   >
-                    <ImageStrip pn={pn} rev={rev || ""} mode="drawing" limit={1} fit />
+                    <ImageStrip pn={pn} rev={rev || ""} mode="drawing" limit={1} fit cacheBust={refreshTick} />
                   </a>
                 </>
               ) : (
                 <div className="pd-drawing-link">
-                  <ImageStrip pn={pn} rev={rev || ""} mode="drawing" limit={1} fit />
+                  <ImageStrip pn={pn} rev={rev || ""} mode="drawing" limit={1} fit cacheBust={refreshTick} />
                 </div>
               )}
             </TabPanel>
@@ -1920,6 +1928,19 @@ function bestUrl(f: FileRow): string {
                       >
                         {refreshBusy ? "Refreshing..." : "Update files"}
                       </button>
+                      <div className="form-check mt-2">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          id="refreshChildrenCheck"
+                          checked={refreshIncludeChildren}
+                          disabled={refreshBusy}
+                          onChange={(e) => setRefreshIncludeChildren(e.target.checked)}
+                        />
+                        <label className="form-check-label small" htmlFor="refreshChildrenCheck">
+                          Include children recursively (assemblies)
+                        </label>
+                      </div>
                       {refreshMsg ? <div className="text-muted small mt-1">{refreshMsg}</div> : null}
                       {refreshError ? <div className="text-danger small mt-1">{refreshError}</div> : null}
                       <div className="text-muted small mt-1">Scans storage for files matching this PN and revision.</div>
