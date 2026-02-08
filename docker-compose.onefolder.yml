@@ -1,0 +1,71 @@
+version: "3.9"
+
+# One-folder TinyMRP container setup:
+# - Provide only TINYMRP_DELIVERABLES_DIR (host path).
+# - Persist MongoDB + runtime secrets under <deliverables>/.tinymrp/
+#
+# Windows note: use forward slashes (e.g. C:/CADEXPORT/Deliverables).
+
+services:
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: tinymrp-v2
+    volumes:
+      - type: bind
+        source: ${TINYMRP_DELIVERABLES_DIR:?Set TINYMRP_DELIVERABLES_DIR (host deliverables folder, e.g. C:/CADEXPORT/Deliverables)}/.tinymrp/mongo
+        target: /data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    restart: unless-stopped
+    environment:
+      FLASK_ENV: production
+      TINYMRP_SECURITY_MODE: compat
+      MONGO_URI: mongodb://mongo:27017/tinymrp-v2
+      # Unified files configuration
+      FILES_LOCAL_ROOT: /data/deliverables
+      FILES_URL_PREFIX: /deliverables
+      FILES_PUBLIC_URLS: "false"
+      FILES_ACCEL_REDIRECT_PREFIX: /__files
+      # Seed a default admin (password is generated once and printed to container logs)
+      TINYMRP_SEED_ADMIN: "true"
+      # NOTE: Must be a syntactically valid, deliverable-looking email for email_validator.
+      # Override if you want a real address.
+      TINYMRP_ADMIN_EMAIL: admin@example.com
+    depends_on:
+      - mongo
+    volumes:
+      - type: bind
+        source: ${TINYMRP_DELIVERABLES_DIR:?Set TINYMRP_DELIVERABLES_DIR (host deliverables folder, e.g. C:/CADEXPORT/Deliverables)}
+        target: /data/deliverables
+      - type: bind
+        source: ${TINYMRP_DELIVERABLES_DIR:?Set TINYMRP_DELIVERABLES_DIR (host deliverables folder, e.g. C:/CADEXPORT/Deliverables)}/.tinymrp/instance
+        target: /app/instance
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-5000}:80"
+    depends_on:
+      - app
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - type: bind
+        source: ${TINYMRP_DELIVERABLES_DIR:?Set TINYMRP_DELIVERABLES_DIR (host deliverables folder, e.g. C:/CADEXPORT/Deliverables)}
+        target: /data/deliverables
+        read_only: true
