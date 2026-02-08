@@ -401,6 +401,50 @@ iscc solidworks-addin\installer.iss
 docker compose up --build
 ```
 
+### One-folder (Windows) quick start
+
+If you want a turnkey setup where the only input is the host **deliverables folder**, use:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\run-tinymrp-container.ps1 "C:\TinyMRP\Deliverables"
+```
+
+This persists everything under:
+
+- `<deliverables>\.tinymrp\mongo` (MongoDB data)
+- `<deliverables>\.tinymrp\instance` (runtime secrets)
+
+### Post-start maintenance
+
+After the helper script finishes, re-use the generated env file for follow-up commands:
+
+```powershell
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml logs -n 200 app
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml ps
+curl http://localhost:5000/
+```
+
+To stop the stack:
+
+```powershell
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml down
+```
+
+### User and role management
+
+The first run seeds default roles plus an admin user (`admin@example.com`). Check the generated password in the `logs -n 200 app` output and log into `http://localhost:5000/` with it.
+
+For CLI management once the stack is up, run:
+
+```powershell
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py user list
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py role list
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py user create --email new@local --password Secret123
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py user grant-role --email new@local --role admin
+```
+
+Use the same `docker compose exec ...` pattern to run `user set-password`, `grant-role`, or `revoke-role`.
+
 Useful snippets (from `handycommands.txt`):
 
 ```bash
