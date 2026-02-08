@@ -15,6 +15,44 @@
     <dt class="col-sm-3">Artifacts added</dt><dd class="col-sm-9">{{ result.artifacts_added }}</dd>
     <dt class="col-sm-3">Thumbnails generated</dt><dd class="col-sm-9">{{ result.thumbnails_generated or result.thumbnails_built or 0 }}</dd>
   </dl>
+
+  {% set err_count = result.errors|length if result.errors else 0 %}
+  {% set warn_count = result.warnings|length if result.warnings else 0 %}
+  {% if err_count or warn_count %}
+    <div class="alert {% if err_count %}alert-danger{% else %}alert-warning{% endif %} small">
+      <div class="fw-semibold">
+        Import completed with {{ err_count }} error{% if err_count != 1 %}s{% endif %}
+        and {{ warn_count }} warning{% if warn_count != 1 %}s{% endif %}.
+      </div>
+      <details class="mt-2">
+        <summary>Show details</summary>
+        {% if result.errors %}
+          <div class="fw-semibold mt-2">Errors</div>
+          <ul class="mb-0">
+            {% for it in result.errors[:50] %}
+              <li>
+                {% if it.stage %}[{{ it.stage }}] {% endif %}
+                {{ it.message or it.exception_message or 'Error' }}
+                {% if it.file or it.line_number %} ({{ it.file or '' }}{% if it.line_number %}:{{ it.line_number }}{% endif %}){% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if result.warnings %}
+          <div class="fw-semibold mt-2">Warnings</div>
+          <ul class="mb-0">
+            {% for it in result.warnings[:50] %}
+              <li>
+                {% if it.stage %}[{{ it.stage }}] {% endif %}
+                {{ it.message or it.exception_message or 'Warning' }}
+                {% if it.file or it.line_number %} ({{ it.file or '' }}{% if it.line_number %}:{{ it.line_number }}{% endif %}){% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </details>
+    </div>
+  {% endif %}
   {% if result.parts_seeded_list %}
   <div class="mt-2">
     <div class="small text-muted">Seeded parts were created for PN/REV pairs that did not exist yet:</div>

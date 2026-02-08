@@ -48,9 +48,27 @@
         <img id="rootPreviewImg" class="img-fluid border rounded" alt="Root preview" style="max-width:40vw;">
       </a>
     </div>
+
+    <div id="issuesWrap" class="mt-3 d-none">
+      <div class="alert alert-warning small mb-0">
+        <div class="fw-semibold mb-1">Import completed with issues</div>
+        <div id="issuesSummary" class="text-muted"></div>
+        <details class="mt-2">
+          <summary>Show details</summary>
+          <div id="issuesErrorsWrap" class="mt-2 d-none">
+            <div class="fw-semibold">Errors</div>
+            <ul id="issuesErrors" class="mb-0"></ul>
+          </div>
+          <div id="issuesWarningsWrap" class="mt-2 d-none">
+            <div class="fw-semibold">Warnings</div>
+            <ul id="issuesWarnings" class="mb-0"></ul>
+          </div>
+        </details>
+      </div>
+    </div>
   </div>
   <p class="text-muted mt-3">
-    Expected ZIP contents: <code>*_FLATBOM.txt</code> (lines of dictionaries) and <code>*_TREEBOM.txt</code> (tab-separated tree).
+    Expected ZIP contents: <code>*_FLATBOM.txt</code> (JSON per line or Python dict per line) and <code>*_TREEBOM.txt</code> (tab-separated tree).
   </p>
 </div>
 {% block extra_scripts %}
@@ -82,6 +100,12 @@
   const rootPreviewStatus = document.getElementById('rootPreviewStatus');
   const rootPreviewLink = document.getElementById('rootPreviewLink');
   const rootPreviewImg = document.getElementById('rootPreviewImg');
+  const issuesWrap = document.getElementById('issuesWrap');
+  const issuesSummary = document.getElementById('issuesSummary');
+  const issuesErrorsWrap = document.getElementById('issuesErrorsWrap');
+  const issuesErrors = document.getElementById('issuesErrors');
+  const issuesWarningsWrap = document.getElementById('issuesWarningsWrap');
+  const issuesWarnings = document.getElementById('issuesWarnings');
   let timer = null;
 
   function setProgress(pct, label){
@@ -118,6 +142,12 @@
     rootPreviewStatus.textContent = 'Preview will appear after import.';
     rootPreviewLink.classList.add('d-none');
     rootPreviewImg.removeAttribute('src');
+    issuesWrap.classList.add('d-none');
+    issuesSummary.textContent = '';
+    issuesErrorsWrap.classList.add('d-none');
+    issuesWarningsWrap.classList.add('d-none');
+    issuesErrors.innerHTML = '';
+    issuesWarnings.innerHTML = '';
   }
 
   function loadRootPreview(rootPn){
@@ -193,6 +223,39 @@
           }
           if (rootPreviewLink) {
             rootPreviewLink.href = partHref;
+          }
+        }
+
+        const errs = Array.isArray(data.errors) ? data.errors : [];
+        const warns = Array.isArray(data.warnings) ? data.warnings : [];
+        const errCount = errs.length;
+        const warnCount = warns.length;
+        if (errCount || warnCount) {
+          issuesWrap.classList.remove('d-none');
+          issuesSummary.textContent = `Errors: ${errCount}, warnings: ${warnCount}`;
+          issuesErrors.innerHTML = '';
+          issuesWarnings.innerHTML = '';
+          if (errCount) {
+            issuesErrorsWrap.classList.remove('d-none');
+            errs.slice(0, 50).forEach((it) => {
+              const li = document.createElement('li');
+              const msg = it.message || it.exception_message || 'Error';
+              const stage = it.stage ? `[${it.stage}] ` : '';
+              const loc = (it.file || it.line_number) ? ` (${it.file || ''}${it.line_number ? (':'+it.line_number) : ''})` : '';
+              li.textContent = `${stage}${msg}${loc}`;
+              issuesErrors.appendChild(li);
+            });
+          }
+          if (warnCount) {
+            issuesWarningsWrap.classList.remove('d-none');
+            warns.slice(0, 50).forEach((it) => {
+              const li = document.createElement('li');
+              const msg = it.message || it.exception_message || 'Warning';
+              const stage = it.stage ? `[${it.stage}] ` : '';
+              const loc = (it.file || it.line_number) ? ` (${it.file || ''}${it.line_number ? (':'+it.line_number) : ''})` : '';
+              li.textContent = `${stage}${msg}${loc}`;
+              issuesWarnings.appendChild(li);
+            });
           }
         }
 

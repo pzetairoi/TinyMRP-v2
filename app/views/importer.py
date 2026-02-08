@@ -1,5 +1,5 @@
 # app/views/importer.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, current_app, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_required
 from werkzeug.utils import secure_filename
 from app.extensions import csrf
@@ -29,11 +29,25 @@ def upload_post():
             flash("File too large.", "warning")
             return redirect(url_for("importer.upload_form"))
     fn = secure_filename(f.filename)
-    result = import_bom_zip(f.read(), fn, seed_tag="upload")
+    try:
+        result = import_bom_zip(f.read(), fn, seed_tag="upload")
+    except ValueError as exc:
+        flash(f"Import failed: {exc}", "danger")
+        return redirect(url_for("importer.upload_form"))
+    except Exception as exc:
+        try:
+            current_app.logger.exception("Import failed: %s", fn)
+        except Exception:
+            pass
+        flash(f"Import failed: {exc}", "danger")
+        return redirect(url_for("importer.upload_form"))
+
+    err_count = len(result.get("errors") or [])
+    warn_count = len(result.get("warnings") or [])
     thumbs = result.get('thumbnails_generated') or result.get('thumbnails_built') or 0
     flash(
-        f"Imported {result['zip']} - root={result['root']} - parts+{result['parts_created']} links+{result['links_created']} - thumbs={thumbs}",
-        "success",
+        f"Imported {result['zip']} - root={result['root']} - parts+{result['parts_created']} links+{result['links_created']} - thumbs={thumbs} - errors={err_count} warnings={warn_count}",
+        "warning" if err_count else ("info" if warn_count else "success"),
     )
     return render_template("import/result.html", result=result)
 
@@ -51,5 +65,14 @@ def upload_api():
         if request.content_length > max_zip_mb * 1024 * 1024:
             return jsonify({"error": "file too large"}), 413
     fn = secure_filename(f.filename)
-    result = import_bom_zip(f.read(), fn, seed_tag="upload-api")
+    try:
+        result = import_bom_zip(f.read(), fn, seed_tag="upload-api")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        try:
+            current_app.logger.exception("Import API failed: %s", fn)
+        except Exception:
+            pass
+        return jsonify({"error": "import failed", "detail": str(exc), "exception_type": type(exc).__name__}), 500
     return jsonify(result)

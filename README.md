@@ -101,6 +101,9 @@ Set explicit secrets in production to avoid warning logs and to support strict m
   - `deliverables/<group>/...`
   - `extra/<PN>/<REV_OR__no_rev__>/...`
 - If revision is blank, use the `__no_rev__` token in paths; DB stores revision as an empty string.
+- `*_FLATBOM.txt` supports **either** JSON-per-line **or** Python dict-literal-per-line (single quotes). Import skips malformed/non-dict lines and reports them as errors.
+- `*_TREEBOM.txt` is tab-separated; rows with blank PART NUMBER are skipped with warnings.
+- BOM import is **best-effort**: it continues past bad lines/rows and returns an error/warning report in the UI (downloadable as JSON).
 
 API endpoints:
 

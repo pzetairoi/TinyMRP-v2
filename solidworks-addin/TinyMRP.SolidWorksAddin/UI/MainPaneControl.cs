@@ -48,6 +48,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Label _bomProgressLabel;
         private Label _actionStatusLabel;
         private Button _cancelButton;
+        private LinkLabel _openLogLink;
+        private string _lastRunLogPath = string.Empty;
         private ProgressBar _toolsProgressBar;
         private Label _toolsProgressLabel;
         private Label _toolsStatusLabel;
@@ -387,6 +389,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             _actionStatusLabel = new Label { AutoSize = true, Text = "" };
             _cancelButton = new Button { Text = "Cancel current task", AutoSize = true };
             _cancelButton.Click += OnCancelCurrentTask;
+            _openLogLink = new LinkLabel { AutoSize = true, Text = "Open last run log", Visible = false };
+            _openLogLink.LinkClicked += (_, __) => TryOpenLastRunLog();
             var progressWrap = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
@@ -397,6 +401,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             progressWrap.Controls.Add(progressLayout);
             progressWrap.Controls.Add(_actionStatusLabel);
             progressWrap.Controls.Add(_cancelButton);
+            progressWrap.Controls.Add(_openLogLink);
             AddSection(panel, CreateGroupBox("Progress", progressWrap));
 
             return page;
@@ -1962,6 +1967,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
             SetStatus("Creating files...");
             publisher.ProcessFiles(options, Log, UpdatePublishProgress);
+            UpdateRunLogLink(publisher.LastRunLogPath);
             // Keep the final status/progress from the publisher (includes per-run log path).
         }
 
@@ -1978,6 +1984,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             PublishOptions options = BuildUploadPackOptions();
             SetStatus("Creating upload pack...");
             publisher.ProcessUploadPack(options, Log);
+            UpdateRunLogLink(publisher.LastRunLogPath);
             SetStatus("Done.");
         }
 
@@ -2058,6 +2065,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             ResetProgress(_bomProgressBar, _bomProgressLabel, "Process BOM");
             SetStatus("Processing BOM...");
             publisher.ProcessBom(options, Log, UpdateBomProgress);
+            UpdateRunLogLink(publisher.LastRunLogPath);
             SetStatus("Done.");
             ResetProgress(_bomProgressBar, _bomProgressLabel, "Process BOM");
         }
@@ -4985,6 +4993,58 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             SetStatus(message);
             AddinLogger.Write(message);
+        }
+
+        private void UpdateRunLogLink(string path)
+        {
+            try
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action<string>(UpdateRunLogLink), path);
+                    return;
+                }
+
+                _lastRunLogPath = path ?? string.Empty;
+                if (_openLogLink == null)
+                {
+                    return;
+                }
+
+                string p = _lastRunLogPath;
+                bool show = !string.IsNullOrWhiteSpace(p) && File.Exists(p);
+                _openLogLink.Visible = show;
+                if (show)
+                {
+                    _openLogLink.Text = "Open log: " + Path.GetFileName(p);
+                }
+            }
+            catch
+            {
+                // ignore UI errors
+            }
+        }
+
+        private void TryOpenLastRunLog()
+        {
+            try
+            {
+                string p = _lastRunLogPath ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(p) || !File.Exists(p))
+                {
+                    return;
+                }
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = p,
+                    UseShellExecute = true,
+                });
+            }
+            catch
+            {
+                // non-intrusive: ignore open failures (path may be blocked by policy)
+            }
         }
 
         private void ResetProgress(ProgressBar bar, Label label, string actionName)
