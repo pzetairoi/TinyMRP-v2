@@ -5591,6 +5591,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                    options.ExportStl ||
                    options.ExportPngDrawing ||
                    options.ExportPdf ||
+                   options.ExportDxf ||
                    options.ExportEdrawingDrawing;
         }
 
@@ -9346,13 +9347,27 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return false;
             }
 
-            string token = NormalizeSheetNameForMatch(sheetName);
-            if (string.IsNullOrWhiteSpace(token))
+            string norm = NormalizeSheetNameForMatch(sheetName);
+            if (string.IsNullOrWhiteSpace(norm))
             {
                 return false;
             }
 
-            return normalizedTokens.Contains(token);
+            // "Forgiving" match: treat configured tokens as patterns, so "dxf" matches "DXF Sheet", "DXF_SHEET_1", etc.
+            foreach (string token in normalizedTokens)
+            {
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    continue;
+                }
+
+                if (norm.Contains(token))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void DwgPublishFast(ModelDoc2 model, string fileString, string deliverablesFolder,
@@ -9583,10 +9598,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
 
                     HashSet<string> dxfSheetTokens = null;
-                    string dxfSheetName = string.Empty;
-                    if (dxfSelected)
+                    if (pdf || dxfSelected)
                     {
                         dxfSheetTokens = BuildDxfSheetNameTokens();
+                    }
+
+                    string dxfSheetName = string.Empty;
+                    if (dxfRequested && dxfSheetTokens != null && dxfSheetTokens.Count > 0)
+                    {
                         for (int i = 0; i < sheetNames.Length; i++)
                         {
                             ThrowIfCancelled();
@@ -9640,7 +9659,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                             // Use the COM SAFEARRAY variant directly where possible (mirrors VBA behavior).
                             object sheetsVariant = sheetNamesObj ?? (object)sheetNames;
-                            if (dxfSelected && dxfSheetTokens != null && dxfSheetTokens.Count > 0)
+                            if (dxfSheetTokens != null && dxfSheetTokens.Count > 0)
                             {
                                 var pdfSheets = new List<string>();
                                 for (int i = 0; i < sheetNames.Length; i++)
@@ -9654,7 +9673,12 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                                 if (pdfSheets.Count > 0 && pdfSheets.Count < sheetNames.Length)
                                 {
-                                    sheetsVariant = pdfSheets.ToArray();
+                                    var pdfVariant = new object[pdfSheets.Count];
+                                    for (int i = 0; i < pdfSheets.Count; i++)
+                                    {
+                                        pdfVariant[i] = pdfSheets[i];
+                                    }
+                                    sheetsVariant = pdfVariant;
                                 }
                             }
                             exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
@@ -10260,10 +10284,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
 
                     HashSet<string> dxfSheetTokens = null;
-                    string dxfSheetName = string.Empty;
-                    if (dxfSelected)
+                    if (pdf || dxfSelected)
                     {
                         dxfSheetTokens = BuildDxfSheetNameTokens();
+                    }
+
+                    string dxfSheetName = string.Empty;
+                    if (dxfRequested && dxfSheetTokens != null && dxfSheetTokens.Count > 0)
+                    {
                         for (int i = 0; i < sheetNames.Length; i++)
                         {
                             ThrowIfCancelled();
@@ -10291,8 +10319,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                             (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
                         if (exportData != null)
                         {
-                            string[] pdfSheets = sheetNames;
-                            if (dxfSelected && dxfSheetTokens != null && dxfSheetTokens.Count > 0)
+                            object pdfSheetsVariant = sheetNamesObj ?? (object)sheetNames;
+                            if (dxfSheetTokens != null && dxfSheetTokens.Count > 0)
                             {
                                 var filtered = new List<string>();
                                 for (int i = 0; i < sheetNames.Length; i++)
@@ -10306,12 +10334,17 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                                 if (filtered.Count > 0 && filtered.Count < sheetNames.Length)
                                 {
-                                    pdfSheets = filtered.ToArray();
+                                    var pdfVariant = new object[filtered.Count];
+                                    for (int i = 0; i < filtered.Count; i++)
+                                    {
+                                        pdfVariant[i] = filtered[i];
+                                    }
+                                    pdfSheetsVariant = pdfVariant;
                                 }
                             }
 
                             exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
-                                pdfSheets);
+                                pdfSheetsVariant);
                             bool ok = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                                 (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
                             ok = ok && File.Exists(pdfPath);
