@@ -37,10 +37,18 @@ from app.services.acl import (
 )
 from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
-from app.services.parts_delete import delete_part_and_refs
+from app.services.parts_delete import delete_part_and_refs_cascade
 from app.services.part_norm import clean_rev, clean_rev_or_none
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
+
+def _parse_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    return text in ("1", "true", "yes", "on")
 
 def _clean_rev_value(value: object) -> str:
     return clean_rev(value)
@@ -181,7 +189,7 @@ def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
     can_jobs = is_admin or user_has_permission(user, "jobs.view")
     can_orders = is_admin or user_has_permission(user, "orders.view")
 
-    job_q = Job.objects()
+    job_q = Job.objects(is_deleted=False)
     if not can_jobs:
         job_q = Job.objects(id__in=[])
     else:
@@ -1013,9 +1021,15 @@ def part_delete():
     if not target:
         return jsonify({"ok": False, "error": "not found"}), 404
 
-    result = delete_part_and_refs(pn, rev)
+    delete_children = _parse_bool(body.get("delete_children") or request.form.get("delete_children"))
+    result = delete_part_and_refs_cascade(pn, rev, delete_children=delete_children)
     try:
-        log_action("part.delete", resource_type="part", resource=f"{pn}:{rev}")
+        log_action(
+            "part.delete",
+            resource_type="part",
+            resource=f"{pn}:{rev}",
+            meta={"delete_children": bool(delete_children)},
+        )
     except Exception:
         pass
     return jsonify({"ok": True, **result})

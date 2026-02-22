@@ -28,6 +28,13 @@ bp = Blueprint("admin_jobs", __name__, url_prefix="/admin/jobs")
 def _clean_rev(value: object) -> str:
     return clean_rev(value)
 
+def _parse_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
 def _external_user_ids() -> set[str]:
     ids: set[str] = set()
     for c in Customer.objects().only("users"):
@@ -75,7 +82,8 @@ def _filter_job_participants(user_ids):
 @bp.get("/")
 @permissions_required("jobs.view")
 def jobs_list():
-    q = Job.objects(is_deleted=False)
+    show_deleted = _parse_bool(request.args.get("show_deleted"))
+    q = Job.objects() if show_deleted else Job.objects(is_deleted=False)
     status = (request.args.get("status") or "").strip()
     if status:
         q = q.filter(status=status)
@@ -138,6 +146,7 @@ def jobs_list():
                 "title": j.title,
                 "description": j.description,
                 "status": j.status,
+                "is_deleted": bool(getattr(j, "is_deleted", False)),
                 "priority": j.priority,
                 "scheduled_start": j.scheduled_start,
                 "scheduled_end": j.scheduled_end,
@@ -157,18 +166,21 @@ def jobs_list():
     active_count = base_q.filter(status__in=["released", "in_progress"]).count()
     overdue_count = base_q.filter(status__in=["released", "in_progress"], scheduled_end__lt=now).count()
     completed_week = base_q.filter(status="completed", actual_end__gte=now - timedelta(days=7)).count()
+    deleted_count = apply_job_scope(Job.objects(is_deleted=True), current_user).count()
     return render_template(
         "admin/jobs_list.html",
         jobs=safe_jobs,
         active_count=active_count,
         overdue_count=overdue_count,
         completed_week=completed_week,
+        deleted_count=deleted_count,
         filters={
             "status": status,
             "priority": priority,
             "job_q": job_q,
             "title_q": title_q,
             "customer_q": customer_q,
+            "show_deleted": show_deleted,
             "from": request.args.get("from") or "",
             "to": request.args.get("to") or "",
         },
@@ -178,7 +190,7 @@ def jobs_list():
 @bp.get("/<job_id>")
 @permissions_required("jobs.view")
 def jobs_view(job_id):
-    j = apply_job_scope(Job.objects(id=job_id, is_deleted=False), current_user).first()
+    j = apply_job_scope(Job.objects(id=job_id), current_user).first()
     if not j:
         abort(404)
     is_external = is_external_scoped_user(current_user)
@@ -198,6 +210,8 @@ def jobs_view(job_id):
     order_links = {}
     can_manage_orders = user_has_permission(current_user, "orders.manage")
     for o in orders:
+        if (o.status or "") == "draft":
+            continue
         for l in (o.lines or []):
             rev_key = _resolve_rev(l.pn or "", l.rev or "")
             pn_key = (l.pn or "").strip()
@@ -266,6 +280,29 @@ def jobs_delete(job_id):
         flash("Job deleted.", "success")
     except Exception:
         flash("Delete failed.", "error")
+    return redirect(url_for("admin_jobs.jobs_list"))
+
+
+@bp.post("/purge_deleted")
+@permissions_required("jobs.manage")
+def jobs_purge_deleted():
+    q = apply_job_scope(Job.objects(is_deleted=True), current_user)
+    ids = [j.id for j in q.only("id")]
+    if not ids:
+        flash("No deleted jobs to purge.", "info")
+        return redirect(url_for("admin_jobs.jobs_list"))
+
+    try:
+        Order.objects(job__in=ids).update(job=None, updated_at=datetime.utcnow())
+    except Exception:
+        pass
+
+    try:
+        deleted = Job.objects(id__in=ids, is_deleted=True).delete()
+    except Exception:
+        deleted = 0
+
+    flash(f"Purged {int(deleted or 0)} deleted job(s).", "success")
     return redirect(url_for("admin_jobs.jobs_list"))
 
 
@@ -412,6 +449,8 @@ def jobs_edit(job_id):
     ordered_map = {}
     order_links = {}
     for o in orders:
+        if (o.status or "") == "draft":
+            continue
         for l in (o.lines or []):
             rev_key = _resolve_rev(l.pn or "", l.rev or "")
             pn_key = (l.pn or "").strip()
@@ -487,7 +526,7 @@ def _job_order_totals(job: Job):
     ordered_total = 0.0
     received_total = 0.0
     for o in _orders_for_job(job):
-        if (o.status or "") == "cancelled":
+        if (o.status or "") in ("cancelled", "draft"):
             continue
         for line in (o.lines or []):
             pn_raw = (line.pn or "").strip()
@@ -548,6 +587,8 @@ def job_bom_json(job_id):
         ordered = 0.0
         links = []
         for o in orders:
+            if (o.status or "") == "draft":
+                continue
             qty_in_o = 0.0
             for l in (o.lines or []):
                 l_rev = _resolve_rev(l.pn or "", l.rev or "")

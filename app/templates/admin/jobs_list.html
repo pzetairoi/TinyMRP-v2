@@ -8,6 +8,14 @@
   </div>
   <div class="d-flex gap-2 mt-2 mt-md-0">
     <a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>
+    {% if has_perm('jobs.manage') %}
+    <form method="post" action="{{ url_for('admin_jobs.jobs_purge_deleted') }}" onsubmit="return confirm('Permanently delete all deleted jobs? This cannot be undone.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-danger" type="submit" {% if (deleted_count or 0) <= 0 %}disabled{% endif %}>
+        Purge deleted{% if deleted_count %} ({{ deleted_count }}){% endif %}
+      </button>
+    </form>
+    {% endif %}
     <a class="btn btn-primary" href="{{ url_for('admin_jobs.jobs_new') }}">Create job</a>
   </div>
 </div>
@@ -87,9 +95,16 @@
           <input class="form-control form-control-sm" type="search" name="customer_q" value="{{ filters.customer_q }}" placeholder="Customer" form="jobs-filter">
         </th>
         <th>
-          <div class="d-flex gap-1">
-            <button class="btn btn-sm btn-primary" type="submit" form="jobs-filter">Apply</button>
-            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Clear</a>
+          <div class="d-flex flex-column gap-1">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="show_deleted" value="1" form="jobs-filter" id="showDeletedCheck"
+                {% if filters.show_deleted %}checked{% endif %}>
+              <label class="form-check-label small" for="showDeletedCheck">Show deleted</label>
+            </div>
+            <div class="d-flex gap-1">
+              <button class="btn btn-sm btn-primary" type="submit" form="jobs-filter">Apply</button>
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Clear</a>
+            </div>
           </div>
         </th>
       </tr>
@@ -105,6 +120,9 @@
               <a href="{{ url_for('admin_jobs.jobs_view', job_id=j.id) }}">{{ j.job_number }}</a>
             {% else %}
               {{ j.job_number }}
+            {% endif %}
+            {% if j.is_deleted %}
+              <span class="badge bg-danger ms-1">deleted</span>
             {% endif %}
           </td>
           <td>{{ j.title or j.description or '-' }}</td>

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 from app.models.part import Part
 from app.models.artifact import PartFile
@@ -88,4 +89,112 @@ def delete_part_and_refs(pn: str, rev: str | None) -> Dict[str, int]:
         "deleted_revisions": int(deleted_revisions or 0),
         "updated_jobs": int(updated_jobs or 0),
         "updated_orders": int(updated_orders or 0),
+    }
+
+
+def _collect_bom_descendants(pn: str, rev: str) -> tuple[tuple[str, str], dict[tuple[str, str], tuple[str, str]]]:
+    pn_clean = (pn or "").strip()
+    rev_clean = clean_rev(rev)
+    root_key = (pn_clean.lower(), rev_clean.lower())
+    key_to_pair: dict[tuple[str, str], tuple[str, str]] = {root_key: (pn_clean, rev_clean)}
+    queue: deque[tuple[str, str]] = deque([(pn_clean, rev_clean)])
+    while queue:
+        parent_pn, parent_rev = queue.popleft()
+        q = BOMLink.objects(parent_pn__iexact=parent_pn, parent_rev__iexact=parent_rev).only("child_pn", "child_rev")
+        for link in q:
+            child_pn = (getattr(link, "child_pn", None) or "").strip()
+            if not child_pn:
+                continue
+            child_rev = clean_rev(getattr(link, "child_rev", None) or "")
+            child_key = (child_pn.lower(), child_rev.lower())
+            if child_key in key_to_pair:
+                continue
+            key_to_pair[child_key] = (child_pn, child_rev)
+            queue.append((child_pn, child_rev))
+    return root_key, key_to_pair
+
+
+def _safe_deletable_subtree(root_key: tuple[str, str], key_to_pair: dict[tuple[str, str], tuple[str, str]]) -> set[tuple[str, str]]:
+    """
+    Return a set of node keys (pn_lower, rev_lower) that can be deleted without breaking other assemblies.
+
+    A node is deletable iff *all* of its parents (BOMLink.parent_*) are also deletable.
+    The root node is treated as deletable.
+    """
+    deletable: set[tuple[str, str]] = set(key_to_pair.keys())
+    changed = True
+    while changed:
+        changed = False
+        for key in list(deletable):
+            if key == root_key:
+                continue
+            pn, rev = key_to_pair.get(key, ("", ""))
+            if not pn:
+                deletable.discard(key)
+                changed = True
+                continue
+            q = BOMLink.objects(child_pn__iexact=pn, child_rev__iexact=rev).only("parent_pn", "parent_rev")
+            blocked = False
+            for link in q:
+                parent_pn = (getattr(link, "parent_pn", None) or "").strip()
+                parent_rev = clean_rev(getattr(link, "parent_rev", None) or "")
+                parent_key = (parent_pn.lower(), parent_rev.lower())
+                if parent_key not in deletable:
+                    blocked = True
+                    break
+            if blocked:
+                deletable.discard(key)
+                changed = True
+    return deletable
+
+
+def delete_part_and_refs_cascade(pn: str, rev: str | None, *, delete_children: bool = False) -> Dict[str, Any]:
+    """
+    Delete a part and (optionally) its BOM descendants, but only when descendants are not referenced
+    by any other remaining assembly.
+    """
+    pn_clean = (pn or "").strip()
+    rev_clean = clean_rev(rev)
+    if not pn_clean:
+        return {"delete_children": bool(delete_children), **delete_part_and_refs(pn, rev)}
+
+    if not delete_children:
+        return {"delete_children": False, **delete_part_and_refs(pn_clean, rev_clean)}
+
+    root_key, key_to_pair = _collect_bom_descendants(pn_clean, rev_clean)
+    deletable_keys = _safe_deletable_subtree(root_key, key_to_pair)
+    child_keys = [k for k in deletable_keys if k != root_key]
+    skipped_children = max(0, (len(key_to_pair) - 1) - len(child_keys))
+
+    totals = {
+        "deleted_parts": 0,
+        "deleted_files": 0,
+        "deleted_bom_links": 0,
+        "deleted_revisions": 0,
+        "updated_jobs": 0,
+        "updated_orders": 0,
+    }
+
+    def _sum_into(res: Dict[str, int]) -> None:
+        for k in totals.keys():
+            try:
+                totals[k] += int(res.get(k) or 0)
+            except Exception:
+                pass
+
+    # Delete children first, then root.
+    for key in sorted(child_keys):
+        child_pn, child_rev = key_to_pair.get(key, ("", ""))
+        if not child_pn:
+            continue
+        _sum_into(delete_part_and_refs(child_pn, child_rev))
+
+    _sum_into(delete_part_and_refs(pn_clean, rev_clean))
+
+    return {
+        "delete_children": True,
+        "children_found": max(0, len(key_to_pair) - 1),
+        "children_deleted": int(len(child_keys)),
+        "children_skipped": int(skipped_children),
+        **totals,
     }

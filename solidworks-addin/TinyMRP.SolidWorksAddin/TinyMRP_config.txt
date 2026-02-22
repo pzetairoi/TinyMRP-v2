@@ -7,6 +7,7 @@ BackendUrl=http://localhost:5000
 AuthToken=
 BOM_Folder=Output
 deliverables_folder=Output
+DxfSheetNames=flatpattern;flat_pattern;dxf;dxf sheet
 NumberingSchemeId=
 NumberingContextDefaults=type=PART;family=;subfamily=;project=;site=
 PartNumberProperty=PartNumber

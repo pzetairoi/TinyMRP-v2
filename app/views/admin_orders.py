@@ -329,7 +329,7 @@ def orders_new():
         supp_id = request.form.get("supplier")
         cust_id = request.form.get("customer")
         if job_id:
-            o.job = Job.objects(id=job_id).first()
+            o.job = Job.objects(id=job_id, is_deleted=False).first()
         if supp_id: o.supplier = Supplier.objects(id=supp_id).first()
         if cust_id: o.customer = Customer.objects(id=cust_id).first()
         if o.job and o.job.customer:
@@ -344,7 +344,7 @@ def orders_new():
         o.save()
         flash("Order created.", "success")
         return redirect(url_for("admin_orders.orders_edit", order_id=o.id))
-    jobs_raw = Job.objects().order_by("job_number")
+    jobs_raw = Job.objects(is_deleted=False).order_by("job_number")
     jobs = []
     for j in jobs_raw:
         try:
@@ -357,7 +357,7 @@ def orders_new():
     prefill_job = request.args.get("job") or ""
     prefill_customer = ""
     if prefill_job:
-        job = Job.objects(id=prefill_job).first()
+        job = Job.objects(id=prefill_job, is_deleted=False).first()
         if job and job.customer:
             prefill_customer = str(job.customer.id)
     return render_template(
@@ -412,7 +412,7 @@ def orders_edit(order_id):
         job_id = request.form.get("job")
         supp_id = request.form.get("supplier")
         cust_id = request.form.get("customer")
-        o.job = Job.objects(id=job_id).first() if job_id else None
+        o.job = Job.objects(id=job_id, is_deleted=False).first() if job_id else None
         o.supplier = Supplier.objects(id=supp_id).first() if supp_id else None
         o.customer = Customer.objects(id=cust_id).first() if cust_id else None
         if o.job and o.job.customer:
@@ -427,7 +427,7 @@ def orders_edit(order_id):
         o.save()
         flash("Order updated.", "success")
         return redirect(url_for("admin_orders.orders_edit", order_id=o.id))
-    jobs_raw = Job.objects().order_by("job_number")
+    jobs_raw = Job.objects(is_deleted=False).order_by("job_number")
     jobs = []
     for j in jobs_raw:
         try:
@@ -444,7 +444,7 @@ def orders_edit(order_id):
 @bp.post("/from_job/<job_id>")
 @permissions_required("orders.manage")
 def orders_from_job(job_id):
-    job = Job.objects(id=job_id).first()
+    job = Job.objects(id=job_id, is_deleted=False).first()
     if not job:
         flash("Job not found.", "error")
         return redirect(url_for("admin_jobs.jobs_list"))
@@ -518,6 +518,8 @@ def _total_ordered_for_job(job: Job, pn: str, rev: str) -> float:
         return 0.0
     tot = 0.0
     for o in Order.objects(job=job, status__ne="cancelled"):
+        if (o.status or "") == "draft":
+            continue
         for l in (o.lines or []):
             if (l.pn or '').strip().lower() == (pn or '').lower() and clean_rev(l.rev) == clean_rev(rev):
                 try:

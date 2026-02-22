@@ -498,12 +498,15 @@ def import_upload_pack(
     bom_result = None
     if not dry_run:
         bom_start = _stage_start()
+        # If the ZIP has no deliverables (or we couldn't parse any deliverable filenames into PN/REV),
+        # fall back to scanning storage so BOM-only uploads still register all available files.
+        scan_storage = len(deliverable_artifact_recs) == 0
         bom_result = import_bom_zip(
             file_bytes,
             filename,
             seed_tag=seed_tag,
-            scan_artifacts=False,
-            generate_thumbs=False,
+            scan_artifacts=scan_storage,
+            generate_thumbs=scan_storage,
         )
         _stage_end(timings, "bom.import", bom_start)
 

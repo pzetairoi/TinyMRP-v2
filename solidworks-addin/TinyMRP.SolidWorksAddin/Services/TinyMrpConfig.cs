@@ -17,6 +17,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         public string AuthToken { get; set; }
         public string BomFolder { get; set; }
         public string DeliverablesFolder { get; set; }
+        public string DxfSheetNames { get; set; }
         public string NumberingSchemeId { get; set; }
         public string NumberingContextDefaults { get; set; }
         public string PartNumberProperty { get; set; }
@@ -79,6 +80,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             AuthToken = string.Empty;
             BomFolder = "Output";
             DeliverablesFolder = "Output";
+            DxfSheetNames = "flatpattern;flat_pattern;dxf;dxf sheet";
             NumberingSchemeId = string.Empty;
             NumberingContextDefaults = "type=PART;family=;subfamily=;project=;site=";
             PartNumberProperty = "PartNumber";
@@ -119,6 +121,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                     break;
                 case "deliverables_folder":
                     DeliverablesFolder = value;
+                    break;
+                case "DxfSheetNames":
+                    DxfSheetNames = value;
                     break;
                 case "NumberingSchemeId":
                     NumberingSchemeId = value;
@@ -184,6 +189,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 "AuthToken=" + (protectedToken ?? string.Empty),
                 "BOM_Folder=" + GetPathForConfig(BomFolder),
                 "deliverables_folder=" + GetPathForConfig(DeliverablesFolder),
+                "DxfSheetNames=" + (DxfSheetNames ?? string.Empty),
                 "NumberingSchemeId=" + (NumberingSchemeId ?? string.Empty),
                 "NumberingContextDefaults=" + (NumberingContextDefaults ?? string.Empty),
                 "PartNumberProperty=" + (PartNumberProperty ?? "PartNumber"),

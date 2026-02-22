@@ -27,6 +27,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         private TextBox _weblinkText;
         private TextBox _bomTemplateText;
         private TextBox _blankTemplateText;
+        private TextBox _dxfSheetNamesText;
         private CheckBox _removeModifiedNotesCheck;
         private CheckBox _topLevelOnlyCheck;
         private CheckBox _overwriteCheck;
@@ -41,6 +42,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         private CheckBox _stlCheck;
         private CheckBox _pngDrawingCheck;
         private CheckBox _pdfCheck;
+        private CheckBox _dxfCheck;
         private CheckBox _edrDrawingCheck;
         private ProgressBar _publishProgressBar;
         private Label _publishProgressLabel;
@@ -252,9 +254,11 @@ namespace TinyMRP.SolidWorksAddin.UI
             };
             _pngDrawingCheck = CreateCheckBox("PNG drawing");
             _pdfCheck = CreateCheckBox("PDF");
+            _dxfCheck = CreateCheckBox("DXF");
             _edrDrawingCheck = CreateCheckBox("eDrawings drawing");
             drawingChecks.Controls.Add(_pngDrawingCheck);
             drawingChecks.Controls.Add(_pdfCheck);
+            drawingChecks.Controls.Add(_dxfCheck);
             drawingChecks.Controls.Add(_edrDrawingCheck);
 
             var deliverablesLayout = new TableLayoutPanel
@@ -1110,6 +1114,11 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(templates, "BOM template", CreateFilePicker(_bomTemplateText, OnBrowseBomTemplate));
             AddSection(panel, CreateGroupBox("Templates", templates));
 
+            var drawingExport = CreateFormLayout();
+            _dxfSheetNamesText = new TextBox { Width = 200 };
+            AddField(drawingExport, "DXF sheet names", _dxfSheetNamesText);
+            AddSection(panel, CreateGroupBox("Drawing export", drawingExport));
+
             var web = CreateFormLayout();
             _weblinkText = new TextBox { Width = 200 };
             var openWeb = new Button { Text = "Open", AutoSize = true };
@@ -1843,6 +1852,11 @@ namespace TinyMRP.SolidWorksAddin.UI
                 _blankTemplateText.Text = config.BlankTemplatePath;
             }
 
+            if (_dxfSheetNamesText != null)
+            {
+                _dxfSheetNamesText.Text = config.DxfSheetNames ?? string.Empty;
+            }
+
             if (_removeModifiedNotesCheck != null)
             {
                 _removeModifiedNotesCheck.Checked = config.RemoveModifiedNotes;
@@ -1872,6 +1886,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 ExportStl = _stlCheck != null && _stlCheck.Checked,
                 ExportPngDrawing = _pngDrawingCheck != null && _pngDrawingCheck.Checked,
                 ExportPdf = _pdfCheck != null && _pdfCheck.Checked,
+                ExportDxf = _dxfCheck != null && _dxfCheck.Checked,
                 ExportEdrawingDrawing = _edrDrawingCheck != null && _edrDrawingCheck.Checked,
                 OverwriteFiles = _overwriteCheck != null && _overwriteCheck.Checked,
                 TopLevelOnly = _topLevelOnlyCheck != null && _topLevelOnlyCheck.Checked,
@@ -1935,6 +1950,11 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_removeModifiedNotesCheck != null)
             {
                 config.RemoveModifiedNotes = _removeModifiedNotesCheck.Checked;
+            }
+
+            if (_dxfSheetNamesText != null)
+            {
+                config.DxfSheetNames = _dxfSheetNamesText.Text;
             }
 
             string schemeId = GetDefaultSchemeId();
@@ -4974,6 +4994,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_stlCheck != null) _stlCheck.Checked = value;
             if (_pngDrawingCheck != null) _pngDrawingCheck.Checked = value;
             if (_pdfCheck != null) _pdfCheck.Checked = value;
+            if (_dxfCheck != null) _dxfCheck.Checked = value;
             if (_edrDrawingCheck != null) _edrDrawingCheck.Checked = value;
         }
 
