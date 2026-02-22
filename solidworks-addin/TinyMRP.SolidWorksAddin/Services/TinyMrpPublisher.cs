@@ -112,6 +112,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             public bool ExportPly;
             public bool ExportStl;
             public bool ExportPdf;
+            public bool ExportDxfSelected;
+            public bool ExportDxf;
             public bool ExportPngDrawing;
             public bool ExportEdrawingDrawing;
             public bool DrawingExists;
@@ -123,7 +125,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             public bool HasDrawingExports()
             {
-                return DrawingExists && (ExportPdf || ExportPngDrawing || ExportEdrawingDrawing);
+                return DrawingExists && (ExportPdf || ExportDxf || ExportPngDrawing || ExportEdrawingDrawing);
             }
         }
 
@@ -1394,13 +1396,43 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 HashSet<string> baseline = SnapshotOpenDocIds();
 
-                string template = _swApp.GetUserPreferenceStringValue(
-                    (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly);
+                string template = string.Empty;
+                try
+                {
+                    template = _swApp.GetUserPreferenceStringValue(
+                        (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly) ?? string.Empty;
+                }
+                catch
+                {
+                    template = string.Empty;
+                }
+
+                if (string.IsNullOrWhiteSpace(template))
+                {
+                    Log(log, "BOM export aborted: SolidWorks default assembly template is not set (Tools > Options > Default Templates).");
+                    return;
+                }
+
+                bool templateExists = false;
+                try
+                {
+                    templateExists = File.Exists(template);
+                }
+                catch
+                {
+                    templateExists = false;
+                }
+                if (!templateExists)
+                {
+                    Log(log, "BOM export aborted: default assembly template not found or inaccessible: " + template);
+                    return;
+                }
+
                 ModelDoc2 assyDoc = _swApp.NewDocument(template, 0, 0, 0) as ModelDoc2;
                 AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
                 if (assyDoc == null || swAssembly == null)
                 {
-                    Log(log, "BOM export aborted: failed to create temporary assembly.");
+                    Log(log, "BOM export aborted: failed to create temporary assembly (template: " + template + ").");
                     return;
                 }
 
@@ -3144,13 +3176,43 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             HashSet<string> baseline = SnapshotOpenDocIds();
 
-            string template = _swApp.GetUserPreferenceStringValue(
-                (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly);
+            string template = string.Empty;
+            try
+            {
+                template = _swApp.GetUserPreferenceStringValue(
+                    (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly) ?? string.Empty;
+            }
+            catch
+            {
+                template = string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(template))
+            {
+                Log(log, "Upload pack: SolidWorks default assembly template is not set (Tools > Options > Default Templates).");
+                return false;
+            }
+
+            bool templateExists = false;
+            try
+            {
+                templateExists = File.Exists(template);
+            }
+            catch
+            {
+                templateExists = false;
+            }
+            if (!templateExists)
+            {
+                Log(log, "Upload pack: default assembly template not found or inaccessible: " + template);
+                return false;
+            }
+
             ModelDoc2 assyDoc = _swApp.NewDocument(template, 0, 0, 0) as ModelDoc2;
             AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
             if (assyDoc == null || swAssembly == null)
             {
-                Log(log, "Upload pack: failed to create temp assembly for TREEBOM.");
+                Log(log, "Upload pack: failed to create temp assembly for TREEBOM (template: " + template + ").");
                 return false;
             }
 
@@ -4337,6 +4399,20 @@ namespace TinyMRP.SolidWorksAddin.Services
                 suppressed = false;
             }
             if (suppressed)
+            {
+                return true;
+            }
+
+            bool isEnvelope = false;
+            try
+            {
+                isEnvelope = IsEnvelopeComponent(comp);
+            }
+            catch
+            {
+                isEnvelope = false;
+            }
+            if (isEnvelope)
             {
                 return true;
             }
@@ -5692,6 +5768,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                              ShouldExport(Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf"),
                                  options.OverwriteFiles);
 
+            bool dxfSelected = drawingExists && options.ExportDxf;
+            bool createDxf = dxfSelected &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf"),
+                                 options.OverwriteFiles);
+
             bool createPngD = drawingExists && options.ExportPngDrawing &&
                               ShouldExport(Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png"),
                                   options.OverwriteFiles);
@@ -5701,7 +5782,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                   options.OverwriteFiles);
 
             if (!createPng && !createStep && !create3mf && !createPly && !createStl && !createEdr &&
-                !createPdf && !createPngD && !createEdrD)
+                !createPdf && !createDxf && !createPngD && !createEdrD)
             {
                 return null;
             }
@@ -5721,6 +5802,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 ExportStl = createStl,
                 ExportEdrawing = createEdr,
                 ExportPdf = createPdf,
+                ExportDxfSelected = dxfSelected,
+                ExportDxf = createDxf,
                 ExportPngDrawing = createPngD,
                 ExportEdrawingDrawing = createEdrD
             };
@@ -5788,6 +5871,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                              ShouldExport(Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf"),
                                  options.OverwriteFiles);
 
+            bool dxfSelected = drawingExists && options.ExportDxf;
+            bool createDxf = dxfSelected &&
+                             ShouldExport(Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf"),
+                                 options.OverwriteFiles);
+
             bool createPngD = drawingExists && options.ExportPngDrawing &&
                               ShouldExport(Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png"),
                                   options.OverwriteFiles);
@@ -5797,7 +5885,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                   options.OverwriteFiles);
 
             if (!createPng && !createStep && !create3mf && !createPly && !createStl && !createEdr &&
-                !createPdf && !createPngD && !createEdrD)
+                !createPdf && !createDxf && !createPngD && !createEdrD)
             {
                 return null;
             }
@@ -5817,6 +5905,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 ExportStl = createStl,
                 ExportEdrawing = createEdr,
                 ExportPdf = createPdf,
+                ExportDxfSelected = dxfSelected,
+                ExportDxf = createDxf,
                 ExportPngDrawing = createPngD,
                 ExportEdrawingDrawing = createEdrD
             };
@@ -8023,7 +8113,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (plan.HasDrawingExports())
             {
                 DwgPublishFast(model, plan.FileString, deliverablesFolder,
-                    overwriteFiles, plan.ExportPdf, plan.ExportPngDrawing, plan.ExportEdrawingDrawing,
+                    overwriteFiles, plan.ExportPdf, plan.ExportDxfSelected, plan.ExportPngDrawing, plan.ExportEdrawingDrawing,
                     log, errorLog, plan.PartNumber, openedDocs, baselineVisibleIds, rootDocId);
 
                 YieldAndCheckCancel();
@@ -8470,7 +8560,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 try
                 {
                     DwgPublish(model, plan.FileString, deliverablesFolder,
-                        overwriteFiles, plan.ExportPdf, plan.ExportPngDrawing, plan.ExportEdrawingDrawing, log, errorLog,
+                        overwriteFiles, plan.ExportPdf, plan.ExportDxfSelected, plan.ExportPngDrawing, plan.ExportEdrawingDrawing, log, errorLog,
                         plan.PartNumber);
                 }
                 catch (Exception ex)
@@ -8508,6 +8598,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (plan.ExportPly) parts.Add("ply");
             if (plan.ExportStl) parts.Add("stl");
             if (plan.ExportPdf) parts.Add("pdf");
+            if (plan.ExportDxf) parts.Add("dxf");
             if (plan.ExportPngDrawing) parts.Add("pngDwg");
             if (plan.ExportEdrawingDrawing) parts.Add("edrw");
             return string.Join(",", parts.ToArray());
@@ -9197,8 +9288,75 @@ namespace TinyMRP.SolidWorksAddin.Services
             return sb.ToString();
         }
 
+        private static string NormalizeSheetNameForMatch(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return string.Empty;
+            }
+
+            string trimmed = name.Trim();
+            var sb = new StringBuilder(trimmed.Length);
+            for (int i = 0; i < trimmed.Length; i++)
+            {
+                char c = trimmed[i];
+                if (char.IsLetterOrDigit(c))
+                {
+                    sb.Append(char.ToLowerInvariant(c));
+                }
+            }
+            return sb.ToString();
+        }
+
+        private HashSet<string> BuildDxfSheetNameTokens()
+        {
+            string raw = string.Empty;
+            try
+            {
+                raw = _config != null ? (_config.DxfSheetNames ?? string.Empty) : string.Empty;
+            }
+            catch
+            {
+                raw = string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                raw = "flatpattern;flat_pattern;dxf;dxf sheet";
+            }
+
+            string[] parts = raw.Split(new[] { ';', ',', '|', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string token = NormalizeSheetNameForMatch(parts[i]);
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    tokens.Add(token);
+                }
+            }
+
+            return tokens;
+        }
+
+        private bool IsDxfSheetName(string sheetName, HashSet<string> normalizedTokens)
+        {
+            if (string.IsNullOrWhiteSpace(sheetName) || normalizedTokens == null || normalizedTokens.Count == 0)
+            {
+                return false;
+            }
+
+            string token = NormalizeSheetNameForMatch(sheetName);
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return false;
+            }
+
+            return normalizedTokens.Contains(token);
+        }
+
         private void DwgPublishFast(ModelDoc2 model, string fileString, string deliverablesFolder,
-            bool overwriteFiles, bool pdf, bool png, bool edr, Action<string> log, Action<string> errorLog, string partNumberOverride,
+            bool overwriteFiles, bool pdf, bool dxf, bool png, bool edr, Action<string> log, Action<string> errorLog, string partNumberOverride,
             OpenTracker openedDocs, HashSet<string> baselineVisibleIds, string rootDocId)
         {
             using (new ExportDialogSuppressionScope(_swApp))
@@ -9249,7 +9407,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 string dxfPath = Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf");
                 string pngPath = Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png");
                 string edrPath = Path.Combine(deliverablesFolder, "edr", fileString + ".edrw");
-                bool dxfRequested = ShouldExport(dxfPath, overwriteFiles);
+                bool dxfSelected = dxf;
+                bool dxfRequested = dxfSelected && ShouldExport(dxfPath, overwriteFiles);
 
                 bool drawingWasOpenBefore = false;
                 bool drawingWasVisibleBefore = false;
@@ -9423,26 +9582,21 @@ namespace TinyMRP.SolidWorksAddin.Services
                         return;
                     }
 
+                    HashSet<string> dxfSheetTokens = null;
                     string dxfSheetName = string.Empty;
-                    if (dxfRequested)
+                    if (dxfSelected)
                     {
+                        dxfSheetTokens = BuildDxfSheetNameTokens();
                         for (int i = 0; i < sheetNames.Length; i++)
                         {
                             ThrowIfCancelled();
-                            string lower = (sheetNames[i] ?? string.Empty).Trim().ToLowerInvariant();
-                            if (lower == "flatpattern" || lower == "dxf" || lower == "dxf sheet")
+                            if (IsDxfSheetName(sheetNames[i], dxfSheetTokens))
                             {
                                 dxfSheetName = sheetNames[i];
                                 break;
                             }
                         }
                     }
-
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swDxfMultiSheetOption,
-                        (int)swDxfMultisheet_e.swDxfActiveSheetOnly);
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swDxfOutputNoScale, 1);
 
                     int errors = 0;
                     int warnings = 0;
@@ -9486,6 +9640,23 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                             // Use the COM SAFEARRAY variant directly where possible (mirrors VBA behavior).
                             object sheetsVariant = sheetNamesObj ?? (object)sheetNames;
+                            if (dxfSelected && dxfSheetTokens != null && dxfSheetTokens.Count > 0)
+                            {
+                                var pdfSheets = new List<string>();
+                                for (int i = 0; i < sheetNames.Length; i++)
+                                {
+                                    string name = sheetNames[i];
+                                    if (!IsDxfSheetName(name, dxfSheetTokens))
+                                    {
+                                        pdfSheets.Add(name);
+                                    }
+                                }
+
+                                if (pdfSheets.Count > 0 && pdfSheets.Count < sheetNames.Length)
+                                {
+                                    sheetsVariant = pdfSheets.ToArray();
+                                }
+                            }
                             exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
                                 sheetsVariant);
 
@@ -9653,10 +9824,24 @@ namespace TinyMRP.SolidWorksAddin.Services
                         // Do not treat "no drawing DXF page" as an export error.
                         if (string.IsNullOrWhiteSpace(dxfSheetName))
                         {
-                            SafeLog(errorLog, "DWG DXF skipped: no designated DXF sheet found (expected sheet name 'DXF'/'DXF Sheet'/'FlatPattern').");
+                            SafeLog(errorLog, "DWG DXF skipped: no designated DXF sheet found (configure Advanced > Drawing export > DXF sheet names; current: " +
+                                              (_config != null ? (_config.DxfSheetNames ?? string.Empty) : string.Empty) + ").");
                         }
                         else
                         {
+                            try
+                            {
+                                _swApp.SetUserPreferenceIntegerValue(
+                                    (int)swUserPreferenceIntegerValue_e.swDxfMultiSheetOption,
+                                    (int)swDxfMultisheet_e.swDxfActiveSheetOnly);
+                                _swApp.SetUserPreferenceIntegerValue(
+                                    (int)swUserPreferenceIntegerValue_e.swDxfOutputNoScale, 1);
+                            }
+                            catch
+                            {
+                                // ignore preference errors
+                            }
+
                             var t = System.Diagnostics.Stopwatch.StartNew();
                             if (summary != null)
                             {
@@ -9698,7 +9883,17 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 while (flatView != null)
                                 {
                                     ThrowIfCancelled();
-                                    if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                                    string viewName = string.Empty;
+                                    try
+                                    {
+                                        viewName = flatView.GetName2() ?? string.Empty;
+                                    }
+                                    catch
+                                    {
+                                        viewName = string.Empty;
+                                    }
+
+                                    if (NormalizeSheetNameForMatch(viewName) == "flatpattern")
                                     {
                                         flatPatternView = flatView;
                                         break;
@@ -9969,7 +10164,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         }
 
         private void DwgPublish(ModelDoc2 model, string fileString, string deliverablesFolder,
-            bool overwriteFiles, bool pdf, bool png, bool edr, Action<string> log, Action<string> errorLog, string partNumberOverride)
+            bool overwriteFiles, bool pdf, bool dxf, bool png, bool edr, Action<string> log, Action<string> errorLog, string partNumberOverride)
         {
             using (new ExportDialogSuppressionScope(_swApp))
             {
@@ -9998,7 +10193,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 string dxfPath = Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf");
                 string pngPath = Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png");
                 string edrPath = Path.Combine(deliverablesFolder, "edr", fileString + ".edrw");
-                bool dxfRequested = ShouldExport(dxfPath, overwriteFiles);
+                bool dxfSelected = dxf;
+                bool dxfRequested = dxfSelected && ShouldExport(dxfPath, overwriteFiles);
 
                 HashSet<string> keep = SnapshotOpenDocIds();
                 AddDocToKeepSet(keep, model, null);
@@ -10063,26 +10259,21 @@ namespace TinyMRP.SolidWorksAddin.Services
                         return;
                     }
 
+                    HashSet<string> dxfSheetTokens = null;
                     string dxfSheetName = string.Empty;
-                    if (dxfRequested)
+                    if (dxfSelected)
                     {
+                        dxfSheetTokens = BuildDxfSheetNameTokens();
                         for (int i = 0; i < sheetNames.Length; i++)
                         {
                             ThrowIfCancelled();
-                            string lower = (sheetNames[i] ?? string.Empty).Trim().ToLowerInvariant();
-                            if (lower == "flatpattern" || lower == "dxf" || lower == "dxf sheet")
+                            if (IsDxfSheetName(sheetNames[i], dxfSheetTokens))
                             {
                                 dxfSheetName = sheetNames[i];
                                 break;
                             }
                         }
                     }
-
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swDxfMultiSheetOption,
-                        (int)swDxfMultisheet_e.swDxfActiveSheetOnly);
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swDxfOutputNoScale, 1);
 
                     int errors = 0;
                     int warnings = 0;
@@ -10100,8 +10291,27 @@ namespace TinyMRP.SolidWorksAddin.Services
                             (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
                         if (exportData != null)
                         {
+                            string[] pdfSheets = sheetNames;
+                            if (dxfSelected && dxfSheetTokens != null && dxfSheetTokens.Count > 0)
+                            {
+                                var filtered = new List<string>();
+                                for (int i = 0; i < sheetNames.Length; i++)
+                                {
+                                    string name = sheetNames[i];
+                                    if (!IsDxfSheetName(name, dxfSheetTokens))
+                                    {
+                                        filtered.Add(name);
+                                    }
+                                }
+
+                                if (filtered.Count > 0 && filtered.Count < sheetNames.Length)
+                                {
+                                    pdfSheets = filtered.ToArray();
+                                }
+                            }
+
                             exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
-                                sheetNames);
+                                pdfSheets);
                             bool ok = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
                                 (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
                             ok = ok && File.Exists(pdfPath);
@@ -10211,10 +10421,24 @@ namespace TinyMRP.SolidWorksAddin.Services
                         // Do not treat "no drawing DXF page" as an export error.
                         if (string.IsNullOrWhiteSpace(dxfSheetName))
                         {
-                            SafeLog(errorLog, "DWG DXF skipped: no designated DXF sheet found (expected sheet name 'DXF'/'DXF Sheet'/'FlatPattern').");
+                            SafeLog(errorLog, "DWG DXF skipped: no designated DXF sheet found (configure Advanced > Drawing export > DXF sheet names; current: " +
+                                              (_config != null ? (_config.DxfSheetNames ?? string.Empty) : string.Empty) + ").");
                         }
                         else
                         {
+                            try
+                            {
+                                _swApp.SetUserPreferenceIntegerValue(
+                                    (int)swUserPreferenceIntegerValue_e.swDxfMultiSheetOption,
+                                    (int)swDxfMultisheet_e.swDxfActiveSheetOnly);
+                                _swApp.SetUserPreferenceIntegerValue(
+                                    (int)swUserPreferenceIntegerValue_e.swDxfOutputNoScale, 1);
+                            }
+                            catch
+                            {
+                                // ignore preference errors
+                            }
+
                             if (summary != null)
                             {
                                 summary.DwgAttemptDxf++;
@@ -10245,7 +10469,17 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 while (flatView != null)
                                 {
                                     ThrowIfCancelled();
-                                    if (string.Equals(flatView.GetName2(), "FLATPATTERN", StringComparison.OrdinalIgnoreCase))
+                                    string viewName = string.Empty;
+                                    try
+                                    {
+                                        viewName = flatView.GetName2() ?? string.Empty;
+                                    }
+                                    catch
+                                    {
+                                        viewName = string.Empty;
+                                    }
+
+                                    if (NormalizeSheetNameForMatch(viewName) == "flatpattern")
                                     {
                                         flatPatternView = flatView;
                                         break;

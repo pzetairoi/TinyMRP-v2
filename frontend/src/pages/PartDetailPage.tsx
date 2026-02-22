@@ -175,6 +175,7 @@ export default function PartDetailPage() {
   const [canPartsNote, setCanPartsNote] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteChildren, setDeleteChildren] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
@@ -1081,7 +1082,10 @@ function bestUrl(f: FileRow): string {
   async function handleDeletePart() {
     if (!canPartsDelete || !part) return;
     const label = `${part.part_number}${part.revision ? "-" + part.revision : ""}`;
-    const ok = window.confirm(`Delete part ${label}? This cannot be undone.`);
+    const extra = deleteChildren
+      ? "\n\nThis will also delete BOM children that are not used in any other assembly."
+      : "";
+    const ok = window.confirm(`Delete part ${label}? This cannot be undone.${extra}`);
     if (!ok) return;
     setDeleteBusy(true);
     setDeleteError(null);
@@ -1089,7 +1093,11 @@ function bestUrl(f: FileRow): string {
       const resp = await fetch("/api/part_delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pn: part.part_number, rev: part.revision || "" }),
+        body: JSON.stringify({
+          pn: part.part_number,
+          rev: part.revision || "",
+          delete_children: deleteChildren,
+        }),
       });
       if (!resp.ok) {
         const msg = await resp.text();
@@ -1956,6 +1964,19 @@ function bestUrl(f: FileRow): string {
                       >
                         {deleteBusy ? "Deleting..." : "Delete part"}
                       </button>
+                      <div className="form-check mt-2">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          id="deleteChildrenCheck"
+                          checked={deleteChildren}
+                          disabled={deleteBusy}
+                          onChange={(e) => setDeleteChildren(e.target.checked)}
+                        />
+                        <label className="form-check-label small" htmlFor="deleteChildrenCheck">
+                          Also delete BOM children (only if not used in other assemblies)
+                        </label>
+                      </div>
                       {deleteError ? <div className="text-danger small mt-1">{deleteError}</div> : null}
                     </div>
                   )}

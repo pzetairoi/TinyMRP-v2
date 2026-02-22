@@ -12,6 +12,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         public bool ExportStl { get; set; }
         public bool ExportPngDrawing { get; set; }
         public bool ExportPdf { get; set; }
+        public bool ExportDxf { get; set; }
         public bool ExportEdrawingDrawing { get; set; }
         public bool OverwriteFiles { get; set; }
         public bool TopLevelOnly { get; set; }

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -31,6 +32,51 @@ namespace TinyMRP.SolidWorksAddin
         private int _addinId;
         private string _taskPaneIconPath;
 
+        private static string AddinTitleWithVersion()
+        {
+            return TitleWithVersion(AddinTitle, Assembly.GetExecutingAssembly());
+        }
+
+        private static string TaskPaneTitleWithVersion()
+        {
+            return TitleWithVersion(TaskPaneTitle, Assembly.GetExecutingAssembly());
+        }
+
+        private static string TitleWithVersion(string baseTitle, Assembly asm)
+        {
+            string version = string.Empty;
+            try
+            {
+                if (asm != null && !string.IsNullOrWhiteSpace(asm.Location))
+                {
+                    version = FileVersionInfo.GetVersionInfo(asm.Location)?.FileVersion ?? string.Empty;
+                }
+            }
+            catch
+            {
+                version = string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                try
+                {
+                    version = (asm != null ? (asm.GetName().Version?.ToString() ?? string.Empty) : string.Empty);
+                }
+                catch
+                {
+                    version = string.Empty;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                return baseTitle;
+            }
+
+            return baseTitle + " v" + version;
+        }
+
         public bool ConnectToSW(object ThisSW, int cookie)
         {
             _swApp = (ISldWorks)ThisSW;
@@ -40,7 +86,7 @@ namespace TinyMRP.SolidWorksAddin
 
             try
             {
-                _taskPane = _swApp.CreateTaskpaneView2(GetTaskPaneIconPath(), TaskPaneTitle);
+                _taskPane = _swApp.CreateTaskpaneView2(GetTaskPaneIconPath(), TaskPaneTitleWithVersion());
                 if (_taskPane != null)
                 {
                     var paneObject = _taskPane.AddControl(UI.MainPaneControl.TaskPaneProgId, string.Empty);
@@ -134,7 +180,7 @@ namespace TinyMRP.SolidWorksAddin
                     if (rk != null)
                     {
                         rk.SetValue(null, 1);
-                        rk.SetValue("Title", AddinTitle);
+                        rk.SetValue("Title", TitleWithVersion(AddinTitle, t.Assembly));
                         rk.SetValue("Description", AddinDescription);
                         if (File.Exists(addinIconPath))
                         {
