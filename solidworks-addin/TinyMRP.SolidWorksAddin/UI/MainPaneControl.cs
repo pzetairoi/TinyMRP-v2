@@ -357,6 +357,14 @@ namespace TinyMRP.SolidWorksAddin.UI
             var btnUploadPack = new Button { Text = "Create upload pack", AutoSize = true };
             btnUploadPack.Click += OnCreateUploadPack;
             uploadPackActions.Controls.Add(btnUploadPack);
+            uploadPackActions.Controls.Add(new Label
+            {
+                Text = "Only the deliverables selected above will be included.",
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                MaximumSize = new Size(260, 0),
+                Padding = new Padding(0, 2, 0, 0)
+            });
             AddSection(panel, CreateGroupBox("Upload pack actions", uploadPackActions));
 
             var bomActions = new FlowLayoutPanel

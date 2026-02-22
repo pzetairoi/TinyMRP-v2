@@ -1585,28 +1585,33 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     if (assyDoc != null)
                     {
-                        try
+                        using (new ExportDialogSuppressionScope(_swApp))
+                        using (new ExternalReferenceBatchOpenScope(_swApp))
                         {
-                            if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+                            try
                             {
-                                _swApp.ActivateDoc(activeBeforeTempNorm);
+                                if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+                                {
+                                    _swApp.ActivateDoc(activeBeforeTempNorm);
+                                }
                             }
-                        }
-                        catch
-                        {
-                            // ignore restore errors
-                        }
+                            catch
+                            {
+                                // ignore restore errors
+                            }
 
-                        try
-                        {
-                            assyDoc.SetSaveFlag();
-                        }
-                        catch
-                        {
-                            // ignore
-                        }
+                            try
+                            {
+                                // Ensure the temp assembly doesn't trigger save UI on close.
+                                assyDoc.SetSaveFlag();
+                            }
+                            catch
+                            {
+                                // ignore
+                            }
 
-                        ForceCloseDocNoSave(assyDoc, null, "BOM temp assembly close");
+                            ForceCloseDocNoSave(assyDoc, null, "BOM temp assembly close");
+                        }
                     }
                     CloseDocsNotInKeepSet(baseline, null, "post BOM temp assembly cleanup");
                 }
@@ -2854,34 +2859,110 @@ namespace TinyMRP.SolidWorksAddin.Services
                             List<ReopenDocInfo> cleanRoomReopen = null;
                             try
                             {
-                                bool closeAndReopenRoot = true;
-                                string rootReason = string.Empty;
-                                try
-                                {
-                                    if (IsDocDirtyOrUnsaved(rootModel, out rootReason) &&
-                                        string.Equals(rootReason, "modified", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        closeAndReopenRoot = false;
-                                        SafeLog(errorLog,
-                                            "WARN: root document is modified; running in-place export mode (will not close/reopen root; edits preserved; memory isolation reduced).");
-                                    }
-                                }
-                                catch
-                                {
-                                    closeAndReopenRoot = true;
-                                }
+                                 bool closeAndReopenRoot = true;
+                                 string rootReason = string.Empty;
+                                 try
+                                 {
+                                     if (IsDocDirtyOrUnsaved(rootModel, out rootReason) &&
+                                         string.Equals(rootReason, "modified", StringComparison.OrdinalIgnoreCase))
+                                     {
+                                         closeAndReopenRoot = false;
+                                         SafeLog(errorLog,
+                                             "WARN: root document is modified; running in-place export mode (will not close/reopen root; edits preserved; memory isolation reduced).");
+                                     }
+                                 }
+                                 catch
+                                 {
+                                     closeAndReopenRoot = true;
+                                 }
 
-                                if (closeAndReopenRoot)
-                                {
-                                    EnsureRootDocSafeToCloseNoSave(rootModel, log, errorLog);
-                                }
+                                 bool skipCleanRoom = false;
+                                 try
+                                 {
+                                     string rootId = GetDocumentId(rootModel);
+                                     var dirtyOtherDocs = new List<string>();
+                                     foreach (ModelDoc2 doc in GetOpenVisibleDocuments())
+                                     {
+                                         if (doc == null)
+                                         {
+                                             continue;
+                                         }
 
-                                cleanRoomReopen = CleanRoomCloseOtherVisibleDocuments(rootModel, log, errorLog);
+                                         string docId = GetDocumentId(doc);
+                                         if (!string.IsNullOrWhiteSpace(rootId) &&
+                                             !string.IsNullOrWhiteSpace(docId) &&
+                                             string.Equals(docId, rootId, StringComparison.OrdinalIgnoreCase))
+                                         {
+                                             continue;
+                                         }
 
-                                ProcessDeliverablesIsolated(
-                                    plannedRefs,
-                                    deliverablesFolder,
-                                    options,
+                                         string dirtyReason;
+                                         if (IsDocDirtyOrUnsaved(doc, out dirtyReason))
+                                         {
+                                             string title = string.Empty;
+                                             string path = string.Empty;
+                                             int docType = 0;
+                                             try
+                                             {
+                                                 title = doc.GetTitle() ?? string.Empty;
+                                                 path = doc.GetPathName() ?? string.Empty;
+                                                 docType = doc.GetType();
+                                             }
+                                             catch
+                                             {
+                                                 title = string.Empty;
+                                                 path = string.Empty;
+                                                 docType = 0;
+                                             }
+
+                                             dirtyOtherDocs.Add(
+                                                 (string.IsNullOrWhiteSpace(title) ? "<untitled>" : title) +
+                                                 " | " + (string.IsNullOrWhiteSpace(path) ? "<no path>" : path) +
+                                                 " | type=" + docType +
+                                                 " | " + (dirtyReason ?? string.Empty));
+                                         }
+                                     }
+
+                                     if (dirtyOtherDocs.Count > 0)
+                                     {
+                                         closeAndReopenRoot = false;
+                                         skipCleanRoom = true;
+
+                                         var shown = new List<string>();
+                                         for (int i = 0; i < dirtyOtherDocs.Count && i < 15; i++)
+                                         {
+                                             shown.Add(dirtyOtherDocs[i]);
+                                         }
+
+                                         SafeLog(errorLog,
+                                             "WARN: other modified/unsaved documents are open; running in-place export mode (will not close/reopen root; will not close other visible docs): " +
+                                             "count=" + dirtyOtherDocs.Count +
+                                             " items=[" + string.Join("; ", shown.ToArray()) + "]");
+                                     }
+                                 }
+                                 catch
+                                 {
+                                     // ignore dirty-doc detection errors; best-effort only
+                                 }
+
+                                 if (closeAndReopenRoot)
+                                 {
+                                     EnsureRootDocSafeToCloseNoSave(rootModel, log, errorLog);
+                                 }
+
+                                 if (!skipCleanRoom)
+                                 {
+                                     cleanRoomReopen = CleanRoomCloseOtherVisibleDocuments(rootModel, log, errorLog);
+                                 }
+                                 else
+                                 {
+                                     cleanRoomReopen = null;
+                                 }
+
+                                 ProcessDeliverablesIsolated(
+                                     plannedRefs,
+                                     deliverablesFolder,
+                                     options,
                                     log,
                                     errorLog,
                                     deliverablesProgress,
@@ -3319,42 +3400,47 @@ namespace TinyMRP.SolidWorksAddin.Services
                     return false;
                 }
             }
-            finally
-            {
-                try
+             finally
+             {
+                using (new ExportDialogSuppressionScope(_swApp))
+                using (new ExternalReferenceBatchOpenScope(_swApp))
                 {
-                    if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+                    try
                     {
-                        _swApp.ActivateDoc(activeBeforeTempNorm);
+                        if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+                        {
+                            _swApp.ActivateDoc(activeBeforeTempNorm);
+                        }
                     }
-                }
-                catch
-                {
-                    // ignore restore errors
-                }
+                    catch
+                    {
+                        // ignore restore errors
+                    }
 
-                try
-                {
-                    assyDoc.Visible = false;
-                }
-                catch
-                {
-                    // ignore
-                }
+                    try
+                    {
+                        assyDoc.Visible = false;
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
 
-                try
-                {
-                    assyDoc.SetSaveFlag();
-                }
-                catch
-                {
-                    // ignore
-                }
+                    try
+                    {
+                        // Ensure the temp assembly doesn't trigger save UI on close.
+                        assyDoc.SetSaveFlag();
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
 
-                ForceCloseDocNoSave(assyDoc, errorLog, "TREEBOM temp assembly close");
-                CloseDocsNotInKeepSet(baseline, errorLog, "post TREEBOM temp assembly cleanup");
-            }
-        }
+                    ForceCloseDocNoSave(assyDoc, errorLog, "TREEBOM temp assembly close");
+                    CloseDocsNotInKeepSet(baseline, errorLog, "post TREEBOM temp assembly cleanup");
+                }
+             }
+         }
 
         private List<ModelEntry> GetEntriesForActiveDoc(bool includeChildren, out ModelDoc2 rootModel,
             out string rootTitle, out HashSet<string> initialDocs, out string startTitle)
@@ -9632,12 +9718,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (pdf)
                     {
-                        var t = System.Diagnostics.Stopwatch.StartNew();
-                        if (summary != null)
-                        {
-                            summary.DwgAttemptPdf++;
-                        }
-
                         YieldAndCheckCancel();
                         ExportPdfData exportData = _swApp.GetExportFileData(
                             (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
@@ -9657,58 +9737,210 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 // ignore
                             }
 
-                            // Use the COM SAFEARRAY variant directly where possible (mirrors VBA behavior).
-                            object sheetsVariant = sheetNamesObj ?? (object)sheetNames;
+                            // Determine which sheets to export to PDF (exclude DXF/flatpattern sheets).
+                            var excludedSheets = new List<string>();
+                            var includedSheets = new List<string>();
                             if (dxfSheetTokens != null && dxfSheetTokens.Count > 0)
                             {
-                                var pdfSheets = new List<string>();
                                 for (int i = 0; i < sheetNames.Length; i++)
                                 {
                                     string name = sheetNames[i];
-                                    if (!IsDxfSheetName(name, dxfSheetTokens))
+                                    if (IsDxfSheetName(name, dxfSheetTokens))
                                     {
-                                        pdfSheets.Add(name);
+                                        excludedSheets.Add(name);
                                     }
-                                }
-
-                                if (pdfSheets.Count > 0 && pdfSheets.Count < sheetNames.Length)
-                                {
-                                    var pdfVariant = new object[pdfSheets.Count];
-                                    for (int i = 0; i < pdfSheets.Count; i++)
+                                    else
                                     {
-                                        pdfVariant[i] = pdfSheets[i];
+                                        includedSheets.Add(name);
                                     }
-                                    sheetsVariant = pdfVariant;
                                 }
                             }
-                            exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
-                                sheetsVariant);
-
-                            saveOk = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
-                        }
-
-                        long bytes = FileBytes(pdfPath);
-                        bool blankSuspect = bytes > 0 && bytes < MinPdfBytes;
-                        bool ok = saveOk && bytes >= MinPdfBytes;
-
-                        t.Stop();
-                        SafeLog(errorLog, "DWG PDF ms=" + t.ElapsedMilliseconds +
-                                          " ok=" + ok +
-                                          " saveOk=" + saveOk +
-                                          " blankSuspect=" + blankSuspect +
-                                          " activeBefore=" + activeBefore +
-                                          " activeAfter=" + ActiveDocTitle() +
-                                          " errors=" + errors +
-                                          " warnings=" + warnings +
-                                          " bytes=" + bytes +
-                                          " path=" + pdfPath);
-
-                        if (ok)
-                        {
-                            if (summary != null)
+                            else
                             {
-                                summary.DwgOkPdf++;
+                                includedSheets.AddRange(sheetNames);
+                            }
+
+                            List<string> tokensSorted = null;
+                            try
+                            {
+                                if (dxfSheetTokens != null)
+                                {
+                                    tokensSorted = new List<string>();
+                                    foreach (string t in dxfSheetTokens)
+                                    {
+                                        if (!string.IsNullOrWhiteSpace(t))
+                                        {
+                                            tokensSorted.Add(t);
+                                        }
+                                    }
+                                    tokensSorted.Sort(StringComparer.OrdinalIgnoreCase);
+                                }
+                            }
+                            catch
+                            {
+                                tokensSorted = null;
+                            }
+
+                            string FormatList(IList<string> values)
+                            {
+                                if (values == null)
+                                {
+                                    return "<null>";
+                                }
+
+                                int max = 50;
+                                var sb = new StringBuilder();
+                                sb.Append("[");
+                                for (int i = 0; i < values.Count; i++)
+                                {
+                                    if (i > 0) sb.Append(", ");
+                                    if (i >= max)
+                                    {
+                                        sb.Append("... +").Append(values.Count - i);
+                                        break;
+                                    }
+                                    sb.Append(values[i] ?? string.Empty);
+                                }
+                                sb.Append("]");
+                                return sb.ToString();
+                            }
+
+                            bool hasExclusions = excludedSheets.Count > 0;
+                            if (hasExclusions)
+                            {
+                                SafeLog(errorLog,
+                                    "DWG PDF sheets: dxfSheetNamesRaw=" + (_config != null ? (_config.DxfSheetNames ?? string.Empty) : string.Empty) +
+                                    " tokens=" + FormatList(tokensSorted) +
+                                    " all=" + FormatList(new List<string>(sheetNames)) +
+                                    " excluded=" + FormatList(excludedSheets) +
+                                    " included=" + FormatList(includedSheets));
+                            }
+
+                            if (hasExclusions && includedSheets.Count == 0)
+                            {
+                                // Excluding the DXF/flatpattern sheets would result in an empty PDF.
+                                SafeLog(errorLog,
+                                    "DWG PDF skipped: all sheets match DXF patterns; no non-DXF sheets available. path=" + pdfPath);
+                            }
+                            else
+                            {
+                                var t = System.Diagnostics.Stopwatch.StartNew();
+                                if (summary != null)
+                                {
+                                    summary.DwgAttemptPdf++;
+                                }
+
+                                string[] pdfSheetNames = (hasExclusions && includedSheets.Count > 0 && includedSheets.Count < sheetNames.Length)
+                                    ? includedSheets.ToArray()
+                                    : sheetNames;
+
+                                bool setOk = false;
+                                string setArgType = "<none>";
+                                try
+                                {
+                                    // Prefer strongly typed string[] (marshals to SAFEARRAY of BSTR).
+                                    setOk = exportData.SetSheets(
+                                        (int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
+                                        pdfSheetNames);
+                                    setArgType = pdfSheetNames != null ? pdfSheetNames.GetType().FullName : "<null>";
+                                }
+                                catch (Exception ex)
+                                {
+                                    setOk = false;
+                                    SafeLog(errorLog, "DWG PDF SetSheets exception (string[]): " + ex.Message);
+                                }
+
+                                if (!setOk)
+                                {
+                                    try
+                                    {
+                                        // Fallback: VT_VARIANT[] (some SW versions are pickier).
+                                        var pdfVariant = new object[pdfSheetNames != null ? pdfSheetNames.Length : 0];
+                                        for (int i = 0; i < pdfVariant.Length; i++)
+                                        {
+                                            pdfVariant[i] = pdfSheetNames[i];
+                                        }
+
+                                        setOk = exportData.SetSheets(
+                                            (int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
+                                            pdfVariant);
+                                        setArgType = pdfVariant.GetType().FullName;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        setOk = false;
+                                        SafeLog(errorLog, "DWG PDF SetSheets exception (variant[]): " + ex.Message);
+                                    }
+                                }
+
+                                SafeLog(errorLog,
+                                    "DWG PDF SetSheets ok=" + setOk +
+                                    " argType=" + (setArgType ?? string.Empty) +
+                                    " count=" + (pdfSheetNames != null ? pdfSheetNames.Length : 0) +
+                                    " export=" + FormatList(new List<string>(pdfSheetNames ?? new string[0])));
+
+                                bool skippedPdf = false;
+                                if (!setOk && hasExclusions)
+                                {
+                                    skippedPdf = true;
+                                    SafeLog(errorLog,
+                                        "DWG PDF skipped: failed to apply sheet filter; refusing to export PDF that would include DXF sheets. path=" + pdfPath);
+                                }
+                                else
+                                {
+                                    saveOk = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
+                                }
+
+                                long bytes = 0;
+                                bool blankSuspect = false;
+                                bool ok = false;
+                                if (!skippedPdf)
+                                {
+                                    bytes = FileBytes(pdfPath);
+                                    blankSuspect = bytes > 0 && bytes < MinPdfBytes;
+                                    ok = saveOk && bytes >= MinPdfBytes;
+                                }
+
+                                t.Stop();
+                                if (!skippedPdf)
+                                {
+                                    SafeLog(errorLog, "DWG PDF ms=" + t.ElapsedMilliseconds +
+                                                      " ok=" + ok +
+                                                      " saveOk=" + saveOk +
+                                                      " blankSuspect=" + blankSuspect +
+                                                      " activeBefore=" + activeBefore +
+                                                      " activeAfter=" + ActiveDocTitle() +
+                                                      " errors=" + errors +
+                                                      " warnings=" + warnings +
+                                                      " bytes=" + bytes +
+                                                      " path=" + pdfPath);
+
+                                    if (ok)
+                                    {
+                                        if (summary != null)
+                                        {
+                                            summary.DwgOkPdf++;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (summary != null)
+                                        {
+                                            summary.DwgFailPdf++;
+                                        }
+                                        LogExportFailure(log, errorLog, exportData != null
+                                            ? (blankSuspect
+                                                ? ("PDF export suspect blank (size " + bytes + "): " + pdfPath)
+                                                : ("PDF export failed: " + pdfPath))
+                                            : "PDF export failed: export data unavailable.");
+                                    }
+                                }
+                                else
+                                {
+                                    SafeLog(errorLog,
+                                        "DWG PDF skipped: elapsedMs=" + t.ElapsedMilliseconds + " path=" + pdfPath);
+                                }
                             }
                         }
                         else
@@ -9717,11 +9949,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             {
                                 summary.DwgFailPdf++;
                             }
-                            LogExportFailure(log, errorLog, exportData != null
-                                ? (blankSuspect
-                                    ? ("PDF export suspect blank (size " + bytes + "): " + pdfPath)
-                                    : ("PDF export failed: " + pdfPath))
-                                : "PDF export failed: export data unavailable.");
+                            LogExportFailure(log, errorLog, "PDF export failed: export data unavailable.");
                         }
                     }
 
@@ -10309,59 +10537,192 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (pdf)
                     {
-                        if (summary != null)
-                        {
-                            summary.DwgAttemptPdf++;
-                        }
-
                         ThrowIfCancelled();
                         ExportPdfData exportData = _swApp.GetExportFileData(
                             (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
                         if (exportData != null)
                         {
-                            object pdfSheetsVariant = sheetNamesObj ?? (object)sheetNames;
+                            try
+                            {
+                                exportData.ViewPdfAfterSaving = false;
+                            }
+                            catch
+                            {
+                                // ignore
+                            }
+
+                            var excludedSheets = new List<string>();
+                            var includedSheets = new List<string>();
                             if (dxfSheetTokens != null && dxfSheetTokens.Count > 0)
                             {
-                                var filtered = new List<string>();
                                 for (int i = 0; i < sheetNames.Length; i++)
                                 {
                                     string name = sheetNames[i];
-                                    if (!IsDxfSheetName(name, dxfSheetTokens))
+                                    if (IsDxfSheetName(name, dxfSheetTokens))
                                     {
-                                        filtered.Add(name);
+                                        excludedSheets.Add(name);
                                     }
-                                }
-
-                                if (filtered.Count > 0 && filtered.Count < sheetNames.Length)
-                                {
-                                    var pdfVariant = new object[filtered.Count];
-                                    for (int i = 0; i < filtered.Count; i++)
+                                    else
                                     {
-                                        pdfVariant[i] = filtered[i];
+                                        includedSheets.Add(name);
                                     }
-                                    pdfSheetsVariant = pdfVariant;
                                 }
                             }
-
-                            exportData.SetSheets((int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
-                                pdfSheetsVariant);
-                            bool ok = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
-                            ok = ok && File.Exists(pdfPath);
-                            if (ok)
+                            else
                             {
-                                if (summary != null)
+                                includedSheets.AddRange(sheetNames);
+                            }
+
+                            List<string> tokensSorted = null;
+                            try
+                            {
+                                if (dxfSheetTokens != null)
                                 {
-                                    summary.DwgOkPdf++;
+                                    tokensSorted = new List<string>();
+                                    foreach (string t in dxfSheetTokens)
+                                    {
+                                        if (!string.IsNullOrWhiteSpace(t))
+                                        {
+                                            tokensSorted.Add(t);
+                                        }
+                                    }
+                                    tokensSorted.Sort(StringComparer.OrdinalIgnoreCase);
                                 }
+                            }
+                            catch
+                            {
+                                tokensSorted = null;
+                            }
+
+                            string FormatList(IList<string> values)
+                            {
+                                if (values == null)
+                                {
+                                    return "<null>";
+                                }
+
+                                int max = 50;
+                                var sb = new StringBuilder();
+                                sb.Append("[");
+                                for (int i = 0; i < values.Count; i++)
+                                {
+                                    if (i > 0) sb.Append(", ");
+                                    if (i >= max)
+                                    {
+                                        sb.Append("... +").Append(values.Count - i);
+                                        break;
+                                    }
+                                    sb.Append(values[i] ?? string.Empty);
+                                }
+                                sb.Append("]");
+                                return sb.ToString();
+                            }
+
+                            bool hasExclusions = excludedSheets.Count > 0;
+                            if (hasExclusions)
+                            {
+                                SafeLog(errorLog,
+                                    "DWG PDF sheets: dxfSheetNamesRaw=" + (_config != null ? (_config.DxfSheetNames ?? string.Empty) : string.Empty) +
+                                    " tokens=" + FormatList(tokensSorted) +
+                                    " all=" + FormatList(new List<string>(sheetNames)) +
+                                    " excluded=" + FormatList(excludedSheets) +
+                                    " included=" + FormatList(includedSheets));
+                            }
+
+                            bool saveOk = false;
+                            bool skippedPdf = false;
+                            if (hasExclusions && includedSheets.Count == 0)
+                            {
+                                skippedPdf = true;
+                                SafeLog(errorLog,
+                                    "DWG PDF skipped: all sheets match DXF patterns; no non-DXF sheets available. path=" + pdfPath);
                             }
                             else
                             {
                                 if (summary != null)
                                 {
-                                    summary.DwgFailPdf++;
+                                    summary.DwgAttemptPdf++;
                                 }
-                                LogExportFailure(log, errorLog, "PDF export failed: " + pdfPath);
+
+                                string[] pdfSheetNames = (hasExclusions && includedSheets.Count > 0 && includedSheets.Count < sheetNames.Length)
+                                    ? includedSheets.ToArray()
+                                    : sheetNames;
+
+                                bool setOk = false;
+                                string setArgType = "<none>";
+                                try
+                                {
+                                    setOk = exportData.SetSheets(
+                                        (int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
+                                        pdfSheetNames);
+                                    setArgType = pdfSheetNames != null ? pdfSheetNames.GetType().FullName : "<null>";
+                                }
+                                catch (Exception ex)
+                                {
+                                    setOk = false;
+                                    SafeLog(errorLog, "DWG PDF SetSheets exception (string[]): " + ex.Message);
+                                }
+
+                                if (!setOk)
+                                {
+                                    try
+                                    {
+                                        var pdfVariant = new object[pdfSheetNames != null ? pdfSheetNames.Length : 0];
+                                        for (int i = 0; i < pdfVariant.Length; i++)
+                                        {
+                                            pdfVariant[i] = pdfSheetNames[i];
+                                        }
+
+                                        setOk = exportData.SetSheets(
+                                            (int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
+                                            pdfVariant);
+                                        setArgType = pdfVariant.GetType().FullName;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        setOk = false;
+                                        SafeLog(errorLog, "DWG PDF SetSheets exception (variant[]): " + ex.Message);
+                                    }
+                                }
+
+                                SafeLog(errorLog,
+                                    "DWG PDF SetSheets ok=" + setOk +
+                                    " argType=" + (setArgType ?? string.Empty) +
+                                    " count=" + (pdfSheetNames != null ? pdfSheetNames.Length : 0) +
+                                    " export=" + FormatList(new List<string>(pdfSheetNames ?? new string[0])) +
+                                    " path=" + pdfPath);
+
+                                if (!setOk && hasExclusions)
+                                {
+                                    skippedPdf = true;
+                                    SafeLog(errorLog,
+                                        "DWG PDF skipped: failed to apply sheet filter; refusing to export PDF that would include DXF sheets. path=" + pdfPath);
+                                }
+                                else
+                                {
+                                    saveOk = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
+                                }
+                            }
+
+                            if (!skippedPdf)
+                            {
+                                bool ok = saveOk && File.Exists(pdfPath);
+                                if (ok)
+                                {
+                                    if (summary != null)
+                                    {
+                                        summary.DwgOkPdf++;
+                                    }
+                                }
+                                else
+                                {
+                                    if (summary != null)
+                                    {
+                                        summary.DwgFailPdf++;
+                                    }
+                                    LogExportFailure(log, errorLog, "PDF export failed: " + pdfPath);
+                                }
                             }
                         }
                         else
@@ -13282,28 +13643,48 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             string closeTitle = NormalizeDocTitleForClose(title);
-            bool tempOrMissingFile = false;
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                tempOrMissingFile = true;
-            }
-            else
-            {
-                try
-                {
-                    tempOrMissingFile = !File.Exists(path);
-                }
-                catch
-                {
-                    tempOrMissingFile = true;
-                }
-            }
+             bool tempOrMissingFile = false;
+             if (string.IsNullOrWhiteSpace(path))
+             {
+                 tempOrMissingFile = true;
+             }
+             else
+             {
+                 try
+                 {
+                     tempOrMissingFile = !File.Exists(path);
+                 }
+                 catch
+                 {
+                     tempOrMissingFile = true;
+                 }
+             }
 
-            string pathFileName = string.Empty;
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(path))
-                {
+             // SolidWorks can report the template path (e.g., *.asmdot) as the "document path" for a new, unsaved model.
+             // Treat template-backed docs as temp/unsaved so closing never triggers Save/SaveAs UI.
+             if (!tempOrMissingFile && !string.IsNullOrWhiteSpace(path))
+             {
+                 try
+                 {
+                     string ext = Path.GetExtension(path) ?? string.Empty;
+                     if (string.Equals(ext, ".asmdot", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(ext, ".prtdot", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(ext, ".drwdot", StringComparison.OrdinalIgnoreCase))
+                     {
+                         tempOrMissingFile = true;
+                     }
+                 }
+                 catch
+                 {
+                     // ignore extension errors
+                 }
+             }
+
+             string pathFileName = string.Empty;
+             try
+             {
+                 if (!string.IsNullOrWhiteSpace(path))
+                 {
                     pathFileName = Path.GetFileName(path) ?? string.Empty;
                 }
             }
