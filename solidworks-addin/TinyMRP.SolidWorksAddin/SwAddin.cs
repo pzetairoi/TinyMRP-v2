@@ -47,14 +47,32 @@ namespace TinyMRP.SolidWorksAddin
             string version = string.Empty;
             try
             {
-                if (asm != null && !string.IsNullOrWhiteSpace(asm.Location))
-                {
-                    version = FileVersionInfo.GetVersionInfo(asm.Location)?.FileVersion ?? string.Empty;
-                }
+                version = asm?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ??
+                          string.Empty;
             }
             catch
             {
                 version = string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(version))
+            {
+                try
+                {
+                    if (asm != null && !string.IsNullOrWhiteSpace(asm.Location))
+                    {
+                        FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(asm.Location);
+                        version = fvi != null ? (fvi.ProductVersion ?? string.Empty) : string.Empty;
+                        if (string.IsNullOrWhiteSpace(version))
+                        {
+                            version = fvi != null ? (fvi.FileVersion ?? string.Empty) : string.Empty;
+                        }
+                    }
+                }
+                catch
+                {
+                    version = string.Empty;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(version))
@@ -72,6 +90,14 @@ namespace TinyMRP.SolidWorksAddin
             if (string.IsNullOrWhiteSpace(version))
             {
                 return baseTitle;
+            }
+
+            version = version.Trim();
+            const string buildToken = "+build.";
+            int buildIdx = version.IndexOf(buildToken, StringComparison.OrdinalIgnoreCase);
+            if (buildIdx >= 0)
+            {
+                version = version.Substring(0, buildIdx) + "+" + version.Substring(buildIdx + buildToken.Length);
             }
 
             return baseTitle + " v" + version;

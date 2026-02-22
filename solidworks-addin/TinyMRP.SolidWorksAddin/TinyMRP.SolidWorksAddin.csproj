@@ -16,11 +16,19 @@
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <InformationalVersion>$(VersionPrefix)</InformationalVersion>
+    <!-- We generate our own git/timestamp informational version; don't let the SDK append full hashes automatically. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
   <PropertyGroup>
     <RepoRootDir>$(MSBuildProjectDirectory)\..\..</RepoRootDir>
   </PropertyGroup>
-  <Target Name="ComputeGitBuildVersion" BeforeTargets="GenerateAssemblyInfo" Condition="Exists('$(RepoRootDir)\\.git') Or Exists('$(RepoRootDir)\\.git\\HEAD') Or Exists('$(MSBuildProjectDirectory)\\.git')">
+  <Target Name="ComputeBuildTimestamp" BeforeTargets="GetAssemblyAttributes">
+    <PropertyGroup>
+      <BuildTimestampUtc>$([System.DateTime]::UtcNow.ToString("yyyyMMddHHmmss"))</BuildTimestampUtc>
+      <InformationalVersion>$(VersionPrefix)+build.$(BuildTimestampUtc)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+  <Target Name="ComputeGitBuildVersion" DependsOnTargets="ComputeBuildTimestamp" BeforeTargets="GetAssemblyAttributes" Condition="Exists('$(RepoRootDir)\\.git') Or Exists('$(RepoRootDir)\\.git\\HEAD') Or Exists('$(MSBuildProjectDirectory)\\.git')">
     <Exec Command="git rev-list --count HEAD" WorkingDirectory="$(RepoRootDir)" ConsoleToMSBuild="true" IgnoreExitCode="true">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitCommitCount" />
     </Exec>
@@ -31,8 +39,8 @@
       <GitCommitCountTrim>$([System.String]::Copy('$(GitCommitCount)').Trim())</GitCommitCountTrim>
       <GitCommitHashTrim>$([System.String]::Copy('$(GitCommitHash)').Trim())</GitCommitHashTrim>
       <FileVersion Condition="'$(GitCommitCountTrim)' != ''">1.0.0.$(GitCommitCountTrim)</FileVersion>
-      <InformationalVersion Condition="'$(GitCommitCountTrim)' != '' and '$(GitCommitHashTrim)' != ''">$(VersionPrefix)+build.$(GitCommitCountTrim).$(GitCommitHashTrim)</InformationalVersion>
-      <InformationalVersion Condition="'$(GitCommitCountTrim)' != '' and '$(GitCommitHashTrim)' == ''">$(VersionPrefix)+build.$(GitCommitCountTrim)</InformationalVersion>
+      <InformationalVersion Condition="'$(GitCommitCountTrim)' != '' and '$(GitCommitHashTrim)' != ''">$(VersionPrefix)+build.$(GitCommitCountTrim).$(GitCommitHashTrim).$(BuildTimestampUtc)</InformationalVersion>
+      <InformationalVersion Condition="'$(GitCommitCountTrim)' != '' and '$(GitCommitHashTrim)' == ''">$(VersionPrefix)+build.$(GitCommitCountTrim).$(BuildTimestampUtc)</InformationalVersion>
     </PropertyGroup>
   </Target>
   <PropertyGroup>
