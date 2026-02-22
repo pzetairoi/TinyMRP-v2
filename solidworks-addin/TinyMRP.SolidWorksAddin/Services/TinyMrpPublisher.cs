@@ -1600,20 +1600,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 // ignore restore errors
                             }
 
-                            try
-                            {
-                                // Ensure the temp assembly doesn't trigger save UI on close.
-                                assyDoc.SetSaveFlag();
-                            }
-                            catch
-                            {
-                                // ignore
-                            }
-
-                            ForceCloseDocNoSave(assyDoc, null, "BOM temp assembly close");
+                            ForceCloseDocNoSave(assyDoc, errorLog, "BOM temp assembly close");
                         }
                     }
-                    CloseDocsNotInKeepSet(baseline, null, "post BOM temp assembly cleanup");
+                    CloseDocsNotInKeepSet(baseline, errorLog, "post BOM temp assembly cleanup");
                 }
 
                 Log(log, BuildRunLogMessage("BOM file generation finished.", runLog));
@@ -3426,21 +3416,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                         // ignore
                     }
 
-                    try
-                    {
-                        // Ensure the temp assembly doesn't trigger save UI on close.
-                        assyDoc.SetSaveFlag();
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
-
                     ForceCloseDocNoSave(assyDoc, errorLog, "TREEBOM temp assembly close");
                     CloseDocsNotInKeepSet(baseline, errorLog, "post TREEBOM temp assembly cleanup");
                 }
-             }
-         }
+              }
+          }
 
         private List<ModelEntry> GetEntriesForActiveDoc(bool includeChildren, out ModelDoc2 rootModel,
             out string rootTitle, out HashSet<string> initialDocs, out string startTitle)
@@ -6543,32 +6523,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
 
                 // ResolveAllLightWeightComponents can dirty the root assembly even when the user hasn't changed it.
-                // Preserve the user's dirty state: clear only if it was clean before this step.
-                if (!wasDirty)
-                {
-                    bool nowDirty = false;
-                    try
-                    {
-                        nowDirty = rootModel.GetSaveFlag();
-                    }
-                    catch
-                    {
-                        nowDirty = false;
-                    }
-
-                    if (nowDirty)
-                    {
-                        try
-                        {
-                            rootModel.SetSaveFlag();
-                            SafeLog(errorLog, "LWT resolve: cleared root dirty flag (was clean before resolve).");
-                        }
-                        catch (Exception ex)
-                        {
-                            SafeLog(errorLog, "LWT resolve: failed to clear root dirty flag: " + ex.Message);
-                        }
-                    }
-                }
+                // SolidWorks does not expose an API to clear the save flag without saving; do not attempt to clear it here.
 
                 YieldAndCheckCancel();
             }
@@ -6601,15 +6556,8 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 if (nowDirty)
                 {
-                    try
-                    {
-                        rootModel.SetSaveFlag();
-                        SafeLog(errorLog, "LWT resolve: cleared root dirty flag (post-resolve).");
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
+                    SafeLog(errorLog,
+                        "WARN: LWT resolve dirtied root document (was clean before resolve); will not attempt to clear save flag.");
                 }
             }
 
@@ -13667,16 +13615,64 @@ namespace TinyMRP.SolidWorksAddin.Services
                  try
                  {
                      string ext = Path.GetExtension(path) ?? string.Empty;
-                     if (string.Equals(ext, ".asmdot", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(ext, ".prtdot", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(ext, ".drwdot", StringComparison.OrdinalIgnoreCase))
+                      if (string.Equals(ext, ".asmdot", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(ext, ".prtdot", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(ext, ".drwdot", StringComparison.OrdinalIgnoreCase))
+                      {
+                          tempOrMissingFile = true;
+                          SafeLog(errorLog,
+                              "ForceClose: treating doc as temp (template extension) context=" + (context ?? string.Empty) +
+                              " type=" + docType +
+                              " ext=" + (ext ?? string.Empty) +
+                              " title=" + (title ?? string.Empty) +
+                              " path=" + (path ?? string.Empty));
+                      }
+                  }
+                  catch
+                  {
+                      // ignore extension errors
+                 }
+             }
+
+             // Some installations use *.SLDASM/*.SLDPRT/*.SLDDRW files as templates; in that case, the new unsaved model
+             // can still report the template file path as its "path". Treat it as temp if it matches the default template.
+             if (!tempOrMissingFile && !string.IsNullOrWhiteSpace(path))
+             {
+                 try
+                 {
+                     int pref = 0;
+                     if (docType == (int)swDocumentTypes_e.swDocASSEMBLY)
                      {
-                         tempOrMissingFile = true;
+                         pref = (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly;
+                     }
+                     else if (docType == (int)swDocumentTypes_e.swDocPART)
+                     {
+                         pref = (int)swUserPreferenceStringValue_e.swDefaultTemplatePart;
+                     }
+                     else if (docType == (int)swDocumentTypes_e.swDocDRAWING)
+                     {
+                         pref = (int)swUserPreferenceStringValue_e.swDefaultTemplateDrawing;
+                     }
+
+                     if (pref != 0)
+                     {
+                         string defaultTemplate = _swApp.GetUserPreferenceStringValue(pref) ?? string.Empty;
+                         if (!string.IsNullOrWhiteSpace(defaultTemplate) &&
+                             string.Equals(path, defaultTemplate, StringComparison.OrdinalIgnoreCase))
+                         {
+                             tempOrMissingFile = true;
+                             SafeLog(errorLog,
+                                 "ForceClose: treating doc as temp (default template match) context=" + (context ?? string.Empty) +
+                                 " type=" + docType +
+                                 " title=" + (title ?? string.Empty) +
+                                 " path=" + (path ?? string.Empty) +
+                                 " template=" + (defaultTemplate ?? string.Empty));
+                         }
                      }
                  }
                  catch
                  {
-                     // ignore extension errors
+                     // ignore template detection errors
                  }
              }
 
@@ -13816,15 +13812,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (tempOrMissingFile)
                     {
-                        try
-                        {
-                            doc.SetSaveFlag();
-                        }
-                        catch
-                        {
-                            // ignore
-                        }
-
                         string[] candidates = new[] { title, closeTitle, pathFileName };
                         string used = string.Empty;
                         for (int i = 0; i < candidates.Length; i++)
