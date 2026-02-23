@@ -1,42 +1,58 @@
 # Overview
 
-TinyMRP is a parts and documentation hub for manufacturing teams. It keeps parts, revisions, deliverables, and doc packs in one place so you can find and share the right data quickly.
+TinyMRP is a manufacturing data platform that combines:
 
-This Help page is written for non-IT users. It explains what to click, what you should see, and what to do next.
+- A web app for parts, BOMs, jobs, orders, suppliers, customers, and document packs.
+- A SolidWorks add-in for publishing deliverables, creating upload packs, and allocating part numbers.
 
-## How this help is generated / how to update it
+This help content is written for day-to-day users. It focuses on what to do, where to click, and what result to expect.
 
-This Help page is built from markdown files in `docs/help/` plus a small amount of auto-generated reference data.
+## Start Here By Role
 
-To update the help:
+### Design and engineering
 
-1) Edit the markdown files in `docs/help/`.
-2) Run `flask help build` from the server project.
-3) Commit the generated files in `app/static/help/` so the help page is up to date.
+- Use `Web UI walkthrough` for Inventory, Part Detail, BOM, and Doc Packs.
+- Use `SolidWorks add-in walkthrough` for Publish/BOM, Tools, Numbering, and Configuration tabs.
 
-The reference section is auto-filled from the codebase using placeholders like `{{AUTO_UI_PAGES}}` and `{{AUTO_API_ENDPOINTS}}`. These are replaced when you run the build command.
+### Purchasing and planning
 
-**Tip:** Keep headings consistent and avoid deep nesting so the table of contents stays clean.
+- Use `End-to-end workflow` for progressive ordering across multi-level BOMs.
+- Focus on Jobs: `Parts in Orders`, `Over-Ordered Parts`, and `Parts Not Yet Ordered` (Flat/Tree toggle).
 
-## What you can do in TinyMRP
+### Admin and IT
 
-- Search and browse parts and revisions.
-- View deliverables (PDF, DXF, STEP, 3MF, PLY, STL, and more).
-- Upload packs that bundle BOM, deliverables, and associated files.
-- Attach extra files to parts (photos, scans, reports).
-- Generate doc packs (binder, index, visuals, BOM spreadsheets).
-- Share data with suppliers, customers, and internal teams.
-- Manage users, roles, permissions, and branding.
+- Use `Server installation` for deployment, environment variables, and upgrades.
+- Use `Customization and admin settings` for users, roles, scoping, branding, and limits.
 
-## Who this guide is for
+## Core Concepts
 
-- Engineers and designers who publish deliverables.
-- Production and purchasing teams who consume BOMs and drawings.
-- Administrators who manage users, roles, and system settings.
+- Part revision: TinyMRP tracks files by `(Part Number, Revision)`.
+- Deliverables: model and drawing outputs like PDF, DXF, STEP, 3MF, PLY, STL, PNG.
+- Associated files: extra files linked to a part revision (photos, scans, reports).
+- Upload Pack: ZIP with `bom/`, `deliverables/`, and optional `extra/`.
+- Doc Pack: generated package (binder/index/visual/hardware/Excel/etc).
 
-## Quick navigation
+## How To Use This Help Quickly
 
-- Server and web app: installation, usage, and customization.
-- SolidWorks add-in: installation, usage, and options.
-- End-to-end workflow: create parts to doc packs.
-- Reference: routes, UI pages, API endpoints, and options.
+- Use the right-side `On this page` panel in `/help` to jump by heading.
+- Use the heading search box for exact terms such as `Over-Ordered`, `Upload Pack`, `Numbering`, `Scope of supply`.
+- For API and route lookup, use `Reference (auto-updated)`.
+
+## Help Sections
+
+- `01_server_installation.md`: deployment and runtime operations.
+- `02_web_ui_walkthrough.md`: complete web app usage.
+- `03_addin_installation.md`: installer, registration, first connection.
+- `04_addin_ui_walkthrough.md`: detailed add-in tab behavior.
+- `05_end_to_end_workflow.md`: practical release and purchasing flows.
+- `06_customization_admin.md`: admin operations and settings.
+- `07_troubleshooting.md`: issue-driven diagnostics.
+- `08_reference_auto.md`: generated routes, APIs, env vars, and add-in options.
+
+## Keeping Help Current
+
+Help pages are generated from `docs/help/`:
+
+1. Edit markdown files in `docs/help/`.
+2. Run `flask --app run.py help build`.
+3. Commit updated files in `app/static/help/`.

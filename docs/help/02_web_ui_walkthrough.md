@@ -1,244 +1,142 @@
-# Web UI walkthrough
+# Web UI Walkthrough
 
-This section explains each screen in the web app, what it is for, and how to use it.
+This page explains how to use each major area of the TinyMRP web app.
 
-## Inventory (Parts list)
+## Main Navigation
 
-**URL:** `/ui/parts`
+Top navigation and user menu are permission-aware. If a menu is missing, your role does not currently include that permission.
 
-### Where to find it
+Common entries:
 
-- Top navbar: Inventory
+- `Inventory` -> `/ui/parts`
+- `Import` -> `/ui/upload-pack`
+- `Jobs` -> `/admin/jobs/`
+- `Orders` -> `/admin/orders/`
+- `Suppliers` -> `/admin/suppliers/`
+- `Customers` -> `/admin/customers/`
+- User menu -> `Help`, `Tokens`, `Admin Dashboard`, `Audit Log`
 
-### What you can do on this screen
+## Inventory (`/ui/parts`)
 
-- Search and filter parts.
-- See basic metadata (part number, revision, description, category, status).
-- Jump to a part detail page.
-- Use pick mode when selecting parts for other workflows.
+### What it does
 
-### Step-by-step
+- Lists part revisions with search, sort, and filters.
+- Opens Part Detail for any row.
+- Supports pick mode for Jobs and Orders line selection.
 
-1) Open Inventory.
-2) Use the search box to type a part number or description.
-3) Use filters (if visible) to narrow by process, category, status, or document type.
-4) Click a part number to open its detail page.
+### Important filters
 
-### What to expect
+- `Approved`
+- `Full files`
+- `Minimum properties`
+- `Used in job` + `Job number contains`
+- Column-level filters for PN, rev, description, process, material, finish.
 
-- The list updates as you search.
-- If you have no permissions, the list may be empty.
+### Pick mode (`/ui/parts?pick=1`)
 
-### Troubleshooting
+- Used by Job BOM and Order line editors.
+- Allows multi-select and quantity entry per selected part.
+- Sends selected rows back to the opener window.
 
-- **Nothing appears:** Confirm you have at least the "items.view" permission.
-- **Search is slow:** Reduce filters or search a smaller term.
+## Part Detail (`/ui/part/:pn?rev=...`)
 
-## Part detail
+Part Detail is the operational center for one part revision.
 
-**URL:** `/ui/part/:pn`
+### Left panel
 
-### Where to find it
+- Hero image and quick file buttons (PDF, DXF, datasheet, 3MF, PLY, STL if present).
+- Approval and uploader metadata.
+- Missing-property signal when critical fields are absent.
 
-- From Inventory, click a part number.
+### Main tabs
 
-### What you can do on this screen
+- `Drawing`: opens drawing preview and PDF link when available.
+- `All attributes`: full attribute dictionary for the part.
+- `3D Preview`: choose among available 3D files and view in-browser.
+- `Associated files`: download/delete existing extras and upload more (edit permission required).
+- `Doc Packs`: build and download targeted output packages.
+- `Other versions`: jump to other revisions of the same PN.
+- `Jobs & Orders`: trace where this part is consumed in jobs and orders.
+- `Notes & Comments`: team notes and comment thread.
+- `Actions`: update file links and optionally delete part (permission-gated).
 
-- See thumbnails and drawings.
-- Download deliverables (PDF, DXF, STEP, 3MF, PLY, STL, etc).
-- Preview 3D models.
-- Generate doc packs.
-- Review revision history, where-used, and related jobs/orders.
+### Doc Packs tab (key controls)
 
-### Step-by-step: viewing images and drawings
+- Depth: `Top Level only` or `Full BOM`.
+- Consumed: `Hide consumed` or `Show consumed`.
+- Classified filter: `Hide`, `Show`, `Only`.
+- Process mode: `All` or `Only selected`.
+- Output selection: selected files, Excel BOM, PDF binder, index, visual summary, hardware summary, cover page, where-used report.
+- Binder options: cover/index/visual/where-used/datasheets/hardware/page numbers/flat patterns.
+- Stamps: quote, confidential, approved, WIP, in progress.
+- One-click `Fabrication Pack` preset for fabrication-oriented outputs.
 
-1) Look at the preview image area near the top.
-2) If a drawing exists, it appears in the drawing panel.
-3) Click the image to view it larger in the browser.
+### Actions tab behavior
 
-**Tip:** Drawing images are taken from files ending with `_DWG.png`.
+- `Update files`: rescans storage for this PN/rev; optional recursive child scan.
+- `Delete part`: optional child delete for children not used elsewhere.
 
-### Step-by-step: 3D preview
+## BOM View (`/ui/bom` and `/ui/bom/:pn`)
 
-1) If a 3D file exists, the preview panel is visible.
-2) If multiple formats exist, select the format before loading.
-3) Use the toolbar:
-   - Fit, Reset, Front/Right/Top/Iso views
-   - Zoom in and out
-   - Toggle Grid, Axes, Edges, Wireframe
-   - Toggle Section cut
-   - Auto-rotate
-   - Full screen
-   - Measure (click two points)
+### What it does
 
-**What this button does:** The Measure tool shows the total distance plus X/Y/Z distances between two clicks.
+- Lazy-loaded BOM tree with expand-on-demand.
+- Where-used table below the tree.
+- Tree nodes link to Part Detail.
 
-### Step-by-step: downloading files
+### Typical use
 
-1) In the file groups section, click a file type (PDF, DXF, STEP, 3MF, PLY, STL).
-2) If multiple files exist, choose the one you need.
+1. Open `/ui/bom/:pn`.
+2. Expand subassemblies.
+3. Use where-used table to find upstream parents.
 
-### Step-by-step: associated files
+## Dashboard (`/ui/dashboard`)
 
-1) Open the "Associated files" tab.
-2) Click "Upload files..." to attach extra files (photos, scans, reports).
-3) Use Download to open a file.
-4) If you have edit permission, use Delete to remove a file.
+### What it shows
 
-**Tip:** Associated files are stored by Part Number + Revision. An empty revision is still valid.
+- Total parts, recent updates, approved counts.
+- Document coverage (PDF/PNG/DXF/STEP/datasheet).
+- Data health (missing material/process/description).
+- Top processes and top hardware usage.
+- Recently updated parts.
 
-### Step-by-step: generating doc packs
+## Import Upload Pack (`/ui/upload-pack`)
 
-1) Open the Doc Pack panel.
-2) Choose the outputs you want (Binder, Index, Visual, Hardware Summary, Excel BOM).
-3) Optional: include flat patterns or extra fields if available.
-4) Click Generate.
-5) Download the result when it is ready.
+### What it does
 
-**Common mistake:** Generating a binder without deliverable PDFs will produce an empty pack. Always ensure PDFs exist first.
+- Uploads ZIP bundles containing BOM + deliverables + associated files.
+- Supports `Dry run` and `Strict structure checks`.
+- Shows progress, timings, diagnostics, warnings, and errors.
+- Offers downloadable JSON import report for troubleshooting.
 
-### Troubleshooting
+### Expected ZIP structure
 
-- **No 3D preview available:** Confirm a 3MF, PLY, or STL is present.
-- **Missing files:** Check that files were exported and imported correctly.
+```text
+bom/
+  *_FLATBOM.txt
+  *_TREEBOM.txt
+deliverables/
+  <group>/...
+extra/
+  <PN>/<REV_OR__no_rev__>/...
+```
 
-## Dashboard
+## Tokens (`/ui/addin/tokens`)
 
-**URL:** `/ui/dashboard`
+- Create personal API tokens for the SolidWorks add-in.
+- Token value is shown once at creation.
+- Revoke tokens that are no longer needed.
 
-### Where to find it
+## Add-in Admin (`/ui/admin/addin`)
 
-- User menu (top right) > Dashboard
+Admin-only workspace for add-in governance:
 
-### What you can do on this screen
+- View users and revoke their tokens.
+- Manage numbering scheme preset/recommended/visibility flags.
+- Build and validate numbering schemes with advanced segment editor.
 
-- See system health statistics and recent updates.
-- Get a quick overview of document coverage.
+## Tools (`/tools`)
 
-### Step-by-step
-
-1) Open Dashboard.
-2) Review the summary tiles and tables.
-
-### Troubleshooting
-
-- **No data:** The system may be new or data import has not run yet.
-
-## BOM views
-
-**URL:** `/ui/bom` and `/ui/bom/:pn`
-
-### Where to find it
-
-- User menu > BOM
-
-### What you can do on this screen
-
-- View a multi-level BOM.
-- Expand and collapse assemblies.
-- Inspect quantities and part info.
-
-### Step-by-step
-
-1) Open BOM.
-2) Search for a top-level part number.
-3) Expand rows to see child components.
-4) Click a part number to open its detail page.
-
-### Troubleshooting
-
-- **Parts missing:** The BOM may not be imported or linked yet.
-
-## Tokens page (Add-in access)
-
-**URL:** `/ui/addin/tokens`
-
-### Where to find it
-
-- User menu > Tokens
-
-### What you can do on this screen
-
-- Create access tokens for the SolidWorks add-in.
-- Copy a token to use in the add-in configuration.
-- Revoke tokens when no longer needed.
-
-### Step-by-step
-
-1) Click "Create token".
-2) Copy the token and store it securely.
-3) Paste it into the SolidWorks add-in configuration.
-
-**Common mistake:** Tokens are shown only once. Copy them immediately.
-
-## Admin add-in page
-
-**URL:** `/ui/admin/addin`
-
-### Where to find it
-
-- Admin Dashboard > Add-in
-
-### What you can do on this screen
-
-- Review add-in settings and token health.
-- Monitor add-in usage (if enabled).
-
-### Troubleshooting
-
-- **Access denied:** You must be an admin user.
-
-## Admin Dashboard
-
-**URL:** `/admin` (varies by setup)
-
-### Where to find it
-
-- User menu > Admin Dashboard (admin users only)
-
-### What you can do on this screen
-
-- Manage users and roles.
-- Set app branding and timezone.
-- View the audit log.
-
-### Step-by-step: branding and timezone
-
-1) Go to Admin Dashboard.
-2) Open App Settings.
-3) Upload a logo and set the timezone.
-4) Save changes.
-
-**What this affects:** The logo appears in the app and doc packs. The timezone controls generated timestamps.
-
-## Import BOM and deliverables
-
-**Recommended:** `/ui/upload-pack`
-
-### Where to find it
-
-- Top navbar: Upload Pack (if you have permission)
-
-### What you can do on this screen
-
-- Upload a ZIP file containing BOM, deliverables, and associated files.
-- Trigger a scan and thumbnail build.
-
-### Step-by-step
-
-1) Create a ZIP with the correct folder structure (see End-to-end workflow section).
-2) Drag the ZIP into the upload box or click to browse.
-3) Wait for the import result message.
-4) Open the part detail page to verify files were found.
-
-### Troubleshooting
-
-- **ZIP rejected:** Check the folder structure and file naming.
-- **No thumbnails:** Run the thumbnail rebuild command or re-import.
-
-### Legacy BOM import (if needed)
-
-**URL:** `/import/upload`
-
-Use this screen if you only need to import a BOM and do not need to upload deliverables or associated files.
-
+- Download latest SolidWorks add-in installer.
+- Download SolidWorks custom property tab templates.
+- Run Excel Compile workflow and download compiled ZIP output.

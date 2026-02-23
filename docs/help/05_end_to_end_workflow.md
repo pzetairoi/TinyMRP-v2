@@ -1,101 +1,110 @@
-# End-to-end workflow (golden path)
+# End-to-End Workflow
 
-This is the recommended workflow from design to doc pack.
+This page provides practical workflows that match current TinyMRP behavior.
 
-## Step 1: Set up the server
+## Workflow A: CAD To Production Package
 
-1) Install the TinyMRP server (see Server installation section).
-2) Create the first admin user.
-3) Log in as admin and create roles and users.
-4) Set branding and timezone in Admin Settings.
+### 1) Prepare CAD data
 
-**Expected result:** Users can log in and see the Inventory page.
+- Confirm part number and revision in SolidWorks properties.
+- Save files before publishing.
 
-## Step 2: Prepare parts in SolidWorks
+### 2) Publish deliverables from add-in
 
-1) Open the part or assembly.
-2) Confirm the part number and revision in the properties.
-3) Save the model.
-4) If you use numbering, allocate a number and apply it.
+- Use `Publish/BOM` tab.
+- Export required model and drawing formats.
+- Add associated files if needed.
 
-**Common mistake:** Exporting deliverables before the part number is saved.
+### 3) Build and import upload pack
 
-## Step 3: Publish deliverables
+- Create upload pack ZIP from the add-in.
+- Import in web app at `/ui/upload-pack`.
+- Review import report for warnings/errors.
 
-1) Open the Publish/BOM tab in the add-in.
-2) Select the outputs you need (PDF, DXF, STEP, 3MF, PLY, STL, PNG).
-3) Choose the deliverables folder.
-4) Optional: click "Manage associated files..." and add extra files (photos, scans, reports).
-5) Optional: enable "Create Upload Pack (ZIP)" if you want a ready-to-upload ZIP.
-6) Click Publish.
-7) Wait until the process finishes.
+### 4) Validate in Part Detail
 
-**Expected result:** Files appear in the correct deliverables subfolders.
+- Confirm drawing and 3D preview.
+- Confirm expected files and associated files.
+- Check attributes and process metadata.
 
-## Step 4: Package for import
+### 5) Generate doc packs
 
-1) If you used "Create Upload Pack (ZIP)", use that file.
-2) Otherwise, create a ZIP with the correct structure:
-   - `deliverables/<group>/...`
-   - `bom/` with `*_FLATBOM.txt` and `*_TREEBOM.txt`
-   - `extra/<PN>/<REV_OR__no_rev__>/...`
-3) Keep file names matching `PARTNUMBER_REV_REVISION.ext`.
+- Use Part Detail `Doc Packs` tab.
+- Select outputs for audience:
+  - Excel BOM for planning
+  - Binder/index/visual for production
+  - Hardware summary where needed
 
-**Tip:** If you are unsure, start by zipping one part and verify the import result.
+## Workflow B: Progressive Ordering Across Multi-Level BOM
 
-## Step 5: Import into TinyMRP
+This is the key purchasing workflow for complex assemblies.
 
-1) Log in to the web app.
-2) Go to Upload Pack.
-3) Upload the ZIP file.
-4) Wait for the import summary.
-5) Open the part detail page to confirm files are visible.
+### 1) Create job BOM roots
 
-**Expected result:** The part shows files and thumbnails on its detail page.
+- In `Jobs`, define BOM lines that represent the job scope.
+- Roots can expand into full multi-level BOM via server rollup logic.
 
-## Step 6: Generate doc packs
+### 2) Review ordering coverage in Job
 
-1) On the part detail page, open Doc Packs.
-2) Select the outputs you need:
-   - Binder (full PDF pack)
-   - Index (standalone)
-   - Visual summary
-   - Hardware summary
-   - Excel BOM
-3) Click Generate and download the result.
+In Job detail you have three purchasing views:
 
-**What this button does:** Generate creates a PDF or ZIP. It does not change your part data.
+- `Parts in Orders`: required vs ordered by part.
+- `Over-Ordered Parts`: quantities ordered above required.
+- `Parts Not Yet Ordered`: remaining demand.
 
-## Step 7: Extract BOM and reports
+### 3) Use `Parts Not Yet Ordered` in Flat or Tree mode
 
-1) Use the Excel BOM output to share the BOM.
-2) Use the binder and visuals for manufacturing packages.
-3) Save outputs to your project folder.
+- `Flat BOM` view: aggregated by part/revision.
+- `Tree BOM` view: per occurrence with BOM level path.
+- Toggle between modes depending on purchasing strategy.
 
-## Iteration loop (when a part changes)
+This allows ordering:
 
-1) Update the model in SolidWorks.
-2) Increment the revision if required.
-3) Re-export deliverables.
-4) Re-import into TinyMRP.
-5) Regenerate doc packs.
+- Top-level assemblies
+- Intermediate subassemblies
+- Leaf components
 
-## If something goes wrong (decision tree)
+### 4) Create order from selected remaining parts
 
-- **No files appear after import**
-  - Check folder names inside the ZIP.
-  - Check that file names match the part number and revision.
-  - Confirm the deliverables folder is mounted to the server.
+1. Filter remaining table.
+2. Select rows (supports select-all on visible rows).
+3. Click `Create order from selected`.
+4. Review and edit the generated order lines.
 
-- **Wrong revision shown**
-  - Confirm the revision in SolidWorks properties.
-  - Re-export and re-import.
+### 5) Repeat until remaining demand is zero
 
-- **3D preview missing**
-  - Confirm a 3MF, PLY, or STL file exists.
-  - Check the file name pattern.
+- Each new non-draft order updates coverage.
+- Job rollup recalculates required, ordered, remaining, and over quantities.
 
-- **Doc pack is empty**
-  - Ensure PDFs exist for the part.
-  - Re-generate after verifying files.
+## Understanding Over-Ordered Behavior
 
+Over-order is expected in mixed sourcing scenarios. Example:
+
+1. You order child parts from Supplier A.
+2. Later you order the full parent assembly from Supplier B.
+3. Child parts can become over-ordered because parent expansion also covers them.
+
+TinyMRP shows these in `Over-Ordered Parts` to make the conflict explicit.
+
+## Order Lifecycle Notes
+
+- `Draft` and `Cancelled` orders are excluded from job ordered coverage.
+- Confirmed/delivered quantities drive received progress in job list metrics.
+
+## Scope Of Supply and Customer Deliverables
+
+From Order detail you can download:
+
+- Scope PDF only
+- Scope ZIP with attached docs
+- Optional children documentation
+- Optional combined binder PDF
+
+Use this for supplier or customer transmittals.
+
+## Iteration Loop (Engineering Change)
+
+1. Update model and revision in CAD.
+2. Re-publish and re-import deliverables.
+3. Re-generate doc packs and scope documents.
+4. Re-check jobs/orders coverage where changed items are involved.

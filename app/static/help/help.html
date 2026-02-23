@@ -1,772 +1,890 @@
 <h1 id="overview">Overview</h1>
-<p>TinyMRP is a parts and documentation hub for manufacturing teams. It keeps parts, revisions, deliverables, and doc packs in one place so you can find and share the right data quickly.</p>
-<p>This Help page is written for non-IT users. It explains what to click, what you should see, and what to do next.</p>
-<h2 id="how-this-help-is-generated-how-to-update-it">How this help is generated / how to update it</h2>
-<p>This Help page is built from markdown files in <code>docs/help/</code> plus a small amount of auto-generated reference data.</p>
-<p>To update the help:</p>
+<p>TinyMRP is a manufacturing data platform that combines:</p>
+<ul>
+<li>A web app for parts, BOMs, jobs, orders, suppliers, customers, and document packs.</li>
+<li>A SolidWorks add-in for publishing deliverables, creating upload packs, and allocating part numbers.</li>
+</ul>
+<p>This help content is written for day-to-day users. It focuses on what to do, where to click, and what result to expect.</p>
+<h2 id="start-here-by-role">Start Here By Role</h2>
+<h3 id="design-and-engineering">Design and engineering</h3>
+<ul>
+<li>Use <code>Web UI walkthrough</code> for Inventory, Part Detail, BOM, and Doc Packs.</li>
+<li>Use <code>SolidWorks add-in walkthrough</code> for Publish/BOM, Tools, Numbering, and Configuration tabs.</li>
+</ul>
+<h3 id="purchasing-and-planning">Purchasing and planning</h3>
+<ul>
+<li>Use <code>End-to-end workflow</code> for progressive ordering across multi-level BOMs.</li>
+<li>Focus on Jobs: <code>Parts in Orders</code>, <code>Over-Ordered Parts</code>, and <code>Parts Not Yet Ordered</code> (Flat/Tree toggle).</li>
+</ul>
+<h3 id="admin-and-it">Admin and IT</h3>
+<ul>
+<li>Use <code>Server installation</code> for deployment, environment variables, and upgrades.</li>
+<li>Use <code>Customization and admin settings</code> for users, roles, scoping, branding, and limits.</li>
+</ul>
+<h2 id="core-concepts">Core Concepts</h2>
+<ul>
+<li>Part revision: TinyMRP tracks files by <code>(Part Number, Revision)</code>.</li>
+<li>Deliverables: model and drawing outputs like PDF, DXF, STEP, 3MF, PLY, STL, PNG.</li>
+<li>Associated files: extra files linked to a part revision (photos, scans, reports).</li>
+<li>Upload Pack: ZIP with <code>bom/</code>, <code>deliverables/</code>, and optional <code>extra/</code>.</li>
+<li>Doc Pack: generated package (binder/index/visual/hardware/Excel/etc).</li>
+</ul>
+<h2 id="how-to-use-this-help-quickly">How To Use This Help Quickly</h2>
+<ul>
+<li>Use the right-side <code>On this page</code> panel in <code>/help</code> to jump by heading.</li>
+<li>Use the heading search box for exact terms such as <code>Over-Ordered</code>, <code>Upload Pack</code>, <code>Numbering</code>, <code>Scope of supply</code>.</li>
+<li>For API and route lookup, use <code>Reference (auto-updated)</code>.</li>
+</ul>
+<h2 id="help-sections">Help Sections</h2>
+<ul>
+<li><code>01_server_installation.md</code>: deployment and runtime operations.</li>
+<li><code>02_web_ui_walkthrough.md</code>: complete web app usage.</li>
+<li><code>03_addin_installation.md</code>: installer, registration, first connection.</li>
+<li><code>04_addin_ui_walkthrough.md</code>: detailed add-in tab behavior.</li>
+<li><code>05_end_to_end_workflow.md</code>: practical release and purchasing flows.</li>
+<li><code>06_customization_admin.md</code>: admin operations and settings.</li>
+<li><code>07_troubleshooting.md</code>: issue-driven diagnostics.</li>
+<li><code>08_reference_auto.md</code>: generated routes, APIs, env vars, and add-in options.</li>
+</ul>
+<h2 id="keeping-help-current">Keeping Help Current</h2>
+<p>Help pages are generated from <code>docs/help/</code>:</p>
 <ol>
-<li>Edit the markdown files in <code>docs/help/</code>.</li>
-<li>Run <code>flask help build</code> from the server project.</li>
-<li>Commit the generated files in <code>app/static/help/</code> so the help page is up to date.</li>
+<li>Edit markdown files in <code>docs/help/</code>.</li>
+<li>Run <code>flask --app run.py help build</code>.</li>
+<li>Commit updated files in <code>app/static/help/</code>.</li>
 </ol>
-<p>The reference section is auto-filled from the codebase using placeholders like <code>| Route | What it is for | Permissions | | --- | --- | --- | | </code>/ui/dashboard<code>| System dashboard and summary metrics. | Requires login | |</code>/ui/parts<code>| Inventory list and search. | Requires login | |</code>/ui/bom<code>| BOM tree view for parts and assemblies. | Requires login | |</code>/ui/bom/:pn<code>| BOM tree view for parts and assemblies. | Requires login | |</code>/ui/part/:pn<code>| Part detail view with files, previews, and doc packs. | Requires login | |</code>/ui/addin/tokens<code>| Create and manage add-in access tokens. | Requires login | |</code>/ui/admin/addin<code>| Admin tools for add-in settings and monitoring. | Admin only | |</code>/ui/upload-pack<code> | See in app. | Requires login |</code> and `### app\views\importer.py</p>
-<table>
-<thead>
-<tr>
-<th>Method</th>
-<th>Path</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>POST</td>
-<td><code>/api</code></td>
-</tr>
-</tbody>
-</table>
-<p><strong>Tip:</strong> Keep headings consistent and avoid deep nesting so the table of contents stays clean.</p>
-<h2 id="what-you-can-do-in-tinymrp">What you can do in TinyMRP</h2>
+<h1 id="server-and-web-app-installation">Server And Web App Installation</h1>
+<p>This page covers first deployment, safe updates, and operating basics for TinyMRP v2.</p>
+<h2 id="deployment-options">Deployment Options</h2>
+<h3 id="recommended-docker-compose">Recommended: Docker Compose</h3>
+<p>Use Docker for production or pilot environments. It is the easiest path for repeatable updates.</p>
+<h3 id="advanced-local-developer-runtime">Advanced: Local developer runtime</h3>
+<p>Use direct Python and Node only for development and debugging.</p>
+<h2 id="prerequisites">Prerequisites</h2>
 <ul>
-<li>Search and browse parts and revisions.</li>
-<li>View deliverables (PDF, DXF, STEP, 3MF, PLY, STL, and more).</li>
-<li>Upload packs that bundle BOM, deliverables, and associated files.</li>
-<li>Attach extra files to parts (photos, scans, reports).</li>
-<li>Generate doc packs (binder, index, visuals, BOM spreadsheets).</li>
-<li>Share data with suppliers, customers, and internal teams.</li>
-<li>Manage users, roles, permissions, and branding.</li>
+<li>Access to a host with Docker and Docker Compose.</li>
+<li>MongoDB connection string (<code>MONGO_URI</code>), local or hosted.</li>
+<li>A file root where deliverables are stored and readable by the app.</li>
+<li>Access to edit environment variables and run CLI commands.</li>
 </ul>
-<h2 id="who-this-guide-is-for">Who this guide is for</h2>
+<h2 id="first-time-setup-docker">First-Time Setup (Docker)</h2>
+<h3 id="1-prepare-environment-file">1) Prepare environment file</h3>
 <ul>
-<li>Engineers and designers who publish deliverables.</li>
-<li>Production and purchasing teams who consume BOMs and drawings.</li>
-<li>Administrators who manage users, roles, and system settings.</li>
-</ul>
-<h2 id="quick-navigation">Quick navigation</h2>
-<ul>
-<li>Server and web app: installation, usage, and customization.</li>
-<li>SolidWorks add-in: installation, usage, and options.</li>
-<li>End-to-end workflow: create parts to doc packs.</li>
-<li>Reference: routes, UI pages, API endpoints, and options.</li>
-</ul>
-<h1 id="server-and-web-app-installation">Server and web app installation</h1>
-<p>This section explains how to install and run the TinyMRP server and web app. It is written for non-IT users and assumes you have someone with basic server access.</p>
-<h2 id="before-you-begin">Before you begin</h2>
-<p>You will need:</p>
-<ul>
-<li>A Windows or Linux server (or a workstation for testing).</li>
-<li>An internet connection for the first setup.</li>
-<li>Access to the deliverables folder where SolidWorks exports files.</li>
-<li>A browser (Chrome, Edge, or Firefox).</li>
-</ul>
-<p><strong>Tip:</strong> If you are not sure which installation method to use, ask your IT contact to set up the Docker method. It is usually the simplest to keep stable.</p>
-<h2 id="option-a-recommended-installation-docker-compose">Option A: Recommended installation (Docker Compose)</h2>
-<p>This method runs the app, database, and file service together.</p>
-<h3 id="step-1-get-the-project-files">Step 1: Get the project files</h3>
-<ol>
-<li>Download or clone the TinyMRP repository to a folder on the server.</li>
-<li>Keep this folder for future updates.</li>
-</ol>
-<h3 id="step-2-prepare-the-environment-file">Step 2: Prepare the environment file</h3>
-<ol>
-<li>Copy an example env file (for example <code>.env.server.example</code>) to <code>.env</code>.</li>
-<li>Open <code>.env</code> in a text editor.</li>
-<li>Fill in the required values. At minimum you must set:
+<li>Copy an example such as <code>.env.server.example</code> to <code>.env</code>.</li>
+<li>Set at least:
 <ul>
 <li><code>SECRET_KEY</code></li>
 <li><code>SECURITY_PASSWORD_SALT</code></li>
 <li><code>MONGO_URI</code></li>
-<li><code>DELIVERABLES_DIR</code> or <code>FILES_LOCAL_ROOT</code> (where deliverables are stored)</li>
-<li><code>HTTP_PORT</code> (the port users will open in their browser)</li>
+<li><code>FILES_LOCAL_ROOT</code> (or equivalent file root key in your setup)</li>
+<li><code>HTTP_PORT</code></li>
 </ul>
 </li>
-</ol>
-<p><strong>Common mistake:</strong> Pointing <code>DELIVERABLES_DIR</code> to a local folder on your PC instead of the shared folder where deliverables are exported.</p>
-<h3 id="step-3-start-the-stack">Step 3: Start the stack</h3>
-<ol>
-<li>Open a terminal in the project folder.</li>
-<li>Run:
-<ul>
-<li><code>docker compose up -d --build</code></li>
 </ul>
-</li>
-<li>Wait until the containers are running.</li>
-</ol>
-<h3 id="step-4-create-the-first-admin-user">Step 4: Create the first admin user</h3>
-<ol>
-<li>Run the commands below:
+<h3 id="2-start-the-stack">2) Start the stack</h3>
+<p>Run from repository root:</p>
+<pre><code class="language-powershell">docker compose up -d --build
+</code></pre>
+<h3 id="3-seed-roles-and-create-first-admin">3) Seed roles and create first admin</h3>
+<pre><code class="language-powershell">docker compose exec app flask --app run.py user seed-roles
+docker compose exec app flask --app run.py user create --email admin@yourcompany.com --password &lt;password&gt;
+docker compose exec app flask --app run.py user grant-admin --email admin@yourcompany.com
+</code></pre>
+<h3 id="4-open-tinymrp">4) Open TinyMRP</h3>
 <ul>
-<li><code>docker compose exec app flask --app run.py user seed-roles</code></li>
-<li><code>docker compose exec app flask --app run.py user create --email admin@yourcompany.com --password &lt;password&gt;</code></li>
-<li><code>docker compose exec app flask --app run.py user grant-admin --email admin@yourcompany.com</code></li>
+<li>URL: <code>http://&lt;server&gt;:&lt;HTTP_PORT&gt;</code></li>
+<li>Login with the admin account.</li>
 </ul>
-</li>
-<li>The admin can now log in and create other users.</li>
-</ol>
-<h3 id="step-5-open-the-web-app">Step 5: Open the web app</h3>
-<ol>
-<li>Open your browser.</li>
-<li>Go to <code>http://&lt;server&gt;:&lt;HTTP_PORT&gt;</code> (for example <code>http://192.168.1.10:5000</code>).</li>
-<li>Log in with the admin account you created.</li>
-</ol>
-<h2 id="option-b-local-development-install-advanced">Option B: Local development install (advanced)</h2>
-<p>This is intended for developers. It is not the recommended production setup.</p>
-<ol>
-<li>Install Python and Node.js.</li>
-<li>Install Python requirements: <code>pip install -r requirements.txt</code>.</li>
-<li>Install frontend dependencies: <code>npm install</code> in the <code>frontend/</code> folder.</li>
-<li>Run the backend: <code>python run.py</code>.</li>
-<li>Run the frontend build: <code>npm run build</code> (or <code>npm run dev</code> for development).</li>
-</ol>
-<h2 id="file-storage-and-deliverables">File storage and deliverables</h2>
-<p>TinyMRP expects deliverables to be stored in a folder structure like this:</p>
+<h2 id="file-storage-rules">File Storage Rules</h2>
+<p>TinyMRP matches files by part number and revision. Standard groups include:</p>
 <ul>
-<li><code>deliverables/png/</code> (preview images)</li>
-<li><code>deliverables/pdf/</code> (drawings)</li>
-<li><code>deliverables/dxf/</code></li>
-<li><code>deliverables/step/</code></li>
-<li><code>deliverables/3mf/</code></li>
-<li><code>deliverables/ply/</code></li>
-<li><code>deliverables/stl/</code></li>
+<li><code>pdf</code>, <code>dxf</code>, <code>step</code>, <code>edr</code>, <code>3mf</code>, <code>ply</code>, <code>stl</code>, <code>png</code>, <code>datasheet</code></li>
 </ul>
-<p>Each file should follow the naming pattern:</p>
+<p>Expected naming pattern:</p>
 <ul>
 <li><code>PARTNUMBER_REV_REVISION.ext</code></li>
+<li>Drawing preview PNG commonly appears as <code>*_DWG.png</code>.</li>
 </ul>
-<p>For example:</p>
+<p>If revision is blank, empty revision tokens are allowed and should be treated as valid.</p>
+<h2 id="upload-pack-limits">Upload Pack Limits</h2>
+<p>Global defaults can be controlled by env and admin settings:</p>
 <ul>
-<li><code>ABC-100_REV_A.pdf</code></li>
-<li><code>ABC-100_REV_A.png</code></li>
-<li><code>ABC-100_REV_.pdf</code> (empty revision is allowed)</li>
+<li>Max ZIP size</li>
+<li>Max single file size</li>
+<li>Max files per ZIP</li>
 </ul>
-<p><strong>What this means:</strong> If you publish a part and later change the revision, the file name changes. TinyMRP uses this to keep revisions separate.</p>
-<h2 id="logging-in-and-permissions">Logging in and permissions</h2>
-<ul>
-<li>Users must log in to see the app.</li>
-<li>Roles control which menus and actions are visible.</li>
-<li>The admin can create roles and assign permissions in the Admin Dashboard.</li>
-</ul>
-<h2 id="updating-the-server-later">Updating the server later</h2>
+<p>These limits are enforced during <code>/api/upload/pack</code> processing.</p>
+<h2 id="local-development-advanced">Local Development (Advanced)</h2>
 <ol>
-<li>Pull the latest code changes into the server folder.</li>
-<li>Re-run <code>docker compose up -d --build</code>.</li>
-<li>If the database schema changes, follow the release notes.</li>
+<li>Install Python dependencies: <code>pip install -r requirements.txt</code></li>
+<li>Install frontend dependencies in <code>frontend/</code>: <code>npm install</code></li>
+<li>Run backend (<code>python run.py</code>) and build frontend (<code>npm run build</code> or <code>npm run dev</code>)</li>
 </ol>
-<p><strong>Tip:</strong> Schedule updates during low usage hours.</p>
-<h1 id="web-ui-walkthrough">Web UI walkthrough</h1>
-<p>This section explains each screen in the web app, what it is for, and how to use it.</p>
-<h2 id="inventory-parts-list">Inventory (Parts list)</h2>
-<p><strong>URL:</strong> <code>/ui/parts</code></p>
-<h3 id="where-to-find-it">Where to find it</h3>
-<ul>
-<li>Top navbar: Inventory</li>
-</ul>
-<h3 id="what-you-can-do-on-this-screen">What you can do on this screen</h3>
-<ul>
-<li>Search and filter parts.</li>
-<li>See basic metadata (part number, revision, description, category, status).</li>
-<li>Jump to a part detail page.</li>
-<li>Use pick mode when selecting parts for other workflows.</li>
-</ul>
-<h3 id="step-by-step">Step-by-step</h3>
+<h2 id="upgrade-procedure">Upgrade Procedure</h2>
 <ol>
-<li>Open Inventory.</li>
-<li>Use the search box to type a part number or description.</li>
-<li>Use filters (if visible) to narrow by process, category, status, or document type.</li>
-<li>Click a part number to open its detail page.</li>
+<li>Pull latest code.</li>
+<li>Rebuild and restart containers:</li>
 </ol>
-<h3 id="what-to-expect">What to expect</h3>
+<pre><code class="language-powershell">docker compose up -d --build
+</code></pre>
+<ol start="3">
+<li>Re-run <code>seed-roles</code> only if role definitions were intentionally updated by release notes.</li>
+<li>Validate critical pages:</li>
+</ol>
 <ul>
-<li>The list updates as you search.</li>
-<li>If you have no permissions, the list may be empty.</li>
+<li><code>/ui/parts</code></li>
+<li><code>/ui/part/&lt;pn&gt;</code></li>
+<li><code>/ui/upload-pack</code></li>
+<li><code>/admin/jobs/</code></li>
+<li><code>/admin/orders/</code></li>
 </ul>
-<h3 id="troubleshooting">Troubleshooting</h3>
+<h2 id="backup-recommendations">Backup Recommendations</h2>
 <ul>
-<li><strong>Nothing appears:</strong> Confirm you have at least the &quot;items.view&quot; permission.</li>
-<li><strong>Search is slow:</strong> Reduce filters or search a smaller term.</li>
+<li>Database backup (MongoDB dump/snapshot).</li>
+<li>Deliverables file root backup.</li>
+<li><code>instance/</code> backup if used for runtime files.</li>
+<li>Branding and app settings backup.</li>
 </ul>
-<h2 id="part-detail">Part detail</h2>
-<p><strong>URL:</strong> <code>/ui/part/:pn</code></p>
-<h3 id="where-to-find-it-2">Where to find it</h3>
+<h2 id="security-baseline">Security Baseline</h2>
 <ul>
-<li>From Inventory, click a part number.</li>
+<li>Keep <code>SECRET_KEY</code> and <code>SECURITY_PASSWORD_SALT</code> strong and private.</li>
+<li>Run HTTPS in production.</li>
+<li>Keep <code>FILES_PUBLIC_URLS</code> disabled unless you explicitly need public file links.</li>
+<li>Use roles and permissions instead of code edits for access control.</li>
 </ul>
-<h3 id="what-you-can-do-on-this-screen-2">What you can do on this screen</h3>
+<h2 id="help-build-command">Help Build Command</h2>
+<p>After updating help markdown:</p>
+<pre><code class="language-powershell">flask --app run.py help build
+</code></pre>
+<p>This regenerates:</p>
 <ul>
-<li>See thumbnails and drawings.</li>
-<li>Download deliverables (PDF, DXF, STEP, 3MF, PLY, STL, etc).</li>
-<li>Preview 3D models.</li>
-<li>Generate doc packs.</li>
-<li>Review revision history, where-used, and related jobs/orders.</li>
+<li><code>app/static/help/help.html</code></li>
+<li><code>app/static/help/help_toc.json</code></li>
 </ul>
-<h3 id="step-by-step-viewing-images-and-drawings">Step-by-step: viewing images and drawings</h3>
+<h1 id="web-ui-walkthrough">Web UI Walkthrough</h1>
+<p>This page explains how to use each major area of the TinyMRP web app.</p>
+<h2 id="main-navigation">Main Navigation</h2>
+<p>Top navigation and user menu are permission-aware. If a menu is missing, your role does not currently include that permission.</p>
+<p>Common entries:</p>
+<ul>
+<li><code>Inventory</code> -&gt; <code>/ui/parts</code></li>
+<li><code>Import</code> -&gt; <code>/ui/upload-pack</code></li>
+<li><code>Jobs</code> -&gt; <code>/admin/jobs/</code></li>
+<li><code>Orders</code> -&gt; <code>/admin/orders/</code></li>
+<li><code>Suppliers</code> -&gt; <code>/admin/suppliers/</code></li>
+<li><code>Customers</code> -&gt; <code>/admin/customers/</code></li>
+<li>User menu -&gt; <code>Help</code>, <code>Tokens</code>, <code>Admin Dashboard</code>, <code>Audit Log</code></li>
+</ul>
+<h2 id="inventory-uiparts">Inventory (<code>/ui/parts</code>)</h2>
+<h3 id="what-it-does">What it does</h3>
+<ul>
+<li>Lists part revisions with search, sort, and filters.</li>
+<li>Opens Part Detail for any row.</li>
+<li>Supports pick mode for Jobs and Orders line selection.</li>
+</ul>
+<h3 id="important-filters">Important filters</h3>
+<ul>
+<li><code>Approved</code></li>
+<li><code>Full files</code></li>
+<li><code>Minimum properties</code></li>
+<li><code>Used in job</code> + <code>Job number contains</code></li>
+<li>Column-level filters for PN, rev, description, process, material, finish.</li>
+</ul>
+<h3 id="pick-mode-uipartspick1">Pick mode (<code>/ui/parts?pick=1</code>)</h3>
+<ul>
+<li>Used by Job BOM and Order line editors.</li>
+<li>Allows multi-select and quantity entry per selected part.</li>
+<li>Sends selected rows back to the opener window.</li>
+</ul>
+<h2 id="part-detail-uipartpnrev">Part Detail (<code>/ui/part/:pn?rev=...</code>)</h2>
+<p>Part Detail is the operational center for one part revision.</p>
+<h3 id="left-panel">Left panel</h3>
+<ul>
+<li>Hero image and quick file buttons (PDF, DXF, datasheet, 3MF, PLY, STL if present).</li>
+<li>Approval and uploader metadata.</li>
+<li>Missing-property signal when critical fields are absent.</li>
+</ul>
+<h3 id="main-tabs">Main tabs</h3>
+<ul>
+<li><code>Drawing</code>: opens drawing preview and PDF link when available.</li>
+<li><code>All attributes</code>: full attribute dictionary for the part.</li>
+<li><code>3D Preview</code>: choose among available 3D files and view in-browser.</li>
+<li><code>Associated files</code>: download/delete existing extras and upload more (edit permission required).</li>
+<li><code>Doc Packs</code>: build and download targeted output packages.</li>
+<li><code>Other versions</code>: jump to other revisions of the same PN.</li>
+<li><code>Jobs &amp; Orders</code>: trace where this part is consumed in jobs and orders.</li>
+<li><code>Notes &amp; Comments</code>: team notes and comment thread.</li>
+<li><code>Actions</code>: update file links and optionally delete part (permission-gated).</li>
+</ul>
+<h3 id="doc-packs-tab-key-controls">Doc Packs tab (key controls)</h3>
+<ul>
+<li>Depth: <code>Top Level only</code> or <code>Full BOM</code>.</li>
+<li>Consumed: <code>Hide consumed</code> or <code>Show consumed</code>.</li>
+<li>Classified filter: <code>Hide</code>, <code>Show</code>, <code>Only</code>.</li>
+<li>Process mode: <code>All</code> or <code>Only selected</code>.</li>
+<li>Output selection: selected files, Excel BOM, PDF binder, index, visual summary, hardware summary, cover page, where-used report.</li>
+<li>Binder options: cover/index/visual/where-used/datasheets/hardware/page numbers/flat patterns.</li>
+<li>Stamps: quote, confidential, approved, WIP, in progress.</li>
+<li>One-click <code>Fabrication Pack</code> preset for fabrication-oriented outputs.</li>
+</ul>
+<h3 id="actions-tab-behavior">Actions tab behavior</h3>
+<ul>
+<li><code>Update files</code>: rescans storage for this PN/rev; optional recursive child scan.</li>
+<li><code>Delete part</code>: optional child delete for children not used elsewhere.</li>
+</ul>
+<h2 id="bom-view-uibom-and-uibompn">BOM View (<code>/ui/bom</code> and <code>/ui/bom/:pn</code>)</h2>
+<h3 id="what-it-does-2">What it does</h3>
+<ul>
+<li>Lazy-loaded BOM tree with expand-on-demand.</li>
+<li>Where-used table below the tree.</li>
+<li>Tree nodes link to Part Detail.</li>
+</ul>
+<h3 id="typical-use">Typical use</h3>
 <ol>
-<li>Look at the preview image area near the top.</li>
-<li>If a drawing exists, it appears in the drawing panel.</li>
-<li>Click the image to view it larger in the browser.</li>
+<li>Open <code>/ui/bom/:pn</code>.</li>
+<li>Expand subassemblies.</li>
+<li>Use where-used table to find upstream parents.</li>
 </ol>
-<p><strong>Tip:</strong> Drawing images are taken from files ending with <code>_DWG.png</code>.</p>
-<h3 id="step-by-step-3d-preview">Step-by-step: 3D preview</h3>
-<ol>
-<li>If a 3D file exists, the preview panel is visible.</li>
-<li>If multiple formats exist, select the format before loading.</li>
-<li>Use the toolbar:
+<h2 id="dashboard-uidashboard">Dashboard (<code>/ui/dashboard</code>)</h2>
+<h3 id="what-it-shows">What it shows</h3>
 <ul>
-<li>Fit, Reset, Front/Right/Top/Iso views</li>
-<li>Zoom in and out</li>
-<li>Toggle Grid, Axes, Edges, Wireframe</li>
-<li>Toggle Section cut</li>
-<li>Auto-rotate</li>
-<li>Full screen</li>
-<li>Measure (click two points)</li>
+<li>Total parts, recent updates, approved counts.</li>
+<li>Document coverage (PDF/PNG/DXF/STEP/datasheet).</li>
+<li>Data health (missing material/process/description).</li>
+<li>Top processes and top hardware usage.</li>
+<li>Recently updated parts.</li>
 </ul>
-</li>
-</ol>
-<p><strong>What this button does:</strong> The Measure tool shows the total distance plus X/Y/Z distances between two clicks.</p>
-<h3 id="step-by-step-downloading-files">Step-by-step: downloading files</h3>
-<ol>
-<li>In the file groups section, click a file type (PDF, DXF, STEP, 3MF, PLY, STL).</li>
-<li>If multiple files exist, choose the one you need.</li>
-</ol>
-<h3 id="step-by-step-associated-files">Step-by-step: associated files</h3>
-<ol>
-<li>Open the &quot;Associated files&quot; tab.</li>
-<li>Click &quot;Upload files...&quot; to attach extra files (photos, scans, reports).</li>
-<li>Use Download to open a file.</li>
-<li>If you have edit permission, use Delete to remove a file.</li>
-</ol>
-<p><strong>Tip:</strong> Associated files are stored by Part Number + Revision. An empty revision is still valid.</p>
-<h3 id="step-by-step-generating-doc-packs">Step-by-step: generating doc packs</h3>
-<ol>
-<li>Open the Doc Pack panel.</li>
-<li>Choose the outputs you want (Binder, Index, Visual, Hardware Summary, Excel BOM).</li>
-<li>Optional: include flat patterns or extra fields if available.</li>
-<li>Click Generate.</li>
-<li>Download the result when it is ready.</li>
-</ol>
-<p><strong>Common mistake:</strong> Generating a binder without deliverable PDFs will produce an empty pack. Always ensure PDFs exist first.</p>
-<h3 id="troubleshooting-2">Troubleshooting</h3>
+<h2 id="import-upload-pack-uiupload-pack">Import Upload Pack (<code>/ui/upload-pack</code>)</h2>
+<h3 id="what-it-does-3">What it does</h3>
 <ul>
-<li><strong>No 3D preview available:</strong> Confirm a 3MF, PLY, or STL is present.</li>
-<li><strong>Missing files:</strong> Check that files were exported and imported correctly.</li>
+<li>Uploads ZIP bundles containing BOM + deliverables + associated files.</li>
+<li>Supports <code>Dry run</code> and <code>Strict structure checks</code>.</li>
+<li>Shows progress, timings, diagnostics, warnings, and errors.</li>
+<li>Offers downloadable JSON import report for troubleshooting.</li>
 </ul>
-<h2 id="dashboard">Dashboard</h2>
-<p><strong>URL:</strong> <code>/ui/dashboard</code></p>
-<h3 id="where-to-find-it-3">Where to find it</h3>
+<h3 id="expected-zip-structure">Expected ZIP structure</h3>
+<pre><code class="language-text">bom/
+  *_FLATBOM.txt
+  *_TREEBOM.txt
+deliverables/
+  &lt;group&gt;/...
+extra/
+  &lt;PN&gt;/&lt;REV_OR__no_rev__&gt;/...
+</code></pre>
+<h2 id="tokens-uiaddintokens">Tokens (<code>/ui/addin/tokens</code>)</h2>
 <ul>
-<li>User menu (top right) &gt; Dashboard</li>
+<li>Create personal API tokens for the SolidWorks add-in.</li>
+<li>Token value is shown once at creation.</li>
+<li>Revoke tokens that are no longer needed.</li>
 </ul>
-<h3 id="what-you-can-do-on-this-screen-3">What you can do on this screen</h3>
+<h2 id="add-in-admin-uiadminaddin">Add-in Admin (<code>/ui/admin/addin</code>)</h2>
+<p>Admin-only workspace for add-in governance:</p>
 <ul>
-<li>See system health statistics and recent updates.</li>
-<li>Get a quick overview of document coverage.</li>
+<li>View users and revoke their tokens.</li>
+<li>Manage numbering scheme preset/recommended/visibility flags.</li>
+<li>Build and validate numbering schemes with advanced segment editor.</li>
 </ul>
-<h3 id="step-by-step-2">Step-by-step</h3>
-<ol>
-<li>Open Dashboard.</li>
-<li>Review the summary tiles and tables.</li>
-</ol>
-<h3 id="troubleshooting-3">Troubleshooting</h3>
+<h2 id="tools-tools">Tools (<code>/tools</code>)</h2>
 <ul>
-<li><strong>No data:</strong> The system may be new or data import has not run yet.</li>
+<li>Download latest SolidWorks add-in installer.</li>
+<li>Download SolidWorks custom property tab templates.</li>
+<li>Run Excel Compile workflow and download compiled ZIP output.</li>
 </ul>
-<h2 id="bom-views">BOM views</h2>
-<p><strong>URL:</strong> <code>/ui/bom</code> and <code>/ui/bom/:pn</code></p>
-<h3 id="where-to-find-it-4">Where to find it</h3>
-<ul>
-<li>User menu &gt; BOM</li>
-</ul>
-<h3 id="what-you-can-do-on-this-screen-4">What you can do on this screen</h3>
-<ul>
-<li>View a multi-level BOM.</li>
-<li>Expand and collapse assemblies.</li>
-<li>Inspect quantities and part info.</li>
-</ul>
-<h3 id="step-by-step-3">Step-by-step</h3>
-<ol>
-<li>Open BOM.</li>
-<li>Search for a top-level part number.</li>
-<li>Expand rows to see child components.</li>
-<li>Click a part number to open its detail page.</li>
-</ol>
-<h3 id="troubleshooting-4">Troubleshooting</h3>
-<ul>
-<li><strong>Parts missing:</strong> The BOM may not be imported or linked yet.</li>
-</ul>
-<h2 id="tokens-page-add-in-access">Tokens page (Add-in access)</h2>
-<p><strong>URL:</strong> <code>/ui/addin/tokens</code></p>
-<h3 id="where-to-find-it-5">Where to find it</h3>
-<ul>
-<li>User menu &gt; Tokens</li>
-</ul>
-<h3 id="what-you-can-do-on-this-screen-5">What you can do on this screen</h3>
-<ul>
-<li>Create access tokens for the SolidWorks add-in.</li>
-<li>Copy a token to use in the add-in configuration.</li>
-<li>Revoke tokens when no longer needed.</li>
-</ul>
-<h3 id="step-by-step-4">Step-by-step</h3>
-<ol>
-<li>Click &quot;Create token&quot;.</li>
-<li>Copy the token and store it securely.</li>
-<li>Paste it into the SolidWorks add-in configuration.</li>
-</ol>
-<p><strong>Common mistake:</strong> Tokens are shown only once. Copy them immediately.</p>
-<h2 id="admin-add-in-page">Admin add-in page</h2>
-<p><strong>URL:</strong> <code>/ui/admin/addin</code></p>
-<h3 id="where-to-find-it-6">Where to find it</h3>
-<ul>
-<li>Admin Dashboard &gt; Add-in</li>
-</ul>
-<h3 id="what-you-can-do-on-this-screen-6">What you can do on this screen</h3>
-<ul>
-<li>Review add-in settings and token health.</li>
-<li>Monitor add-in usage (if enabled).</li>
-</ul>
-<h3 id="troubleshooting-5">Troubleshooting</h3>
-<ul>
-<li><strong>Access denied:</strong> You must be an admin user.</li>
-</ul>
-<h2 id="admin-dashboard">Admin Dashboard</h2>
-<p><strong>URL:</strong> <code>/admin</code> (varies by setup)</p>
-<h3 id="where-to-find-it-7">Where to find it</h3>
-<ul>
-<li>User menu &gt; Admin Dashboard (admin users only)</li>
-</ul>
-<h3 id="what-you-can-do-on-this-screen-7">What you can do on this screen</h3>
-<ul>
-<li>Manage users and roles.</li>
-<li>Set app branding and timezone.</li>
-<li>View the audit log.</li>
-</ul>
-<h3 id="step-by-step-branding-and-timezone">Step-by-step: branding and timezone</h3>
-<ol>
-<li>Go to Admin Dashboard.</li>
-<li>Open App Settings.</li>
-<li>Upload a logo and set the timezone.</li>
-<li>Save changes.</li>
-</ol>
-<p><strong>What this affects:</strong> The logo appears in the app and doc packs. The timezone controls generated timestamps.</p>
-<h2 id="import-bom-and-deliverables">Import BOM and deliverables</h2>
-<p><strong>Recommended:</strong> <code>/ui/upload-pack</code></p>
-<h3 id="where-to-find-it-8">Where to find it</h3>
-<ul>
-<li>Top navbar: Upload Pack (if you have permission)</li>
-</ul>
-<h3 id="what-you-can-do-on-this-screen-8">What you can do on this screen</h3>
-<ul>
-<li>Upload a ZIP file containing BOM, deliverables, and associated files.</li>
-<li>Trigger a scan and thumbnail build.</li>
-</ul>
-<h3 id="step-by-step-5">Step-by-step</h3>
-<ol>
-<li>Create a ZIP with the correct folder structure (see End-to-end workflow section).</li>
-<li>Drag the ZIP into the upload box or click to browse.</li>
-<li>Wait for the import result message.</li>
-<li>Open the part detail page to verify files were found.</li>
-</ol>
-<h3 id="troubleshooting-6">Troubleshooting</h3>
-<ul>
-<li><strong>ZIP rejected:</strong> Check the folder structure and file naming.</li>
-<li><strong>No thumbnails:</strong> Run the thumbnail rebuild command or re-import.</li>
-</ul>
-<h3 id="legacy-bom-import-if-needed">Legacy BOM import (if needed)</h3>
-<p><strong>URL:</strong> <code>/import/upload</code></p>
-<p>Use this screen if you only need to import a BOM and do not need to upload deliverables or associated files.</p>
-<h1 id="solidworks-add-in-installation">SolidWorks add-in installation</h1>
-<p>This section explains how to install the TinyMRP SolidWorks add-in.</p>
-<h2 id="what-you-need">What you need</h2>
+<h1 id="solidworks-add-in-installation">SolidWorks Add-in Installation</h1>
+<p>This page covers installer setup, activation in SolidWorks, and first connection to TinyMRP.</p>
+<h2 id="before-you-start">Before You Start</h2>
 <ul>
 <li>SolidWorks installed on the workstation.</li>
-<li>Windows user with permission to install software.</li>
-<li>The TinyMRP add-in installer (<code>TinyMRP_SolidWorksAddin_*.exe</code>).</li>
-<li>A TinyMRP access token (from the Tokens page in the web app).</li>
+<li>.NET Framework 4.8 available.</li>
+<li>Local admin rights for installer and COM registration.</li>
+<li>TinyMRP access token from <code>/ui/addin/tokens</code>.</li>
 </ul>
-<p><strong>Tip:</strong> If you do not have an installer, ask your admin to build or provide it.</p>
-<h2 id="step-by-step-install-the-add-in">Step-by-step: install the add-in</h2>
-<ol>
-<li>Close SolidWorks if it is open.</li>
-<li>Run the installer file.</li>
-<li>Accept the prompts. The installer registers the add-in with SolidWorks.</li>
-<li>When finished, open SolidWorks.</li>
-</ol>
-<h2 id="step-by-step-enable-the-add-in-in-solidworks">Step-by-step: enable the add-in in SolidWorks</h2>
-<ol>
-<li>In SolidWorks, go to <code>Tools &gt; Add-Ins</code>.</li>
-<li>Find &quot;TinyMRP SolidWorks Add-in&quot; in the list.</li>
-<li>Check &quot;Active Add-ins&quot; to enable it now.</li>
-<li>Check &quot;Start Up&quot; so it loads every time.</li>
-</ol>
-<p><strong>Common mistake:</strong> Enabling only &quot;Active Add-ins&quot; means it will not load on next restart.</p>
-<h2 id="step-by-step-open-the-task-pane">Step-by-step: open the task pane</h2>
-<ol>
-<li>Look on the right side for the task pane.</li>
-<li>Click the TinyMRP icon.</li>
-<li>If the pane is hidden, use <code>View &gt; Task Pane</code> to show it.</li>
-</ol>
-<h2 id="step-by-step-configure-the-connection">Step-by-step: configure the connection</h2>
-<ol>
-<li>Open the Configuration tab in the add-in.</li>
-<li>Set the Server URL (for example <code>http://server:5000</code>).</li>
-<li>Paste your access token from the Tokens page.</li>
-<li>Click &quot;Test connection&quot; (or the equivalent button).</li>
-<li>Save the settings.</li>
-</ol>
-<p><strong>What this button does:</strong> Test connection checks that the server and token are valid.</p>
-<h2 id="where-settings-are-saved">Where settings are saved</h2>
-<p>The add-in stores its settings in a configuration file and uses it when SolidWorks opens. If settings are missing, the add-in may open with empty fields.</p>
-<h2 id="if-installation-fails">If installation fails</h2>
+<h2 id="get-the-installer">Get The Installer</h2>
+<p>Use one of these:</p>
 <ul>
-<li>Restart the computer and try again.</li>
-<li>Check that SolidWorks is installed correctly.</li>
-<li>Ask your IT team to run the installer as an administrator.</li>
+<li>Web tools page: <code>/tools</code> -&gt; <code>SolidWorks Setup</code> -&gt; <code>Download latest</code></li>
+<li>Landing download endpoint: <code>/downloads/addin</code></li>
+<li>File drop used by server tools: <code>solidworks-addin/Windows Installer latest</code></li>
 </ul>
-<h1 id="solidworks-add-in-walkthrough">SolidWorks add-in walkthrough</h1>
-<p>This section explains each tab and option in the TinyMRP SolidWorks add-in.</p>
-<h2 id="publishbom-tab">Publish/BOM tab</h2>
-<h3 id="where-to-find-it-9">Where to find it</h3>
-<ul>
-<li>Open the TinyMRP task pane.</li>
-<li>Click the Publish/BOM tab.</li>
-</ul>
-<h3 id="what-you-can-do">What you can do</h3>
-<ul>
-<li>Export deliverables (PDF, DXF, STEP, 3MF, PLY, STL, PNG).</li>
-<li>Export BOM files.</li>
-<li>Publish for a single model or a whole assembly.</li>
-</ul>
-<h3 id="step-by-step-publish-deliverables">Step-by-step: publish deliverables</h3>
+<h2 id="run-the-installer">Run The Installer</h2>
 <ol>
-<li>Open a part or assembly in SolidWorks.</li>
-<li>In Publish/BOM, select the outputs you need.</li>
-<li>Choose the deliverables folder.</li>
-<li>Click Publish.</li>
-<li>Wait for the process to complete.</li>
-</ol>
-<p><strong>What this button does:</strong> Publish creates files on disk. It does not automatically upload them; you upload or import them later.</p>
-<h3 id="associated-files-extra-files">Associated files (extra files)</h3>
-<ol>
-<li>In Publish/BOM, click &quot;Manage associated files...&quot;.</li>
-<li>Add one or more files (photos, scans, reports).</li>
-<li>Optional: add a label in the list.</li>
-<li>Click OK to save.</li>
-</ol>
-<p><strong>What this does:</strong> The list is stored inside the CAD file as a custom property (<code>TINYMPR_ASSOC_FILES</code>).</p>
-<h3 id="create-upload-pack-zip">Create Upload Pack (ZIP)</h3>
-<ol>
-<li>Check &quot;Create Upload Pack (ZIP)&quot; in the Publish/BOM options.</li>
-<li>Click Publish.</li>
-<li>The add-in writes a ZIP that contains BOM files, deliverables, and associated files.</li>
-</ol>
-<p><strong>Tip:</strong> If revision is blank, the ZIP uses the <code>__no_rev__</code> token in the extra files path.</p>
-<h3 id="step-by-step-export-bom">Step-by-step: export BOM</h3>
-<ol>
-<li>Open the top-level assembly.</li>
-<li>Choose BOM options (flat or indented).</li>
-<li>Click Export BOM.</li>
-<li>Verify that a BOM file is created in the output folder.</li>
-</ol>
-<h3 id="troubleshooting-7">Troubleshooting</h3>
+<li>Close SolidWorks.</li>
+<li>Run <code>TinyMRP_SolidWorksAddin_*.exe</code> as administrator.</li>
+<li>Complete installer pages:
 <ul>
-<li><strong>Missing output files:</strong> Check that the model is saved and has a part number.</li>
-<li><strong>Wrong file name:</strong> Check the revision value and part number in properties.</li>
-</ul>
-<h2 id="tools-tab">Tools tab</h2>
-<h3 id="what-you-can-do-2">What you can do</h3>
-<ul>
-<li>Normalize units.</li>
-<li>Hide feature types.</li>
-<li>Run bulk operations on assemblies.</li>
-</ul>
-<h3 id="tips">Tips</h3>
-<ul>
-<li>Use Tools carefully on large assemblies.</li>
-<li>Make a backup before running mass changes.</li>
-</ul>
-<h2 id="numbering-tab">Numbering tab</h2>
-<h3 id="what-you-can-do-3">What you can do</h3>
-<ul>
-<li>Select a numbering scheme.</li>
-<li>Preview how numbers will look.</li>
-<li>Allocate part numbers to configurations.</li>
-<li>Apply or rename based on rules.</li>
-</ul>
-<h3 id="step-by-step-allocate-part-numbers">Step-by-step: allocate part numbers</h3>
-<ol>
-<li>Open the Numbering tab.</li>
-<li>Pick a scheme from the list.</li>
-<li>Click Preview to see the next number.</li>
-<li>Click Allocate to assign to the current configuration.</li>
-</ol>
-<p><strong>Common mistake:</strong> Allocating numbers without saving the document. Always save after allocating.</p>
-<h2 id="configuration-tab">Configuration tab</h2>
-<p>This area controls how the add-in connects to the server.</p>
-<h3 id="quick-start-sub-tab">Quick Start sub-tab</h3>
-<ul>
-<li>Server URL</li>
-<li>Token</li>
-<li>Test connection</li>
-</ul>
-<h3 id="advanced-sub-tab">Advanced sub-tab</h3>
-<ul>
-<li>Folder locations</li>
-<li>Custom behavior flags</li>
-<li>Debug options (if enabled)</li>
-</ul>
-<h3 id="step-by-step-update-settings">Step-by-step: update settings</h3>
-<ol>
-<li>Go to Configuration.</li>
-<li>Update the fields.</li>
-<li>Click Save.</li>
-</ol>
-<p><strong>Tip:</strong> If the add-in cannot connect, double-check the URL and token.</p>
-<h2 id="output-folders-and-naming">Output folders and naming</h2>
-<p>The add-in writes files to subfolders inside your deliverables folder. Typical examples:</p>
-<ul>
-<li><code>deliverables/pdf/</code></li>
-<li><code>deliverables/step/</code></li>
-<li><code>deliverables/3mf/</code></li>
-<li><code>deliverables/ply/</code></li>
-<li><code>deliverables/stl/</code></li>
-</ul>
-<p>File naming uses part number and revision:</p>
-<ul>
-<li><code>PARTNUMBER_REV_REVISION.ext</code></li>
-</ul>
-<p>If the revision is blank, the name ends with <code>_REV_.ext</code> (this is expected).</p>
-<h1 id="end-to-end-workflow-golden-path">End-to-end workflow (golden path)</h1>
-<p>This is the recommended workflow from design to doc pack.</p>
-<h2 id="step-1-set-up-the-server">Step 1: Set up the server</h2>
-<ol>
-<li>Install the TinyMRP server (see Server installation section).</li>
-<li>Create the first admin user.</li>
-<li>Log in as admin and create roles and users.</li>
-<li>Set branding and timezone in Admin Settings.</li>
-</ol>
-<p><strong>Expected result:</strong> Users can log in and see the Inventory page.</p>
-<h2 id="step-2-prepare-parts-in-solidworks">Step 2: Prepare parts in SolidWorks</h2>
-<ol>
-<li>Open the part or assembly.</li>
-<li>Confirm the part number and revision in the properties.</li>
-<li>Save the model.</li>
-<li>If you use numbering, allocate a number and apply it.</li>
-</ol>
-<p><strong>Common mistake:</strong> Exporting deliverables before the part number is saved.</p>
-<h2 id="step-3-publish-deliverables">Step 3: Publish deliverables</h2>
-<ol>
-<li>Open the Publish/BOM tab in the add-in.</li>
-<li>Select the outputs you need (PDF, DXF, STEP, 3MF, PLY, STL, PNG).</li>
-<li>Choose the deliverables folder.</li>
-<li>Optional: click &quot;Manage associated files...&quot; and add extra files (photos, scans, reports).</li>
-<li>Optional: enable &quot;Create Upload Pack (ZIP)&quot; if you want a ready-to-upload ZIP.</li>
-<li>Click Publish.</li>
-<li>Wait until the process finishes.</li>
-</ol>
-<p><strong>Expected result:</strong> Files appear in the correct deliverables subfolders.</p>
-<h2 id="step-4-package-for-import">Step 4: Package for import</h2>
-<ol>
-<li>If you used &quot;Create Upload Pack (ZIP)&quot;, use that file.</li>
-<li>Otherwise, create a ZIP with the correct structure:
-<ul>
-<li><code>deliverables/&lt;group&gt;/...</code></li>
-<li><code>bom/</code> with <code>*_FLATBOM.txt</code> and <code>*_TREEBOM.txt</code></li>
-<li><code>extra/&lt;PN&gt;/&lt;REV_OR__no_rev__&gt;/...</code></li>
+<li>Output folder for exports</li>
+<li>Template paths and backend URL</li>
+<li>Optional auth token</li>
+<li>Optional override/clear of existing settings</li>
 </ul>
 </li>
-<li>Keep file names matching <code>PARTNUMBER_REV_REVISION.ext</code>.</li>
 </ol>
-<p><strong>Tip:</strong> If you are unsure, start by zipping one part and verify the import result.</p>
-<h2 id="step-5-import-into-tinymrp">Step 5: Import into TinyMRP</h2>
+<p>The installer registers <code>TinyMRP.SolidWorksAddin.dll</code> with <code>RegAsm</code>.</p>
+<h2 id="enable-in-solidworks">Enable In SolidWorks</h2>
 <ol>
-<li>Log in to the web app.</li>
-<li>Go to Upload Pack.</li>
-<li>Upload the ZIP file.</li>
-<li>Wait for the import summary.</li>
-<li>Open the part detail page to confirm files are visible.</li>
-</ol>
-<p><strong>Expected result:</strong> The part shows files and thumbnails on its detail page.</p>
-<h2 id="step-6-generate-doc-packs">Step 6: Generate doc packs</h2>
-<ol>
-<li>On the part detail page, open Doc Packs.</li>
-<li>Select the outputs you need:
+<li>Open SolidWorks.</li>
+<li>Go to <code>Tools &gt; Add-Ins</code>.</li>
+<li>Enable <code>TinyMRP SolidWorks Add-in</code> for:
 <ul>
-<li>Binder (full PDF pack)</li>
-<li>Index (standalone)</li>
-<li>Visual summary</li>
-<li>Hardware summary</li>
-<li>Excel BOM</li>
+<li><code>Active Add-ins</code></li>
+<li><code>Start Up</code></li>
 </ul>
 </li>
-<li>Click Generate and download the result.</li>
 </ol>
-<p><strong>What this button does:</strong> Generate creates a PDF or ZIP. It does not change your part data.</p>
-<h2 id="step-7-extract-bom-and-reports">Step 7: Extract BOM and reports</h2>
+<p>If startup is not checked, the add-in will not auto-load after restart.</p>
+<h2 id="open-the-task-pane">Open The Task Pane</h2>
+<ul>
+<li>Use <code>View &gt; Task Pane</code> if hidden.</li>
+<li>Click the TinyMRP icon in the right task pane.</li>
+<li>You should see tabs: <code>Publish/BOM</code>, <code>Tools</code>, <code>Numbering</code>, <code>Configuration</code>.</li>
+</ul>
+<h2 id="first-connection-recommended">First Connection (Recommended)</h2>
 <ol>
-<li>Use the Excel BOM output to share the BOM.</li>
-<li>Use the binder and visuals for manufacturing packages.</li>
-<li>Save outputs to your project folder.</li>
+<li>Open <code>Configuration</code> tab, <code>Quick Start</code>.</li>
+<li>Set <code>Backend URL</code>.</li>
+<li>Paste token into <code>Auth token</code>.</li>
+<li>Click <code>Test connection</code>.</li>
+<li>Save settings.</li>
 </ol>
-<h2 id="iteration-loop-when-a-part-changes">Iteration loop (when a part changes)</h2>
+<h2 id="where-settings-are-stored">Where Settings Are Stored</h2>
+<p>Config file: <code>TinyMRP_config.txt</code></p>
+<p>Read/write precedence:</p>
 <ol>
-<li>Update the model in SolidWorks.</li>
-<li>Increment the revision if required.</li>
-<li>Re-export deliverables.</li>
-<li>Re-import into TinyMRP.</li>
-<li>Regenerate doc packs.</li>
+<li><code>%PROGRAMDATA%\TinyMRP\TinyMRP_config.txt</code></li>
+<li>Add-in install folder copy</li>
+<li><code>%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt</code></li>
 </ol>
-<h2 id="if-something-goes-wrong-decision-tree">If something goes wrong (decision tree)</h2>
+<p>If machine-level path is not writable, the add-in falls back to user-level path.</p>
+<h2 id="manual-register-repair-if-needed">Manual Register / Repair (If Needed)</h2>
+<p>If installer registration fails:</p>
+<pre><code class="language-powershell">&amp; &quot;C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe&quot; &quot;C:\Path\To\TinyMRP.SolidWorksAddin.dll&quot; /codebase /tlb
+</code></pre>
+<p>To unregister:</p>
+<pre><code class="language-powershell">&amp; &quot;C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe&quot; &quot;C:\Path\To\TinyMRP.SolidWorksAddin.dll&quot; /unregister
+</code></pre>
+<h2 id="silent-install-it-deployment">Silent Install (IT Deployment)</h2>
+<p>Example:</p>
+<pre><code class="language-powershell">TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL=&quot;http://server:5000&quot; /AUTHTOKEN=&quot;tmrp_xxx&quot;
+</code></pre>
+<h1 id="solidworks-add-in-walkthrough">SolidWorks Add-in Walkthrough</h1>
+<p>This guide maps each add-in tab to practical tasks.</p>
+<h2 id="publishbom-tab">Publish/BOM Tab</h2>
+<h3 id="deliverables">Deliverables</h3>
+<p>Model outputs:</p>
 <ul>
-<li>
-<p><strong>No files appear after import</strong></p>
-<ul>
-<li>Check folder names inside the ZIP.</li>
-<li>Check that file names match the part number and revision.</li>
-<li>Confirm the deliverables folder is mounted to the server.</li>
+<li>PNG</li>
+<li>STEP</li>
+<li>eDrawings</li>
+<li>3MF</li>
+<li>PLY</li>
+<li>STL</li>
 </ul>
-</li>
-<li>
-<p><strong>Wrong revision shown</strong></p>
+<p>Drawing outputs:</p>
 <ul>
-<li>Confirm the revision in SolidWorks properties.</li>
-<li>Re-export and re-import.</li>
+<li>PNG drawing</li>
+<li>PDF</li>
+<li>DXF</li>
+<li>eDrawings drawing</li>
 </ul>
-</li>
-<li>
-<p><strong>3D preview missing</strong></p>
+<h3 id="publish-options">Publish options</h3>
 <ul>
-<li>Confirm a 3MF, PLY, or STL file exists.</li>
-<li>Check the file name pattern.</li>
+<li><code>Overwrite files</code>: replace existing outputs.</li>
+<li><code>Top level only</code>: limit assembly processing to root item.</li>
 </ul>
-</li>
-<li>
-<p><strong>Doc pack is empty</strong></p>
+<h3 id="associated-files">Associated files</h3>
 <ul>
-<li>Ensure PDFs exist for the part.</li>
-<li>Re-generate after verifying files.</li>
+<li><code>Manage associated files...</code> opens the extra-files manager.</li>
+<li>Data is stored in custom property <code>TINYMPR_ASSOC_FILES</code>.</li>
+</ul>
+<h3 id="upload-pack-actions">Upload pack actions</h3>
+<ul>
+<li><code>Create upload pack</code> builds ZIP from selected deliverables and associated files.</li>
+<li>Include toggles:
+<ul>
+<li><code>Include deliverables</code></li>
+<li><code>Include associated files</code></li>
 </ul>
 </li>
 </ul>
-<h1 id="customization-and-admin-settings">Customization and admin settings</h1>
-<p>This section is for admins who manage the system.</p>
-<h2 id="branding-logo-and-visual-identity">Branding (logo and visual identity)</h2>
-<h3 id="where-to-find-it-10">Where to find it</h3>
+<h3 id="bom-actions">BOM actions</h3>
 <ul>
-<li>Admin Dashboard &gt; App Settings</li>
+<li><code>Process BOM</code> exports BOM text files for import.</li>
 </ul>
-<h3 id="what-you-can-do-4">What you can do</h3>
+<h3 id="progress-and-run-controls">Progress and run controls</h3>
 <ul>
-<li>Upload a company logo.</li>
-<li>Update the branding used in the web app and doc packs.</li>
+<li>Progress bars for <code>Create files</code> and <code>Process BOM</code>.</li>
+<li><code>Cancel current task</code> aborts long operations.</li>
+<li><code>Open last run log</code> opens detailed run log.</li>
 </ul>
-<h3 id="step-by-step-6">Step-by-step</h3>
+<h2 id="tools-tab">Tools Tab</h2>
+<h3 id="model-utilities">Model utilities</h3>
+<ul>
+<li><code>Freeze model</code></li>
+<li><code>Unfreeze model</code></li>
+<li><code>Normalize units</code></li>
+</ul>
+<h3 id="visibility-utilities">Visibility utilities</h3>
+<p>Hide selected reference geometry and sketch categories in bulk:</p>
+<ul>
+<li>Origin, planes, axes, points, coordinate systems</li>
+<li>2D/3D sketches, spline/curve helpers</li>
+<li>Envelope and related helper geometry</li>
+</ul>
+<p>Controls include <code>Select all</code>, <code>Clear</code>, <code>Hide selected features</code>, and cancellation support.</p>
+<h2 id="numbering-tab">Numbering Tab</h2>
+<h3 id="quick-actions">Quick actions</h3>
+<ul>
+<li><code>Preview Partnumber</code></li>
+<li><code>Allocate &amp; Apply</code></li>
+<li><code>Allocate and rename</code></li>
+</ul>
+<h3 id="context-and-presets">Context and presets</h3>
+<ul>
+<li>Preset scheme dropdown with refresh.</li>
+<li>Context fields such as type, family, subfamily, project, site.</li>
+<li>Live preview fields for part number, revision, and display code.</li>
+</ul>
+<h3 id="advanced-numbering-editor">Advanced numbering editor</h3>
+<ul>
+<li>Full scheme builder: segments, separator, scope mode, scope keys.</li>
+<li>Sequence controls: padding, base, start, reset policy.</li>
+<li>Revision controls: policy and start value.</li>
+<li>Validation rules: max length, allowed charset, require sequence segment.</li>
+<li>Segment operations: add, update, remove, move up/down.</li>
+<li><code>Validate scheme</code>, <code>Save scheme</code>, <code>Deactivate</code>.</li>
+</ul>
+<h3 id="advanced-allocation-and-rename">Advanced allocation and rename</h3>
+<ul>
+<li>Allocation scope: active config, all configs, or selected configurations.</li>
+<li>Optional document-level property write.</li>
+<li>Rename dry run support before commit.</li>
+<li>Rename behavior options include safe mode and reference-aware mode.</li>
+</ul>
+<h2 id="configuration-tab">Configuration Tab</h2>
+<p>Configuration has two sub-tabs: <code>Quick Start</code> and <code>Advanced</code>.</p>
+<h3 id="quick-start">Quick Start</h3>
+<ul>
+<li>Backend URL</li>
+<li>Auth token</li>
+<li>Preset scheme selection</li>
+<li>Numbering defaults (property names, apply mode, context defaults)</li>
+<li>Deliverables folder</li>
+<li><code>Save settings</code></li>
+</ul>
+<h3 id="advanced">Advanced</h3>
+<ul>
+<li>Template paths:
+<ul>
+<li>Blank sheet template</li>
+<li>BOM template</li>
+</ul>
+</li>
+<li>Drawing export settings:
+<ul>
+<li>DXF sheet names</li>
+</ul>
+</li>
+<li>Server links:
+<ul>
+<li>Web link</li>
+<li>Backend URL</li>
+<li>Auth token</li>
+</ul>
+</li>
+<li>Diagnostics and actions:
+<ul>
+<li><code>Test connection</code></li>
+<li><code>Apply server defaults</code></li>
+<li><code>Preview next</code></li>
+<li><code>Go to Numbering</code></li>
+<li><code>Diagnostics</code></li>
+</ul>
+</li>
+<li>Save actions:
+<ul>
+<li><code>Save local config</code></li>
+<li><code>Save server settings</code></li>
+</ul>
+</li>
+</ul>
+<h2 id="recommended-daily-flows">Recommended Daily Flows</h2>
+<h3 id="release-package-from-cad">Release package from CAD</h3>
 <ol>
-<li>Open Admin Dashboard.</li>
-<li>Go to App Settings.</li>
-<li>Upload a logo file (PNG or SVG).</li>
-<li>Save changes.</li>
+<li>Open model/assembly.</li>
+<li>In <code>Publish/BOM</code>, select required outputs.</li>
+<li>Run <code>Create files</code>.</li>
+<li>Optionally run <code>Create upload pack</code>.</li>
+<li>Import ZIP in web app (<code>/ui/upload-pack</code>).</li>
 </ol>
-<p><strong>Expected result:</strong> The new logo appears in the header and in doc packs.</p>
-<h2 id="timezone">Timezone</h2>
-<h3 id="why-it-matters">Why it matters</h3>
-<p>Doc packs show a &quot;Generated&quot; timestamp. The timezone setting ensures the time is correct for your location.</p>
-<h3 id="step-by-step-7">Step-by-step</h3>
+<h3 id="controlled-numbering-rename">Controlled numbering + rename</h3>
 <ol>
-<li>Open Admin Dashboard.</li>
-<li>Go to App Settings.</li>
-<li>Enter a timezone (for example <code>Australia/Melbourne</code>).</li>
-<li>Save changes.</li>
+<li>In <code>Numbering</code>, select preset and context.</li>
+<li>Preview.</li>
+<li>Allocate and apply.</li>
+<li>Run rename dry run.</li>
+<li>Execute rename only after preview looks correct.</li>
 </ol>
-<p><strong>Tip:</strong> Use standard timezone names from the IANA list.</p>
-<h2 id="users-and-roles">Users and roles</h2>
-<h3 id="where-to-find-it-11">Where to find it</h3>
+<h1 id="end-to-end-workflow">End-to-End Workflow</h1>
+<p>This page provides practical workflows that match current TinyMRP behavior.</p>
+<h2 id="workflow-a-cad-to-production-package">Workflow A: CAD To Production Package</h2>
+<h3 id="1-prepare-cad-data">1) Prepare CAD data</h3>
 <ul>
-<li>Admin Dashboard &gt; Users</li>
-<li>Admin Dashboard &gt; Roles</li>
+<li>Confirm part number and revision in SolidWorks properties.</li>
+<li>Save files before publishing.</li>
 </ul>
-<h3 id="what-you-can-do-5">What you can do</h3>
+<h3 id="2-publish-deliverables-from-add-in">2) Publish deliverables from add-in</h3>
 <ul>
-<li>Add users.</li>
-<li>Assign roles and permissions.</li>
-<li>Limit access to specific functions.</li>
+<li>Use <code>Publish/BOM</code> tab.</li>
+<li>Export required model and drawing formats.</li>
+<li>Add associated files if needed.</li>
 </ul>
-<h3 id="common-role-patterns">Common role patterns</h3>
+<h3 id="3-build-and-import-upload-pack">3) Build and import upload pack</h3>
 <ul>
-<li>Viewer: read-only access</li>
-<li>Operator: view + import</li>
-<li>Planner: manage jobs and orders</li>
-<li>Admin: full access</li>
+<li>Create upload pack ZIP from the add-in.</li>
+<li>Import in web app at <code>/ui/upload-pack</code>.</li>
+<li>Review import report for warnings/errors.</li>
 </ul>
-<h2 id="add-in-administration">Add-in administration</h2>
-<h3 id="where-to-find-it-12">Where to find it</h3>
+<h3 id="4-validate-in-part-detail">4) Validate in Part Detail</h3>
 <ul>
-<li>Admin Dashboard &gt; Add-in</li>
+<li>Confirm drawing and 3D preview.</li>
+<li>Confirm expected files and associated files.</li>
+<li>Check attributes and process metadata.</li>
 </ul>
-<h3 id="what-you-can-do-6">What you can do</h3>
+<h3 id="5-generate-doc-packs">5) Generate doc packs</h3>
 <ul>
-<li>View or manage add-in settings and tokens.</li>
-<li>Check usage if logs are enabled.</li>
+<li>Use Part Detail <code>Doc Packs</code> tab.</li>
+<li>Select outputs for audience:
+<ul>
+<li>Excel BOM for planning</li>
+<li>Binder/index/visual for production</li>
+<li>Hardware summary where needed</li>
 </ul>
-<h2 id="deliverables-storage">Deliverables storage</h2>
-<h3 id="what-you-can-do-7">What you can do</h3>
-<ul>
-<li>Choose the deliverables root folder.</li>
-<li>Control public file access.</li>
+</li>
 </ul>
-<p><strong>Common mistake:</strong> Enabling public file URLs without a proxy or security layer.</p>
-<h1 id="troubleshooting-8">Troubleshooting</h1>
-<p>Use this section when something is not working as expected.</p>
-<h2 id="login-issues">Login issues</h2>
+<h2 id="workflow-b-progressive-ordering-across-multi-level-bom">Workflow B: Progressive Ordering Across Multi-Level BOM</h2>
+<p>This is the key purchasing workflow for complex assemblies.</p>
+<h3 id="1-create-job-bom-roots">1) Create job BOM roots</h3>
 <ul>
-<li><strong>Cannot log in:</strong> Check email and password. Ask an admin to reset your password.</li>
-<li><strong>Access denied:</strong> You may not have the required role or permission.</li>
+<li>In <code>Jobs</code>, define BOM lines that represent the job scope.</li>
+<li>Roots can expand into full multi-level BOM via server rollup logic.</li>
 </ul>
-<h2 id="missing-files-in-part-detail">Missing files in part detail</h2>
+<h3 id="2-review-ordering-coverage-in-job">2) Review ordering coverage in Job</h3>
+<p>In Job detail you have three purchasing views:</p>
 <ul>
-<li>Confirm the file is in the deliverables folder.</li>
-<li>Confirm the file name matches the part number and revision.</li>
-<li>Re-import the ZIP.</li>
+<li><code>Parts in Orders</code>: required vs ordered by part.</li>
+<li><code>Over-Ordered Parts</code>: quantities ordered above required.</li>
+<li><code>Parts Not Yet Ordered</code>: remaining demand.</li>
 </ul>
-<h2 id="thumbnails-not-showing">Thumbnails not showing</h2>
+<h3 id="3-use-parts-not-yet-ordered-in-flat-or-tree-mode">3) Use <code>Parts Not Yet Ordered</code> in Flat or Tree mode</h3>
 <ul>
-<li>Wait a few seconds after import (thumbnails are generated).</li>
-<li>If still missing, re-import or run thumbnail rebuild.</li>
+<li><code>Flat BOM</code> view: aggregated by part/revision.</li>
+<li><code>Tree BOM</code> view: per occurrence with BOM level path.</li>
+<li>Toggle between modes depending on purchasing strategy.</li>
 </ul>
-<h2 id="drawing-preview-is-blank">Drawing preview is blank</h2>
+<p>This allows ordering:</p>
 <ul>
-<li>Confirm a file ending with <code>_DWG.png</code> exists in the <code>png</code> folder.</li>
-<li>Ensure the drawing file is readable (open it outside TinyMRP).</li>
+<li>Top-level assemblies</li>
+<li>Intermediate subassemblies</li>
+<li>Leaf components</li>
 </ul>
-<h2 id="3d-preview-missing">3D preview missing</h2>
+<h3 id="4-create-order-from-selected-remaining-parts">4) Create order from selected remaining parts</h3>
+<ol>
+<li>Filter remaining table.</li>
+<li>Select rows (supports select-all on visible rows).</li>
+<li>Click <code>Create order from selected</code>.</li>
+<li>Review and edit the generated order lines.</li>
+</ol>
+<h3 id="5-repeat-until-remaining-demand-is-zero">5) Repeat until remaining demand is zero</h3>
 <ul>
-<li>Confirm a 3MF, PLY, or STL file exists.</li>
-<li>Confirm the file name matches the part number and revision.</li>
-<li>Try selecting a different format in the 3D preview selector.</li>
+<li>Each new non-draft order updates coverage.</li>
+<li>Job rollup recalculates required, ordered, remaining, and over quantities.</li>
 </ul>
-<h2 id="doc-pack-is-empty-or-missing-sections">Doc pack is empty or missing sections</h2>
+<h2 id="understanding-over-ordered-behavior">Understanding Over-Ordered Behavior</h2>
+<p>Over-order is expected in mixed sourcing scenarios. Example:</p>
+<ol>
+<li>You order child parts from Supplier A.</li>
+<li>Later you order the full parent assembly from Supplier B.</li>
+<li>Child parts can become over-ordered because parent expansion also covers them.</li>
+</ol>
+<p>TinyMRP shows these in <code>Over-Ordered Parts</code> to make the conflict explicit.</p>
+<h2 id="order-lifecycle-notes">Order Lifecycle Notes</h2>
 <ul>
-<li>Ensure PDFs exist for the part.</li>
-<li>Re-generate the doc pack after verifying files.</li>
+<li><code>Draft</code> and <code>Cancelled</code> orders are excluded from job ordered coverage.</li>
+<li>Confirmed/delivered quantities drive received progress in job list metrics.</li>
 </ul>
-<h2 id="import-errors">Import errors</h2>
+<h2 id="scope-of-supply-and-customer-deliverables">Scope Of Supply and Customer Deliverables</h2>
+<p>From Order detail you can download:</p>
 <ul>
-<li><strong>ZIP rejected:</strong> Check the folder structure.</li>
-<li><strong>No parts created:</strong> Ensure the BOM file and deliverables exist.</li>
-<li><strong>Wrong revision:</strong> Check the revision value in file names.</li>
-<li><strong>Associated files missing:</strong> Check <code>extra/&lt;PN&gt;/&lt;REV_OR__no_rev__&gt;/...</code> paths in the ZIP.</li>
+<li>Scope PDF only</li>
+<li>Scope ZIP with attached docs</li>
+<li>Optional children documentation</li>
+<li>Optional combined binder PDF</li>
 </ul>
-<h2 id="add-in-connection-failed">Add-in connection failed</h2>
+<p>Use this for supplier or customer transmittals.</p>
+<h2 id="iteration-loop-engineering-change">Iteration Loop (Engineering Change)</h2>
+<ol>
+<li>Update model and revision in CAD.</li>
+<li>Re-publish and re-import deliverables.</li>
+<li>Re-generate doc packs and scope documents.</li>
+<li>Re-check jobs/orders coverage where changed items are involved.</li>
+</ol>
+<h1 id="customization-and-admin-settings">Customization And Admin Settings</h1>
+<p>This page is for admin users who maintain TinyMRP operations.</p>
+<h2 id="admin-dashboard-admin">Admin Dashboard (<code>/admin</code>)</h2>
+<p>Main admin modules:</p>
 <ul>
-<li>Check the server URL and token.</li>
-<li>Ensure the server is running.</li>
-<li>Ask your admin to create a new token.</li>
+<li>Users</li>
+<li>Roles</li>
+<li>Audit Log</li>
+<li>Metrics</li>
+<li>App Settings</li>
+<li>Add-in Admin</li>
+<li>Jobs, Suppliers, Customers, Orders shortcuts</li>
 </ul>
-<h2 id="when-to-contact-support">When to contact support</h2>
+<h2 id="app-settings-adminsettings">App Settings (<code>/admin/settings</code>)</h2>
+<h3 id="branding">Branding</h3>
 <ul>
-<li>You see repeated errors after following the steps above.</li>
-<li>The server does not start.</li>
-<li>Data appears corrupted or missing across multiple parts.</li>
+<li>Upload PNG or SVG logo used in UI and doc packs.</li>
+<li>Optional remove-logo toggle to return to default.</li>
+</ul>
+<h3 id="timezone">Timezone</h3>
+<ul>
+<li>Sets timezone used in generated document timestamps.</li>
+<li>Use valid IANA names (example: <code>America/New_York</code>).</li>
+</ul>
+<h3 id="hardware-classification">Hardware classification</h3>
+<ul>
+<li>Folder keywords used to classify hardware during ZIP import.</li>
+<li>Case-insensitive matching.</li>
+</ul>
+<h3 id="flat-pattern-page-filter">Flat pattern page filter</h3>
+<ul>
+<li>Sheet-name tokens used to remove flat pattern pages from binder output.</li>
+</ul>
+<h3 id="upload-pack-limits-2">Upload Pack limits</h3>
+<ul>
+<li>Max ZIP size (MB)</li>
+<li>Max file size (MB)</li>
+<li>Max files per ZIP</li>
+<li><code>0</code> disables a limit</li>
+</ul>
+<h2 id="users-and-roles">Users And Roles</h2>
+<h3 id="users-adminusers">Users (<code>/admin/users</code>)</h3>
+<ul>
+<li>Create, edit, bulk-delete users.</li>
+<li>Optional password reset in user edit.</li>
+</ul>
+<h3 id="roles-adminroles">Roles (<code>/admin/roles</code>)</h3>
+<ul>
+<li>Create/edit role permission sets.</li>
+<li>Typical permission groups:
+<ul>
+<li>Items/BOM</li>
+<li>Jobs/Orders</li>
+<li>Suppliers/Customers</li>
+<li>Tools/Import</li>
+<li>Numbering management</li>
+</ul>
+</li>
+</ul>
+<p>Do not change access behavior in code unless intentionally redesigning ACL. Production access should be managed through roles, permissions, and entity links.</p>
+<h2 id="access-scoping-model-operational-view">Access Scoping Model (Operational View)</h2>
+<p>External users can be scoped by linked entities:</p>
+<ul>
+<li>Customer-linked users see customer-relevant data.</li>
+<li>Supplier-linked users see supplier-relevant data.</li>
+<li>Internal privileged roles remain unscoped.</li>
+</ul>
+<p>This scoping is enforced server-side on jobs, orders, customers, suppliers, parts, and related views.</p>
+<h2 id="customer-and-supplier-master-data">Customer And Supplier Master Data</h2>
+<h3 id="customers-admincustomers">Customers (<code>/admin/customers</code>)</h3>
+<ul>
+<li>Company, contacts, addresses, tags, status/type.</li>
+<li>Linked users list controls customer-scoped access.</li>
+<li>Related jobs and orders are visible in detail view.</li>
+</ul>
+<h3 id="suppliers-adminsuppliers">Suppliers (<code>/admin/suppliers</code>)</h3>
+<ul>
+<li>Company, contact/rating, categories, processes, lead time, tags.</li>
+<li>Linked users list controls supplier-scoped access.</li>
+<li>Related orders visible in detail view.</li>
+</ul>
+<h2 id="jobs-administration-adminjobs">Jobs Administration (<code>/admin/jobs</code>)</h2>
+<ul>
+<li>Manage schedule, status, priority, participants, vendors, customer.</li>
+<li>Edit job BOM with part picker and inline filters.</li>
+<li>Analyze purchasing coverage:
+<ul>
+<li>Parts in Orders</li>
+<li>Over-Ordered Parts</li>
+<li>Parts Not Yet Ordered (Flat/Tree)</li>
+</ul>
+</li>
+</ul>
+<h2 id="orders-administration-adminorders">Orders Administration (<code>/admin/orders</code>)</h2>
+<ul>
+<li>Purchase and sales order lifecycle management.</li>
+<li>Line-level pricing, discount, tax, and summary totals.</li>
+<li>Job-linked orders can lock customer selection.</li>
+<li>Docpack export and scope-of-supply export are available per order.</li>
+</ul>
+<h2 id="add-in-admin-uiadminaddin-2">Add-in Admin (<code>/ui/admin/addin</code>)</h2>
+<ul>
+<li>Review users and revoke add-in tokens.</li>
+<li>Manage numbering scheme metadata:
+<ul>
+<li>preset flag</li>
+<li>recommended flag</li>
+<li>quickstart visibility</li>
+</ul>
+</li>
+<li>Build/validate/save/deactivate schemes in browser.</li>
+</ul>
+<h2 id="audit-and-metrics">Audit And Metrics</h2>
+<h3 id="audit-adminaudit">Audit (<code>/admin/audit/</code>)</h3>
+<ul>
+<li>Filter by action, user, endpoint, method, resource, and time range.</li>
+<li>Useful for traceability and access troubleshooting.</li>
+</ul>
+<h3 id="metrics-adminmetrics">Metrics (<code>/admin/metrics</code>)</h3>
+<ul>
+<li>Snapshot of resource usage and slow areas.</li>
+</ul>
+<h2 id="high-risk-operations">High-Risk Operations</h2>
+<ul>
+<li><code>Purge Parts Data</code> removes part/BOM/file data and should be used only with backups and explicit maintenance windows.</li>
+</ul>
+<h1 id="troubleshooting">Troubleshooting</h1>
+<p>Use this page when behavior does not match expectations.</p>
+<h2 id="login-or-access-denied">Login Or Access Denied</h2>
+<p>Checks:</p>
+<ul>
+<li>Confirm user can sign in.</li>
+<li>Confirm role includes required permission for the page.</li>
+<li>Confirm user is linked to correct customer/supplier/job if scoped externally.</li>
+</ul>
+<p>Common cause:</p>
+<ul>
+<li>Permission exists but row-level scope excludes requested record.</li>
+</ul>
+<h2 id="inventory-is-empty-or-missing-parts">Inventory Is Empty Or Missing Parts</h2>
+<p>Checks:</p>
+<ul>
+<li>Remove filters one by one (<code>Approved</code>, <code>Full files</code>, <code>Used in job</code>, search terms).</li>
+<li>Confirm part revisions exist in database.</li>
+<li>For scoped users, verify part is inside allowed jobs/orders/customer/supplier scope.</li>
+</ul>
+<h2 id="part-detail-missing-files">Part Detail Missing Files</h2>
+<p>Checks:</p>
+<ul>
+<li>Confirm file naming includes correct part number and revision.</li>
+<li>Confirm file is in expected deliverables group.</li>
+<li>Run <code>Actions -&gt; Update files</code> in Part Detail.</li>
+<li>For assemblies, try recursive file refresh.</li>
+</ul>
+<h2 id="drawing-or-3d-preview-missing">Drawing Or 3D Preview Missing</h2>
+<p>Drawing:</p>
+<ul>
+<li>Ensure drawing PNG/PDF artifacts exist for the same PN/rev.</li>
+<li>Confirm drawing PNG naming conventions are respected.</li>
+</ul>
+<p>3D:</p>
+<ul>
+<li>Ensure at least one of <code>3mf</code>, <code>ply</code>, <code>stl</code> exists for that revision.</li>
+<li>In 3D tab, pick a file from dropdown if multiple are present.</li>
+</ul>
+<h2 id="associated-files-not-visible">Associated Files Not Visible</h2>
+<p>Checks:</p>
+<ul>
+<li>Confirm files were imported in <code>extra/&lt;PN&gt;/&lt;REV_OR__no_rev__&gt;/...</code>.</li>
+<li>Confirm revision token (<code>__no_rev__</code> for blank rev) is correct.</li>
+<li>Confirm extra files are enabled by system configuration.</li>
+</ul>
+<h2 id="upload-pack-import-errors">Upload Pack Import Errors</h2>
+<p>Checks:</p>
+<ul>
+<li>ZIP contains <code>bom/</code> plus valid <code>*_FLATBOM.txt</code> and <code>*_TREEBOM.txt</code>.</li>
+<li>Deliverables are under valid groups (<code>pdf</code>, <code>dxf</code>, <code>step</code>, etc).</li>
+<li>File size and count are within configured limits.</li>
+<li>Paths are not nested unsafely or using blocked patterns.</li>
+</ul>
+<p>Actions:</p>
+<ul>
+<li>Download report JSON from results panel.</li>
+<li>Review <code>errors</code> and <code>warnings</code> with stage/file context.</li>
+</ul>
+<h2 id="job-ordering-looks-wrong">Job Ordering Looks Wrong</h2>
+<p>If <code>Parts Not Yet Ordered</code>, <code>Parts in Orders</code>, or <code>Over-Ordered</code> seem off:</p>
+<ul>
+<li>Check order status. Draft/cancelled orders do not count for ordered coverage.</li>
+<li>Confirm ordered lines use correct PN/rev.</li>
+<li>If ordering both children and full parent assemblies, over-order on children is expected behavior and should appear in <code>Over-Ordered Parts</code>.</li>
+<li>Compare Flat vs Tree remaining view to see aggregate vs occurrence-level demand.</li>
+</ul>
+<h2 id="doc-pack-output-missing-sections">Doc Pack Output Missing Sections</h2>
+<p>Checks:</p>
+<ul>
+<li>Confirm selected output checkboxes match desired result.</li>
+<li>For binder, confirm options like <code>binder_add_*</code> and selected file types.</li>
+<li>Confirm required files exist for included BOM members.</li>
+<li>If flat patterns are missing, verify flat pattern naming/filter settings.</li>
+</ul>
+<h2 id="add-in-cannot-connect">Add-in Cannot Connect</h2>
+<p>Checks in add-in Configuration tab:</p>
+<ul>
+<li>Backend URL reachable from workstation.</li>
+<li>Auth token is valid and not revoked.</li>
+<li><code>Test connection</code> response is successful.</li>
+</ul>
+<p>If still failing:</p>
+<ul>
+<li>Regenerate token in <code>/ui/addin/tokens</code>.</li>
+<li>Ask admin to verify token status in <code>/ui/admin/addin</code>.</li>
+</ul>
+<h2 id="numbering-errors-in-add-in">Numbering Errors In Add-in</h2>
+<p>Checks:</p>
+<ul>
+<li>Scheme exists and is active.</li>
+<li>Required context fields for selected scheme are populated.</li>
+<li>Validation rules (charset/length/sequence requirement) are satisfied.</li>
+</ul>
+<p>Tools:</p>
+<ul>
+<li>Use <code>Preview</code> before allocate.</li>
+<li>Use scheme <code>Validate</code> in advanced editor.</li>
+<li>For rename, run dry run first.</li>
+</ul>
+<h2 id="installer-or-add-in-not-showing-in-solidworks">Installer Or Add-in Not Showing In SolidWorks</h2>
+<p>Checks:</p>
+<ul>
+<li>Installer run as admin.</li>
+<li>Add-in enabled in <code>Tools &gt; Add-Ins</code> for both Active and Start Up.</li>
+<li>COM registration exists for add-in GUID.</li>
+</ul>
+<p>Repair path:</p>
+<ul>
+<li>Re-run installer.</li>
+<li>Run manual <code>RegAsm</code> register command if needed.</li>
+</ul>
+<h2 id="what-to-collect-before-escalation">What To Collect Before Escalation</h2>
+<p>Include:</p>
+<ul>
+<li>Exact page or tab where issue occurs.</li>
+<li>Part number and revision.</li>
+<li>Job/order number if applicable.</li>
+<li>Timestamp and user email.</li>
+<li>For upload/import: report JSON.</li>
+<li>For add-in: last run log from <code>Open last run log</code>.</li>
 </ul>
 <h1 id="reference-auto-updated">Reference (auto-updated)</h1>
-<p>This section is auto-generated when you run <code>flask help build</code>. It summarizes routes, pages, and options detected in the codebase.</p>
+<p>This section is generated when you run <code>flask --app run.py help build</code>.</p>
+<p>Use it for quick lookup of:</p>
+<ul>
+<li>Web routes and pages</li>
+<li>API endpoint inventory by module</li>
+<li>Environment variables found in example env files</li>
+<li>SolidWorks add-in options and tabs detected from source</li>
+</ul>
 <h2 id="web-ui-pages-routes">Web UI pages (routes)</h2>
 <table>
 <thead>
@@ -891,6 +1009,11 @@
 <td></td>
 </tr>
 <tr>
+<td><code>TINYMRP_SECURITY_MODE</code></td>
+<td><code>compat</code></td>
+<td></td>
+</tr>
+<tr>
 <td><code>VITE_BACKEND_URL</code></td>
 <td><code>http://localhost:5000</code></td>
 <td></td>
@@ -948,6 +1071,11 @@
 <td>Publish/BOM tab</td>
 </tr>
 <tr>
+<td><code>ExportDxf</code></td>
+<td>Add-in option.</td>
+<td>Add-in UI</td>
+</tr>
+<tr>
 <td><code>ExportEdrawingDrawing</code></td>
 <td>Export eDrawings drawing.</td>
 <td>Publish/BOM tab</td>
@@ -964,6 +1092,16 @@
 </tr>
 <tr>
 <td><code>CreateUploadPack</code></td>
+<td>Add-in option.</td>
+<td>Add-in UI</td>
+</tr>
+<tr>
+<td><code>UploadPackIncludeDeliverables</code></td>
+<td>Add-in option.</td>
+<td>Add-in UI</td>
+</tr>
+<tr>
+<td><code>UploadPackIncludeExtras</code></td>
 <td>Add-in option.</td>
 <td>Add-in UI</td>
 </tr>

@@ -1,6 +1,13 @@
 # Reference (auto-updated)
 
-This section is auto-generated when you run `flask help build`. It summarizes routes, pages, and options detected in the codebase.
+This section is generated when you run `flask --app run.py help build`.
+
+Use it for quick lookup of:
+
+- Web routes and pages
+- API endpoint inventory by module
+- Environment variables found in example env files
+- SolidWorks add-in options and tabs detected from source
 
 ## Web UI pages (routes)
 

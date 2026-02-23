@@ -1,127 +1,150 @@
-# SolidWorks add-in walkthrough
+# SolidWorks Add-in Walkthrough
 
-This section explains each tab and option in the TinyMRP SolidWorks add-in.
+This guide maps each add-in tab to practical tasks.
 
-## Publish/BOM tab
+## Publish/BOM Tab
 
-### Where to find it
+### Deliverables
 
-- Open the TinyMRP task pane.
-- Click the Publish/BOM tab.
+Model outputs:
 
-### What you can do
+- PNG
+- STEP
+- eDrawings
+- 3MF
+- PLY
+- STL
 
-- Export deliverables (PDF, DXF, STEP, 3MF, PLY, STL, PNG).
-- Export BOM files.
-- Publish for a single model or a whole assembly.
+Drawing outputs:
 
-### Step-by-step: publish deliverables
+- PNG drawing
+- PDF
+- DXF
+- eDrawings drawing
 
-1) Open a part or assembly in SolidWorks.
-2) In Publish/BOM, select the outputs you need.
-3) Choose the deliverables folder.
-4) Click Publish.
-5) Wait for the process to complete.
+### Publish options
 
-**What this button does:** Publish creates files on disk. It does not automatically upload them; you upload or import them later.
+- `Overwrite files`: replace existing outputs.
+- `Top level only`: limit assembly processing to root item.
 
-### Associated files (extra files)
+### Associated files
 
-1) In Publish/BOM, click "Manage associated files...".
-2) Add one or more files (photos, scans, reports).
-3) Optional: add a label in the list.
-4) Click OK to save.
+- `Manage associated files...` opens the extra-files manager.
+- Data is stored in custom property `TINYMPR_ASSOC_FILES`.
 
-**What this does:** The list is stored inside the CAD file as a custom property (`TINYMPR_ASSOC_FILES`).
+### Upload pack actions
 
-### Create Upload Pack (ZIP)
+- `Create upload pack` builds ZIP from selected deliverables and associated files.
+- Include toggles:
+  - `Include deliverables`
+  - `Include associated files`
 
-1) Check "Create Upload Pack (ZIP)" in the Publish/BOM options.
-2) Click Publish.
-3) The add-in writes a ZIP that contains BOM files, deliverables, and associated files.
+### BOM actions
 
-**Tip:** If revision is blank, the ZIP uses the `__no_rev__` token in the extra files path.
+- `Process BOM` exports BOM text files for import.
 
-### Step-by-step: export BOM
+### Progress and run controls
 
-1) Open the top-level assembly.
-2) Choose BOM options (flat or indented).
-3) Click Export BOM.
-4) Verify that a BOM file is created in the output folder.
+- Progress bars for `Create files` and `Process BOM`.
+- `Cancel current task` aborts long operations.
+- `Open last run log` opens detailed run log.
 
-### Troubleshooting
+## Tools Tab
 
-- **Missing output files:** Check that the model is saved and has a part number.
-- **Wrong file name:** Check the revision value and part number in properties.
+### Model utilities
 
-## Tools tab
+- `Freeze model`
+- `Unfreeze model`
+- `Normalize units`
 
-### What you can do
+### Visibility utilities
 
-- Normalize units.
-- Hide feature types.
-- Run bulk operations on assemblies.
+Hide selected reference geometry and sketch categories in bulk:
 
-### Tips
+- Origin, planes, axes, points, coordinate systems
+- 2D/3D sketches, spline/curve helpers
+- Envelope and related helper geometry
 
-- Use Tools carefully on large assemblies.
-- Make a backup before running mass changes.
+Controls include `Select all`, `Clear`, `Hide selected features`, and cancellation support.
 
-## Numbering tab
+## Numbering Tab
 
-### What you can do
+### Quick actions
 
-- Select a numbering scheme.
-- Preview how numbers will look.
-- Allocate part numbers to configurations.
-- Apply or rename based on rules.
+- `Preview Partnumber`
+- `Allocate & Apply`
+- `Allocate and rename`
 
-### Step-by-step: allocate part numbers
+### Context and presets
 
-1) Open the Numbering tab.
-2) Pick a scheme from the list.
-3) Click Preview to see the next number.
-4) Click Allocate to assign to the current configuration.
+- Preset scheme dropdown with refresh.
+- Context fields such as type, family, subfamily, project, site.
+- Live preview fields for part number, revision, and display code.
 
-**Common mistake:** Allocating numbers without saving the document. Always save after allocating.
+### Advanced numbering editor
 
-## Configuration tab
+- Full scheme builder: segments, separator, scope mode, scope keys.
+- Sequence controls: padding, base, start, reset policy.
+- Revision controls: policy and start value.
+- Validation rules: max length, allowed charset, require sequence segment.
+- Segment operations: add, update, remove, move up/down.
+- `Validate scheme`, `Save scheme`, `Deactivate`.
 
-This area controls how the add-in connects to the server.
+### Advanced allocation and rename
 
-### Quick Start sub-tab
+- Allocation scope: active config, all configs, or selected configurations.
+- Optional document-level property write.
+- Rename dry run support before commit.
+- Rename behavior options include safe mode and reference-aware mode.
 
-- Server URL
-- Token
-- Test connection
+## Configuration Tab
 
-### Advanced sub-tab
+Configuration has two sub-tabs: `Quick Start` and `Advanced`.
 
-- Folder locations
-- Custom behavior flags
-- Debug options (if enabled)
+### Quick Start
 
-### Step-by-step: update settings
+- Backend URL
+- Auth token
+- Preset scheme selection
+- Numbering defaults (property names, apply mode, context defaults)
+- Deliverables folder
+- `Save settings`
 
-1) Go to Configuration.
-2) Update the fields.
-3) Click Save.
+### Advanced
 
-**Tip:** If the add-in cannot connect, double-check the URL and token.
+- Template paths:
+  - Blank sheet template
+  - BOM template
+- Drawing export settings:
+  - DXF sheet names
+- Server links:
+  - Web link
+  - Backend URL
+  - Auth token
+- Diagnostics and actions:
+  - `Test connection`
+  - `Apply server defaults`
+  - `Preview next`
+  - `Go to Numbering`
+  - `Diagnostics`
+- Save actions:
+  - `Save local config`
+  - `Save server settings`
 
-## Output folders and naming
+## Recommended Daily Flows
 
-The add-in writes files to subfolders inside your deliverables folder. Typical examples:
+### Release package from CAD
 
-- `deliverables/pdf/`
-- `deliverables/step/`
-- `deliverables/3mf/`
-- `deliverables/ply/`
-- `deliverables/stl/`
+1. Open model/assembly.
+2. In `Publish/BOM`, select required outputs.
+3. Run `Create files`.
+4. Optionally run `Create upload pack`.
+5. Import ZIP in web app (`/ui/upload-pack`).
 
-File naming uses part number and revision:
+### Controlled numbering + rename
 
-- `PARTNUMBER_REV_REVISION.ext`
-
-If the revision is blank, the name ends with `_REV_.ext` (this is expected).
-
+1. In `Numbering`, select preset and context.
+2. Preview.
+3. Allocate and apply.
+4. Run rename dry run.
+5. Execute rename only after preview looks correct.
