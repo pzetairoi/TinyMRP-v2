@@ -1,4 +1,4 @@
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.2"
 #define BuildStamp GetDateTimeString('yyyymmdd_hhnnss', '', '')
 #define OutputDirName "Windows Installer latest"
 #define ConfigFileName "TinyMRP_config.txt"
