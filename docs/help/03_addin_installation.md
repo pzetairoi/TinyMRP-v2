@@ -1,55 +1,88 @@
-# SolidWorks add-in installation
+# SolidWorks Add-in Installation
 
-This section explains how to install the TinyMRP SolidWorks add-in.
+This page covers installer setup, activation in SolidWorks, and first connection to TinyMRP.
 
-## What you need
+## Before You Start
 
 - SolidWorks installed on the workstation.
-- Windows user with permission to install software.
-- The TinyMRP add-in installer (`TinyMRP_SolidWorksAddin_*.exe`).
-- A TinyMRP access token (from the Tokens page in the web app).
+- .NET Framework 4.8 available.
+- Local admin rights for installer and COM registration.
+- TinyMRP access token from `/ui/addin/tokens`.
 
-**Tip:** If you do not have an installer, ask your admin to build or provide it.
+## Get The Installer
 
-## Step-by-step: install the add-in
+Use one of these:
 
-1) Close SolidWorks if it is open.
-2) Run the installer file.
-3) Accept the prompts. The installer registers the add-in with SolidWorks.
-4) When finished, open SolidWorks.
+- Web tools page: `/tools` -> `SolidWorks Setup` -> `Download latest`
+- Landing download endpoint: `/downloads/addin`
+- File drop used by server tools: `solidworks-addin/Windows Installer latest`
 
-## Step-by-step: enable the add-in in SolidWorks
+## Run The Installer
 
-1) In SolidWorks, go to `Tools > Add-Ins`.
-2) Find "TinyMRP SolidWorks Add-in" in the list.
-3) Check "Active Add-ins" to enable it now.
-4) Check "Start Up" so it loads every time.
+1. Close SolidWorks.
+2. Run `TinyMRP_SolidWorksAddin_*.exe` as administrator.
+3. Complete installer pages:
+   - Output folder for exports
+   - Template paths and backend URL
+   - Optional auth token
+   - Optional override/clear of existing settings
 
-**Common mistake:** Enabling only "Active Add-ins" means it will not load on next restart.
+The installer registers `TinyMRP.SolidWorksAddin.dll` with `RegAsm`.
 
-## Step-by-step: open the task pane
+## Enable In SolidWorks
 
-1) Look on the right side for the task pane.
-2) Click the TinyMRP icon.
-3) If the pane is hidden, use `View > Task Pane` to show it.
+1. Open SolidWorks.
+2. Go to `Tools > Add-Ins`.
+3. Enable `TinyMRP SolidWorks Add-in` for:
+   - `Active Add-ins`
+   - `Start Up`
 
-## Step-by-step: configure the connection
+If startup is not checked, the add-in will not auto-load after restart.
 
-1) Open the Configuration tab in the add-in.
-2) Set the Server URL (for example `http://server:5000`).
-3) Paste your access token from the Tokens page.
-4) Click "Test connection" (or the equivalent button).
-5) Save the settings.
+## Open The Task Pane
 
-**What this button does:** Test connection checks that the server and token are valid.
+- Use `View > Task Pane` if hidden.
+- Click the TinyMRP icon in the right task pane.
+- You should see tabs: `Publish/BOM`, `Tools`, `Numbering`, `Configuration`.
 
-## Where settings are saved
+## First Connection (Recommended)
 
-The add-in stores its settings in a configuration file and uses it when SolidWorks opens. If settings are missing, the add-in may open with empty fields.
+1. Open `Configuration` tab, `Quick Start`.
+2. Set `Backend URL`.
+3. Paste token into `Auth token`.
+4. Click `Test connection`.
+5. Save settings.
 
-## If installation fails
+## Where Settings Are Stored
 
-- Restart the computer and try again.
-- Check that SolidWorks is installed correctly.
-- Ask your IT team to run the installer as an administrator.
+Config file: `TinyMRP_config.txt`
 
+Read/write precedence:
+
+1. `%PROGRAMDATA%\TinyMRP\TinyMRP_config.txt`
+2. Add-in install folder copy
+3. `%LOCALAPPDATA%\TinyMRP\TinyMRP_config.txt`
+
+If machine-level path is not writable, the add-in falls back to user-level path.
+
+## Manual Register / Repair (If Needed)
+
+If installer registration fails:
+
+```powershell
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /codebase /tlb
+```
+
+To unregister:
+
+```powershell
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\RegAsm.exe" "C:\Path\To\TinyMRP.SolidWorksAddin.dll" /unregister
+```
+
+## Silent Install (IT Deployment)
+
+Example:
+
+```powershell
+TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://server:5000" /AUTHTOKEN="tmrp_xxx"
+```

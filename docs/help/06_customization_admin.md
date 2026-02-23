@@ -1,79 +1,126 @@
-# Customization and admin settings
+# Customization And Admin Settings
 
-This section is for admins who manage the system.
+This page is for admin users who maintain TinyMRP operations.
 
-## Branding (logo and visual identity)
+## Admin Dashboard (`/admin`)
 
-### Where to find it
+Main admin modules:
 
-- Admin Dashboard > App Settings
+- Users
+- Roles
+- Audit Log
+- Metrics
+- App Settings
+- Add-in Admin
+- Jobs, Suppliers, Customers, Orders shortcuts
 
-### What you can do
+## App Settings (`/admin/settings`)
 
-- Upload a company logo.
-- Update the branding used in the web app and doc packs.
+### Branding
 
-### Step-by-step
+- Upload PNG or SVG logo used in UI and doc packs.
+- Optional remove-logo toggle to return to default.
 
-1) Open Admin Dashboard.
-2) Go to App Settings.
-3) Upload a logo file (PNG or SVG).
-4) Save changes.
+### Timezone
 
-**Expected result:** The new logo appears in the header and in doc packs.
+- Sets timezone used in generated document timestamps.
+- Use valid IANA names (example: `America/New_York`).
 
-## Timezone
+### Hardware classification
 
-### Why it matters
+- Folder keywords used to classify hardware during ZIP import.
+- Case-insensitive matching.
 
-Doc packs show a "Generated" timestamp. The timezone setting ensures the time is correct for your location.
+### Flat pattern page filter
 
-### Step-by-step
+- Sheet-name tokens used to remove flat pattern pages from binder output.
 
-1) Open Admin Dashboard.
-2) Go to App Settings.
-3) Enter a timezone (for example `Australia/Melbourne`).
-4) Save changes.
+### Upload Pack limits
 
-**Tip:** Use standard timezone names from the IANA list.
+- Max ZIP size (MB)
+- Max file size (MB)
+- Max files per ZIP
+- `0` disables a limit
 
-## Users and roles
+## Users And Roles
 
-### Where to find it
+### Users (`/admin/users`)
 
-- Admin Dashboard > Users
-- Admin Dashboard > Roles
+- Create, edit, bulk-delete users.
+- Optional password reset in user edit.
 
-### What you can do
+### Roles (`/admin/roles`)
 
-- Add users.
-- Assign roles and permissions.
-- Limit access to specific functions.
+- Create/edit role permission sets.
+- Typical permission groups:
+  - Items/BOM
+  - Jobs/Orders
+  - Suppliers/Customers
+  - Tools/Import
+  - Numbering management
 
-### Common role patterns
+Do not change access behavior in code unless intentionally redesigning ACL. Production access should be managed through roles, permissions, and entity links.
 
-- Viewer: read-only access
-- Operator: view + import
-- Planner: manage jobs and orders
-- Admin: full access
+## Access Scoping Model (Operational View)
 
-## Add-in administration
+External users can be scoped by linked entities:
 
-### Where to find it
+- Customer-linked users see customer-relevant data.
+- Supplier-linked users see supplier-relevant data.
+- Internal privileged roles remain unscoped.
 
-- Admin Dashboard > Add-in
+This scoping is enforced server-side on jobs, orders, customers, suppliers, parts, and related views.
 
-### What you can do
+## Customer And Supplier Master Data
 
-- View or manage add-in settings and tokens.
-- Check usage if logs are enabled.
+### Customers (`/admin/customers`)
 
-## Deliverables storage
+- Company, contacts, addresses, tags, status/type.
+- Linked users list controls customer-scoped access.
+- Related jobs and orders are visible in detail view.
 
-### What you can do
+### Suppliers (`/admin/suppliers`)
 
-- Choose the deliverables root folder.
-- Control public file access.
+- Company, contact/rating, categories, processes, lead time, tags.
+- Linked users list controls supplier-scoped access.
+- Related orders visible in detail view.
 
-**Common mistake:** Enabling public file URLs without a proxy or security layer.
+## Jobs Administration (`/admin/jobs`)
 
+- Manage schedule, status, priority, participants, vendors, customer.
+- Edit job BOM with part picker and inline filters.
+- Analyze purchasing coverage:
+  - Parts in Orders
+  - Over-Ordered Parts
+  - Parts Not Yet Ordered (Flat/Tree)
+
+## Orders Administration (`/admin/orders`)
+
+- Purchase and sales order lifecycle management.
+- Line-level pricing, discount, tax, and summary totals.
+- Job-linked orders can lock customer selection.
+- Docpack export and scope-of-supply export are available per order.
+
+## Add-in Admin (`/ui/admin/addin`)
+
+- Review users and revoke add-in tokens.
+- Manage numbering scheme metadata:
+  - preset flag
+  - recommended flag
+  - quickstart visibility
+- Build/validate/save/deactivate schemes in browser.
+
+## Audit And Metrics
+
+### Audit (`/admin/audit/`)
+
+- Filter by action, user, endpoint, method, resource, and time range.
+- Useful for traceability and access troubleshooting.
+
+### Metrics (`/admin/metrics`)
+
+- Snapshot of resource usage and slow areas.
+
+## High-Risk Operations
+
+- `Purge Parts Data` removes part/BOM/file data and should be used only with backups and explicit maintenance windows.

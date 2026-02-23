@@ -1,105 +1,126 @@
-# Server and web app installation
+# Server And Web App Installation
 
-This section explains how to install and run the TinyMRP server and web app. It is written for non-IT users and assumes you have someone with basic server access.
+This page covers first deployment, safe updates, and operating basics for TinyMRP v2.
 
-## Before you begin
+## Deployment Options
 
-You will need:
+### Recommended: Docker Compose
 
-- A Windows or Linux server (or a workstation for testing).
-- An internet connection for the first setup.
-- Access to the deliverables folder where SolidWorks exports files.
-- A browser (Chrome, Edge, or Firefox).
+Use Docker for production or pilot environments. It is the easiest path for repeatable updates.
 
-**Tip:** If you are not sure which installation method to use, ask your IT contact to set up the Docker method. It is usually the simplest to keep stable.
+### Advanced: Local developer runtime
 
-## Option A: Recommended installation (Docker Compose)
+Use direct Python and Node only for development and debugging.
 
-This method runs the app, database, and file service together.
+## Prerequisites
 
-### Step 1: Get the project files
+- Access to a host with Docker and Docker Compose.
+- MongoDB connection string (`MONGO_URI`), local or hosted.
+- A file root where deliverables are stored and readable by the app.
+- Access to edit environment variables and run CLI commands.
 
-1) Download or clone the TinyMRP repository to a folder on the server.
-2) Keep this folder for future updates.
+## First-Time Setup (Docker)
 
-### Step 2: Prepare the environment file
+### 1) Prepare environment file
 
-1) Copy an example env file (for example `.env.server.example`) to `.env`.
-2) Open `.env` in a text editor.
-3) Fill in the required values. At minimum you must set:
-   - `SECRET_KEY`
-   - `SECURITY_PASSWORD_SALT`
-   - `MONGO_URI`
-   - `DELIVERABLES_DIR` or `FILES_LOCAL_ROOT` (where deliverables are stored)
-   - `HTTP_PORT` (the port users will open in their browser)
+- Copy an example such as `.env.server.example` to `.env`.
+- Set at least:
+  - `SECRET_KEY`
+  - `SECURITY_PASSWORD_SALT`
+  - `MONGO_URI`
+  - `FILES_LOCAL_ROOT` (or equivalent file root key in your setup)
+  - `HTTP_PORT`
 
-**Common mistake:** Pointing `DELIVERABLES_DIR` to a local folder on your PC instead of the shared folder where deliverables are exported.
+### 2) Start the stack
 
-### Step 3: Start the stack
+Run from repository root:
 
-1) Open a terminal in the project folder.
-2) Run:
-   - `docker compose up -d --build`
-3) Wait until the containers are running.
+```powershell
+docker compose up -d --build
+```
 
-### Step 4: Create the first admin user
+### 3) Seed roles and create first admin
 
-1) Run the commands below:
-   - `docker compose exec app flask --app run.py user seed-roles`
-   - `docker compose exec app flask --app run.py user create --email admin@yourcompany.com --password <password>`
-   - `docker compose exec app flask --app run.py user grant-admin --email admin@yourcompany.com`
-2) The admin can now log in and create other users.
+```powershell
+docker compose exec app flask --app run.py user seed-roles
+docker compose exec app flask --app run.py user create --email admin@yourcompany.com --password <password>
+docker compose exec app flask --app run.py user grant-admin --email admin@yourcompany.com
+```
 
-### Step 5: Open the web app
+### 4) Open TinyMRP
 
-1) Open your browser.
-2) Go to `http://<server>:<HTTP_PORT>` (for example `http://192.168.1.10:5000`).
-3) Log in with the admin account you created.
+- URL: `http://<server>:<HTTP_PORT>`
+- Login with the admin account.
 
-## Option B: Local development install (advanced)
+## File Storage Rules
 
-This is intended for developers. It is not the recommended production setup.
+TinyMRP matches files by part number and revision. Standard groups include:
 
-1) Install Python and Node.js.
-2) Install Python requirements: `pip install -r requirements.txt`.
-3) Install frontend dependencies: `npm install` in the `frontend/` folder.
-4) Run the backend: `python run.py`.
-5) Run the frontend build: `npm run build` (or `npm run dev` for development).
+- `pdf`, `dxf`, `step`, `edr`, `3mf`, `ply`, `stl`, `png`, `datasheet`
 
-## File storage and deliverables
-
-TinyMRP expects deliverables to be stored in a folder structure like this:
-
-- `deliverables/png/` (preview images)
-- `deliverables/pdf/` (drawings)
-- `deliverables/dxf/`
-- `deliverables/step/`
-- `deliverables/3mf/`
-- `deliverables/ply/`
-- `deliverables/stl/`
-
-Each file should follow the naming pattern:
+Expected naming pattern:
 
 - `PARTNUMBER_REV_REVISION.ext`
+- Drawing preview PNG commonly appears as `*_DWG.png`.
 
-For example:
+If revision is blank, empty revision tokens are allowed and should be treated as valid.
 
-- `ABC-100_REV_A.pdf`
-- `ABC-100_REV_A.png`
-- `ABC-100_REV_.pdf` (empty revision is allowed)
+## Upload Pack Limits
 
-**What this means:** If you publish a part and later change the revision, the file name changes. TinyMRP uses this to keep revisions separate.
+Global defaults can be controlled by env and admin settings:
 
-## Logging in and permissions
+- Max ZIP size
+- Max single file size
+- Max files per ZIP
 
-- Users must log in to see the app.
-- Roles control which menus and actions are visible.
-- The admin can create roles and assign permissions in the Admin Dashboard.
+These limits are enforced during `/api/upload/pack` processing.
 
-## Updating the server later
+## Local Development (Advanced)
 
-1) Pull the latest code changes into the server folder.
-2) Re-run `docker compose up -d --build`.
-3) If the database schema changes, follow the release notes.
+1. Install Python dependencies: `pip install -r requirements.txt`
+2. Install frontend dependencies in `frontend/`: `npm install`
+3. Run backend (`python run.py`) and build frontend (`npm run build` or `npm run dev`)
 
-**Tip:** Schedule updates during low usage hours.
+## Upgrade Procedure
+
+1. Pull latest code.
+2. Rebuild and restart containers:
+
+```powershell
+docker compose up -d --build
+```
+
+3. Re-run `seed-roles` only if role definitions were intentionally updated by release notes.
+4. Validate critical pages:
+  - `/ui/parts`
+  - `/ui/part/<pn>`
+  - `/ui/upload-pack`
+  - `/admin/jobs/`
+  - `/admin/orders/`
+
+## Backup Recommendations
+
+- Database backup (MongoDB dump/snapshot).
+- Deliverables file root backup.
+- `instance/` backup if used for runtime files.
+- Branding and app settings backup.
+
+## Security Baseline
+
+- Keep `SECRET_KEY` and `SECURITY_PASSWORD_SALT` strong and private.
+- Run HTTPS in production.
+- Keep `FILES_PUBLIC_URLS` disabled unless you explicitly need public file links.
+- Use roles and permissions instead of code edits for access control.
+
+## Help Build Command
+
+After updating help markdown:
+
+```powershell
+flask --app run.py help build
+```
+
+This regenerates:
+
+- `app/static/help/help.html`
+- `app/static/help/help_toc.json`

@@ -1,55 +1,135 @@
 # Troubleshooting
 
-Use this section when something is not working as expected.
+Use this page when behavior does not match expectations.
 
-## Login issues
+## Login Or Access Denied
 
-- **Cannot log in:** Check email and password. Ask an admin to reset your password.
-- **Access denied:** You may not have the required role or permission.
+Checks:
 
-## Missing files in part detail
+- Confirm user can sign in.
+- Confirm role includes required permission for the page.
+- Confirm user is linked to correct customer/supplier/job if scoped externally.
 
-- Confirm the file is in the deliverables folder.
-- Confirm the file name matches the part number and revision.
-- Re-import the ZIP.
+Common cause:
 
-## Thumbnails not showing
+- Permission exists but row-level scope excludes requested record.
 
-- Wait a few seconds after import (thumbnails are generated).
-- If still missing, re-import or run thumbnail rebuild.
+## Inventory Is Empty Or Missing Parts
 
-## Drawing preview is blank
+Checks:
 
-- Confirm a file ending with `_DWG.png` exists in the `png` folder.
-- Ensure the drawing file is readable (open it outside TinyMRP).
+- Remove filters one by one (`Approved`, `Full files`, `Used in job`, search terms).
+- Confirm part revisions exist in database.
+- For scoped users, verify part is inside allowed jobs/orders/customer/supplier scope.
 
-## 3D preview missing
+## Part Detail Missing Files
 
-- Confirm a 3MF, PLY, or STL file exists.
-- Confirm the file name matches the part number and revision.
-- Try selecting a different format in the 3D preview selector.
+Checks:
 
-## Doc pack is empty or missing sections
+- Confirm file naming includes correct part number and revision.
+- Confirm file is in expected deliverables group.
+- Run `Actions -> Update files` in Part Detail.
+- For assemblies, try recursive file refresh.
 
-- Ensure PDFs exist for the part.
-- Re-generate the doc pack after verifying files.
+## Drawing Or 3D Preview Missing
 
-## Import errors
+Drawing:
 
-- **ZIP rejected:** Check the folder structure.
-- **No parts created:** Ensure the BOM file and deliverables exist.
-- **Wrong revision:** Check the revision value in file names.
-- **Associated files missing:** Check `extra/<PN>/<REV_OR__no_rev__>/...` paths in the ZIP.
+- Ensure drawing PNG/PDF artifacts exist for the same PN/rev.
+- Confirm drawing PNG naming conventions are respected.
 
-## Add-in connection failed
+3D:
 
-- Check the server URL and token.
-- Ensure the server is running.
-- Ask your admin to create a new token.
+- Ensure at least one of `3mf`, `ply`, `stl` exists for that revision.
+- In 3D tab, pick a file from dropdown if multiple are present.
 
-## When to contact support
+## Associated Files Not Visible
 
-- You see repeated errors after following the steps above.
-- The server does not start.
-- Data appears corrupted or missing across multiple parts.
+Checks:
 
+- Confirm files were imported in `extra/<PN>/<REV_OR__no_rev__>/...`.
+- Confirm revision token (`__no_rev__` for blank rev) is correct.
+- Confirm extra files are enabled by system configuration.
+
+## Upload Pack Import Errors
+
+Checks:
+
+- ZIP contains `bom/` plus valid `*_FLATBOM.txt` and `*_TREEBOM.txt`.
+- Deliverables are under valid groups (`pdf`, `dxf`, `step`, etc).
+- File size and count are within configured limits.
+- Paths are not nested unsafely or using blocked patterns.
+
+Actions:
+
+- Download report JSON from results panel.
+- Review `errors` and `warnings` with stage/file context.
+
+## Job Ordering Looks Wrong
+
+If `Parts Not Yet Ordered`, `Parts in Orders`, or `Over-Ordered` seem off:
+
+- Check order status. Draft/cancelled orders do not count for ordered coverage.
+- Confirm ordered lines use correct PN/rev.
+- If ordering both children and full parent assemblies, over-order on children is expected behavior and should appear in `Over-Ordered Parts`.
+- Compare Flat vs Tree remaining view to see aggregate vs occurrence-level demand.
+
+## Doc Pack Output Missing Sections
+
+Checks:
+
+- Confirm selected output checkboxes match desired result.
+- For binder, confirm options like `binder_add_*` and selected file types.
+- Confirm required files exist for included BOM members.
+- If flat patterns are missing, verify flat pattern naming/filter settings.
+
+## Add-in Cannot Connect
+
+Checks in add-in Configuration tab:
+
+- Backend URL reachable from workstation.
+- Auth token is valid and not revoked.
+- `Test connection` response is successful.
+
+If still failing:
+
+- Regenerate token in `/ui/addin/tokens`.
+- Ask admin to verify token status in `/ui/admin/addin`.
+
+## Numbering Errors In Add-in
+
+Checks:
+
+- Scheme exists and is active.
+- Required context fields for selected scheme are populated.
+- Validation rules (charset/length/sequence requirement) are satisfied.
+
+Tools:
+
+- Use `Preview` before allocate.
+- Use scheme `Validate` in advanced editor.
+- For rename, run dry run first.
+
+## Installer Or Add-in Not Showing In SolidWorks
+
+Checks:
+
+- Installer run as admin.
+- Add-in enabled in `Tools > Add-Ins` for both Active and Start Up.
+- COM registration exists for add-in GUID.
+
+Repair path:
+
+- Re-run installer.
+- Run manual `RegAsm` register command if needed.
+
+## What To Collect Before Escalation
+
+Include:
+
+- Exact page or tab where issue occurs.
+- Part number and revision.
+- Job/order number if applicable.
+- Timestamp and user email.
+- For upload/import: report JSON.
+- For add-in: last run log from `Open last run log`.
