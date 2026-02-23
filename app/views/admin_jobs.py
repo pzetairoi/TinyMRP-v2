@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify
 from flask_login import current_user
 from datetime import datetime, timedelta
+from typing import Dict, List, Tuple
 from app.services.acl import (
     permissions_required,
     apply_job_scope,
@@ -18,6 +19,7 @@ from app.models.customer import Customer
 from app.models.auth import User
 from app.models.order import Order
 from app.models.part import Part
+from app.models.bom import BOMLink
 from app.services.attrs import harvest_part_attrs
 from app.services.thumbs import thumb_urls_for
 from app.services.biz_utils import generate_job_number
@@ -77,6 +79,368 @@ def _filter_job_participants(user_ids):
             continue
         out.append(u)
     return out
+
+
+_MAX_BOM_DEPTH = 40
+
+
+def _part_key(pn: str, rev: str | None) -> Tuple[str, str]:
+    return ((pn or "").strip().lower(), _clean_rev(rev).lower())
+
+
+def _effective_rev_for_bom(pn: str, rev: str | None) -> str:
+    rev_clean = _clean_rev(rev)
+    if rev_clean:
+        return rev_clean
+    p = Part.objects(part_number__iexact=(pn or "").strip()).only("revision", "updated_at").order_by("-updated_at").first()
+    return _clean_rev(getattr(p, "revision", "") if p else "")
+
+
+def _bom_children_links(parent_pn: str, parent_rev: str | None) -> List[BOMLink]:
+    parent_pn = (parent_pn or "").strip()
+    if not parent_pn:
+        return []
+    rev_clean = _clean_rev(parent_rev)
+    if "parent_rev" in BOMLink._fields:
+        scoped = list(BOMLink.objects(parent_pn=parent_pn, parent_rev=rev_clean))
+        if scoped:
+            return scoped
+    return list(BOMLink.objects(parent_pn=parent_pn))
+
+
+def _link_occurrence_qtys(link: BOMLink) -> List[float]:
+    occs = getattr(link, "occurrences", None) or []
+    out: List[float] = []
+    if occs:
+        for occ in occs:
+            try:
+                q = float(occ.get("qty", getattr(link, "qty", 1.0)) or 0.0)
+            except Exception:
+                q = 0.0
+            if q > 0.0:
+                out.append(q)
+        if out:
+            return out
+    try:
+        q = float(getattr(link, "qty", 1.0) or 0.0)
+    except Exception:
+        q = 0.0
+    return [q] if q > 0.0 else []
+
+
+def _expand_part_totals(pn: str, rev: str | None, qty: float) -> Tuple[Dict[Tuple[str, str], float], Dict[Tuple[str, str], Tuple[str, str]]]:
+    totals: Dict[Tuple[str, str], float] = {}
+    display: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    root_pn = (pn or "").strip()
+    try:
+        root_qty = float(qty or 0.0)
+    except Exception:
+        root_qty = 0.0
+    if not root_pn or root_qty <= 0.0:
+        return totals, display
+
+    root_rev = _effective_rev_for_bom(root_pn, rev)
+    root_key = _part_key(root_pn, root_rev)
+    stack: List[Tuple[str, str, float, int, set[Tuple[str, str]], bool]] = [
+        (root_pn, root_rev, root_qty, 0, {root_key}, False)
+    ]
+
+    while stack:
+        cur_pn, cur_rev, cur_qty, depth, trail, is_cycle = stack.pop()
+        key = _part_key(cur_pn, cur_rev)
+        totals[key] = totals.get(key, 0.0) + cur_qty
+        if key not in display:
+            display[key] = (cur_pn, _clean_rev(cur_rev))
+        if is_cycle or depth >= _MAX_BOM_DEPTH:
+            continue
+
+        children: List[Tuple[str, str, float, int, set[Tuple[str, str]], bool]] = []
+        for link in _bom_children_links(cur_pn, cur_rev):
+            child_pn = (getattr(link, "child_pn", "") or "").strip()
+            if not child_pn:
+                continue
+            child_rev = _effective_rev_for_bom(child_pn, getattr(link, "child_rev", ""))
+            child_key = _part_key(child_pn, child_rev)
+            child_cycle = child_key in trail
+            for occ_qty in _link_occurrence_qtys(link):
+                child_total = cur_qty * occ_qty
+                if child_total <= 0.0:
+                    continue
+                next_trail = set(trail)
+                next_trail.add(child_key)
+                children.append((child_pn, child_rev, child_total, depth + 1, next_trail, child_cycle))
+
+        for item in reversed(children):
+            stack.append(item)
+
+    return totals, display
+
+
+def _expand_part_occurrences(pn: str, rev: str | None, qty: float, root_index: int) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    root_pn = (pn or "").strip()
+    try:
+        root_qty = float(qty or 0.0)
+    except Exception:
+        root_qty = 0.0
+    if not root_pn or root_qty <= 0.0:
+        return rows
+
+    root_rev = _effective_rev_for_bom(root_pn, rev)
+    root_level = f"+.{root_index:02d}"
+    root_key = _part_key(root_pn, root_rev)
+    stack: List[Tuple[str, str, float, int, str, set[Tuple[str, str]], bool]] = [
+        (root_pn, root_rev, root_qty, 0, root_level, {root_key}, False)
+    ]
+
+    while stack:
+        cur_pn, cur_rev, cur_qty, depth, level, trail, is_cycle = stack.pop()
+        key = _part_key(cur_pn, cur_rev)
+        rows.append(
+            {
+                "key": key,
+                "pn": cur_pn,
+                "rev": _clean_rev(cur_rev),
+                "required": float(cur_qty),
+                "depth": depth,
+                "level": level,
+            }
+        )
+        if is_cycle or depth >= _MAX_BOM_DEPTH:
+            continue
+
+        children: List[Tuple[str, str, float, int, str, set[Tuple[str, str]], bool]] = []
+        seq = 0
+        for link in _bom_children_links(cur_pn, cur_rev):
+            child_pn = (getattr(link, "child_pn", "") or "").strip()
+            if not child_pn:
+                continue
+            child_rev = _effective_rev_for_bom(child_pn, getattr(link, "child_rev", ""))
+            child_key = _part_key(child_pn, child_rev)
+            child_cycle = child_key in trail
+            for occ_qty in _link_occurrence_qtys(link):
+                child_total = cur_qty * occ_qty
+                if child_total <= 0.0:
+                    continue
+                seq += 1
+                child_level = f"{level}.{seq:02d}"
+                next_trail = set(trail)
+                next_trail.add(child_key)
+                children.append((child_pn, child_rev, child_total, depth + 1, child_level, next_trail, child_cycle))
+
+        for item in reversed(children):
+            stack.append(item)
+
+    return rows
+
+
+def _level_sort_key(level: str) -> List[Tuple[int, object]]:
+    out: List[Tuple[int, object]] = []
+    for seg in [s for s in str(level or "").split(".") if s and s != "+"]:
+        if seg.isdigit():
+            out.append((0, int(seg)))
+        else:
+            out.append((1, seg))
+    return out
+
+
+def _merge_order_link(
+    order_links: Dict[Tuple[str, str], Dict[str, Dict[str, str]]],
+    key: Tuple[str, str],
+    order: Order,
+    href: str,
+) -> None:
+    bucket = order_links.setdefault(key, {})
+    order_id = str(order.id)
+    if order_id in bucket:
+        return
+    bucket[order_id] = {
+        "order_number": order.order_number,
+        "href": href,
+        "supplier": getattr(order.supplier, "name", ""),
+    }
+
+
+def _job_required_structure(job: Job):
+    required_map: Dict[Tuple[str, str], float] = {}
+    display_map: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    occurrences: List[Dict[str, object]] = []
+    root_idx = 0
+    for line in (job.bom or []):
+        pn = (line.pn or "").strip()
+        if not pn:
+            continue
+        try:
+            line_qty = float(line.qty or 0.0)
+        except Exception:
+            line_qty = 0.0
+        if line_qty <= 0.0:
+            continue
+        root_idx += 1
+        rows = _expand_part_occurrences(pn, line.rev or "", line_qty, root_idx)
+        for row in rows:
+            key = row["key"]
+            required_map[key] = required_map.get(key, 0.0) + float(row.get("required") or 0.0)
+            display_map.setdefault(key, (row.get("pn") or "", row.get("rev") or ""))
+            occurrences.append(row)
+    return required_map, display_map, occurrences
+
+
+def _job_order_coverage(
+    job: Job,
+    *,
+    required_keys: set[Tuple[str, str]] | None = None,
+    can_manage_orders: bool = False,
+    include_links: bool = False,
+    use_received: bool = False,
+):
+    ordered_map: Dict[Tuple[str, str], float] = {}
+    display_map: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    order_links: Dict[Tuple[str, str], Dict[str, Dict[str, str]]] = {}
+
+    for o in _orders_for_job(job):
+        status = (o.status or "").strip().lower()
+        if status in ("draft", "cancelled"):
+            continue
+        href = ""
+        if include_links:
+            href = (
+                url_for("admin_orders.orders_edit", order_id=str(o.id))
+                if can_manage_orders
+                else url_for("admin_orders.orders_view", order_id=str(o.id))
+            )
+        for line in (o.lines or []):
+            pn = (line.pn or "").strip()
+            if not pn:
+                continue
+            try:
+                base_qty = float(line.qty or 0.0)
+            except Exception:
+                base_qty = 0.0
+            if use_received:
+                try:
+                    base_qty = float(line.qty_received or 0.0)
+                except Exception:
+                    base_qty = 0.0
+                if base_qty <= 0.0 and status in ("confirmed", "delivered"):
+                    try:
+                        base_qty = float(line.qty or 0.0)
+                    except Exception:
+                        base_qty = 0.0
+            if base_qty <= 0.0:
+                continue
+
+            expanded_totals, expanded_display = _expand_part_totals(pn, line.rev or "", base_qty)
+            for key, qty in expanded_totals.items():
+                if required_keys is not None and key not in required_keys:
+                    continue
+                ordered_map[key] = ordered_map.get(key, 0.0) + float(qty or 0.0)
+                if key not in display_map:
+                    display_map[key] = expanded_display.get(key, (pn, _clean_rev(line.rev)))
+                if include_links:
+                    _merge_order_link(order_links, key, o, href)
+
+    return ordered_map, display_map, order_links
+
+
+def _build_job_bom_rollup(job: Job, can_manage_orders: bool):
+    required_map, display_map, occurrences = _job_required_structure(job)
+    required_keys = set(required_map.keys()) if required_map else None
+    ordered_map, ordered_display, order_links_raw = _job_order_coverage(
+        job,
+        required_keys=required_keys,
+        can_manage_orders=can_manage_orders,
+        include_links=True,
+        use_received=False,
+    )
+    for key, val in ordered_display.items():
+        display_map.setdefault(key, val)
+
+    flat_rows = []
+    rows_by_key = {}
+    for key in sorted(
+        required_map.keys(),
+        key=lambda k: (
+            (display_map.get(k, (k[0], k[1]))[0] or "").lower(),
+            (display_map.get(k, (k[0], k[1]))[1] or "").lower(),
+        ),
+    ):
+        pn_disp, rev_disp = display_map.get(key, (key[0], key[1]))
+        req = float(required_map.get(key, 0.0) or 0.0)
+        ordered = float(ordered_map.get(key, 0.0) or 0.0)
+        rem = max(req - ordered, 0.0)
+        over = max(ordered - req, 0.0)
+        meta = _part_meta(pn_disp, rev_disp)
+        links = sorted(
+            list((order_links_raw.get(key) or {}).values()),
+            key=lambda item: (item.get("order_number") or ""),
+        )
+        row = {
+            "pn": pn_disp,
+            "rev": meta.get("rev") or rev_disp or "",
+            "required": req,
+            "ordered": ordered,
+            "remaining": rem,
+            "over": over,
+            "desc": meta.get("desc") or "",
+            "thumb": meta.get("thumb") or "",
+            "orders": links,
+        }
+        rows_by_key[key] = row
+        flat_rows.append(row)
+
+    ordered_parts = [r for r in flat_rows if float(r.get("ordered") or 0.0) > 0.0]
+    remaining_parts_flat = [r for r in flat_rows if float(r.get("remaining") or 0.0) > 0.0]
+    oversupplied_parts = [r for r in flat_rows if float(r.get("over") or 0.0) > 0.0]
+
+    remaining_budget = {
+        k: max(float(required_map.get(k, 0.0) or 0.0) - float(ordered_map.get(k, 0.0) or 0.0), 0.0)
+        for k in required_map.keys()
+    }
+    covered_budget = {
+        k: max(min(float(ordered_map.get(k, 0.0) or 0.0), float(required_map.get(k, 0.0) or 0.0)), 0.0)
+        for k in required_map.keys()
+    }
+    remaining_parts_tree = []
+    for occ in sorted(occurrences, key=lambda item: _level_sort_key(item.get("level") or "")):
+        key = occ.get("key")
+        if key not in required_map:
+            continue
+        req_occ = float(occ.get("required") or 0.0)
+        if req_occ <= 0.0:
+            continue
+        used = min(req_occ, covered_budget.get(key, 0.0))
+        covered_budget[key] = max(covered_budget.get(key, 0.0) - used, 0.0)
+        rem_occ = min(max(req_occ - used, 0.0), remaining_budget.get(key, 0.0))
+        remaining_budget[key] = max(remaining_budget.get(key, 0.0) - rem_occ, 0.0)
+        if rem_occ <= 0.0:
+            continue
+        base = rows_by_key.get(key)
+        remaining_parts_tree.append(
+            {
+                "pn": occ.get("pn") or "",
+                "rev": occ.get("rev") or "",
+                "required": req_occ,
+                "ordered": used,
+                "remaining": rem_occ,
+                "over": float(base.get("over") or 0.0) if base else 0.0,
+                "desc": (base or {}).get("desc") or "",
+                "thumb": (base or {}).get("thumb") or "",
+                "orders": (base or {}).get("orders") or [],
+                "level": occ.get("level") or "",
+                "depth": int(occ.get("depth") or 0),
+            }
+        )
+
+    return {
+        "required_map": required_map,
+        "ordered_map": ordered_map,
+        "flat_rows": flat_rows,
+        "ordered_parts": ordered_parts,
+        "remaining_parts_flat": remaining_parts_flat,
+        "remaining_parts_tree": remaining_parts_tree,
+        "oversupplied_parts": oversupplied_parts,
+    }
 
 
 @bp.get("/")
@@ -203,52 +567,8 @@ def jobs_view(job_id):
     customers = Customer.objects().order_by("name")
     bom_text = "\n".join([f"{l.pn},{l.rev},{l.qty:g}" for l in (j.bom or [])])
     orders = _orders_for_job(j)
-    ordered_parts = []
-    remaining_parts = []
-    oversupplied_parts = []
-    ordered_map = {}
-    order_links = {}
     can_manage_orders = user_has_permission(current_user, "orders.manage")
-    for o in orders:
-        if (o.status or "") == "draft":
-            continue
-        for l in (o.lines or []):
-            rev_key = _resolve_rev(l.pn or "", l.rev or "")
-            pn_key = (l.pn or "").strip()
-            key = (pn_key.lower(), (rev_key or "").lower())
-            ordered_map[key] = ordered_map.get(key, 0.0) + float(l.qty or 0)
-            href = url_for("admin_orders.orders_edit", order_id=str(o.id)) if can_manage_orders else url_for("admin_orders.orders_view", order_id=str(o.id))
-            order_links.setdefault(key, []).append({
-                "order_number": o.order_number,
-                "href": href,
-                "supplier": getattr(o.supplier, "name", ""),
-            })
-    for line in (j.bom or []):
-        resolved_rev = _resolve_rev(line.pn or "", line.rev or "")
-        pn_key = (line.pn or "").strip()
-        key = (pn_key.lower(), (resolved_rev or "").lower())
-        req = float(line.qty or 0)
-        ordered = ordered_map.get(key, 0.0)
-        rem = max(req - ordered, 0.0)
-        over = max(ordered - req, 0.0)
-        meta = _part_meta(line.pn, line.rev or "")
-        row = {
-            "pn": line.pn,
-            "rev": meta.get("rev") or (line.rev or ""),
-            "required": req,
-            "ordered": ordered,
-            "remaining": rem,
-            "over": over,
-            "desc": meta.get("desc") or "",
-            "thumb": meta.get("thumb") or "",
-            "orders": order_links.get(key, []),
-        }
-        if ordered > 0:
-            ordered_parts.append(row)
-        if rem > 0:
-            remaining_parts.append(row)
-        if over > 0:
-            oversupplied_parts.append(row)
+    rollup = _build_job_bom_rollup(j, can_manage_orders=can_manage_orders)
     return render_template(
         "admin/jobs_form.html",
         users=users,
@@ -257,9 +577,10 @@ def jobs_view(job_id):
         job=j,
         bom_text=bom_text,
         orders=orders,
-        ordered_parts=ordered_parts,
-        remaining_parts=remaining_parts,
-        oversupplied_parts=oversupplied_parts,
+        ordered_parts=rollup["ordered_parts"],
+        remaining_parts=rollup["remaining_parts_flat"],
+        remaining_parts_tree=rollup["remaining_parts_tree"],
+        oversupplied_parts=rollup["oversupplied_parts"],
         readonly=True,
         hide_participants=is_external,
         hide_vendors=bool(is_external and cust_ids),
@@ -445,51 +766,7 @@ def jobs_edit(job_id):
     # Recompose bom_text for editing
     bom_text = "\n".join([f"{l.pn},{l.rev},{l.qty:g}" for l in (j.bom or [])])
     orders = _orders_for_job(j)
-    # aggregate ordered parts
-    ordered_map = {}
-    order_links = {}
-    for o in orders:
-        if (o.status or "") == "draft":
-            continue
-        for l in (o.lines or []):
-            rev_key = _resolve_rev(l.pn or "", l.rev or "")
-            pn_key = (l.pn or "").strip()
-            key = (pn_key.lower(), (rev_key or "").lower())
-            ordered_map[key] = ordered_map.get(key, 0.0) + float(l.qty or 0)
-            order_links.setdefault(key, []).append({
-                "order_number": o.order_number,
-                "href": url_for("admin_orders.orders_edit", order_id=str(o.id)),
-                "supplier": getattr(o.supplier, "name", ""),
-            })
-    ordered_parts = []
-    remaining_parts = []
-    oversupplied_parts = []
-    for line in (j.bom or []):
-        resolved_rev = _resolve_rev(line.pn or "", line.rev or "")
-        pn_key = (line.pn or "").strip()
-        key = (pn_key.lower(), (resolved_rev or "").lower())
-        req = float(line.qty or 0)
-        ordered = ordered_map.get(key, 0.0)
-        rem = max(req - ordered, 0.0)
-        over = max(ordered - req, 0.0)
-        meta = _part_meta(line.pn, line.rev or "")
-        row = {
-            "pn": line.pn,
-            "rev": meta.get("rev") or (line.rev or ""),
-            "required": req,
-            "ordered": ordered,
-            "remaining": rem,
-            "over": over,
-            "desc": meta.get("desc") or "",
-            "thumb": meta.get("thumb") or "",
-            "orders": order_links.get(key, []),
-        }
-        if ordered > 0:
-            ordered_parts.append(row)
-        if rem > 0:
-            remaining_parts.append(row)
-        if over > 0:
-            oversupplied_parts.append(row)
+    rollup = _build_job_bom_rollup(j, can_manage_orders=True)
     return render_template(
         "admin/jobs_form.html",
         users=users,
@@ -498,9 +775,10 @@ def jobs_edit(job_id):
         job=j,
         bom_text=bom_text,
         orders=orders,
-        ordered_parts=ordered_parts,
-        remaining_parts=remaining_parts,
-        oversupplied_parts=oversupplied_parts,
+        ordered_parts=rollup["ordered_parts"],
+        remaining_parts=rollup["remaining_parts_flat"],
+        remaining_parts_tree=rollup["remaining_parts_tree"],
+        oversupplied_parts=rollup["oversupplied_parts"],
     )
 
 
@@ -513,34 +791,26 @@ def _orders_for_job(job: Job):
         return []
 
 def _job_order_totals(job: Job):
-    required_map = {}
-    for line in (job.bom or []):
-        pn_raw = (line.pn or "").strip()
-        if not pn_raw:
-            continue
-        rev_raw = _resolve_rev(pn_raw, line.rev or "")
-        key = (pn_raw.lower(), (rev_raw or "").lower())
-        required_map[key] = required_map.get(key, 0.0) + float(line.qty or 0.0)
-    required_total = sum(required_map.values())
+    required_map, _, _ = _job_required_structure(job)
+    required_total = float(sum(required_map.values()) if required_map else 0.0)
+    required_keys = set(required_map.keys()) if required_map else None
 
-    ordered_total = 0.0
-    received_total = 0.0
-    for o in _orders_for_job(job):
-        if (o.status or "") in ("cancelled", "draft"):
-            continue
-        for line in (o.lines or []):
-            pn_raw = (line.pn or "").strip()
-            if not pn_raw:
-                continue
-            rev_raw = _resolve_rev(pn_raw, line.rev or "")
-            key = (pn_raw.lower(), (rev_raw or "").lower())
-            if required_map and key not in required_map:
-                continue
-            ordered_total += float(line.qty or 0.0)
-            qty_received = float(line.qty_received or 0.0)
-            if qty_received <= 0.0 and (o.status or "") in ("confirmed", "delivered"):
-                qty_received = float(line.qty or 0.0)
-            received_total += qty_received
+    ordered_map, _, _ = _job_order_coverage(
+        job,
+        required_keys=required_keys,
+        can_manage_orders=False,
+        include_links=False,
+        use_received=False,
+    )
+    received_map, _, _ = _job_order_coverage(
+        job,
+        required_keys=required_keys,
+        can_manage_orders=False,
+        include_links=False,
+        use_received=True,
+    )
+    ordered_total = float(sum(ordered_map.values()) if ordered_map else 0.0)
+    received_total = float(sum(received_map.values()) if received_map else 0.0)
 
     if required_total == 0.0 and not required_map:
         required_total = ordered_total if ordered_total > 0.0 else 0.0

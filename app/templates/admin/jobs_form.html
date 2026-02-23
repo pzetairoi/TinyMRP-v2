@@ -354,16 +354,55 @@
             </div>
           </div>
         {% endif %}
-        {% if remaining_parts %}
+        {% set has_remaining_flat = remaining_parts and (remaining_parts|length > 0) %}
+        {% set has_remaining_tree = remaining_parts_tree and (remaining_parts_tree|length > 0) %}
+        {% if has_remaining_flat or has_remaining_tree %}
           <div class="mt-3">
             <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between mb-2 gap-2">
               <h2 class="h6 mb-0 fw-bold">Parts Not Yet Ordered</h2>
               <div class="d-flex gap-2">
+                <div class="btn-group btn-group-sm" role="group">
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    id="remaining-view-flat"
+                    onclick="setRemainingView('flat')"
+                    {% if not has_remaining_flat %}disabled{% endif %}
+                  >
+                    Flat BOM
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    id="remaining-view-tree"
+                    onclick="setRemainingView('tree')"
+                    {% if not has_remaining_tree %}disabled{% endif %}
+                  >
+                    Tree BOM
+                  </button>
+                </div>
                 <button type="button" class="btn btn-sm btn-primary" onclick="submitRemainingOrder()">Create order from selected</button>
               </div>
             </div>
-            <div class="table-responsive">
-              <table class="table table-sm table-striped align-middle" id="remaining-table">
+            <div class="row g-2 mb-2">
+              <div class="col-md-3">
+                <input id="remaining-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
+              </div>
+              <div class="col-md-3">
+                <input id="remaining-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
+              </div>
+              <div class="col-md-2">
+                <input id="remaining-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
+              </div>
+              <div class="col-md-2">
+                <input id="remaining-filter-level" class="form-control form-control-sm" type="search" placeholder="Filter Level (tree)">
+              </div>
+              <div class="col-md-2">
+                <input id="remaining-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Remaining min">
+              </div>
+            </div>
+            <div class="table-responsive remaining-table-wrap{% if not has_remaining_flat %} d-none{% endif %}" id="remaining-flat-wrap">
+              <table class="table table-sm table-striped align-middle" id="remaining-flat-table">
                 <thead>
                   <tr>
                     <th style="width:36px;">Sel</th>
@@ -379,34 +418,21 @@
                     <th style="width:15%;">Suppliers</th>
                     {% endif %}
                   </tr>
-                  <tr class="table-light">
-                    <th>
-                      <input class="form-check-input" type="checkbox" id="remaining-select-all" onclick="toggleRemainingSelectAll(this)">
-                    </th>
-                    <th></th>
-                    <th>
-                      <input id="remaining-filter-pn" class="form-control form-control-sm" type="search" placeholder="Filter PN">
-                    </th>
-                    <th>
-                      <input id="remaining-filter-desc" class="form-control form-control-sm" type="search" placeholder="Filter Description">
-                    </th>
-                    <th>
-                      <input id="remaining-filter-rev" class="form-control form-control-sm" type="search" placeholder="Filter Rev">
-                    </th>
-                    <th></th>
-                    <th></th>
-                    <th>
-                      <input id="remaining-filter-qty-min" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Min">
-                    </th>
-                    <th></th>
+                  {% if remaining_parts %}
+                  <tr>
+                    <td>
+                      <input class="form-check-input remaining-select-all" type="checkbox" onclick="toggleRemainingSelectAll(this)">
+                    </td>
+                    <td colspan="8" class="d-none d-md-table-cell"></td>
                     {% if not mask_supplier_names %}
-                    <th></th>
+                    <td class="d-none d-md-table-cell"></td>
                     {% endif %}
                   </tr>
+                  {% endif %}
                 </thead>
                 <tbody>
                   {% for p in remaining_parts %}
-                  <tr class="remaining-row" data-pn="{{ p.pn }}" data-desc="{{ p.desc }}" data-rev="{{ p.rev }}" data-remaining="{{ p.remaining }}">
+                  <tr class="remaining-row" data-pn="{{ p.pn }}" data-desc="{{ p.desc }}" data-rev="{{ p.rev }}" data-level="" data-remaining="{{ p.remaining }}">
                     <td>
                       <input class="form-check-input remaining-select" type="checkbox" data-pn="{{ p.pn }}" data-rev="{{ p.rev }}" data-qty="{{ p.remaining }}" data-desc="{{ p.desc }}">
                     </td>
@@ -423,6 +449,81 @@
                       {% else %}
                         {{ p.pn }}
                       {% endif %}
+                    </td>
+                    <td>{{ p.desc }}</td>
+                    <td>{{ p.rev }}</td>
+                    <td>{{ '%.2f' % p.required if p.required is number else p.required }}</td>
+                    <td>{{ '%.2f' % p.ordered if p.ordered is number else p.ordered }}</td>
+                    <td>{{ '%.2f' % p.remaining if p.remaining is number else p.remaining }}</td>
+                    <td>
+                      {% for o in p.orders %}
+                        <div><a href="{{ o.href }}">{{ o.order_number }}</a></div>
+                      {% endfor %}
+                    </td>
+                    {% if not mask_supplier_names %}
+                    <td>
+                      {% for o in p.orders %}
+                        <div>{{ o.supplier }}</div>
+                      {% endfor %}
+                    </td>
+                    {% endif %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="table-responsive remaining-table-wrap{% if has_remaining_flat %} d-none{% endif %}" id="remaining-tree-wrap">
+              <table class="table table-sm table-striped align-middle" id="remaining-tree-table">
+                <thead>
+                  <tr>
+                    <th style="width:36px;">Sel</th>
+                    <th style="width:11%;">Level</th>
+                    <th style="width:64px;">Thumb</th>
+                    <th class="col-part-number">Part Number</th>
+                    <th class="col-description">Description</th>
+                    <th style="width:10%;">Rev</th>
+                    <th style="width:11%;">Required</th>
+                    <th style="width:11%;">Ordered</th>
+                    <th style="width:11%;">Remaining</th>
+                    <th style="width:20%;">Orders</th>
+                    {% if not mask_supplier_names %}
+                    <th style="width:15%;">Suppliers</th>
+                    {% endif %}
+                  </tr>
+                  {% if remaining_parts_tree %}
+                  <tr>
+                    <td>
+                      <input class="form-check-input remaining-select-all" type="checkbox" onclick="toggleRemainingSelectAll(this)">
+                    </td>
+                    <td colspan="9" class="d-none d-md-table-cell"></td>
+                    {% if not mask_supplier_names %}
+                    <td class="d-none d-md-table-cell"></td>
+                    {% endif %}
+                  </tr>
+                  {% endif %}
+                </thead>
+                <tbody>
+                  {% for p in remaining_parts_tree %}
+                  <tr class="remaining-row" data-pn="{{ p.pn }}" data-desc="{{ p.desc }}" data-rev="{{ p.rev }}" data-level="{{ p.level }}" data-remaining="{{ p.remaining }}">
+                    <td>
+                      <input class="form-check-input remaining-select" type="checkbox" data-pn="{{ p.pn }}" data-rev="{{ p.rev }}" data-qty="{{ p.remaining }}" data-desc="{{ p.desc }}">
+                    </td>
+                    <td><code>{{ p.level }}</code></td>
+                    <td>
+                      {% if p.thumb %}
+                        <img src="{{ p.thumb }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
+                      {% else %}
+                        <img src="{{ url_for('branding.logo') }}" class="img-thumbnail" style="max-height:48px;max-width:64px;" alt="">
+                      {% endif %}
+                    </td>
+                    <td>
+                      <span style="display:inline-block;padding-left:{{ (p.depth or 0) * 1.15 }}rem;">
+                        {% if has_perm('items.view') %}
+                          <a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a>
+                        {% else %}
+                          {{ p.pn }}
+                        {% endif %}
+                      </span>
                     </td>
                     <td>{{ p.desc }}</td>
                     <td>{{ p.rev }}</td>
@@ -630,7 +731,7 @@
           </form>
         </div>
         {% endif %}
-        {% if remaining_parts %}
+        {% if has_remaining_flat or has_remaining_tree %}
         <form id="remaining-order-form" method="post" action="{{ url_for('admin_orders.orders_from_job', job_id=job.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="parts_json" id="remaining-parts-json" value="">
@@ -645,6 +746,7 @@
 <script>
   let bomRows = [];
   let replaceIdx = null;
+  let remainingView = 'flat';
   const thumbCache = {};
   const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
   const fallbackLogo = "{{ url_for('branding.logo') }}";
@@ -713,30 +815,62 @@
       pn: (document.getElementById('remaining-filter-pn')?.value || '').toLowerCase(),
       desc: (document.getElementById('remaining-filter-desc')?.value || '').toLowerCase(),
       rev: (document.getElementById('remaining-filter-rev')?.value || '').toLowerCase(),
+      level: (document.getElementById('remaining-filter-level')?.value || '').toLowerCase(),
       qtyMin: parseFloat(document.getElementById('remaining-filter-qty-min')?.value || '') || null,
     };
   }
 
+  function remainingWrap(mode){
+    if(mode === 'tree') return document.getElementById('remaining-tree-wrap');
+    return document.getElementById('remaining-flat-wrap');
+  }
+
+  function setRemainingView(mode){
+    const flatBtn = document.getElementById('remaining-view-flat');
+    const treeBtn = document.getElementById('remaining-view-tree');
+    const flatWrap = remainingWrap('flat');
+    const treeWrap = remainingWrap('tree');
+    if(mode === 'flat' && flatBtn && flatBtn.disabled) return;
+    if(mode === 'tree' && treeBtn && treeBtn.disabled) return;
+    remainingView = (mode === 'tree') ? 'tree' : 'flat';
+    if(flatWrap) flatWrap.classList.toggle('d-none', remainingView !== 'flat');
+    if(treeWrap) treeWrap.classList.toggle('d-none', remainingView !== 'tree');
+    if(flatBtn){
+      flatBtn.classList.toggle('btn-secondary', remainingView === 'flat');
+      flatBtn.classList.toggle('btn-outline-secondary', remainingView !== 'flat');
+    }
+    if(treeBtn){
+      treeBtn.classList.toggle('btn-secondary', remainingView === 'tree');
+      treeBtn.classList.toggle('btn-outline-secondary', remainingView !== 'tree');
+    }
+    document.querySelectorAll('input.remaining-select').forEach(cb => { cb.checked = false; });
+    document.querySelectorAll('input.remaining-select-all').forEach(cb => { cb.checked = false; });
+    applyRemainingFilters();
+  }
+
   function applyRemainingFilters(){
     const f = remainingFilters();
-    const rows = document.querySelectorAll('#remaining-table tbody tr.remaining-row');
+    const rows = document.querySelectorAll('.remaining-table-wrap tbody tr.remaining-row');
     rows.forEach(row => {
       const pn = (row.getAttribute('data-pn') || '').toLowerCase();
       const desc = (row.getAttribute('data-desc') || '').toLowerCase();
       const rev = (row.getAttribute('data-rev') || '').toLowerCase();
+      const level = (row.getAttribute('data-level') || '').toLowerCase();
       const remaining = parseFloat(row.getAttribute('data-remaining') || '0');
       if(f.pn && !pn.includes(f.pn)) { row.style.display = 'none'; return; }
       if(f.desc && !desc.includes(f.desc)) { row.style.display = 'none'; return; }
       if(f.rev && !rev.includes(f.rev)) { row.style.display = 'none'; return; }
+      if(f.level && !level.includes(f.level)) { row.style.display = 'none'; return; }
       if(f.qtyMin !== null && remaining < f.qtyMin) { row.style.display = 'none'; return; }
       row.style.display = '';
     });
-    const selAll = document.getElementById('remaining-select-all');
-    if(selAll) selAll.checked = false;
+    document.querySelectorAll('input.remaining-select-all').forEach(cb => { cb.checked = false; });
   }
 
   function toggleRemainingSelectAll(box){
-    const rows = document.querySelectorAll('#remaining-table tbody tr.remaining-row');
+    const wrap = box.closest('.remaining-table-wrap');
+    if(!wrap) return;
+    const rows = wrap.querySelectorAll('tbody tr.remaining-row');
     rows.forEach(row => {
       if(row.style.display === 'none') return;
       const cb = row.querySelector('input.remaining-select');
@@ -866,10 +1000,16 @@
     syncTextarea();
     renderBomTable();
     attachBomHandlers();
-    ['remaining-filter-pn','remaining-filter-desc','remaining-filter-rev','remaining-filter-qty-min'].forEach(id=>{
+    ['remaining-filter-pn','remaining-filter-desc','remaining-filter-rev','remaining-filter-level','remaining-filter-qty-min'].forEach(id=>{
       document.getElementById(id)?.addEventListener('input', applyRemainingFilters);
     });
-    applyRemainingFilters();
+    const flatCount = document.querySelectorAll('#remaining-flat-wrap tbody tr.remaining-row').length;
+    const treeCount = document.querySelectorAll('#remaining-tree-wrap tbody tr.remaining-row').length;
+    if(flatCount === 0 && treeCount > 0){
+      setRemainingView('tree');
+    } else {
+      setRemainingView('flat');
+    }
   });
 
   async function ensureThumb(idx){
