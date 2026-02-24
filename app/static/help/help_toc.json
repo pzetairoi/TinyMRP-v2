@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-02-23 09:35 UTC",
-  "commit": "4a5e334",
+  "generated_at": "2026-02-24 10:36 UTC",
+  "commit": "3a4aaf0",
   "items": [
     {
       "id": "start-here-by-role",
@@ -53,6 +53,11 @@
       "level": 3
     },
     {
+      "id": "hardened-windows-lan-only-no-docker",
+      "title": "Hardened Windows LAN-Only (No Docker)",
+      "level": 3
+    },
+    {
       "id": "advanced-local-developer-runtime",
       "title": "Advanced: Local developer runtime",
       "level": 3
@@ -86,6 +91,11 @@
       "id": "4-open-tinymrp",
       "title": "4) Open TinyMRP",
       "level": 3
+    },
+    {
+      "id": "windows-lan-only-setup-no-docker",
+      "title": "Windows LAN-Only Setup (No Docker)",
+      "level": 2
     },
     {
       "id": "file-storage-rules",

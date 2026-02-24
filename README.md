@@ -414,6 +414,13 @@ This persists everything under:
 - `<deliverables>\.tinymrp\mongo` (MongoDB data)
 - `<deliverables>\.tinymrp\instance` (runtime secrets)
 
+### Windows service deployment (LAN-only, no Docker)
+
+For secured office environments that do not allow Docker Desktop, use the native Windows guide:
+
+- `deploy/windows/README.md`
+- `deploy/windows/IT_REQUEST_TEMPLATE.md`
+
 ### Post-start maintenance
 
 After the helper script finishes, re-use the generated env file for follow-up commands:

@@ -8,6 +8,14 @@ This page covers first deployment, safe updates, and operating basics for TinyMR
 
 Use Docker for production or pilot environments. It is the easiest path for repeatable updates.
 
+### Hardened Windows LAN-Only (No Docker)
+
+Use this when IT requires a Windows workstation deployment with internal-only access.
+
+- Guide: `deploy/windows/README.md`
+- IT ticket template: `deploy/windows/IT_REQUEST_TEMPLATE.md`
+- Hardened env template: `deploy/windows/.env.windows.lan.example`
+
 ### Advanced: Local developer runtime
 
 Use direct Python and Node only for development and debugging.
@@ -51,6 +59,23 @@ docker compose exec app flask --app run.py user grant-admin --email admin@yourco
 
 - URL: `http://<server>:<HTTP_PORT>`
 - Login with the admin account.
+
+## Windows LAN-Only Setup (No Docker)
+
+Use this path for service-based Windows deployment with NGINX reverse proxy + Waitress.
+
+1. Follow `deploy/windows/README.md` step-by-step.
+2. Keep Flask app private on `127.0.0.1:8000`.
+3. Keep MongoDB private on `127.0.0.1:27017` (or separate internal DB server).
+4. Expose only NGINX HTTP (`80`) to allowed LAN ranges.
+5. Run with `TINYMRP_SECURITY_MODE=compat`, `FORCE_HTTPS=false`, `FILES_PUBLIC_URLS=false`.
+
+Compatibility note (as of 2026-02-24):
+
+- Windows 10 support ended on 2025-10-14.
+- MongoDB current Windows support tables list Windows 11 / Windows Server variants for modern releases.
+- NGINX on Windows has known limitations and does not run as a native Windows service without a wrapper.
+- If host OS must stay Windows 10, prefer running MongoDB on a separate supported host and point `MONGO_URI` there.
 
 ## File Storage Rules
 

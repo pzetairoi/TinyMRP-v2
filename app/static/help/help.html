@@ -19,6 +19,7 @@
 <h3 id="admin-and-it">Admin and IT</h3>
 <ul>
 <li>Use <code>Server installation</code> for deployment, environment variables, and upgrades.</li>
+<li>For Windows workstation hardening and LAN-only exposure, use <code>deploy/windows/README.md</code>.</li>
 <li>Use <code>Customization and admin settings</code> for users, roles, scoping, branding, and limits.</li>
 </ul>
 <h2 id="core-concepts">Core Concepts</h2>
@@ -58,6 +59,13 @@
 <h2 id="deployment-options">Deployment Options</h2>
 <h3 id="recommended-docker-compose">Recommended: Docker Compose</h3>
 <p>Use Docker for production or pilot environments. It is the easiest path for repeatable updates.</p>
+<h3 id="hardened-windows-lan-only-no-docker">Hardened Windows LAN-Only (No Docker)</h3>
+<p>Use this when IT requires a Windows workstation deployment with internal-only access.</p>
+<ul>
+<li>Guide: <code>deploy/windows/README.md</code></li>
+<li>IT ticket template: <code>deploy/windows/IT_REQUEST_TEMPLATE.md</code></li>
+<li>Hardened env template: <code>deploy/windows/.env.windows.lan.example</code></li>
+</ul>
 <h3 id="advanced-local-developer-runtime">Advanced: Local developer runtime</h3>
 <p>Use direct Python and Node only for development and debugging.</p>
 <h2 id="prerequisites">Prerequisites</h2>
@@ -94,6 +102,22 @@ docker compose exec app flask --app run.py user grant-admin --email admin@yourco
 <ul>
 <li>URL: <code>http://&lt;server&gt;:&lt;HTTP_PORT&gt;</code></li>
 <li>Login with the admin account.</li>
+</ul>
+<h2 id="windows-lan-only-setup-no-docker">Windows LAN-Only Setup (No Docker)</h2>
+<p>Use this path for service-based Windows deployment with NGINX reverse proxy + Waitress.</p>
+<ol>
+<li>Follow <code>deploy/windows/README.md</code> step-by-step.</li>
+<li>Keep Flask app private on <code>127.0.0.1:8000</code>.</li>
+<li>Keep MongoDB private on <code>127.0.0.1:27017</code> (or separate internal DB server).</li>
+<li>Expose only NGINX HTTP (<code>80</code>) to allowed LAN ranges.</li>
+<li>Run with <code>TINYMRP_SECURITY_MODE=compat</code>, <code>FORCE_HTTPS=false</code>, <code>FILES_PUBLIC_URLS=false</code>.</li>
+</ol>
+<p>Compatibility note (as of 2026-02-24):</p>
+<ul>
+<li>Windows 10 support ended on 2025-10-14.</li>
+<li>MongoDB current Windows support tables list Windows 11 / Windows Server variants for modern releases.</li>
+<li>NGINX on Windows has known limitations and does not run as a native Windows service without a wrapper.</li>
+<li>If host OS must stay Windows 10, prefer running MongoDB on a separate supported host and point <code>MONGO_URI</code> there.</li>
 </ul>
 <h2 id="file-storage-rules">File Storage Rules</h2>
 <p>TinyMRP matches files by part number and revision. Standard groups include:</p>
@@ -341,7 +365,7 @@ extra/
 <h2 id="first-connection-recommended">First Connection (Recommended)</h2>
 <ol>
 <li>Open <code>Configuration</code> tab, <code>Quick Start</code>.</li>
-<li>Set <code>Backend URL</code>.</li>
+<li>Set <code>Backend URL</code> (use your internal LAN URL, for example <code>http://tinymrp-lan.company.local</code>).</li>
 <li>Paste token into <code>Auth token</code>.</li>
 <li>Click <code>Test connection</code>.</li>
 <li>Save settings.</li>
@@ -364,7 +388,7 @@ extra/
 </code></pre>
 <h2 id="silent-install-it-deployment">Silent Install (IT Deployment)</h2>
 <p>Example:</p>
-<pre><code class="language-powershell">TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL=&quot;http://server:5000&quot; /AUTHTOKEN=&quot;tmrp_xxx&quot;
+<pre><code class="language-powershell">TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL=&quot;http://tinymrp-lan.company.local&quot; /AUTHTOKEN=&quot;tmrp_xxx&quot;
 </code></pre>
 <h1 id="solidworks-add-in-walkthrough">SolidWorks Add-in Walkthrough</h1>
 <p>This guide maps each add-in tab to practical tasks.</p>
