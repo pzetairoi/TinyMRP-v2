@@ -22,6 +22,7 @@ This help content is written for day-to-day users. It focuses on what to do, whe
 ### Admin and IT
 
 - Use `Server installation` for deployment, environment variables, and upgrades.
+- For Windows workstation hardening and LAN-only exposure, use `deploy/windows/README.md`.
 - Use `Customization and admin settings` for users, roles, scoping, branding, and limits.
 
 ## Core Concepts

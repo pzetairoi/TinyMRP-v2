@@ -48,7 +48,7 @@ If startup is not checked, the add-in will not auto-load after restart.
 ## First Connection (Recommended)
 
 1. Open `Configuration` tab, `Quick Start`.
-2. Set `Backend URL`.
+2. Set `Backend URL` (use your internal LAN URL, for example `http://tinymrp-lan.company.local`).
 3. Paste token into `Auth token`.
 4. Click `Test connection`.
 5. Save settings.
@@ -84,5 +84,5 @@ To unregister:
 Example:
 
 ```powershell
-TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://server:5000" /AUTHTOKEN="tmrp_xxx"
+TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://tinymrp-lan.company.local" /AUTHTOKEN="tmrp_xxx"
 ```
