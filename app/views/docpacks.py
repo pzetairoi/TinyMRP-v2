@@ -100,6 +100,7 @@ def _parse_docpack_request():
         file_types=[t for t in _list("file_types") if t],
         want_excel_bom=bool(gv("excel_bom") in (True, "true", "1", 1, "on")),
         excel_all_fields=bool(gv("excel_all_fields") in (True, "true", "1", 1, "on")),
+        excel_field_ids=[field_id for field_id in _list("excel_field_ids") if field_id],
         want_selected_files=bool(gv("selected_files") in (True, "true", "1", 1, "on")),
         want_pdf_binder=bool(gv("pdf_binder") in (True, "true", "1", 1, "on")),
         want_index_pdf=bool(gv("index_pdf") in (True, "true", "1", 1, "on") or gv("index") in (True, "true", "1", 1, "on")),
