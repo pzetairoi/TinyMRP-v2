@@ -1,33 +1,93 @@
-import json, os, re
-from typing import Dict, List, Iterable, Any
+import copy
+import json
+import os
+import re
+from typing import Any, Dict, Iterable, List
 
 _DEFAULT = {
-    "purchase":  {"color":"112, 48, 160","icon":"purchase.svg","aliases":["purchasing","buy","procure"]},
-    "machine":   {"color":"255, 0, 0","icon":"machine.svg","aliases":["machining","cnc"]},
-    "welding":   {"color":"255, 192, 0","icon":"welding.svg","aliases":["stud welding","stud_welding"]},
-    "folding":   {"color":"0, 102, 0","icon":"folding.svg","aliases":[]},
-    "rolling":   {"color":"0, 102, 0","icon":"roll.svg","aliases":[]},
-    "casting":   {"color":"255, 0, 255","icon":"casting.svg","aliases":[]},
-    "lasercut":  {"color":"0, 176, 80","icon":"lasercut.svg","aliases":["laser cut","laser-cut"]},
-    "profile cut":{"color":"153, 102, 51","icon":"profilecut.svg","aliases":["profile-cut","oxy","plasma","plasma cut","plasmacut","waterjet","water jet","water-jet"]},
-    "3d laser":  {"color":"0, 176, 80","icon":"3d-laser.svg","aliases":["3dlaser"]},
-    "cutting":   {"color":"255, 192, 0","icon":"cutting.svg","aliases":[]},
-    "sewing":    {"color":"192, 0, 0","icon":"sewing.svg","aliases":[]},
-    "3d print":  {"color":"192, 0, 0","icon":"3d-printing.svg","aliases":["3dprint","additive"]},
-    "paint":     {"color":"0, 32, 96","icon":"spray.svg","aliases":["painting","powdercoat","powder coat"]},
-    "zinc":      {"color":"0, 32, 96","icon":"zinc.svg","aliases":[]},
-    "galvanize": {"color":"0, 32, 96","icon":"galvanize.svg","aliases":["galvanised","galvanized"]},
-    "nickel":    {"color":"0, 32, 96","icon":"nickel.svg","aliases":[]},
-    "assembly":  {"color":"0, 176, 240","icon":"assembly.svg","aliases":["assy","assemble"]},
-    "label":     {"color":"0, 176, 240","icon":"label.svg","aliases":[]},
-    "hardware":  {"color":"208, 206, 206","icon":"hardware.svg","aliases":["fastener","fasteners"]},
-    "others":    {"color":"118, 113, 113","icon":"unknown.svg","aliases":[]},
+    "purchase": {
+        "color": "112, 48, 160",
+        "icon": "purchase.svg",
+        "aliases": ["purchasing", "buy", "procure"],
+        "file_groups": ["pdf", "datasheet"],
+    },
+    "machine": {"color": "255, 0, 0", "icon": "machine.svg", "aliases": ["machining", "cnc"]},
+    "welding": {"color": "255, 192, 0", "icon": "welding.svg", "aliases": ["stud welding", "stud_welding"]},
+    "folding": {"color": "0, 102, 0", "icon": "folding.svg", "aliases": []},
+    "rolling": {"color": "0, 102, 0", "icon": "roll.svg", "aliases": []},
+    "casting": {"color": "255, 0, 255", "icon": "casting.svg", "aliases": []},
+    "lasercut": {"color": "0, 176, 80", "icon": "lasercut.svg", "aliases": ["laser cut", "laser-cut"]},
+    "profile cut": {
+        "color": "153, 102, 51",
+        "icon": "profilecut.svg",
+        "aliases": ["profile-cut", "oxy", "plasma", "plasma cut", "plasmacut", "waterjet", "water jet", "water-jet"],
+    },
+    "3d laser": {"color": "0, 176, 80", "icon": "3d-laser.svg", "aliases": ["3dlaser"]},
+    "cutting": {"color": "255, 192, 0", "icon": "cutting.svg", "aliases": []},
+    "sewing": {"color": "192, 0, 0", "icon": "sewing.svg", "aliases": []},
+    "3d print": {"color": "192, 0, 0", "icon": "3d-printing.svg", "aliases": ["3dprint", "additive"]},
+    "paint": {"color": "0, 32, 96", "icon": "spray.svg", "aliases": ["painting", "powdercoat", "powder coat"]},
+    "zinc": {"color": "0, 32, 96", "icon": "zinc.svg", "aliases": []},
+    "galvanize": {"color": "0, 32, 96", "icon": "galvanize.svg", "aliases": ["galvanised", "galvanized"]},
+    "nickel": {"color": "0, 32, 96", "icon": "nickel.svg", "aliases": []},
+    "assembly": {"color": "0, 176, 240", "icon": "assembly.svg", "aliases": ["assy", "assemble"]},
+    "label": {"color": "0, 176, 240", "icon": "label.svg", "aliases": []},
+    "hardware": {"color": "208, 206, 206", "icon": "hardware.svg", "aliases": ["fastener", "fasteners"]},
+    "others": {"color": "118, 113, 113", "icon": "unknown.svg", "aliases": []},
 }
+
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
-def load_process_meta(path: str | None = None) -> Dict:
+
+def _uniq(items: Iterable[str]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        token = text.lower()
+        if token in seen:
+            continue
+        seen.add(token)
+        out.append(text)
+    return out
+
+
+def _clean_color(value: Any, default_value: str = "118, 113, 113") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return default_value
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if len(parts) != 3:
+        return default_value
+    nums: List[str] = []
+    for part in parts:
+        try:
+            num = max(0, min(255, int(float(part))))
+        except Exception:
+            return default_value
+        nums.append(str(num))
+    return ", ".join(nums)
+
+
+def _clean_icon(value: Any, default_value: str = "unknown.svg") -> str:
+    text = os.path.basename(str(value or "").strip())
+    return text or default_value
+
+
+def _clean_file_group(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in ("stp", "step"):
+        return "step"
+    if text in ("jpg", "jpeg"):
+        return "png"
+    return text
+
+
+def default_process_meta(path: str | None = None) -> Dict[str, Dict[str, Any]]:
     path = path or os.getenv("PROCESS_META_FILE")
     data = None
     if path and os.path.isfile(path):
@@ -36,16 +96,78 @@ def load_process_meta(path: str | None = None) -> Dict:
                 data = json.load(f)
         except Exception:
             data = None
-    meta = data or _DEFAULT
+    source = data or _DEFAULT
+    return sanitize_process_meta(source, ensure_defaults=False)
 
-    # build alias index
-    alias_index: Dict[str, str] = {}
-    for canon, m in meta.items():
-        alias_index[_norm(canon)] = canon
-        for a in m.get("aliases", []):
-            alias_index[_norm(a)] = canon
-    meta["_alias_index"] = alias_index
+
+def sanitize_process_meta(raw: Any, *, ensure_defaults: bool = True) -> Dict[str, Dict[str, Any]]:
+    items: Iterable[tuple[str, Any]]
+    if isinstance(raw, dict):
+        items = [(str(k or ""), v) for k, v in raw.items() if str(k or "").strip() and not str(k).startswith("_")]
+    elif isinstance(raw, list):
+        tmp: List[tuple[str, Any]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            tmp.append((str(item.get("name") or item.get("id") or ""), item))
+        items = tmp
+    else:
+        items = []
+
+    meta: Dict[str, Dict[str, Any]] = {}
+    for raw_name, payload in items:
+        name = _norm(raw_name)
+        if not name:
+            continue
+        entry = payload if isinstance(payload, dict) else {}
+        aliases = _uniq(_norm(alias) for alias in (entry.get("aliases") or []))
+        if isinstance(entry.get("aliases"), str):
+            aliases = _uniq(_norm(alias) for alias in re.split(r"[,;\r\n]+", str(entry.get("aliases") or "")))
+        aliases = [alias for alias in aliases if alias and alias != name]
+
+        file_groups_raw = entry.get("file_groups") or entry.get("required_files") or entry.get("files") or []
+        if isinstance(file_groups_raw, str):
+            file_groups_raw = re.split(r"[,;\r\n]+", file_groups_raw)
+        file_groups = _uniq(_clean_file_group(item) for item in (file_groups_raw or []))
+
+        default_entry = _DEFAULT.get(name) or _DEFAULT.get("others") or {}
+        out: Dict[str, Any] = {
+            "color": _clean_color(entry.get("color"), default_entry.get("color", "118, 113, 113")),
+            "icon": _clean_icon(entry.get("icon"), default_entry.get("icon", "unknown.svg")),
+            "aliases": aliases,
+        }
+        if file_groups:
+            out["file_groups"] = file_groups
+        meta[name] = out
+
+    if ensure_defaults and "others" not in meta:
+        fallback = _DEFAULT["others"]
+        meta["others"] = {
+            "color": fallback["color"],
+            "icon": fallback["icon"],
+            "aliases": list(fallback.get("aliases") or []),
+        }
     return meta
+
+
+def _with_alias_index(meta: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    out = copy.deepcopy(meta)
+    alias_index: Dict[str, str] = {}
+    for canon, item in out.items():
+        alias_index[_norm(canon)] = canon
+        for alias in item.get("aliases", []):
+            alias_index[_norm(alias)] = canon
+    out["_alias_index"] = alias_index
+    return out
+
+
+def load_process_meta(path: str | None = None, overrides: Any | None = None) -> Dict:
+    base = default_process_meta(path)
+    custom = sanitize_process_meta(overrides) if overrides else {}
+    meta = custom or base
+    if "others" not in meta:
+        meta["others"] = copy.deepcopy(base.get("others") or _DEFAULT["others"])
+    return _with_alias_index(meta)
 
 def _split_process_value(value: Any) -> List[str]:
     if value is None:

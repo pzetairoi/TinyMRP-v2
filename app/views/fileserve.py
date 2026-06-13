@@ -5,22 +5,46 @@ from flask_login import login_required, current_user
 from app.services.audit import log_action
 from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.files_access import resolve_file_token
+from app.services.app_settings import resolve_file_sources
 from app.models.artifact import PartFile
 
 bp = Blueprint("fileserve", __name__, url_prefix="/files")
 
+def _configured_roots() -> list[str]:
+    roots: list[str] = []
+    try:
+        configured = current_app.config.get("FILE_SOURCES")
+        if isinstance(configured, list) and configured:
+            sources = [dict(item) for item in configured if isinstance(item, dict)]
+        else:
+            sources = resolve_file_sources()
+        for source in sources:
+            root = str(source.get("local_root") or "").strip()
+            if root:
+                roots.append(os.path.abspath(root))
+    except Exception:
+        pass
+    fallback = (current_app.config.get("FILE_ROOT_LOCAL") or "").strip()
+    if fallback:
+        fallback_abs = os.path.abspath(fallback)
+        if fallback_abs not in roots:
+            roots.append(fallback_abs)
+    return roots
+
 def _allowed_path(abs_path: str) -> bool:
     try:
         ap = os.path.abspath(abs_path)
-        base = os.path.abspath((current_app.config.get("FILE_ROOT_LOCAL") or "").strip())
-        if not base: return False
-        # Windows-safe comparison
-        ap_norm, base_norm = os.path.normcase(ap), os.path.normcase(base)
-        try:
-            return os.path.commonpath([ap_norm, base_norm]) == base_norm
-        except Exception:
-            # If drives differ, simple prefix fallback
-            return ap_norm.startswith(base_norm)
+        for base in _configured_roots():
+            if not base:
+                continue
+            ap_norm, base_norm = os.path.normcase(ap), os.path.normcase(base)
+            try:
+                if os.path.commonpath([ap_norm, base_norm]) == base_norm:
+                    return True
+            except Exception:
+                if ap_norm.startswith(base_norm):
+                    return True
+        return False
     except Exception:
         return False
 
@@ -64,6 +88,9 @@ def _rel_from_abs(abs_path: str) -> str | None:
 
 
 def _path_for_pf(pf: PartFile, kind: str) -> tuple[str | None, str | None]:
+    if getattr(pf, "path", None) and os.path.isabs(pf.path):
+        rel = _rel_from_abs(pf.path) or getattr(pf, "rel_path", None)
+        return pf.path, rel
     rel = None
     if kind == "thumb" and getattr(pf, "thumb_rel_path", None):
         rel = pf.thumb_rel_path

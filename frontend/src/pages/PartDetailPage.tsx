@@ -9,7 +9,23 @@ import { TabView, TabPanel } from "primereact/tabview";
 import ImageStrip from "../components/ImageStrip";
 import ThumbImg from "../components/ThumbImg";
 import "./partdetail.css";
-import { FilterMatchMode } from "primereact/api";
+import FieldSelector from "../components/FieldSelector";
+import {
+  contextFields,
+  defaultFieldIds,
+  fieldFilterPlaceholder,
+  formatFieldValue,
+  loadFieldConfig,
+  matchesFieldFilter,
+  requiredFieldIds,
+  saveFieldPreferences,
+  selectedFieldIds,
+  updateContextSelection,
+  updateContextMode,
+  type FieldConfigPayload,
+  type FieldDefinition,
+  type FieldPreferences,
+} from "../lib/fieldConfig";
 
 // ---------- Types ----------
 type Part = {
@@ -19,6 +35,8 @@ type Part = {
   category?: string;
   uom?: string;
   processes?: string[];
+  process?: string;
+  field_values?: Record<string, any>;
   attrs: Record<string, any>;
 };
 
@@ -56,6 +74,10 @@ type WURow = {
   alt_group: string;
   parent_thumb_urls?: string[];
   parent_rev?: string;
+  part_number?: string;
+  revision?: string;
+  description?: string;
+  [key: string]: any;
 };
 
 type VersionRow = {
@@ -102,6 +124,32 @@ type ExtraFileRow = {
   url?: string;
   rel_path?: string;
 };
+
+const FALLBACK_SUMMARY_FIELDS: FieldDefinition[] = [
+  { id: "material", label: "Material", kind: "builtin", filterable: true, sortable: true },
+  { id: "finish", label: "Finish", kind: "builtin", filterable: true, sortable: true },
+  { id: "mass", label: "Mass", kind: "builtin", filterable: true, sortable: true },
+  { id: "process", label: "Process", kind: "builtin", filterable: true, sortable: true },
+];
+
+const FALLBACK_BOM_FIELDS: FieldDefinition[] = [
+  { id: "thumbnail", label: "Thumbnail", kind: "special", filterable: false, sortable: false },
+  { id: "part_number", label: "Part Number", kind: "builtin", filterable: true, sortable: true },
+  { id: "revision", label: "Revision", kind: "builtin", filterable: true, sortable: true },
+  { id: "description", label: "Description", kind: "builtin", filterable: true, sortable: true },
+  { id: "process", label: "Process", kind: "builtin", filterable: true, sortable: true },
+  { id: "finish", label: "Finish", kind: "builtin", filterable: true, sortable: true },
+  { id: "material", label: "Material", kind: "builtin", filterable: true, sortable: true },
+  { id: "qty", label: "Qty", kind: "special", filterable: true, sortable: true },
+];
+
+const FALLBACK_WHERE_USED_FIELDS: FieldDefinition[] = [
+  { id: "thumbnail", label: "Thumbnail", kind: "special", filterable: false, sortable: false },
+  { id: "part_number", label: "Part Number", kind: "builtin", filterable: true, sortable: true },
+  { id: "revision", label: "Revision", kind: "builtin", filterable: true, sortable: true },
+  { id: "description", label: "Description", kind: "builtin", filterable: true, sortable: true },
+  { id: "qty", label: "Qty", kind: "special", filterable: true, sortable: true },
+];
 
 // threeMF viewer (lazy load)
 const ThreeMFViewer = React.lazy(() => import("../components/ThreeMFViewer"));
@@ -182,6 +230,8 @@ export default function PartDetailPage() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [refreshIncludeChildren, setRefreshIncludeChildren] = useState(false);
   const [canPartsEdit, setCanPartsEdit] = useState(false);
+  const [fieldConfig, setFieldConfig] = useState<FieldConfigPayload | null>(null);
+  const [fieldPreferences, setFieldPreferences] = useState<FieldPreferences | null>(null);
   const insightsLoading = false;
   const [notes, setNotes] = useState("");
   const [comments, setComments] = useState<CommentRow[]>([]);
@@ -190,6 +240,7 @@ export default function PartDetailPage() {
   const [commentText, setCommentText] = useState("");
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
+  const [notesSearch, setNotesSearch] = useState("");
 
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
@@ -245,21 +296,11 @@ export default function PartDetailPage() {
   // --- TreeTable filters (controlled) ---
   type TTFilters = Record<string, { value: any; matchMode: string }>;
 
-  const makeInitFilters = (): TTFilters => ({
-    pn: { value: null, matchMode: FilterMatchMode.CUSTOM },
-    desc: { value: null, matchMode: FilterMatchMode.CUSTOM },
-    rev: { value: null, matchMode: FilterMatchMode.CUSTOM },
-    process: { value: null, matchMode: FilterMatchMode.CUSTOM },
-    finish: { value: null, matchMode: FilterMatchMode.CUSTOM },
-    material: { value: null, matchMode: FilterMatchMode.CUSTOM },
-    qty: { value: null, matchMode: FilterMatchMode.EQUALS },
-  });
+  const [ttFilters, setTtFilters] = useState<TTFilters>({});
 
-  const [ttFilters, setTtFilters] = useState<TTFilters>(makeInitFilters());
-
-  // Remove cleared filters ('' / null) so they don’t “stick”
+  // Remove cleared filters ('' / null) so they do not stick.
   function normalizeFilters(next: TTFilters): TTFilters {
-    const out: TTFilters = { ...makeInitFilters() };
+    const out: TTFilters = {};
     for (const k of Object.keys(next || {})) {
       const v = next[k]?.value;
       if (v !== "" && v !== null && v !== undefined) out[k] = next[k];
@@ -273,22 +314,9 @@ export default function PartDetailPage() {
 
   const [ttKey, setTtKey] = useState(0); // to force remount
   function clearTTFilters() {
-    setTtFilters(makeInitFilters());
+    setTtFilters({});
     setTtKey((k) => k + 1);
   }
-
-  // Multi-term (space-separated) CONTAINS-ALL, case-insensitive
-  const containsAllTerms = (value: any, filter: any) => {
-    if (filter == null || filter === "") return true;
-    const hay = String(value ?? "").toLowerCase();
-    const terms = String(filter)
-      .toLowerCase()
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-    if (!terms.length) return true;
-    return terms.every((t) => hay.includes(t));
-  };
 
   // --- helpers that rely on component state (must be inside component) ---
 // Prefer rel_path + BASE; avoid absolute http_url to dodge CORS
@@ -418,6 +446,51 @@ function bestUrl(f: FileRow): string {
     );
   };
 
+  function renderSummaryField(field: FieldDefinition) {
+    const value = summaryValue(field.id);
+    if (field.data_type === "link") {
+      const href = String(value || "").trim();
+      return href ? <a href={href} target="_blank" rel="noreferrer">{field.label}</a> : <span><strong>{field.label}:</strong> -</span>;
+    }
+    return <span><strong>{field.label}:</strong> {formatFieldValue(value)}</span>;
+  }
+
+  function renderBomCell(field: FieldDefinition, node: any) {
+    const value = node?.data?.[field.id];
+    if (field.id === "thumbnail") return thumbOnlyBody(node);
+    if (field.id === "part_number") return pnBody(node);
+    if (field.data_type === "link") {
+      const href = String(value || "").trim();
+      return href ? <a href={href} target="_blank" rel="noreferrer">Open</a> : "-";
+    }
+    return formatFieldValue(value);
+  }
+
+  function renderWhereUsedCell(field: FieldDefinition, row: WURow & Record<string, any>) {
+    const value = row?.[field.id];
+    if (field.id === "thumbnail") {
+      return <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />;
+    }
+    if (field.id === "part_number") {
+      return <Link to={`/ui/part/${encodeURIComponent(row.part_number)}?rev=${encodeURIComponent(row.revision || "")}`}>{row.part_number}</Link>;
+    }
+    if (field.data_type === "link") {
+      const href = String(value || "").trim();
+      return href ? <a href={href} target="_blank" rel="noreferrer">Open</a> : "-";
+    }
+    return formatFieldValue(value);
+  }
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await loadFieldConfig();
+        setFieldConfig(resp.config);
+        setFieldPreferences(resp.user_preferences || { contexts: {} });
+      } catch {}
+    })();
+  }, []);
+
   // ---- Load Part Detail ----
   useEffect(() => {
     let canceled = false;
@@ -441,7 +514,9 @@ function bestUrl(f: FileRow): string {
                 revision: j.part.revision || "",
                 category: j.part.category || "",
                 uom: j.part.uom || "EA",
+                process: j.part.process || "",
                 processes: Array.isArray(j.part.processes) ? j.part.processes : [],
+                field_values: j.part.field_values || {},
                 attrs: partAttrs,
               }
             : null
@@ -899,6 +974,55 @@ function bestUrl(f: FileRow): string {
   const materialValue = (part?.attrs?.material || part?.attrs?.Material || part?.attrs?.MATERIAL || "") as string
   const finishValue = (part?.attrs?.finish || part?.attrs?.Finish || "") as string
   const massValue = (part?.attrs?.mass || part?.attrs?.Weight || "") as string
+  const summaryFields = fieldConfig ? contextFields(fieldConfig, "part_detail_summary") : FALLBACK_SUMMARY_FIELDS
+  const bomFields = fieldConfig ? contextFields(fieldConfig, "bom_tree") : FALLBACK_BOM_FIELDS
+  const whereUsedFields = fieldConfig ? contextFields(fieldConfig, "where_used") : FALLBACK_WHERE_USED_FIELDS
+  const excelFields = fieldConfig ? contextFields(fieldConfig, "excel_bom") : []
+  const defaultSummaryIds = fieldConfig ? defaultFieldIds(fieldConfig, "part_detail_summary") : ["material", "finish", "mass", "process"]
+  const defaultBomIds = fieldConfig ? defaultFieldIds(fieldConfig, "bom_tree") : ["thumbnail", "part_number", "revision", "description", "process", "finish", "material", "qty"]
+  const defaultWhereUsedIds = fieldConfig ? defaultFieldIds(fieldConfig, "where_used") : ["thumbnail", "part_number", "revision", "description", "qty"]
+  const defaultExcelIds = fieldConfig ? defaultFieldIds(fieldConfig, "excel_bom") : []
+  const requiredSummaryIds = fieldConfig ? requiredFieldIds(fieldConfig, "part_detail_summary") : []
+  const requiredBomIds = fieldConfig ? requiredFieldIds(fieldConfig, "bom_tree") : ["part_number"]
+  const requiredWhereUsedIds = fieldConfig ? requiredFieldIds(fieldConfig, "where_used") : ["part_number"]
+  const requiredExcelIds = fieldConfig ? requiredFieldIds(fieldConfig, "excel_bom") : ["part_number", "revision", "description", "total_qty"]
+  const selectedSummaryIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "part_detail_summary") : defaultSummaryIds
+  const selectedBomIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "bom_tree") : defaultBomIds
+  const selectedWhereUsedIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "where_used") : defaultWhereUsedIds
+  const selectedExcelIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "excel_bom") : defaultExcelIds
+  const excelUseDefault = fieldPreferences?.contexts?.excel_bom?.use_default ?? true
+
+  async function persistFieldPreferences(nextPrefs: FieldPreferences) {
+    setFieldPreferences(nextPrefs)
+    try {
+      const resp = await saveFieldPreferences(nextPrefs)
+      setFieldPreferences(resp.settings.field_preferences || nextPrefs)
+    } catch {}
+  }
+
+  async function persistFieldSelection(contextName: string, fieldIds: string[]) {
+    if (!fieldConfig) return
+    const nextPrefs = updateContextSelection(fieldConfig, fieldPreferences, contextName, fieldIds)
+    await persistFieldPreferences(nextPrefs)
+  }
+
+  async function persistFieldMode(contextName: string, useDefault: boolean) {
+    const nextPrefs = updateContextMode(fieldPreferences, contextName, useDefault)
+    await persistFieldPreferences(nextPrefs)
+  }
+
+  async function persistFieldSelectionAndMode(contextName: string, fieldIds: string[], useDefault: boolean) {
+    if (!fieldConfig) return
+    let nextPrefs = updateContextSelection(fieldConfig, fieldPreferences, contextName, fieldIds)
+    nextPrefs = updateContextMode(nextPrefs, contextName, useDefault)
+    await persistFieldPreferences(nextPrefs)
+  }
+
+  function summaryValue(fieldId: string) {
+    const value = part?.field_values?.[fieldId]
+    if (value !== undefined) return value
+    return (part as any)?.[fieldId]
+  }
 
   const approvedInfo = useMemo(() => {
     const raw = part?.attrs?.approvedby ?? part?.attrs?.approved ?? part?.attrs?.approved_by
@@ -910,6 +1034,17 @@ function bestUrl(f: FileRow): string {
     if (["n/a", "na", "none", "null", "0", "false"].includes(lowered)) return { approved: false, label: "" }
     return { approved: true, label: text }
   }, [part])
+
+  const notesSearchLower = notesSearch.trim().toLowerCase()
+  const notesMatchesSearch = !notesSearchLower || notes.toLowerCase().includes(notesSearchLower)
+  const filteredComments = useMemo(() => {
+    if (!notesSearchLower) return comments
+    return comments.filter((item) =>
+      [item.author || "", item.text || "", item.ts || ""].some((value) =>
+        String(value).toLowerCase().includes(notesSearchLower),
+      ),
+    )
+  }, [comments, notesSearchLower])
 
   const uploaderName = useMemo(() => {
     const a = part?.attrs || {}
@@ -1212,10 +1347,25 @@ function bestUrl(f: FileRow): string {
               </div>
 
               <div className="pd-info-row pd-meta-row">
-                <span><strong>Material:</strong> {materialValue || "-"}</span>
-                <span><strong>Finish:</strong> {finishValue || "-"}</span>
-                <span><strong>Mass:</strong> {massValue || "-"}</span>
+                {selectedSummaryIds.map((fieldId) => {
+                  const field = summaryFields.find((item) => item.id === fieldId)
+                  return field ? <span key={field.id}>{renderSummaryField(field)}</span> : null
+                })}
               </div>
+
+              {summaryFields.length > 0 && (
+                <div className="pd-info-row">
+                  <FieldSelector
+                    title="Part summary fields"
+                    buttonLabel="Summary fields"
+                    availableFields={summaryFields}
+                    selectedIds={selectedSummaryIds}
+                    requiredIds={requiredSummaryIds}
+                    onChange={(fieldIds) => persistFieldSelection("part_detail_summary", fieldIds)}
+                    onReset={() => persistFieldSelection("part_detail_summary", defaultSummaryIds)}
+                  />
+                </div>
+              )}
 
               <div className="pd-info-row pd-file-row">
                 {(() => {
@@ -1577,10 +1727,46 @@ function bestUrl(f: FileRow): string {
                       <div className="fw-semibold small">Doc Packs</div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docExcel" checked={wantExcel} onChange={(e)=>setWantExcel(e.target.checked)} /><label className="form-check-label" htmlFor="docExcel">Excel BOM</label></div>
-                      {wantExcel && (
-                        <div className="form-check ms-3">
-                          <input className="form-check-input" type="checkbox" id="docExcelAll" checked={excelAllFields} onChange={(e)=>setExcelAllFields(e.target.checked)} />
-                          <label className="form-check-label" htmlFor="docExcelAll">Include all fields</label>
+                      {wantExcel && excelFields.length > 0 && (
+                        <div className="border rounded p-2 mt-2">
+                          <div className="fw-semibold small mb-2">Excel fields</div>
+                          <div className="form-check">
+                            <input
+                              className="form-check-input"
+                              type="radio"
+                              name="excelMode"
+                              id="excelModeDefault"
+                              checked={excelUseDefault}
+                              onChange={() => persistFieldMode("excel_bom", true)}
+                            />
+                            <label className="form-check-label small" htmlFor="excelModeDefault">Use admin default preset</label>
+                          </div>
+                          <div className="form-check mb-2">
+                            <input
+                              className="form-check-input"
+                              type="radio"
+                              name="excelMode"
+                              id="excelModeCustom"
+                              checked={!excelUseDefault}
+                              onChange={() => persistFieldMode("excel_bom", false)}
+                            />
+                            <label className="form-check-label small" htmlFor="excelModeCustom">Use my selected fields</label>
+                          </div>
+                          {!excelUseDefault && (
+                            <FieldSelector
+                              inline
+                              title="Excel BOM fields"
+                              availableFields={excelFields}
+                              selectedIds={selectedExcelIds}
+                              requiredIds={requiredExcelIds}
+                              onChange={(fieldIds) => {
+                                persistFieldSelectionAndMode("excel_bom", fieldIds, false)
+                              }}
+                              onReset={() => {
+                                persistFieldSelectionAndMode("excel_bom", defaultExcelIds, true)
+                              }}
+                            />
+                          )}
                         </div>
                       )}
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div>
@@ -1703,6 +1889,7 @@ function bestUrl(f: FileRow): string {
                         selected_files: wantSelectedFiles,
                         excel_bom: wantExcel,
                         excel_all_fields: excelAllFields,
+                        excel_field_ids: !excelUseDefault ? selectedExcelIds : [],
                         pdf_binder: wantBinder,
                         index_pdf: wantIndex,
                         visual_list: wantVisual,
@@ -1881,10 +2068,25 @@ function bestUrl(f: FileRow): string {
               {!canPartsNote && <div className="text-muted small mt-1">Read-only</div>}
 
               <div className="mt-3">
-                <h6 className="mb-2">Comments</h6>
-                {comments.length ? (
+                <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
+                  <h6 className="mb-0">Comments</h6>
+                  <input
+                    type="search"
+                    className="form-control form-control-sm"
+                    style={{ maxWidth: 280 }}
+                    value={notesSearch}
+                    onChange={(e) => setNotesSearch(e.target.value)}
+                    placeholder="Search notes/comments"
+                  />
+                </div>
+                {notesSearch.trim() ? (
+                  <div className="small text-muted mb-2">
+                    Notes: {notesMatchesSearch ? "match found" : "no match"}
+                  </div>
+                ) : null}
+                {filteredComments.length ? (
                   <div className="d-flex flex-column gap-2">
-                    {comments.map((c, idx) => (
+                    {filteredComments.map((c, idx) => (
                       <div key={`${c.ts}-${idx}`} className="border rounded p-2">
                         <div className="small text-muted">
                           {c.author || "User"} {c.ts ? `- ${new Date(c.ts).toLocaleString()}` : ""}
@@ -1894,7 +2096,9 @@ function bestUrl(f: FileRow): string {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-muted small">No comments yet.</div>
+                  <div className="text-muted small">
+                    {notesSearch.trim() ? "No matching comments." : "No comments yet."}
+                  </div>
                 )}
                 {canPartsNote && (
                   <div className="input-group input-group-sm mt-2">
@@ -1992,24 +2196,38 @@ function bestUrl(f: FileRow): string {
 
             {/* Used in (always visible under tabs) */}
             <div className="pd-usedin pd-card">
-            <h6 className="mb-2">Used in</h6>
-            <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll">
-              <Column
-                header=""
-                body={(row: WURow) => <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />}
-                style={{ width: 56 }}
-              />
-              <Column
-                field="parent_pn"
-                header="Parent PN"
-                sortable
-                body={(r: WURow) => (
-                  <Link to={`/ui/part/${encodeURIComponent(r.parent_pn)}?rev=${encodeURIComponent(r.parent_rev || "")}`}>{r.parent_pn}</Link>
-                )}
-              />
-              <Column field="parent_rev" header="Rev" sortable style={{ width: 100 }} />
-              <Column field="parent_desc" header="Description" sortable />
-              <Column field="qty" header="Qty" sortable style={{ width: 100 }} />
+            <div className="d-flex align-items-center justify-content-between mb-2">
+              <h6 className="mb-0">Used in</h6>
+              {whereUsedFields.length > 0 && (
+                <FieldSelector
+                  title="Where-used fields"
+                  buttonLabel="Fields"
+                  availableFields={whereUsedFields}
+                  selectedIds={selectedWhereUsedIds}
+                  requiredIds={requiredWhereUsedIds}
+                  onChange={(fieldIds) => persistFieldSelection("where_used", fieldIds)}
+                  onReset={() => persistFieldSelection("where_used", defaultWhereUsedIds)}
+                />
+              )}
+            </div>
+            <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll" filterDisplay="row">
+              {selectedWhereUsedIds.map((fieldId) => {
+                const field = whereUsedFields.find((item) => item.id === fieldId)
+                if (!field) return null
+                return (
+                  <Column
+                    key={field.id}
+                    field={field.id}
+                    header={field.id === "thumbnail" ? "" : field.label}
+                    sortable={field.sortable !== false}
+                    filter={field.filterable !== false}
+                    showFilterMenu={false}
+                    filterPlaceholder={fieldFilterPlaceholder(field)}
+                    body={(row: WURow) => renderWhereUsedCell(field, row)}
+                    style={field.id === "thumbnail" ? { width: 56 } : field.id === "revision" ? { width: 100 } : field.id === "qty" ? { width: 100 } : undefined}
+                  />
+                )
+              })}
             </DataTable>
           </div>
         </div>
@@ -2020,25 +2238,38 @@ function bestUrl(f: FileRow): string {
       <div className="mt-4">
         <div className="d-flex align-items-center justify-content-between mb-2">
           <h6 className="mb-0">BOM</h6>
-          <button type="button" className="btn btn-sm btn-outline-secondary" onClick={expandAll}>
-            Expand all
-          </button>
-          <button
-            className="btn btn-sm btn-outline-secondary ms-2"
-            onClick={() => setBomExpanded({})}
-          >
-            Collapse all
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary"
-            onClick={(e) => {
-              e.preventDefault();
-              clearTTFilters();
-            }}
-          >
-            Clear filters
-          </button>
+          <div className="d-flex gap-2 flex-wrap">
+            {bomFields.length > 0 && (
+              <FieldSelector
+                title="BOM fields"
+                buttonLabel="Fields"
+                availableFields={bomFields}
+                selectedIds={selectedBomIds}
+                requiredIds={requiredBomIds}
+                onChange={(fieldIds) => persistFieldSelection("bom_tree", fieldIds)}
+                onReset={() => persistFieldSelection("bom_tree", defaultBomIds)}
+              />
+            )}
+            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={expandAll}>
+              Expand all
+            </button>
+            <button
+              className="btn btn-sm btn-outline-secondary"
+              onClick={() => setBomExpanded({})}
+            >
+              Collapse all
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              onClick={(e) => {
+                e.preventDefault();
+                clearTTFilters();
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
         </div>
 
         {/*  ---- TreeTable ----  */}
@@ -2071,90 +2302,36 @@ function bestUrl(f: FileRow): string {
             style={{ width: 24, minWidth: 24, maxWidth: 24 }}
           />
 
-          {/* 3) Image preview ONLY */}
-          <Column header="" body={thumbOnlyBody} style={{ width: 64 }} />
-
-          {/* 4) PN (left aligned) */}
-          <Column
-            field="pn"
-            filterField="pn"
-            header="Partnumber"
-            sortable
-            filter
-            filterMatchMode="custom"
-            filterFunction={(value, flt) => containsAllTerms(value, flt)}
-            showFilterMenu={false}
-            filterPlaceholder="Filter PN"
-            body={pnBody}
-            style={{ width: 240, textAlign: "left" }}
-          />
-
-          <Column
-            field="rev"
-            filterField="rev"
-            header="Rev"
-            sortable
-            filter
-            filterMatchMode="custom"
-            filterFunction={(value, flt) => containsAllTerms(value, flt)}
-            showFilterMenu={false}
-            filterPlaceholder="Rev"
-            style={{ width: 90 }}
-          />
-          <Column
-            field="desc"
-            filterField="desc"
-            header="Description"
-            sortable
-            filter
-            filterMatchMode="custom"
-            filterFunction={(value, flt) => containsAllTerms(value, flt)}
-            showFilterMenu={false}
-            filterPlaceholder="Filter description"
-          />
-          <Column
-            field="process"
-            filterField="process"
-            header="Process"
-            sortable
-            filter
-            filterMatchMode="custom"
-            filterFunction={(value, flt) => containsAllTerms(value, flt)}
-            showFilterMenu={false}
-            filterPlaceholder="Filter process"
-          />
-          <Column
-            field="finish"
-            filterField="finish"
-            header="Finish"
-            sortable
-            filter
-            filterMatchMode="custom"
-            filterFunction={(value, flt) => containsAllTerms(value, flt)}
-            showFilterMenu={false}
-            filterPlaceholder="Filter finish"
-          />
-          <Column
-            field="material"
-            filterField="material"
-            header="Material"
-            sortable
-            filter
-            filterMatchMode="custom"
-            filterFunction={(value, flt) => containsAllTerms(value, flt)}
-            showFilterMenu={false}
-            filterPlaceholder="Filter material"
-          />
-          <Column
-            field="qty"
-            filterField="qty"
-            header="Level QTY"
-            sortable
-            filter
-            showFilterMenu={false}
-            filterPlaceholder="= Qty"
-            style={{ width: 110 }}
-          />
+          {selectedBomIds.map((fieldId) => {
+            const field = bomFields.find((item) => item.id === fieldId)
+            if (!field) return null
+            const style =
+              field.id === "thumbnail"
+                ? { width: 64 }
+                : field.id === "part_number"
+                ? { width: 240, textAlign: "left" as const }
+                : field.id === "revision"
+                ? { width: 90 }
+                : field.id === "qty"
+                ? { width: 110 }
+                : undefined
+            return (
+              <Column
+                key={field.id}
+                field={field.id}
+                filterField={field.id}
+                header={field.id === "thumbnail" ? "" : field.label}
+                sortable={field.sortable !== false}
+                filter={field.filterable !== false}
+                filterMatchMode="custom"
+                filterFunction={(value, flt) => matchesFieldFilter(field, value, flt)}
+                showFilterMenu={false}
+                filterPlaceholder={fieldFilterPlaceholder(field)}
+                body={(node: any) => renderBomCell(field, node)}
+                style={style}
+              />
+            )
+          })}
         </TreeTable>
       </div>
       ) : null}

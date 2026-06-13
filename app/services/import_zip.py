@@ -12,7 +12,7 @@ from collections import defaultdict
 # Import necessary services for file scanning and upserting
 from app.services.filescan import discover_part_files, upsert_part_files
 # Import necessary services for attributes normalization and merging
-from app.services.attrs import normalize_props, merge_save_part_attrs, process_attributes
+from app.services.attrs import approved_value, harvest_part_attrs, normalize_props, merge_save_part_attrs, process_attributes
 from app.services.processmeta import normalize_processes
 from app.services.part_norm import clean_rev, clean_pn, clean_qty
 
@@ -66,6 +66,96 @@ def _snapshot_resources() -> Dict[str, Any]:
     except Exception:
         snap["rss_bytes"] = None
     return snap
+
+
+_PART_OVERRIDE_MODES = {"preserve", "approved_only", "always"}
+_PROTECTED_ATTR_KEYS = {"notes", "comments", "comments_search"}
+
+
+def _override_mode(value: object) -> str:
+    mode = str(value or "preserve").strip().lower()
+    return mode if mode in _PART_OVERRIDE_MODES else "preserve"
+
+
+def _has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _merge_attrs_preserve(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(existing or {})
+    for key, value in (incoming or {}).items():
+        if key in _PROTECTED_ATTR_KEYS and _has_value(merged.get(key)):
+            continue
+        if not _has_value(merged.get(key)) and _has_value(value):
+            merged[key] = value
+    return merged
+
+
+def _merge_attrs_replace(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(incoming or {})
+    for key in _PROTECTED_ATTR_KEYS:
+        if _has_value((existing or {}).get(key)):
+            merged[key] = existing.get(key)
+    return merged
+
+
+def _should_replace_existing(existing_attrs: Dict[str, Any], incoming_attrs: Dict[str, Any], override_mode: str) -> bool:
+    mode = _override_mode(override_mode)
+    if mode == "always":
+        return True
+    if mode != "approved_only":
+        return False
+    incoming_approved = bool(approved_value(incoming_attrs or {}))
+    existing_approved = bool(approved_value(existing_attrs or {}))
+    return incoming_approved and not existing_approved
+
+
+def _apply_part_update(
+    part: Part,
+    norm: Dict[str, Any],
+    *,
+    seed_tag: str,
+    override_mode: str,
+) -> None:
+    incoming_attrs, incoming_processes = process_attributes(norm.get("attrs") or {})
+    if _is_hardware_by_folder(incoming_attrs) or _is_hardware_by_process(incoming_attrs):
+        incoming_attrs["process"] = "hardware"
+        incoming_attrs["process2"] = ""
+        incoming_attrs["process3"] = ""
+        incoming_attrs["processes"] = ["hardware"]
+        incoming_processes = ["hardware"]
+    incoming_attrs["seed"] = seed_tag
+
+    is_new = part.id is None
+    existing_attrs = dict(getattr(part, "attrs", {}) or {})
+    replace_existing = is_new or _should_replace_existing(existing_attrs, incoming_attrs, override_mode)
+
+    if replace_existing:
+        part.description = norm.get("description") or ""
+        part.category = norm.get("category") or ""
+        part.uom = norm.get("uom") or "EA"
+        part.attrs = _merge_attrs_replace(existing_attrs, incoming_attrs)
+        if incoming_processes:
+            part.processes = incoming_processes
+        elif is_new:
+            part.processes = []
+        return
+
+    if not _has_value(getattr(part, "description", None)):
+        part.description = norm.get("description") or ""
+    if not _has_value(getattr(part, "category", None)):
+        part.category = norm.get("category") or ""
+    if not _has_value(getattr(part, "uom", None)):
+        part.uom = norm.get("uom") or "EA"
+    part.attrs = _merge_attrs_preserve(existing_attrs, incoming_attrs)
+    if not list(getattr(part, "processes", None) or []) and incoming_processes:
+        part.processes = incoming_processes
 
 def _report_inc(report: Dict[str, Any], key: str, delta: int = 1) -> None:
     if report is None:
@@ -574,6 +664,7 @@ def import_bom_zip(
     *,
     scan_artifacts: bool = True,
     generate_thumbs: bool = True,
+    override_mode: str = "preserve",
 ) -> Dict[str, Any]:
     """
     Main entry: import a single ZIP file.
@@ -598,6 +689,7 @@ def import_bom_zip(
         "artifacts_found_by_type": {},
         "thumbnails_built": 0,
         "thumbnails_generated": 0,
+        "override_mode": _override_mode(override_mode),
         # diagnostics / best-effort counters
         "rows_skipped_blank_part": 0,
         "flat_lines_failed_parse": 0,
@@ -730,30 +822,18 @@ def import_bom_zip(
                     if not pn:
                         continue
 
-                    attrs = norm.get("attrs") or {}
                     try:
                         p = Part.objects(part_number=pn, revision=rev).first()
                         is_new = p is None
                         if p is None:
                             p = Part(part_number=pn, revision=rev)
 
-                        p.description = norm.get("description") or ""
-                        p.category = norm.get("category") or ""
-                        p.uom = norm.get("uom") or "EA"
-
-                        attrs, processes = process_attributes(attrs)
-                        if _is_hardware_by_folder(attrs) or _is_hardware_by_process(attrs):
-                            attrs["process"] = "hardware"
-                            attrs["process2"] = ""
-                            attrs["process3"] = ""
-                            attrs["processes"] = ["hardware"]
-                            processes = ["hardware"]
-
-                        attrs["seed"] = seed_tag
-                        p.attrs = attrs
-                        if processes:
-                            p.processes = processes
-
+                        _apply_part_update(
+                            p,
+                            norm,
+                            seed_tag=seed_tag,
+                            override_mode=override_mode,
+                        )
                         p.save()
                         if is_new:
                             created_parts += 1
@@ -764,10 +844,12 @@ def import_bom_zip(
                             existing = Part.objects(part_number=pn, revision=rev).first()
                             if not existing:
                                 raise
-                            existing.description = norm.get("description") or ""
-                            existing.category = norm.get("category") or ""
-                            existing.uom = norm.get("uom") or "EA"
-                            existing.attrs = attrs
+                            _apply_part_update(
+                                existing,
+                                norm,
+                                seed_tag=seed_tag,
+                                override_mode=override_mode,
+                            )
                             existing.save()
                             updated_parts += 1
                         except Exception as exc:
@@ -962,7 +1044,12 @@ def import_bom_zip(
                         seen.add(key)
 
                         try:
-                            found = discover_part_files(pn, rev)
+                            part_doc = Part.objects(part_number__iexact=pn, revision__iexact=rev).only("attrs", "props").first()
+                            found = discover_part_files(
+                                pn,
+                                rev,
+                                approved=bool(approved_value(harvest_part_attrs(part_doc))) if part_doc else None,
+                            )
                         except Exception as exc:
                             _report_issue(
                                 report,

@@ -13,6 +13,7 @@ from ..models.customer import Customer
 from ..models.api_token import ApiToken
 from ..models.user_settings import UserSettings
 from app.services.app_settings import branding_root, get_app_settings
+from app.services.processmeta import load_process_meta, sanitize_process_meta
 from zoneinfo import ZoneInfo
 import os
 import re
@@ -49,6 +50,65 @@ def _parse_int(value: str, default_value: int) -> int:
         return max(0, int(str(value).strip()))
     except Exception:
         return default_value
+
+
+def _parse_file_sources(form) -> list[dict]:
+    labels = form.getlist("source_label")
+    roots = form.getlist("source_local_root")
+    urls = form.getlist("source_url_prefix")
+    priorities = form.getlist("source_priority")
+    scopes = form.getlist("source_scope")
+    out: list[dict] = []
+    total = max(len(labels), len(roots), len(urls), len(priorities), len(scopes))
+    for idx in range(total):
+        label = (labels[idx] if idx < len(labels) else "").strip()
+        local_root = (roots[idx] if idx < len(roots) else "").strip()
+        url_prefix = (urls[idx] if idx < len(urls) else "").strip()
+        scope = (scopes[idx] if idx < len(scopes) else "both").strip().lower()
+        if not local_root:
+            continue
+        try:
+            priority = max(1, int((priorities[idx] if idx < len(priorities) else str(idx + 1)).strip()))
+        except Exception:
+            priority = idx + 1
+        use_for_approved = scope in ("both", "approved")
+        use_for_unapproved = scope in ("both", "unapproved")
+        out.append(
+            {
+                "label": label or f"Source {idx + 1}",
+                "local_root": local_root,
+                "url_prefix": url_prefix,
+                "priority": priority,
+                "use_for_approved": use_for_approved,
+                "use_for_unapproved": use_for_unapproved,
+                "active": True,
+            }
+        )
+    return out
+
+
+def _parse_process_meta(form) -> dict:
+    names = form.getlist("process_name")
+    icons = form.getlist("process_icon")
+    colors = form.getlist("process_color")
+    aliases = form.getlist("process_aliases")
+    file_groups = form.getlist("process_file_groups")
+    rows: list[dict] = []
+    total = max(len(names), len(icons), len(colors), len(aliases), len(file_groups))
+    for idx in range(total):
+        name = (names[idx] if idx < len(names) else "").strip()
+        if not name:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "icon": (icons[idx] if idx < len(icons) else "").strip(),
+                "color": (colors[idx] if idx < len(colors) else "").strip(),
+                "aliases": (aliases[idx] if idx < len(aliases) else "").strip(),
+                "file_groups": (file_groups[idx] if idx < len(file_groups) else "").strip(),
+            }
+        )
+    return sanitize_process_meta(rows)
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -98,6 +158,11 @@ def admin_settings():
         settings.upload_pack_max_files = _parse_int(
             request.form.get("upload_pack_max_files"), settings.upload_pack_max_files or 5000
         )
+        settings.file_sources = _parse_file_sources(request.form)
+        if request.form.get("reset_process_library") in ("1", "true", "on"):
+            settings.process_meta = {}
+        else:
+            settings.process_meta = _parse_process_meta(request.form)
 
         remove_logo = bool(request.form.get("remove_logo") in ("on", "true", "1", True))
         upload = request.files.get("brand_logo")
@@ -141,6 +206,17 @@ def admin_settings():
             current_app.config["UPLOAD_PACK_MAX_ZIP_MB"] = settings.upload_pack_max_zip_mb or 0
             current_app.config["UPLOAD_PACK_MAX_FILE_MB"] = settings.upload_pack_max_file_mb or 0
             current_app.config["UPLOAD_PACK_MAX_FILES"] = settings.upload_pack_max_files or 0
+            from app.services.app_settings import resolve_file_sources
+            file_sources = resolve_file_sources(settings)
+            current_app.config["PROCESS_META"] = load_process_meta(overrides=settings.process_meta or None)
+            current_app.config["FILE_SOURCES"] = file_sources
+            if file_sources:
+                primary_source = file_sources[0]
+                current_app.config["FILES_LOCAL_ROOT"] = primary_source.get("local_root") or ""
+                current_app.config["FILE_ROOT_LOCAL"] = primary_source.get("local_root") or ""
+                current_app.config["FILES_URL_PREFIX"] = primary_source.get("url_prefix") or ""
+                current_app.config["FILE_ROOT_HTTP"] = primary_source.get("url_prefix") or ""
+                current_app.config["EXTRA_FILES_ROOT"] = primary_source.get("local_root") or ""
         except Exception:
             pass
         try:
@@ -151,16 +227,43 @@ def admin_settings():
         return redirect(url_for("admin.admin_settings"))
 
     process_meta = current_app.config.get("PROCESS_META", {}) or {}
-    process_rows = [(k, v) for k, v in process_meta.items() if not str(k).startswith("_")]
-    process_rows.sort(key=lambda item: item[0])
+    process_rows = []
+    for name, meta in process_meta.items():
+        if str(name).startswith("_"):
+            continue
+        process_rows.append(
+            {
+                "name": name,
+                "icon": (meta or {}).get("icon", ""),
+                "color": (meta or {}).get("color", ""),
+                "aliases": list((meta or {}).get("aliases") or []),
+                "file_groups": list((meta or {}).get("file_groups") or []),
+            }
+        )
+    process_rows.sort(key=lambda item: item["name"])
+    while len(process_rows) < 8:
+        process_rows.append({"name": "", "icon": "", "color": "", "aliases": [], "file_groups": []})
+    image_root = os.path.join(current_app.root_path, "static", "images")
+    process_icon_choices = sorted(
+        [
+            name
+            for name in os.listdir(image_root)
+            if os.path.isfile(os.path.join(image_root, name)) and name.lower().endswith((".svg", ".png"))
+        ]
+    ) if os.path.isdir(image_root) else []
     hw_display = "\n".join(settings.hardware_folders or [])
     fp_display = "\n".join(settings.flat_pattern_page_names or [])
+    file_source_rows = list(settings.file_sources or [])
+    while len(file_source_rows) < 5:
+        file_source_rows.append({})
     return render_template(
         "admin/settings.html",
         settings=settings,
         process_rows=process_rows,
+        process_icon_choices=process_icon_choices,
         hardware_folders_text=hw_display,
         flat_pattern_page_names_text=fp_display,
+        file_source_rows=file_source_rows,
     )
 
 @bp.route("/users")

@@ -1,6 +1,7 @@
 # app/views/bom_tree.py
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required
+from app.models.artifact import PartFile
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs import preview_png_urls_for
@@ -10,6 +11,7 @@ from flask_login import current_user
 from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.acl import require_items_view
 from app.services.audit import log_action
+from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.part_norm import clean_rev
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
@@ -27,7 +29,15 @@ def _has_children(pn: str, rev: str | None = None) -> bool:
         return False
     return BOMLink.objects(parent=p).limit(1).count() > 0
 
-def _node(pn: str, link=None, rev: str | None = None):
+
+def _coverage_groups(pn: str, rev: str) -> set[str]:
+    groups: set[str] = set()
+    for row in PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev)).only("ext_group"):
+        if row.ext_group:
+            groups.add(str(row.ext_group).lower())
+    return groups
+
+def _node(pn: str, link=None, rev: str | None = None, config: dict | None = None):
     # Prefer specific revision when provided, else pick latest by updated_at
     rev_clean = _clean_rev(rev) if rev is not None else None
     if rev is not None:
@@ -37,6 +47,25 @@ def _node(pn: str, link=None, rev: str | None = None):
     attrs = harvest_part_attrs(p) if p else {}
     effective_rev = _clean_rev(attrs.get("revision") or (p.revision if p else "") or (rev_clean or ""))
     proc_label = _process_label(attrs)
+    config = config or get_field_config()
+    thumbs = preview_png_urls_for(pn, effective_rev)
+    coverage = _coverage_groups(pn, effective_rev)
+    values = resolve_part_field_values(
+        p,
+        context_field_ids("bom_tree", config),
+        attrs=attrs,
+        config=config,
+        extra={
+            "part_number": pn,
+            "revision": effective_rev,
+            "description": attrs.get("description", ""),
+            "qty": getattr(link, "qty", None),
+            "uom": getattr(link, "uom", None),
+            "alt_group": getattr(link, "alt_group", "") or "",
+            "thumbnail": thumbs[0] if thumbs else "",
+        },
+        coverage=coverage,
+    )
     return {
         "key": f"{pn}::{effective_rev}",
         "leaf": not _has_children(pn, effective_rev),
@@ -50,8 +79,9 @@ def _node(pn: str, link=None, rev: str | None = None):
             "material":  attrs.get("material",""),
             "finish":    attrs.get("finish",""),
             "process":   proc_label,
-            "thumb_urls": preview_png_urls_for(pn, effective_rev),
+            "thumb_urls": thumbs,
             "attrs": attrs,
+            **values,
         }
     }
 
@@ -93,6 +123,7 @@ def _is_hardware_node(node: dict) -> bool:
 @login_required
 @require_items_view
 def bom_tree():
+    config = get_field_config()
     pn = (request.args.get("pn") or "").strip()
     rev = request.args.get("rev")  # keep None vs ""
     parent = (request.args.get("parent") or "").strip()
@@ -115,7 +146,7 @@ def bom_tree():
         except Exception:
             pass
         root_rev = _clean_rev(rev) if rev is not None else _clean_rev(p.revision or "")
-        root = _node(p.part_number, rev=(root_rev if rev is not None else root_rev))
+        root = _node(p.part_number, rev=(root_rev if rev is not None else root_rev), config=config)
         root["children"] = []   # lazy
         try:
             log_action("bom.view", resource_type="bom", resource=f"root:{p.part_number}:{p.revision or ''}")
@@ -142,7 +173,7 @@ def bom_tree():
                             continue
                     except Exception:
                         pass
-                    kids.append(_node(child_pn, l, rev=c_rev))
+                    kids.append(_node(child_pn, l, rev=c_rev, config=config))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}:{(parent_rev or '')}")
             except Exception:
@@ -165,7 +196,7 @@ def bom_tree():
                             continue
                     except Exception:
                         pass
-                    kids.append(_node(child_pn, l))
+                    kids.append(_node(child_pn, l, config=config))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}")
             except Exception:

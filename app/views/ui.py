@@ -86,6 +86,17 @@ def admin_addin_ui():
         abort(404, "React build missing. Run `npm run build` in /frontend.")
     return render_template("ui/react_shell.html", title="Add-in Admin", assets=assets, initial={})
 
+
+@bp.get("/admin/fields")
+@login_required
+def admin_fields_ui():
+    if not getattr(current_user, "has_role", None) or not current_user.has_role("admin"):
+        abort(403)
+    assets = vite_assets()
+    if not assets["js"]:
+        abort(404, "React build missing. Run `npm run build` in /frontend.")
+    return render_template("ui/react_shell.html", title="Field Configuration", assets=assets, initial={})
+
 @bp.get("/upload-pack")
 @login_required
 def upload_pack_ui():

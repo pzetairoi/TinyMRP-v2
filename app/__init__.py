@@ -259,8 +259,23 @@ def create_app(config_object=None):
 
     # Override settings from persisted app settings if available.
     try:
-        from app.services.app_settings import get_app_settings
+        from app.services.app_settings import get_app_settings, resolve_file_sources
+        from app.services.processmeta import load_process_meta
         settings = get_app_settings(create=False)
+        file_sources = resolve_file_sources(settings, config=app.config)
+        if file_sources:
+            app.config["FILE_SOURCES"] = file_sources
+            primary_source = next((src for src in file_sources if src.get("active")), file_sources[0])
+            primary_root = str(primary_source.get("local_root") or "").strip()
+            primary_url = str(primary_source.get("url_prefix") or "").strip()
+            if primary_root:
+                app.config["FILES_LOCAL_ROOT"] = primary_root
+                app.config["FILE_ROOT_LOCAL"] = primary_root
+                if not app.config.get("EXTRA_FILES_ROOT"):
+                    app.config["EXTRA_FILES_ROOT"] = primary_root
+            if primary_url:
+                app.config["FILES_URL_PREFIX"] = primary_url
+                app.config["FILE_ROOT_HTTP"] = primary_url
         if settings and getattr(settings, "hardware_folders", None):
             hw_tokens = [str(x).strip().lower() for x in (settings.hardware_folders or []) if str(x).strip()]
             if hw_tokens:
@@ -269,6 +284,8 @@ def create_app(config_object=None):
             fp_tokens = [str(x).strip().lower() for x in (settings.flat_pattern_page_names or []) if str(x).strip()]
             if fp_tokens:
                 app.config["FLAT_PATTERN_PAGE_NAMES"] = fp_tokens
+        if settings is not None:
+            app.config["PROCESS_META"] = load_process_meta(overrides=getattr(settings, "process_meta", None) or None)
         if settings:
             if getattr(settings, "upload_pack_max_zip_mb", None) is not None:
                 app.config["UPLOAD_PACK_MAX_ZIP_MB"] = int(settings.upload_pack_max_zip_mb or 0)
@@ -523,6 +540,13 @@ def create_app(config_object=None):
     app.register_blueprint(me_bp)
     try:
         csrf.exempt(me_bp)
+    except Exception:
+        pass
+
+    from app.views.field_config import bp as field_config_bp
+    app.register_blueprint(field_config_bp)
+    try:
+        csrf.exempt(field_config_bp)
     except Exception:
         pass
 

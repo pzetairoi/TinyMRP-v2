@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { loadFieldConfig } from '../lib/fieldConfig'
 
 type Summary = {
   counts: { total_parts: number; updated_7d: number; approved: number }
@@ -14,6 +15,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [canAdmin, setCanAdmin] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -30,6 +32,17 @@ export default function DashboardPage() {
       } finally {
         if (!cancelled) setLoading(false)
       }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const resp = await loadFieldConfig()
+        if (!cancelled) setCanAdmin(!!resp.permissions?.can_admin)
+      } catch {}
     })()
     return () => { cancelled = true }
   }, [])
@@ -88,6 +101,21 @@ export default function DashboardPage() {
       </div>
 
       <div className="row g-3 mt-1">
+        {canAdmin && (
+          <div className="col-lg-4">
+            <div className="card p-3 h-100">
+              <div className="fw-semibold">Field Configuration</div>
+              <div className="small text-muted mt-2">
+                Manage JSON field mapping, default columns, and Excel BOM field presets.
+              </div>
+              <div className="mt-3">
+                <Link className="btn btn-sm btn-outline-primary" to="/ui/admin/fields">
+                  Open field admin
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="col-lg-4">
           <div className="card p-3 h-100">
             <div className="d-flex justify-content-between align-items-center">

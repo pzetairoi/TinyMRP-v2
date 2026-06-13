@@ -8,6 +8,7 @@ import PartsPage from './pages/PartsPage'
 import BomPage from './pages/BomPage'
 import ApiTokensPage from './pages/ApiTokensPage'
 import AdminAddinPage from './pages/AdminAddinPage'
+import AdminFieldsPage from './pages/AdminFieldsPage'
 import DashboardPage from './pages/DashboardPage'
 import UploadPackPage from './pages/UploadPackPage'
 
@@ -29,6 +30,7 @@ const router = createBrowserRouter([
       { path: '/ui/part/:pn', element: <PartDetailPage /> },
       { path: '/ui/addin/tokens', element: <ApiTokensPage /> },
       { path: '/ui/admin/addin', element: <AdminAddinPage /> },
+      { path: '/ui/admin/fields', element: <AdminFieldsPage /> },
       { path: '/ui/upload-pack', element: <UploadPackPage /> },
       // fallback: send unknown paths to Parts
       { path: '*', element: <PartsPage /> },

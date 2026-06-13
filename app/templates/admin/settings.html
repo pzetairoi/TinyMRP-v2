@@ -123,8 +123,75 @@
 
     <div class="card shadow-sm mb-3">
       <div class="card-body">
-        <h5 class="card-title">Process library</h5>
-        <p class="text-muted small">Reference list of available processes and icons.</p>
+        <h5 class="card-title">File sources</h5>
+        <p class="text-muted small">
+          Configure primary/secondary deliverable roots. Lower priority wins first.
+          Scope controls whether a source is preferred for approved parts, unapproved parts, or both.
+          Clear the local root to disable a row.
+        </p>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th style="min-width: 120px;">Label</th>
+                <th style="min-width: 280px;">Local root</th>
+                <th style="min-width: 180px;">Public URL prefix</th>
+                <th style="width: 110px;">Priority</th>
+                <th style="width: 180px;">Scope</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in file_source_rows %}
+              {% set scope = 'both' %}
+              {% if row.get('use_for_approved') and not row.get('use_for_unapproved') %}
+                {% set scope = 'approved' %}
+              {% elif row.get('use_for_unapproved') and not row.get('use_for_approved') %}
+                {% set scope = 'unapproved' %}
+              {% endif %}
+              <tr>
+                <td>
+                  <input class="form-control form-control-sm" type="text" name="source_label" value="{{ row.get('label', '') }}">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm" type="text" name="source_local_root" value="{{ row.get('local_root', '') }}" placeholder="C:\Deliverables">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm" type="text" name="source_url_prefix" value="{{ row.get('url_prefix', '') }}" placeholder="/deliverables">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm" type="number" min="1" name="source_priority" value="{{ row.get('priority', loop.index) }}">
+                </td>
+                <td>
+                  <select class="form-select form-select-sm" name="source_scope">
+                    <option value="both" {% if scope == 'both' %}selected{% endif %}>Approved + WIP</option>
+                    <option value="approved" {% if scope == 'approved' %}selected{% endif %}>Approved only</option>
+                    <option value="unapproved" {% if scope == 'unapproved' %}selected{% endif %}>WIP only</option>
+                  </select>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between gap-2">
+          <h5 class="card-title mb-0">Process library</h5>
+          <button class="btn btn-sm btn-outline-secondary" type="submit" name="reset_process_library" value="1">
+            Restore defaults
+          </button>
+        </div>
+        <p class="text-muted small mt-2">
+          Manage canonical process names, icons, colors, aliases, and required file groups. Leave blank rows unused.
+        </p>
+        <datalist id="processIconList">
+          {% for icon in process_icon_choices %}
+          <option value="{{ icon }}"></option>
+          {% endfor %}
+        </datalist>
         {% if process_rows %}
         <div class="table-responsive">
           <table class="table table-sm align-middle mb-0">
@@ -134,22 +201,26 @@
                 <th>Icon</th>
                 <th>Color</th>
                 <th>Aliases</th>
+                <th>Required files</th>
               </tr>
             </thead>
             <tbody>
-              {% for name, meta in process_rows %}
+              {% for row in process_rows %}
               <tr>
-                <td>{{ name }}</td>
                 <td>
-                  {% if meta.icon %}
-                  <img src="{{ url_for('static', filename='images/' + meta.icon) }}" alt="{{ name }}" style="height:20px;">
-                  {% else %}
-                  <span class="text-muted small">-</span>
-                  {% endif %}
+                  <input class="form-control form-control-sm" type="text" name="process_name" value="{{ row.name }}" placeholder="welding">
                 </td>
-                <td>{{ meta.color or '-' }}</td>
-                <td class="text-muted small">
-                  {% if meta.aliases %}{{ meta.aliases | join(', ') }}{% else %}-{% endif %}
+                <td>
+                  <input class="form-control form-control-sm" type="text" name="process_icon" value="{{ row.icon }}" list="processIconList" placeholder="welding.svg">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm" type="text" name="process_color" value="{{ row.color }}" placeholder="255, 192, 0">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm" type="text" name="process_aliases" value="{{ row.aliases | join(', ') }}" placeholder="stud welding, fabrication">
+                </td>
+                <td>
+                  <input class="form-control form-control-sm" type="text" name="process_file_groups" value="{{ row.file_groups | join(', ') }}" placeholder="pdf, step, dxf">
                 </td>
               </tr>
               {% endfor %}

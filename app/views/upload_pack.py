@@ -83,6 +83,7 @@ def upload_pack():
     filename = secure_filename(f.filename)
     dry_run = _parse_bool(request.form.get("dry_run") or request.args.get("dry_run"))
     strict = _parse_bool(request.form.get("strict_structure") or request.args.get("strict_structure"))
+    override_mode = str(request.form.get("override_mode") or request.args.get("override_mode") or "preserve").strip().lower()
     allow_extra = bool(current_app.config.get("EXTRA_FILES_ALLOWED", True))
     try:
         result = import_upload_pack(
@@ -92,6 +93,7 @@ def upload_pack():
             dry_run=dry_run,
             strict_structure=strict,
             allow_extra=allow_extra,
+            override_mode=override_mode,
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
