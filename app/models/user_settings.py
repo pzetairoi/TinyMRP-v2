@@ -12,6 +12,7 @@ class UserSettings(Document):
     sw_property_map = DictField(default=dict)
     apply_mode = StringField(default="active_config")
     ui_preferences = DictField(default=dict)
+    field_preferences = DictField(default=dict)
     updated_at = DateTimeField(default=datetime.utcnow)
 
     meta = {

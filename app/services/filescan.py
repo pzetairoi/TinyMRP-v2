@@ -6,18 +6,24 @@ from typing import Dict, List, Tuple, Any, Optional
 
 from flask import current_app
 from app.models.artifact import PartFile
+from app.services.app_settings import resolve_file_sources
 
-def _roots():
-    """Return (local_root, http_base) from unified app config.
-    Reads canonical FILES_LOCAL_ROOT and FILES_URL_PREFIX, falling back to
-    legacy FILE_ROOT_LOCAL/FILE_ROOT_HTTP if present.
-    """
-    cfg = current_app.config
-    local_root = (cfg.get("FILES_LOCAL_ROOT") or cfg.get("FILE_ROOT_LOCAL") or "").strip()
-    http_root  = (cfg.get("FILES_URL_PREFIX") or cfg.get("FILE_ROOT_HTTP")  or "").strip()
-    if not local_root and not http_root:
-        return None, None
-    return local_root, http_root
+def _sources(approved: Optional[bool] = None) -> List[Dict[str, Any]]:
+    try:
+        configured = current_app.config.get("FILE_SOURCES")
+        if isinstance(configured, list) and configured:
+            sources = [dict(item) for item in configured if isinstance(item, dict)]
+        else:
+            sources = resolve_file_sources()
+    except Exception:
+        sources = []
+    active = [src for src in sources if str(src.get("local_root") or "").strip()]
+    if approved is None:
+        return active
+    pref_key = "use_for_approved" if approved else "use_for_unapproved"
+    preferred = [src for src in active if bool(src.get(pref_key, True))]
+    fallback = [src for src in active if src not in preferred]
+    return preferred + fallback
 
 def _expectations_for(pn: str, rev: str) -> List[Tuple[str, str, bool]]:
     """
@@ -102,53 +108,62 @@ def _rel_path_for(candidate: Path, local_root: Path) -> str:
     
     return str(candidate.relative_to(local_root)).replace("\\","/")
 
-def discover_part_files(pn: str, rev: str) -> Dict[Tuple[str,bool], Dict]:
+def discover_part_files(pn: str, rev: str, *, approved: Optional[bool] = None) -> Dict[Tuple[str,bool], Dict]:
     """
-    Return a dict keyed by (ext_group, is_dwg) -> record {ext, rel_path, http_url, size, mtime_iso}
-    Only one record per key; if multiple matches exist, last-modified wins.
+    Return a dict keyed by (ext_group, is_dwg) -> record {ext, rel_path, http_url, size, mtime_iso}.
+    When multiple sources contain the same artifact, source preference wins and mtime breaks ties inside
+    the same source rank.
     """
-   #print("discover",pn,rev)
-    local, http = _roots()
-   #print(local,http)
-    if not local:
+    sources = _sources(approved)
+    if not sources:
         return {}
-    local_root = Path(local)
 
-    found: Dict[Tuple[str,bool], Dict] = {}
-    # We search by expected relative paths from the known subfolders (png, pdf, dxf, step, edr, 3mf, ply, stl, datasheet).
-    # The repo uses subfolders named as ext_groups.
-    folders = ("png","pdf","dxf","step","edr","3mf","ply","stl","datasheet")
-   #print(folders)
-    for ext_group, leaf, is_dwg in _expectations_for(pn, rev):
-        # try in the matching folder (png in png/, pdf in pdf/, …)
-        subdir = ext_group
-        candidate_rel = f"{subdir}/{leaf}"
-       #print("candidate_rel",candidate_rel)
-        p = _find_case_insensitive(local_root, candidate_rel)
-       #print("p",p)
-        if not p:
+    found: Dict[Tuple[str, bool], Dict[str, Any]] = {}
+    for source_rank, source in enumerate(sources):
+        local_root = Path(str(source.get("local_root") or "").strip())
+        if not local_root:
             continue
-        stat = p.stat()
-        key = (ext_group, is_dwg)
-        record = {
-            "ext": p.suffix.lstrip("."),
-            "rel_path": _rel_path_for(p, local_root),
-            "http_url": (http.rstrip("/") + "/" + _rel_path_for(p, local_root)) if http else None,
-            "size": float(stat.st_size),
-            "mtime_iso": datetime.fromtimestamp(stat.st_mtime),
-            "is_dwg": is_dwg,
-        }
-        
-        # keep the newest if duplicate
-        prev = found.get(key)
-        if prev and prev["mtime_iso"] >= record["mtime_iso"]:
-            continue
-        found[key] = record
-       #print("key",key)
-       #print("record",record)
+        http = str(source.get("url_prefix") or "").strip()
+        for ext_group, leaf, is_dwg in _expectations_for(pn, rev):
+            candidate_rel = f"{ext_group}/{leaf}"
+            p = _find_case_insensitive(local_root, candidate_rel)
+            if not p:
+                continue
+            stat = p.stat()
+            key = (ext_group, is_dwg)
+            rel_path = _rel_path_for(p, local_root)
+            record: Dict[str, Any] = {
+                "ext": p.suffix.lstrip("."),
+                "rel_path": rel_path,
+                "abs_path": str(p),
+                "http_url": (http.rstrip("/") + "/" + rel_path) if http else None,
+                "size": float(stat.st_size),
+                "mtime_iso": datetime.fromtimestamp(stat.st_mtime),
+                "is_dwg": is_dwg,
+                "source": str(source.get("id") or "scan"),
+                "meta_info": {
+                    "source_id": str(source.get("id") or ""),
+                    "source_label": str(source.get("label") or ""),
+                    "source_root": str(source.get("local_root") or ""),
+                    "source_priority": int(source.get("priority") or (source_rank + 1)),
+                },
+                "_source_rank": source_rank,
+            }
 
+            prev = found.get(key)
+            if prev is None:
+                found[key] = record
+                continue
+            prev_rank = int(prev.get("_source_rank", 10**6))
+            if source_rank < prev_rank:
+                found[key] = record
+                continue
+            if source_rank == prev_rank and prev["mtime_iso"] < record["mtime_iso"]:
+                found[key] = record
+
+    for record in found.values():
+        record.pop("_source_rank", None)
     return found
-
 
 
 def _group_from_ext(ext: str) -> Optional[str]:
@@ -210,10 +225,9 @@ def upsert_part_files(
         if "rel_path" in allowed and norm_rel:
             updates["set__rel_path"] = norm_rel
 
-        # Ensure `path` is set to a non-null, unique value (avoid dup key on path_1)
-        # We intentionally use rel_path (not absolute) to keep it stable & portable.
-        if "path" in allowed and norm_rel:
-            updates["set__path"] = norm_rel
+        abs_path = str(r.get("abs_path") or "").strip()
+        if "path" in allowed and (abs_path or norm_rel):
+            updates["set__path"] = abs_path or norm_rel
 
         # Pass through common metadata if present
         if "http_url" in r and "http_url" in allowed:
@@ -228,6 +242,10 @@ def upsert_part_files(
             updates["set__is_dwg"] = r["is_dwg"]
         if "content_type" in r and "content_type" in allowed:
             updates["set__content_type"] = r["content_type"]
+        if "source" in r and "source" in allowed:
+            updates["set__source"] = r["source"]
+        if "meta_info" in r and "meta_info" in allowed:
+            updates["set__meta_info"] = r["meta_info"]
 
         # Optional: stamp first discovery without touching on updates
         if "discovered_at" in allowed:

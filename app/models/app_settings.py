@@ -1,5 +1,5 @@
 from datetime import datetime
-from mongoengine import Document, StringField, DateTimeField, ListField, IntField
+from mongoengine import Document, StringField, DateTimeField, ListField, IntField, DictField
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -12,6 +12,9 @@ class AppSettings(Document):
     upload_pack_max_zip_mb = IntField(default=1024)
     upload_pack_max_file_mb = IntField(default=1024)
     upload_pack_max_files = IntField(default=5000)
+    file_sources = ListField(DictField(), default=list)
+    field_config = DictField(default=dict)
+    process_meta = DictField(default=dict)
     updated_at = DateTimeField(default=datetime.utcnow)
 
     meta = {

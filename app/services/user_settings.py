@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from app.models.user_settings import UserSettings
+from app.services.field_config import sanitize_user_field_preferences
 from app.services.numbering_presets import get_recommended_scheme
 
 
@@ -23,6 +24,7 @@ def default_settings_dict() -> Dict[str, Any]:
         "sw_property_map": dict(DEFAULT_PROPERTY_MAP),
         "apply_mode": "active_config",
         "ui_preferences": {"show_advanced": False},
+        "field_preferences": {},
         "updated_at": datetime.utcnow(),
     }
 
@@ -38,6 +40,7 @@ def get_or_create_settings(user) -> UserSettings:
 
 
 def settings_to_dict(settings: UserSettings) -> Dict[str, Any]:
+    field_preferences = sanitize_user_field_preferences(settings.field_preferences or {})
     return {
         "id": str(settings.id),
         "default_scheme_id": settings.default_scheme_id or "",
@@ -45,6 +48,7 @@ def settings_to_dict(settings: UserSettings) -> Dict[str, Any]:
         "sw_property_map": settings.sw_property_map or dict(DEFAULT_PROPERTY_MAP),
         "apply_mode": settings.apply_mode or "active_config",
         "ui_preferences": settings.ui_preferences or {"show_advanced": False},
+        "field_preferences": field_preferences,
         "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
     }
 
@@ -60,6 +64,8 @@ def apply_settings_payload(settings: UserSettings, payload: Dict[str, Any]) -> U
         settings.apply_mode = str(payload.get("apply_mode") or "active_config")
     if "ui_preferences" in payload and isinstance(payload.get("ui_preferences"), dict):
         settings.ui_preferences = payload.get("ui_preferences") or {}
+    if "field_preferences" in payload and isinstance(payload.get("field_preferences"), dict):
+        settings.field_preferences = sanitize_user_field_preferences(payload.get("field_preferences") or {})
 
     settings.updated_at = datetime.utcnow()
     settings.save()

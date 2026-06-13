@@ -1,6 +1,6 @@
 # app/views/parts.py
 from flask import Blueprint, request, jsonify, current_app
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
@@ -13,7 +13,7 @@ from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
-from app.services.attrs import harvest_part_attrs, approved_value
+from app.services.attrs import comments_search_text, harvest_part_attrs, approved_value, process_attributes
 from app.models.artifact import PartFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
@@ -37,6 +37,15 @@ from app.services.acl import (
 )
 from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
+from app.services.field_config import (
+    context_field_ids,
+    field_index as field_config_index,
+    get_field_config,
+    matches_field_filter_value,
+    primary_query_path,
+    query_paths_for_field,
+    resolve_part_field_values,
+)
 from app.services.parts_delete import delete_part_and_refs_cascade
 from app.services.part_norm import clean_rev, clean_rev_or_none
 
@@ -284,6 +293,26 @@ def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
     return rows
 
 
+def _context_field_values(
+    part: Part | None,
+    context_name: str,
+    *,
+    coverage: set[str] | None = None,
+    extra: dict | None = None,
+):
+    config = get_field_config()
+    attrs = harvest_part_attrs(part) if part else {}
+    values = resolve_part_field_values(
+        part,
+        context_field_ids(context_name, config),
+        attrs=attrs,
+        config=config,
+        extra=extra,
+        coverage=coverage,
+    )
+    return config, attrs, values
+
+
 _EMPTY_VALUES = {"", "n/a", "na", "none", "null", "0", "false"}
 
 def _is_blankish(value: object, *, allow_na: bool = False) -> bool:
@@ -387,27 +416,45 @@ def parts_lazy():
     sort_order = int(body.get("sortOrder", 1))  # 1 asc, -1 desc
     filters = body.get("filters", {})
 
-    sort_map = {
-        "material": "attrs__material",
-        "finish": "attrs__finish",
-        "mass": "attrs__mass",
-        "revision": "revision",
-        "category": "category",
-        "description": "description",
-        "part_number": "part_number",
-    }
-    allowed = set(sort_map.keys())
-    if sort_field not in allowed:
+    field_config = get_field_config()
+    parts_field_ids = context_field_ids("parts_list", field_config)
+    field_meta = field_config_index(field_config)
+    sortable_ids = {field_id for field_id in parts_field_ids if field_meta.get(field_id, {}).get("sortable")}
+    filterable_ids = {field_id for field_id in parts_field_ids if field_meta.get(field_id, {}).get("filterable")}
+    if sort_field not in sortable_ids:
         sort_field = "part_number"
-    mapped = sort_map.get(sort_field, sort_field)
+    mapped = primary_query_path(sort_field, field_config)
+    if not mapped:
+        sort_field = "part_number"
+        mapped = primary_query_path(sort_field, field_config) or "part_number"
     order_by = f"-{mapped}" if sort_order == -1 else mapped
 
     def _terms(s: str):
         return [t for t in re.split(r"\s+", (s or "").strip().lower()) if t]
 
+    _missing = object()
+
+    def _filter_value(key: str, default: Any = _missing):
+        raw = filters.get(key)
+        if not isinstance(raw, dict):
+            return default
+        if "value" in raw:
+            return raw.get("value")
+        constraints = raw.get("constraints")
+        if isinstance(constraints, list):
+            for item in constraints:
+                if not isinstance(item, dict) or "value" not in item:
+                    continue
+                value = item.get("value")
+                if value not in (None, ""):
+                    return value
+                if isinstance(value, bool):
+                    return value
+        return default
+
     def add_filter(q: Q, key: str, *fields):
-        f = filters.get(key) or {}
-        val = (f.get("value") or "").strip()
+        raw_value = _filter_value(key, "")
+        val = str(raw_value or "").strip()
         if not val or val.startswith("__"):
             return q
         for t in _terms(val):
@@ -417,24 +464,60 @@ def parts_lazy():
             q = q & or_q
         return q
 
+    def add_field_filter(q: Q, key: str):
+        if key not in filterable_ids:
+            return q
+        raw_value = _filter_value(key, "")
+        val = str(raw_value or "").strip()
+        if not val or val.startswith("__"):
+            return q
+        paths = query_paths_for_field(key, field_config)
+        if not paths:
+            return q
+        for t in _terms(val):
+            or_q = Q()
+            for fld in paths:
+                or_q = or_q | Q(**{f"{fld}__icontains": t})
+            q = q & or_q
+        return q
+
     def _flag_enabled(key: str) -> bool:
-        val = (filters.get(key) or {}).get("value")
+        val = _filter_value(key)
         if isinstance(val, bool):
             return val
         if val is None:
             return False
         return str(val).strip().lower() in ("true", "1", "yes", "y", "on")
 
+    def _or_contains(paths: list[str], term: str) -> Q:
+        out = Q()
+        for fld in paths:
+            out = out | Q(**{f"{fld}__icontains": term})
+        return out
+
     q = Q()
-    q = add_filter(q, "part_number", "part_number")
-    q = add_filter(q, "revision", "revision")
-    q = add_filter(q, "description", "description")
-    q = add_filter(q, "category", "category")
-    material_val = (filters.get("material") or {}).get("value")
+    parts_context_ids = context_field_ids("parts_list", field_config)
+    generic_filter_ids = []
+    typed_filter_specs: list[tuple[str, str, Any]] = []
+    for field_id in filterable_ids:
+        if field_id in {"material", "process"}:
+            continue
+        data_type = str(field_meta.get(field_id, {}).get("data_type") or "text")
+        raw_value = _filter_value(field_id)
+        if data_type == "image":
+            continue
+        if data_type in {"boolean", "number"}:
+            if raw_value is not _missing and raw_value not in (None, ""):
+                typed_filter_specs.append((field_id, data_type, raw_value))
+            continue
+        generic_filter_ids.append(field_id)
+    for field_id in generic_filter_ids:
+        q = add_field_filter(q, field_id)
+    material_val = _filter_value("material", "")
     material_val_norm = str(material_val or "").strip().lower()
     if material_val_norm not in ("__missing__", "missing", "(missing)"):
-        q = add_filter(q, "material", "attrs__material")
-    q = add_filter(q, "finish", "attrs__finish")
+        q = add_field_filter(q, "material")
+    q = add_field_filter(q, "finish")
     def _process_filter_q(terms: list[str]) -> Q:
         or_q = Q()
         if terms:
@@ -446,36 +529,37 @@ def parts_lazy():
                 or_q = or_q | Q(attrs__processes__icontains=t)
         return or_q
 
+    category_paths = query_paths_for_field("category", field_config) or ["attrs__category", "category"]
+    material_paths = query_paths_for_field("material", field_config) or ["attrs__material"]
     proc_key = "process" if "process" in filters else "processes"
-    proc_val = (filters.get(proc_key) or {}).get("value")
+    proc_val = _filter_value(proc_key, "")
     proc_val_norm = str(proc_val or "").strip().lower()
     if proc_val_norm in ("hardware", "fastener", "fasteners"):
         q = q & (
             _process_filter_q(["hardware", "fastener", "fasteners"])
-            | Q(attrs__category__icontains="hardware")
-            | Q(category__icontains="hardware")
+            | _or_contains(category_paths, "hardware")
         )
     elif proc_val_norm in ("sheet metal", "sheetmetal", "sheet"):
         q = q & (
             _process_filter_q(["lasercut", "profile cut", "cutting", "folding", "rolling", "sheet"])
-            | Q(attrs__category__icontains="sheet")
-            | Q(category__icontains="sheet")
-            | Q(attrs__material__icontains="sheet")
+            | _or_contains(category_paths, "sheet")
+            | _or_contains(material_paths, "sheet")
         )
     else:
-        q = add_filter(q, proc_key, "processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes")
-    g = (filters.get("global") or {}).get("value")
+        q = add_field_filter(q, proc_key)
+    g = _filter_value("global", "")
     if g:
+        global_paths: list[str] = []
+        for field_id in parts_field_ids:
+            if field_id == "process":
+                continue
+            for fld in query_paths_for_field(field_id, field_config):
+                if fld not in global_paths:
+                    global_paths.append(fld)
         for t in _terms(str(g)):
-            orq = (
-                Q(part_number__icontains=t)
-                | Q(revision__icontains=t)
-                | Q(description__icontains=t)
-                | Q(category__icontains=t)
-                | Q(attrs__material__icontains=t)
-                | Q(attrs__finish__icontains=t)
-                | Q(processes__icontains=t)
-            )
+            orq = _process_filter_q([t])
+            for fld in global_paths:
+                orq = orq | Q(**{f"{fld}__icontains": t})
             q = q & orq
 
     def _pairs_q(pairs: set[tuple[str, str]]):
@@ -505,7 +589,7 @@ def parts_lazy():
 
     # Optional "used in job" filter (with optional job number substring)
     used_in_job = _flag_enabled("used_in_job")
-    job_number_filter = str((filters.get("job_number") or {}).get("value") or "").strip()
+    job_number_filter = str(_filter_value("job_number", "") or "").strip()
     if used_in_job:
         job_qs = Job.objects(is_deleted=False)
         if job_number_filter:
@@ -522,12 +606,12 @@ def parts_lazy():
         q = q & _pairs_q(pairs)
 
     # ACL filter for restricted viewers
-    allowed = allowed_parts_for(current_user)
-    if isinstance(allowed, set):
-        if not allowed:
+    allowed_scope = allowed_parts_for(current_user)
+    if isinstance(allowed_scope, set):
+        if not allowed_scope:
             return jsonify({"data": [], "totalRecords": 0})
         allowed_q = Q()
-        for pn, rev in allowed:
+        for pn, rev in allowed_scope:
             pn_clean = (pn or "").strip()
             if not pn_clean:
                 continue
@@ -540,56 +624,37 @@ def parts_lazy():
     qs = Part.objects(q)
 
     if material_val_norm in ("__missing__", "missing", "(missing)"):
+        material_query = (primary_query_path("material", field_config) or "attrs__material").replace("__", ".")
         qs = qs.filter(
             __raw__={
                 "$or": [
-                    {"attrs.material": {"$exists": False}},
-                    {"attrs.material": ""},
-                    {"attrs.material": None},
+                    {material_query: {"$exists": False}},
+                    {material_query: ""},
+                    {material_query: None},
                 ]
             }
         )
 
-    def _bool_filter(val: object) -> Optional[bool]:
-        if val is None:
-            return None
-        if isinstance(val, bool):
-            return val
-        s = str(val).strip().lower()
-        if s in ("true", "1", "yes", "y"):
-            return True
-        if s in ("false", "0", "no", "n", "missing"):
-            return False
-        return None
-
-    has_pdf_filter = _bool_filter((filters.get("has_pdf") or {}).get("value"))
     full_files_filter = _flag_enabled("full_files")
-    approved_filter = _flag_enabled("approved")
+    approved_only_filter = _flag_enabled("approved_only")
     min_props_filter = _flag_enabled("min_props")
 
     def _coverage_map(parts_list: list[Part]) -> dict[tuple[str, str], set[str]]:
         if not parts_list:
             return {}
         pn_list = list({p.part_number for p in parts_list if p.part_number})
-        rev_list = []
-        for p in parts_list:
-            attrs = harvest_part_attrs(p)
-            rev_list.append(_normalized_revision(p, attrs))
-        rev_list = list({r for r in rev_list})
         qf = PartFile.objects(part_number__in=pn_list)
-        if rev_list:
-            qf = qf.filter(revision__in=list(set(rev_list)))
         coverage: dict[tuple[str, str], set[str]] = {}
         for f in qf.only("part_number", "revision", "ext_group"):
-            key = (f.part_number, f.revision or "")
+            key = (f.part_number, _clean_rev_value(f.revision or ""))
             coverage.setdefault(key, set()).add((f.ext_group or "").lower())
         return coverage
 
     needs_scan = any([
-        has_pdf_filter is not None,
         full_files_filter,
-        approved_filter,
+        approved_only_filter,
         min_props_filter,
+        bool(typed_filter_specs),
     ])
 
     if needs_scan:
@@ -598,20 +663,36 @@ def parts_lazy():
         )
         coverage = _coverage_map(all_docs)
         filtered_docs = []
+        resolved_cache: dict[tuple[str, str], dict[str, Any]] = {}
         meta = current_app.config.get("PROCESS_META", {})
         for p in all_docs:
             attrs = harvest_part_attrs(p)
             rev = _normalized_revision(p, attrs)
             groups = coverage.get((p.part_number, rev)) or set()
             proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
-            if has_pdf_filter is not None and ("pdf" in groups) != has_pdf_filter:
-                continue
-            if approved_filter and not _is_approved(attrs):
+            if approved_only_filter and not _is_approved(attrs):
                 continue
             if min_props_filter and not _min_props_ok(p, attrs, proc_list):
                 continue
             if full_files_filter and not _full_files_ok(proc_list, groups, meta):
                 continue
+            key = (p.part_number, rev)
+            values = resolve_part_field_values(
+                p,
+                parts_context_ids,
+                attrs=attrs,
+                config=field_config,
+                extra={"part_number": p.part_number, "revision": rev},
+                coverage=groups,
+            )
+            typed_match = True
+            for field_id, data_type, raw_value in typed_filter_specs:
+                if not matches_field_filter_value(values.get(field_id), raw_value, data_type):
+                    typed_match = False
+                    break
+            if not typed_match:
+                continue
+            resolved_cache[key] = values
             filtered_docs.append(p)
         filtered = len(filtered_docs)
         docs = filtered_docs[first:first + rows]
@@ -624,32 +705,53 @@ def parts_lazy():
             .limit(rows)
         )
         coverage = _coverage_map(docs)
+        resolved_cache = {}
 
     out = []
     for p in docs:
         attrs = harvest_part_attrs(p)
         pn = p.part_number
         rev = _normalized_revision(p, attrs)
-        display_code = f"{pn}-{rev}" if rev else pn
         groups = coverage.get((pn, rev)) or set()
+        process_list = normalize_process_list(attrs, list(p.processes or []), current_app.config.get("PROCESS_META", {}))
+        thumb_list = thumb_urls_for(pn, rev)
+        values = dict(resolved_cache.get((pn, rev)) or {})
+        if not values:
+            values = resolve_part_field_values(
+                p,
+                parts_context_ids,
+                attrs=attrs,
+                config=field_config,
+                extra={"part_number": pn, "revision": rev, "thumbnail": thumb_list[0] if thumb_list else ""},
+                coverage=groups,
+            )
+        elif thumb_list:
+            values["thumbnail"] = thumb_list[0]
+        values["display_code"] = f"{pn}-{rev}" if rev else pn
         out.append(
             {
                 "id": f"{pn}::{rev}",
-                "part_number": pn,
-                "revision": rev,
-                "display_code": display_code,
-                "description": p.description or attrs.get("description") or "",
-                "category": attrs.get("category") or p.category or "",
-                "material": attrs.get("material", ""),
-                "finish": attrs.get("finish", ""),
-                "mass": attrs.get("mass", ""),
-                "processes": normalize_process_list(attrs, list(p.processes or []), current_app.config.get("PROCESS_META", {})),
-                "thumb_urls": thumb_urls_for(pn, rev),
-                "has_pdf": "pdf" in groups,
-                "has_png": "png" in groups,
-                "has_dxf": "dxf" in groups,
-                "has_step": "step" in groups,
-                "has_datasheet": "datasheet" in groups,
+                "part_number": values.get("part_number", pn),
+                "revision": values.get("revision", rev),
+                "display_code": values.get("display_code", f"{pn}-{rev}" if rev else pn),
+                "description": values.get("description", ""),
+                "category": values.get("category", ""),
+                "material": values.get("material", ""),
+                "finish": values.get("finish", ""),
+                "mass": values.get("mass", ""),
+                "process": values.get("process", ""),
+                "processes": process_list,
+                "thumb_urls": thumb_list,
+                "has_pdf": bool(values.get("has_pdf", "pdf" in groups)),
+                "has_png": bool(values.get("has_png", "png" in groups)),
+                "has_dxf": bool(values.get("has_dxf", "dxf" in groups)),
+                "has_step": bool(values.get("has_step", "step" in groups)),
+                "has_edr": bool(values.get("has_edr", "edr" in groups)),
+                "has_3mf": bool(values.get("has_3mf", "3mf" in groups)),
+                "has_ply": bool(values.get("has_ply", "ply" in groups)),
+                "has_stl": bool(values.get("has_stl", "stl" in groups)),
+                "has_datasheet": bool(values.get("has_datasheet", "datasheet" in groups)),
+                **values,
             }
         )
 
@@ -691,6 +793,11 @@ def part_detail():
     norm_rev = _normalized_revision(p, attrs)
     meta = current_app.config.get("PROCESS_META", {})
     proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
+    _, _, summary_field_values = _context_field_values(
+        p,
+        "part_detail_summary",
+        extra={"part_number": p.part_number, "revision": norm_rev},
+    )
 
     preview_urls = preview_png_urls_for(p.part_number, norm_rev)
     drawing_urls = drawing_png_urls_for(p.part_number, norm_rev)
@@ -699,6 +806,8 @@ def part_detail():
     allow_public = public_file_urls_enabled()
 
     def to_url(f: PartFile):
+        if allow_public and getattr(f, "http_url", None):
+            return f.http_url
         if allow_public and http_base and f.rel_path:
             return f"{http_base}/{f.rel_path}"
         return file_url_for(f)
@@ -710,7 +819,7 @@ def part_detail():
     files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": [], "ply": [], "stl": []}
     for f in (
         PartFile.objects(part_number__iexact=p.part_number, revision__iexact=norm_rev)
-        .only("ext_group", "rel_path", "path")
+        .only("ext_group", "rel_path", "path", "http_url")
         .order_by("ext_group", "rel_path")
     ):
         if f.ext_group in files:
@@ -759,14 +868,16 @@ def part_detail():
         {
             "part": {
                 "part_number": p.part_number,
-                "description": p.description or attrs.get("description", ""),
+                "description": summary_field_values.get("description", p.description or attrs.get("description", "")),
                 "revision": norm_rev,
                 "display_code": f"{p.part_number}-{norm_rev}" if norm_rev else p.part_number,
-                "category": attrs.get("category", ""),
-                "material": attrs.get("material", ""),
-                "finish": attrs.get("finish", ""),
-                "mass": attrs.get("mass", ""),
+                "category": summary_field_values.get("category", attrs.get("category", "")),
+                "material": summary_field_values.get("material", attrs.get("material", "")),
+                "finish": summary_field_values.get("finish", attrs.get("finish", "")),
+                "mass": summary_field_values.get("mass", attrs.get("mass", "")),
+                "process": summary_field_values.get("process", ", ".join(proc_list)),
                 "processes": proc_list,
+                "field_values": summary_field_values,
                 "attributes": attrs,
             },
             "images": preview_urls,
@@ -847,7 +958,10 @@ def part_notes_update(pn):
         pass
     attrs = dict(p.attrs or {})
     attrs["notes"] = notes
+    attrs, processes = process_attributes(attrs)
     p.attrs = attrs
+    if processes:
+        p.processes = processes
     p.updated_at = datetime.utcnow()
     p.save()
     try:
@@ -894,7 +1008,11 @@ def part_comments_add(pn):
     }
     comments.append(comment)
     attrs["comments"] = comments
+    attrs["comments_search"] = comments_search_text(comments)
+    attrs, processes = process_attributes(attrs)
     p.attrs = attrs
+    if processes:
+        p.processes = processes
     p.updated_at = datetime.utcnow()
     p.save()
     try:
