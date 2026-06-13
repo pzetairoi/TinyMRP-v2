@@ -3,10 +3,18 @@ from flask import Blueprint, request, jsonify
 from flask_login import login_required
 from app.services.acl import require_items_view
 from app.services.audit import log_action
+from app.models.artifact import PartFile
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs import thumb_urls_for
 from app.services.attrs import harvest_part_attrs
+from app.services.field_config import (
+    context_field_ids,
+    field_index,
+    get_field_config,
+    matches_field_filter_value,
+    resolve_part_field_values,
+)
 from flask_login import login_required, current_user
 from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed
 from app.services.part_norm import clean_rev
@@ -16,8 +24,17 @@ bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 def _clean_rev(value: object) -> str:
     return clean_rev(value)
 
-def _rows_for_child_pn(pn: str, child_rev: str | None = None):
+
+def _coverage_groups(pn: str, rev: str) -> set[str]:
+    groups: set[str] = set()
+    for row in PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev)).only("ext_group"):
+        if row.ext_group:
+            groups.add(str(row.ext_group).lower())
+    return groups
+
+def _rows_for_child_pn(pn: str, child_rev: str | None = None, *, config: dict | None = None):
     """Return where-used rows for a child part number, keeping revisions accurate."""
+    config = config or get_field_config()
     # Fetch links where this PN is the child
     if "child_pn" in BOMLink._fields:
         query = BOMLink.objects(child_pn=pn)
@@ -55,18 +72,40 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None):
         parent_part = Part.objects(part_number=parent_pn, revision=(parent_rev or "")).first()
         attrs = harvest_part_attrs(parent_part) if parent_part else {}
         resolved_parent_rev = _clean_rev(attrs.get("revision", "") or parent_rev or "")
+        thumbs = thumb_urls_for(parent_pn, resolved_parent_rev)
+        coverage = _coverage_groups(parent_pn, resolved_parent_rev)
+        values = resolve_part_field_values(
+            parent_part,
+            context_field_ids("where_used", config),
+            attrs=attrs,
+            config=config,
+            extra={
+                "part_number": parent_pn,
+                "revision": resolved_parent_rev,
+                "description": attrs.get("description", "") or getattr(parent_part, "description", "") or "",
+                "qty": getattr(l, "qty", None),
+                "uom": getattr(l, "uom", "") or "",
+                "alt_group": getattr(l, "alt_group", "") or "",
+                "thumbnail": thumbs[0] if thumbs else "",
+            },
+            coverage=coverage,
+        )
 
         rows.append({
             "id": f"{parent_pn}::{resolved_parent_rev}::{pn}::{effective_child_rev}",
-            "parent_pn": parent_pn,
-            "parent_desc": attrs.get("description", "") or getattr(parent_part, "description", "") or "",
+            "parent_pn": values.get("part_number", parent_pn),
+            "parent_desc": values.get("description", attrs.get("description", "") or getattr(parent_part, "description", "") or ""),
             "qty": getattr(l, "qty", None),
             "uom": getattr(l, "uom", "") or "",
             "alt_group": getattr(l, "alt_group", "") or "",
-            "parent_thumb_urls": thumb_urls_for(parent_pn, resolved_parent_rev),
-            "parent_rev": resolved_parent_rev,
+            "parent_thumb_urls": thumbs,
+            "parent_rev": values.get("revision", resolved_parent_rev),
             "child_pn": pn,
             "child_rev": (effective_child_rev or ""),
+            "part_number": values.get("part_number", parent_pn),
+            "revision": values.get("revision", resolved_parent_rev),
+            "description": values.get("description", attrs.get("description", "") or getattr(parent_part, "description", "") or ""),
+            **values,
         })
     return rows
 
@@ -79,35 +118,40 @@ def whereused_lazy():
     rev = p.get("rev")  # keep None vs ""
     first = int(p.get("first") or 0)
     rows_per_page = int(p.get("rows") or 25)
-    sort_field = (p.get("sortField") or "parent_pn")
+    sort_field = (p.get("sortField") or "part_number")
     sort_order = int(p.get("sortOrder") or 1)
     filters = p.get("filters") or {}
+    config = get_field_config()
 
-    rows = _rows_for_child_pn(pn, rev)
+    rows = _rows_for_child_pn(pn, rev, config=config)
 
-    # filters (contains)
-    def contains(val, needle):
-        return (needle or "").lower() in (str(val or "")).lower()
-
-    fp = (filters.get("parent_pn", {}) or {}).get("value")
-    fd = (filters.get("parent_desc", {}) or {}).get("value")
-    fa = (filters.get("alt_group", {}) or {}).get("value")
-    if fp: rows = [r for r in rows if contains(r["parent_pn"], fp)]
-    if fd: rows = [r for r in rows if contains(r["parent_desc"], fd)]
-    if fa: rows = [r for r in rows if contains(r["alt_group"], fa)]
+    filterable_ids = set(context_field_ids("where_used", config))
+    field_meta = field_index(config)
+    alias_map = {"parent_pn": "part_number", "parent_rev": "revision", "parent_desc": "description"}
+    for raw_key, payload in filters.items():
+        field_id = alias_map.get(raw_key, raw_key)
+        if field_id not in filterable_ids:
+            continue
+        value = (payload or {}).get("value")
+        if value in (None, ""):
+            continue
+        data_type = str((field_meta.get(field_id) or {}).get("data_type") or "text")
+        rows = [r for r in rows if matches_field_filter_value(r.get(field_id), value, data_type)]
 
     # sort
     reverse = (sort_order == -1)
-    if sort_field in ("parent_pn", "parent_desc", "alt_group", "uom"):
-        rows.sort(key=lambda r: (r.get(sort_field) or "").lower(), reverse=reverse)
-    elif sort_field == "qty":
-        rows.sort(key=lambda r: (r.get("qty") or 0), reverse=reverse)
+    sort_field = alias_map.get(sort_field, sort_field)
+    sort_type = str((field_meta.get(sort_field) or {}).get("data_type") or "text")
+    if sort_type == "number" or sort_field in {"qty"}:
+        rows.sort(key=lambda r: (r.get(sort_field) or 0), reverse=reverse)
+    else:
+        rows.sort(key=lambda r: (str(r.get(sort_field) or "")).lower(), reverse=reverse)
 
     # ACL: filter rows by whether parent is allowed (if enforced)
     try:
         allowed = allowed_parts_for(current_user)
         if isinstance(allowed, set):
-            rows = [r for r in rows if part_is_allowed(allowed, r.get("parent_pn"), r.get("parent_rev") or "")]
+            rows = [r for r in rows if part_is_allowed(allowed, r.get("part_number"), r.get("revision") or "")]
     except Exception:
         pass
     total = len(rows)

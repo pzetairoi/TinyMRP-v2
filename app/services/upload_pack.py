@@ -252,6 +252,7 @@ def import_upload_pack(
     strict_structure: bool = False,
     allow_extra: bool = True,
     seed_tag: str = "upload-pack",
+    override_mode: str = "preserve",
 ) -> Dict[str, Any]:
     timings: Dict[str, Any] = {}
     resources_start = _snapshot_resources()
@@ -507,6 +508,7 @@ def import_upload_pack(
             seed_tag=seed_tag,
             scan_artifacts=scan_storage,
             generate_thumbs=scan_storage,
+            override_mode=override_mode,
         )
         _stage_end(timings, "bom.import", bom_start)
 
@@ -552,6 +554,7 @@ def import_upload_pack(
     return {
         "zip": filename,
         "dry_run": bool(dry_run),
+        "override_mode": override_mode,
         "items": items,
         "warnings": warnings,
         "deliverables_written": deliverables_written,

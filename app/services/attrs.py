@@ -1,6 +1,6 @@
 # app/services/attrs.py
 from __future__ import annotations
-from typing import Dict, Any, Iterable
+from typing import Dict, Any, Iterable, List, Tuple
 import re
 
 _SPLIT = re.compile(r"[;,]")  # split on commas/semicolons
@@ -54,7 +54,6 @@ ALIASES: Dict[str, str] = {
     "oem_part_number": "oem_partnumber",
     "mfr_part": "oem_partnumber",
     "process": "process",
-    "comments": "process",
     "secondprocess": "process2",
     "thirdprocess": "process3",
     "process2": "process2",
@@ -132,6 +131,33 @@ def _to_list(v) -> List[str]:
     return [str(v)]
 
 
+def comments_search_text(value: Any) -> str:
+    if value is None:
+        return ""
+    parts: List[str] = []
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                for key in ("author", "text", "ts"):
+                    text = str(item.get(key) or "").strip()
+                    if text:
+                        parts.append(text)
+            else:
+                text = str(item).strip()
+                if text:
+                    parts.append(text)
+    elif isinstance(value, dict):
+        for key in ("author", "text", "ts"):
+            text = str(value.get(key) or "").strip()
+            if text:
+                parts.append(text)
+    else:
+        text = str(value).strip()
+        if text:
+            parts.append(text)
+    return " | ".join(parts)
+
+
 def normalize_processes_from_attrs(attrs: Dict) -> List[str]:
     """
     Read process fields from raw attrs and produce a normalized, lowercased,
@@ -169,6 +195,8 @@ def process_attributes(raw_attrs: Dict | None) -> Tuple[Dict, List[str]]:
     attrs = dict(raw_attrs or {})
     _normalize_approved_fields(attrs)
     processes = normalize_processes_from_attrs(attrs)
+    if "comments" in attrs:
+        attrs["comments_search"] = comments_search_text(attrs.get("comments"))
 
     # Mirror the list into attrs for the UI "All attributes" panel
     attrs["processes"] = processes
@@ -205,10 +233,12 @@ def normalize_props(raw: Dict[str, Any] | None) -> Dict[str, Any]:
                 processes_list.append(s)
     # also harvest from single fields (keep order)
     for k in ("process", "process2", "process3"):
-        s = (aliased.get(k) or "").strip()
+        s = _as_str(aliased.get(k) or "").strip()
         if s and s not in processes_list:
             processes_list.append(s)
     aliased["processes"] = processes_list
+    if "comments" in aliased:
+        aliased["comments_search"] = comments_search_text(aliased.get("comments"))
 
     # Ensure all required keys exist as strings
     for k in REQUIRED_KEYS:

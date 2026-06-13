@@ -132,6 +132,7 @@ export default function UploadPackPage() {
   const [result, setResult] = useState<UploadResult | null>(null);
   const [dryRun, setDryRun] = useState(false);
   const [strictStructure, setStrictStructure] = useState(false);
+  const [overrideMode, setOverrideMode] = useState<"preserve" | "approved_only" | "always">("preserve");
   const [progressPct, setProgressPct] = useState(0);
   const [progressLabel, setProgressLabel] = useState("Waiting to start...");
   const [showProgress, setShowProgress] = useState(false);
@@ -315,6 +316,7 @@ export default function UploadPackPage() {
     form.append("file", file);
     if (dryRun) form.append("dry_run", "1");
     if (strictStructure) form.append("strict_structure", "1");
+    form.append("override_mode", overrideMode);
 
     let lastPct = 2;
     const xhr = new XMLHttpRequest();
@@ -462,6 +464,51 @@ export default function UploadPackPage() {
                 <label className="form-check-label" htmlFor="strictCheck">
                   Strict structure checks
                 </label>
+              </div>
+              <div className="mt-3">
+                <div className="fw-semibold small">Existing part data</div>
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    id="overridePreserve"
+                    name="overrideMode"
+                    checked={overrideMode === "preserve"}
+                    onChange={() => setOverrideMode("preserve")}
+                  />
+                  <label className="form-check-label" htmlFor="overridePreserve">
+                    Keep existing data, only fill blanks
+                  </label>
+                </div>
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    id="overrideApproved"
+                    name="overrideMode"
+                    checked={overrideMode === "approved_only"}
+                    onChange={() => setOverrideMode("approved_only")}
+                  />
+                  <label className="form-check-label" htmlFor="overrideApproved">
+                    Override only when the incoming part is approved
+                  </label>
+                </div>
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
+                    id="overrideAlways"
+                    name="overrideMode"
+                    checked={overrideMode === "always"}
+                    onChange={() => setOverrideMode("always")}
+                  />
+                  <label className="form-check-label" htmlFor="overrideAlways">
+                    Always override importable part data
+                  </label>
+                </div>
+                <div className="text-muted small mt-1">
+                  Notes and comments are preserved even when import data overrides other fields.
+                </div>
               </div>
               <button className="btn btn-primary mt-3" onClick={runImport} disabled={busy}>
                 {busy ? "Importing..." : "Import"}

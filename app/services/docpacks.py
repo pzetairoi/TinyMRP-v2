@@ -10,6 +10,7 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs, ALIASES, approved_value
+from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.processmeta import normalize_processes
 from app.services.filenames import build_output_name
 from app.services.part_norm import clean_rev as _clean_rev, clean_rev_or_none as _rev_or_none
@@ -29,6 +30,7 @@ class DocPackOptions:
     file_types: List[str] = None         # ext_groups to include (e.g., ["png","pdf","step","dxf","edr","3mf","datasheet"]) 
     want_excel_bom: bool = False
     excel_all_fields: bool = False
+    excel_field_ids: Optional[List[str]] = None
     want_selected_files: bool = True
     want_pdf_binder: bool = False
     want_index_pdf: bool = False
@@ -66,13 +68,18 @@ def _part_by(pn: str, rev: Optional[str]) -> Optional[Part]:
 
 
 def _part_description(part: Optional[Part], attrs: Optional[Dict] = None) -> str:
-    if part and getattr(part, "description", ""):
-        return str(part.description or "")
     if attrs is None and part:
         try:
             attrs = harvest_part_attrs(part)
         except Exception:
             attrs = {}
+    try:
+        values = resolve_part_field_values(part, ["description"], attrs=attrs, config=get_field_config())
+        return str(values.get("description") or "")
+    except Exception:
+        pass
+    if part and getattr(part, "description", ""):
+        return str(part.description or "")
     return str((attrs or {}).get("description") or "")
 
 
@@ -562,6 +569,7 @@ def _excel_bom_bytes(
     occ: Dict[Tuple[str,str], List[Tuple[str,float]]],
     full_qty_map: Optional[Dict[Tuple[str,str], float]] = None,
     include_all_fields: bool = False,
+    field_ids: Optional[List[str]] = None,
 ) -> bytes:
     def _sorted_occ(key: Tuple[str, str]):
         rows = list(occ.get(key, []))
@@ -602,6 +610,7 @@ def _excel_bom_bytes(
     # Determine union of attribute keys (canonicalized using ALIASES on existing keys only)
     attr_keys: Set[str] = set()
     parts_cache: Dict[Tuple[str,str], Optional[Part]] = {}
+    coverage_map: Dict[Tuple[str, str], Set[str]] = {}
     for pn, rev, _ in flat:
         key = (pn, _norm_rev(rev))
         if key not in parts_cache:
@@ -615,44 +624,55 @@ def _excel_bom_bytes(
                 canon = ALIASES.get(kl, kl)
                 if canon:
                     attr_keys.add(str(canon))
-    # Primary columns enforced (exact names per request)
-    qty_col = 'total qty'
-    header_main = [
-        'thumbnail',
-        'partnumber','revision','description',qty_col,'material','process','finish','mass',
-        'link','oem','oem partnumber',
-        'level','level qty'
-    ]
-    # Remove any attribute keys that collide with primary names (case-insensitive)
-    ignore = set([h.lower() for h in header_main] + ['oem_partnumber','oem partnumber','approvedby','approved_by','approved'])
+    unique_pns = list({pn for pn, _rev, _qty in flat if pn})
+    if unique_pns:
+        for row in PartFile.objects(part_number__in=unique_pns).only("part_number", "revision", "ext_group"):
+            key = (str(row.part_number or ""), _norm_rev(getattr(row, "revision", "") or ""))
+            coverage_map.setdefault(key, set()).add(str(getattr(row, "ext_group", "") or "").lower())
+    field_config = get_field_config()
+    excel_context = field_config.get("contexts", {}).get("excel_bom", {})
+    field_defs = {field["id"]: field for field in field_config.get("fields", [])}
+    valid_excel_ids = set(excel_context.get("allowed_field_ids") or [])
+    selected_field_ids = [field_id for field_id in (field_ids or excel_context.get("default_field_ids") or []) if field_id in valid_excel_ids]
+    for req in excel_context.get("required_field_ids") or []:
+        if req in valid_excel_ids and req not in selected_field_ids:
+            selected_field_ids.append(req)
+    if not selected_field_ids:
+        selected_field_ids = ["thumbnail", "part_number", "revision", "description", "total_qty", "level", "level_qty"]
+
+    ignore = {field_id.lower() for field_id in selected_field_ids}
+    ignore.update({"oem_partnumber", "approvedby", "approved_by", "approved"})
     header_attrs = sorted([k for k in attr_keys if k and k.lower() not in ignore]) if include_all_fields else []
-    header = header_main + header_attrs
-    ws.append(header)
+    header_fields = list(selected_field_ids) + header_attrs
+    header_labels = [
+        str(field_defs.get(field_id, {}).get("label") or field_id.replace("_", " ").title())
+        for field_id in selected_field_ids
+    ] + header_attrs
+    ws.append(header_labels)
     ws.freeze_panes = 'A2'
 
     # Column widths
     widths = {
         'thumbnail': 14,
-        'partnumber': 26,
+        'part_number': 26,
         'revision': 10,
         'level': 10,
-        'level qty': 14,
+        'level_qty': 14,
         'description': 40,
-        qty_col: 14,
+        'total_qty': 14,
         'material': 18,
         'process': 18,
-        'thickness': 12,
         'finish': 16,
         'mass': 12,
         'link': 30,
         'oem': 18,
-        'oem partnumber': 22,
+        'oem_partnumber': 22,
     }
-    for i, col in enumerate(header, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = widths.get(col, 16)
+    for i, field_id in enumerate(header_fields, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = widths.get(field_id, 16)
 
     # Map header name -> column index for robust addressing
-    header_index: Dict[str, int] = { name: idx+1 for idx, name in enumerate(header) }
+    header_index: Dict[str, int] = { field_id: idx+1 for idx, field_id in enumerate(header_fields) }
 
     # Helper to find preview PNG path
     file_root = (current_app.config.get('FILE_ROOT_LOCAL') or '').rstrip('/\\')
@@ -705,34 +725,26 @@ def _excel_bom_bytes(
         occ_list = _sorted_occ(key)
         levels_list = [l for l,_ in occ_list]
         qtys_list = [q for _,q in occ_list]
-        # processes as ordered list from process/process2/process3 attributes
-        proc_list: List[str] = []
-        for k in ("process", "process2", "process3"):
-            val = attrs.get(k)
-            if val:
-                proc_list.append(str(val))
-
         full_qty = (full_qty_map or {}).get(key, qty)
-        values = {
-            'thumbnail': '',
-            'partnumber': pn,
-            'revision': _norm_rev(rev),
-            'description': _part_description(p, attrs) if p else attrs.get('description','') or '',
-            qty_col: full_qty,
-            'material': attrs.get('material',''),
-            'process': repr(proc_list),
-            'finish': attrs.get('finish',''),
-            'mass': attrs.get('mass',''),
-            'link': attrs.get('link',''),
-            'oem': attrs.get('oem','') or attrs.get('manufacturer',''),
-            'oem partnumber': attrs.get('oem_partnumber',''),
-            'level': ", ".join(str(x) for x in levels_list),
-            'level qty': ", ".join(f"{x:g}" for x in qtys_list),
-        }
+        values = resolve_part_field_values(
+            p,
+            selected_field_ids,
+            attrs=attrs,
+            config=field_config,
+            extra={
+                "part_number": pn,
+                "revision": _norm_rev(rev),
+                "description": _part_description(p, attrs) if p else attrs.get('description','') or '',
+                "total_qty": full_qty,
+                "level": ", ".join(str(x) for x in levels_list),
+                "level_qty": ", ".join(f"{x:g}" for x in qtys_list),
+            },
+            coverage=coverage_map.get(key) or set(),
+        )
         # Merge all attributes at the end, blanks when missing
         for k in header_attrs:
             values[k] = attrs.get(k, '')
-        row = [_cell(values.get(k, '')) for k in header]
+        row = [_cell(values.get(k, '')) for k in header_fields]
         ws.append(row)
         # Adjust row height for thumbnail
         ws.row_dimensions[row_idx].height = 56
@@ -757,25 +769,27 @@ def _excel_bom_bytes(
         # Hyperlink partnumber to the app part-detail page
         try:
             app_url = _part_detail_url(pn, _norm_rev(rev))
-            pn_col = header_index.get('partnumber') or (header.index('partnumber') + 1)
-            pcell = ws.cell(row=row_idx, column=pn_col)
-            pcell.hyperlink = app_url
-            pcell.font = Font(color='0000EE', underline='single')
+            pn_col = header_index.get('part_number')
+            if pn_col:
+                pcell = ws.cell(row=row_idx, column=pn_col)
+                pcell.hyperlink = app_url
+                pcell.font = Font(color='0000EE', underline='single')
         except Exception:
             pass
 
         # Hyperlink on link column if URL present (external only)
         try:
-            raw = (values.get('link') or '').strip()
+            raw = str(values.get('link') or '').strip()
             if raw:
                 url = raw
                 if not (url.startswith('http://') or url.startswith('https://')):
                     url = 'http://' + url
-                lcol = header_index.get('link') or (header.index('link') + 1)
-                lcell = ws.cell(row=row_idx, column=lcol)
-                # HYPERLINK formula for compatibility
-                disp = raw
-                lcell.value = f'=HYPERLINK("{url}","{disp}")'
+                lcol = header_index.get('link')
+                if lcol:
+                    lcell = ws.cell(row=row_idx, column=lcol)
+                    # HYPERLINK formula for compatibility
+                    disp = raw
+                    lcell.value = f'=HYPERLINK("{url}","{disp}")'
                 try:
                     lcell.hyperlink = url
                 except Exception:
@@ -789,14 +803,14 @@ def _excel_bom_bytes(
     center = Alignment(horizontal='center')
     main_fill = PatternFill(fill_type='solid', fgColor='000000')
     main_font = Font(b=True, color='FFFFFF')
-    for col_idx in range(1, len(header)+1):
+    for col_idx in range(1, len(header_fields)+1):
         cell = ws.cell(row=1, column=col_idx)
         cell.font = bold
         cell.alignment = center
-        if col_idx <= len(header_main):
+        if col_idx <= len(selected_field_ids):
             cell.fill = main_fill
             cell.font = main_font
-    ws.auto_filter.ref = f"A1:{get_column_letter(len(header))}{row_idx}"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(header_fields))}{row_idx}"
 
     out = io.BytesIO()
     wb.save(out)
@@ -1207,7 +1221,7 @@ def _visual_list_pdf(
         try:
             approved = False
             if pdoc is not None:
-                a = (getattr(pdoc, 'attrs', {}) or {})
+                a = harvest_part_attrs(pdoc)
                 raw = approved_value(a)
                 raw = str(raw).strip()
                 if raw:
@@ -1413,9 +1427,16 @@ def _hardware_summary_rows(pn_rev_qty: Iterable[Tuple[str, str, float]]) -> List
         classification = classify_part(attrs, list(pdoc.processes or []), meta, category=getattr(pdoc, "category", ""))
         if classification != "hardware":
             continue
+        resolved = resolve_part_field_values(
+            pdoc,
+            ["material", "finish"],
+            attrs=attrs,
+            config=get_field_config(),
+            extra={"part_number": pn, "revision": _norm_rev(rev)},
+        )
         desc = _part_description(pdoc, attrs)
-        material = attrs.get("material", "") or ""
-        finish = attrs.get("finish", "") or ""
+        material = resolved.get("material", "") or ""
+        finish = resolved.get("finish", "") or ""
         key = (pn, _norm_rev(rev), desc, material, finish)
         rows[key] = rows.get(key, 0.0) + float(qty or 0.0)
     out = []
@@ -1884,9 +1905,16 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[da
             author = str(v).strip()
             break
 
-    material = str((attrs or {}).get("material") or "").strip()
-    finish = str((attrs or {}).get("finish") or "").strip()
-    mass = str((attrs or {}).get("mass") or "").strip()
+    resolved = resolve_part_field_values(
+        pdoc,
+        ["material", "finish", "mass"],
+        attrs=attrs,
+        config=get_field_config(),
+        extra={"part_number": root_pn, "revision": root_rev_clean},
+    )
+    material = str(resolved.get("material") or "").strip()
+    finish = str(resolved.get("finish") or "").strip()
+    mass = str(resolved.get("mass") or "").strip()
 
     related_file = ""
     try:
@@ -2609,6 +2637,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             occ_map,
             full_qty_map,
             include_all_fields=bool(getattr(opts, "excel_all_fields", False)),
+            field_ids=list(getattr(opts, "excel_field_ids", None) or []),
         )
         bom_name = build_output_name(f"{base_stub}_BOM", "xlsx", max_len=96, include_time=False, now=build_ts)
         z.writestr(bom_name, xlsx)
