@@ -1,11 +1,219 @@
 {% extends "security/base.html" %}
-{% block title %}Home · TinyMRP{% endblock %}
+{% block title %}My Account · TinyMRP{% endblock %}
 {% block content %}
-  <div class="row">
-    <div class="col-12">
-      <div class="p-4 bg-white border rounded-3 shadow-sm">
-        <h1 class="h4 mb-2">Welcome{{ " " ~ user.email if user else "" }} 👋</h1>
-        <p class="text-muted mb-0">You’re logged in. We’ll add the dashboard here next.</p>
+  <div class="account-shell">
+    <div class="row g-4">
+      <div class="col-xl-4">
+        <section class="account-panel account-panel--hero h-100">
+          <div class="d-flex align-items-start gap-3">
+            <span
+              class="account-avatar account-avatar--xl account-avatar--{{ profile.avatar_shape or 'circle' }}"
+              style="background: {{ profile.avatar_color or '#1d4ed8' }};"
+              aria-hidden="true"
+            >
+              {{ profile.initials or "U" }}
+            </span>
+            <div>
+              <div class="account-eyebrow">My Account</div>
+              <h1 class="h3 mb-1">{{ profile.label or current_user.email }}</h1>
+              <div class="text-muted">{{ current_user.email }}</div>
+              <div class="small text-muted mt-2">
+                This profile is shown for uploads, part detail ownership, and comments when your email is recorded.
+              </div>
+            </div>
+          </div>
+
+          <div class="account-stats mt-4">
+            <div class="account-stat">
+              <div class="account-stat__label">Roles</div>
+              <div class="account-stat__value">{{ role_names|length }}</div>
+            </div>
+            <div class="account-stat">
+              <div class="account-stat__label">Permissions</div>
+              <div class="account-stat__value">{{ permissions|length }}</div>
+            </div>
+            <div class="account-stat">
+              <div class="account-stat__label">Session</div>
+              <div class="account-stat__value">{{ security_summary.session_timeout_minutes }}m</div>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <div class="account-section-title">Roles</div>
+            <div class="account-chip-row">
+              {% if role_names %}
+                {% for role in role_names %}
+                  <span class="account-chip">{{ role }}</span>
+                {% endfor %}
+              {% else %}
+                <span class="text-muted small">No roles assigned.</span>
+              {% endif %}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-xl-8">
+        <div class="row g-4">
+          <div class="col-12">
+            <section class="account-panel">
+              <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                <div>
+                  <div class="account-section-title">Quick Access</div>
+                  <div class="text-muted small">Common areas available to this account.</div>
+                </div>
+              </div>
+              <div class="row g-3">
+                {% for link in quick_links %}
+                  <div class="col-md-6">
+                    <a class="account-link-card" href="{{ link.href }}">
+                      <div class="fw-semibold">{{ link.title }}</div>
+                      <div class="small text-muted mt-1">{{ link.description }}</div>
+                    </a>
+                  </div>
+                {% endfor %}
+              </div>
+            </section>
+          </div>
+
+          <div class="col-lg-6">
+            <section class="account-panel h-100">
+              <div class="account-section-title mb-2">Profile Options</div>
+              <div class="text-muted small mb-3">
+                Set the display name and avatar style used around the application.
+              </div>
+              <form method="post" action="{{ url_for('main.app_profile_update') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="mb-3">
+                  <label class="form-label" for="display_name">Display name</label>
+                  <input
+                    class="form-control"
+                    id="display_name"
+                    name="display_name"
+                    type="text"
+                    maxlength="60"
+                    value="{{ profile.display_name or '' }}"
+                    placeholder="Shown instead of the email address when available"
+                  >
+                </div>
+                <div class="mb-3">
+                  <label class="form-label" for="avatar_color">Avatar color</label>
+                  <select class="form-select" id="avatar_color" name="avatar_color">
+                    {% for option in profile_colors %}
+                      <option value="{{ option.value }}" {% if option.value == profile.avatar_color %}selected{% endif %}>
+                        {{ option.label }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label" for="avatar_shape">Avatar shape</label>
+                  <select class="form-select" id="avatar_shape" name="avatar_shape">
+                    {% for option in profile_shapes %}
+                      <option value="{{ option.value }}" {% if option.value == profile.avatar_shape %}selected{% endif %}>
+                        {{ option.label }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <button class="btn btn-primary" type="submit">Save profile</button>
+              </form>
+            </section>
+          </div>
+
+          <div class="col-lg-6">
+            <section class="account-panel h-100">
+              <div class="account-section-title mb-2">Change Password</div>
+              <div class="text-muted small mb-3">
+                Use a passphrase with at least {{ security_summary.min_length }} characters. Password rotation is only needed after suspected compromise.
+              </div>
+              <form method="post" action="{{ url_for('main.app_password_change') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="mb-3">
+                  <label class="form-label" for="current_password">Current password</label>
+                  <input class="form-control" id="current_password" name="current_password" type="password" autocomplete="current-password">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label" for="new_password">New password</label>
+                  <input class="form-control" id="new_password" name="new_password" type="password" autocomplete="new-password">
+                </div>
+                <div class="mb-3">
+                  <label class="form-label" for="confirm_password">Confirm new password</label>
+                  <input class="form-control" id="confirm_password" name="confirm_password" type="password" autocomplete="new-password">
+                </div>
+                <button class="btn btn-outline-primary" type="submit">Update password</button>
+              </form>
+            </section>
+          </div>
+
+          <div class="col-lg-7">
+            <section class="account-panel h-100">
+              <div class="account-section-title mb-2">Permissions</div>
+              <div class="text-muted small mb-3">
+                Effective access from the roles currently assigned to this account.
+              </div>
+              <div class="account-chip-row">
+                {% if permissions %}
+                  {% for permission in permissions %}
+                    <span class="account-chip account-chip--accent">{{ permission }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span class="text-muted small">No explicit permissions assigned.</span>
+                {% endif %}
+              </div>
+            </section>
+          </div>
+
+          <div class="col-lg-5">
+            <section class="account-panel h-100">
+              <div class="account-section-title mb-2">Security Summary</div>
+              <div class="account-kv">
+                <div>
+                  <span>Account created</span>
+                  <strong>{{ security_summary.account_created_at.strftime("%Y-%m-%d %H:%M:%S") if security_summary.account_created_at else "Not recorded" }}</strong>
+                </div>
+                <div>
+                  <span>Last profile update</span>
+                  <strong>{{ security_summary.account_updated_at.strftime("%Y-%m-%d %H:%M:%S") if security_summary.account_updated_at else "Not recorded" }}</strong>
+                </div>
+                <div>
+                  <span>Last login</span>
+                  <strong>{{ security_summary.last_login_at.strftime("%Y-%m-%d %H:%M:%S") if security_summary.last_login_at else "Not recorded yet" }}</strong>
+                </div>
+                <div>
+                  <span>Password changed</span>
+                  <strong>{{ security_summary.password_changed_at.strftime("%Y-%m-%d %H:%M:%S") if security_summary.password_changed_at else "Not recorded" }}</strong>
+                </div>
+                <div>
+                  <span>Last login IP</span>
+                  <strong>{{ security_summary.last_login_ip or "Not recorded" }}</strong>
+                </div>
+                <div>
+                  <span>Session timeout</span>
+                  <strong>{{ security_summary.session_timeout_minutes }} minutes</strong>
+                </div>
+                <div>
+                  <span>Password length</span>
+                  <strong>{{ security_summary.min_length }} to {{ security_summary.max_length }} characters</strong>
+                </div>
+              </div>
+              <div class="account-flag-row mt-3">
+                <span class="account-flag {% if security_summary.generic_auth_responses %}is-on{% endif %}">
+                  Generic auth responses: {{ "On" if security_summary.generic_auth_responses else "Off" }}
+                </span>
+                <span class="account-flag {% if security_summary.secure_cookie %}is-on{% endif %}">
+                  Secure session cookie: {{ "On" if security_summary.secure_cookie else "Off" }}
+                </span>
+                <span class="account-flag {% if security_summary.remember_cookie_secure %}is-on{% endif %}">
+                  Secure remember cookie: {{ "On" if security_summary.remember_cookie_secure else "Off" }}
+                </span>
+              </div>
+              {% if security_summary.last_login_ua %}
+                <div class="small text-muted mt-3">{{ security_summary.last_login_ua }}</div>
+              {% endif %}
+            </section>
+          </div>
+        </div>
       </div>
     </div>
   </div>

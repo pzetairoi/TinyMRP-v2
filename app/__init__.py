@@ -136,6 +136,8 @@ def create_app(config_object=None):
     # Load default config if not set
     # (Secrets are resolved below to avoid shipping insecure defaults.)
     app.config.setdefault("SECURITY_PASSWORD_HASH", "argon2")
+    app.config.setdefault("SECURITY_PASSWORD_LENGTH_MIN", int(os.getenv("SECURITY_PASSWORD_LENGTH_MIN") or "12"))
+    app.config.setdefault("SECURITY_RETURN_GENERIC_RESPONSES", True)
     app.config.setdefault("MONGO_URI", "mongodb://localhost:27017/tinymrp-v2")
     app.config.setdefault("SECURITY_REGISTERABLE", False)
     app.config.setdefault("SECURITY_RECOVERABLE", False)
@@ -194,6 +196,7 @@ def create_app(config_object=None):
     app.config.setdefault("WTF_CSRF_ENABLED", True)
     app.config.setdefault("SECURITY_LOGOUT_METHODS", ["POST"])  # explicit
     app.config.setdefault("SECURITY_POST_LOGOUT_VIEW", "/login")  # where to go after logout
+    app.config.setdefault("SECURITY_POST_LOGIN_VIEW", "/app")
     
     # Simple files config (centralized)
     # One local root inside the container/host mount, one URL prefix served by nginx.
@@ -300,6 +303,44 @@ def create_app(config_object=None):
     datastore = MongoEngineUserDatastore(db_conn, User, Role)
     global security
     security = Security(app, datastore)
+
+    try:
+        from flask_login import user_logged_in, user_logged_out
+
+        @user_logged_in.connect_via(app)
+        def _audit_login(_sender, user=None, **_extra):
+            if user is None:
+                return
+            try:
+                user.last_login_at = datetime.utcnow()
+                user.last_login_ip = (
+                    request.headers.get("X-Forwarded-For")
+                    or request.headers.get("X-Real-IP")
+                    or request.remote_addr
+                    or ""
+                )
+                user.last_login_ua = request.headers.get("User-Agent") or ""
+                user.updated_at = datetime.utcnow()
+                user.save()
+            except Exception:
+                pass
+            try:
+                from app.services.audit import log_action
+                log_action("auth.login", resource_type="user", resource=str(getattr(user, "email", "") or ""))
+            except Exception:
+                pass
+
+        @user_logged_out.connect_via(app)
+        def _audit_logout(_sender, user=None, **_extra):
+            if user is None:
+                return
+            try:
+                from app.services.audit import log_action
+                log_action("auth.logout", resource_type="user", resource=str(getattr(user, "email", "") or ""))
+            except Exception:
+                pass
+    except Exception:
+        pass
     
     # Register CSRF error handler on the app instance
     def handle_csrf_error(e):
@@ -613,7 +654,27 @@ def create_app(config_object=None):
         except Exception:
             def has_perm(p: str) -> bool:
                 return False
-        return dict(files_base=fb, has_perm=has_perm)
+        current_profile = None
+        current_roles = []
+        current_permissions = []
+        try:
+            from flask_login import current_user
+            if getattr(current_user, "is_authenticated", False):
+                from app.services.user_profile import profile_for_user, permissions_for_user, role_names_for_user
+                current_profile = profile_for_user(current_user)
+                current_roles = role_names_for_user(current_user)
+                current_permissions = permissions_for_user(current_user)
+        except Exception:
+            current_profile = None
+            current_roles = []
+            current_permissions = []
+        return dict(
+            files_base=fb,
+            has_perm=has_perm,
+            current_user_profile=current_profile,
+            current_user_roles=current_roles,
+            current_user_permissions=current_permissions,
+        )
 
     from .cli import init_app as init_cli
     init_cli(app)
