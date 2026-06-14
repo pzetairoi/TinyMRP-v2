@@ -170,6 +170,28 @@ type FileOverviewSection = {
   files?: FileOverviewRow[];
 };
 
+type PublicShareInfo = {
+  share_id?: string;
+  created_at?: string;
+  expires_at?: string;
+  access_count?: number;
+};
+
+type PartShareRow = {
+  id: string;
+  part_number: string;
+  revision: string;
+  token_prefix?: string;
+  status?: string;
+  created_at?: string | null;
+  created_by_email?: string;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+  revoked_by_email?: string;
+  last_accessed_at?: string | null;
+  access_count?: number;
+};
+
 type FlatBomRow = {
   row_key?: string;
   part_number?: string;
@@ -289,6 +311,13 @@ export default function PartDetailPage() {
   const pn = route.pn || (window as any).__INITIAL__?.pn || "";
   const sp = new URLSearchParams(window.location.search);
   const rev = sp.get("rev") || ((window as any).__INITIAL__?.rev ?? "");
+  const shareId = route.shareId || (window as any).__INITIAL__?.share_id || "";
+  const shareToken = route.token || (window as any).__INITIAL__?.share_token || "";
+  const isSharedView = !!shareId && !!shareToken;
+  const shareApiBase = isSharedView
+    ? `/api/share/part/${encodeURIComponent(shareId)}/${encodeURIComponent(shareToken)}`
+    : "";
+  const partImagesEndpoint = isSharedView ? `${shareApiBase}/part_images` : "/api/part_images";
 
   const [part, setPart] = useState<Part | null>(null);
   const [files, setFiles] = useState<FileRow[]>([]);
@@ -310,6 +339,7 @@ export default function PartDetailPage() {
   const [forbidden, setForbidden] = useState(false);
   const [canJobsManage, setCanJobsManage] = useState(false);
   const [canOrdersManage, setCanOrdersManage] = useState(false);
+  const [canAdmin, setCanAdmin] = useState(false);
   const [canPartsDelete, setCanPartsDelete] = useState(false);
   const [canPartsNote, setCanPartsNote] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -321,6 +351,7 @@ export default function PartDetailPage() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [refreshIncludeChildren, setRefreshIncludeChildren] = useState(false);
   const [canPartsEdit, setCanPartsEdit] = useState(false);
+  const [publicShareInfo, setPublicShareInfo] = useState<PublicShareInfo | null>(null);
   const [fieldConfig, setFieldConfig] = useState<FieldConfigPayload | null>(null);
   const [fieldPreferences, setFieldPreferences] = useState<FieldPreferences | null>(null);
   const insightsLoading = false;
@@ -334,6 +365,15 @@ export default function PartDetailPage() {
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
   const [notesSearch, setNotesSearch] = useState("");
+  const [shareLinks, setShareLinks] = useState<PartShareRow[]>([]);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareCreateBusy, setShareCreateBusy] = useState(false);
+  const [shareCreateError, setShareCreateError] = useState<string | null>(null);
+  const [shareCreateUrl, setShareCreateUrl] = useState("");
+  const [shareCopied, setShareCopied] = useState(false);
+  const [shareExpiresDays, setShareExpiresDays] = useState("30");
+  const [shareRevokingId, setShareRevokingId] = useState<string | null>(null);
 
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
@@ -513,9 +553,13 @@ function bestUrl(f: FileRow): string {
     const depth = Math.max(0, Number(data?._depth ?? 0));
     return (
       <span className="tt-pncell" style={depth ? { paddingLeft: `${depth * 0.8}rem` } : undefined}>
-        <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(bomPn)}?rev=${encodeURIComponent(bomRev)}`}>
-          {bomPn}
-        </a>
+        {isSharedView ? (
+          <span className="tt-pnlink">{bomPn}</span>
+        ) : (
+          <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(bomPn)}?rev=${encodeURIComponent(bomRev)}`}>
+            {bomPn}
+          </a>
+        )}
       </span>
     );
   };
@@ -547,7 +591,9 @@ function bestUrl(f: FileRow): string {
       return <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />;
     }
     if (field.id === "part_number") {
-      return <Link to={`/ui/part/${encodeURIComponent(row.part_number)}?rev=${encodeURIComponent(row.revision || "")}`}>{row.part_number}</Link>;
+      return isSharedView
+        ? row.part_number
+        : <Link to={`/ui/part/${encodeURIComponent(row.part_number)}?rev=${encodeURIComponent(row.revision || "")}`}>{row.part_number}</Link>;
     }
     if (field.data_type === "link") {
       const href = String(value || "").trim();
@@ -559,12 +605,22 @@ function bestUrl(f: FileRow): string {
   useEffect(() => {
     (async () => {
       try {
+        if (isSharedView) {
+          const resp = await fetch(`${shareApiBase}/field-config`);
+          if (!resp.ok) throw new Error(await resp.text());
+          const payload = await resp.json();
+          setFieldConfig(payload.config || null);
+          setFieldPreferences(payload.user_preferences || { contexts: {} });
+          setCanAdmin(false);
+          return;
+        }
         const resp = await loadFieldConfig();
         setFieldConfig(resp.config);
         setFieldPreferences(resp.user_preferences || { contexts: {} });
+        setCanAdmin(!!resp.permissions?.can_admin);
       } catch {}
     })();
-  }, []);
+  }, [isSharedView, shareApiBase]);
 
   // ---- Load Part Detail ----
   useEffect(() => {
@@ -574,7 +630,10 @@ function bestUrl(f: FileRow): string {
       setRefreshMsg(null);
       setRefreshError(null);
       try {
-        const r = await fetch(`/api/part_detail?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`);
+        const detailUrl = isSharedView
+          ? `${shareApiBase}/part_detail?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`
+          : `/api/part_detail?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`;
+        const r = await fetch(detailUrl);
         if (r.status === 403) { if (!canceled) { setForbidden(true); } return; }
         if (!r.ok) throw new Error(await r.text());
         const j = await r.json();
@@ -600,6 +659,7 @@ function bestUrl(f: FileRow): string {
         setComments(Array.isArray(j.comments) ? j.comments : Array.isArray(partAttrs?.comments) ? partAttrs.comments : []);
         setUploaderProfile(j.uploader_profile || null);
         setApproverProfile(j.approver_profile || null);
+        setPublicShareInfo(j.public_share || null);
 
         // --- files: handle both array and grouped object ---
         const arrFiles: FileRow[] = [];
@@ -654,6 +714,7 @@ function bestUrl(f: FileRow): string {
             setComments([]);
             setUploaderProfile(null);
             setApproverProfile(null);
+            setPublicShareInfo(null);
             setCanPartsEdit(false);
             setCanPartsNote(false);
           }
@@ -664,10 +725,16 @@ function bestUrl(f: FileRow): string {
     return () => {
       canceled = true;
     };
-  }, [pn, rev, refreshTick]);
+  }, [isSharedView, pn, rev, refreshTick, shareApiBase]);
 
   async function loadExtraFiles() {
     if (!pn) return;
+    if (isSharedView) {
+      setExtraFiles([]);
+      setExtraError(null);
+      setExtraLoading(false);
+      return;
+    }
     setExtraLoading(true);
     setExtraError(null);
     try {
@@ -697,7 +764,10 @@ function bestUrl(f: FileRow): string {
     setFilesOverviewError(null);
     try {
       const qs = new URLSearchParams({ rev: rev || "" });
-      const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/files_overview?${qs.toString()}`);
+      const url = isSharedView
+        ? `${shareApiBase}/files_overview?${qs.toString()}`
+        : `/api/parts/${encodeURIComponent(pn)}/files_overview?${qs.toString()}`;
+      const resp = await fetch(url);
       if (resp.status === 403) {
         setFilesOverviewCurrent(null);
         setFilesOverviewOther([]);
@@ -719,17 +789,21 @@ function bestUrl(f: FileRow): string {
 
   useEffect(() => {
     loadExtraFiles();
-  }, [pn, revToken, refreshTick]);
+  }, [isSharedView, pn, revToken, refreshTick]);
 
   useEffect(() => {
     loadFilesOverview();
-  }, [pn, rev, refreshTick]);
+  }, [isSharedView, pn, rev, refreshTick, shareApiBase]);
 
   // Load DocPack options when pn/rev/depth changes
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        if (isSharedView) {
+          if (!cancelled) setDocOpts({ file_types: [], processes: [] });
+          return;
+        }
         const r = await fetch(`/api/docpacks/options?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&depth=${depth}`);
         if (r.status === 403) { if (!cancelled) setForbidden(true); return; }
         if (!r.ok) return;
@@ -743,7 +817,7 @@ function bestUrl(f: FileRow): string {
       } catch {}
     })();
     return () => { cancelled = true };
-  }, [pn, rev, depth]);
+  }, [depth, isSharedView, pn, rev]);
 
   // ---------- Process metadata ----------
   type ProcMeta = { color: string; icon: string };
@@ -770,9 +844,10 @@ function bestUrl(f: FileRow): string {
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch(
-          `/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&withThumb=1`
-        );
+        const rootUrl = isSharedView
+          ? `${shareApiBase}/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&withThumb=1`
+          : `/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&withThumb=1`;
+        const r = await fetch(rootUrl);
         if (r.status === 403) { if (!cancelled) setForbidden(true); return; }
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const root: TreeNode[] = asArr(await r.json());
@@ -787,9 +862,10 @@ function bestUrl(f: FileRow): string {
         const rootPn = (rootNode?.data?.pn || pn) as string;
         const rootRev = (rootNode?.data?.rev || "") as string;
 
-        const r2 = await fetch(
-          `/api/bom_tree?parent=${encodeURIComponent(rootPn)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`
-        );
+        const childUrl = isSharedView
+          ? `${shareApiBase}/bom_tree?parent=${encodeURIComponent(rootPn)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`
+          : `/api/bom_tree?parent=${encodeURIComponent(rootPn)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`;
+        const r2 = await fetch(childUrl);
         if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
         let kids: TreeNode[] = asArr(await r2.json());
 
@@ -809,16 +885,17 @@ function bestUrl(f: FileRow): string {
     return () => {
       cancelled = true;
     };
-  }, [pn, rev, refreshTick]);
+  }, [isSharedView, pn, rev, refreshTick, shareApiBase]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setFlatBomLoading(true);
       try {
-        const r = await fetch(
-          `/api/bom_flat?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`
-        );
+        const flatUrl = isSharedView
+          ? `${shareApiBase}/bom_flat?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`
+          : `/api/bom_flat?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`;
+        const r = await fetch(flatUrl);
         if (r.status === 403) {
           if (!cancelled) setForbidden(true);
           return;
@@ -836,7 +913,7 @@ function bestUrl(f: FileRow): string {
     return () => {
       cancelled = true;
     };
-  }, [pn, rev, refreshTick]);
+  }, [isSharedView, pn, rev, refreshTick, shareApiBase]);
 
   // ---------- Load BOM (lazy children) ----------
   function setNodeChildren(
@@ -873,9 +950,10 @@ function bestUrl(f: FileRow): string {
       const parentNode = findNode(bomNodes, key);
       const parentPn = (parentNode as any)?.data?.pn || key;
       const parentRev = (parentNode as any)?.data?.rev || "";
-      const r = await fetch(
-        `/api/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`
-      );
+      const url = isSharedView
+        ? `${shareApiBase}/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`
+        : `/api/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`;
+      const r = await fetch(url);
       if (r.status === 403) { setForbidden(true); return; }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       let kids: TreeNode[] = asArr(await r.json());
@@ -913,9 +991,10 @@ function bestUrl(f: FileRow): string {
           const parentNode2 = findNode(nextTree, key);
           const parentPn2 = (parentNode2 as any)?.data?.pn || key;
           const parentRev2 = (parentNode2 as any)?.data?.rev || "";
-          const r = await fetch(
-            `/api/bom_tree?parent=${encodeURIComponent(parentPn2)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`
-          );
+          const url = isSharedView
+            ? `${shareApiBase}/bom_tree?parent=${encodeURIComponent(parentPn2)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`
+            : `/api/bom_tree?parent=${encodeURIComponent(parentPn2)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`;
+          const r = await fetch(url);
           if (r.ok) {
             let kids: TreeNode[] = asArr(await r.json());
             const parentDepth = findNodeDepth(nextTree, key) ?? 0;
@@ -1195,6 +1274,85 @@ function bestUrl(f: FileRow): string {
     await persistFieldPreferences(nextPrefs)
   }
 
+  async function loadShareLinks() {
+    if (!canAdmin || isSharedView || !pn) return
+    setShareLoading(true)
+    setShareError(null)
+    try {
+      const qs = new URLSearchParams({ rev: effectiveRev || "" })
+      const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/shares?${qs.toString()}`)
+      if (!resp.ok) throw new Error(await resp.text())
+      const data = await resp.json()
+      setShareLinks(Array.isArray(data?.shares) ? data.shares : [])
+    } catch (err: any) {
+      setShareLinks([])
+      setShareError(err?.message || "Failed to load share links.")
+    } finally {
+      setShareLoading(false)
+    }
+  }
+
+  async function createShareLink() {
+    if (!canAdmin || isSharedView || !pn) return
+    setShareCreateBusy(true)
+    setShareCreateError(null)
+    setShareCopied(false)
+    try {
+      const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/shares`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rev: effectiveRev || "",
+          expires_in_days: Number(shareExpiresDays || 30),
+        }),
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      const data = await resp.json()
+      setShareCreateUrl(String(data?.url || ""))
+      await loadShareLinks()
+    } catch (err: any) {
+      setShareCreateError(err?.message || "Failed to create share link.")
+    } finally {
+      setShareCreateBusy(false)
+    }
+  }
+
+  async function copyShareLink() {
+    if (!shareCreateUrl) return
+    try {
+      await navigator.clipboard.writeText(shareCreateUrl)
+      setShareCopied(true)
+    } catch {
+      setShareCopied(false)
+    }
+  }
+
+  async function revokeShareLink(shareRow: PartShareRow) {
+    if (!canAdmin || isSharedView || !pn || !shareRow?.id) return
+    setShareRevokingId(shareRow.id)
+    setShareError(null)
+    try {
+      const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/shares/${encodeURIComponent(shareRow.id)}`, {
+        method: "DELETE",
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      await loadShareLinks()
+    } catch (err: any) {
+      setShareError(err?.message || "Failed to revoke share link.")
+    } finally {
+      setShareRevokingId(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!canAdmin || isSharedView) {
+      setShareLinks([])
+      setShareError(null)
+      return
+    }
+    loadShareLinks()
+  }, [canAdmin, isSharedView, pn, effectiveRev])
+
   function summaryValue(fieldId: string) {
     const value = part?.field_values?.[fieldId]
     if (value !== undefined) return value
@@ -1303,6 +1461,11 @@ function bestUrl(f: FileRow): string {
 
   // ---------- Render ----------
   const [tabIndex, setTabIndex] = useState(0)
+  useEffect(() => {
+    setTabIndex(0)
+    setShareCreateUrl("")
+    setShareCopied(false)
+  }, [effectiveRev, isSharedView, pn])
   // If there is no drawing preview image but there is a PDF, we still
   // consider that we have a drawing. Otherwise, hide the Drawing tab and
   // default to All attributes.
@@ -1579,6 +1742,12 @@ function bestUrl(f: FileRow): string {
               {part?.description ? ` - ${part.description}` : ""}
             </h4>
             <div className="text-muted small">{part?.category || ""}</div>
+            {isSharedView ? (
+              <div className="alert alert-info py-2 px-3 mt-2 mb-0 small">
+                Read-only shared view.
+                {publicShareInfo?.expires_at ? ` Expires ${new Date(publicShareInfo.expires_at).toLocaleString()}.` : ""}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1589,7 +1758,7 @@ function bestUrl(f: FileRow): string {
         <div className="col-lg-4">
             <div className="pd-card">
             <div className="pd-hero">
-              <ImageStrip pn={pn} rev={rev || ""} mode="preview" limit={1} fit cacheBust={refreshTick} />
+              <ImageStrip pn={pn} rev={rev || ""} mode="preview" endpointBase={partImagesEndpoint} limit={1} fit cacheBust={refreshTick} />
             </div>
 
             <div className="pd-info-rows">
@@ -1623,7 +1792,7 @@ function bestUrl(f: FileRow): string {
                 })}
               </div>
 
-              {summaryFields.length > 0 && (
+              {!isSharedView && summaryFields.length > 0 && (
                 <div className="pd-info-row">
                   <FieldSelector
                     title="Part summary fields"
@@ -1760,12 +1929,12 @@ function bestUrl(f: FileRow): string {
                     className="pd-drawing-link"
                     title="Open PDF drawing"
                   >
-                    <ImageStrip pn={pn} rev={rev || ""} mode="drawing" limit={1} fit cacheBust={refreshTick} />
+                    <ImageStrip pn={pn} rev={rev || ""} mode="drawing" endpointBase={partImagesEndpoint} limit={1} fit cacheBust={refreshTick} />
                   </a>
                 </>
               ) : (
                 <div className="pd-drawing-link">
-                  <ImageStrip pn={pn} rev={rev || ""} mode="drawing" limit={1} fit cacheBust={refreshTick} />
+                  <ImageStrip pn={pn} rev={rev || ""} mode="drawing" endpointBase={partImagesEndpoint} limit={1} fit cacheBust={refreshTick} />
                 </div>
               )}
             </TabPanel>
@@ -1789,7 +1958,7 @@ function bestUrl(f: FileRow): string {
               )}
             </TabPanel>)}
 
-            <TabPanel header="All attributes">
+            {!isSharedView && <TabPanel header="All attributes">
               {attrs.length === 0 ? (
                 <div className="text-muted small">No attributes.</div>
               ) : (
@@ -1804,7 +1973,7 @@ function bestUrl(f: FileRow): string {
                   </div>
                 </div>
               )}
-            </TabPanel>
+            </TabPanel>}
 
             {/* 3D Preview tab at the end */}
             {threeDOptions.length > 0 && (
@@ -1843,7 +2012,7 @@ function bestUrl(f: FileRow): string {
               </TabPanel>
             )}
 
-            <TabPanel header="Doc Packs">
+            {!isSharedView && <TabPanel header="Doc Packs">
 
               <div className="pd-card p-3 mt-3">
                 <h6 className="mb-3">BOM and output options</h6>
@@ -2147,9 +2316,9 @@ function bestUrl(f: FileRow): string {
                   )}
                 </div>
               </div>
-            </TabPanel>
+            </TabPanel>}
 
-          {versions.length > 1 && (
+          {!isSharedView && versions.length > 1 && (
             <TabPanel header="Other versions">
               <DataTable value={versions} dataKey="id" responsiveLayout="scroll" stripedRows>
                 <Column header="" body={(r: VersionRow) => <ThumbImg urls={r.thumb_urls || []} maxH={32} maxW={48} />} style={{width:60}} />
@@ -2160,7 +2329,7 @@ function bestUrl(f: FileRow): string {
             </TabPanel>
           )}
 
-          <TabPanel header="Jobs & Orders">
+          {!isSharedView && <TabPanel header="Jobs & Orders">
             {jobsOrders.length ? (
               <DataTable value={jobsOrders} dataKey="row_key" responsiveLayout="scroll" stripedRows>
                 <Column
@@ -2229,11 +2398,11 @@ function bestUrl(f: FileRow): string {
             ) : (
               <div className="text-muted small">No jobs or orders found for this part.</div>
             )}
-          </TabPanel>
+          </TabPanel>}
 
 
             
-          <TabPanel header="Notes & Comments">
+          {!isSharedView && <TabPanel header="Notes & Comments">
             <div className="pd-card p-3 mt-3">
               <div className="d-flex align-items-center justify-content-between">
                 <h6 className="mb-0">Notes</h6>
@@ -2320,13 +2489,112 @@ function bestUrl(f: FileRow): string {
                 {commentError ? <div className="text-danger small mt-1">{commentError}</div> : null}
               </div>
             </div>
-          </TabPanel>
+          </TabPanel>}
 
 
-          <TabPanel header="Actions">
+          {!isSharedView && <TabPanel header="Actions">
             <div className="pd-card p-3">
-              {(canPartsEdit || canPartsDelete) ? (
+              {(canPartsEdit || canPartsDelete || canAdmin) ? (
                 <div className="d-flex flex-column gap-3">
+                  {canAdmin && (
+                    <div className="border rounded p-3">
+                      <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                        <div>
+                          <h6 className="mb-0">External share link</h6>
+                          <div className="text-muted small mt-1">
+                            Creates a read-only public link for this part only. The raw link is shown once at creation time.
+                          </div>
+                        </div>
+                        <div className="d-flex align-items-center gap-2">
+                          <select
+                            className="form-select form-select-sm"
+                            style={{ width: 130 }}
+                            value={shareExpiresDays}
+                            onChange={(e) => setShareExpiresDays(e.target.value)}
+                            disabled={shareCreateBusy}
+                          >
+                            <option value="7">Expires in 7 days</option>
+                            <option value="30">Expires in 30 days</option>
+                            <option value="90">Expires in 90 days</option>
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={createShareLink}
+                            disabled={shareCreateBusy}
+                          >
+                            {shareCreateBusy ? "Creating..." : "Create share link"}
+                          </button>
+                        </div>
+                      </div>
+                      {shareCreateError ? <div className="text-danger small mt-2">{shareCreateError}</div> : null}
+                      {shareCreateUrl ? (
+                        <div className="mt-2">
+                          <label className="form-label small fw-semibold mb-1">New share URL</label>
+                          <div className="input-group input-group-sm">
+                            <input className="form-control" value={shareCreateUrl} readOnly />
+                            <button type="button" className="btn btn-outline-secondary" onClick={copyShareLink}>
+                              Copy
+                            </button>
+                          </div>
+                          <div className="text-muted small mt-1">
+                            {shareCopied ? "Copied to clipboard." : "If this link is lost, create a new one and revoke the old link."}
+                          </div>
+                        </div>
+                      ) : null}
+                      <div className="mt-3">
+                        <div className="fw-semibold small mb-2">Existing share links</div>
+                        {shareLoading ? (
+                          <div className="text-muted small">Loading share links...</div>
+                        ) : shareLinks.length ? (
+                          <div className="table-responsive">
+                            <table className="table table-sm align-middle mb-0">
+                              <thead>
+                                <tr>
+                                  <th>Prefix</th>
+                                  <th>Status</th>
+                                  <th>Created</th>
+                                  <th>Expires</th>
+                                  <th>Last access</th>
+                                  <th>Accesses</th>
+                                  <th />
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {shareLinks.map((item) => (
+                                  <tr key={item.id}>
+                                    <td><code>{item.token_prefix || "-"}</code></td>
+                                    <td>{item.status || "-"}</td>
+                                    <td>{item.created_at ? new Date(item.created_at).toLocaleString() : "-"}</td>
+                                    <td>{item.expires_at ? new Date(item.expires_at).toLocaleString() : "-"}</td>
+                                    <td>{item.last_accessed_at ? new Date(item.last_accessed_at).toLocaleString() : "-"}</td>
+                                    <td>{item.access_count ?? 0}</td>
+                                    <td>
+                                      {item.status === "active" ? (
+                                        <button
+                                          type="button"
+                                          className="btn btn-sm btn-outline-danger"
+                                          disabled={shareRevokingId === item.id}
+                                          onClick={() => revokeShareLink(item)}
+                                        >
+                                          {shareRevokingId === item.id ? "Revoking..." : "Revoke"}
+                                        </button>
+                                      ) : (
+                                        <span className="text-muted small">-</span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="text-muted small">No share links created for this revision.</div>
+                        )}
+                        {shareError ? <div className="text-danger small mt-2">{shareError}</div> : null}
+                      </div>
+                    </div>
+                  )}
                   {canPartsEdit && (
                     <div>
                       <button
@@ -2386,7 +2654,7 @@ function bestUrl(f: FileRow): string {
                 <div className="text-muted small">No actions available.</div>
               )}
             </div>
-          </TabPanel>
+          </TabPanel>}
 
           <TabPanel header="Files">
             <div className="d-flex flex-column gap-3">
@@ -2468,7 +2736,7 @@ function bestUrl(f: FileRow): string {
             </div>
 
             {/* Used in (always visible under tabs) */}
-            <div className="pd-usedin pd-card">
+            {!isSharedView && <div className="pd-usedin pd-card">
             <div className="d-flex align-items-center justify-content-between mb-2">
               <h6 className="mb-0">Used in</h6>
               {whereUsedFields.length > 0 && (
@@ -2502,7 +2770,7 @@ function bestUrl(f: FileRow): string {
                 )
               })}
             </DataTable>
-          </div>
+          </div>}
         </div>
       </div>
 
@@ -2528,7 +2796,7 @@ function bestUrl(f: FileRow): string {
                 Flat
               </button>
             </div>
-            {bomFields.length > 0 && (
+            {!isSharedView && bomFields.length > 0 && (
               <FieldSelector
                 title="BOM fields"
                 buttonLabel="Fields"

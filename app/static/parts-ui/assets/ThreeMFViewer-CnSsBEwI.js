@@ -1,4 +1,4 @@
-import{r as Xt,j as te}from"./index-6aCm60fD.js";/**
+import{r as Xt,j as te}from"./index-QaXZwDLh.js";/**
  * @license
  * Copyright 2010-2025 Three.js Authors
  * SPDX-License-Identifier: MIT

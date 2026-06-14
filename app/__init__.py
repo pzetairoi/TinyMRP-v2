@@ -529,6 +529,9 @@ def create_app(config_object=None):
     from app.views.ui import bp as ui_bp
     app.register_blueprint(ui_bp)
 
+    from app.views.part_shares import bp as part_shares_bp
+    app.register_blueprint(part_shares_bp)
+
     # Help page
     from app.views.help import bp as help_bp
     app.register_blueprint(help_bp)

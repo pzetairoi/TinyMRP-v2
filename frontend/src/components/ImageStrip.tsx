@@ -6,24 +6,25 @@ type Props = {
   pn: string
   rev?: string
   mode?: 'preview' | 'drawing'
+  endpointBase?: string
   limit?: number         // render first N only when provided
   fit?: boolean          // when true, image fills parent (hero use)
   cacheBust?: string | number
 }
 
-export default function ImageStrip({ pn, rev = '', mode = 'preview', limit, fit = false, cacheBust }: Props) {
+export default function ImageStrip({ pn, rev = '', mode = 'preview', endpointBase = '/api/part_images', limit, fit = false, cacheBust }: Props) {
   const [rows, setRows] = useState<ApiRow[]>([])
   useEffect(() => {
     let cancelled = false
     ;(async ()=>{
       const qs = new URLSearchParams({ pn, mode })  // <--- tell backend which set we want
       if (rev !== undefined) qs.set('rev', rev)
-      const r = await fetch(`/api/part_images?${qs.toString()}`)
+      const r = await fetch(`${endpointBase}?${qs.toString()}`)
       const j = (r.ok ? await r.json() : []) as ApiRow[]
       if (!cancelled) setRows(Array.isArray(j) ? j : [])
     })()
     return ()=>{cancelled=true}
-  }, [pn, rev, mode, cacheBust])
+  }, [pn, rev, mode, endpointBase, cacheBust])
 
   const list = rows.length
     ? (typeof limit === 'number' ? rows.slice(0, Math.max(0, limit)) : rows)
