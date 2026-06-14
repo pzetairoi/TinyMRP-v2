@@ -53,3 +53,62 @@ def test_import_bom_zip_best_effort_collects_errors_and_continues(app):
         assert link is not None
         assert link.qty == 3
 
+
+def test_import_bom_zip_modified_parts_report_includes_data_and_bom_changes(app):
+    Part(
+        part_number="ASM-CHG",
+        revision="A",
+        description="Original Assembly",
+        attrs={"material": "Steel"},
+    ).save()
+    Part(part_number="LEGACY-1", revision="", description="Legacy child").save()
+    BOMLink(parent_pn="ASM-CHG", parent_rev="A", child_pn="LEGACY-1", child_rev="", qty=1).save()
+
+    flat_lines = [
+        json.dumps({"partnumber": "ASM-CHG", "revision": "A", "description": "Updated Assembly", "material": "Aluminium"}),
+        json.dumps({"partnumber": "NEW-1", "revision": "", "description": "New child"}),
+    ]
+    tree_lines = [
+        "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+        "1\tASM-CHG\tA\t1",
+        "1.1\tNEW-1\t\t2",
+    ]
+    zip_bytes = _make_zip("\n".join(flat_lines), "\n".join(tree_lines))
+
+    with app.app_context():
+        report = import_bom_zip(
+            zip_bytes,
+            "modified-report.zip",
+            seed_tag="test",
+            scan_artifacts=False,
+            generate_thumbs=False,
+            override_mode="always",
+        )
+
+    modified_parts = report.get("modified_parts") or []
+    root_entry = next((item for item in modified_parts if item.get("part_number") == "ASM-CHG" and item.get("revision") == "A"), None)
+    assert root_entry is not None
+    assert any(change.get("field") == "description" for change in root_entry.get("data_changes") or [])
+    assert any(change.get("field") == "material" for change in root_entry.get("data_changes") or [])
+    bom_changes = root_entry.get("bom_changes") or {}
+    assert any(item.get("part_number") == "NEW-1" for item in bom_changes.get("added") or [])
+    assert any(item.get("part_number") == "LEGACY-1" for item in bom_changes.get("removed") or [])
+
+
+def test_import_bom_zip_artifact_scan_no_longer_queries_removed_props_field(app):
+    zip_bytes = _make_zip(
+        json.dumps({"partnumber": "SCAN-1", "revision": "A", "description": "Scan target"}),
+        "ITEM NO.\tPART NUMBER\tRevision\tQTY.\n1\tSCAN-1\tA\t1",
+    )
+
+    with app.app_context():
+        report = import_bom_zip(
+            zip_bytes,
+            "artifact-scan.zip",
+            seed_tag="test",
+            scan_artifacts=True,
+            generate_thumbs=False,
+        )
+
+    warning_messages = [str(item.get("exception_message") or item.get("message") or "") for item in (report.get("warnings") or [])]
+    assert all('Cannot resolve field "props"' not in message for message in warning_messages)
