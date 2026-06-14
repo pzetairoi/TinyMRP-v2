@@ -29,7 +29,7 @@ def upload_post():
             flash("File too large.", "warning")
             return redirect(url_for("importer.upload_form"))
     fn = secure_filename(f.filename)
-    override_mode = str(request.form.get("override_mode") or request.args.get("override_mode") or "preserve").strip().lower()
+    override_mode = str(request.form.get("override_mode") or request.args.get("override_mode") or "unless_existing_approved").strip().lower()
     try:
         result = import_bom_zip(f.read(), fn, seed_tag="upload", override_mode=override_mode)
     except ValueError as exc:
@@ -66,7 +66,7 @@ def upload_api():
         if request.content_length > max_zip_mb * 1024 * 1024:
             return jsonify({"error": "file too large"}), 413
     fn = secure_filename(f.filename)
-    override_mode = str(request.form.get("override_mode") or request.args.get("override_mode") or "preserve").strip().lower()
+    override_mode = str(request.form.get("override_mode") or request.args.get("override_mode") or "unless_existing_approved").strip().lower()
     try:
         result = import_bom_zip(f.read(), fn, seed_tag="upload-api", override_mode=override_mode)
     except ValueError as exc:

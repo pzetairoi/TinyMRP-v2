@@ -177,24 +177,23 @@ def _group_from_ext(ext: str) -> Optional[str]:
     if ext in {"ply"}: return "ply"
     if ext in {"stl"}: return "stl"
     return None
-# app/services/filescan.py
 
-def upsert_part_files(
+
+def upsert_part_files_detailed(
     recs: List[Dict[str, Any]],
     pn: Optional[str] = None,
     rev: Optional[str] = None,
-) -> int:
+) -> Dict[str, Any]:
     """
     Upsert a batch of file records.
     - recs: list of dicts (each may include pn/part_number, rev/revision,
       ext_group/group, ext, rel_path, size, mtime_iso, http_url, is_dwg, etc.)
     - pn, rev: optional defaults applied to all records when missing.
-    Returns number of upserts attempted.
+    Returns a report with total upserts attempted and per-record changes.
     """
     n = 0
+    changes: List[Dict[str, Any]] = []
     for r in recs or []:
-        #print("upsert", r)
-
         rpn = pn or r.get("pn") or r.get("part_number")
         rrev = (rev if rev is not None else r.get("rev") or r.get("revision") or "")
         group = (r.get("ext_group") or r.get("group") or "").lower()
@@ -207,45 +206,53 @@ def upsert_part_files(
 
         # Unique key for your "one file per ext_group+ext per (pn,rev)" rule
         query = dict(part_number=rpn, revision=rrev, ext_group=group, ext=ext, is_dwg=is_dwg)
-        #print("query", query)
+        existing = PartFile.objects(**query).first()
 
         # Allowed fields from the model
         allowed = set(PartFile._fields.keys())
-        #print("allowed", allowed)
 
         # Build atomic updates for modify()
         updates: Dict[str, Any] = {}
+        final_values: Dict[str, Any] = {}
 
         # Normalized rel_path -> also use as unique, non-null `path`
         rel_path = r.get("rel_path") or ""
         norm_rel = rel_path.replace("\\", "/").lstrip("/")
-        
-        #print(rel_path, norm_rel)
 
         if "rel_path" in allowed and norm_rel:
             updates["set__rel_path"] = norm_rel
+            final_values["rel_path"] = norm_rel
 
         abs_path = str(r.get("abs_path") or "").strip()
         if "path" in allowed and (abs_path or norm_rel):
             updates["set__path"] = abs_path or norm_rel
+            final_values["path"] = abs_path or norm_rel
 
         # Pass through common metadata if present
         if "http_url" in r and "http_url" in allowed:
             updates["set__http_url"] = r["http_url"]
+            final_values["http_url"] = r["http_url"]
         if "urls" in r and "urls" in allowed:
             updates["set__urls"] = r["urls"]
+            final_values["urls"] = r["urls"]
         if "size" in r and "size" in allowed:
             updates["set__size"] = r["size"]
+            final_values["size"] = r["size"]
         if "mtime_iso" in r and "mtime_iso" in allowed:
             updates["set__mtime_iso"] = r["mtime_iso"]
+            final_values["mtime_iso"] = r["mtime_iso"]
         if "is_dwg" in r and "is_dwg" in allowed:
             updates["set__is_dwg"] = r["is_dwg"]
+            final_values["is_dwg"] = r["is_dwg"]
         if "content_type" in r and "content_type" in allowed:
             updates["set__content_type"] = r["content_type"]
+            final_values["content_type"] = r["content_type"]
         if "source" in r and "source" in allowed:
             updates["set__source"] = r["source"]
+            final_values["source"] = r["source"]
         if "meta_info" in r and "meta_info" in allowed:
             updates["set__meta_info"] = r["meta_info"]
+            final_values["meta_info"] = r["meta_info"]
 
         # Optional: stamp first discovery without touching on updates
         if "discovered_at" in allowed:
@@ -255,10 +262,38 @@ def upsert_part_files(
         if not updates:
             continue
 
-        #print("updates", updates)
+        action = "added" if existing is None else "updated"
+        changed_fields: List[str] = []
+        if existing is None:
+            changed_fields = sorted(final_values.keys())
+        else:
+            for field_name, new_value in final_values.items():
+                if getattr(existing, field_name, None) != new_value:
+                    changed_fields.append(field_name)
 
         # Upsert
         PartFile.objects(**query).modify(upsert=True, new=True, **updates)  # type: ignore
         n += 1
+        if action == "added" or changed_fields:
+            changes.append(
+                {
+                    "part_number": str(rpn),
+                    "revision": str(rrev or ""),
+                    "ext_group": group,
+                    "ext": ext,
+                    "is_dwg": is_dwg,
+                    "rel_path": norm_rel,
+                    "action": action,
+                    "changed_fields": changed_fields,
+                }
+            )
 
-    return n
+    return {"count": n, "changes": changes}
+
+
+def upsert_part_files(
+    recs: List[Dict[str, Any]],
+    pn: Optional[str] = None,
+    rev: Optional[str] = None,
+) -> int:
+    return int(upsert_part_files_detailed(recs, pn=pn, rev=rev).get("count") or 0)

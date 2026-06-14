@@ -10,7 +10,7 @@ from app.services.thumbs_gen import generate_thumbs_for_parts
 from collections import defaultdict
 
 # Import necessary services for file scanning and upserting
-from app.services.filescan import discover_part_files, upsert_part_files
+from app.services.filescan import discover_part_files, upsert_part_files_detailed
 # Import necessary services for attributes normalization and merging
 from app.services.attrs import approved_value, harvest_part_attrs, normalize_props, merge_save_part_attrs, process_attributes
 from app.services.processmeta import normalize_processes
@@ -68,13 +68,21 @@ def _snapshot_resources() -> Dict[str, Any]:
     return snap
 
 
-_PART_OVERRIDE_MODES = {"preserve", "approved_only", "always"}
+_PART_OVERRIDE_MODE_DEFAULT = "unless_existing_approved"
+_PART_OVERRIDE_MODE_ALIASES = {
+    "default": _PART_OVERRIDE_MODE_DEFAULT,
+    "override_unless_existing_approved": _PART_OVERRIDE_MODE_DEFAULT,
+    "override_unless_approved": _PART_OVERRIDE_MODE_DEFAULT,
+}
+_PART_OVERRIDE_MODES = {_PART_OVERRIDE_MODE_DEFAULT, "preserve", "approved_only", "always"}
 _PROTECTED_ATTR_KEYS = {"notes", "comments", "comments_search"}
+_REPORT_ATTR_EXCLUDE_KEYS = {"seed", "comments_search"}
 
 
 def _override_mode(value: object) -> str:
-    mode = str(value or "preserve").strip().lower()
-    return mode if mode in _PART_OVERRIDE_MODES else "preserve"
+    mode = str(value or _PART_OVERRIDE_MODE_DEFAULT).strip().lower()
+    mode = _PART_OVERRIDE_MODE_ALIASES.get(mode, mode)
+    return mode if mode in _PART_OVERRIDE_MODES else _PART_OVERRIDE_MODE_DEFAULT
 
 
 def _has_value(value: Any) -> bool:
@@ -107,12 +115,14 @@ def _merge_attrs_replace(existing: Dict[str, Any], incoming: Dict[str, Any]) -> 
 
 def _should_replace_existing(existing_attrs: Dict[str, Any], incoming_attrs: Dict[str, Any], override_mode: str) -> bool:
     mode = _override_mode(override_mode)
+    existing_approved = bool(approved_value(existing_attrs or {}))
+    incoming_approved = bool(approved_value(incoming_attrs or {}))
     if mode == "always":
         return True
+    if mode == _PART_OVERRIDE_MODE_DEFAULT:
+        return not existing_approved
     if mode != "approved_only":
         return False
-    incoming_approved = bool(approved_value(incoming_attrs or {}))
-    existing_approved = bool(approved_value(existing_attrs or {}))
     return incoming_approved and not existing_approved
 
 
@@ -156,6 +166,171 @@ def _apply_part_update(
     part.attrs = _merge_attrs_preserve(existing_attrs, incoming_attrs)
     if not list(getattr(part, "processes", None) or []) and incoming_processes:
         part.processes = incoming_processes
+
+
+def _report_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _report_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_report_value(v) for v in value]
+    return str(value)
+
+
+def _part_snapshot(part: Part) -> Dict[str, Any]:
+    return {
+        "description": str(getattr(part, "description", "") or ""),
+        "category": str(getattr(part, "category", "") or ""),
+        "uom": str(getattr(part, "uom", "") or ""),
+        "processes": list(getattr(part, "processes", None) or []),
+        "attrs": dict(getattr(part, "attrs", {}) or {}),
+    }
+
+
+def _diff_part_snapshot(before: Dict[str, Any], after: Dict[str, Any]) -> List[Dict[str, Any]]:
+    changes: List[Dict[str, Any]] = []
+    for field_name in ("description", "category", "uom", "processes"):
+        before_value = _report_value((before or {}).get(field_name))
+        after_value = _report_value((after or {}).get(field_name))
+        if before_value != after_value:
+            changes.append(
+                {
+                    "scope": "part",
+                    "field": field_name,
+                    "before": before_value,
+                    "after": after_value,
+                }
+            )
+
+    before_attrs = dict((before or {}).get("attrs") or {})
+    after_attrs = dict((after or {}).get("attrs") or {})
+    attr_keys = sorted({str(k) for k in before_attrs.keys()} | {str(k) for k in after_attrs.keys()})
+    for field_name in attr_keys:
+        if field_name in _REPORT_ATTR_EXCLUDE_KEYS:
+            continue
+        before_value = _report_value(before_attrs.get(field_name))
+        after_value = _report_value(after_attrs.get(field_name))
+        if before_value != after_value:
+            changes.append(
+                {
+                    "scope": "attribute",
+                    "field": field_name,
+                    "before": before_value,
+                    "after": after_value,
+                }
+            )
+    return changes
+
+
+def _snapshot_bom_children(parents: Iterable[Tuple[str, str]]) -> Dict[Tuple[str, str], Dict[Tuple[str, str], float]]:
+    snapshots: Dict[Tuple[str, str], Dict[Tuple[str, str], float]] = {}
+    for parent_pn, parent_rev in parents:
+        target_pn = _norm_pn(parent_pn)
+        target_rev = clean_rev(parent_rev)
+        if not target_pn:
+            continue
+        pn_pattern = _pn_regex(target_pn)
+        if not pn_pattern:
+            continue
+        children: Dict[Tuple[str, str], float] = {}
+        q = BOMLink.objects(parent_pn__iregex=pn_pattern).only(
+            "parent_pn",
+            "parent_rev",
+            "child_pn",
+            "child_rev",
+            "qty",
+        )
+        for link in q:
+            link_parent_pn = _norm_pn(getattr(link, "parent_pn", ""))
+            link_parent_rev = clean_rev(getattr(link, "parent_rev", ""))
+            if link_parent_pn != target_pn or link_parent_rev != target_rev:
+                continue
+            child_key = (
+                _norm_pn(getattr(link, "child_pn", "")),
+                clean_rev(getattr(link, "child_rev", "")),
+            )
+            if not child_key[0]:
+                continue
+            children[child_key] = float(getattr(link, "qty", 0.0) or 0.0)
+        snapshots[(target_pn, target_rev)] = children
+    return snapshots
+
+
+def _children_from_links(
+    links: Iterable[Tuple[str, str, str, str, float, List[Dict[str, Any]]]]
+) -> Dict[Tuple[str, str], Dict[Tuple[str, str], float]]:
+    out: Dict[Tuple[str, str], Dict[Tuple[str, str], float]] = {}
+    for parent_pn, parent_rev, child_pn, child_rev, qty, _occs in links:
+        parent_key = (_norm_pn(parent_pn), clean_rev(parent_rev))
+        child_key = (_norm_pn(child_pn), clean_rev(child_rev))
+        if not parent_key[0] or not child_key[0]:
+            continue
+        out.setdefault(parent_key, {})[child_key] = float(qty or 0.0)
+    return out
+
+
+def _bom_child_row(child_key: Tuple[str, str], qty: float) -> Dict[str, Any]:
+    return {
+        "part_number": child_key[0],
+        "revision": child_key[1],
+        "qty": float(qty or 0.0),
+    }
+
+
+def _diff_bom_children(
+    before: Dict[Tuple[str, str], float],
+    after: Dict[Tuple[str, str], float],
+) -> Dict[str, Any] | None:
+    before = dict(before or {})
+    after = dict(after or {})
+    before_keys = set(before.keys())
+    after_keys = set(after.keys())
+    added = [_bom_child_row(key, after[key]) for key in sorted(after_keys - before_keys)]
+    removed = [_bom_child_row(key, before[key]) for key in sorted(before_keys - after_keys)]
+    qty_changed: List[Dict[str, Any]] = []
+    for key in sorted(before_keys & after_keys):
+        before_qty = float(before.get(key, 0.0) or 0.0)
+        after_qty = float(after.get(key, 0.0) or 0.0)
+        if before_qty != after_qty:
+            qty_changed.append(
+                {
+                    "part_number": key[0],
+                    "revision": key[1],
+                    "before_qty": before_qty,
+                    "after_qty": after_qty,
+                }
+            )
+    if not added and not removed and not qty_changed:
+        return None
+    return {
+        "before_children": len(before),
+        "after_children": len(after),
+        "added": added,
+        "removed": removed,
+        "qty_changed": qty_changed,
+    }
+
+
+def _ensure_modified_part(
+    modified_parts: Dict[Tuple[str, str], Dict[str, Any]],
+    pn: str,
+    rev: str,
+) -> Dict[str, Any]:
+    key = (_norm_pn(pn), clean_rev(rev))
+    entry = modified_parts.get(key)
+    if entry is None:
+        entry = {
+            "part_number": key[0],
+            "revision": key[1],
+            "data_changes": [],
+            "bom_changes": None,
+            "file_changes": [],
+        }
+        modified_parts[key] = entry
+    return entry
 
 def _report_inc(report: Dict[str, Any], key: str, delta: int = 1) -> None:
     if report is None:
@@ -664,7 +839,7 @@ def import_bom_zip(
     *,
     scan_artifacts: bool = True,
     generate_thumbs: bool = True,
-    override_mode: str = "preserve",
+    override_mode: str = _PART_OVERRIDE_MODE_DEFAULT,
 ) -> Dict[str, Any]:
     """
     Main entry: import a single ZIP file.
@@ -679,6 +854,8 @@ def import_bom_zip(
         "root_revision": "",
         "parts_created": 0,
         "parts_updated": 0,
+        "modified_parts_count": 0,
+        "modified_parts": [],
         "links_created": 0,
         "links_skipped": 0,
         "links_removed": 0,
@@ -755,6 +932,8 @@ def import_bom_zip(
             skipped_links = 0
             tree_parts: Set[Tuple[str, str]] = set()
             seeded_parts: Set[Tuple[str, str]] = set()
+            part_existed_before: Dict[Tuple[str, str], bool] = {}
+            modified_parts: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
             # 1) Parts from FLATBOM
             part_props: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -825,6 +1004,8 @@ def import_bom_zip(
                     try:
                         p = Part.objects(part_number=pn, revision=rev).first()
                         is_new = p is None
+                        part_existed_before[(pn, rev)] = not is_new
+                        before_snapshot = _part_snapshot(p) if p is not None else None
                         if p is None:
                             p = Part(part_number=pn, revision=rev)
 
@@ -839,11 +1020,17 @@ def import_bom_zip(
                             created_parts += 1
                         else:
                             updated_parts += 1
+                            changes = _diff_part_snapshot(before_snapshot or {}, _part_snapshot(p))
+                            if changes:
+                                entry = _ensure_modified_part(modified_parts, pn, rev)
+                                entry["data_changes"] = changes
                     except NotUniqueError:
                         try:
                             existing = Part.objects(part_number=pn, revision=rev).first()
                             if not existing:
                                 raise
+                            part_existed_before[(pn, rev)] = True
+                            before_snapshot = _part_snapshot(existing)
                             _apply_part_update(
                                 existing,
                                 norm,
@@ -852,6 +1039,10 @@ def import_bom_zip(
                             )
                             existing.save()
                             updated_parts += 1
+                            changes = _diff_part_snapshot(before_snapshot, _part_snapshot(existing))
+                            if changes:
+                                entry = _ensure_modified_part(modified_parts, pn, rev)
+                                entry["data_changes"] = changes
                         except Exception as exc:
                             _report_issue(
                                 report,
@@ -912,6 +1103,8 @@ def import_bom_zip(
                     links = []
 
                 parent_pairs = {(p, clean_rev(r)) for p, r, _, _, _, _ in links if p}
+                existing_parent_pairs = {pair for pair in parent_pairs if part_existed_before.get(pair)}
+                bom_before = _snapshot_bom_children(existing_parent_pairs) if existing_parent_pairs else {}
                 if parent_pairs:
                     try:
                         clear_links_start = _stage_start()
@@ -1016,6 +1209,17 @@ def import_bom_zip(
                             exc=exc,
                         )
 
+                if existing_parent_pairs:
+                    bom_after = _children_from_links(links)
+                    for parent_key in sorted(existing_parent_pairs):
+                        diff = _diff_bom_children(
+                            bom_before.get(parent_key, {}),
+                            bom_after.get(parent_key, {}),
+                        )
+                        if diff:
+                            entry = _ensure_modified_part(modified_parts, parent_key[0], parent_key[1])
+                            entry["bom_changes"] = diff
+
             # 3) Discover and register artifacts for all parts (best effort)
             for pn, rev in tree_parts:
                 key = (pn, rev)
@@ -1044,7 +1248,7 @@ def import_bom_zip(
                         seen.add(key)
 
                         try:
-                            part_doc = Part.objects(part_number__iexact=pn, revision__iexact=rev).only("attrs", "props").first()
+                            part_doc = Part.objects(part_number__iexact=pn, revision__iexact=rev).only("attrs").first()
                             found = discover_part_files(
                                 pn,
                                 rev,
@@ -1073,7 +1277,16 @@ def import_bom_zip(
                             pass
 
                         try:
-                            artifact_inserts += upsert_part_files(recs, pn, (rev or ""))
+                            upsert_result = upsert_part_files_detailed(recs, pn, (rev or ""))
+                            artifact_inserts += int(upsert_result.get("count") or 0)
+                            if part_existed_before.get(key):
+                                file_changes = list(upsert_result.get("changes") or [])
+                                if file_changes:
+                                    entry = _ensure_modified_part(modified_parts, pn, rev)
+                                    for item in file_changes:
+                                        file_change = dict(item)
+                                        file_change["kind"] = "artifact"
+                                        entry["file_changes"].append(file_change)
                         except Exception as exc:
                             _report_issue(
                                 report,
@@ -1129,12 +1342,23 @@ def import_bom_zip(
                 except Exception:
                     root_rev = ""
 
+            modified_parts_list: List[Dict[str, Any]] = []
+            for key in sorted(modified_parts):
+                entry = dict(modified_parts[key])
+                entry["data_changes"] = list(entry.get("data_changes") or [])
+                entry["file_changes"] = list(entry.get("file_changes") or [])
+                if not entry["data_changes"] and not entry.get("bom_changes") and not entry["file_changes"]:
+                    continue
+                modified_parts_list.append(entry)
+
             report.update(
                 {
                     "root": root_pn,
                     "root_revision": root_rev,
                     "parts_created": created_parts,
                     "parts_updated": updated_parts,
+                    "modified_parts_count": len(modified_parts_list),
+                    "modified_parts": modified_parts_list,
                     "links_created": created_links,
                     "links_skipped": skipped_links,
                     "links_removed": removed_links,
