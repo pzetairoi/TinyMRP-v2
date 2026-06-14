@@ -11,6 +11,7 @@ class UserSettings(Document):
     default_context = DictField(default=dict)
     sw_property_map = DictField(default=dict)
     apply_mode = StringField(default="active_config")
+    profile = DictField(default=dict)
     ui_preferences = DictField(default=dict)
     field_preferences = DictField(default=dict)
     updated_at = DateTimeField(default=datetime.utcnow)

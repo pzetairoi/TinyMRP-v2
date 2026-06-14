@@ -6,6 +6,7 @@ from typing import Dict, Any
 from app.models.user_settings import UserSettings
 from app.services.field_config import sanitize_user_field_preferences
 from app.services.numbering_presets import get_recommended_scheme
+from app.services.user_profile import default_profile_settings, sanitize_profile
 
 
 DEFAULT_PROPERTY_MAP = {
@@ -23,6 +24,7 @@ def default_settings_dict() -> Dict[str, Any]:
         "default_context": {},
         "sw_property_map": dict(DEFAULT_PROPERTY_MAP),
         "apply_mode": "active_config",
+        "profile": default_profile_settings(),
         "ui_preferences": {"show_advanced": False},
         "field_preferences": {},
         "updated_at": datetime.utcnow(),
@@ -47,6 +49,7 @@ def settings_to_dict(settings: UserSettings) -> Dict[str, Any]:
         "default_context": settings.default_context or {},
         "sw_property_map": settings.sw_property_map or dict(DEFAULT_PROPERTY_MAP),
         "apply_mode": settings.apply_mode or "active_config",
+        "profile": sanitize_profile(settings.profile or {}),
         "ui_preferences": settings.ui_preferences or {"show_advanced": False},
         "field_preferences": field_preferences,
         "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
@@ -62,6 +65,8 @@ def apply_settings_payload(settings: UserSettings, payload: Dict[str, Any]) -> U
         settings.sw_property_map = payload.get("sw_property_map") or dict(DEFAULT_PROPERTY_MAP)
     if "apply_mode" in payload:
         settings.apply_mode = str(payload.get("apply_mode") or "active_config")
+    if "profile" in payload and isinstance(payload.get("profile"), dict):
+        settings.profile = sanitize_profile(payload.get("profile") or {})
     if "ui_preferences" in payload and isinstance(payload.get("ui_preferences"), dict):
         settings.ui_preferences = payload.get("ui_preferences") or {}
     if "field_preferences" in payload and isinstance(payload.get("field_preferences"), dict):
