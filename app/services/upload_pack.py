@@ -14,8 +14,9 @@ from typing import Any, Dict, List, Tuple
 from flask import current_app
 
 from app.models.extra_file import PartExtraFile
+from app.models.part import Part
 from app.services.import_zip import import_bom_zip
-from app.services.filescan import upsert_part_files
+from app.services.filescan import upsert_part_files_detailed
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.part_norm import clean_pn, clean_rev
 from app.services.extra_files import (
@@ -41,6 +42,8 @@ _DELIVERABLE_GROUPS = {
     "stl",
     "datasheet",
 }
+
+_PART_OVERRIDE_MODE_DEFAULT = "unless_existing_approved"
 
 
 def _stage_start() -> Tuple[float, float]:
@@ -128,6 +131,45 @@ def _base_pn(pn: str) -> str:
     if not pn:
         return ""
     return clean_pn(str(pn).split("^", 1)[0])
+
+
+def _existing_part_pairs(pairs: set[Tuple[str, str]]) -> set[Tuple[str, str]]:
+    existing: set[Tuple[str, str]] = set()
+    for pn, rev in pairs:
+        pn_clean = _base_pn(pn)
+        rev_clean = clean_rev(rev)
+        if not pn_clean:
+            continue
+        if Part.objects(part_number=pn_clean, revision=rev_clean).only("id").first() is not None:
+            existing.add((pn_clean, rev_clean))
+    return existing
+
+
+def _ensure_modified_part_entry(report: Dict[str, Any], pn: str, rev: str) -> Dict[str, Any]:
+    pn_clean = _base_pn(pn)
+    rev_clean = clean_rev(rev)
+    items = report.get("modified_parts")
+    if not isinstance(items, list):
+        items = []
+        report["modified_parts"] = items
+    for item in items:
+        if (
+            str(item.get("part_number") or "") == pn_clean
+            and str(item.get("revision") or "") == rev_clean
+        ):
+            item.setdefault("data_changes", [])
+            item.setdefault("bom_changes", None)
+            item.setdefault("file_changes", [])
+            return item
+    entry = {
+        "part_number": pn_clean,
+        "revision": rev_clean,
+        "data_changes": [],
+        "bom_changes": None,
+        "file_changes": [],
+    }
+    items.append(entry)
+    return entry
 
 
 def _parse_flatbom(
@@ -252,7 +294,7 @@ def import_upload_pack(
     strict_structure: bool = False,
     allow_extra: bool = True,
     seed_tag: str = "upload-pack",
-    override_mode: str = "preserve",
+    override_mode: str = _PART_OVERRIDE_MODE_DEFAULT,
 ) -> Dict[str, Any]:
     timings: Dict[str, Any] = {}
     resources_start = _snapshot_resources()
@@ -273,6 +315,7 @@ def import_upload_pack(
     pair_warnings: Dict[Tuple[str, str], List[str]] = {}
     extra_counts: Dict[Tuple[str, str], int] = {}
     extra_pairs: set[Tuple[str, str]] = set()
+    extra_file_changes: List[Dict[str, Any]] = []
 
     deliverables_written = 0
     extras_written = 0
@@ -460,6 +503,7 @@ def import_upload_pack(
                         revision=rev,
                         rel_path=rel_path,
                     ).first()
+                    extra_action = "updated" if existing else "added"
                     if existing:
                         existing.original_name = os.path.basename(file_name)
                         existing.size = size
@@ -485,6 +529,17 @@ def import_upload_pack(
                             uploaded_at=datetime.utcnow(),
                             source=seed_tag,
                         ).save()
+                    extra_file_changes.append(
+                        {
+                            "part_number": pn,
+                            "revision": rev,
+                            "kind": "extra_file",
+                            "action": extra_action,
+                            "name": os.path.basename(file_name),
+                            "rel_path": rel_path,
+                            "label": label,
+                        }
+                    )
                 extras_written += 1
                 extra_pairs.add((pn, rev))
                 extra_counts[(pn, rev)] = extra_counts.get((pn, rev), 0) + 1
@@ -497,6 +552,7 @@ def import_upload_pack(
         _stage_end(timings, "zip.entries", scan_entries_start)
 
     bom_result = None
+    preexisting_part_pairs = _existing_part_pairs(set(bom_pairs) | set(deliverable_pairs) | set(extra_pairs))
     if not dry_run:
         bom_start = _stage_start()
         # If the ZIP has no deliverables (or we couldn't parse any deliverable filenames into PN/REV),
@@ -516,9 +572,16 @@ def import_upload_pack(
         artifacts_upserted = 0
         thumbs = 0
         artifacts_found_by_type: Dict[str, int] = {}
+        deliverable_file_changes: List[Dict[str, Any]] = []
         artifacts_start = _stage_start()
         try:
-            artifacts_upserted = upsert_part_files(deliverable_artifact_recs)
+            upsert_result = upsert_part_files_detailed(deliverable_artifact_recs)
+            artifacts_upserted = int(upsert_result.get("count") or 0)
+            for rec in list(upsert_result.get("changes") or []):
+                item = dict(rec)
+                item["kind"] = "deliverable"
+                item["name"] = os.path.basename(str(item.get("rel_path") or ""))
+                deliverable_file_changes.append(item)
             for rec in deliverable_artifact_recs:
                 grp = str(rec.get("ext_group") or "unknown")
                 artifacts_found_by_type[grp] = artifacts_found_by_type.get(grp, 0) + 1
@@ -536,6 +599,18 @@ def import_upload_pack(
             bom_result["artifacts_found_by_type"] = artifacts_found_by_type or (bom_result.get("artifacts_found_by_type") or {})
             bom_result["thumbnails_generated"] = int(bom_result.get("thumbnails_generated") or 0) + int(thumbs)
             bom_result["thumbnails_built"] = int(bom_result.get("thumbnails_built") or 0) + int(thumbs)
+            combined_file_changes = list(deliverable_file_changes) + list(extra_file_changes)
+            for change in combined_file_changes:
+                key = (_base_pn(change.get("part_number") or ""), clean_rev(change.get("revision") or ""))
+                if key not in preexisting_part_pairs:
+                    continue
+                entry = _ensure_modified_part_entry(bom_result, key[0], key[1])
+                entry.setdefault("file_changes", []).append(change)
+            bom_result["modified_parts"] = sorted(
+                list(bom_result.get("modified_parts") or []),
+                key=lambda item: (str(item.get("part_number") or ""), str(item.get("revision") or "")),
+            )
+            bom_result["modified_parts_count"] = len(bom_result["modified_parts"])
 
     items: List[Dict[str, Any]] = []
     pairs = set(bom_pairs) | set(extra_pairs)

@@ -204,6 +204,44 @@ def test_upload_pack_extra_label_manifest(client, app, user, tmp_path):
     assert ef.label == "Inspection report"
 
 
+def test_upload_pack_report_includes_existing_part_file_changes(client, app, user, tmp_path):
+    role = Role(name="importer_report", permissions=["import.bom", "items.view", "items.edit"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    with app.app_context():
+        app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+        app.config["EXTRA_FILES_ALLOWED"] = True
+
+    pn = "PN-REPORT"
+    rev = "A"
+    Part(part_number=pn, revision=rev, description="Existing part").save()
+    entries = {
+        f"deliverables/pdf/{pn}_REV_{rev}.pdf": b"pdf",
+        f"extra/{pn}/{rev}/inspection.txt": b"report",
+    }
+    zip_bytes = _make_bom_zip(pn, rev, entries)
+
+    resp = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(zip_bytes), "pack.zip")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json() or {}
+    report = data.get("import") or {}
+
+    modified_parts = report.get("modified_parts") or []
+    entry = next((item for item in modified_parts if item.get("part_number") == pn and item.get("revision") == rev), None)
+    assert entry is not None
+    file_changes = entry.get("file_changes") or []
+    kinds = {item.get("kind") for item in file_changes}
+    assert "deliverable" in kinds
+    assert "extra_file" in kinds
+
+
 def test_direct_extra_upload_empty_rev(client, app, user, tmp_path):
     role = Role(name="editor", permissions=["items.view", "items.edit"]).save()
     user.roles = [role]

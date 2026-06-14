@@ -21,6 +21,48 @@ type ImportIssue = {
   traceback?: string;
 };
 
+type ImportDataChange = {
+  scope?: string;
+  field?: string;
+  before?: any;
+  after?: any;
+};
+
+type ImportBomItem = {
+  part_number?: string;
+  revision?: string;
+  qty?: number;
+  before_qty?: number;
+  after_qty?: number;
+};
+
+type ImportFileChange = {
+  part_number?: string;
+  revision?: string;
+  kind?: string;
+  action?: string;
+  name?: string;
+  rel_path?: string;
+  ext_group?: string;
+  ext?: string;
+  changed_fields?: string[];
+  label?: string;
+};
+
+type ModifiedPartSummary = {
+  part_number?: string;
+  revision?: string;
+  data_changes?: ImportDataChange[];
+  bom_changes?: {
+    before_children?: number;
+    after_children?: number;
+    added?: ImportBomItem[];
+    removed?: ImportBomItem[];
+    qty_changed?: ImportBomItem[];
+  } | null;
+  file_changes?: ImportFileChange[];
+};
+
 type ImportReport = {
   zip?: string;
   flatbom_file?: string;
@@ -29,6 +71,8 @@ type ImportReport = {
   root_revision?: string;
   parts_created?: number;
   parts_updated?: number;
+  modified_parts_count?: number;
+  modified_parts?: ModifiedPartSummary[];
   links_created?: number;
   links_skipped?: number;
   links_removed?: number;
@@ -99,6 +143,22 @@ function formatImportIssue(issue: ImportIssue): string {
   return `${head}${msg}${exc}`.trim() || "Unknown issue";
 }
 
+function formatChangeValue(value: any): string {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatPartRef(pn?: string, rev?: string): string {
+  const partNumber = String(pn || "").trim() || "(blank PN)";
+  const revision = String(rev || "").trim();
+  return revision ? `${partNumber} REV ${revision}` : partNumber;
+}
+
 function downloadJson(filename: string, data: unknown) {
   try {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -132,7 +192,9 @@ export default function UploadPackPage() {
   const [result, setResult] = useState<UploadResult | null>(null);
   const [dryRun, setDryRun] = useState(false);
   const [strictStructure, setStrictStructure] = useState(false);
-  const [overrideMode, setOverrideMode] = useState<"preserve" | "approved_only" | "always">("preserve");
+  const [overrideMode, setOverrideMode] = useState<
+    "unless_existing_approved" | "preserve" | "approved_only" | "always"
+  >("unless_existing_approved");
   const [progressPct, setProgressPct] = useState(0);
   const [progressLabel, setProgressLabel] = useState("Waiting to start...");
   const [showProgress, setShowProgress] = useState(false);
@@ -181,6 +243,10 @@ export default function UploadPackPage() {
 
   const seededParts = useMemo(() => {
     const list = importSummary?.parts_seeded_list || [];
+    return Array.isArray(list) ? list : [];
+  }, [importSummary]);
+  const modifiedParts = useMemo(() => {
+    const list = importSummary?.modified_parts || [];
     return Array.isArray(list) ? list : [];
   }, [importSummary]);
 
@@ -471,6 +537,19 @@ export default function UploadPackPage() {
                   <input
                     className="form-check-input"
                     type="radio"
+                    id="overrideDefault"
+                    name="overrideMode"
+                    checked={overrideMode === "unless_existing_approved"}
+                    onChange={() => setOverrideMode("unless_existing_approved")}
+                  />
+                  <label className="form-check-label" htmlFor="overrideDefault">
+                    Override data unless existing part is approved
+                  </label>
+                </div>
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="radio"
                     id="overridePreserve"
                     name="overrideMode"
                     checked={overrideMode === "preserve"}
@@ -634,6 +713,9 @@ extra/
                     <b>{importSummary.parts_updated ?? 0}</b>
                   </div>
                   <div>
+                    Existing parts modified: <b>{importSummary.modified_parts_count ?? modifiedParts.length}</b>
+                  </div>
+                  <div>
                     Parts seeded: <b>{importSummary.parts_seeded ?? 0}</b>
                   </div>
                   <div>
@@ -746,6 +828,106 @@ extra/
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {modifiedParts.length > 0 && (
+              <div className="mt-3">
+                <h6 className="mb-2">Modified existing parts</h6>
+                <div className="text-muted small mb-2">
+                  Field, BOM, and file changes detected while updating existing part records.
+                </div>
+                <div className="d-flex flex-column gap-2">
+                  {modifiedParts.map((part) => {
+                    const dataChanges = Array.isArray(part.data_changes) ? part.data_changes : [];
+                    const bomChanges = part.bom_changes || null;
+                    const fileChanges = Array.isArray(part.file_changes) ? part.file_changes : [];
+                    return (
+                      <details
+                        key={`${part.part_number || ""}:${part.revision || ""}`}
+                        className="border rounded p-2"
+                      >
+                        <summary className="fw-semibold">
+                          {formatPartRef(part.part_number, part.revision)}
+                          <span className="text-muted ms-2 small">
+                            {dataChanges.length ? `${dataChanges.length} field change${dataChanges.length === 1 ? "" : "s"}` : ""}
+                            {dataChanges.length && (bomChanges || fileChanges.length) ? " · " : ""}
+                            {bomChanges ? "BOM updated" : ""}
+                            {bomChanges && fileChanges.length ? " · " : ""}
+                            {fileChanges.length ? `${fileChanges.length} file change${fileChanges.length === 1 ? "" : "s"}` : ""}
+                          </span>
+                        </summary>
+
+                        {dataChanges.length > 0 && (
+                          <div className="mt-2">
+                            <div className="fw-semibold small">Field changes</div>
+                            <ul className="small mb-0">
+                              {dataChanges.map((change, idx) => (
+                                <li key={`data-${idx}`}>
+                                  {change.scope === "attribute" ? "Attribute" : "Part"} <code>{change.field || "-"}</code>:{" "}
+                                  <span className="text-muted">{formatChangeValue(change.before)}</span> to{" "}
+                                  <span>{formatChangeValue(change.after)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {bomChanges && (
+                          <div className="mt-2">
+                            <div className="fw-semibold small">
+                              BOM changes ({bomChanges.before_children ?? 0} to {bomChanges.after_children ?? 0} children)
+                            </div>
+                            {Array.isArray(bomChanges.added) && bomChanges.added.length > 0 && (
+                              <div className="small">
+                                Added:{" "}
+                                {bomChanges.added
+                                  .map((item) => `${formatPartRef(item.part_number, item.revision)} x ${item.qty ?? 0}`)
+                                  .join(", ")}
+                              </div>
+                            )}
+                            {Array.isArray(bomChanges.removed) && bomChanges.removed.length > 0 && (
+                              <div className="small">
+                                Removed:{" "}
+                                {bomChanges.removed
+                                  .map((item) => `${formatPartRef(item.part_number, item.revision)} x ${item.qty ?? 0}`)
+                                  .join(", ")}
+                              </div>
+                            )}
+                            {Array.isArray(bomChanges.qty_changed) && bomChanges.qty_changed.length > 0 && (
+                              <div className="small">
+                                Qty changed:{" "}
+                                {bomChanges.qty_changed
+                                  .map(
+                                    (item) =>
+                                      `${formatPartRef(item.part_number, item.revision)} ${item.before_qty ?? 0} to ${item.after_qty ?? 0}`,
+                                  )
+                                  .join(", ")}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {fileChanges.length > 0 && (
+                          <div className="mt-2">
+                            <div className="fw-semibold small">File changes</div>
+                            <ul className="small mb-0">
+                              {fileChanges.map((change, idx) => (
+                                <li key={`file-${idx}`}>
+                                  {String(change.action || "updated").toUpperCase()} {change.kind || "file"}:{" "}
+                                  {change.name || change.rel_path || `${change.ext_group || "file"}.${change.ext || ""}`}
+                                  {change.changed_fields && change.changed_fields.length
+                                    ? ` (${change.changed_fields.join(", ")})`
+                                    : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </details>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
