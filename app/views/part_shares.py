@@ -3,8 +3,9 @@ from __future__ import annotations
 import mimetypes
 import os
 from datetime import datetime
+from io import BytesIO
 
-from flask import Blueprint, abort, jsonify, make_response, render_template, request, send_file
+from flask import Blueprint, abort, current_app, jsonify, make_response, render_template, request, send_file
 from flask_login import current_user, login_required
 
 from app.extensions import csrf
@@ -17,6 +18,7 @@ from app.services.audit import log_action
 from app.services.extra_files import extra_abs_path, extra_file_token_for, extra_root, resolve_extra_file_token
 from app.services.field_config import get_field_config
 from app.services.files_access import file_token_for, resolve_file_token
+from app.services.docpacks import DocPackOptions, _flatten_bom, build_docpack
 from app.services.part_shares import (
     create_part_share,
     normalize_share_revision,
@@ -75,6 +77,18 @@ def _part_share_scope(share) -> tuple[str, str]:
     return (str(share.part_number or "").strip(), normalize_share_revision(share.revision))
 
 
+def _share_allows_children(share) -> bool:
+    return bool(getattr(share, "allow_children", False))
+
+
+def _share_allows_docpacks(share) -> bool:
+    return bool(getattr(share, "allow_docpacks", False))
+
+
+def _share_allows_attributes(share) -> bool:
+    return bool(getattr(share, "allow_attributes", False))
+
+
 def _share_or_abort(share_id: str, token: str):
     share, status = resolve_part_share(share_id, token)
     if share and status == "ok":
@@ -91,9 +105,50 @@ def _part_or_404(part_number: str, revision: str) -> Part:
     return part
 
 
+def _public_json(payload, status: int = 200):
+    resp = jsonify(payload)
+    resp.status_code = status
+    return public_response_headers(resp)
+
+
+def _flag_enabled(value) -> bool:
+    return value in (True, 1, "1", "true", "True", "on", "yes", "Yes")
+
+
 def _same_shared_part_number(share, pn: str) -> bool:
     share_pn, _share_rev = _part_share_scope(share)
     return str(pn or "").strip().lower() == share_pn.lower()
+
+
+def _share_allows_part_key(share, pn: str, rev: str | None) -> bool:
+    key = (str(pn or "").strip(), normalize_share_revision(rev))
+    if not key[0]:
+        return False
+    if key == _part_share_scope(share):
+        return True
+    return _share_allows_children(share) and key in _share_descendant_keys(share)
+
+
+def _allowed_part_number_for_share(share, pn: str) -> bool:
+    share_pn, _share_rev = _part_share_scope(share)
+    target = str(pn or "").strip().lower()
+    if not target:
+        return False
+    if target == share_pn.lower():
+        return True
+    if not _share_allows_children(share):
+        return False
+    return any(str(child_pn or "").strip().lower() == target for child_pn, _child_rev in _share_descendant_keys(share))
+
+
+def _requested_shared_part_key(share) -> tuple[str, str]:
+    root_pn, root_rev = _part_share_scope(share)
+    pn = (request.args.get("pn") or "").strip() or root_pn
+    rev_arg = request.args.get("rev")
+    rev = normalize_share_revision(rev_arg if rev_arg is not None else root_rev)
+    if not _share_allows_part_key(share, pn, rev):
+        abort(404)
+    return pn, rev
 
 
 def _share_preview_urls_for(share, raw_token: str, pn: str, rev: str, *, is_dwg: bool) -> list[str]:
@@ -161,7 +216,7 @@ def _share_descendant_keys(share) -> set[tuple[str, str]]:
 
 
 def _allowed_file_for_share(share, part_number: str) -> bool:
-    return _same_shared_part_number(share, part_number)
+    return _allowed_part_number_for_share(share, part_number)
 
 
 def _allowed_path(abs_path: str, base_root: str) -> bool:
@@ -263,6 +318,9 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
             "created_at": share.created_at.isoformat() if share.created_at else None,
             "expires_at": share.expires_at.isoformat() if share.expires_at else None,
             "access_count": int(share.access_count or 0),
+            "allow_children": _share_allows_children(share),
+            "allow_docpacks": _share_allows_docpacks(share),
+            "allow_attributes": _share_allows_attributes(share),
         },
     }
 
@@ -347,7 +405,7 @@ def public_share_field_config(share_id: str, token: str):
 @bp.get("/api/share/part/<share_id>/<token>/part_detail")
 def public_share_part_detail(share_id: str, token: str):
     share = _share_or_abort(share_id, token)
-    part_number, revision = _part_share_scope(share)
+    part_number, revision = _requested_shared_part_key(share)
     part = _part_or_404(part_number, revision)
     record_part_share_access(share, kind="detail")
     resp = jsonify(_part_detail_payload_for_share(share, token, part))
@@ -357,7 +415,7 @@ def public_share_part_detail(share_id: str, token: str):
 @bp.get("/api/share/part/<share_id>/<token>/files_overview")
 def public_share_files_overview(share_id: str, token: str):
     share = _share_or_abort(share_id, token)
-    part_number, revision = _part_share_scope(share)
+    part_number, revision = _requested_shared_part_key(share)
     part = _part_or_404(part_number, revision)
     attrs = harvest_part_attrs(part)
     current_rev = _normalized_revision(part, attrs)
@@ -420,7 +478,7 @@ def public_share_part_images(share_id: str, token: str):
     pn = (request.args.get("pn") or "").strip()
     mode = (request.args.get("mode") or "preview").strip().lower()
     rev = normalize_share_revision(request.args.get("rev"))
-    if not pn or not _same_shared_part_number(share, pn):
+    if not pn or not _share_allows_part_key(share, pn, rev):
         resp = jsonify([])
         return public_response_headers(resp)
 
@@ -451,18 +509,17 @@ def public_share_part_images(share_id: str, token: str):
 def public_share_bom_tree(share_id: str, token: str):
     share = _share_or_abort(share_id, token)
     config = get_field_config()
-    root_pn, root_rev = _part_share_scope(share)
     pn = (request.args.get("pn") or "").strip()
     rev = normalize_share_revision(request.args.get("rev"))
     parent = (request.args.get("parent") or "").strip()
     parent_rev = normalize_share_revision(request.args.get("parent_rev"))
 
     if pn:
-        if pn.lower() != root_pn.lower() or rev != root_rev:
+        if not _share_allows_part_key(share, pn, rev):
             resp = jsonify([])
             return public_response_headers(resp)
-        root_part = _part_or_404(root_pn, root_rev)
-        root = _node(root_part.part_number, rev=root_rev, config=config)
+        root_part = _part_or_404(pn, rev)
+        root = _node(root_part.part_number, rev=rev, config=config)
         root["children"] = []
         root["data"] = _rewrite_share_thumbs(share, token, root.get("data") or {})
         resp = jsonify([root])
@@ -493,7 +550,7 @@ def public_share_bom_tree(share_id: str, token: str):
 def public_share_bom_flat(share_id: str, token: str):
     share = _share_or_abort(share_id, token)
     config = get_field_config()
-    root_pn, root_rev = _part_share_scope(share)
+    root_pn, root_rev = _requested_shared_part_key(share)
     root_part = _part_or_404(root_pn, root_rev)
 
     rows_by_key: dict[tuple[str, str], dict] = {}
@@ -621,6 +678,109 @@ def public_share_bom_flat(share_id: str, token: str):
     return public_response_headers(resp)
 
 
+def _share_docpack_options_payload(part_number: str, revision: str, depth: str) -> dict:
+    flat = _flatten_bom(part_number, revision, full=(depth != "top"))
+    flat.append((part_number, revision or "", 1.0))
+
+    groups = set()
+    for pnr, rev, _qty in flat:
+        q = PartFile.objects(part_number__iexact=pnr)
+        if rev is not None:
+            q = q.filter(revision__iexact=(rev or ""))
+        for pf in q.only("ext_group"):
+            if pf.ext_group:
+                groups.add(str(pf.ext_group))
+
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    processes = [key for key in meta.keys() if not str(key).startswith("_")]
+    return {
+        "file_types": sorted(groups),
+        "processes": sorted(processes),
+    }
+
+
+@bp.get("/api/share/part/<share_id>/<token>/docpacks/options")
+def public_share_docpack_options(share_id: str, token: str):
+    share = _share_or_abort(share_id, token)
+    if not _share_allows_docpacks(share):
+        return _public_json({"error": "forbidden"}, 403)
+    part_number, revision = _requested_shared_part_key(share)
+    depth = (request.args.get("depth") or "full").strip().lower()
+    try:
+        log_action(
+            "part.share.docpack.options",
+            resource_type="part_share",
+            resource=f"{share.part_number}:{share.revision or ''}",
+            meta={
+                "share_id": str(share.id),
+                "token_prefix": share.token_prefix or "",
+                "pn": part_number,
+                "rev": revision,
+                "depth": depth,
+            },
+        )
+    except Exception:
+        pass
+    return _public_json(_share_docpack_options_payload(part_number, revision, depth))
+
+
+@bp.post("/api/share/part/<share_id>/<token>/docpacks/build")
+@csrf.exempt
+def public_share_docpack_build(share_id: str, token: str):
+    share = _share_or_abort(share_id, token)
+    if not _share_allows_docpacks(share):
+        return _public_json({"error": "forbidden"}, 403)
+
+    from app.views.docpacks import _parse_docpack_request
+
+    payload, data, args, gv, _list, _has_key, base_kwargs, _output_name, fab_enabled = _parse_docpack_request()
+    fallback_pn, fallback_rev = _part_share_scope(share)
+    requested_pn = gv("pn") or gv("part_number") or gv("partnumber") or gv("root_pn") or gv("root") or fallback_pn
+    requested_rev = gv("rev") if gv("rev") is not None else (gv("revision") if gv("revision") is not None else fallback_rev)
+    part_number = str(requested_pn or "").strip()
+    revision = normalize_share_revision(requested_rev)
+    if not _share_allows_part_key(share, part_number, revision):
+        abort(404)
+
+    opts = DocPackOptions(
+        root_pn=part_number,
+        root_rev=revision,
+        **base_kwargs,
+    )
+    if fab_enabled:
+        setattr(opts, "fabrication_pack", True)
+
+    try:
+        name, blob, mime = build_docpack(opts)
+    except RuntimeError as exc:
+        return _public_json({"error": str(exc)}, 400)
+
+    record_part_share_access(share, kind="docpack_build")
+    try:
+        log_action(
+            "part.share.docpack.build",
+            resource_type="part_share",
+            resource=f"{share.part_number}:{share.revision or ''}",
+            meta={
+                "share_id": str(share.id),
+                "token_prefix": share.token_prefix or "",
+                "pn": opts.root_pn,
+                "rev": opts.root_rev or "",
+                "depth": opts.depth,
+                "types": ",".join(opts.file_types or []),
+                "process_mode": opts.process_mode,
+                "excel": bool(opts.want_excel_bom),
+                "binder": bool(opts.want_pdf_binder),
+                "visual": bool(opts.want_visual_list),
+            },
+        )
+    except Exception:
+        pass
+
+    resp = send_file(BytesIO(blob), mimetype=mime, as_attachment=True, download_name=name)
+    return public_response_headers(resp)
+
+
 @bp.get("/api/parts/<path:pn>/shares")
 @login_required
 def list_part_shares(pn: str):
@@ -654,13 +814,31 @@ def create_part_share_api(pn: str):
     expires_in_days = int(payload.get("expires_in_days") or 30)
     if expires_in_days < 1 or expires_in_days > 365:
         return jsonify({"ok": False, "error": "invalid_expiry"}), 400
-    share, raw_token = create_part_share(part.part_number, part.revision or "", created_by=current_user, expires_in_days=expires_in_days)
+    allow_children = _flag_enabled(payload.get("allow_children"))
+    allow_docpacks = _flag_enabled(payload.get("allow_docpacks"))
+    allow_attributes = _flag_enabled(payload.get("allow_attributes"))
+    share, raw_token = create_part_share(
+        part.part_number,
+        part.revision or "",
+        created_by=current_user,
+        expires_in_days=expires_in_days,
+        allow_children=allow_children,
+        allow_docpacks=allow_docpacks,
+        allow_attributes=allow_attributes,
+    )
     try:
         log_action(
             "part.share.create",
             resource_type="part_share",
             resource=f"{part.part_number}:{normalize_share_revision(part.revision)}",
-            meta={"share_id": str(share.id), "expires_in_days": expires_in_days, "token_prefix": share.token_prefix},
+            meta={
+                "share_id": str(share.id),
+                "expires_in_days": expires_in_days,
+                "token_prefix": share.token_prefix,
+                "allow_children": allow_children,
+                "allow_docpacks": allow_docpacks,
+                "allow_attributes": allow_attributes,
+            },
         )
     except Exception:
         pass

@@ -36,6 +36,9 @@ def create_part_share(
     *,
     created_by=None,
     expires_in_days: int = 30,
+    allow_children: bool = False,
+    allow_docpacks: bool = False,
+    allow_attributes: bool = False,
 ) -> tuple[PartShareLink, str]:
     raw_token = secrets.token_urlsafe(32)
     share = PartShareLink(
@@ -43,6 +46,9 @@ def create_part_share(
         revision=normalize_share_revision(revision),
         token_hash=hash_part_share_token(raw_token),
         token_prefix=raw_token[:8],
+        allow_children=bool(allow_children),
+        allow_docpacks=bool(allow_docpacks),
+        allow_attributes=bool(allow_attributes),
         created_by_user_id=str(getattr(created_by, "id", "") or ""),
         created_by_email=str(getattr(created_by, "email", "") or ""),
     )
@@ -91,6 +97,9 @@ def share_dict(share: PartShareLink) -> dict[str, Any]:
         "part_number": share.part_number or "",
         "revision": share.revision or "",
         "token_prefix": share.token_prefix or "",
+        "allow_children": bool(getattr(share, "allow_children", False)),
+        "allow_docpacks": bool(getattr(share, "allow_docpacks", False)),
+        "allow_attributes": bool(getattr(share, "allow_attributes", False)),
         "status": share_status(share),
         "created_at": share.created_at.isoformat() if share.created_at else None,
         "created_by_email": share.created_by_email or "",
