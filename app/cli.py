@@ -18,6 +18,7 @@ from app.services.import_zip import import_bom_zip
 from flask import current_app
 
 from app.services.attrs import harvest_part_attrs, merge_save_part_attrs
+from app.services.password_policy import validate_admin_password
 
 
 
@@ -52,10 +53,22 @@ def _get_user(email: str):
 @click.option("--password", prompt=True, hide_input=True, confirmation_prompt=True)
 @with_appcontext
 def create_user(email, password):
+    email = str(email or "").strip().lower()
     if User.objects(email=email).first():
         click.echo("User exists")
         return
-    u = User(email=email, password=hash_password(password), fs_uniquifier=secrets.token_hex(16))
+    errors = validate_admin_password(password, email=email)
+    if errors:
+        for error in errors:
+            click.echo(error)
+        raise SystemExit(1)
+    u = User(
+        email=email,
+        password=hash_password(password),
+        fs_uniquifier=secrets.token_hex(16),
+        password_changed_at=dt.datetime.utcnow(),
+        updated_at=dt.datetime.utcnow(),
+    )
     u.save()
     click.echo("Created user")
 
@@ -94,7 +107,14 @@ def set_password(email, password):
     if not u:
         click.echo("User not found")
         raise SystemExit(1)
+    errors = validate_admin_password(password, email=u.email or email)
+    if errors:
+        for error in errors:
+            click.echo(error)
+        raise SystemExit(1)
     u.password = hash_password(password)
+    u.password_changed_at = dt.datetime.utcnow()
+    u.updated_at = dt.datetime.utcnow()
     u.save()
     click.echo("Password updated")
 
@@ -173,12 +193,20 @@ def seed_roles():
 @click.option("--password", prompt=True, hide_input=True, confirmation_prompt=True)
 @with_appcontext
 def bootstrap_admin(email, password):
+    email = str(email or "").strip().lower()
     seed_roles()
     u = _get_user(email)
     if not u:
         u = User(email=email.lower(), fs_uniquifier=secrets.token_hex(16))
+    errors = validate_admin_password(password, email=email)
+    if errors:
+        for error in errors:
+            click.echo(error)
+        raise SystemExit(1)
     u.password = hash_password(password)
     u.active = True
+    u.password_changed_at = dt.datetime.utcnow()
+    u.updated_at = dt.datetime.utcnow()
     r = Role.objects(name="admin").first() or Role(name="admin").save()
     if r not in (u.roles or []):
         u.roles.append(r)

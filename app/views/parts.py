@@ -15,6 +15,7 @@ from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
 from app.services.attrs import comments_search_text, harvest_part_attrs, approved_value, process_attributes
 from app.models.artifact import PartFile
+from app.models.extra_file import PartExtraFile
 from app.views.whereused import _rows_for_child_pn
 from app.services.processmeta import normalize_processes
 from app.services.insights import (
@@ -26,6 +27,7 @@ from app.services.insights import (
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
 from app.services.filescan import discover_part_files, upsert_part_files
 from app.services.thumbs_gen import generate_thumbs_for_parts
+from app.services.extra_files import extra_file_url_for
 from app.services.acl import (
     require_items_view,
     allowed_parts_for,
@@ -48,6 +50,7 @@ from app.services.field_config import (
 )
 from app.services.parts_delete import delete_part_and_refs_cascade
 from app.services.part_norm import clean_rev, clean_rev_or_none
+from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
@@ -190,6 +193,135 @@ def _part_label(pn: str, rev: str | None) -> dict:
     attrs = harvest_part_attrs(p) if p else {}
     desc = (p.description if p else "") or attrs.get("description") or ""
     return {"pn": pn, "rev": resolved_rev, "desc": desc}
+
+
+def _attr_identity(attrs: dict, *keys: str) -> str:
+    for key in keys:
+        value = str(attrs.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _comment_payload(comment: dict, resolved: dict[str, dict[str, object]] | None = None) -> dict[str, object]:
+    item = dict(comment or {})
+    author = str(item.get("author") or "").strip()
+    profile = None
+    if author:
+        if resolved is not None:
+            profile = resolved.get(author.lower()) or resolve_identity_profile(author)
+        else:
+            profile = resolve_identity_profile(author)
+    return {
+        "ts": item.get("ts") or "",
+        "author": author,
+        "author_display": (profile or {}).get("label") or author or "User",
+        "author_profile": profile or resolve_identity_profile(author),
+        "text": str(item.get("text") or ""),
+    }
+
+
+def _display_revision_label(rev: str | None) -> str:
+    rev_clean = _clean_rev_value(rev)
+    return rev_clean or "(no revision)"
+
+
+def _part_file_overview_row(pf: PartFile) -> dict[str, Any]:
+    http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
+    allow_public = public_file_urls_enabled()
+    url = ""
+    if allow_public and getattr(pf, "http_url", None):
+        url = pf.http_url
+    elif allow_public and http_base and getattr(pf, "rel_path", None):
+        url = f"{http_base}/{pf.rel_path}"
+    else:
+        try:
+            url = file_url_for(pf)
+        except Exception:
+            url = ""
+    ext = str(getattr(pf, "ext", "") or "").strip().lower()
+    name = os.path.basename(pf.rel_path or pf.path or "") or (f"{pf.ext_group}.{ext}" if pf.ext_group else "file")
+    recorded_at = getattr(pf, "mtime_iso", None) or getattr(pf, "mtime", None) or getattr(pf, "discovered_at", None)
+    return {
+        "id": f"partfile:{pf.id}",
+        "db_id": str(pf.id),
+        "collection": "part_files",
+        "kind": "scanned",
+        "part_number": pf.part_number,
+        "revision": _clean_rev_value(pf.revision or ""),
+        "display_revision": _display_revision_label(pf.revision or ""),
+        "name": name,
+        "label": "",
+        "ext_group": str(getattr(pf, "ext_group", "") or "").strip().lower(),
+        "ext": ext,
+        "mime": getattr(pf, "content_type", None) or "",
+        "rel_path": pf.rel_path or "",
+        "size": pf.size,
+        "source": getattr(pf, "source", None) or "scan",
+        "recorded_by": "",
+        "recorded_at": recorded_at.isoformat() if recorded_at else "",
+        "url": url,
+    }
+
+
+def _extra_file_overview_row(ef: PartExtraFile) -> dict[str, Any]:
+    filename = (ef.original_name or "").strip() or os.path.basename(ef.rel_path or "") or "file"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        "id": f"extra:{ef.id}",
+        "db_id": str(ef.id),
+        "collection": "part_extra_files",
+        "kind": "extra",
+        "part_number": ef.part_number,
+        "revision": _clean_rev_value(ef.revision or ""),
+        "display_revision": _display_revision_label(ef.revision or ""),
+        "name": filename,
+        "label": ef.label or "",
+        "ext_group": "extra",
+        "ext": ext,
+        "mime": ef.mime or "",
+        "rel_path": ef.rel_path or "",
+        "size": ef.size,
+        "source": ef.source or "upload",
+        "recorded_by": ef.uploaded_by or "",
+        "recorded_at": ef.uploaded_at.isoformat() if ef.uploaded_at else "",
+        "url": extra_file_url_for(ef),
+    }
+
+
+def _group_file_overview_rows(rows: list[dict[str, Any]], current_rev: str) -> dict[str, Any]:
+    def sort_key(row: dict[str, Any]) -> tuple[str, str, str]:
+        return (
+            "0" if row.get("collection") == "part_files" else "1",
+            str(row.get("ext_group") or ""),
+            str(row.get("name") or ""),
+        )
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        rev = _clean_rev_value(row.get("revision"))
+        row["revision"] = rev
+        row["display_revision"] = _display_revision_label(rev)
+        grouped.setdefault(rev, []).append(row)
+
+    def section_for(rev: str) -> dict[str, Any]:
+        files = sorted(grouped.get(rev, []), key=sort_key)
+        return {
+            "revision": rev,
+            "display_revision": _display_revision_label(rev),
+            "counts": {
+                "total": len(files),
+                "part_files": sum(1 for row in files if row.get("collection") == "part_files"),
+                "part_extra_files": sum(1 for row in files if row.get("collection") == "part_extra_files"),
+            },
+            "files": files,
+        }
+
+    other_revs = sorted(rev for rev in grouped.keys() if rev != current_rev)
+    return {
+        "current_revision": section_for(current_rev),
+        "other_revisions": [section_for(rev) for rev in other_revs],
+    }
 
 
 def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
@@ -825,6 +957,22 @@ def part_detail():
         if f.ext_group in files:
             files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path or "", "name": file_label(f)})
 
+    uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
+    approver_identity = _attr_identity(attrs, "approvedby", "approved_by", "approved", "checkedby")
+    raw_comments = attrs.get("comments")
+    if not isinstance(raw_comments, list):
+        raw_comments = []
+    identity_keys = [uploader_identity, approver_identity]
+    identity_keys.extend(str((comment or {}).get("author") or "").strip() for comment in raw_comments)
+    resolved_profiles = resolve_identity_profiles(identity_keys)
+    comments = [_comment_payload(comment, resolved_profiles) for comment in raw_comments]
+    uploader_profile = resolve_identity_profile(uploader_identity) if uploader_identity else None
+    if uploader_identity:
+        uploader_profile = resolved_profiles.get(uploader_identity.lower(), uploader_profile)
+    approver_profile = resolve_identity_profile(approver_identity) if approver_identity else None
+    if approver_identity:
+        approver_profile = resolved_profiles.get(approver_identity.lower(), approver_profile)
+
     wu_rows = _rows_for_child_pn(p.part_number, p.revision)
 
     other_versions = []
@@ -883,6 +1031,9 @@ def part_detail():
             "images": preview_urls,
             "drawing_urls": drawing_urls,
             "files": files,
+            "uploader_profile": uploader_profile,
+            "approver_profile": approver_profile,
+            "comments": comments,
             "whereused": wu_rows,
             "other_versions": other_versions,
             "jobs_orders": jobs_orders,
@@ -891,6 +1042,91 @@ def part_detail():
             "can_parts_delete": can_parts_delete,
             "can_parts_edit": can_parts_edit,
             "can_parts_note": can_parts_note,
+        }
+    )
+
+
+@bp.get("/parts/<path:pn>/files_overview")
+@login_required
+@require_items_view
+def part_files_overview(pn: str):
+    pn = (pn or "").strip()
+    rev = request.args.get("rev")
+    p = _find_part_doc(pn, rev)
+    if not p:
+        return jsonify({"error": "not found"}), 404
+
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            return jsonify({"error": "forbidden"}), 403
+    except Exception:
+        allowed = None
+
+    attrs = harvest_part_attrs(p)
+    current_rev = _normalized_revision(p, attrs)
+    rows: list[dict[str, Any]] = []
+
+    for pf in (
+        PartFile.objects(part_number__iexact=p.part_number)
+        .only(
+            "part_number",
+            "revision",
+            "ext_group",
+            "ext",
+            "rel_path",
+            "path",
+            "http_url",
+            "size",
+            "mtime_iso",
+            "mtime",
+            "discovered_at",
+            "content_type",
+            "source",
+        )
+        .order_by("revision", "ext_group", "rel_path")
+    ):
+        row_rev = _clean_rev_value(pf.revision or "")
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, row_rev):
+            continue
+        rows.append(_part_file_overview_row(pf))
+
+    for ef in (
+        PartExtraFile.objects(part_number__iexact=p.part_number)
+        .only(
+            "part_number",
+            "revision",
+            "original_name",
+            "rel_path",
+            "size",
+            "mime",
+            "label",
+            "uploaded_by",
+            "uploaded_at",
+            "source",
+        )
+        .order_by("revision", "-uploaded_at", "original_name")
+    ):
+        row_rev = _clean_rev_value(ef.revision or "")
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, row_rev):
+            continue
+        rows.append(_extra_file_overview_row(ef))
+
+    try:
+        log_action(
+            "part.files.view",
+            resource_type="part",
+            resource=f"{p.part_number}:{current_rev}",
+        )
+    except Exception:
+        pass
+
+    grouped = _group_file_overview_rows(rows, current_rev)
+    return jsonify(
+        {
+            "part_number": p.part_number,
+            "current_revision": grouped["current_revision"],
+            "other_revisions": grouped["other_revisions"],
         }
     )
 
@@ -1024,7 +1260,7 @@ def part_comments_add(pn):
         )
     except Exception:
         pass
-    return jsonify({"ok": True, "comment": comment})
+    return jsonify({"ok": True, "comment": _comment_payload(comment)})
 
 
 @bp.post("/parts/<pn>/refresh_files")

@@ -99,6 +99,12 @@
           <!-- Right: search + Admin & user -->
           <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
             {% if current_user.is_authenticated %}
+            {% set nav_profile = current_user_profile or {
+              'label': current_user.email or 'User',
+              'initials': 'U',
+              'avatar_color': '#1d4ed8',
+              'avatar_shape': 'circle'
+            } %}
             <li class="nav-item me-2">
               <form class="d-flex" role="search" action="/ui/parts" method="get">
                 <input class="form-control form-control-sm me-2" type="search" placeholder="Search parts..." aria-label="Search" name="q" style="min-width: 180px;">
@@ -107,9 +113,26 @@
             </li>
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle" href="#" id="navUser" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                  {{ current_user.email or 'User' }}
+                  <span class="nav-account">
+                    <span
+                      class="account-avatar account-avatar--sm account-avatar--{{ nav_profile.avatar_shape or 'circle' }}"
+                      style="background: {{ nav_profile.avatar_color or '#1d4ed8' }};"
+                      aria-hidden="true"
+                    >
+                      {{ nav_profile.initials or 'U' }}
+                    </span>
+                    <span class="nav-account__text">
+                      <span class="nav-account__label">{{ nav_profile.label or current_user.email or 'User' }}</span>
+                      <span class="nav-account__sub">{{ current_user.email }}</span>
+                    </span>
+                  </span>
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navUser">
+                  <li class="dropdown-header">
+                    <div class="fw-semibold">{{ nav_profile.label or current_user.email or 'User' }}</div>
+                    <div class="small text-muted">{{ current_user.email }}</div>
+                  </li>
+                  <li><hr class="dropdown-divider"></li>
                   <li><a class="dropdown-item" href="/help">Help</a></li>
                   <li><hr class="dropdown-divider"></li>
                   {% if current_user.has_role('admin') %}
@@ -120,7 +143,7 @@
                   <li><a class="dropdown-item text-danger" href="{{ url_for('admin.purge_parts') }}">Purge Parts Data</a></li>
                   <li><hr class="dropdown-divider"></li>
                   {% endif %}
-                  <li><a class="dropdown-item" href="{{ url_for('main.app_home') }}">My Home</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('main.app_home') }}">My Account</a></li>
                   <li><a class="dropdown-item" href="/ui/addin/tokens">Tokens</a></li>
                   <li><hr class="dropdown-divider"></li>
                   <li>

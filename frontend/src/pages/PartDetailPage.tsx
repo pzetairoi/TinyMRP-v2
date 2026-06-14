@@ -105,9 +105,22 @@ type JobsOrdersRow = {
   top_desc?: string;
 };
 
+type IdentityProfile = {
+  email?: string;
+  display_name?: string;
+  label?: string;
+  initials?: string;
+  avatar_color?: string;
+  avatar_shape?: string;
+  roles?: string[];
+  permissions?: string[];
+};
+
 type CommentRow = {
   ts: string;
   author: string;
+  author_display?: string;
+  author_profile?: IdentityProfile | null;
   text: string;
 };
 
@@ -123,6 +136,50 @@ type ExtraFileRow = {
   uploaded_at?: string;
   url?: string;
   rel_path?: string;
+};
+
+type FileOverviewRow = {
+  id?: string;
+  db_id?: string;
+  collection?: string;
+  kind?: string;
+  part_number?: string;
+  revision?: string;
+  display_revision?: string;
+  name?: string;
+  label?: string;
+  ext_group?: string;
+  ext?: string;
+  mime?: string;
+  rel_path?: string;
+  size?: number;
+  source?: string;
+  recorded_by?: string;
+  recorded_at?: string;
+  url?: string;
+};
+
+type FileOverviewSection = {
+  revision?: string;
+  display_revision?: string;
+  counts?: {
+    total?: number;
+    part_files?: number;
+    part_extra_files?: number;
+  };
+  files?: FileOverviewRow[];
+};
+
+type FlatBomRow = {
+  row_key?: string;
+  part_number?: string;
+  revision?: string;
+  description?: string;
+  qty?: number;
+  uom?: string;
+  alt_group?: string;
+  thumb_urls?: string[];
+  [key: string]: any;
 };
 
 const FALLBACK_SUMMARY_FIELDS: FieldDefinition[] = [
@@ -196,6 +253,36 @@ function formatBytes(value?: number): string {
   return `${n.toFixed(n >= 10 ? 0 : 1)} ${units[i]}`;
 }
 
+function initialsForLabel(value: string): string {
+  const tokens = String(value || "")
+    .trim()
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+  if (!tokens.length) return "U"
+  if (tokens.length === 1) return tokens[0].slice(0, 2).toUpperCase()
+  return `${tokens[0][0]}${tokens[1][0]}`.toUpperCase()
+}
+
+function identityLabel(profile?: IdentityProfile | null, fallback = ""): string {
+  return String(profile?.label || profile?.display_name || profile?.email || fallback || "").trim()
+}
+
+function identityAvatar(profile?: IdentityProfile | null, fallback = "", size: "sm" | "md" = "sm") {
+  const label = identityLabel(profile, fallback) || "User"
+  const shape = String(profile?.avatar_shape || "circle").toLowerCase()
+  const avatarClass = shape === "square" ? "square" : shape === "rounded" ? "rounded" : "circle"
+  return (
+    <span
+      className={`pd-identity-avatar pd-identity-avatar--${size} pd-identity-avatar--${avatarClass}`}
+      style={{ backgroundColor: String(profile?.avatar_color || "#1d4ed8") }}
+      title={label}
+      aria-hidden="true"
+    >
+      {String(profile?.initials || initialsForLabel(label)).slice(0, 2)}
+    </span>
+  )
+}
+
 // ---------- Component ----------
 export default function PartDetailPage() {
   const route = useParams();
@@ -211,6 +298,10 @@ export default function PartDetailPage() {
   const [extraUploadBusy, setExtraUploadBusy] = useState(false);
   const [extraUploadError, setExtraUploadError] = useState<string | null>(null);
   const [extraDeleteBusy, setExtraDeleteBusy] = useState<string | null>(null);
+  const [filesOverviewCurrent, setFilesOverviewCurrent] = useState<FileOverviewSection | null>(null);
+  const [filesOverviewOther, setFilesOverviewOther] = useState<FileOverviewSection[]>([]);
+  const [filesOverviewLoading, setFilesOverviewLoading] = useState(false);
+  const [filesOverviewError, setFilesOverviewError] = useState<string | null>(null);
   const [children, setChildren] = useState<ChildRow[]>([]);
   const [wu, setWU] = useState<WURow[]>([]);
   const [versions, setVersions] = useState<VersionRow[]>([]);
@@ -235,6 +326,8 @@ export default function PartDetailPage() {
   const insightsLoading = false;
   const [notes, setNotes] = useState("");
   const [comments, setComments] = useState<CommentRow[]>([]);
+  const [uploaderProfile, setUploaderProfile] = useState<IdentityProfile | null>(null);
+  const [approverProfile, setApproverProfile] = useState<IdentityProfile | null>(null);
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
@@ -286,9 +379,11 @@ export default function PartDetailPage() {
   const [fabricationPack, setFabricationPack] = useState(false);
 
   // BOM Tree
+  const [bomMode, setBomMode] = useState<"tree" | "flat">("tree");
   const [bomNodes, setBomNodes] = useState<TreeNode[]>([]);
+  const [flatBomRows, setFlatBomRows] = useState<FlatBomRow[]>([]);
+  const [flatBomLoading, setFlatBomLoading] = useState(false);
   const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({});
-  const [rootKey, setRootKey] = useState<string | null>(null); // <- moved up so helpers can reference it
 
   const effectiveRev = (part?.revision ?? rev ?? "").trim();
   const revToken = effectiveRev ? effectiveRev : "__no_rev__";
@@ -368,79 +463,25 @@ function bestUrl(f: FileRow): string {
     };
   }
 
-  function getNodeByKey(tree: TreeNode[], key: string): TreeNode | undefined {
-    for (const n of tree) {
-      if (String(n.key) === String(key)) return n;
-      if (n.children?.length) {
-        const hit = getNodeByKey(n.children as TreeNode[], key);
-        if (hit) return hit;
-      }
-    }
-    return undefined;
+  function bomData(row: any): Record<string, any> {
+    return row?.data ?? row ?? {};
   }
 
-  function getChildrenOf(parentKey: string | null): TreeNode[] {
-    if (!parentKey || parentKey === rootKey) return bomNodes;
-    const p = getNodeByKey(bomNodes, parentKey);
-    return (p?.children as TreeNode[]) || [];
-  }
-
-  function isLastSibling(nodeKey: string, parentKey: string | null): boolean {
-    const sibs = getChildrenOf(parentKey);
-    const idx = sibs.findIndex((s) => String(s.key) === String(nodeKey));
-    return idx >= 0 && idx === sibs.length - 1;
-  }
-
-  function getAncestorChain(node: any): string[] {
-    const chain: string[] = [];
-    let p: string | null = node?.data?._parent ?? null;
-    while (p) {
-      chain.unshift(p);
-      if (p === rootKey) break;
-      const pn = getNodeByKey(bomNodes, p);
-      p = (pn?.data?._parent ?? rootKey) as string | null;
-    }
-    return chain;
-  }
-
-  const levelCellBody = (node: any) => {
-    const depth = Math.max(0, Number(node?.data?._depth ?? 0));
-    const parentKey = node?.data?._parent ?? null;
-    const ancestors = getAncestorChain(node);
-
-    // draw vertical lines for ancestors that have a next sibling
-    const keepMask = ancestors.map(
-      (ak) =>
-        !isLastSibling(ak, getNodeByKey(bomNodes, ak)?.data?._parent ?? rootKey)
-    );
-
-    const lastHere = isLastSibling(String(node?.key ?? node?.data?.pn ?? ""), parentKey);
-    const indent = 16; // px per level
-    const totalSlots = Math.max(1, depth + 1);
-
-    return (
-      <div className="tt-levelcell" style={{ width: totalSlots * indent }}>
-        {Array.from({ length: depth }).map((_, i) => (
-          <span key={`v-${i}`} className={`tt-lvl ${keepMask[i] ? "keep" : ""}`} />
-        ))}
-        <span className={`tt-lvl cap ${lastHere ? "last" : "mid"}`} />
-      </div>
-    );
-  };
-
-  const thumbOnlyBody = (node: any) => {
-    const urls: string[] = Array.isArray(node?.data?.thumb_urls)
-      ? node.data.thumb_urls
-      : [];
+  const thumbOnlyBody = (row: any) => {
+    const data = bomData(row);
+    const urls: string[] = Array.isArray(data?.thumb_urls) ? data.thumb_urls : [];
     return <ThumbImg urls={urls} maxH={32} maxW={48} />;
   };
 
-  const pnBody = (n: any) => {
-    const pn = n?.data?.pn || "";
+  const pnBody = (row: any) => {
+    const data = bomData(row);
+    const bomPn = data?.part_number || data?.pn || "";
+    const bomRev = data?.revision || data?.rev || "";
+    const depth = Math.max(0, Number(data?._depth ?? 0));
     return (
-      <span className="tt-pncell">
-        <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(pn)}?rev=${encodeURIComponent(n?.data?.rev || "")}`}>
-          {pn}
+      <span className="tt-pncell" style={depth ? { paddingLeft: `${depth * 0.8}rem` } : undefined}>
+        <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(bomPn)}?rev=${encodeURIComponent(bomRev)}`}>
+          {bomPn}
         </a>
       </span>
     );
@@ -455,10 +496,11 @@ function bestUrl(f: FileRow): string {
     return <span><strong>{field.label}:</strong> {formatFieldValue(value)}</span>;
   }
 
-  function renderBomCell(field: FieldDefinition, node: any) {
-    const value = node?.data?.[field.id];
-    if (field.id === "thumbnail") return thumbOnlyBody(node);
-    if (field.id === "part_number") return pnBody(node);
+  function renderBomCell(field: FieldDefinition, row: any) {
+    const data = bomData(row);
+    const value = data?.[field.id];
+    if (field.id === "thumbnail") return thumbOnlyBody(row);
+    if (field.id === "part_number") return pnBody(row);
     if (field.data_type === "link") {
       const href = String(value || "").trim();
       return href ? <a href={href} target="_blank" rel="noreferrer">Open</a> : "-";
@@ -522,7 +564,9 @@ function bestUrl(f: FileRow): string {
             : null
         );
         setNotes(String(partAttrs?.notes || ""));
-        setComments(Array.isArray(partAttrs?.comments) ? partAttrs.comments : []);
+        setComments(Array.isArray(j.comments) ? j.comments : Array.isArray(partAttrs?.comments) ? partAttrs.comments : []);
+        setUploaderProfile(j.uploader_profile || null);
+        setApproverProfile(j.approver_profile || null);
 
         // --- files: handle both array and grouped object ---
         const arrFiles: FileRow[] = [];
@@ -575,6 +619,8 @@ function bestUrl(f: FileRow): string {
             setJobsOrders([]);
             setNotes("");
             setComments([]);
+            setUploaderProfile(null);
+            setApproverProfile(null);
             setCanPartsEdit(false);
             setCanPartsNote(false);
           }
@@ -612,9 +658,39 @@ function bestUrl(f: FileRow): string {
     }
   }
 
+  async function loadFilesOverview() {
+    if (!pn) return;
+    setFilesOverviewLoading(true);
+    setFilesOverviewError(null);
+    try {
+      const qs = new URLSearchParams({ rev: rev || "" });
+      const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/files_overview?${qs.toString()}`);
+      if (resp.status === 403) {
+        setFilesOverviewCurrent(null);
+        setFilesOverviewOther([]);
+        setFilesOverviewError("Forbidden");
+        return;
+      }
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      setFilesOverviewCurrent(data?.current_revision || null);
+      setFilesOverviewOther(Array.isArray(data?.other_revisions) ? data.other_revisions : []);
+    } catch (err: any) {
+      setFilesOverviewCurrent(null);
+      setFilesOverviewOther([]);
+      setFilesOverviewError(err?.message || "Failed to load file visibility.");
+    } finally {
+      setFilesOverviewLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadExtraFiles();
   }, [pn, revToken, refreshTick]);
+
+  useEffect(() => {
+    loadFilesOverview();
+  }, [pn, rev, refreshTick]);
 
   // Load DocPack options when pn/rev/depth changes
   useEffect(() => {
@@ -671,15 +747,12 @@ function bestUrl(f: FileRow): string {
         if (!root.length) {
           setBomNodes([]);
           setBomExpanded({});
-          setRootKey(null);
           return;
         }
 
         const rootNode = root[0] as any;
         const rootPn = (rootNode?.data?.pn || pn) as string;
-        const rk = String(rootNode?.key ?? rootPn);
         const rootRev = (rootNode?.data?.rev || "") as string;
-        setRootKey(rk);
 
         const r2 = await fetch(
           `/api/bom_tree?parent=${encodeURIComponent(rootPn)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`
@@ -687,7 +760,7 @@ function bestUrl(f: FileRow): string {
         if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
         let kids: TreeNode[] = asArr(await r2.json());
 
-        kids = annotateDepth(kids, 0, rk); // depth 0 for first visible level, parent=rootKey
+        kids = annotateDepth(kids, 0, String(rootNode?.key ?? rootPn));
         if (!cancelled) {
           setBomNodes(kids);
           setBomExpanded({});
@@ -697,14 +770,40 @@ function bestUrl(f: FileRow): string {
         if (!cancelled) {
           setBomNodes([]);
           setBomExpanded({});
-          setRootKey(null);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [pn, rev]);
+  }, [pn, rev, refreshTick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setFlatBomLoading(true);
+      try {
+        const r = await fetch(
+          `/api/bom_flat?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`
+        );
+        if (r.status === 403) {
+          if (!cancelled) setForbidden(true);
+          return;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const rows = asArr<FlatBomRow>(await r.json());
+        if (!cancelled) setFlatBomRows(rows);
+      } catch (err) {
+        console.error("bom_flat failed", err);
+        if (!cancelled) setFlatBomRows([]);
+      } finally {
+        if (!cancelled) setFlatBomLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pn, rev, refreshTick]);
 
   // ---------- Load BOM (lazy children) ----------
   function setNodeChildren(
@@ -895,6 +994,11 @@ function bestUrl(f: FileRow): string {
   }, [fileGroups]);
 
   const pdfHref = firstLinks.pdf?.href || "";
+  const currentFileRows = useMemo(() => asArr<FileOverviewRow>(filesOverviewCurrent?.files), [filesOverviewCurrent]);
+  const otherRevisionFileCount = useMemo(
+    () => filesOverviewOther.reduce((sum, section) => sum + asArr<FileOverviewRow>(section?.files).length, 0),
+    [filesOverviewOther]
+  );
 
   useEffect(() => {
     if (threeDOptions.length <= 1) {
@@ -1040,13 +1144,13 @@ function bestUrl(f: FileRow): string {
   const filteredComments = useMemo(() => {
     if (!notesSearchLower) return comments
     return comments.filter((item) =>
-      [item.author || "", item.text || "", item.ts || ""].some((value) =>
+      [item.author || "", item.author_display || "", item.text || "", item.ts || ""].some((value) =>
         String(value).toLowerCase().includes(notesSearchLower),
       ),
     )
   }, [comments, notesSearchLower])
 
-  const uploaderName = useMemo(() => {
+  const uploaderIdentity = useMemo(() => {
     const a = part?.attrs || {}
     return (
       a.uploader ||
@@ -1058,10 +1162,16 @@ function bestUrl(f: FileRow): string {
     )
   }, [part])
 
-  const approverName = useMemo(() => {
+  const approverIdentity = useMemo(() => {
     const a = part?.attrs || {}
     return a.approvedby || a.approved || a.approved_by || a.checkedby || ""
   }, [part])
+
+  const uploaderName = useMemo(() => identityLabel(uploaderProfile, uploaderIdentity), [uploaderProfile, uploaderIdentity])
+  const approverName = useMemo(
+    () => identityLabel(approverProfile, approvedInfo.label || approverIdentity),
+    [approverIdentity, approverProfile, approvedInfo.label],
+  )
 
   const missingCritical = useMemo(() => {
     const missing: string[] = []
@@ -1116,6 +1226,7 @@ function bestUrl(f: FileRow): string {
       return legendKeys.has(String(k).toLowerCase())
     })
   }, [procMeta, legendKeys])
+  const hasBomContent = bomNodes.length > 0 || flatBomRows.length > 0 || flatBomLoading;
 
   // ---------- Render ----------
   const [tabIndex, setTabIndex] = useState(0)
@@ -1266,6 +1377,7 @@ function bestUrl(f: FileRow): string {
         setExtraUploadError(data.errors.join("; "));
       }
       await loadExtraFiles();
+      await loadFilesOverview();
     } catch (err: any) {
       setExtraUploadError(err?.message || "Upload failed.");
     } finally {
@@ -1290,11 +1402,96 @@ function bestUrl(f: FileRow): string {
         throw new Error(msg);
       }
       await loadExtraFiles();
+      await loadFilesOverview();
     } catch (err) {
       console.error(err);
     } finally {
       setExtraDeleteBusy(null);
     }
+  }
+
+  function fileRowActions(row: FileOverviewRow, allowManageCurrent = false) {
+    return (
+      <div className="d-flex gap-2 flex-wrap">
+        {row.url ? (
+          <a className="btn btn-sm btn-outline-secondary" href={row.url} target="_blank" rel="noreferrer">
+            Open
+          </a>
+        ) : (
+          <span className="text-muted small">-</span>
+        )}
+        {allowManageCurrent && canPartsEdit && row.collection === "part_extra_files" ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-danger"
+            disabled={extraDeleteBusy === row.db_id}
+            onClick={() => handleExtraDelete(row.db_id)}
+          >
+            {extraDeleteBusy === row.db_id ? "Deleting..." : "Delete"}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderFilesSection(section: FileOverviewSection | null, title: string, allowManageCurrent = false, note?: string) {
+    const rows = asArr<FileOverviewRow>(section?.files);
+    return (
+      <div className="pd-card p-3">
+        <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
+          <div>
+            <h6 className="mb-0">{title}</h6>
+            {note ? <div className="text-muted small mt-1">{note}</div> : null}
+          </div>
+          <div className="small text-muted">
+            Total {section?.counts?.total ?? rows.length} · part_files {section?.counts?.part_files ?? 0} · part_extra_files {section?.counts?.part_extra_files ?? 0}
+          </div>
+        </div>
+        {rows.length ? (
+          <div className="table-responsive">
+            <table className="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Collection</th>
+                  <th>Group</th>
+                  <th>Ext</th>
+                  <th>Path</th>
+                  <th>Size</th>
+                  <th>Recorded</th>
+                  <th>Source</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id || `${row.collection}-${row.rel_path}-${row.revision}`}>
+                    <td>
+                      <div>{row.name || "-"}</div>
+                      {row.label ? <div className="text-muted small">Label: {row.label}</div> : null}
+                      {row.mime ? <div className="text-muted small">{row.mime}</div> : null}
+                    </td>
+                    <td><code>{row.collection || "-"}</code></td>
+                    <td>{row.ext_group || "-"}</td>
+                    <td>{row.ext || "-"}</td>
+                    <td className="pd-files-path">{row.rel_path || "-"}</td>
+                    <td>{formatBytes(row.size)}</td>
+                    <td>
+                      <div>{row.recorded_at ? new Date(row.recorded_at).toLocaleString() : "-"}</div>
+                      {row.recorded_by ? <div className="text-muted small">{row.recorded_by}</div> : null}
+                    </td>
+                    <td>{row.source || "-"}</td>
+                    <td>{fileRowActions(row, allowManageCurrent)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-muted small">No files recorded in the database for this revision.</div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -1441,11 +1638,15 @@ function bestUrl(f: FileRow): string {
 
               <div className="pd-info-row pd-user-row">
                 <span className="pd-user-pill">
-                  <img src="/static/images/file.svg" alt="Uploader" />
+                  {identityAvatar(uploaderProfile, uploaderName || "Uploader")}
                   <span>{uploaderName ? `Uploaded by ${uploaderName}` : "Uploader unknown"}</span>
                 </span>
                 <span className="pd-user-pill">
-                  <img src={approvedInfo.approved ? "/static/images/approved.svg" : "/static/images/notapproved.svg"} alt="Approval" />
+                  {approverName ? (
+                    identityAvatar(approverProfile, approverName)
+                  ) : (
+                    <img src={approvedInfo.approved ? "/static/images/approved.svg" : "/static/images/notapproved.svg"} alt="Approval" />
+                  )}
                   <span>
                     {approverName
                       ? `Approved by ${approverName}`
@@ -1569,88 +1770,6 @@ function bestUrl(f: FileRow): string {
               </TabPanel>
             )}
 
-            {extraFiles.length > 0 && (
-              <TabPanel header="Associated files">
-                <div className="pd-card p-3 mt-3">
-                  <div className="d-flex align-items-center justify-content-between mb-2">
-                    <h6 className="mb-0">Associated files</h6>
-                    {canPartsEdit && (
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-primary"
-                        onClick={() => extraFileInputRef.current?.click()}
-                        disabled={extraUploadBusy}
-                      >
-                        {extraUploadBusy ? "Uploading..." : "Upload files..."}
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    ref={extraFileInputRef}
-                    type="file"
-                    multiple
-                    className="d-none"
-                    onChange={(e) => handleExtraUpload(e.target.files)}
-                  />
-                  {extraUploadError && <div className="text-danger small mb-2">{extraUploadError}</div>}
-                  {extraError && <div className="text-danger small mb-2">{extraError}</div>}
-                  {extraLoading ? (
-                    <div className="text-muted small">Loading...</div>
-                  ) : extraFiles.length ? (
-                    <div className="table-responsive">
-                      <table className="table table-sm">
-                        <thead>
-                          <tr>
-                            <th>Name</th>
-                            <th>Label</th>
-                            <th>Size</th>
-                            <th>Type</th>
-                            <th>Uploaded</th>
-                            <th />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {extraFiles.map((f) => (
-                            <tr key={f.id || f.rel_path || f.original_name}>
-                              <td>{f.original_name || f.rel_path || "file"}</td>
-                              <td>{f.label || "-"}</td>
-                              <td>{formatBytes(f.size)}</td>
-                              <td>{f.mime || "-"}</td>
-                              <td>
-                                {f.uploaded_at ? new Date(f.uploaded_at).toLocaleString() : "-"}
-                              </td>
-                              <td>
-                                {f.url ? (
-                                  <a className="btn btn-sm btn-outline-secondary" href={f.url} target="_blank" rel="noreferrer">
-                                    Download
-                                  </a>
-                                ) : (
-                                  <span className="text-muted small">-</span>
-                                )}
-                                {canPartsEdit && (
-                                  <button
-                                    type="button"
-                                    className="btn btn-sm btn-outline-danger ms-2"
-                                    disabled={extraDeleteBusy === f.id}
-                                    onClick={() => handleExtraDelete(f.id)}
-                                  >
-                                    {extraDeleteBusy === f.id ? "Deleting..." : "Delete"}
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="text-muted small">No associated files.</div>
-                  )}
-                </div>
-              </TabPanel>
-            )}
-
-            
             <TabPanel header="Doc Packs">
 
               <div className="pd-card p-3 mt-3">
@@ -2088,10 +2207,15 @@ function bestUrl(f: FileRow): string {
                   <div className="d-flex flex-column gap-2">
                     {filteredComments.map((c, idx) => (
                       <div key={`${c.ts}-${idx}`} className="border rounded p-2">
-                        <div className="small text-muted">
-                          {c.author || "User"} {c.ts ? `- ${new Date(c.ts).toLocaleString()}` : ""}
+                        <div className="pd-comment-row">
+                          {identityAvatar(c.author_profile, c.author_display || c.author || "User", "md")}
+                          <div className="pd-comment-body">
+                            <div className="small text-muted">
+                              {c.author_display || c.author || "User"} {c.ts ? `- ${new Date(c.ts).toLocaleString()}` : ""}
+                            </div>
+                            <div className="small">{c.text}</div>
+                          </div>
                         </div>
-                        <div className="small">{c.text}</div>
                       </div>
                     ))}
                   </div>
@@ -2191,6 +2315,82 @@ function bestUrl(f: FileRow): string {
             </div>
           </TabPanel>
 
+          <TabPanel header="Files">
+            <div className="d-flex flex-column gap-3">
+              <div className="pd-card p-3">
+                <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                  <div>
+                    <h6 className="mb-0">File visibility by revision</h6>
+                    <div className="text-muted small mt-1">
+                      Files are shown by the database revision key for this part number. Other revisions stay isolated below.
+                    </div>
+                  </div>
+                  {canPartsEdit ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => extraFileInputRef.current?.click()}
+                      disabled={extraUploadBusy}
+                    >
+                      {extraUploadBusy ? "Uploading..." : "Upload files..."}
+                    </button>
+                  ) : null}
+                </div>
+                <input
+                  ref={extraFileInputRef}
+                  type="file"
+                  multiple
+                  className="d-none"
+                  onChange={(e) => handleExtraUpload(e.target.files)}
+                />
+                {extraUploadError ? <div className="text-danger small mt-2">{extraUploadError}</div> : null}
+                {extraError ? <div className="text-danger small mt-2">{extraError}</div> : null}
+                {filesOverviewError ? <div className="text-danger small mt-2">{filesOverviewError}</div> : null}
+                <div className="text-muted small mt-2">
+                  Current revision rows: {currentFileRows.length}. Other revision rows: {otherRevisionFileCount}.
+                </div>
+              </div>
+
+              {filesOverviewLoading ? (
+                <div className="text-muted small">Loading file visibility...</div>
+              ) : (
+                <>
+                  {renderFilesSection(
+                    filesOverviewCurrent,
+                    `Current revision (${filesOverviewCurrent?.display_revision || (effectiveRev || "(no revision)")})`,
+                    true,
+                    "This section matches the exact part number and revision shown in the page header."
+                  )}
+
+                  <div className="pd-card p-3">
+                    <div className="d-flex align-items-center justify-content-between mb-2">
+                      <h6 className="mb-0">Other revisions</h6>
+                      <div className="text-muted small">
+                        {filesOverviewOther.length
+                          ? `${filesOverviewOther.length} revision section${filesOverviewOther.length === 1 ? "" : "s"}`
+                          : "No files found for other revisions."}
+                      </div>
+                    </div>
+                    {filesOverviewOther.length ? (
+                      <div className="d-flex flex-column gap-3">
+                        {filesOverviewOther.map((section) => (
+                          <div key={`files-other-${section.revision || "none"}`} className="pd-files-other">
+                            {renderFilesSection(
+                              section,
+                              `Revision ${section.display_revision || section.revision || "(no revision)"}`,
+                              false,
+                              "These rows belong to another revision of the same part number."
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
+          </TabPanel>
+
             </TabView>
             </div>
 
@@ -2233,12 +2433,28 @@ function bestUrl(f: FileRow): string {
         </div>
       </div>
 
-      {/* Components table (Tree) */}
-      {bomNodes.length > 0 ? (
+      {/* Components table */}
+      {hasBomContent ? (
       <div className="mt-4">
         <div className="d-flex align-items-center justify-content-between mb-2">
           <h6 className="mb-0">BOM</h6>
           <div className="d-flex gap-2 flex-wrap">
+            <div className="btn-group" role="group" aria-label="BOM mode">
+              <button
+                type="button"
+                className={`btn btn-sm ${bomMode === "tree" ? "btn-primary" : "btn-outline-secondary"}`}
+                onClick={() => setBomMode("tree")}
+              >
+                Tree
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${bomMode === "flat" ? "btn-primary" : "btn-outline-secondary"}`}
+                onClick={() => setBomMode("flat")}
+              >
+                Flat
+              </button>
+            </div>
             {bomFields.length > 0 && (
               <FieldSelector
                 title="BOM fields"
@@ -2250,15 +2466,23 @@ function bestUrl(f: FileRow): string {
                 onReset={() => persistFieldSelection("bom_tree", defaultBomIds)}
               />
             )}
-            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={expandAll}>
-              Expand all
-            </button>
-            <button
-              className="btn btn-sm btn-outline-secondary"
-              onClick={() => setBomExpanded({})}
-            >
-              Collapse all
-            </button>
+            {bomMode === "tree" ? (
+              <>
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={expandAll}>
+                  Expand all
+                </button>
+                <button
+                  className="btn btn-sm btn-outline-secondary"
+                  onClick={() => setBomExpanded({})}
+                >
+                  Collapse all
+                </button>
+              </>
+            ) : (
+              <span className="text-muted small align-self-center">
+                Flat mode deduplicates child part numbers and rolls quantities up.
+              </span>
+            )}
             <button
               type="button"
               className="btn btn-sm btn-outline-secondary"
@@ -2272,67 +2496,113 @@ function bestUrl(f: FileRow): string {
           </div>
         </div>
 
-        {/*  ---- TreeTable ----  */}
-        <TreeTable
-          key={ttKey}
-          className="pd-tt"
-          value={bomNodes || []}
-          expandedKeys={bomExpanded}
-          onToggle={(e) => setBomExpanded(e.value)}
-          onExpand={onExpandNode}
-          filters={ttFilters}
-          onFilter={onTTFilter}
-          filterDisplay="row"
-          rowClassName={rowClassName}
-          showGridlines
-          scrollable
-          scrollHeight="55vh"
-          resizableColumns
-          size="small"
-        >
-          {/* 1) Level guides (dynamic width) */}
-          <Column header="" body={levelCellBody} style={{ width: "auto", padding: 0 }} />
+        {bomMode === "tree" ? (
+          <TreeTable
+            key={`tree-${ttKey}`}
+            className="pd-tt"
+            value={bomNodes || []}
+            expandedKeys={bomExpanded}
+            onToggle={(e) => setBomExpanded(e.value)}
+            onExpand={onExpandNode}
+            filters={ttFilters}
+            onFilter={onTTFilter}
+            filterDisplay="row"
+            rowClassName={rowClassName}
+            showGridlines
+            scrollable
+            scrollHeight="55vh"
+            resizableColumns
+            size="small"
+          >
+            <Column
+              expander
+              className="tt-expander"
+              bodyClassName="tt-expander"
+              headerClassName="tt-expander"
+              style={{ width: 30, minWidth: 30, maxWidth: 30 }}
+            />
 
-          {/* 2) Expander (arrow only on expandable rows) */}
-          <Column
-            expander
-            className="tt-expander"
-            bodyClassName="tt-expander"
-            headerClassName="tt-expander"
-            style={{ width: 24, minWidth: 24, maxWidth: 24 }}
-          />
-
-          {selectedBomIds.map((fieldId) => {
-            const field = bomFields.find((item) => item.id === fieldId)
-            if (!field) return null
-            const style =
-              field.id === "thumbnail"
-                ? { width: 64 }
-                : field.id === "part_number"
-                ? { width: 240, textAlign: "left" as const }
-                : field.id === "revision"
-                ? { width: 90 }
-                : field.id === "qty"
-                ? { width: 110 }
-                : undefined
-            return (
-              <Column
-                key={field.id}
-                field={field.id}
-                filterField={field.id}
-                header={field.id === "thumbnail" ? "" : field.label}
-                sortable={field.sortable !== false}
-                filter={field.filterable !== false}
-                filterMatchMode="custom"
-                filterFunction={(value, flt) => matchesFieldFilter(field, value, flt)}
-                showFilterMenu={false}
-                filterPlaceholder={fieldFilterPlaceholder(field)}
-                body={(node: any) => renderBomCell(field, node)}
-                style={style}
-              />
-            )
-          })}
-        </TreeTable>
+            {selectedBomIds.map((fieldId) => {
+              const field = bomFields.find((item) => item.id === fieldId)
+              if (!field) return null
+              const style =
+                field.id === "thumbnail"
+                  ? { width: 64 }
+                  : field.id === "part_number"
+                  ? { width: 240, textAlign: "left" as const }
+                  : field.id === "revision"
+                  ? { width: 90 }
+                  : field.id === "qty"
+                  ? { width: 110 }
+                  : undefined
+              return (
+                <Column
+                  key={field.id}
+                  field={field.id}
+                  filterField={field.id}
+                  header={field.id === "thumbnail" ? "" : field.label}
+                  sortable={field.sortable !== false}
+                  filter={field.filterable !== false}
+                  filterMatchMode="custom"
+                  filterFunction={(value, flt) => matchesFieldFilter(field, value, flt)}
+                  showFilterMenu={false}
+                  filterPlaceholder={fieldFilterPlaceholder(field)}
+                  body={(node: any) => renderBomCell(field, node)}
+                  style={style}
+                />
+              )
+            })}
+          </TreeTable>
+        ) : flatBomLoading ? (
+          <div className="text-muted small">Loading flat BOM...</div>
+        ) : (
+          <DataTable
+            key={`flat-${ttKey}`}
+            value={flatBomRows}
+            dataKey="row_key"
+            stripedRows
+            responsiveLayout="scroll"
+            filterDisplay="row"
+            filters={ttFilters as any}
+            onFilter={onTTFilter}
+            showGridlines
+            scrollable
+            scrollHeight="55vh"
+            resizableColumns
+            size="small"
+          >
+            {selectedBomIds.map((fieldId) => {
+              const field = bomFields.find((item) => item.id === fieldId)
+              if (!field) return null
+              const style =
+                field.id === "thumbnail"
+                  ? { width: 64 }
+                  : field.id === "part_number"
+                  ? { width: 240 }
+                  : field.id === "revision"
+                  ? { width: 90 }
+                  : field.id === "qty"
+                  ? { width: 110 }
+                  : undefined
+              const header = field.id === "thumbnail" ? "" : field.id === "qty" ? "Total Qty" : field.label
+              return (
+                <Column
+                  key={field.id}
+                  field={field.id}
+                  header={header}
+                  sortable={field.sortable !== false}
+                  filter={field.filterable !== false}
+                  filterMatchMode="custom"
+                  filterFunction={(value, flt) => matchesFieldFilter(field, value, flt)}
+                  showFilterMenu={false}
+                  filterPlaceholder={fieldFilterPlaceholder(field)}
+                  body={(row: FlatBomRow) => renderBomCell(field, row)}
+                  style={style}
+                />
+              )
+            })}
+          </DataTable>
+        )}
       </div>
       ) : null}
 

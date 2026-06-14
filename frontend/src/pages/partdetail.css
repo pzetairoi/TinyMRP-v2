@@ -60,6 +60,52 @@
   height: 16px;
 }
 
+.pd-identity-avatar {
+  align-items: center;
+  color: #fff;
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.pd-identity-avatar--circle {
+  border-radius: 999px;
+}
+
+.pd-identity-avatar--rounded {
+  border-radius: 0.65rem;
+}
+
+.pd-identity-avatar--square {
+  border-radius: 0.3rem;
+}
+
+.pd-identity-avatar--sm {
+  height: 1.2rem;
+  width: 1.2rem;
+}
+
+.pd-identity-avatar--md {
+  font-size: 0.82rem;
+  height: 2rem;
+  width: 2rem;
+}
+
+.pd-comment-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+}
+
+.pd-comment-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .pd-th { width: 28%; white-space: nowrap; }
 
 .pd-files a { font-weight: 600; }
@@ -311,4 +357,16 @@
   font-size: .8rem;
   line-height: 1.1;
   white-space: nowrap;
+}
+
+.pd-files-path {
+  max-width: 28rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .8rem;
+}
+
+.pd-files-other + .pd-files-other {
+  margin-top: .75rem;
 }

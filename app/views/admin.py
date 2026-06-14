@@ -13,6 +13,7 @@ from ..models.customer import Customer
 from ..models.api_token import ApiToken
 from ..models.user_settings import UserSettings
 from app.services.app_settings import branding_root, get_app_settings
+from app.services.password_policy import validate_admin_password
 from app.services.processmeta import load_process_meta, sanitize_process_meta
 from zoneinfo import ZoneInfo
 import os
@@ -347,11 +348,20 @@ def users_create():
         if not email or not password:
             flash("Email and password are required.", "error")
             return redirect(url_for("admin.users_create"))
+        for error in validate_admin_password(password, email=email):
+            flash(error, "error")
+            return redirect(url_for("admin.users_create"))
         if User.objects(email=email).first():
             flash("User already exists.", "error")
             return redirect(url_for("admin.users_create"))
         import secrets
-        u = User(email=email, password=hash_password(password), fs_uniquifier=secrets.token_hex(16))
+        u = User(
+            email=email,
+            password=hash_password(password),
+            fs_uniquifier=secrets.token_hex(16),
+            password_changed_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
         # initial roles from form
         role_ids = request.form.getlist("roles")
         if role_ids:
@@ -394,12 +404,17 @@ def users_edit(user_id):
             if new_pw != new_pw2:
                 flash("Password confirmation does not match.", "error");
                 return redirect(url_for("admin.users_edit", user_id=user_id))
+            for error in validate_admin_password(new_pw, email=u.email or ""):
+                flash(error, "error")
+                return redirect(url_for("admin.users_edit", user_id=user_id))
             u.password = hash_password(new_pw)
+            u.password_changed_at = datetime.utcnow()
             try:
                 log_action("admin.user.password", resource_type="user", resource=str(u.email))
             except Exception:
                 pass
 
+        u.updated_at = datetime.utcnow()
         u.save()
         try:
             log_action("admin.user.edit_roles", resource_type="user", resource=str(u.email))
