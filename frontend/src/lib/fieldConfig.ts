@@ -152,6 +152,16 @@ function containsAllTerms(value: any, filterValue: any) {
   return terms.every((term) => hay.includes(term))
 }
 
+function unwrapFilterValue(filterValue: any): any {
+  if (!filterValue || typeof filterValue !== 'object') return filterValue
+  if (Array.isArray(filterValue)) return filterValue
+  if ('value' in filterValue) return unwrapFilterValue(filterValue.value)
+  if (Array.isArray(filterValue.constraints) && filterValue.constraints.length) {
+    return unwrapFilterValue(filterValue.constraints[0])
+  }
+  return filterValue
+}
+
 export function fieldFilterPlaceholder(field: FieldDefinition) {
   if (field.data_type === 'boolean') return 'true / false'
   if (field.data_type === 'number') return 'e.g. >10 or 5..15'
@@ -159,10 +169,11 @@ export function fieldFilterPlaceholder(field: FieldDefinition) {
 }
 
 export function matchesFieldFilter(field: FieldDefinition, value: any, filterValue: any) {
-  const text = String(filterValue ?? '').trim()
+  const normalizedFilterValue = unwrapFilterValue(filterValue)
+  const text = String(normalizedFilterValue ?? '').trim()
   if (!text) return true
   if (field.data_type === 'boolean') {
-    const expected = parseBoolFilter(text)
+    const expected = parseBoolFilter(normalizedFilterValue)
     if (expected !== null) return Boolean(value) === expected
     return containsAllTerms(value ? 'true yes' : 'false no', text)
   }
