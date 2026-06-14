@@ -28,6 +28,7 @@ const router = createBrowserRouter([
       { path: '/ui/bom', element: <BomPage /> },
       { path: '/ui/bom/:pn', element: <BomPage /> },
       { path: '/ui/part/:pn', element: <PartDetailPage /> },
+      { path: '/share/part/:shareId/:token', element: <PartDetailPage /> },
       { path: '/ui/addin/tokens', element: <ApiTokensPage /> },
       { path: '/ui/admin/addin', element: <AdminAddinPage /> },
       { path: '/ui/admin/fields', element: <AdminFieldsPage /> },
