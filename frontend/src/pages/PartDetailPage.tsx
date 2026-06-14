@@ -1,6 +1,6 @@
 // frontend/src/pages/PartDetailPage.tsx
 import React, { useEffect, useMemo, useState, Suspense, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useLocation, useParams, Link } from "react-router-dom";
 import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
 import { TreeTable } from "primereact/treetable";
@@ -175,6 +175,9 @@ type PublicShareInfo = {
   created_at?: string;
   expires_at?: string;
   access_count?: number;
+  allow_children?: boolean;
+  allow_docpacks?: boolean;
+  allow_attributes?: boolean;
 };
 
 type PartShareRow = {
@@ -182,6 +185,9 @@ type PartShareRow = {
   part_number: string;
   revision: string;
   token_prefix?: string;
+  allow_children?: boolean;
+  allow_docpacks?: boolean;
+  allow_attributes?: boolean;
   status?: string;
   created_at?: string | null;
   created_by_email?: string;
@@ -308,14 +314,18 @@ function identityAvatar(profile?: IdentityProfile | null, fallback = "", size: "
 // ---------- Component ----------
 export default function PartDetailPage() {
   const route = useParams();
-  const pn = route.pn || (window as any).__INITIAL__?.pn || "";
-  const sp = new URLSearchParams(window.location.search);
-  const rev = sp.get("rev") || ((window as any).__INITIAL__?.rev ?? "");
+  const location = useLocation();
+  const sp = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const shareId = route.shareId || (window as any).__INITIAL__?.share_id || "";
   const shareToken = route.token || (window as any).__INITIAL__?.share_token || "";
   const isSharedView = !!shareId && !!shareToken;
+  const pn = (isSharedView ? sp.get("pn") : route.pn) || (window as any).__INITIAL__?.pn || "";
+  const rev = sp.get("rev") || ((window as any).__INITIAL__?.rev ?? "");
   const shareApiBase = isSharedView
     ? `/api/share/part/${encodeURIComponent(shareId)}/${encodeURIComponent(shareToken)}`
+    : "";
+  const shareViewBase = isSharedView
+    ? `/share/part/${encodeURIComponent(shareId)}/${encodeURIComponent(shareToken)}`
     : "";
   const partImagesEndpoint = isSharedView ? `${shareApiBase}/part_images` : "/api/part_images";
 
@@ -373,6 +383,8 @@ export default function PartDetailPage() {
   const [shareCreateUrl, setShareCreateUrl] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [shareExpiresDays, setShareExpiresDays] = useState("30");
+  const [shareAllowChildren, setShareAllowChildren] = useState(false);
+  const [shareAllowExtended, setShareAllowExtended] = useState(false);
   const [shareRevokingId, setShareRevokingId] = useState<string | null>(null);
 
   // for the right-side Drawing tab + hero image
@@ -427,6 +439,9 @@ export default function PartDetailPage() {
 
   const effectiveRev = (part?.revision ?? rev ?? "").trim();
   const revToken = effectiveRev ? effectiveRev : "__no_rev__";
+  const sharedAllowsChildren = !!publicShareInfo?.allow_children;
+  const sharedAllowsDocpacks = !!publicShareInfo?.allow_docpacks;
+  const sharedAllowsAttributes = !!publicShareInfo?.allow_attributes;
 
   // --- TreeTable filters (controlled) ---
   type TTFilters = Record<string, { value: any; matchMode: string }>;
@@ -540,6 +555,14 @@ function bestUrl(f: FileRow): string {
     return row?.data ?? row ?? {};
   }
 
+  function sharedPartHref(targetPn: string, targetRev: string) {
+    if (!shareViewBase) return "#";
+    const qs = new URLSearchParams();
+    qs.set("pn", targetPn || "");
+    qs.set("rev", targetRev || "");
+    return `${shareViewBase}?${qs.toString()}`;
+  }
+
   const thumbOnlyBody = (row: any) => {
     const data = bomData(row);
     const urls: string[] = Array.isArray(data?.thumb_urls) ? data.thumb_urls : [];
@@ -554,7 +577,13 @@ function bestUrl(f: FileRow): string {
     return (
       <span className="tt-pncell" style={depth ? { paddingLeft: `${depth * 0.8}rem` } : undefined}>
         {isSharedView ? (
-          <span className="tt-pnlink">{bomPn}</span>
+          sharedAllowsChildren ? (
+            <Link className="tt-pnlink" to={sharedPartHref(bomPn, bomRev)}>
+              {bomPn}
+            </Link>
+          ) : (
+            <span className="tt-pnlink">{bomPn}</span>
+          )
         ) : (
           <a className="tt-pnlink" href={`/ui/part/${encodeURIComponent(bomPn)}?rev=${encodeURIComponent(bomRev)}`}>
             {bomPn}
@@ -763,7 +792,7 @@ function bestUrl(f: FileRow): string {
     setFilesOverviewLoading(true);
     setFilesOverviewError(null);
     try {
-      const qs = new URLSearchParams({ rev: rev || "" });
+      const qs = new URLSearchParams({ pn, rev: rev || "" });
       const url = isSharedView
         ? `${shareApiBase}/files_overview?${qs.toString()}`
         : `/api/parts/${encodeURIComponent(pn)}/files_overview?${qs.toString()}`;
@@ -800,11 +829,14 @@ function bestUrl(f: FileRow): string {
     let cancelled = false;
     (async () => {
       try {
-        if (isSharedView) {
+        if (isSharedView && !sharedAllowsDocpacks) {
           if (!cancelled) setDocOpts({ file_types: [], processes: [] });
           return;
         }
-        const r = await fetch(`/api/docpacks/options?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&depth=${depth}`);
+        const optionsUrl = isSharedView
+          ? `${shareApiBase}/docpacks/options?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&depth=${depth}`
+          : `/api/docpacks/options?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&depth=${depth}`;
+        const r = await fetch(optionsUrl);
         if (r.status === 403) { if (!cancelled) setForbidden(true); return; }
         if (!r.ok) return;
         const j = await r.json();
@@ -817,7 +849,7 @@ function bestUrl(f: FileRow): string {
       } catch {}
     })();
     return () => { cancelled = true };
-  }, [depth, isSharedView, pn, rev]);
+  }, [depth, isSharedView, pn, rev, shareApiBase, sharedAllowsDocpacks]);
 
   // ---------- Process metadata ----------
   type ProcMeta = { color: string; icon: string };
@@ -1304,6 +1336,9 @@ function bestUrl(f: FileRow): string {
         body: JSON.stringify({
           rev: effectiveRev || "",
           expires_in_days: Number(shareExpiresDays || 30),
+          allow_children: shareAllowChildren,
+          allow_docpacks: shareAllowExtended,
+          allow_attributes: shareAllowExtended,
         }),
       })
       if (!resp.ok) throw new Error(await resp.text())
@@ -1746,6 +1781,15 @@ function bestUrl(f: FileRow): string {
               <div className="alert alert-info py-2 px-3 mt-2 mb-0 small">
                 Read-only shared view.
                 {publicShareInfo?.expires_at ? ` Expires ${new Date(publicShareInfo.expires_at).toLocaleString()}.` : ""}
+                {(sharedAllowsChildren || sharedAllowsDocpacks || sharedAllowsAttributes) ? (
+                  <div className="mt-1">
+                    Enabled:
+                    {sharedAllowsChildren ? " child parts" : ""}
+                    {sharedAllowsChildren && (sharedAllowsDocpacks || sharedAllowsAttributes) ? "," : ""}
+                    {sharedAllowsDocpacks || sharedAllowsAttributes ? " doc packs and attributes" : ""}
+                    .
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -1958,7 +2002,7 @@ function bestUrl(f: FileRow): string {
               )}
             </TabPanel>)}
 
-            {!isSharedView && <TabPanel header="All attributes">
+            {(!isSharedView || sharedAllowsAttributes) && <TabPanel header="All attributes">
               {attrs.length === 0 ? (
                 <div className="text-muted small">No attributes.</div>
               ) : (
@@ -2012,7 +2056,7 @@ function bestUrl(f: FileRow): string {
               </TabPanel>
             )}
 
-            {!isSharedView && <TabPanel header="Doc Packs">
+            {(!isSharedView || sharedAllowsDocpacks) && <TabPanel header="Doc Packs">
 
               <div className="pd-card p-3 mt-3">
                 <h6 className="mb-3">BOM and output options</h6>
@@ -2273,7 +2317,8 @@ function bestUrl(f: FileRow): string {
                         stamp_inprogress: stampInprog,
                       };
                       if (outputName.trim()) body.output_name = outputName.trim();
-                      const resp = await fetch('/api/docpacks/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                      const buildUrl = isSharedView ? `${shareApiBase}/docpacks/build` : '/api/docpacks/build';
+                      const resp = await fetch(buildUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                       if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
                       const blob = await resp.blob();
                       const disp = resp.headers.get('Content-Disposition') || '';
@@ -2527,6 +2572,44 @@ function bestUrl(f: FileRow): string {
                           </button>
                         </div>
                       </div>
+                      <div className="row g-3 mt-1">
+                        <div className="col-md-6">
+                          <div className="form-check">
+                            <input
+                              className="form-check-input"
+                              type="checkbox"
+                              id="shareAllowChildren"
+                              checked={shareAllowChildren}
+                              disabled={shareCreateBusy}
+                              onChange={(e) => setShareAllowChildren(e.target.checked)}
+                            />
+                            <label className="form-check-label" htmlFor="shareAllowChildren">
+                              Allow access to BOM children
+                            </label>
+                          </div>
+                          <div className="text-muted small mt-1">
+                            Lets external users open descendant part pages inside the same shared link.
+                          </div>
+                        </div>
+                        <div className="col-md-6">
+                          <div className="form-check">
+                            <input
+                              className="form-check-input"
+                              type="checkbox"
+                              id="shareAllowExtended"
+                              checked={shareAllowExtended}
+                              disabled={shareCreateBusy}
+                              onChange={(e) => setShareAllowExtended(e.target.checked)}
+                            />
+                            <label className="form-check-label" htmlFor="shareAllowExtended">
+                              Allow doc packs and attributes
+                            </label>
+                          </div>
+                          <div className="text-muted small mt-1">
+                            Exposes the All attributes and Doc Packs tabs for this shared link.
+                          </div>
+                        </div>
+                      </div>
                       {shareCreateError ? <div className="text-danger small mt-2">{shareCreateError}</div> : null}
                       {shareCreateUrl ? (
                         <div className="mt-2">
@@ -2553,6 +2636,8 @@ function bestUrl(f: FileRow): string {
                                 <tr>
                                   <th>Prefix</th>
                                   <th>Status</th>
+                                  <th>Children</th>
+                                  <th>Doc packs / attrs</th>
                                   <th>Created</th>
                                   <th>Expires</th>
                                   <th>Last access</th>
@@ -2565,6 +2650,8 @@ function bestUrl(f: FileRow): string {
                                   <tr key={item.id}>
                                     <td><code>{item.token_prefix || "-"}</code></td>
                                     <td>{item.status || "-"}</td>
+                                    <td>{item.allow_children ? "Yes" : "-"}</td>
+                                    <td>{item.allow_docpacks || item.allow_attributes ? "Yes" : "-"}</td>
                                     <td>{item.created_at ? new Date(item.created_at).toLocaleString() : "-"}</td>
                                     <td>{item.expires_at ? new Date(item.expires_at).toLocaleString() : "-"}</td>
                                     <td>{item.last_accessed_at ? new Date(item.last_accessed_at).toLocaleString() : "-"}</td>

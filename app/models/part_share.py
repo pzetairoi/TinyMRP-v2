@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from mongoengine import DateTimeField, Document, IntField, StringField
+from mongoengine import BooleanField, DateTimeField, Document, IntField, StringField
 
 
 DB_ALIAS = "tinymrp-v2"
@@ -11,6 +11,9 @@ class PartShareLink(Document):
     revision = StringField(default="")
     token_hash = StringField(required=True, unique=True)
     token_prefix = StringField(required=True)
+    allow_children = BooleanField(default=False)
+    allow_docpacks = BooleanField(default=False)
+    allow_attributes = BooleanField(default=False)
     created_at = DateTimeField(default=datetime.utcnow)
     created_by_user_id = StringField()
     created_by_email = StringField()
