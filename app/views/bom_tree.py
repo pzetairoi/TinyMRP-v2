@@ -37,6 +37,41 @@ def _coverage_groups(pn: str, rev: str) -> set[str]:
             groups.add(str(row.ext_group).lower())
     return groups
 
+
+def _child_links(parent_pn: str, parent_rev: str | None):
+    if "parent_pn" not in BOMLink._fields:
+        p = Part.objects(part_number=parent_pn).only("id").first()
+        if not p:
+            return []
+        return list(BOMLink.objects(parent=p).only("child", "qty", "uom", "alt_group"))
+    if parent_rev is not None and "parent_rev" in BOMLink._fields:
+        return list(
+            BOMLink.objects(parent_pn=parent_pn, parent_rev=_clean_rev(parent_rev)).only(
+                "child_pn", "qty", "uom", "alt_group", "child_rev", "occurrences"
+            )
+        )
+    return list(
+        BOMLink.objects(parent_pn=parent_pn).only(
+            "child_pn", "qty", "uom", "alt_group", "child_rev", "occurrences"
+        )
+    )
+
+
+def _link_occurrence_qtys(link: BOMLink) -> list[float]:
+    occs = getattr(link, "occurrences", None) or []
+    if occs:
+        out: list[float] = []
+        for occ in occs:
+            qty_val = occ.get("qty")
+            if qty_val is None:
+                qty_val = getattr(link, "qty", 1.0)
+            out.append(float(qty_val or 0.0))
+        return out
+    qty = getattr(link, "qty", None)
+    if qty is None:
+        qty = 1.0
+    return [float(qty or 0.0)]
+
 def _node(pn: str, link=None, rev: str | None = None, config: dict | None = None):
     # Prefer specific revision when provided, else pick latest by updated_at
     rev_clean = _clean_rev(rev) if rev is not None else None
@@ -157,10 +192,7 @@ def bom_tree():
     if parent:
         # children
         if "parent_pn" in BOMLink._fields:
-            if parent_rev is not None and "parent_rev" in BOMLink._fields:
-                links = BOMLink.objects(parent_pn=parent, parent_rev=_clean_rev(parent_rev)).only("child_pn","qty","uom","alt_group","child_rev")
-            else:
-                links = BOMLink.objects(parent_pn=parent).only("child_pn","qty","uom","alt_group","child_rev")
+            links = _child_links(parent, parent_rev)
             kids = []
             for l in links:
                 child_pn = getattr(l, "child_pn", None)
@@ -205,3 +237,158 @@ def bom_tree():
             return jsonify(kids)
 
     return jsonify([])
+
+
+@bp.get("/bom_flat")
+@login_required
+@require_items_view
+def bom_flat():
+    config = get_field_config()
+    pn = (request.args.get("pn") or "").strip()
+    rev = request.args.get("rev")
+    if not pn:
+        return jsonify([])
+
+    if rev is not None:
+        root_part = Part.objects(part_number=pn, revision=_clean_rev(rev)).first()
+    else:
+        root_part = Part.objects(part_number=pn).order_by("-updated_at").first()
+    if not root_part:
+        return jsonify([])
+
+    root_rev = _clean_rev(rev) if rev is not None else _clean_rev(root_part.revision or "")
+    allowed = None
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, root_part.part_number, root_rev):
+            return jsonify([]), 403
+    except Exception:
+        allowed = None
+
+    rows_by_key: dict[tuple[str, str], dict] = {}
+    part_cache: dict[tuple[str, str], tuple[Part | None, dict, str, list[str], set[str], dict]] = {}
+
+    def row_for(child_pn: str, child_rev: str) -> dict:
+        key = (child_pn, _clean_rev(child_rev))
+        existing = rows_by_key.get(key)
+        if existing:
+            return existing
+
+        cached = part_cache.get(key)
+        if cached is None:
+            part_doc = Part.objects(part_number=child_pn, revision=key[1]).first()
+            attrs = harvest_part_attrs(part_doc) if part_doc else {}
+            effective_rev = _clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
+            proc_label = _process_label(attrs)
+            thumbs = preview_png_urls_for(child_pn, effective_rev)
+            coverage = _coverage_groups(child_pn, effective_rev)
+            values = resolve_part_field_values(
+                part_doc,
+                context_field_ids("bom_tree", config),
+                attrs=attrs,
+                config=config,
+                extra={
+                    "part_number": child_pn,
+                    "revision": effective_rev,
+                    "description": attrs.get("description", ""),
+                    "qty": 0.0,
+                    "uom": "",
+                    "alt_group": "",
+                    "thumbnail": thumbs[0] if thumbs else "",
+                },
+                coverage=coverage,
+            )
+            cached = (part_doc, attrs, proc_label, thumbs, coverage, values)
+            part_cache[key] = cached
+
+        _part_doc, attrs, proc_label, thumbs, _coverage, values = cached
+        row = {
+            "row_key": f"{child_pn}::{key[1]}",
+            "part_number": child_pn,
+            "revision": key[1],
+            "description": attrs.get("description", ""),
+            "qty": 0.0,
+            "uom": "",
+            "alt_group": "",
+            "process": proc_label,
+            "thumb_urls": thumbs,
+            "attrs": attrs,
+            **values,
+        }
+        rows_by_key[key] = row
+        return row
+
+    root_key = (root_part.part_number, root_rev)
+    stack: list[tuple[str, str, float, str, str, tuple[tuple[str, str], ...]]] = []
+    for link in _child_links(root_part.part_number, root_rev):
+        child_pn = getattr(link, "child_pn", None)
+        if not child_pn:
+            continue
+        child_rev = _clean_rev(getattr(link, "child_rev", "") or "")
+        child_key = (child_pn, child_rev)
+        if child_key == root_key:
+            continue
+        if isinstance(allowed, set) and not part_is_allowed(allowed, child_pn, child_rev):
+            continue
+        for occ_qty in _link_occurrence_qtys(link):
+            stack.append(
+                (
+                    child_pn,
+                    child_rev,
+                    float(occ_qty or 0.0),
+                    getattr(link, "uom", None) or "",
+                    getattr(link, "alt_group", None) or "",
+                    (root_key, child_key),
+                )
+            )
+
+    while stack:
+        child_pn, child_rev, qty, uom, alt_group, lineage = stack.pop()
+        row = row_for(child_pn, child_rev)
+        row["qty"] = float(row.get("qty") or 0.0) + float(qty or 0.0)
+        row["total_qty"] = row["qty"]
+
+        uom_set = row.setdefault("_uom_set", set())
+        if uom:
+            uom_set.add(str(uom))
+        row["uom"] = ", ".join(sorted(uom_set)) if uom_set else ""
+
+        alt_set = row.setdefault("_alt_group_set", set())
+        if alt_group:
+            alt_set.add(str(alt_group))
+        row["alt_group"] = ", ".join(sorted(alt_set)) if alt_set else ""
+
+        for link in _child_links(child_pn, child_rev):
+            next_pn = getattr(link, "child_pn", None)
+            if not next_pn:
+                continue
+            next_rev = _clean_rev(getattr(link, "child_rev", "") or "")
+            next_key = (next_pn, next_rev)
+            if next_key in lineage:
+                continue
+            if isinstance(allowed, set) and not part_is_allowed(allowed, next_pn, next_rev):
+                continue
+            for occ_qty in _link_occurrence_qtys(link):
+                stack.append(
+                    (
+                        next_pn,
+                        next_rev,
+                        float(qty or 0.0) * float(occ_qty or 0.0),
+                        getattr(link, "uom", None) or "",
+                        getattr(link, "alt_group", None) or "",
+                        lineage + (next_key,),
+                    )
+                )
+
+    rows = []
+    for row in rows_by_key.values():
+        row.pop("_uom_set", None)
+        row.pop("_alt_group_set", None)
+        rows.append(row)
+    rows.sort(key=lambda item: (str(item.get("part_number") or ""), str(item.get("revision") or "")))
+
+    try:
+        log_action("bom.view", resource_type="bom", resource=f"flat:{root_part.part_number}:{root_rev}")
+    except Exception:
+        pass
+    return jsonify(rows)

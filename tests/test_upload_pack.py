@@ -6,6 +6,7 @@ import zipfile
 from app.models.auth import Role
 from app.models.part import Part
 from app.models.extra_file import PartExtraFile
+from app.models.artifact import PartFile
 
 
 def _login(client, user):
@@ -273,3 +274,76 @@ def test_upload_pack_zip_slip_rejected(client, app, user, tmp_path):
         content_type="multipart/form-data",
     )
     assert resp.status_code == 400
+
+
+def test_files_overview_separates_current_and_other_revisions(client, app, user, tmp_path):
+    role = Role(name="files_overview", permissions=["items.view", "items.edit"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    with app.app_context():
+        app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+        app.config["EXTRA_FILES_ALLOWED"] = True
+
+    pn = "PN-VIS"
+    current_rev = "A"
+    other_rev = "B"
+    Part(part_number=pn, revision=current_rev, description="Current rev").save()
+    Part(part_number=pn, revision=other_rev, description="Other rev").save()
+    PartFile(
+        part_number=pn,
+        revision=current_rev,
+        ext_group="pdf",
+        ext="pdf",
+        rel_path=f"pdf/{pn}_REV_{current_rev}.pdf",
+        path=str(tmp_path / "pdf" / f"{pn}_REV_{current_rev}.pdf"),
+        source="scan",
+    ).save()
+    PartFile(
+        part_number=pn,
+        revision=other_rev,
+        ext_group="step",
+        ext="step",
+        rel_path=f"step/{pn}_REV_{other_rev}.step",
+        path=str(tmp_path / "step" / f"{pn}_REV_{other_rev}.step"),
+        source="scan",
+    ).save()
+    PartExtraFile(
+        part_number=pn,
+        revision=current_rev,
+        original_name="note.txt",
+        rel_path=f"extra/{pn}/{current_rev}/note.txt",
+        size=12,
+        mime="text/plain",
+        sha256="",
+        uploaded_by="user@example.com",
+    ).save()
+    PartExtraFile(
+        part_number=pn,
+        revision=other_rev,
+        original_name="legacy.csv",
+        rel_path=f"extra/{pn}/{other_rev}/legacy.csv",
+        size=24,
+        mime="text/csv",
+        sha256="",
+        uploaded_by="user@example.com",
+    ).save()
+
+    resp = client.get(f"/api/parts/{pn}/files_overview?rev={current_rev}")
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    current_section = data["current_revision"]
+    assert current_section["revision"] == current_rev
+    assert current_section["counts"]["part_files"] == 1
+    assert current_section["counts"]["part_extra_files"] == 1
+    current_names = {row["name"] for row in current_section["files"]}
+    assert f"{pn}_REV_{current_rev}.pdf" in current_names
+    assert "note.txt" in current_names
+
+    assert len(data["other_revisions"]) == 1
+    other_section = data["other_revisions"][0]
+    assert other_section["revision"] == other_rev
+    assert {row["collection"] for row in other_section["files"]} == {"part_files", "part_extra_files"}

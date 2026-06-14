@@ -153,6 +153,29 @@ def test_bom_tree_and_whereused_include_extended_file_availability(client):
     assert wu_rows[0]["has_pdf"] is True
 
 
+def test_bom_flat_aggregates_duplicate_descendants(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    root = Part(part_number="ASM-FLAT", revision="A", description="Assembly").save()
+    sub = Part(part_number="SUB-FLAT", revision="A", description="Sub Assembly").save()
+    child = Part(part_number="CMP-FLAT", revision="B", description="Shared Component").save()
+
+    BOMLink(parent_pn=root.part_number, parent_rev=root.revision, child_pn=sub.part_number, child_rev=sub.revision, qty=1).save()
+    BOMLink(parent_pn=root.part_number, parent_rev=root.revision, child_pn=child.part_number, child_rev=child.revision, qty=2).save()
+    BOMLink(parent_pn=sub.part_number, parent_rev=sub.revision, child_pn=child.part_number, child_rev=child.revision, qty=3).save()
+
+    resp = client.get(f"/api/bom_flat?pn={root.part_number}&rev={root.revision}")
+    assert resp.status_code == 200
+    rows = resp.get_json()
+
+    by_pn = {row["part_number"]: row for row in rows}
+    assert sorted(by_pn.keys()) == [child.part_number, sub.part_number]
+    assert by_pn[sub.part_number]["qty"] == 1
+    assert by_pn[child.part_number]["qty"] == 5
+    assert by_pn[child.part_number]["revision"] == child.revision
+
+
 def test_admin_settings_can_override_and_reset_process_library(client):
     admin = _admin_user()
     _login(client, admin)
