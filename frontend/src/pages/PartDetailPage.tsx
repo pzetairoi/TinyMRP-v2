@@ -413,6 +413,39 @@ export default function PartDetailPage() {
     setTtKey((k) => k + 1);
   }
 
+  function setTTFilterValue(key: string, value: any, matchMode = "custom") {
+    setTtFilters((prev) =>
+      normalizeFilters({
+        ...prev,
+        [key]: { ...(prev[key] || { matchMode }), value, matchMode },
+      }),
+    )
+  }
+
+  function setBooleanTTFilter(key: string, value: string) {
+    let nextValue: boolean | null = null
+    if (value === "true") nextValue = true
+    if (value === "false") nextValue = false
+    setTTFilterValue(key, nextValue, "custom")
+  }
+
+  function renderBomColumnFilter(field: FieldDefinition) {
+    if (field.data_type !== "boolean") return undefined
+    const rawValue = ttFilters?.[field.id]?.value
+    const value = rawValue === true ? "true" : rawValue === false ? "false" : ""
+    return (
+      <select
+        className="form-select form-select-sm"
+        value={value}
+        onChange={(e) => setBooleanTTFilter(field.id, e.target.value)}
+      >
+        <option value="">Any</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+    )
+  }
+
   // --- helpers that rely on component state (must be inside component) ---
 // Prefer rel_path + BASE; avoid absolute http_url to dodge CORS
 
@@ -1095,6 +1128,46 @@ function bestUrl(f: FileRow): string {
   const selectedWhereUsedIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "where_used") : defaultWhereUsedIds
   const selectedExcelIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "excel_bom") : defaultExcelIds
   const excelUseDefault = fieldPreferences?.contexts?.excel_bom?.use_default ?? true
+  const bomFieldMap = useMemo(
+    () => new Map(bomFields.map((field) => [field.id, field] as const)),
+    [bomFields],
+  )
+  const flatTableFilters = useMemo(() => {
+    const next: TTFilters = {}
+    for (const [fieldId, filterMeta] of Object.entries(ttFilters || {})) {
+      if (bomFieldMap.get(fieldId)?.data_type === "boolean") continue
+      next[fieldId] = filterMeta
+    }
+    return next
+  }, [bomFieldMap, ttFilters])
+  const flatFilteredRows = useMemo(() => {
+    const booleanEntries = Object.entries(ttFilters || {}).filter(
+      ([fieldId]) => bomFieldMap.get(fieldId)?.data_type === "boolean",
+    )
+    if (!booleanEntries.length) return flatBomRows
+    return flatBomRows.filter((row) =>
+      booleanEntries.every(([fieldId, filterMeta]) => {
+        const field = bomFieldMap.get(fieldId)
+        return field ? matchesFieldFilter(field, row?.[fieldId], filterMeta?.value) : true
+      }),
+    )
+  }, [bomFieldMap, flatBomRows, ttFilters])
+
+  function onFlatTTFilter(e: any) {
+    const nextNonBoolean = normalizeFilters(e.filters || {})
+    setTtFilters((prev) => {
+      const preservedBoolean: TTFilters = {}
+      for (const [fieldId, filterMeta] of Object.entries(prev || {})) {
+        if (bomFieldMap.get(fieldId)?.data_type === "boolean") {
+          preservedBoolean[fieldId] = filterMeta
+        }
+      }
+      return normalizeFilters({
+        ...nextNonBoolean,
+        ...preservedBoolean,
+      })
+    })
+  }
 
   async function persistFieldPreferences(nextPrefs: FieldPreferences) {
     setFieldPreferences(nextPrefs)
@@ -2546,7 +2619,8 @@ function bestUrl(f: FileRow): string {
                   filterMatchMode="custom"
                   filterFunction={(value, flt) => matchesFieldFilter(field, value, flt)}
                   showFilterMenu={false}
-                  filterPlaceholder={fieldFilterPlaceholder(field)}
+                  filterPlaceholder={field.data_type === "boolean" ? undefined : fieldFilterPlaceholder(field)}
+                  filterElement={renderBomColumnFilter(field)}
                   body={(node: any) => renderBomCell(field, node)}
                   style={style}
                 />
@@ -2558,13 +2632,13 @@ function bestUrl(f: FileRow): string {
         ) : (
           <DataTable
             key={`flat-${ttKey}`}
-            value={flatBomRows}
+            value={flatFilteredRows}
             dataKey="row_key"
             stripedRows
             responsiveLayout="scroll"
             filterDisplay="row"
-            filters={ttFilters as any}
-            onFilter={onTTFilter}
+            filters={flatTableFilters as any}
+            onFilter={onFlatTTFilter}
             showGridlines
             scrollable
             scrollHeight="55vh"
@@ -2589,13 +2663,15 @@ function bestUrl(f: FileRow): string {
                 <Column
                   key={field.id}
                   field={field.id}
+                  filterField={field.id}
                   header={header}
                   sortable={field.sortable !== false}
                   filter={field.filterable !== false}
                   filterMatchMode="custom"
                   filterFunction={(value, flt) => matchesFieldFilter(field, value, flt)}
                   showFilterMenu={false}
-                  filterPlaceholder={fieldFilterPlaceholder(field)}
+                  filterPlaceholder={field.data_type === "boolean" ? undefined : fieldFilterPlaceholder(field)}
+                  filterElement={renderBomColumnFilter(field)}
                   body={(row: FlatBomRow) => renderBomCell(field, row)}
                   style={style}
                 />
