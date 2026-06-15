@@ -135,6 +135,7 @@ def create_app(config_object=None):
 
     # Load default config if not set
     # (Secrets are resolved below to avoid shipping insecure defaults.)
+    
     app.config.setdefault("SECURITY_PASSWORD_HASH", "argon2")
     app.config.setdefault("SECURITY_PASSWORD_LENGTH_MIN", int(os.getenv("SECURITY_PASSWORD_LENGTH_MIN") or "12"))
     app.config.setdefault("SECURITY_RETURN_GENERIC_RESPONSES", True)
@@ -197,6 +198,11 @@ def create_app(config_object=None):
     app.config.setdefault("SECURITY_LOGOUT_METHODS", ["POST"])  # explicit
     app.config.setdefault("SECURITY_POST_LOGOUT_VIEW", "/login")  # where to go after logout
     app.config.setdefault("SECURITY_POST_LOGIN_VIEW", "/app")
+    
+    #Arena file link base URL (for generating links to files in Arena from the UI)
+    app.config.setdefault(
+    "ARENA_FILE_LINK_BASE_URL",
+    (os.getenv("ARENA_FILE_LINK_BASE_URL") or "").strip(),)
     
     # Simple files config (centralized)
     # One local root inside the container/host mount, one URL prefix served by nginx.
@@ -289,6 +295,9 @@ def create_app(config_object=None):
                 app.config["FLAT_PATTERN_PAGE_NAMES"] = fp_tokens
         if settings is not None:
             app.config["PROCESS_META"] = load_process_meta(overrides=getattr(settings, "process_meta", None) or None)
+            app.config["ARENA_FILE_LINK_BASE_URL"] = (getattr(settings, "arena_file_link_base_url", "")
+                                                      or app.config.get("ARENA_FILE_LINK_BASE_URL", "") or ""
+    ).strip()
         if settings:
             if getattr(settings, "upload_pack_max_zip_mb", None) is not None:
                 app.config["UPLOAD_PACK_MAX_ZIP_MB"] = int(settings.upload_pack_max_zip_mb or 0)

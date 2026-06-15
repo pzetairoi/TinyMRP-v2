@@ -693,6 +693,9 @@ function bestUrl(f: FileRow): string {
         setApproverProfile(j.approver_profile || null);
         setPublicShareInfo(j.public_share || null);
 
+        if (!isSharedView) {
+        setArenaBaseUrl(String(j.arena_file_link_base_url || ""));}
+
         // --- files: handle both array and grouped object ---
         const arrFiles: FileRow[] = [];
         const src = j.files || j.part_files || j.artifacts || j.file_rows || [];

@@ -7,6 +7,7 @@ DB_ALIAS = "tinymrp-v2"
 class AppSettings(Document):
     brand_logo_rel_path = StringField(default="")
     timezone = StringField(default="")
+    arena_file_link_base_url = StringField(default="")
     hardware_folders = ListField(StringField(), default=list)
     flat_pattern_page_names = ListField(StringField(), default=list)
     upload_pack_max_zip_mb = IntField(default=1024)
