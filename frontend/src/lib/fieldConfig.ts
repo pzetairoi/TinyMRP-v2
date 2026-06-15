@@ -11,6 +11,16 @@ export type FieldDefinition = {
   filterable?: boolean
 }
 
+export type FieldCandidate = {
+  id: string
+  label: string
+  source_path: string
+  data_type?: string
+  part_count: number
+  sample_value?: string
+  raw_keys?: string[]
+}
+
 export type FieldContext = {
   label: string
   required_field_ids: string[]
@@ -37,6 +47,10 @@ export type FieldConfigResponse = {
 
 export async function loadFieldConfig() {
   return apiFetch<FieldConfigResponse>('/api/field-config')
+}
+
+export async function loadFieldCandidates() {
+  return apiFetch<{ ok: boolean; candidates: FieldCandidate[] }>('/api/admin/field-config/candidates')
 }
 
 export function contextFields(config: FieldConfigPayload | null | undefined, contextName: string): FieldDefinition[] {

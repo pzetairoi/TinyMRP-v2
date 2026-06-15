@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from app.models.app_settings import AppSettings
 from app.models.part import Part
-from app.services.attrs import approved_value, comments_search_text, harvest_part_attrs
+from app.services.attrs import ALIASES, approved_value, canonical_attr_key, comments_search_text, harvest_part_attrs, normalize_props
 from app.services.part_norm import clean_rev
 from app.services.processmeta import normalize_processes
 
@@ -17,6 +17,8 @@ _BOOLEAN_TRUE = {"1", "true", "yes", "on", "y"}
 _BOOLEAN_FALSE = {"0", "false", "no", "off", "n", "missing", "none", "absent"}
 _NUMBER_RANGE_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:\.\.|to|-)\s*(-?\d+(?:\.\d+)?)\s*$", re.IGNORECASE)
 _NUMBER_COMPARE_RE = re.compile(r"^\s*(<=|>=|=|<|>)?\s*(-?\d+(?:\.\d+)?)\s*$")
+_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+_FIELD_CANDIDATE_EXCLUDED_IDS = {"process", "process2", "process3", "processes", "comments_search"}
 
 
 DEFAULT_FIELDS: List[Dict[str, Any]] = [
@@ -579,6 +581,30 @@ def _normalize_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _normalize_field_id(value: Any) -> str:
+    text = canonical_attr_key(value)
+    return text
+
+
+def _normalize_source_path(path: Any) -> str:
+    text = _normalize_text(path)
+    if not text:
+        return ""
+    parts = [segment for segment in text.split(".") if _normalize_text(segment)]
+    if len(parts) < 2:
+        return ""
+    head = _normalize_text(parts[0]).lower()
+    if head not in {"part", "attrs"}:
+        return ""
+    tail: List[str] = []
+    for segment in parts[1:]:
+        normalized = _normalize_field_id(segment)
+        if not normalized:
+            return ""
+        tail.append(normalized)
+    return ".".join([head] + tail)
+
+
 def _is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -610,7 +636,7 @@ def _unique_ids(values: Iterable[str], valid_ids: set[str]) -> List[str]:
 
 
 def _is_valid_source_path(path: Any) -> bool:
-    return bool(_SOURCE_PATH_RE.match(_normalize_text(path)))
+    return bool(_SOURCE_PATH_RE.match(_normalize_source_path(path)))
 
 
 def _coerce_custom_data_type(value: Any) -> str:
@@ -761,7 +787,7 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
         if label:
             item["label"] = label
         if not default_field.get("source_locked"):
-            source_path = _normalize_text(raw.get("source_path") or default_field.get("source_path"))
+            source_path = _normalize_source_path(raw.get("source_path") or default_field.get("source_path"))
             if _is_valid_source_path(source_path):
                 item["source_path"] = source_path
             elif default_field.get("source_path"):
@@ -777,12 +803,14 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
         for item in raw_custom:
             if not isinstance(item, dict):
                 continue
-            field_id = _normalize_text(item.get("id")).lower()
+            field_id = _normalize_field_id(item.get("id"))
             if not _FIELD_ID_RE.match(field_id):
                 continue
             if field_id in builtin_default_map or field_id in seen_custom:
                 continue
-            source_path = _normalize_text(item.get("source_path"))
+            source_path = _normalize_source_path(item.get("source_path"))
+            if not source_path:
+                source_path = f"attrs.{field_id}"
             if not _is_valid_source_path(source_path):
                 continue
             label = _normalize_text(item.get("label")) or field_id.replace("_", " ").title()
@@ -910,6 +938,179 @@ def reset_field_config() -> Dict[str, Any]:
     return get_field_config()
 
 
+def _builtin_candidate_source_paths() -> set[str]:
+    paths: set[str] = set()
+    for field in DEFAULT_FIELDS:
+        for source_path in [field.get("source_path"), *(field.get("fallback_paths") or [])]:
+            normalized = _normalize_source_path(source_path)
+            if normalized:
+                paths.add(normalized)
+    return paths
+
+
+def _candidate_label_from_raw(raw_key: Any, field_id: str) -> str:
+    text = _normalize_text(raw_key)
+    if not text:
+        return field_id.replace("_", " ").title()
+    tokens = [token for token in re.split(r"[^A-Za-z0-9]+", text) if token]
+    if not tokens:
+        return field_id.replace("_", " ").title()
+    pretty: List[str] = []
+    for token in tokens:
+        if token.isupper() and len(token) <= 5:
+            pretty.append(token)
+        elif token.islower() or token.isupper():
+            pretty.append(token.capitalize())
+        else:
+            pretty.append(token)
+    return " ".join(pretty)
+
+
+def _candidate_label_score(label: str) -> tuple[int, int, str]:
+    acronym_count = sum(1 for token in label.split() if token.isupper() and len(token) <= 5)
+    return (-acronym_count, len(label), label.lower())
+
+
+def _candidate_label(field_id: str, raw_keys: Iterable[str]) -> str:
+    labels = {
+        _candidate_label_from_raw(raw_key, field_id)
+        for raw_key in raw_keys
+        if _normalize_text(raw_key)
+    }
+    if not labels:
+        return field_id.replace("_", " ").title()
+    return sorted(labels, key=_candidate_label_score)[0]
+
+
+def _candidate_sample_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+    if isinstance(value, (list, tuple, set)):
+        text = ", ".join(_candidate_sample_value(item) for item in value if _non_empty(item))
+    elif isinstance(value, dict):
+        text = ", ".join(
+            f"{_normalize_text(key)}: {_candidate_sample_value(item)}"
+            for key, item in value.items()
+            if _non_empty(item)
+        )
+    else:
+        text = _normalize_text(value)
+    if len(text) > 120:
+        return text[:117] + "..."
+    return text
+
+
+def _candidate_value_is_boolean(value: Any) -> bool:
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
+        return False
+    text = _normalize_text(value).lower()
+    return bool(text) and text in (_BOOLEAN_TRUE | _BOOLEAN_FALSE)
+
+
+def _candidate_value_is_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    text = _normalize_text(value)
+    if not text:
+        return False
+    try:
+        float(text)
+    except Exception:
+        return False
+    return True
+
+
+def _candidate_value_is_link(value: Any) -> bool:
+    if isinstance(value, (list, tuple, set, dict)):
+        return False
+    text = _normalize_text(value)
+    return bool(text) and bool(_URL_RE.match(text))
+
+
+def _candidate_data_type(sample_values: Iterable[Any]) -> str:
+    values = [value for value in sample_values if _non_empty(value)]
+    if not values:
+        return "text"
+    if all(_candidate_value_is_boolean(value) for value in values):
+        return "boolean"
+    if all(_candidate_value_is_number(value) for value in values):
+        return "number"
+    if all(_candidate_value_is_link(value) for value in values):
+        return "link"
+    return "text"
+
+
+def discover_part_attr_fields() -> List[Dict[str, Any]]:
+    builtin_source_paths = _builtin_candidate_source_paths()
+    discovered: Dict[str, Dict[str, Any]] = {}
+
+    for part in Part.objects.only("attrs").order_by("part_number", "revision"):
+        raw_attrs = getattr(part, "attrs", None)
+        if not isinstance(raw_attrs, dict) or not raw_attrs:
+            continue
+
+        raw_keys_by_id: Dict[str, set[str]] = {}
+        for raw_key, raw_value in raw_attrs.items():
+            if not _non_empty(raw_value):
+                continue
+            canonical_key = canonical_attr_key(raw_key)
+            field_id = ALIASES.get(canonical_key, canonical_key)
+            if not field_id:
+                continue
+            raw_keys_by_id.setdefault(field_id, set()).add(str(raw_key))
+
+        normalized_attrs = normalize_props(raw_attrs)
+        for key, value in normalized_attrs.items():
+            field_id = _normalize_field_id(key)
+            source_path = f"attrs.{field_id}" if field_id else ""
+            if not field_id or field_id in _FIELD_CANDIDATE_EXCLUDED_IDS:
+                continue
+            if source_path in builtin_source_paths or not _non_empty(value):
+                continue
+            entry = discovered.setdefault(
+                field_id,
+                {
+                    "id": field_id,
+                    "source_path": source_path,
+                    "part_count": 0,
+                    "raw_keys": set(),
+                    "sample_values": [],
+                },
+            )
+            entry["part_count"] += 1
+            entry["raw_keys"].update(raw_keys_by_id.get(field_id) or [])
+            if len(entry["sample_values"]) < 5:
+                entry["sample_values"].append(value)
+
+    candidates: List[Dict[str, Any]] = []
+    for field_id, item in discovered.items():
+        raw_keys = sorted(item["raw_keys"], key=lambda value: value.lower())
+        sample_values = list(item["sample_values"])
+        candidates.append(
+            {
+                "id": field_id,
+                "label": _candidate_label(field_id, raw_keys),
+                "source_path": item["source_path"],
+                "data_type": _candidate_data_type(sample_values),
+                "part_count": int(item["part_count"]),
+                "sample_value": next((_candidate_sample_value(value) for value in sample_values if _non_empty(value)), ""),
+                "raw_keys": raw_keys,
+            }
+        )
+
+    return sorted(candidates, key=lambda item: (item["label"].lower(), item["id"]))
+
+
 def field_index(config: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
     config = config or get_field_config()
     return {field["id"]: field for field in config.get("fields", [])}
@@ -953,7 +1154,12 @@ def _get_nested(source: Any, path: List[str]) -> Any:
         if cur is None:
             return None
         if isinstance(cur, dict):
-            cur = cur.get(part)
+            if part in cur:
+                cur = cur.get(part)
+                continue
+            target = canonical_attr_key(part)
+            matched_key = next((key for key in cur.keys() if canonical_attr_key(key) == target), None)
+            cur = cur.get(matched_key) if matched_key is not None else None
             continue
         cur = getattr(cur, part, None)
     return cur
@@ -1045,7 +1251,7 @@ def resolve_part_field_value(
     field = field_index(config).get(field_id)
     if not field:
         return ""
-    attrs = dict(attrs or (harvest_part_attrs(part) if part else {}))
+    attrs = normalize_props(attrs or (harvest_part_attrs(part) if part else {}))
     extra = dict(extra or {})
     data_type = field.get("data_type", "text")
 
@@ -1090,6 +1296,26 @@ def resolve_part_field_value(
             return _coerce_value(value, data_type)
 
     return ""
+
+
+def field_requires_runtime_scan(field_id: str, config: Optional[Dict[str, Any]] = None) -> bool:
+    config = config or get_field_config()
+    field = field_index(config).get(field_id)
+    if not field:
+        return False
+    kind = str(field.get("kind") or "")
+    if kind == "custom":
+        return True
+    if kind == "special":
+        return False
+    default_field = _default_builtin_map().get(field_id)
+    if not default_field:
+        return True
+    if field.get("source_locked"):
+        return False
+    current_source = _normalize_source_path(field.get("source_path"))
+    default_source = _normalize_source_path(default_field.get("source_path"))
+    return bool(current_source and default_source and current_source != default_source)
 
 
 def resolve_part_field_values(

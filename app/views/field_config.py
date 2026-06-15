@@ -4,7 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from app.services.api_auth import api_auth_required, get_request_user
 from app.services.acl import user_has_permission
-from app.services.field_config import get_field_config, reset_field_config, save_field_config
+from app.services.field_config import discover_part_attr_fields, get_field_config, reset_field_config, save_field_config
 from app.services.user_settings import get_or_create_settings, settings_to_dict
 
 bp = Blueprint("field_config_api", __name__, url_prefix="/api")
@@ -52,6 +52,15 @@ def field_config_save():
     payload = request.get_json(force=True, silent=True) or {}
     config = save_field_config(payload)
     return jsonify({"ok": True, "config": config})
+
+
+@bp.get("/admin/field-config/candidates")
+@api_auth_required
+def field_config_candidates():
+    user = get_request_user()
+    if not _is_admin(user):
+        return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
+    return jsonify({"ok": True, "candidates": discover_part_attr_fields()})
 
 
 @bp.post("/admin/field-config/reset")
