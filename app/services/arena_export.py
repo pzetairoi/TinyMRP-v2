@@ -18,6 +18,10 @@ from app.services.field_config import (
 )
 from app.services.part_norm import clean_rev, clean_rev_or_none
 
+import re
+from flask import current_app, has_app_context
+from app.services.insights import HARDWARE_TERMS, normalized_processes as normalized_process_list
+
 
 _ARENA_BOM_RESERVED_FIELD_IDS = {"thumbnail", "part_number", "description", "qty", "level"}
 _ARENA_LINK_SUPPORTED_GROUPS = {"pdf", "dxf", "step"}
@@ -359,6 +363,9 @@ def build_arena_file_links_csv(
     ]
     rows: list[dict[str, Any]] = []
     for pn, rev in parts:
+        part_doc = _part_by(pn, rev)
+        if _is_hardware_or_fastener(part_doc):
+            continue
         best_files = _best_file_candidates(pn, rev)
         if not best_files:
             continue
@@ -374,7 +381,7 @@ def build_arena_file_links_csv(
                     "item number": pn,
                     "file title": file_title,
                     "file number": "",
-                    "edition identifier": rev,
+                    "edition identifier": _edition_identifier(rev),
                     "file category": "Drawing" if file_format == "pdf" else "CAD File",
                     "file category path": "",
                     "file location": _join_base_url(base_url, f"{_ARENA_LINK_FOLDERS[file_format]}/{desc}.{file_format}"),
@@ -387,3 +394,52 @@ def build_arena_file_links_csv(
 
     filename = f"{root_part.part_number}_{root_effective_rev or 'no_rev'}_arena_file_links.csv"
     return filename, _write_csv(rows, headers)
+
+
+def _edition_identifier(rev: Any) -> str:
+    return _clean_rev(rev) or "1"
+
+def _desc_from(pn: str, rev: str) -> str:
+    safe_rev = _edition_identifier(rev).replace("/", "-").replace("\\", "-").replace(":", "-")
+    return f"{pn}_REV_{safe_rev}"
+
+
+def _raw_process_terms(part: Optional[Part], attrs: dict[str, Any]) -> set[str]:
+    values: list[Any] = []
+    if part is not None:
+        values.extend(list(getattr(part, "processes", []) or []))
+
+    for key in ("process", "process2", "process3", "processes"):
+        raw = attrs.get(key)
+        if isinstance(raw, (list, tuple, set)):
+            values.extend(raw)
+        elif raw is not None:
+            values.append(raw)
+
+    terms: set[str] = set()
+    for value in values:
+        for token in re.split(r"\s*(?:,|;|/|\||&|\+|\r|\n)\s*", str(value or "").lower()):
+            token = token.strip()
+            if token:
+                terms.add(token)
+    return terms
+
+
+def _is_hardware_or_fastener(part: Optional[Part]) -> bool:
+    if not part:
+        return False
+
+    attrs = harvest_part_attrs(part)
+    meta = current_app.config.get("PROCESS_META", {}) if has_app_context() else {}
+
+    normalized = set(
+        normalized_process_list(
+            attrs,
+            list(getattr(part, "processes", []) or []),
+            meta,
+        )
+        or []
+    )
+    raw_terms = _raw_process_terms(part, attrs)
+
+    return bool((normalized | raw_terms) & HARDWARE_TERMS)

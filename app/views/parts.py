@@ -53,7 +53,13 @@ from app.services.field_config import (
 from app.services.arena_export import build_arena_bom_csv, build_arena_file_links_csv
 from app.services.parts_delete import delete_part_and_refs_cascade
 from app.services.part_norm import clean_rev, clean_rev_or_none
-from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
+#from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
+
+from app.services.user_profile import (
+    resolve_identity_profile,
+    resolve_identity_profiles,
+    profile_for_user,
+)
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
@@ -1105,6 +1111,7 @@ def part_detail():
             "can_parts_delete": can_parts_delete,
             "can_parts_edit": can_parts_edit,
             "can_parts_note": can_parts_note,
+            "arena_file_link_base_url": current_app.config.get("ARENA_FILE_LINK_BASE_URL", ""),
         }
     )
 
@@ -1206,13 +1213,27 @@ def export_arena_file_links(pn: str):
 
     attrs = harvest_part_attrs(part)
     norm_rev = _normalized_revision(part, attrs)
-    base_url = str(payload.get("base_url") or request.form.get("base_url") or request.args.get("base_url") or "").strip()
+    base_url = str(
+            payload.get("base_url")
+            or request.form.get("base_url")
+            or request.args.get("base_url")
+            or current_app.config.get("ARENA_FILE_LINK_BASE_URL")
+            or ""
+                ).strip()
     try:
+        
+        profile = profile_for_user(current_user)
+        author = str(
+            profile.get("display_name")
+            or profile.get("email")
+            or getattr(current_user, "email", "")
+            or ""
+        ).strip()
         name, data = build_arena_file_links_csv(
             part.part_number,
             norm_rev,
             base_url=base_url,
-            author=str(getattr(current_user, "email", "") or ""),
+            author=author,
             is_allowed=(lambda child_pn, child_rev: part_is_allowed(allowed, child_pn, child_rev or "")) if isinstance(allowed, set) else None,
         )
     except RuntimeError as exc:

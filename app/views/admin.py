@@ -149,6 +149,8 @@ def admin_settings():
 
         fp_raw = request.form.get("flat_pattern_page_names") or ""
         settings.flat_pattern_page_names = _parse_flat_pattern_names(fp_raw)
+        
+        settings.arena_file_link_base_url = (request.form.get("arena_file_link_base_url") or "").strip()
 
         settings.upload_pack_max_zip_mb = _parse_int(
             request.form.get("upload_pack_max_zip_mb"), settings.upload_pack_max_zip_mb or 1024
@@ -207,6 +209,7 @@ def admin_settings():
             current_app.config["UPLOAD_PACK_MAX_ZIP_MB"] = settings.upload_pack_max_zip_mb or 0
             current_app.config["UPLOAD_PACK_MAX_FILE_MB"] = settings.upload_pack_max_file_mb or 0
             current_app.config["UPLOAD_PACK_MAX_FILES"] = settings.upload_pack_max_files or 0
+            current_app.config["ARENA_FILE_LINK_BASE_URL"] = settings.arena_file_link_base_url or ""
             from app.services.app_settings import resolve_file_sources
             file_sources = resolve_file_sources(settings)
             current_app.config["PROCESS_META"] = load_process_meta(overrides=settings.process_meta or None)
