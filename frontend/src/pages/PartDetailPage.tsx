@@ -386,6 +386,9 @@ export default function PartDetailPage() {
   const [shareAllowChildren, setShareAllowChildren] = useState(false);
   const [shareAllowExtended, setShareAllowExtended] = useState(false);
   const [shareRevokingId, setShareRevokingId] = useState<string | null>(null);
+  const [arenaBaseUrl, setArenaBaseUrl] = useState("");
+  const [arenaBusy, setArenaBusy] = useState<null | "bom" | "links">(null);
+  const [arenaError, setArenaError] = useState<string | null>(null);
 
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
@@ -1226,19 +1229,44 @@ function bestUrl(f: FileRow): string {
   const bomFields = fieldConfig ? contextFields(fieldConfig, "bom_tree") : FALLBACK_BOM_FIELDS
   const whereUsedFields = fieldConfig ? contextFields(fieldConfig, "where_used") : FALLBACK_WHERE_USED_FIELDS
   const excelFields = fieldConfig ? contextFields(fieldConfig, "excel_bom") : []
+  const arenaFields = fieldConfig ? contextFields(fieldConfig, "arena_bom") : []
   const defaultSummaryIds = fieldConfig ? defaultFieldIds(fieldConfig, "part_detail_summary") : ["material", "finish", "mass", "process"]
   const defaultBomIds = fieldConfig ? defaultFieldIds(fieldConfig, "bom_tree") : ["thumbnail", "part_number", "revision", "description", "process", "finish", "material", "qty"]
   const defaultWhereUsedIds = fieldConfig ? defaultFieldIds(fieldConfig, "where_used") : ["thumbnail", "part_number", "revision", "description", "qty"]
   const defaultExcelIds = fieldConfig ? defaultFieldIds(fieldConfig, "excel_bom") : []
+  const defaultArenaIds = fieldConfig ? defaultFieldIds(fieldConfig, "arena_bom") : []
   const requiredSummaryIds = fieldConfig ? requiredFieldIds(fieldConfig, "part_detail_summary") : []
   const requiredBomIds = fieldConfig ? requiredFieldIds(fieldConfig, "bom_tree") : ["part_number"]
   const requiredWhereUsedIds = fieldConfig ? requiredFieldIds(fieldConfig, "where_used") : ["part_number"]
   const requiredExcelIds = fieldConfig ? requiredFieldIds(fieldConfig, "excel_bom") : ["part_number", "revision", "description", "total_qty"]
+  const requiredArenaIds = fieldConfig ? requiredFieldIds(fieldConfig, "arena_bom") : []
   const selectedSummaryIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "part_detail_summary") : defaultSummaryIds
   const selectedBomIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "bom_tree") : defaultBomIds
   const selectedWhereUsedIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "where_used") : defaultWhereUsedIds
   const selectedExcelIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "excel_bom") : defaultExcelIds
+  const selectedArenaIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "arena_bom") : defaultArenaIds
   const excelUseDefault = fieldPreferences?.contexts?.excel_bom?.use_default ?? true
+  const arenaUseDefault = fieldPreferences?.contexts?.arena_bom?.use_default ?? true
+  const arenaAvailableFields = useMemo(
+    () => arenaFields.filter((field) => !["thumbnail", "part_number", "description", "qty", "level"].includes(field.id)),
+    [arenaFields],
+  )
+  const arenaVisibleFieldIds = useMemo(() => new Set(arenaAvailableFields.map((field) => field.id)), [arenaAvailableFields])
+  const defaultVisibleArenaIds = useMemo(() => {
+    return defaultArenaIds.filter((fieldId) => arenaVisibleFieldIds.has(fieldId))
+  }, [arenaVisibleFieldIds, defaultArenaIds])
+  const visibleRequiredArenaIds = useMemo(() => {
+    return requiredArenaIds.filter((fieldId) => arenaVisibleFieldIds.has(fieldId))
+  }, [arenaVisibleFieldIds, requiredArenaIds])
+  const visibleSelectedArenaIds = useMemo(() => {
+    return selectedArenaIds.filter((fieldId) => arenaVisibleFieldIds.has(fieldId))
+  }, [arenaVisibleFieldIds, selectedArenaIds])
+  const arenaSuggestedFieldIds = useMemo(() => {
+    const allowed = new Set(arenaAvailableFields.map((field) => field.id))
+    const source = defaultVisibleArenaIds.length ? defaultVisibleArenaIds : selectedExcelIds.length ? selectedExcelIds : defaultExcelIds
+    return source.filter((fieldId) => allowed.has(fieldId))
+  }, [arenaAvailableFields, defaultExcelIds, defaultVisibleArenaIds, selectedExcelIds])
+  const hasManagementActions = canAdmin || canPartsEdit || canPartsDelete
   const bomFieldMap = useMemo(
     () => new Map(bomFields.map((field) => [field.id, field] as const)),
     [bomFields],
@@ -1304,6 +1332,75 @@ function bestUrl(f: FileRow): string {
     let nextPrefs = updateContextSelection(fieldConfig, fieldPreferences, contextName, fieldIds)
     nextPrefs = updateContextMode(nextPrefs, contextName, useDefault)
     await persistFieldPreferences(nextPrefs)
+  }
+
+  async function downloadArenaCsv(endpoint: string, body: Record<string, any>, kind: "bom" | "links", fallbackName: string) {
+    setArenaBusy(kind)
+    setArenaError(null)
+    try {
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (!resp.ok) {
+        let message = `HTTP ${resp.status}`
+        const raw = await resp.text()
+        try {
+          const payload = JSON.parse(raw)
+          message = payload?.error || payload?.message || message
+        } catch {
+          message = raw || message
+        }
+        throw new Error(message)
+      }
+      const blob = await resp.blob()
+      const disp = resp.headers.get("Content-Disposition") || ""
+      const match = disp.match(/filename=\"?([^\";]+)\"?/i)
+      const filename = (match ? match[1] : fallbackName).replace(/\s+/g, "_")
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setArenaError(err?.message || "Arena export failed.")
+    } finally {
+      setArenaBusy(null)
+    }
+  }
+
+  async function handleArenaBomExport() {
+    if (!pn) return
+    await downloadArenaCsv(
+      `/api/parts/${encodeURIComponent(pn)}/export/arena_bom`,
+      {
+        rev: effectiveRev || "",
+        field_ids: !arenaUseDefault ? visibleSelectedArenaIds : [],
+      },
+      "bom",
+      `${pn}_${effectiveRev || "no_rev"}_arena_bom.csv`,
+    )
+  }
+
+  async function handleArenaFileLinksExport() {
+    if (!pn) return
+    if (!arenaBaseUrl.trim()) {
+      setArenaError("BASE URL is required for Arena file links.")
+      return
+    }
+    await downloadArenaCsv(
+      `/api/parts/${encodeURIComponent(pn)}/export/arena_file_links`,
+      {
+        rev: effectiveRev || "",
+        base_url: arenaBaseUrl.trim(),
+      },
+      "links",
+      `${pn}_${effectiveRev || "no_rev"}_arena_file_links.csv`,
+    )
   }
 
   async function loadShareLinks() {
@@ -2539,7 +2636,93 @@ function bestUrl(f: FileRow): string {
 
           {!isSharedView && <TabPanel header="Actions">
             <div className="pd-card p-3">
-              {(canPartsEdit || canPartsDelete || canAdmin) ? (
+              <div className="border rounded p-3 mb-3">
+                <div>
+                  <h6 className="mb-0">Export to Arena</h6>
+                  <div className="text-muted small mt-1">
+                    Generate Arena-compatible CSV exports for BOM structure, selected part properties, and file links.
+                  </div>
+                </div>
+                <div className="text-muted small mt-3">
+                  Required Arena BOM columns are always included: <code>item number</code>, <code>line number</code>, <code>level</code>, <code>quantity</code>, and <code>item name</code>.
+                  Extra property columns come from the shared field configuration so the admin preset can be reused consistently by all users.
+                </div>
+                {arenaAvailableFields.length > 0 && (
+                  <div className="border rounded p-2 mt-3">
+                    <div className="fw-semibold small mb-2">Arena item properties</div>
+                    <div className="form-check">
+                      <input
+                        className="form-check-input"
+                        type="radio"
+                        name="arenaMode"
+                        id="arenaModeDefault"
+                        checked={arenaUseDefault}
+                        onChange={() => persistFieldMode("arena_bom", true)}
+                      />
+                      <label className="form-check-label small" htmlFor="arenaModeDefault">Use admin default preset</label>
+                    </div>
+                    <div className="form-check mb-2">
+                      <input
+                        className="form-check-input"
+                        type="radio"
+                        name="arenaMode"
+                        id="arenaModeCustom"
+                        checked={!arenaUseDefault}
+                        onChange={() => persistFieldMode("arena_bom", false)}
+                      />
+                      <label className="form-check-label small" htmlFor="arenaModeCustom">Use my selected fields</label>
+                    </div>
+                    {!arenaUseDefault && (
+                      <FieldSelector
+                        inline
+                        title="Arena item properties"
+                        availableFields={arenaAvailableFields}
+                        selectedIds={visibleSelectedArenaIds}
+                        requiredIds={visibleRequiredArenaIds}
+                        onChange={(fieldIds) => {
+                          persistFieldSelectionAndMode("arena_bom", fieldIds, false)
+                        }}
+                        onReset={() => {
+                          persistFieldSelectionAndMode("arena_bom", defaultVisibleArenaIds.length ? defaultVisibleArenaIds : arenaSuggestedFieldIds, true)
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
+                <div className="d-flex flex-wrap gap-2 mt-3">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    onClick={handleArenaBomExport}
+                    disabled={arenaBusy !== null}
+                  >
+                    {arenaBusy === "bom" ? "Generating..." : "Bom and part properties"}
+                  </button>
+                </div>
+                <div className="mt-3">
+                  <label className="form-label small fw-semibold mb-1" htmlFor="arenaBaseUrl">BASE for file links</label>
+                  <input
+                    id="arenaBaseUrl"
+                    className="form-control form-control-sm font-monospace"
+                    value={arenaBaseUrl}
+                    onChange={(e) => setArenaBaseUrl(e.target.value)}
+                    placeholder="https://your.web.chain/touse/aspattern/"
+                  />
+                  <div className="text-muted small mt-1">
+                    The file-links CSV appends extension subfolders and a normalized <code>PART_REV</code> file name to this prefix, for example <code>PDF/PART_REV_A.pdf</code>.
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-primary mt-2"
+                    onClick={handleArenaFileLinksExport}
+                    disabled={arenaBusy !== null}
+                  >
+                    {arenaBusy === "links" ? "Generating..." : "File links"}
+                  </button>
+                </div>
+                {arenaError ? <div className="text-danger small mt-2">{arenaError}</div> : null}
+              </div>
+              {hasManagementActions ? (
                 <div className="d-flex flex-column gap-3">
                   {canAdmin && (
                     <div className="border rounded p-3">
@@ -2738,7 +2921,7 @@ function bestUrl(f: FileRow): string {
                   )}
                 </div>
               ) : (
-                <div className="text-muted small">No actions available.</div>
+                <div className="text-muted small">No management actions available.</div>
               )}
             </div>
           </TabPanel>}
