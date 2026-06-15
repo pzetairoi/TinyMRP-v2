@@ -2,11 +2,34 @@ import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import type { ApiError } from '../lib/api'
 import {
+  loadFieldCandidates,
   loadFieldConfig,
+  type FieldCandidate,
   type FieldConfigPayload,
   type FieldContext,
   type FieldDefinition,
 } from '../lib/fieldConfig'
+
+function slugFieldId(value: string) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function normalizeSourcePath(value: string) {
+  const parts = String(value || '')
+    .split('.')
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+  if (parts.length < 2) return ''
+  const [head, ...tail] = parts
+  if (!['attrs', 'part'].includes(head.toLowerCase())) return ''
+  const normalizedTail = tail.map((part) => slugFieldId(part)).filter(Boolean)
+  if (!normalizedTail.length) return ''
+  return [head.toLowerCase(), ...normalizedTail].join('.')
+}
 
 function cloneContexts(contexts: Record<string, FieldContext>) {
   return Object.fromEntries(
@@ -25,6 +48,9 @@ function cloneContexts(contexts: Record<string, FieldContext>) {
 
 export default function AdminFieldsPage() {
   const [config, setConfig] = useState<FieldConfigPayload | null>(null)
+  const [fieldCandidates, setFieldCandidates] = useState<FieldCandidate[]>([])
+  const [selectedCandidateId, setSelectedCandidateId] = useState('')
+  const [candidateError, setCandidateError] = useState<string | null>(null)
   const [canAdmin, setCanAdmin] = useState(false)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -39,6 +65,14 @@ export default function AdminFieldsPage() {
           contexts: cloneContexts(resp.config.contexts || {}),
         })
         setCanAdmin(!!resp.permissions?.can_admin)
+        if (resp.permissions?.can_admin) {
+          try {
+            const candidatesResp = await loadFieldCandidates()
+            setFieldCandidates(candidatesResp.candidates || [])
+          } catch (candidateErr) {
+            setCandidateError((candidateErr as ApiError).message || 'Failed to load detected part fields.')
+          }
+        }
       } catch (err) {
         setError((err as ApiError).message || 'Failed to load field configuration.')
       }
@@ -48,6 +82,20 @@ export default function AdminFieldsPage() {
   const fields = config?.fields || []
   const builtinFields = useMemo(() => fields.filter((field) => field.kind !== 'custom'), [fields])
   const customFields = useMemo(() => fields.filter((field) => field.kind === 'custom'), [fields])
+  const availableFieldCandidates = useMemo(() => {
+    const configuredIds = new Set(fields.map((field) => slugFieldId(field.id)))
+    const configuredSources = new Set(fields.map((field) => normalizeSourcePath(field.source_path || '')).filter(Boolean))
+    return fieldCandidates.filter((candidate) => {
+      const candidateId = slugFieldId(candidate.id)
+      const candidateSource = normalizeSourcePath(candidate.source_path || '')
+      if (!candidateId || !candidateSource) return false
+      return !configuredIds.has(candidateId) && !configuredSources.has(candidateSource)
+    })
+  }, [fieldCandidates, fields])
+  const selectedCandidate = useMemo(
+    () => availableFieldCandidates.find((candidate) => candidate.id === selectedCandidateId) || null,
+    [availableFieldCandidates, selectedCandidateId],
+  )
 
   function updateField(fieldId: string, patch: Partial<FieldDefinition>) {
     setConfig((prev) => {
@@ -72,7 +120,7 @@ export default function AdminFieldsPage() {
             label: `Custom ${customFields.length + 1}`,
             kind: 'custom',
             data_type: 'text',
-            source_path: 'attrs.new_field',
+            source_path: `attrs.${nextId}`,
             sortable: true,
             filterable: true,
           },
@@ -81,8 +129,33 @@ export default function AdminFieldsPage() {
     })
   }
 
+  function addCandidateField() {
+    if (!selectedCandidate || !config) return
+    setConfig((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        fields: [
+          ...prev.fields,
+          {
+            id: slugFieldId(selectedCandidate.id),
+            label: selectedCandidate.label,
+            kind: 'custom',
+            data_type: selectedCandidate.data_type || 'text',
+            source_path: selectedCandidate.source_path,
+            sortable: true,
+            filterable: true,
+          },
+        ],
+      }
+    })
+    setSelectedCandidateId('')
+    setError(null)
+    setMessage(`Detected field "${selectedCandidate.label}" added.`)
+  }
+
   function renameCustomField(fieldId: string, nextFieldId: string) {
-    const cleaned = nextFieldId.trim().toLowerCase()
+    const cleaned = slugFieldId(nextFieldId)
     if (!cleaned || cleaned === fieldId) return
     setConfig((prev) => {
       if (!prev) return prev
@@ -93,7 +166,15 @@ export default function AdminFieldsPage() {
       }
       return {
         ...prev,
-        fields: prev.fields.map((field) => (field.id === fieldId ? { ...field, id: cleaned } : field)),
+        fields: prev.fields.map((field) => {
+          if (field.id !== fieldId) return field
+          const currentSource = String(field.source_path || '').trim()
+          const nextSource =
+            !currentSource || currentSource === `attrs.${fieldId}` || currentSource === 'attrs.new_field'
+              ? `attrs.${cleaned}`
+              : currentSource
+          return { ...field, id: cleaned, source_path: nextSource }
+        }),
         contexts,
       }
     })
@@ -165,9 +246,9 @@ export default function AdminFieldsPage() {
         custom_fields: config.fields
           .filter((field) => field.kind === 'custom')
           .map((field) => ({
-            id: field.id,
+            id: slugFieldId(field.id),
             label: field.label,
-            source_path: field.source_path || '',
+            source_path: (field.source_path || '').trim() || `attrs.${slugFieldId(field.id)}`,
             data_type: field.data_type || 'text',
             sortable: field.sortable !== false,
             filterable: field.filterable !== false,
@@ -217,6 +298,12 @@ export default function AdminFieldsPage() {
       setSaving(false)
     }
   }
+
+  useEffect(() => {
+    if (selectedCandidateId && !availableFieldCandidates.some((candidate) => candidate.id === selectedCandidateId)) {
+      setSelectedCandidateId('')
+    }
+  }, [availableFieldCandidates, selectedCandidateId])
 
   if (error && !config) {
     return <div className="text-danger">{error}</div>
@@ -296,10 +383,46 @@ export default function AdminFieldsPage() {
       <div className="card p-3 mb-4">
         <div className="d-flex align-items-center justify-content-between mb-3">
           <h5 className="mb-0">Custom Fields</h5>
-          <button className="btn btn-sm btn-outline-primary" onClick={addCustomField}>
-            Add custom field
-          </button>
+          <div className="d-flex flex-wrap gap-2">
+            <button className="btn btn-sm btn-outline-primary" onClick={addCustomField}>
+              Add manual field
+            </button>
+          </div>
         </div>
+        <div className="row g-2 align-items-center mb-3">
+          <div className="col-lg-6">
+            <select
+              className="form-select form-select-sm"
+              value={selectedCandidateId}
+              onChange={(e) => setSelectedCandidateId(e.target.value)}
+            >
+              <option value="">Add from detected part field...</option>
+              {availableFieldCandidates.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.label} [{candidate.source_path}]
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="col-auto">
+            <button className="btn btn-sm btn-primary" onClick={addCandidateField} disabled={!selectedCandidate}>
+              Add detected field
+            </button>
+          </div>
+        </div>
+        <div className="small text-muted mb-3">
+          Detected fields are collected from non-empty part attributes and normalized with the same rules used by filters and exports.
+        </div>
+        {selectedCandidate && (
+          <div className="small text-muted mb-3">
+            Type: <span className="font-monospace">{selectedCandidate.data_type || 'text'}</span> · Source:{' '}
+            <span className="font-monospace">{selectedCandidate.source_path}</span> · Seen on {selectedCandidate.part_count} part
+            {selectedCandidate.part_count === 1 ? '' : 's'}
+            {selectedCandidate.sample_value ? ` · Sample: ${selectedCandidate.sample_value}` : ''}
+            {selectedCandidate.raw_keys?.length ? ` · Seen as: ${selectedCandidate.raw_keys.join(', ')}` : ''}
+          </div>
+        )}
+        {candidateError && <div className="alert alert-warning py-2">{candidateError}</div>}
         <div className="table-responsive">
           <table className="table table-sm align-middle">
             <thead>

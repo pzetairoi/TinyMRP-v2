@@ -41,6 +41,7 @@ from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.services.field_config import (
     context_field_ids,
+    field_requires_runtime_scan,
     field_index as field_config_index,
     get_field_config,
     matches_field_filter_value,
@@ -551,15 +552,17 @@ def parts_lazy():
     field_config = get_field_config()
     parts_field_ids = context_field_ids("parts_list", field_config)
     field_meta = field_config_index(field_config)
+    runtime_filter_ids = {field_id for field_id in parts_field_ids if field_requires_runtime_scan(field_id, field_config)}
     sortable_ids = {field_id for field_id in parts_field_ids if field_meta.get(field_id, {}).get("sortable")}
     filterable_ids = {field_id for field_id in parts_field_ids if field_meta.get(field_id, {}).get("filterable")}
     if sort_field not in sortable_ids:
         sort_field = "part_number"
-    mapped = primary_query_path(sort_field, field_config)
-    if not mapped:
+    runtime_sort = field_requires_runtime_scan(sort_field, field_config)
+    mapped = None if runtime_sort else primary_query_path(sort_field, field_config)
+    if not runtime_sort and not mapped:
         sort_field = "part_number"
         mapped = primary_query_path(sort_field, field_config) or "part_number"
-    order_by = f"-{mapped}" if sort_order == -1 else mapped
+    order_by = f"-{mapped}" if mapped and sort_order == -1 else (mapped or "part_number")
 
     def _terms(s: str):
         return [t for t in re.split(r"\s+", (s or "").strip().lower()) if t]
@@ -631,6 +634,7 @@ def parts_lazy():
     parts_context_ids = context_field_ids("parts_list", field_config)
     generic_filter_ids = []
     typed_filter_specs: list[tuple[str, str, Any]] = []
+    runtime_filter_specs: list[tuple[str, str, Any]] = []
     for field_id in filterable_ids:
         if field_id in {"material", "process"}:
             continue
@@ -642,14 +646,25 @@ def parts_lazy():
             if raw_value is not _missing and raw_value not in (None, ""):
                 typed_filter_specs.append((field_id, data_type, raw_value))
             continue
+        if field_id in runtime_filter_ids:
+            if raw_value is not _missing and raw_value not in (None, ""):
+                runtime_filter_specs.append((field_id, data_type, raw_value))
+            continue
         generic_filter_ids.append(field_id)
     for field_id in generic_filter_ids:
         q = add_field_filter(q, field_id)
     material_val = _filter_value("material", "")
     material_val_norm = str(material_val or "").strip().lower()
     if material_val_norm not in ("__missing__", "missing", "(missing)"):
-        q = add_field_filter(q, "material")
-    q = add_field_filter(q, "finish")
+        if "material" in runtime_filter_ids and material_val not in (None, ""):
+            runtime_filter_specs.append(("material", str(field_meta.get("material", {}).get("data_type") or "text"), material_val))
+        else:
+            q = add_field_filter(q, "material")
+    finish_val = _filter_value("finish", "")
+    if "finish" in runtime_filter_ids and finish_val not in (None, ""):
+        runtime_filter_specs.append(("finish", str(field_meta.get("finish", {}).get("data_type") or "text"), finish_val))
+    else:
+        q = add_field_filter(q, "finish")
     def _process_filter_q(terms: list[str]) -> Q:
         or_q = Q()
         if terms:
@@ -680,7 +695,8 @@ def parts_lazy():
     else:
         q = add_field_filter(q, proc_key)
     g = _filter_value("global", "")
-    if g:
+    runtime_global_search = bool(g) and any(field_id in runtime_filter_ids for field_id in parts_field_ids if field_id != "process")
+    if g and not runtime_global_search:
         global_paths: list[str] = []
         for field_id in parts_field_ids:
             if field_id == "process":
@@ -787,16 +803,21 @@ def parts_lazy():
         approved_only_filter,
         min_props_filter,
         bool(typed_filter_specs),
+        bool(runtime_filter_specs),
+        runtime_global_search,
+        runtime_sort,
     ])
 
     if needs_scan:
+        scan_order_by = order_by if not runtime_sort else "part_number"
         all_docs = list(
-            qs.order_by(order_by).only("part_number", "revision", "description", "category", "attrs", "processes")
+            qs.order_by(scan_order_by).only("part_number", "revision", "description", "category", "attrs", "processes")
         )
         coverage = _coverage_map(all_docs)
         filtered_docs = []
         resolved_cache: dict[tuple[str, str], dict[str, Any]] = {}
         meta = current_app.config.get("PROCESS_META", {})
+        global_terms = _terms(str(g)) if runtime_global_search else []
         for p in all_docs:
             attrs = harvest_part_attrs(p)
             rev = _normalized_revision(p, attrs)
@@ -824,8 +845,48 @@ def parts_lazy():
                     break
             if not typed_match:
                 continue
+            runtime_match = True
+            for field_id, data_type, raw_value in runtime_filter_specs:
+                if not matches_field_filter_value(values.get(field_id), raw_value, data_type):
+                    runtime_match = False
+                    break
+            if not runtime_match:
+                continue
+            if runtime_global_search:
+                haystacks: list[str] = []
+                for field_id in parts_context_ids:
+                    if field_id == "thumbnail":
+                        continue
+                    value = values.get(field_id)
+                    if isinstance(value, bool):
+                        haystacks.append("true yes" if value else "false no")
+                    elif value not in (None, ""):
+                        haystacks.append(str(value).strip().lower())
+                if proc_list:
+                    haystacks.append(", ".join(proc_list).lower())
+                if not all(any(term in hay for hay in haystacks) for term in global_terms):
+                    continue
             resolved_cache[key] = values
             filtered_docs.append(p)
+        if runtime_sort:
+            sort_type = str((field_meta.get(sort_field) or {}).get("data_type") or "text")
+            reverse = (sort_order == -1)
+
+            def _runtime_sort_key(doc: Part):
+                attrs = harvest_part_attrs(doc)
+                rev = _normalized_revision(doc, attrs)
+                values = resolved_cache.get((doc.part_number, rev)) or {}
+                value = values.get(sort_field)
+                if sort_type == "number":
+                    try:
+                        return float(value)
+                    except Exception:
+                        return float("-inf") if reverse else float("inf")
+                if sort_type == "boolean":
+                    return 1 if bool(value) else 0
+                return str(value or "").lower()
+
+            filtered_docs.sort(key=_runtime_sort_key, reverse=reverse)
         filtered = len(filtered_docs)
         docs = filtered_docs[first:first + rows]
     else:

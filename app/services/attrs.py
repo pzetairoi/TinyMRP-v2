@@ -4,6 +4,7 @@ from typing import Dict, Any, Iterable, List, Tuple
 import re
 
 _SPLIT = re.compile(r"[;,]")  # split on commas/semicolons
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 # Canonical keys that must always exist (as strings)
 REQUIRED_KEYS: Iterable[str] = (
@@ -88,6 +89,12 @@ ALIASES: Dict[str, str] = {
 }
 
 _APPROVAL_EMPTY = {"", "n/a", "na", "none", "null", "0", "false"}
+
+
+def canonical_attr_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = _NON_ALNUM.sub("_", text)
+    return text.strip("_")
 
 def _is_blankish_approval(value: Any) -> bool:
     if value is None:
@@ -214,7 +221,7 @@ def _as_str(x: Any) -> str:
 def _aliasize(raw: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for k, v in (raw or {}).items():
-        kl = (k or "").strip().lower()
+        kl = canonical_attr_key(k)
         key = ALIASES.get(kl, kl)
         out[key] = v
     return out

@@ -61,6 +61,18 @@
     <div class="col-md-4">
       <div class="card shadow-sm h-100">
         <div class="card-body">
+          <h5 class="card-title">Field Configuration</h5>
+          <p class="card-text text-muted">Define custom fields and choose which fields appear in tables and Excel BOM exports.</p>
+          <a class="btn btn-primary" href="{{ url_for('ui.admin_fields_ui') }}">Open Field Configuration</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
           <h5 class="card-title">App Settings</h5>
           <p class="card-text text-muted">Branding logo and timezone.</p>
           <a class="btn btn-primary" href="{{ url_for('admin.admin_settings') }}">Open Settings</a>
