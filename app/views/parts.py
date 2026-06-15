@@ -1,9 +1,10 @@
 # app/views/parts.py
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, send_file
 from typing import Any, Optional
 from datetime import datetime
 from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
+from io import BytesIO
 import re
 import os
 
@@ -49,6 +50,7 @@ from app.services.field_config import (
     query_paths_for_field,
     resolve_part_field_values,
 )
+from app.services.arena_export import build_arena_bom_csv, build_arena_file_links_csv
 from app.services.parts_delete import delete_part_and_refs_cascade
 from app.services.part_norm import clean_rev, clean_rev_or_none
 from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
@@ -1104,6 +1106,133 @@ def part_detail():
             "can_parts_edit": can_parts_edit,
             "can_parts_note": can_parts_note,
         }
+    )
+
+
+def _request_list_value(payload: dict[str, Any], key: str) -> list[str]:
+    value = payload.get(key)
+    if value is None:
+        value = request.form.getlist(key)
+        if not value:
+            value = request.args.getlist(key)
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item or "").strip()]
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [text]
+
+
+@bp.post("/parts/<path:pn>/export/arena_bom")
+@csrf.exempt
+@login_required
+@require_items_view
+def export_arena_bom(pn: str):
+    payload = request.get_json(silent=True) or {}
+    rev = payload.get("rev")
+    if rev is None and "rev" in request.form:
+        rev = request.form.get("rev")
+    if rev is None and "rev" in request.args:
+        rev = request.args.get("rev")
+
+    part = _find_part_doc(pn, rev)
+    if not part:
+        return jsonify({"error": "not found"}), 404
+
+    allowed = None
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, part.part_number, part.revision or ""):
+            return jsonify({"error": "forbidden"}), 403
+    except Exception:
+        allowed = None
+
+    attrs = harvest_part_attrs(part)
+    norm_rev = _normalized_revision(part, attrs)
+    field_ids = _request_list_value(payload, "field_ids")
+    try:
+        name, data = build_arena_bom_csv(
+            part.part_number,
+            norm_rev,
+            field_ids=field_ids,
+            is_allowed=(lambda child_pn, child_rev: part_is_allowed(allowed, child_pn, child_rev or "")) if isinstance(allowed, set) else None,
+        )
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        log_action(
+            "arena.export.bom",
+            resource_type="part",
+            resource=f"{part.part_number}:{norm_rev}",
+            meta={"field_count": len(field_ids)},
+        )
+    except Exception:
+        pass
+
+    return send_file(
+        BytesIO(data),
+        mimetype="text/csv; charset=utf-8",
+        as_attachment=True,
+        download_name=name,
+    )
+
+
+@bp.post("/parts/<path:pn>/export/arena_file_links")
+@csrf.exempt
+@login_required
+@require_items_view
+def export_arena_file_links(pn: str):
+    payload = request.get_json(silent=True) or {}
+    rev = payload.get("rev")
+    if rev is None and "rev" in request.form:
+        rev = request.form.get("rev")
+    if rev is None and "rev" in request.args:
+        rev = request.args.get("rev")
+
+    part = _find_part_doc(pn, rev)
+    if not part:
+        return jsonify({"error": "not found"}), 404
+
+    allowed = None
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, part.part_number, part.revision or ""):
+            return jsonify({"error": "forbidden"}), 403
+    except Exception:
+        allowed = None
+
+    attrs = harvest_part_attrs(part)
+    norm_rev = _normalized_revision(part, attrs)
+    base_url = str(payload.get("base_url") or request.form.get("base_url") or request.args.get("base_url") or "").strip()
+    try:
+        name, data = build_arena_file_links_csv(
+            part.part_number,
+            norm_rev,
+            base_url=base_url,
+            author=str(getattr(current_user, "email", "") or ""),
+            is_allowed=(lambda child_pn, child_rev: part_is_allowed(allowed, child_pn, child_rev or "")) if isinstance(allowed, set) else None,
+        )
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        log_action(
+            "arena.export.files",
+            resource_type="part",
+            resource=f"{part.part_number}:{norm_rev}",
+            meta={"base_url": base_url},
+        )
+    except Exception:
+        pass
+
+    return send_file(
+        BytesIO(data),
+        mimetype="text/csv; charset=utf-8",
+        as_attachment=True,
+        download_name=name,
     )
 
 

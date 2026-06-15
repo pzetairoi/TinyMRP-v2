@@ -10,6 +10,8 @@ import {
   type FieldDefinition,
 } from '../lib/fieldConfig'
 
+const ARENA_FIXED_FIELD_IDS = new Set(['thumbnail', 'part_number', 'description', 'qty', 'level'])
+
 function slugFieldId(value: string) {
   return String(value || '')
     .trim()
@@ -118,6 +120,7 @@ export default function AdminFieldsPage() {
           {
             id: nextId,
             label: `Custom ${customFields.length + 1}`,
+            arena_header: `Custom ${customFields.length + 1}`,
             kind: 'custom',
             data_type: 'text',
             source_path: `attrs.${nextId}`,
@@ -140,6 +143,7 @@ export default function AdminFieldsPage() {
           {
             id: slugFieldId(selectedCandidate.id),
             label: selectedCandidate.label,
+            arena_header: selectedCandidate.label,
             kind: 'custom',
             data_type: selectedCandidate.data_type || 'text',
             source_path: selectedCandidate.source_path,
@@ -241,6 +245,7 @@ export default function AdminFieldsPage() {
           .map((field) => ({
             id: field.id,
             label: field.label,
+            arena_header: field.arena_header || field.label,
             source_path: field.source_path || '',
           })),
         custom_fields: config.fields
@@ -248,6 +253,7 @@ export default function AdminFieldsPage() {
           .map((field) => ({
             id: slugFieldId(field.id),
             label: field.label,
+            arena_header: field.arena_header || field.label,
             source_path: (field.source_path || '').trim() || `attrs.${slugFieldId(field.id)}`,
             data_type: field.data_type || 'text',
             sortable: field.sortable !== false,
@@ -323,7 +329,7 @@ export default function AdminFieldsPage() {
         <div>
           <h4 className="mb-0">Field Configuration</h4>
           <div className="text-muted small">
-            Define the source field mapping once, keep defaults available, and control which fields users can expose in tables and Excel BOM exports.
+            Define the source field mapping once, keep defaults available, and control which fields users can expose in tables, Excel BOM exports, and Arena BOM exports.
           </div>
         </div>
         <div className="d-flex gap-2">
@@ -350,6 +356,7 @@ export default function AdminFieldsPage() {
               <tr>
                 <th style={{ width: 180 }}>Field ID</th>
                 <th>Label</th>
+                <th>Arena header</th>
                 <th>Source path</th>
               </tr>
             </thead>
@@ -362,6 +369,14 @@ export default function AdminFieldsPage() {
                       className="form-control form-control-sm"
                       value={field.label || ''}
                       onChange={(e) => updateField(field.id, { label: e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="form-control form-control-sm"
+                      value={field.arena_header || ''}
+                      onChange={(e) => updateField(field.id, { arena_header: e.target.value })}
+                      placeholder={field.label || field.id}
                     />
                   </td>
                   <td>
@@ -429,6 +444,7 @@ export default function AdminFieldsPage() {
               <tr>
                 <th style={{ width: 160 }}>Field ID</th>
                 <th>Label</th>
+                <th>Arena header</th>
                 <th>Source path</th>
                 <th style={{ width: 140 }}>Type</th>
                 <th style={{ width: 100 }}>Sortable</th>
@@ -451,6 +467,14 @@ export default function AdminFieldsPage() {
                       className="form-control form-control-sm"
                       value={field.label || ''}
                       onChange={(e) => updateField(field.id, { label: e.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="form-control form-control-sm"
+                      value={field.arena_header || ''}
+                      onChange={(e) => updateField(field.id, { arena_header: e.target.value })}
+                      placeholder={field.label || field.id}
                     />
                   </td>
                   <td>
@@ -501,7 +525,7 @@ export default function AdminFieldsPage() {
               ))}
               {!customFields.length && (
                 <tr>
-                  <td colSpan={7} className="text-muted small">
+                  <td colSpan={8} className="text-muted small">
                     No custom fields yet.
                   </td>
                 </tr>
@@ -519,15 +543,23 @@ export default function AdminFieldsPage() {
         <div className="row g-3">
           {Object.entries(config.contexts || {}).map(([contextName, ctx]) => {
             const required = new Set(ctx.required_field_ids || [])
+            const selectableFields = contextName === 'arena_bom'
+              ? fields.filter((field) => !ARENA_FIXED_FIELD_IDS.has(field.id))
+              : fields
             return (
               <div key={contextName} className="col-12">
                 <div className="border rounded p-3">
                   <div className="fw-semibold mb-2">{ctx.label}</div>
+                  {contextName === 'arena_bom' ? (
+                    <div className="small text-muted mb-2">
+                      Fixed Arena columns such as item number, item name, level, and quantity are always included separately.
+                    </div>
+                  ) : null}
                   <div className="row g-3">
                     <div className="col-lg-6">
                       <div className="small text-muted mb-2">Allowed fields</div>
                       <div className="row g-2">
-                        {fields.map((field) => (
+                        {selectableFields.map((field) => (
                           <div key={`${contextName}-allow-${field.id}`} className="col-md-6">
                             <div className="form-check">
                               <input
@@ -550,7 +582,7 @@ export default function AdminFieldsPage() {
                     <div className="col-lg-6">
                       <div className="small text-muted mb-2">Default preset</div>
                       <div className="row g-2">
-                        {fields
+                        {selectableFields
                           .filter((field) => ctx.allowed_field_ids.includes(field.id))
                           .map((field) => (
                             <div key={`${contextName}-default-${field.id}`} className="col-md-6">

@@ -19,6 +19,23 @@ _NUMBER_RANGE_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:\.\.|to|-)\s*(-?\d+(?
 _NUMBER_COMPARE_RE = re.compile(r"^\s*(<=|>=|=|<|>)?\s*(-?\d+(?:\.\d+)?)\s*$")
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 _FIELD_CANDIDATE_EXCLUDED_IDS = {"process", "process2", "process3", "processes", "comments_search"}
+_ARENA_BOM_FIXED_FIELD_IDS = {"thumbnail", "part_number", "description", "qty", "level"}
+_DEFAULT_ARENA_HEADERS = {
+    "description": "item name",
+    "category": "item category",
+    "classified": "classification",
+    "oem": "oem",
+    "oem_partnumber": "OEM PART NUMBER",
+    "process": "process",
+    "material": "material",
+    "finish": "finish",
+    "link": "link",
+    "revision": "Revision",
+    "mass": "Mass",
+    "uom": "UoM",
+    "level_qty": "Level Qty",
+    "total_qty": "Total Qty",
+}
 
 
 DEFAULT_FIELDS: List[Dict[str, Any]] = [
@@ -564,7 +581,58 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "level_qty",
         ],
     },
+    "arena_bom": {
+        "label": "Arena BOM",
+        "required_field_ids": [],
+        "allowed_field_ids": [
+            "revision",
+            "notes",
+            "comments",
+            "category",
+            "material",
+            "finish",
+            "mass",
+            "process",
+            "uom",
+            "status",
+            "approved",
+            "link",
+            "oem",
+            "oem_partnumber",
+            "datasheet",
+            "classified",
+            "approved_by",
+            "approved_date",
+            "drawn_by",
+            "drawn_date",
+            "checked_by",
+            "checked_date",
+            "manufacturer",
+            "mfr_part",
+            "alt_group",
+            "level_qty",
+            "total_qty",
+            *[field_id for field_id, _label, _group in FILE_AVAILABILITY_FIELDS],
+        ],
+        "default_field_ids": [
+            "revision",
+            "total_qty",
+            "material",
+            "process",
+            "finish",
+            "mass",
+            "link",
+            "oem",
+            "oem_partnumber",
+            "category",
+            "level_qty",
+        ],
+    },
 }
+
+
+def default_arena_header_for_field(field_id: str, label: str = "") -> str:
+    return _DEFAULT_ARENA_HEADERS.get(field_id, _normalize_text(label) or field_id.replace("_", " ").title())
 
 
 def _default_builtin_map() -> Dict[str, Dict[str, Any]]:
@@ -742,7 +810,12 @@ def matches_field_filter_value(value: Any, filter_value: Any, data_type: str = "
 def default_field_config() -> Dict[str, Any]:
     return {
         "builtin_fields": [
-            {"id": field["id"], "label": field["label"], "source_path": field.get("source_path", "")}
+            {
+                "id": field["id"],
+                "label": field["label"],
+                "source_path": field.get("source_path", ""),
+                "arena_header": default_arena_header_for_field(field["id"], field["label"]),
+            }
             for field in DEFAULT_FIELDS
         ],
         "custom_fields": [],
@@ -782,10 +855,17 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
     for field_id in _default_field_order():
         default_field = builtin_default_map[field_id]
         raw = builtin_index.get(field_id, {})
-        item: Dict[str, Any] = {"id": field_id, "label": default_field["label"]}
+        item: Dict[str, Any] = {
+            "id": field_id,
+            "label": default_field["label"],
+            "arena_header": default_arena_header_for_field(field_id, default_field["label"]),
+        }
         label = _normalize_text(raw.get("label"))
         if label:
             item["label"] = label
+        arena_header = _normalize_text(raw.get("arena_header"))
+        if arena_header:
+            item["arena_header"] = arena_header
         if not default_field.get("source_locked"):
             source_path = _normalize_source_path(raw.get("source_path") or default_field.get("source_path"))
             if _is_valid_source_path(source_path):
@@ -818,6 +898,7 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
                 {
                     "id": field_id,
                     "label": label,
+                    "arena_header": _normalize_text(item.get("arena_header")) or label,
                     "source_path": source_path,
                     "kind": "custom",
                     "data_type": _coerce_custom_data_type(item.get("data_type")),
@@ -836,6 +917,9 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
         if not allowed:
             allowed = list(default_ctx["allowed_field_ids"])
         default_selected = _unique_ids(raw.get("default_field_ids") or default_ctx["default_field_ids"], set(allowed))
+        if name == "arena_bom":
+            allowed = [field_id for field_id in allowed if field_id not in _ARENA_BOM_FIXED_FIELD_IDS]
+            default_selected = [field_id for field_id in default_selected if field_id not in _ARENA_BOM_FIXED_FIELD_IDS]
         required = _unique_ids(default_ctx.get("required_field_ids") or [], field_ids)
         for req in required:
             if req not in allowed:
@@ -879,6 +963,7 @@ def get_field_config() -> Dict[str, Any]:
         override = overrides.get(field_id, {})
         if override.get("label"):
             field["label"] = override["label"]
+        field["arena_header"] = override.get("arena_header") or default_arena_header_for_field(field_id, field.get("label", ""))
         if not field.get("source_locked") and override.get("source_path"):
             field["source_path"] = override["source_path"]
         fields.append(field)
@@ -888,6 +973,7 @@ def get_field_config() -> Dict[str, Any]:
             {
                 "id": custom["id"],
                 "label": custom["label"],
+                "arena_header": custom.get("arena_header") or custom["label"],
                 "kind": "custom",
                 "data_type": custom.get("data_type", "text"),
                 "source_path": custom["source_path"],
@@ -906,6 +992,13 @@ def get_field_config() -> Dict[str, Any]:
         contexts[name]["required_field_ids"] = list(ctx.get("required_field_ids") or contexts[name]["required_field_ids"])
         contexts[name]["allowed_field_ids"] = [field_id for field_id in ctx.get("allowed_field_ids", []) if field_id in field_index_map]
         contexts[name]["default_field_ids"] = [field_id for field_id in ctx.get("default_field_ids", []) if field_id in field_index_map]
+        if name == "arena_bom":
+            contexts[name]["allowed_field_ids"] = [
+                field_id for field_id in contexts[name]["allowed_field_ids"] if field_id not in _ARENA_BOM_FIXED_FIELD_IDS
+            ]
+            contexts[name]["default_field_ids"] = [
+                field_id for field_id in contexts[name]["default_field_ids"] if field_id not in _ARENA_BOM_FIXED_FIELD_IDS
+            ]
         if not contexts[name]["allowed_field_ids"]:
             contexts[name]["allowed_field_ids"] = [field_id for field_id in DEFAULT_CONTEXTS[name]["allowed_field_ids"] if field_id in field_index_map]
         if not contexts[name]["default_field_ids"]:

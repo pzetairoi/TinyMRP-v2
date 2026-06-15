@@ -3,6 +3,7 @@ import { apiFetch } from './api'
 export type FieldDefinition = {
   id: string
   label: string
+  arena_header?: string
   kind: string
   data_type?: string
   source_path?: string
