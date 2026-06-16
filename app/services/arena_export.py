@@ -84,13 +84,13 @@ def _csv_text(value: Any) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, float):
-        return str(int(value)) if value.is_integer() else str(value)
+        rounded = round(value, 1)
+        return str(int(rounded)) if rounded.is_integer() else f"{rounded:.1f}"
     if isinstance(value, int):
         return str(value)
     if isinstance(value, (list, tuple, set)):
         return ", ".join(_csv_text(item) for item in value if item is not None)
     return str(value)
-
 
 def _desc_from(pn: str, rev: str) -> str:
     safe_rev = str(rev or "").replace("/", "-").replace("\\", "-").replace(":", "-")
