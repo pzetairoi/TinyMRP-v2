@@ -701,17 +701,28 @@ def parts_lazy():
             | _or_contains(material_paths, "sheet")
         )
     else:
-        q = add_field_filter(q, proc_key)
+        terms = _terms(proc_val_norm)
+        if proc_val_norm and proc_val_norm not in terms:
+            terms.insert(0, proc_val_norm)
+        if terms:
+            q = q & _process_filter_q(terms)
     g = _filter_value("global", "")
-    runtime_global_search = bool(g) and any(field_id in runtime_filter_ids for field_id in parts_field_ids if field_id != "process")
-    if g and not runtime_global_search:
+
+    # Keep global search in MongoDB. Do not allow normal search to trigger
+    # a Python-side scan of all parts just because one visible field is runtime-only.
+    runtime_global_search = False
+
+    if g:
         global_paths: list[str] = []
         for field_id in parts_field_ids:
             if field_id == "process":
                 continue
+            if field_id in runtime_filter_ids:
+                continue
             for fld in query_paths_for_field(field_id, field_config):
                 if fld not in global_paths:
                     global_paths.append(fld)
+
         for t in _terms(str(g)):
             orq = _process_filter_q([t])
             for fld in global_paths:
@@ -812,7 +823,6 @@ def parts_lazy():
         min_props_filter,
         bool(typed_filter_specs),
         bool(runtime_filter_specs),
-        runtime_global_search,
         runtime_sort,
     ])
 
@@ -825,7 +835,7 @@ def parts_lazy():
         filtered_docs = []
         resolved_cache: dict[tuple[str, str], dict[str, Any]] = {}
         meta = current_app.config.get("PROCESS_META", {})
-        global_terms = _terms(str(g)) if runtime_global_search else []
+        global_terms: list[str] = []
         for p in all_docs:
             attrs = harvest_part_attrs(p)
             rev = _normalized_revision(p, attrs)
@@ -860,20 +870,7 @@ def parts_lazy():
                     break
             if not runtime_match:
                 continue
-            if runtime_global_search:
-                haystacks: list[str] = []
-                for field_id in parts_context_ids:
-                    if field_id == "thumbnail":
-                        continue
-                    value = values.get(field_id)
-                    if isinstance(value, bool):
-                        haystacks.append("true yes" if value else "false no")
-                    elif value not in (None, ""):
-                        haystacks.append(str(value).strip().lower())
-                if proc_list:
-                    haystacks.append(", ".join(proc_list).lower())
-                if not all(any(term in hay for hay in haystacks) for term in global_terms):
-                    continue
+ 
             resolved_cache[key] = values
             filtered_docs.append(p)
         if runtime_sort:
