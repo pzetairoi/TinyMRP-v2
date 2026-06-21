@@ -32,8 +32,8 @@ class Part(Document):
             { "fields": ["description"], "name": "parts_description_idx" },
             { "fields": ["notes_search"], "name": "parts_notes_search_idx" },
             { "fields": ["comments_search"], "name": "parts_comments_search_idx" },
-            { "fields": ["canonical.material"], "name": "parts_material_idx" },
-            { "fields": ["canonical.finish"], "name": "parts_finish_idx" },
+            { "fields": ["canonical.material"], "name": "parts_canonical_material_idx" },
+            { "fields": ["canonical.finish"], "name": "parts_canonical_finish_idx" },
         ],
         "db_alias": DB_ALIAS
     }

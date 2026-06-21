@@ -456,8 +456,7 @@ export default function PartDetailPage() {
   function normalizeFilters(next: TTFilters): TTFilters {
     const out: TTFilters = {};
     for (const k of Object.keys(next || {})) {
-      const v = next[k]?.value;
-      if (v !== "" && v !== null && v !== undefined) out[k] = next[k];
+      if (hasActiveFilterValue(filterMetaValue(next[k]))) out[k] = next[k];
     }
     return out;
   }
@@ -490,7 +489,7 @@ export default function PartDetailPage() {
 
   function renderBomColumnFilter(field: FieldDefinition) {
     if (field.data_type !== "boolean") return undefined
-    const rawValue = ttFilters?.[field.id]?.value
+    const rawValue = filterMetaValue(ttFilters?.[field.id])
     const value = rawValue === true ? "true" : rawValue === false ? "false" : ""
     return (
       <select
@@ -502,6 +501,22 @@ export default function PartDetailPage() {
         <option value="true">Yes</option>
         <option value="false">No</option>
       </select>
+    )
+  }
+
+  function renderFlatBomColumnFilter(field: FieldDefinition) {
+    if (field.data_type === "boolean") return renderBomColumnFilter(field)
+    const rawValue = filterMetaValue(ttFilters?.[field.id])
+    const value = hasActiveFilterValue(rawValue) ? String(rawValue) : ""
+
+    return (
+      <input
+        className="form-control form-control-sm"
+        type="text"
+        value={value}
+        onChange={(e) => setTTFilterValue(field.id, e.target.value, "custom")}
+        placeholder={fieldFilterPlaceholder(field)}
+      />
     )
   }
 
@@ -559,6 +574,31 @@ function bestUrl(f: FileRow): string {
     return row?.data ?? row ?? {};
   }
 
+  function bomCellValue(row: any, fieldId: string): any {
+    const data = bomData(row);
+    return data?.[fieldId];
+  }
+
+  function filterMetaValue(filterMeta: any): any {
+    if (!filterMeta || typeof filterMeta !== "object") return filterMeta;
+    if ("value" in filterMeta) return filterMeta.value;
+
+    const constraints = filterMeta.constraints;
+    if (Array.isArray(constraints)) {
+      const active = constraints.find((item) => {
+        const value = item?.value;
+        return value !== "" && value !== null && value !== undefined;
+      });
+      return active?.value;
+    }
+
+    return undefined;
+  }
+
+  function hasActiveFilterValue(value: any): boolean {
+    return value !== "" && value !== null && value !== undefined;
+  }
+
   function sharedPartHref(targetPn: string, targetRev: string) {
     if (!shareViewBase) return "#";
     const qs = new URLSearchParams();
@@ -607,8 +647,7 @@ function bestUrl(f: FileRow): string {
   }
 
   function renderBomCell(field: FieldDefinition, row: any) {
-    const data = bomData(row);
-    const value = data?.[field.id];
+    const value = bomCellValue(row, field.id);
     if (field.id === "thumbnail") return thumbOnlyBody(row);
     if (field.id === "part_number") return pnBody(row);
     if (field.data_type === "link") {
@@ -1268,42 +1307,28 @@ function bestUrl(f: FileRow): string {
     () => new Map(bomFields.map((field) => [field.id, field] as const)),
     [bomFields],
   )
-  const flatTableFilters = useMemo(() => {
-    const next: TTFilters = {}
-    for (const [fieldId, filterMeta] of Object.entries(ttFilters || {})) {
-      if (bomFieldMap.get(fieldId)?.data_type === "boolean") continue
-      next[fieldId] = filterMeta
-    }
-    return next
-  }, [bomFieldMap, ttFilters])
   const flatFilteredRows = useMemo(() => {
-    const booleanEntries = Object.entries(ttFilters || {}).filter(
-      ([fieldId]) => bomFieldMap.get(fieldId)?.data_type === "boolean",
-    )
-    if (!booleanEntries.length) return flatBomRows
+    const activeEntries = Object.entries(ttFilters || {}).filter(([fieldId, filterMeta]) => {
+      const field = bomFieldMap.get(fieldId);
+      if (!field || field.id === "thumbnail") return false;
+      return hasActiveFilterValue(filterMetaValue(filterMeta));
+    });
+
+    if (!activeEntries.length) return flatBomRows;
+
     return flatBomRows.filter((row) =>
-      booleanEntries.every(([fieldId, filterMeta]) => {
+      activeEntries.every(([fieldId, filterMeta]) => {
         const field = bomFieldMap.get(fieldId)
-        return field ? matchesFieldFilter(field, row?.[fieldId], filterMeta?.value) : true
+        if (!field) return true;
+
+        return matchesFieldFilter(
+          field,
+          bomCellValue(row, fieldId),
+          filterMetaValue(filterMeta),
+        );
       }),
     )
   }, [bomFieldMap, flatBomRows, ttFilters])
-
-  function onFlatTTFilter(e: any) {
-    const nextNonBoolean = normalizeFilters(e.filters || {})
-    setTtFilters((prev) => {
-      const preservedBoolean: TTFilters = {}
-      for (const [fieldId, filterMeta] of Object.entries(prev || {})) {
-        if (bomFieldMap.get(fieldId)?.data_type === "boolean") {
-          preservedBoolean[fieldId] = filterMeta
-        }
-      }
-      return normalizeFilters({
-        ...nextNonBoolean,
-        ...preservedBoolean,
-      })
-    })
-  }
 
   async function persistFieldPreferences(nextPrefs: FieldPreferences) {
     setFieldPreferences(nextPrefs)
@@ -3172,8 +3197,6 @@ function bestUrl(f: FileRow): string {
             stripedRows
             responsiveLayout="scroll"
             filterDisplay="row"
-            filters={flatTableFilters as any}
-            onFilter={onFlatTTFilter}
             showGridlines
             scrollable
             scrollHeight="55vh"
@@ -3203,10 +3226,10 @@ function bestUrl(f: FileRow): string {
                   sortable={field.sortable !== false}
                   filter={field.filterable !== false}
                   filterMatchMode="custom"
-                  filterFunction={(value, flt) => matchesFieldFilter(field, value, flt)}
+                  filterFunction={() => true}
                   showFilterMenu={false}
                   filterPlaceholder={field.data_type === "boolean" ? undefined : fieldFilterPlaceholder(field)}
-                  filterElement={renderBomColumnFilter(field)}
+                  filterElement={renderFlatBomColumnFilter(field)}
                   body={(row: FlatBomRow) => renderBomCell(field, row)}
                   style={style}
                 />
