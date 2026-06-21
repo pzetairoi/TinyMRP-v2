@@ -209,12 +209,20 @@ def normalize_processes(attrs: Dict, meta: Dict) -> List[str]:
     if not procs:
         return []
 
-    alias = meta.get("_alias_index", {})
+    alias = meta.get("_alias_index", {}) if isinstance(meta, dict) else {}
+    catalog = {str(key): value for key, value in (meta or {}).items() if not str(key).startswith("_")} if isinstance(meta, dict) else {}
     normalized = []
     seen = set()
     for p in procs:
-        canon = alias.get(_norm(p), p)
-        if canon not in meta:
+        token = _norm(p)
+        if not token:
+            continue
+        canon = alias.get(token)
+        if canon is None and token in catalog:
+            canon = token
+        if canon is None:
+            canon = "others" if catalog else token
+        elif catalog and canon not in catalog:
             canon = "others"
         if canon not in seen:
             seen.add(canon)

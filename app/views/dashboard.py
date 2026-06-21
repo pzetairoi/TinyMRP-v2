@@ -241,9 +241,9 @@ def dashboard_summary():
 
     missing_material_raw = {
         "$or": [
-            {"attrs.material": {"$exists": False}},
-            {"attrs.material": ""},
-            {"attrs.material": None},
+            {"canonical.material": {"$exists": False}},
+            {"canonical.material": ""},
+            {"canonical.material": None},
         ]
     }
     missing_description_raw = {
@@ -253,29 +253,11 @@ def dashboard_summary():
         ]
     }
     missing_process_raw = {
-        "$and": [
-            {"$or": [{"processes": {"$exists": False}}, {"processes": {"$size": 0}}]},
-            {
-                "$or": [
-                    {"attrs.process": {"$exists": False}},
-                    {"attrs.process": ""},
-                    {"attrs.process": None},
-                    {"attrs.process2": {"$exists": False}},
-                    {"attrs.process2": ""},
-                    {"attrs.process2": None},
-                    {"attrs.process3": {"$exists": False}},
-                    {"attrs.process3": ""},
-                    {"attrs.process3": None},
-                    {"attrs.processes": {"$exists": False}},
-                    {"attrs.processes": {"$size": 0}},
-                    {"attrs.processes": ""},
-                    {"attrs.processes": None},
-                ]
-            },
-        ]
+        "$or": [{"processes": {"$exists": False}}, {"processes": {"$size": 0}}],
     }
     approved_raw = {
         "$or": [
+            {"canonical.approved_by": {"$exists": True, "$ne": ""}},
             {"attrs.approvedby": {"$exists": True, "$ne": ""}},
             {"attrs.approved_by": {"$exists": True, "$ne": ""}},
             {"attrs.approved": {"$exists": True, "$nin": ["", "no", "false", "0"]}},

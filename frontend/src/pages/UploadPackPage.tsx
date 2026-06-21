@@ -586,7 +586,7 @@ export default function UploadPackPage() {
                   </label>
                 </div>
                 <div className="text-muted small mt-1">
-                  Notes and comments are preserved even when import data overrides other fields.
+                  Internal notes and comments are preserved even when import data overrides other fields.
                 </div>
               </div>
               <button className="btn btn-primary mt-3" onClick={runImport} disabled={busy}>

@@ -30,6 +30,13 @@ export type FieldContext = {
   available_fields: FieldDefinition[]
 }
 
+export type CanonicalAliasEntry = {
+  field_id: string
+  label: string
+  multi_value?: boolean
+  aliases: string[]
+}
+
 export type FieldPreferences = {
   contexts: Record<string, { field_ids: string[]; use_default?: boolean }>
 }
@@ -37,6 +44,7 @@ export type FieldPreferences = {
 export type FieldConfigPayload = {
   fields: FieldDefinition[]
   contexts: Record<string, FieldContext>
+  canonical_aliases?: CanonicalAliasEntry[]
 }
 
 export type FieldConfigResponse = {

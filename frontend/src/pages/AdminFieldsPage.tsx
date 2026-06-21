@@ -4,6 +4,7 @@ import type { ApiError } from '../lib/api'
 import {
   loadFieldCandidates,
   loadFieldConfig,
+  type CanonicalAliasEntry,
   type FieldCandidate,
   type FieldConfigPayload,
   type FieldContext,
@@ -48,6 +49,13 @@ function cloneContexts(contexts: Record<string, FieldContext>) {
   ) as Record<string, FieldContext>
 }
 
+function cloneCanonicalAliases(entries: CanonicalAliasEntry[] | undefined) {
+  return (entries || []).map((entry) => ({
+    ...entry,
+    aliases: [...(entry.aliases || [])],
+  }))
+}
+
 export default function AdminFieldsPage() {
   const [config, setConfig] = useState<FieldConfigPayload | null>(null)
   const [fieldCandidates, setFieldCandidates] = useState<FieldCandidate[]>([])
@@ -65,6 +73,7 @@ export default function AdminFieldsPage() {
         setConfig({
           fields: [...(resp.config.fields || [])],
           contexts: cloneContexts(resp.config.contexts || {}),
+          canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
         })
         setCanAdmin(!!resp.permissions?.can_admin)
         if (resp.permissions?.can_admin) {
@@ -84,6 +93,7 @@ export default function AdminFieldsPage() {
   const fields = config?.fields || []
   const builtinFields = useMemo(() => fields.filter((field) => field.kind !== 'custom'), [fields])
   const customFields = useMemo(() => fields.filter((field) => field.kind === 'custom'), [fields])
+  const canonicalAliases = config?.canonical_aliases || []
   const availableFieldCandidates = useMemo(() => {
     const configuredIds = new Set(fields.map((field) => slugFieldId(field.id)))
     const configuredSources = new Set(fields.map((field) => normalizeSourcePath(field.source_path || '')).filter(Boolean))
@@ -128,6 +138,26 @@ export default function AdminFieldsPage() {
             filterable: true,
           },
         ],
+      }
+    })
+  }
+
+  function updateCanonicalAliases(fieldId: string, value: string) {
+    setConfig((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        canonical_aliases: (prev.canonical_aliases || []).map((entry) =>
+          entry.field_id === fieldId
+            ? {
+                ...entry,
+                aliases: value
+                  .split(/[,\n;]/)
+                  .map((item) => item.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''))
+                  .filter((item, idx, arr) => item && arr.indexOf(item) === idx),
+              }
+            : entry,
+        ),
       }
     })
   }
@@ -268,6 +298,10 @@ export default function AdminFieldsPage() {
             },
           ]),
         ),
+        canonical_aliases: (config.canonical_aliases || []).map((entry) => ({
+          field_id: entry.field_id,
+          aliases: entry.aliases || [],
+        })),
       }
       const resp = await apiFetch<{ config: FieldConfigPayload }>('/api/admin/field-config', {
         method: 'PUT',
@@ -276,6 +310,7 @@ export default function AdminFieldsPage() {
       setConfig({
         fields: [...(resp.config.fields || [])],
         contexts: cloneContexts(resp.config.contexts || {}),
+        canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
       })
       setMessage('Field configuration saved.')
     } catch (err) {
@@ -296,6 +331,7 @@ export default function AdminFieldsPage() {
       setConfig({
         fields: [...(resp.config.fields || [])],
         contexts: cloneContexts(resp.config.contexts || {}),
+        canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
       })
       setMessage('Defaults restored.')
     } catch (err) {
@@ -310,6 +346,28 @@ export default function AdminFieldsPage() {
       setSelectedCandidateId('')
     }
   }, [availableFieldCandidates, selectedCandidateId])
+
+  async function rebuildCanonicalFields() {
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const resp = await apiFetch<{ config: FieldConfigPayload; report: { scanned: number; updated: number } }>(
+        '/api/admin/field-config/rebuild-canonical-fields',
+        { method: 'POST' },
+      )
+      setConfig({
+        fields: [...(resp.config.fields || [])],
+        contexts: cloneContexts(resp.config.contexts || {}),
+        canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
+      })
+      setMessage(`Canonical fields rebuilt for ${resp.report.updated} of ${resp.report.scanned} parts.`)
+    } catch (err) {
+      setError((err as ApiError).message || 'Failed to rebuild canonical fields.')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   if (error && !config) {
     return <div className="text-danger">{error}</div>
@@ -388,6 +446,51 @@ export default function AdminFieldsPage() {
                       placeholder={field.kind === 'special' ? 'Computed field' : 'attrs.some_field'}
                     />
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card p-3 mb-4">
+        <div className="d-flex align-items-center justify-content-between mb-3">
+          <div>
+            <h5 className="mb-0">Canonical Import Aliases</h5>
+            <div className="text-muted small">
+              Map raw imported attribute names to the app canonical fields. Use this for files where fields such as `comments` really mean `process`.
+            </div>
+          </div>
+          <button className="btn btn-outline-primary" onClick={rebuildCanonicalFields} disabled={saving}>
+            {saving ? 'Working...' : 'Rebuild canonical fields'}
+          </button>
+        </div>
+        <div className="table-responsive">
+          <table className="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th style={{ width: 180 }}>Canonical field</th>
+                <th>Aliases</th>
+                <th style={{ width: 120 }}>Mode</th>
+              </tr>
+            </thead>
+            <tbody>
+              {canonicalAliases.map((entry) => (
+                <tr key={entry.field_id}>
+                  <td>
+                    <div className="fw-semibold">{entry.label}</div>
+                    <div className="small text-muted font-monospace">{entry.field_id}</div>
+                  </td>
+                  <td>
+                    <textarea
+                      className="form-control form-control-sm font-monospace"
+                      rows={2}
+                      value={(entry.aliases || []).join(', ')}
+                      onChange={(e) => updateCanonicalAliases(entry.field_id, e.target.value)}
+                      placeholder="process, comments, secondprocess"
+                    />
+                  </td>
+                  <td className="small text-muted">{entry.multi_value ? 'Multi-value' : 'Single value'}</td>
                 </tr>
               ))}
             </tbody>

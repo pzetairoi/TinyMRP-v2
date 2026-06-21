@@ -31,13 +31,9 @@ def _safe_lower(value: str | None) -> str:
 def normalized_processes(attrs: Dict, part_processes: List[str], meta: Dict) -> List[str]:
     from app.services.processmeta import normalize_processes
 
-    proc_list = normalize_processes(attrs or {}, meta)
     if part_processes:
-        extra = normalize_processes({"processes": part_processes}, meta)
-        for p in extra:
-            if p not in proc_list:
-                proc_list.append(p)
-    return proc_list
+        return normalize_processes({"processes": part_processes}, meta)
+    return normalize_processes(attrs or {}, meta)
 
 
 def classify_part(attrs: Dict, part_processes: List[str], meta: Dict, category: str = "") -> str:

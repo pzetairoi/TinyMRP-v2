@@ -14,6 +14,7 @@ from app.models.extra_file import PartExtraFile
 from app.models.part import Part
 from app.models.part_share import PartShareLink
 from app.services.attrs import harvest_part_attrs
+from app.services.part_annotations import filtered_part_attrs
 from app.services.audit import log_action
 from app.services.extra_files import extra_abs_path, extra_file_token_for, extra_root, resolve_extra_file_token
 from app.services.field_config import get_field_config
@@ -246,13 +247,15 @@ def _extra_file_overview_row_for_share(share, raw_token: str, ef: PartExtraFile)
 
 def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
     attrs = harvest_part_attrs(part)
-    public_attrs = {k: v for k, v in (attrs or {}).items() if k not in {"notes", "comments", "comments_search"}}
+    public_attrs = filtered_part_attrs(part, attrs)
     norm_rev = _normalized_revision(part, attrs)
     _config, _attrs, summary_field_values = _context_field_values(
         part,
         "part_detail_summary",
         extra={"part_number": part.part_number, "revision": norm_rev},
     )
+    summary_field_values["notes"] = ""
+    summary_field_values["comments"] = ""
 
     preview_urls = _share_preview_urls_for(share, raw_token, part.part_number, norm_rev, is_dwg=False)
     drawing_urls = _share_preview_urls_for(share, raw_token, part.part_number, norm_rev, is_dwg=True)
@@ -294,8 +297,9 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
             "material": summary_field_values.get("material", attrs.get("material", "")),
             "finish": summary_field_values.get("finish", attrs.get("finish", "")),
             "mass": summary_field_values.get("mass", attrs.get("mass", "")),
-            "process": summary_field_values.get("process", _process_label(attrs)),
+            "process": summary_field_values.get("process", _process_label(part, attrs)),
             "processes": list(part.processes or []),
+            "notes": "",
             "field_values": summary_field_values,
             "attributes": public_attrs,
         },
@@ -567,7 +571,7 @@ def public_share_bom_flat(share_id: str, token: str):
             part_doc = Part.objects(part_number=child_pn, revision=key[1]).first()
             attrs = harvest_part_attrs(part_doc) if part_doc else {}
             effective_rev = _bom_clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
-            proc_label = _process_label(attrs)
+            proc_label = _process_label(part_doc, attrs)
             thumbs = _share_preview_urls_for(share, token, child_pn, effective_rev, is_dwg=False)
             coverage = _bom_coverage_groups(child_pn, effective_rev)
             from app.services.field_config import context_field_ids, resolve_part_field_values
