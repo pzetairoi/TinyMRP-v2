@@ -32,6 +32,7 @@ class PartFile(Document):
         "db_alias": DB_ALIAS,
     "indexes": [
         # unique identity for an artifact type per PN+REV
-        {"fields": ["part_number", "revision", "ext_group", "ext","is_dwg"], "unique": True}
+        {"fields": ["part_number", "revision", "ext_group", "ext","is_dwg"], "unique": True},
+        {"fields": ["ext_group", "part_number", "revision"], "name": "part_files_ext_group_part_rev_idx"},
     ]
 }
