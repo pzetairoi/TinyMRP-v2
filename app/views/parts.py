@@ -631,6 +631,70 @@ def parts_lazy():
             q = q & or_q
         return q
 
+    def _bool_filter_value(value: Any) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+        if text in ("1", "true", "yes", "y", "on"):
+            return True
+        if text in ("0", "false", "no", "n", "off", "missing"):
+            return False
+        return None
+
+    def _number_filter(value: Any) -> tuple[str, float, float | None] | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        range_match = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:\.\.|to|-)\s*(-?\d+(?:\.\d+)?)\s*$", text, re.I)
+        if range_match:
+            left = float(range_match.group(1))
+            right = float(range_match.group(2))
+            return ("range", min(left, right), max(left, right))
+        compare_match = re.match(r"^\s*(<=|>=|=|<|>)?\s*(-?\d+(?:\.\d+)?)\s*$", text)
+        if compare_match:
+            op = compare_match.group(1) or "="
+            target = float(compare_match.group(2))
+            return (op, target, None)
+        return None
+
+    def add_typed_field_filter(q: Q, key: str, data_type: str, raw_value: Any):
+        paths = query_paths_for_field(key, field_config)
+        if not paths:
+            return None
+
+        if data_type == "boolean":
+            expected = _bool_filter_value(raw_value)
+            if expected is None:
+                return add_field_filter(q, key)
+            or_q = Q()
+            for fld in paths:
+                or_q = or_q | Q(**{fld: expected})
+            return q & or_q
+
+        if data_type == "number":
+            parsed = _number_filter(raw_value)
+            path = primary_query_path(key, field_config)
+            if parsed is None or not path:
+                return add_field_filter(q, key)
+            op, start, end = parsed
+            if op == "range":
+                return q & Q(**{f"{path}__gte": start}) & Q(**{f"{path}__lte": end})
+            if op == ">":
+                return q & Q(**{f"{path}__gt": start})
+            if op == ">=":
+                return q & Q(**{f"{path}__gte": start})
+            if op == "<":
+                return q & Q(**{f"{path}__lt": start})
+            if op == "<=":
+                return q & Q(**{f"{path}__lte": start})
+            return q & Q(**{path: start})
+
+        return add_field_filter(q, key)
+
     def _flag_enabled(key: str) -> bool:
         val = _filter_value(key)
         if isinstance(val, bool):
@@ -644,6 +708,11 @@ def parts_lazy():
         for fld in paths:
             out = out | Q(**{f"{fld}__icontains": term})
         return out
+
+    def _or_array_regex(field: str, term: str) -> Q:
+        if not term:
+            return Q()
+        return Q(__raw__={field: {"$regex": re.escape(term), "$options": "i"}})
 
     q = Q()
     parts_context_ids = context_field_ids("parts_list", field_config)
@@ -659,7 +728,14 @@ def parts_lazy():
             continue
         if data_type in {"boolean", "number"}:
             if raw_value is not _missing and raw_value not in (None, ""):
-                typed_filter_specs.append((field_id, data_type, raw_value))
+                if field_id in runtime_filter_ids:
+                    typed_filter_specs.append((field_id, data_type, raw_value))
+                else:
+                    next_q = add_typed_field_filter(q, field_id, data_type, raw_value)
+                    if next_q is None:
+                        typed_filter_specs.append((field_id, data_type, raw_value))
+                    else:
+                        q = next_q
             continue
         if field_id in runtime_filter_ids:
             if raw_value is not _missing and raw_value not in (None, ""):
@@ -680,10 +756,31 @@ def parts_lazy():
         runtime_filter_specs.append(("finish", str(field_meta.get("finish", {}).get("data_type") or "text"), finish_val))
     else:
         q = add_field_filter(q, "finish")
-    def _process_filter_q(terms: list[str]) -> Q:
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+
+    def _process_filter_q(text: str) -> Q:
+        raw_text = str(text or "").strip()
+        if not raw_text:
+            return Q()
+
+        normalized_terms = normalize_processes({"processes": [raw_text]}, meta)
+        raw_terms = _terms(raw_text)
+        if raw_text.lower() not in raw_terms:
+            raw_terms.insert(0, raw_text.lower())
+
         or_q = Q()
-        if terms:
-            or_q = or_q | Q(processes__in=terms)
+        if normalized_terms:
+            or_q = or_q | Q(processes__in=normalized_terms)
+        for term in raw_terms:
+            or_q = (
+                or_q
+                | _or_array_regex("processes", term)
+                | Q(attrs__process__icontains=term)
+                | Q(attrs__process2__icontains=term)
+                | Q(attrs__process3__icontains=term)
+                | Q(attrs__processes__icontains=term)
+                | Q(canonical__processes__icontains=term)
+            )
         return or_q
 
     category_paths = query_paths_for_field("category", field_config) or ["attrs__category", "category"]
@@ -693,21 +790,18 @@ def parts_lazy():
     proc_val_norm = str(proc_val or "").strip().lower()
     if proc_val_norm in ("hardware", "fastener", "fasteners"):
         q = q & (
-            _process_filter_q(["hardware", "fastener", "fasteners"])
+            _process_filter_q("hardware")
             | _or_contains(category_paths, "hardware")
         )
     elif proc_val_norm in ("sheet metal", "sheetmetal", "sheet"):
         q = q & (
-            _process_filter_q(["lasercut", "profile cut", "cutting", "folding", "rolling", "sheet"])
+            _process_filter_q(proc_val_norm)
             | _or_contains(category_paths, "sheet")
             | _or_contains(material_paths, "sheet")
         )
     else:
-        terms = _terms(proc_val_norm)
-        if proc_val_norm and proc_val_norm not in terms:
-            terms.insert(0, proc_val_norm)
-        if terms:
-            q = q & _process_filter_q(terms)
+        if proc_val_norm:
+            q = q & _process_filter_q(proc_val_norm)
     g = _filter_value("global", "")
 
     # Keep global search in MongoDB. Do not allow normal search to trigger
@@ -726,7 +820,7 @@ def parts_lazy():
                     global_paths.append(fld)
 
         for t in _terms(str(g)):
-            orq = _process_filter_q([t])
+            orq = _process_filter_q(t)
             for fld in global_paths:
                 orq = orq | Q(**{f"{fld}__icontains": t})
             q = q & orq
@@ -836,8 +930,6 @@ def parts_lazy():
         coverage = _coverage_map(all_docs)
         filtered_docs = []
         resolved_cache: dict[tuple[str, str], dict[str, Any]] = {}
-        meta = current_app.config.get("PROCESS_META", {})
-        global_terms: list[str] = []
         for p in all_docs:
             attrs = harvest_part_attrs(p)
             rev = _normalized_revision(p, attrs)
