@@ -12,7 +12,9 @@ from collections import defaultdict
 # Import necessary services for file scanning and upserting
 from app.services.filescan import discover_part_files, upsert_part_files_detailed
 # Import necessary services for attributes normalization and merging
-from app.services.attrs import approved_value, harvest_part_attrs, normalize_props, merge_save_part_attrs, process_attributes
+from app.services.attrs import approved_value, harvest_part_attrs, process_attributes
+from app.services.canonical_fields import sync_part_canonical_fields
+from app.services.part_annotations import migrate_legacy_annotations
 from app.services.processmeta import normalize_processes
 from app.services.part_norm import clean_rev, clean_pn, clean_qty
 
@@ -75,7 +77,6 @@ _PART_OVERRIDE_MODE_ALIASES = {
     "override_unless_approved": _PART_OVERRIDE_MODE_DEFAULT,
 }
 _PART_OVERRIDE_MODES = {_PART_OVERRIDE_MODE_DEFAULT, "preserve", "approved_only", "always"}
-_PROTECTED_ATTR_KEYS = {"notes", "comments", "comments_search"}
 _REPORT_ATTR_EXCLUDE_KEYS = {"seed", "comments_search"}
 
 
@@ -98,19 +99,13 @@ def _has_value(value: Any) -> bool:
 def _merge_attrs_preserve(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(existing or {})
     for key, value in (incoming or {}).items():
-        if key in _PROTECTED_ATTR_KEYS and _has_value(merged.get(key)):
-            continue
         if not _has_value(merged.get(key)) and _has_value(value):
             merged[key] = value
     return merged
 
 
 def _merge_attrs_replace(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
-    merged = dict(incoming or {})
-    for key in _PROTECTED_ATTR_KEYS:
-        if _has_value((existing or {}).get(key)):
-            merged[key] = existing.get(key)
-    return merged
+    return dict(incoming or {})
 
 
 def _should_replace_existing(existing_attrs: Dict[str, Any], incoming_attrs: Dict[str, Any], override_mode: str) -> bool:
@@ -133,16 +128,19 @@ def _apply_part_update(
     seed_tag: str,
     override_mode: str,
 ) -> None:
-    incoming_attrs, incoming_processes = process_attributes(norm.get("attrs") or {})
-    if _is_hardware_by_folder(incoming_attrs) or _is_hardware_by_process(incoming_attrs):
-        incoming_attrs["process"] = "hardware"
-        incoming_attrs["process2"] = ""
-        incoming_attrs["process3"] = ""
-        incoming_attrs["processes"] = ["hardware"]
-        incoming_processes = ["hardware"]
+    incoming_attrs = dict(norm.get("attrs") or {})
     incoming_attrs["seed"] = seed_tag
+    _, incoming_processes = process_attributes(incoming_attrs)
+    hardware_override = _is_hardware_by_folder(incoming_attrs) or _is_hardware_by_process(incoming_attrs)
+    if hardware_override:
+        incoming_processes = ["hardware"]
 
     is_new = part.id is None
+    if not is_new:
+        try:
+            migrate_legacy_annotations(part)
+        except Exception:
+            pass
     existing_attrs = dict(getattr(part, "attrs", {}) or {})
     replace_existing = is_new or _should_replace_existing(existing_attrs, incoming_attrs, override_mode)
 
@@ -151,9 +149,18 @@ def _apply_part_update(
         part.category = norm.get("category") or ""
         part.uom = norm.get("uom") or "EA"
         part.attrs = _merge_attrs_replace(existing_attrs, incoming_attrs)
-        if incoming_processes:
-            part.processes = incoming_processes
-        elif is_new:
+        sync_part_canonical_fields(
+            part,
+            raw_attrs=part.attrs,
+            top_level_overrides={
+                "description": part.description,
+                "revision": norm.get("revision") or part.revision or "",
+                "category": part.category,
+                "uom": part.uom,
+            },
+            process_override=incoming_processes if incoming_processes or hardware_override else None,
+        )
+        if not incoming_processes and is_new:
             part.processes = []
         return
 
@@ -164,8 +171,17 @@ def _apply_part_update(
     if not _has_value(getattr(part, "uom", None)):
         part.uom = norm.get("uom") or "EA"
     part.attrs = _merge_attrs_preserve(existing_attrs, incoming_attrs)
-    if not list(getattr(part, "processes", None) or []) and incoming_processes:
-        part.processes = incoming_processes
+    sync_part_canonical_fields(
+        part,
+        raw_attrs=part.attrs,
+        top_level_overrides={
+            "description": part.description or norm.get("description") or "",
+            "revision": norm.get("revision") or part.revision or "",
+            "category": part.category or norm.get("category") or "",
+            "uom": part.uom or norm.get("uom") or "EA",
+        },
+        process_override=incoming_processes if incoming_processes or hardware_override else None,
+    )
 
 
 def _report_value(value: Any) -> Any:

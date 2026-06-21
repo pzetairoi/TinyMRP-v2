@@ -9,6 +9,7 @@ from app.models.artifact import PartFile
 from app.models.bom import BOMLink
 from app.models.part import Part
 from app.services.attrs import harvest_part_attrs
+from app.services.canonical_fields import canonical_processes_for_part
 from app.services.field_config import (
     context_field_ids,
     default_arena_header_for_field,
@@ -407,7 +408,7 @@ def _desc_from(pn: str, rev: str) -> str:
 def _raw_process_terms(part: Optional[Part], attrs: dict[str, Any]) -> set[str]:
     values: list[Any] = []
     if part is not None:
-        values.extend(list(getattr(part, "processes", []) or []))
+        values.extend(canonical_processes_for_part(part))
 
     for key in ("process", "process2", "process3", "processes"):
         raw = attrs.get(key)

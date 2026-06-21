@@ -10,6 +10,7 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs, ALIASES, approved_value
+from app.services.canonical_fields import canonical_processes_for_part
 from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.processmeta import normalize_processes
 from app.services.filenames import build_output_name
@@ -86,15 +87,8 @@ def _part_description(part: Optional[Part], attrs: Optional[Dict] = None) -> str
 def _part_processes(part: Optional[Part]) -> List[str]:
     if not part:
         return []
-    attrs = getattr(part, "attrs", {}) or {}
     meta = current_app.config.get("PROCESS_META", {}) or {}
-    proc_list = normalize_processes(attrs, meta)
-    if isinstance(getattr(part, "processes", None), list) and part.processes:
-        extra = normalize_processes({"processes": list(part.processes or [])}, meta)
-        for p in extra:
-            if p not in proc_list:
-                proc_list.append(p)
-    return proc_list
+    return canonical_processes_for_part(part, process_meta=meta)
 
 
 def _flatten_bom(
@@ -1889,14 +1883,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[da
     attrs = harvest_part_attrs(pdoc) if pdoc else {}
     desc = _part_description(pdoc, attrs) if pdoc else ""
 
-    meta = current_app.config.get("PROCESS_META", {}) or {}
-    processes = normalize_processes(attrs, meta)
-    if pdoc and isinstance(getattr(pdoc, "processes", None), list):
-        extra = normalize_processes({"processes": list(pdoc.processes or [])}, meta)
-        for p in extra:
-            if p not in processes:
-                processes.append(p)
-    proc_text = ", ".join([p for p in processes if p])
+    proc_text = ", ".join([p for p in _part_processes(pdoc) if p])
 
     author = ""
     for key in ("author", "drawnby", "checkedby", "approvedby"):

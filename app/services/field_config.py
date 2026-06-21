@@ -4,9 +4,19 @@ import re
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
+from flask import current_app, has_app_context
+
 from app.models.app_settings import AppSettings
 from app.models.part import Part
-from app.services.attrs import ALIASES, approved_value, canonical_attr_key, comments_search_text, harvest_part_attrs, normalize_props
+from app.services.attrs import ALIASES, approved_value, canonical_attr_key, harvest_part_attrs, normalize_props
+from app.services.canonical_fields import (
+    canonical_alias_entries_from_field_config,
+    canonical_field_for_attr_key,
+    canonical_process_label_for_part,
+    default_canonical_alias_entries,
+    set_runtime_canonical_aliases,
+)
+from app.services.part_annotations import annotation_payload
 from app.services.part_norm import clean_rev
 from app.services.processmeta import normalize_processes
 
@@ -64,8 +74,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Revision",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.revision",
-        "fallback_paths": ["attrs.revision", "part.revision"],
+        "source_path": "part.canonical.revision",
+        "fallback_paths": ["part.canonical.revision", "part.revision", "attrs.revision"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -86,8 +96,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Notes",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.notes",
-        "fallback_paths": ["attrs.notes"],
+        "source_path": "part.notes_search",
+        "fallback_paths": ["part.notes_search"],
         "source_locked": False,
         "sortable": False,
         "filterable": True,
@@ -97,8 +107,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Comments",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.comments_search",
-        "fallback_paths": ["attrs.comments_search", "attrs.comments"],
+        "source_path": "part.comments_search",
+        "fallback_paths": ["part.comments_search"],
         "source_locked": False,
         "sortable": False,
         "filterable": True,
@@ -117,8 +127,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Category",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.category",
-        "fallback_paths": ["attrs.category", "part.category"],
+        "source_path": "part.canonical.category",
+        "fallback_paths": ["part.canonical.category", "part.category", "attrs.category"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -128,8 +138,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Material",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.material",
-        "fallback_paths": ["attrs.material"],
+        "source_path": "part.canonical.material",
+        "fallback_paths": ["part.canonical.material", "attrs.material"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -139,8 +149,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Finish",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.finish",
-        "fallback_paths": ["attrs.finish"],
+        "source_path": "part.canonical.finish",
+        "fallback_paths": ["part.canonical.finish", "attrs.finish"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -150,8 +160,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Mass",
         "kind": "builtin",
         "data_type": "number",
-        "source_path": "attrs.mass",
-        "fallback_paths": ["attrs.mass"],
+        "source_path": "part.canonical.mass",
+        "fallback_paths": ["part.canonical.mass", "attrs.mass"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -170,8 +180,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "UoM",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.uom",
-        "fallback_paths": ["attrs.uom", "part.uom"],
+        "source_path": "part.canonical.uom",
+        "fallback_paths": ["part.canonical.uom", "part.uom", "attrs.uom"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -192,8 +202,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Link",
         "kind": "builtin",
         "data_type": "link",
-        "source_path": "attrs.link",
-        "fallback_paths": ["attrs.link"],
+        "source_path": "part.canonical.link",
+        "fallback_paths": ["part.canonical.link", "attrs.link"],
         "source_locked": False,
         "sortable": False,
         "filterable": True,
@@ -203,8 +213,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "OEM",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.oem",
-        "fallback_paths": ["attrs.oem", "attrs.manufacturer", "part.manufacturer"],
+        "source_path": "part.canonical.oem",
+        "fallback_paths": ["part.canonical.oem", "attrs.oem", "attrs.manufacturer", "part.manufacturer"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -214,8 +224,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "OEM Part Number",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.oem_partnumber",
-        "fallback_paths": ["attrs.oem_partnumber", "attrs.mfr_part", "part.mfr_part"],
+        "source_path": "part.canonical.oem_partnumber",
+        "fallback_paths": ["part.canonical.oem_partnumber", "attrs.oem_partnumber", "attrs.mfr_part", "part.mfr_part"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -225,8 +235,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Datasheet",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.datasheet",
-        "fallback_paths": ["attrs.datasheet"],
+        "source_path": "part.canonical.datasheet",
+        "fallback_paths": ["part.canonical.datasheet", "attrs.datasheet"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -236,8 +246,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Classified",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.classified",
-        "fallback_paths": ["attrs.classified"],
+        "source_path": "part.canonical.classified",
+        "fallback_paths": ["part.canonical.classified", "attrs.classified"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -256,8 +266,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Approved By",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.approvedby",
-        "fallback_paths": ["attrs.approvedby", "attrs.approved_by", "attrs.approved"],
+        "source_path": "part.canonical.approved_by",
+        "fallback_paths": ["part.canonical.approved_by", "attrs.approvedby", "attrs.approved_by", "attrs.approved"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -267,8 +277,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Approved Date",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.approveddate",
-        "fallback_paths": ["attrs.approveddate"],
+        "source_path": "part.canonical.approved_date",
+        "fallback_paths": ["part.canonical.approved_date", "attrs.approveddate"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -278,8 +288,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Drawn By",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.drawnby",
-        "fallback_paths": ["attrs.drawnby"],
+        "source_path": "part.canonical.drawn_by",
+        "fallback_paths": ["part.canonical.drawn_by", "attrs.drawnby"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -289,8 +299,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Drawn Date",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.drawndate",
-        "fallback_paths": ["attrs.drawndate"],
+        "source_path": "part.canonical.drawn_date",
+        "fallback_paths": ["part.canonical.drawn_date", "attrs.drawndate"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -300,8 +310,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Checked By",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.checkedby",
-        "fallback_paths": ["attrs.checkedby"],
+        "source_path": "part.canonical.checked_by",
+        "fallback_paths": ["part.canonical.checked_by", "attrs.checkedby"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -311,8 +321,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Checked Date",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "attrs.checkeddate",
-        "fallback_paths": ["attrs.checkeddate"],
+        "source_path": "part.canonical.checked_date",
+        "fallback_paths": ["part.canonical.checked_date", "attrs.checkeddate"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -322,8 +332,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Manufacturer",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "part.manufacturer",
-        "fallback_paths": ["part.manufacturer", "attrs.manufacturer", "attrs.oem"],
+        "source_path": "part.canonical.manufacturer",
+        "fallback_paths": ["part.canonical.manufacturer", "part.manufacturer", "attrs.manufacturer", "attrs.oem"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -333,8 +343,8 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Manufacturer Part",
         "kind": "builtin",
         "data_type": "text",
-        "source_path": "part.mfr_part",
-        "fallback_paths": ["part.mfr_part", "attrs.mfr_part", "attrs.oem_partnumber"],
+        "source_path": "part.canonical.mfr_part",
+        "fallback_paths": ["part.canonical.mfr_part", "part.mfr_part", "attrs.mfr_part", "attrs.oem_partnumber"],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -820,6 +830,7 @@ def default_field_config() -> Dict[str, Any]:
         ],
         "custom_fields": [],
         "contexts": deepcopy(DEFAULT_CONTEXTS),
+        "canonical_aliases": default_canonical_alias_entries(),
     }
 
 
@@ -834,7 +845,6 @@ def _settings_doc(create: bool = True) -> Optional[AppSettings]:
 
 def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any]:
     payload = payload or {}
-    defaults = default_field_config()
     builtin_default_map = _default_builtin_map()
 
     builtin_raw = payload.get("builtin_fields")
@@ -939,6 +949,7 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
         "builtin_fields": builtin_fields,
         "custom_fields": custom_fields,
         "contexts": contexts,
+        "canonical_aliases": canonical_alias_entries_from_field_config(payload),
     }
 
 
@@ -1013,6 +1024,7 @@ def get_field_config() -> Dict[str, Any]:
     return {
         "fields": fields,
         "contexts": contexts,
+        "canonical_aliases": list(sanitized.get("canonical_aliases") or default_canonical_alias_entries()),
     }
 
 
@@ -1021,6 +1033,7 @@ def save_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any]:
     settings = _settings_doc(create=True)
     settings.field_config = sanitized
     settings.save()
+    set_runtime_canonical_aliases(sanitized)
     return get_field_config()
 
 
@@ -1028,6 +1041,7 @@ def reset_field_config() -> Dict[str, Any]:
     settings = _settings_doc(create=True)
     settings.field_config = {}
     settings.save()
+    set_runtime_canonical_aliases({})
     return get_field_config()
 
 
@@ -1145,6 +1159,7 @@ def _candidate_data_type(sample_values: Iterable[Any]) -> str:
 
 def discover_part_attr_fields() -> List[Dict[str, Any]]:
     builtin_source_paths = _builtin_candidate_source_paths()
+    builtin_ids = {field["id"] for field in DEFAULT_FIELDS}
     discovered: Dict[str, Dict[str, Any]] = {}
 
     for part in Part.objects.only("attrs").order_by("part_number", "revision"):
@@ -1156,28 +1171,33 @@ def discover_part_attr_fields() -> List[Dict[str, Any]]:
         for raw_key, raw_value in raw_attrs.items():
             if not _non_empty(raw_value):
                 continue
-            canonical_key = canonical_attr_key(raw_key)
-            field_id = ALIASES.get(canonical_key, canonical_key)
+            field_id = canonical_field_for_attr_key(raw_key) or ALIASES.get(canonical_attr_key(raw_key), canonical_attr_key(raw_key))
             if not field_id:
                 continue
             raw_keys_by_id.setdefault(field_id, set()).add(str(raw_key))
 
         normalized_attrs = normalize_props(raw_attrs)
         for key, value in normalized_attrs.items():
-            field_id = _normalize_field_id(key)
+            field_id = canonical_field_for_attr_key(key) or _normalize_field_id(key)
             source_path = f"attrs.{field_id}" if field_id else ""
             if not field_id or field_id in _FIELD_CANDIDATE_EXCLUDED_IDS:
                 continue
             if source_path in builtin_source_paths or not _non_empty(value):
                 continue
+            candidate_id = field_id
+            candidate_label_suffix = ""
+            if field_id in builtin_ids:
+                candidate_id = f"attr_{field_id}"
+                candidate_label_suffix = " (Attribute)"
             entry = discovered.setdefault(
-                field_id,
+                candidate_id,
                 {
-                    "id": field_id,
+                    "id": candidate_id,
                     "source_path": source_path,
                     "part_count": 0,
                     "raw_keys": set(),
                     "sample_values": [],
+                    "label_suffix": candidate_label_suffix,
                 },
             )
             entry["part_count"] += 1
@@ -1189,10 +1209,13 @@ def discover_part_attr_fields() -> List[Dict[str, Any]]:
     for field_id, item in discovered.items():
         raw_keys = sorted(item["raw_keys"], key=lambda value: value.lower())
         sample_values = list(item["sample_values"])
+        label = _candidate_label(field_id, raw_keys)
+        if item.get("label_suffix"):
+            label = f"{label}{item['label_suffix']}"
         candidates.append(
             {
                 "id": field_id,
-                "label": _candidate_label(field_id, raw_keys),
+                "label": label,
                 "source_path": item["source_path"],
                 "data_type": _candidate_data_type(sample_values),
                 "part_count": int(item["part_count"]),
@@ -1360,15 +1383,12 @@ def resolve_part_field_value(
             rev = clean_rev(attrs.get("revision") or getattr(part, "revision", ""))
         return f"{pn}-{rev}" if pn and rev else pn
     if field_id == "process":
-        processes = normalize_processes(attrs, {})
-        if isinstance(getattr(part, "processes", None), list):
-            for item in part.processes or []:
-                text = _normalize_text(item).lower()
-                if text and text not in processes:
-                    processes.append(text)
-        return ", ".join(processes)
+        meta = current_app.config.get("PROCESS_META", {}) if has_app_context() else {}
+        return canonical_process_label_for_part(part, raw_attrs=attrs, process_meta=meta)
+    if field_id == "notes":
+        return _coerce_value(annotation_payload(part).get("notes"), data_type)
     if field_id == "comments":
-        return comments_search_text(attrs.get("comments") or attrs.get("comments_search"))
+        return _coerce_value(annotation_payload(part).get("comments_search"), data_type)
     if field_id == "approved":
         return bool(approved_value(attrs))
     file_group = file_field_group(field_id)

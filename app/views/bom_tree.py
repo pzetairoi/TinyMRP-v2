@@ -6,6 +6,7 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.thumbs import preview_png_urls_for
 from app.services.attrs import harvest_part_attrs
+from app.services.canonical_fields import canonical_process_label_for_part
 from app.services.processmeta import normalize_processes
 from flask_login import current_user
 from app.services.acl import allowed_parts_for, part_is_allowed
@@ -81,7 +82,7 @@ def _node(pn: str, link=None, rev: str | None = None, config: dict | None = None
         p = Part.objects(part_number=pn).order_by("-updated_at").first()
     attrs = harvest_part_attrs(p) if p else {}
     effective_rev = _clean_rev(attrs.get("revision") or (p.revision if p else "") or (rev_clean or ""))
-    proc_label = _process_label(attrs)
+    proc_label = _process_label(p, attrs)
     config = config or get_field_config()
     thumbs = preview_png_urls_for(pn, effective_rev)
     coverage = _coverage_groups(pn, effective_rev)
@@ -121,35 +122,16 @@ def _node(pn: str, link=None, rev: str | None = None, config: dict | None = None
     }
 
 
-def _process_label(attrs: dict) -> str:
-    if not isinstance(attrs, dict):
-        return ""
-    raw = []
-    procs = attrs.get("processes", [])
-    if isinstance(procs, (list, tuple)):
-        raw.extend(list(procs))
-    for key in ("process", "process2", "process3"):
-        val = attrs.get(key)
-        if val:
-            raw.append(val)
-    seen = set()
-    out = []
-    for item in raw:
-        text = str(item).strip()
-        if not text:
-            continue
-        key = text.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(text)
-    return ", ".join(out)
+def _process_label(part: Part | None, attrs: dict | None = None) -> str:
+    meta = current_app.config.get("PROCESS_META", {}) or {}
+    return canonical_process_label_for_part(part, raw_attrs=attrs or {}, process_meta=meta)
 
 def _is_hardware_node(node: dict) -> bool:
     try:
-        attrs = (node.get("data") or {}).get("attrs") or {}
+        data = node.get("data") or {}
+        attrs = data.get("attrs") or {}
         meta = current_app.config.get("PROCESS_META", {}) or {}
-        procs = normalize_processes(attrs, meta)
+        procs = normalize_processes({"processes": data.get("processes") or data.get("process") or attrs.get("processes") or []}, meta)
         return "hardware" in procs
     except Exception:
         return False
@@ -279,7 +261,7 @@ def bom_flat():
             part_doc = Part.objects(part_number=child_pn, revision=key[1]).first()
             attrs = harvest_part_attrs(part_doc) if part_doc else {}
             effective_rev = _clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
-            proc_label = _process_label(attrs)
+            proc_label = _process_label(part_doc, attrs)
             thumbs = preview_png_urls_for(child_pn, effective_rev)
             coverage = _coverage_groups(child_pn, effective_rev)
             values = resolve_part_field_values(

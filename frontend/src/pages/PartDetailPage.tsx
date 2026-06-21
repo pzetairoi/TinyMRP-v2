@@ -32,6 +32,7 @@ type Part = {
   part_number: string;
   description: string;
   revision?: string;
+  notes?: string;
   category?: string;
   uom?: string;
   processes?: string[];
@@ -672,12 +673,14 @@ function bestUrl(f: FileRow): string {
         if (canceled) return;
 
         const partAttrs = j.part?.attributes || j.part?.attrs || {};
+        const partNotes = typeof j.part?.notes === "string" ? j.part.notes : "";
         setPart(
           j.part
             ? {
                 part_number: j.part.part_number,
                 description: j.part.description,
                 revision: j.part.revision || "",
+                notes: partNotes,
                 category: j.part.category || "",
                 uom: j.part.uom || "EA",
                 process: j.part.process || "",
@@ -687,8 +690,8 @@ function bestUrl(f: FileRow): string {
               }
             : null
         );
-        setNotes(String(partAttrs?.notes || ""));
-        setComments(Array.isArray(j.comments) ? j.comments : Array.isArray(partAttrs?.comments) ? partAttrs.comments : []);
+        setNotes(partNotes);
+        setComments(Array.isArray(j.comments) ? j.comments : []);
         setUploaderProfile(j.uploader_profile || null);
         setApproverProfile(j.approver_profile || null);
         setPublicShareInfo(j.public_share || null);
@@ -1171,7 +1174,7 @@ function bestUrl(f: FileRow): string {
     const raw = (part?.attrs || {}) as Record<string, any>;
 
     // only non-empty
-    const skipKeys = new Set(["notes", "comments"]);
+    const skipKeys = new Set(["comments_search"]);
     const allEntries = Object.entries(raw).filter(([k, v]) => {
       if (skipKeys.has(String(k || "").toLowerCase())) return false;
       return hasDisplayValue(v);
@@ -1204,16 +1207,7 @@ function bestUrl(f: FileRow): string {
 
   // Processes: normalize and deduplicate
   const processes: string[] = useMemo(() => {
-    const a = part?.attrs || {};
-    const raw = (Array.isArray(part?.processes) && part.processes.length)
-      ? part.processes
-      : ([] as string[]).concat(
-          Array.isArray(a.processes) ? a.processes : [],
-          a.process ? [a.process] : [],
-          a.process2 ? [a.process2] : [],
-          a.process3 ? [a.process3] : []
-        );
-    return raw
+    return (Array.isArray(part?.processes) ? part.processes : [])
       .map((x) => String(x || "").trim().toLowerCase())
       .filter((x, i, arr) => x && arr.indexOf(x) === i);
   }, [part]);
@@ -2547,7 +2541,7 @@ function bestUrl(f: FileRow): string {
 
 
             
-          {!isSharedView && <TabPanel header="Notes & Comments">
+          {!isSharedView && <TabPanel header="Internal Notes & Comments">
             <div className="pd-card p-3 mt-3">
               <div className="d-flex align-items-center justify-content-between">
                 <h6 className="mb-0">Notes</h6>

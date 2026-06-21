@@ -18,6 +18,7 @@ from app.services.import_zip import import_bom_zip
 from flask import current_app
 
 from app.services.attrs import harvest_part_attrs, merge_save_part_attrs
+from app.services.part_annotations import bulk_sync_annotation_search_fields
 from app.services.password_policy import validate_admin_password
 
 
@@ -760,6 +761,18 @@ def attrs_backfill():
     click.echo({"updated": count})
 
 
+@click.group()
+def annotations():
+    """Part notes/comments utilities"""
+
+
+@annotations.command("backfill")
+@with_appcontext
+def annotations_backfill():
+    result = bulk_sync_annotation_search_fields(Part.objects())
+    click.echo(result)
+
+
 
 def init_app(app):
     # ... your existing CLI registrations ...
@@ -771,6 +784,7 @@ def init_app(app):
     app.cli.add_command(role)
     app.cli.add_command(data)
     app.cli.add_command(attrs)
+    app.cli.add_command(annotations)
 
     # Audit diagnostics group
     import click

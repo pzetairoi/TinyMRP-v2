@@ -14,7 +14,7 @@ from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
-from app.services.attrs import comments_search_text, harvest_part_attrs, approved_value, process_attributes
+from app.services.attrs import harvest_part_attrs, approved_value
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.views.whereused import _rows_for_child_pn
@@ -53,6 +53,13 @@ from app.services.field_config import (
 from app.services.arena_export import build_arena_bom_csv, build_arena_file_links_csv
 from app.services.parts_delete import delete_part_and_refs_cascade
 from app.services.part_norm import clean_rev, clean_rev_or_none
+from app.services.part_annotations import (
+    add_part_comment,
+    annotation_payload,
+    filtered_part_attrs,
+    migrate_legacy_annotations,
+    set_part_notes,
+)
 #from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
 
 from app.services.user_profile import (
@@ -677,11 +684,6 @@ def parts_lazy():
         or_q = Q()
         if terms:
             or_q = or_q | Q(processes__in=terms)
-            for t in terms:
-                or_q = or_q | Q(attrs__process__icontains=t)
-                or_q = or_q | Q(attrs__process2__icontains=t)
-                or_q = or_q | Q(attrs__process3__icontains=t)
-                or_q = or_q | Q(attrs__processes__icontains=t)
         return or_q
 
     category_paths = query_paths_for_field("category", field_config) or ["attrs__category", "category"]
@@ -988,6 +990,8 @@ def part_detail():
         pass
 
     attrs = harvest_part_attrs(p)
+    notes_comments = annotation_payload(p, attrs)
+    visible_attrs = filtered_part_attrs(p)
     norm_rev = _normalized_revision(p, attrs)
     meta = current_app.config.get("PROCESS_META", {})
     proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
@@ -1025,9 +1029,7 @@ def part_detail():
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
     approver_identity = _attr_identity(attrs, "approvedby", "approved_by", "approved", "checkedby")
-    raw_comments = attrs.get("comments")
-    if not isinstance(raw_comments, list):
-        raw_comments = []
+    raw_comments = list(notes_comments.get("comments") or [])
     identity_keys = [uploader_identity, approver_identity]
     identity_keys.extend(str((comment or {}).get("author") or "").strip() for comment in raw_comments)
     resolved_profiles = resolve_identity_profiles(identity_keys)
@@ -1091,8 +1093,9 @@ def part_detail():
                 "mass": summary_field_values.get("mass", attrs.get("mass", "")),
                 "process": summary_field_values.get("process", ", ".join(proc_list)),
                 "processes": proc_list,
+                "notes": str(notes_comments.get("notes") or ""),
                 "field_values": summary_field_values,
-                "attributes": attrs,
+                "attributes": visible_attrs,
             },
             "images": preview_urls,
             "drawing_urls": drawing_urls,
@@ -1400,14 +1403,11 @@ def part_notes_update(pn):
             return jsonify({"ok": False, "error": "forbidden"}), 403
     except Exception:
         pass
-    attrs = dict(p.attrs or {})
-    attrs["notes"] = notes
-    attrs, processes = process_attributes(attrs)
-    p.attrs = attrs
-    if processes:
-        p.processes = processes
-    p.updated_at = datetime.utcnow()
-    p.save()
+    try:
+        migrate_legacy_annotations(p)
+    except Exception:
+        pass
+    payload = set_part_notes(p, notes)
     try:
         log_action(
             "part.notes.update",
@@ -1417,7 +1417,7 @@ def part_notes_update(pn):
         )
     except Exception:
         pass
-    return jsonify({"ok": True, "notes": notes})
+    return jsonify({"ok": True, "notes": str((payload or {}).get("notes") or notes)})
 
 
 @bp.post("/parts/<pn>/comments")
@@ -1440,25 +1440,13 @@ def part_comments_add(pn):
             return jsonify({"ok": False, "error": "forbidden"}), 403
     except Exception:
         pass
-
-    attrs = dict(p.attrs or {})
-    comments = attrs.get("comments")
-    if not isinstance(comments, list):
-        comments = []
-    comment = {
-        "ts": datetime.utcnow().isoformat(),
-        "author": getattr(current_user, "email", "") or "",
-        "text": text,
-    }
-    comments.append(comment)
-    attrs["comments"] = comments
-    attrs["comments_search"] = comments_search_text(comments)
-    attrs, processes = process_attributes(attrs)
-    p.attrs = attrs
-    if processes:
-        p.processes = processes
-    p.updated_at = datetime.utcnow()
-    p.save()
+    migrate_legacy_annotations(p)
+    comment = add_part_comment(
+        p,
+        author=getattr(current_user, "email", "") or "",
+        text=text,
+        ts=datetime.utcnow().isoformat(),
+    )
     try:
         log_action(
             "part.comments.add",

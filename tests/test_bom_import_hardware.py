@@ -7,6 +7,7 @@ import pytest
 
 from app.models.part import Part
 from app.models.bom import BOMLink
+from app.services.field_config import save_field_config
 from app.services.import_zip import import_bom_zip
 
 
@@ -59,8 +60,10 @@ def test_import_bom_flags_hardware_from_folder(app):
 
         assert "hardware" in (bolt.processes or [])
         assert "hardware" in (rivet.processes or [])
-        assert bolt.attrs.get("process") == "hardware"
-        assert rivet.attrs.get("process") == "hardware"
+        assert bolt.attrs.get("process") == "purchase"
+        assert rivet.attrs.get("process") == "fasteners"
+        assert (bolt.canonical or {}).get("processes") == ["hardware"]
+        assert (rivet.canonical or {}).get("processes") == ["hardware"]
         assert "hardware" not in (plate.processes or [])
 
 
@@ -155,3 +158,46 @@ def test_import_bom_flatbom_utf8_bom_is_ok(app):
 
         part = Part.objects(part_number="BOM-B1", revision="A").first()
         assert part is not None
+
+
+def test_import_bom_can_map_comments_to_canonical_process_with_admin_aliases(app):
+    flat_rows = [
+        {
+            "partnumber": "PROC-100",
+            "revision": "A",
+            "description": "Mapped Process Part",
+            "comments": "LASERCUT",
+            "secondprocess": "MACHINE",
+            "process": "",
+            "process2": "",
+            "process3": "",
+        },
+    ]
+    flat_txt = "\n".join(repr(r) for r in flat_rows)
+    tree_txt = "\n".join(
+        [
+            "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+            "1\tPROC-100\tA\t1",
+        ]
+    )
+    zip_bytes = _make_zip(flat_txt, tree_txt)
+
+    with app.app_context():
+        save_field_config(
+            {
+                "canonical_aliases": [
+                    {
+                        "field_id": "process",
+                        "aliases": ["process", "processes", "comments", "secondprocess", "thirdprocess"],
+                    }
+                ]
+            }
+        )
+        import_bom_zip(zip_bytes, "test.zip", seed_tag="test")
+
+        part = Part.objects(part_number="PROC-100", revision="A").first()
+        assert part is not None
+        assert part.attrs.get("comments") == "LASERCUT"
+        assert part.attrs.get("secondprocess") == "MACHINE"
+        assert (part.canonical or {}).get("processes") == ["lasercut", "machine"]
+        assert (part.processes or []) == ["lasercut", "machine"]

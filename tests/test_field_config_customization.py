@@ -362,3 +362,50 @@ def test_filters_use_resolved_values_for_custom_and_remapped_fields(client):
     )
     assert custom_resp.status_code == 200
     assert [row["part_number"] for row in custom_resp.get_json()["data"]] == ["FLT-RAW-2"]
+
+
+def test_admin_can_rebuild_canonical_fields_using_custom_aliases(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    part = Part(
+        part_number="CAN-100",
+        revision="A",
+        description="Alias Part",
+        attrs={"comments": "LASERCUT", "secondprocess": "MACHINE"},
+    ).save()
+
+    save_resp = client.put(
+        "/api/admin/field-config",
+        json={
+            "canonical_aliases": [
+                {
+                    "field_id": "process",
+                    "aliases": ["process", "processes", "comments", "secondprocess", "thirdprocess"],
+                }
+            ]
+        },
+    )
+    assert save_resp.status_code == 200
+
+    rebuild_resp = client.post("/api/admin/field-config/rebuild-canonical-fields")
+    assert rebuild_resp.status_code == 200
+    report = rebuild_resp.get_json()["report"]
+    assert report["updated"] >= 1
+
+    part.reload()
+    assert part.attrs["comments"] == "LASERCUT"
+    assert part.attrs["secondprocess"] == "MACHINE"
+    assert (part.processes or []) == ["lasercut", "machine"]
+    assert (part.canonical or {}).get("processes") == ["lasercut", "machine"]
+
+    list_resp = client.post("/api/parts_lazy", json={"first": 0, "rows": 25, "filters": {"process": {"value": "machine"}}})
+    assert list_resp.status_code == 200
+    rows = list_resp.get_json()["data"]
+    assert [row["part_number"] for row in rows] == [part.part_number]
+
+    detail_resp = client.get(f"/api/part_detail?pn={part.part_number}&rev={part.revision}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.get_json()
+    assert detail["part"]["processes"] == ["lasercut", "machine"]
+    assert detail["part"]["process"] == "lasercut, machine"

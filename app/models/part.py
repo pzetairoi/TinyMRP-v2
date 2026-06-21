@@ -9,6 +9,7 @@ class Part(Document):
     revision    = StringField(default="")
     description = StringField(default="")
     processes   = ListField(StringField(), default=list)
+    canonical   = DictField(default=dict)
     category    = StringField(default="")
     uom         = StringField(default="EA")
     manufacturer= StringField(default="")
@@ -16,6 +17,8 @@ class Part(Document):
     status      = StringField(default="active")
     docs        = ListField(StringField())
     attrs       = DictField()
+    notes_search = StringField(default="")
+    comments_search = StringField(default="")
     created_at  = DateTimeField(default=datetime.utcnow)
     updated_at  = DateTimeField(default=datetime.utcnow)
 
@@ -27,8 +30,10 @@ class Part(Document):
             { "fields": ["updated_at"], "name": "parts_updated_at_idx" },
             { "fields": ["processes"], "name": "parts_processes_idx" },
             { "fields": ["description"], "name": "parts_description_idx" },
-            { "fields": ["attrs.material"], "name": "parts_material_idx" },
-            { "fields": ["attrs.finish"], "name": "parts_finish_idx" },
+            { "fields": ["notes_search"], "name": "parts_notes_search_idx" },
+            { "fields": ["comments_search"], "name": "parts_comments_search_idx" },
+            { "fields": ["canonical.material"], "name": "parts_material_idx" },
+            { "fields": ["canonical.finish"], "name": "parts_finish_idx" },
         ],
         "db_alias": DB_ALIAS
     }
