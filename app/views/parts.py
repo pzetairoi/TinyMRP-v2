@@ -14,7 +14,7 @@ from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
-from app.services.attrs import harvest_part_attrs, approved_value
+from app.services.attrs import harvest_part_attrs
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.views.whereused import _rows_for_child_pn
@@ -43,6 +43,7 @@ from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.services.field_config import (
     context_field_ids,
     field_requires_runtime_scan,
+    file_field_group,
     field_index as field_config_index,
     get_field_config,
     matches_field_filter_value,
@@ -471,17 +472,6 @@ def _is_blankish(value: object, *, allow_na: bool = False) -> bool:
         return False
     return text in _EMPTY_VALUES
 
-def _is_approved(attrs: dict) -> bool:
-    raw = approved_value(attrs)
-    if raw is None:
-        return False
-    if isinstance(raw, bool):
-        return raw
-    text = str(raw).strip().lower()
-    if text in _EMPTY_VALUES:
-        return False
-    return True
-
 _REQUIRED_ALWAYS = {"pdf"}
 _REQUIRED_BY_PROCESS = {
     "machine": {"step"},
@@ -714,6 +704,71 @@ def parts_lazy():
             return Q()
         return Q(__raw__={field: {"$regex": re.escape(term), "$options": "i"}})
 
+    def _pairs_q(pairs: set[tuple[str, str]]):
+        pair_q = Q()
+        for pn, rev in pairs:
+            pn_clean = (pn or "").strip()
+            if not pn_clean:
+                continue
+            rev_clean = _clean_rev_value(rev)
+            pair_q = pair_q | Q(part_number__iexact=pn_clean, revision__iexact=rev_clean)
+        return pair_q
+
+    def _exclude_pairs_q(pairs: set[tuple[str, str]]) -> Q:
+        clauses: list[dict[str, object]] = []
+        for pn, rev in pairs:
+            pn_clean = (pn or "").strip()
+            if not pn_clean:
+                continue
+            rev_clean = _clean_rev_value(rev)
+            clauses.append(
+                {
+                    "part_number": {"$regex": f"^{re.escape(pn_clean)}$", "$options": "i"},
+                    "revision": {"$regex": f"^{re.escape(rev_clean)}$", "$options": "i"},
+                }
+            )
+        if not clauses:
+            return Q()
+        return Q(__raw__={"$nor": clauses})
+
+    def _file_pairs_for_group(group: str) -> set[tuple[str, str]]:
+        pairs: set[tuple[str, str]] = set()
+        group_norm = _norm_file_group(group)
+        if not group_norm:
+            return pairs
+        for row in PartFile.objects(ext_group=group_norm).only("part_number", "revision"):
+            pn_clean = (getattr(row, "part_number", None) or "").strip()
+            if not pn_clean:
+                continue
+            pairs.add((pn_clean, _clean_rev_value(getattr(row, "revision", "") or "")))
+        return pairs
+
+    def _approval_q(expected: bool) -> Q:
+        empty_values = [None, "", "n/a", "N/A", "na", "NA", "none", "None", "null", "NULL", "0", "false", "False", "FALSE"]
+        keys = ["attrs.approvedby", "attrs.approved_by", "attrs.approved"]
+        if expected:
+            return Q(
+                __raw__={
+                    "$or": [
+                        {key: {"$exists": True, "$nin": empty_values}}
+                        for key in keys
+                    ]
+                }
+            )
+        return Q(
+            __raw__={
+                "$and": [
+                    {
+                        "$or": [
+                            {key: {"$exists": False}},
+                            {key: {"$in": empty_values}},
+                        ]
+                    }
+                    for key in keys
+                ]
+            }
+        )
+
     q = Q()
     parts_context_ids = context_field_ids("parts_list", field_config)
     generic_filter_ids = []
@@ -728,6 +783,22 @@ def parts_lazy():
             continue
         if data_type in {"boolean", "number"}:
             if raw_value is not _missing and raw_value not in (None, ""):
+                if data_type == "boolean" and field_id == "approved":
+                    expected = _bool_filter_value(raw_value)
+                    if expected is not None:
+                        q = q & _approval_q(expected)
+                        continue
+                if data_type == "boolean":
+                    file_group = file_field_group(field_id)
+                    if file_group:
+                        expected = _bool_filter_value(raw_value)
+                        if expected is not None:
+                            pairs = _file_pairs_for_group(file_group)
+                            if expected and not pairs:
+                                return jsonify({"data": [], "totalRecords": 0})
+                            if pairs:
+                                q = q & (_pairs_q(pairs) if expected else _exclude_pairs_q(pairs))
+                            continue
                 if field_id in runtime_filter_ids:
                     typed_filter_specs.append((field_id, data_type, raw_value))
                 else:
@@ -804,10 +875,6 @@ def parts_lazy():
             q = q & _process_filter_q(proc_val_norm)
     g = _filter_value("global", "")
 
-    # Keep global search in MongoDB. Do not allow normal search to trigger
-    # a Python-side scan of all parts just because one visible field is runtime-only.
-    runtime_global_search = False
-
     if g:
         global_paths: list[str] = []
         for field_id in parts_field_ids:
@@ -824,16 +891,6 @@ def parts_lazy():
             for fld in global_paths:
                 orq = orq | Q(**{f"{fld}__icontains": t})
             q = q & orq
-
-    def _pairs_q(pairs: set[tuple[str, str]]):
-        pair_q = Q()
-        for pn, rev in pairs:
-            pn_clean = (pn or "").strip()
-            if not pn_clean:
-                continue
-            rev_clean = _clean_rev_value(rev)
-            pair_q = pair_q | Q(part_number__iexact=pn_clean, revision__iexact=rev_clean)
-        return pair_q
 
     # Optional job filter: limit to BOM parts for that job unless explicitly bypassed
     job_id = body.get("job") or request.args.get("job")
@@ -902,6 +959,9 @@ def parts_lazy():
     approved_only_filter = _flag_enabled("approved_only")
     min_props_filter = _flag_enabled("min_props")
 
+    if approved_only_filter:
+        qs = qs.filter(_approval_q(True))
+
     def _coverage_map(parts_list: list[Part]) -> dict[tuple[str, str], set[str]]:
         if not parts_list:
             return {}
@@ -915,7 +975,6 @@ def parts_lazy():
 
     needs_scan = any([
         full_files_filter,
-        approved_only_filter,
         min_props_filter,
         bool(typed_filter_specs),
         bool(runtime_filter_specs),
@@ -927,7 +986,16 @@ def parts_lazy():
         all_docs = list(
             qs.order_by(scan_order_by).only("part_number", "revision", "description", "category", "attrs", "processes")
         )
-        coverage = _coverage_map(all_docs)
+        scan_requires_coverage = bool(full_files_filter)
+        if not scan_requires_coverage:
+            scan_requires_coverage = any(bool(file_field_group(field_id)) for field_id, _data_type, _raw_value in typed_filter_specs)
+        if not scan_requires_coverage:
+            scan_requires_coverage = any(bool(file_field_group(field_id)) for field_id, _data_type, _raw_value in runtime_filter_specs)
+        if not scan_requires_coverage and runtime_sort:
+            scan_requires_coverage = bool(file_field_group(sort_field))
+
+        scan_requires_values = bool(runtime_sort or typed_filter_specs or runtime_filter_specs)
+        coverage = _coverage_map(all_docs) if scan_requires_coverage else {}
         filtered_docs = []
         resolved_cache: dict[tuple[str, str], dict[str, Any]] = {}
         for p in all_docs:
@@ -935,21 +1003,21 @@ def parts_lazy():
             rev = _normalized_revision(p, attrs)
             groups = coverage.get((p.part_number, rev)) or set()
             proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
-            if approved_only_filter and not _is_approved(attrs):
-                continue
             if min_props_filter and not _min_props_ok(p, attrs, proc_list):
                 continue
             if full_files_filter and not _full_files_ok(proc_list, groups, meta):
                 continue
             key = (p.part_number, rev)
-            values = resolve_part_field_values(
-                p,
-                parts_context_ids,
-                attrs=attrs,
-                config=field_config,
-                extra={"part_number": p.part_number, "revision": rev},
-                coverage=groups,
-            )
+            values: dict[str, Any] = {}
+            if scan_requires_values:
+                values = resolve_part_field_values(
+                    p,
+                    parts_context_ids,
+                    attrs=attrs,
+                    config=field_config,
+                    extra={"part_number": p.part_number, "revision": rev},
+                    coverage=groups if scan_requires_coverage else None,
+                )
             typed_match = True
             for field_id, data_type, raw_value in typed_filter_specs:
                 if not matches_field_filter_value(values.get(field_id), raw_value, data_type):
@@ -965,7 +1033,8 @@ def parts_lazy():
             if not runtime_match:
                 continue
  
-            resolved_cache[key] = values
+            if values:
+                resolved_cache[key] = values
             filtered_docs.append(p)
         if runtime_sort:
             sort_type = str((field_meta.get(sort_field) or {}).get("data_type") or "text")

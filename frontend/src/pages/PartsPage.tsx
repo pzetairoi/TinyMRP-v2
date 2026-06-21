@@ -122,22 +122,40 @@ export default function PartsPage() {
   }, [pickMode])
 
   useEffect(() => {
-    (async () => {
+    const controller = new AbortController()
+    let cancelled = false
+
+    ;(async () => {
       setLoading(true)
-      const payload: any = { ...lazy }
-      if (jobId && jobOnly) {
-        payload.job = jobId
-        payload.job_only = true
+      try {
+        const payload: any = { ...lazy }
+        if (jobId && jobOnly) {
+          payload.job = jobId
+          payload.job_only = true
+        }
+        const res = await fetch('/api/parts_lazy', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        })
+        const j = await res.json()
+        if (cancelled) return
+        setRows(j.data || [])
+        setTotal(j.totalRecords || 0)
+      } catch (err: any) {
+        if (cancelled || err?.name === 'AbortError') return
+        setRows([])
+        setTotal(0)
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      const res = await fetch('/api/parts_lazy', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      })
-      const j = await res.json()
-      setRows(j.data || [])
-      setTotal(j.totalRecords || 0)
-      setLoading(false)
     })()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
   }, [lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters), jobId, jobOnly])
 
   const filterApproved = Boolean((lazy.filters as any)?.approved_only?.value)
