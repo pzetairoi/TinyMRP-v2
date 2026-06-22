@@ -322,6 +322,194 @@ function identityAvatar(profile?: IdentityProfile | null, fallback = "", size: "
   )
 }
 
+const APPROVAL_TRUE_VALUES = new Set(["1", "true", "yes", "y", "on", "approved"])
+const APPROVAL_FALSE_VALUES = new Set([
+  "0",
+  "false",
+  "no",
+  "n",
+  "off",
+  "missing",
+  "none",
+  "absent",
+  "n/a",
+  "na",
+  "null",
+  "not approved",
+  "not_approved",
+  "not-approved",
+  "notapproved",
+  "unapproved",
+  "rejected",
+  "wip",
+  "work in progress",
+  "in progress",
+])
+const PART_DETAIL_FIELD_FALLBACK_ALIASES: Record<string, string[]> = {
+  description: ["description", "desc", "desc1", "summary_text"],
+  revision: ["revision", "rev"],
+  category: ["category"],
+  material: ["material"],
+  finish: ["finish", "treatment", "colour", "color"],
+  mass: ["mass", "weight"],
+  uom: ["uom", "unit", "unit_of_measure"],
+  link: ["link", "oem_internet", "oem_link"],
+  oem: ["oem", "manufacturer", "oem_supplier"],
+  oem_partnumber: ["oem_partnumber", "oem_part_number", "supplier_partnumber", "supplier_part_number", "mfr_part", "manufacturer_part"],
+  datasheet: ["datasheet", "oem_data_sheet", "oem_datasheet", "data_sheet", "datasheet_url"],
+  approved: ["approved"],
+  approved_by: ["approvedby", "approved_by", "approved"],
+  process: [
+    "process",
+    "processes",
+    "process2",
+    "process3",
+    "secondprocess",
+    "thirdprocess",
+    "second_process",
+    "third_process",
+    "second process",
+    "third process",
+  ],
+}
+
+function normalizeAliasName(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+}
+
+function readRecordValue(record: Record<string, unknown> | null | undefined, key: string) {
+  if (!record) return undefined
+  if (Object.prototype.hasOwnProperty.call(record, key)) return record[key]
+  const target = normalizeAliasName(key)
+  if (!target) return undefined
+  for (const [recordKey, value] of Object.entries(record)) {
+    if (normalizeAliasName(recordKey) === target) return value
+  }
+  return undefined
+}
+
+function canonicalFieldAliases(
+  config: FieldConfigPayload | null | undefined,
+  fieldId: string,
+  fallbackAliases: string[],
+): string[] {
+  const aliases = new Set<string>()
+  const add = (value: unknown) => {
+    const text = String(value ?? "").trim()
+    if (text) aliases.add(text)
+  }
+
+  add(fieldId)
+  const entry = (config?.canonical_aliases || []).find(
+    (item) => normalizeAliasName(item?.field_id) === normalizeAliasName(fieldId),
+  )
+  for (const alias of entry?.aliases || []) add(alias)
+  for (const alias of fallbackAliases) add(alias)
+
+  return Array.from(aliases)
+}
+
+function collectRecordValues(record: Record<string, unknown> | null | undefined, aliases: string[]): unknown[] {
+  const values: unknown[] = []
+  for (const alias of aliases) {
+    const value = readRecordValue(record, alias)
+    if (value !== undefined) values.push(value)
+  }
+  return values
+}
+
+function approvalTextVariants(value: string): string[] {
+  const text = String(value || "").trim().toLowerCase()
+  if (!text) return []
+
+  const variants = new Set<string>()
+  const add = (item: string) => {
+    const normalized = item.trim().toLowerCase().replace(/\s+/g, " ")
+    if (normalized) variants.add(normalized)
+  }
+
+  add(text)
+  add(text.replace(/[_-]+/g, " "))
+
+  const alnumSpaced = text.replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ")
+  if (alnumSpaced) {
+    add(alnumSpaced)
+    add(alnumSpaced.replace(/\s+/g, ""))
+    add(alnumSpaced.replace(/\s+/g, "_"))
+    add(alnumSpaced.replace(/\s+/g, "-"))
+  }
+
+  return Array.from(variants)
+}
+
+function explicitApprovalStatus(value: unknown): boolean | null {
+  if (value === undefined || value === null) return null
+  if (typeof value === "boolean") return value
+  if (typeof value === "number") return value !== 0
+  if (typeof value !== "string") return null
+
+  const text = value.trim()
+  if (!text) return null
+
+  const variants = approvalTextVariants(text)
+  if (variants.some((item) => APPROVAL_FALSE_VALUES.has(item))) return false
+  if (variants.some((item) => APPROVAL_TRUE_VALUES.has(item))) return true
+  return null
+}
+
+function approvalStatus(value: unknown): boolean | null {
+  if (value === undefined || value === null) return null
+  if (Array.isArray(value)) {
+    let sawNonEmpty = false
+    for (const item of value) {
+      const status = approvalStatus(item)
+      if (status === false) return false
+      if (status === true) return true
+      if (hasDisplayValue(item)) sawNonEmpty = true
+    }
+    return sawNonEmpty ? true : null
+  }
+
+  const explicit = explicitApprovalStatus(value)
+  if (explicit !== null) return explicit
+  if (typeof value === "string") return value.trim() ? true : null
+  if (typeof value === "number") return value !== 0
+  return null
+}
+
+function approvalIdentityText(value: unknown): string {
+  if (value === undefined || value === null) return ""
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => approvalIdentityText(item))
+      .filter(Boolean)
+      .join(", ")
+      .trim()
+  }
+  if (explicitApprovalStatus(value) !== null) return ""
+  if (typeof value !== "string") return ""
+  return value.trim()
+}
+
+function partDetailFieldFallbackAliases(fieldId: string): string[] {
+  return PART_DETAIL_FIELD_FALLBACK_ALIASES[fieldId] || [fieldId]
+}
+
+function processTokens(value: unknown): string[] {
+  if (value === undefined || value === null) return []
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => processTokens(item))
+  }
+  return String(value)
+    .split(/\s*(?:,|;|\/|\||&|\+|\r|\n)\s*/)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+}
+
 // ---------- Component ----------
 export default function PartDetailPage() {
   const route = useParams();
@@ -1369,10 +1557,11 @@ function isExternalDatasheetUrl(url: string): boolean {
 
   // Processes: normalize and deduplicate
   const processes: string[] = useMemo(() => {
-    return (Array.isArray(part?.processes) ? part.processes : [])
-      .map((x) => String(x || "").trim().toLowerCase())
+    const direct = Array.isArray(part?.processes) ? part.processes : []
+    const source = direct.length ? direct : rawSummaryValue("process")
+    return processTokens(source)
       .filter((x, i, arr) => x && arr.indexOf(x) === i);
-  }, [part]);
+  }, [part, rawSummaryValue]);
 
   const isBlankish = (value: any, allowNa = false) => {
     if (value === null || value === undefined) return true
@@ -1381,9 +1570,12 @@ function isExternalDatasheetUrl(url: string): boolean {
     return text === "" || text === "none" || text === "null"
   }
 
-  const materialValue = (part?.attrs?.material || part?.attrs?.Material || part?.attrs?.MATERIAL || "") as string
-  const finishValue = (part?.attrs?.finish || part?.attrs?.Finish || "") as string
-  const massValue = (part?.attrs?.mass || part?.attrs?.Weight || "") as string
+  const materialValue = rawSummaryValue("material")
+  const finishValue = rawSummaryValue("finish")
+  const descriptionValue = rawSummaryValue("description")
+  const revisionValue = rawSummaryValue("revision")
+  const categoryValue = rawSummaryValue("category")
+  const linkValue = rawSummaryValue("link")
   const summaryFields = fieldConfig ? contextFields(fieldConfig, "part_detail_summary") : FALLBACK_SUMMARY_FIELDS
   const bomFields = fieldConfig ? contextFields(fieldConfig, "bom_tree") : FALLBACK_BOM_FIELDS
   const whereUsedFields = fieldConfig ? contextFields(fieldConfig, "where_used") : FALLBACK_WHERE_USED_FIELDS
@@ -1426,6 +1618,23 @@ function isExternalDatasheetUrl(url: string): boolean {
     return source.filter((fieldId) => allowed.has(fieldId))
   }, [arenaAvailableFields, defaultExcelIds, defaultVisibleArenaIds, selectedExcelIds])
   const hasManagementActions = canAdmin || canPartsEdit || canPartsDelete
+
+  function attrsValue(fieldId: string) {
+    const values = collectRecordValues(
+      part?.attrs || {},
+      canonicalFieldAliases(fieldConfig, fieldId, partDetailFieldFallbackAliases(fieldId)),
+    )
+    return values.find((value) => value !== undefined)
+  }
+
+  function rawSummaryValue(fieldId: string) {
+    const fieldValue = readRecordValue(part?.field_values || {}, fieldId)
+    if (fieldValue !== undefined) return fieldValue
+    const topLevelValue = readRecordValue(part ? (part as unknown as Record<string, unknown>) : undefined, fieldId)
+    if (topLevelValue !== undefined) return topLevelValue
+    return attrsValue(fieldId)
+  }
+
   const bomFieldMap = useMemo(
     () => new Map(bomFields.map((field) => [field.id, field] as const)),
     [bomFields],
@@ -1631,21 +1840,47 @@ function isExternalDatasheetUrl(url: string): boolean {
   }, [canAdmin, isSharedView, pn, effectiveRev])
 
   function summaryValue(fieldId: string) {
-    const value = part?.field_values?.[fieldId]
-    if (value !== undefined) return value
-    return (part as any)?.[fieldId]
+    if (fieldId === "approved") return approvedInfo.approved
+    if (fieldId === "approved_by") return approvedInfo.approved ? (approverIdentity || approvedInfo.label || "") : ""
+    if (fieldId === "process" && processes.length) return processes
+    return rawSummaryValue(fieldId)
   }
 
+  const approvedAliases = useMemo(
+    () => canonicalFieldAliases(fieldConfig, "approved", ["approved"]),
+    [fieldConfig],
+  )
+  const approvedByAliases = useMemo(
+    () => canonicalFieldAliases(fieldConfig, "approved_by", ["approved_by", "approvedby", "approved"]),
+    [fieldConfig],
+  )
+
   const approvedInfo = useMemo(() => {
-    const raw = part?.attrs?.approvedby ?? part?.attrs?.approved ?? part?.attrs?.approved_by
-    if (raw === undefined || raw === null) return { approved: false, label: "" }
-    if (typeof raw === "boolean") return { approved: raw, label: "" }
-    const text = String(raw).trim()
-    if (!text) return { approved: false, label: "" }
-    const lowered = text.toLowerCase()
-    if (["n/a", "na", "none", "null", "0", "false"].includes(lowered)) return { approved: false, label: "" }
-    return { approved: true, label: text }
-  }, [part])
+    const fieldValues = part?.field_values || {}
+    const attrs = part?.attrs || {}
+    const explicitApproved = readRecordValue(fieldValues, "approved")
+    const explicitBoolean = typeof explicitApproved === "boolean" ? explicitApproved : null
+    const attrApprovedValues = collectRecordValues(attrs, approvedAliases)
+    const fieldApprovedBy = readRecordValue(fieldValues, "approved_by")
+    const attrApprovedByValues = collectRecordValues(attrs, approvedByAliases)
+    const identitySource = [fieldApprovedBy, ...attrApprovedByValues].find((value) => !!approvalIdentityText(value))
+    const label = approvalIdentityText(identitySource)
+
+    if (explicitBoolean !== null) {
+      return { approved: explicitBoolean, label: explicitBoolean ? label : "" }
+    }
+
+    const candidates = [explicitApproved, ...attrApprovedValues, fieldApprovedBy, ...attrApprovedByValues]
+    const explicitStatuses = candidates
+      .map((value) => explicitApprovalStatus(value))
+      .filter((value): value is boolean => value !== null)
+
+    if (explicitStatuses.includes(false)) return { approved: false, label: "" }
+    if (explicitStatuses.includes(true)) return { approved: true, label: label || "" }
+
+    const hasApprovalValue = candidates.some((value) => approvalStatus(value) === true)
+    return { approved: hasApprovalValue, label: hasApprovalValue ? label || "" : "" }
+  }, [approvedAliases, approvedByAliases, part])
 
   const notesSearchLower = notesSearch.trim().toLowerCase()
   const notesMatchesSearch = !notesSearchLower || notes.toLowerCase().includes(notesSearchLower)
@@ -1671,29 +1906,30 @@ function isExternalDatasheetUrl(url: string): boolean {
   }, [part])
 
   const approverIdentity = useMemo(() => {
-    const a = part?.attrs || {}
-    return a.approvedby || a.approved || a.approved_by || a.checkedby || ""
-  }, [part])
+    const fieldApprovedBy = readRecordValue(part?.field_values || {}, "approved_by")
+    const attrApprovedByValues = collectRecordValues(part?.attrs || {}, approvedByAliases)
+    return approvalIdentityText([fieldApprovedBy, ...attrApprovedByValues])
+  }, [approvedByAliases, part])
 
   const uploaderName = useMemo(() => identityLabel(uploaderProfile, uploaderIdentity), [uploaderProfile, uploaderIdentity])
   const approverName = useMemo(
-    () => identityLabel(approverProfile, approvedInfo.label || approverIdentity),
-    [approverIdentity, approverProfile, approvedInfo.label],
+    () => (approvedInfo.approved ? identityLabel(approverProfile, approvedInfo.label || approverIdentity) : ""),
+    [approvedInfo.approved, approvedInfo.label, approverIdentity, approverProfile],
   )
 
   const missingCritical = useMemo(() => {
     const missing: string[] = []
     const pnValue = (part?.part_number || pn || "").toString().trim()
     if (!pnValue) missing.push("partnumber")
-    const desc = (part?.description || part?.attrs?.description || "").toString().trim()
+    const desc = String(descriptionValue ?? "").trim()
     if (!desc) missing.push("description")
-    const rev = (part?.revision || part?.attrs?.revision || "").toString().trim()
+    const rev = String(revisionValue ?? "").trim()
     if (!rev) missing.push("revision")
     if (isBlankish(materialValue, true)) missing.push("material")
     if (isBlankish(finishValue, true)) missing.push("finish")
     if (!processes.length) missing.push("process")
     return missing
-  }, [part, pn, processes, materialValue, finishValue])
+  }, [descriptionValue, finishValue, materialValue, part, pn, processes, revisionValue])
 
   const hasAnyFiles = useMemo(() => {
     return Object.values(firstLinks).some((v) => !!v)
@@ -2021,10 +2257,10 @@ function isExternalDatasheetUrl(url: string): boolean {
           <div>
             <h4 className="mb-0">
               {pn}
-              {part?.revision ? ` REV ${part.revision}` : ""}
-              {part?.description ? ` - ${part.description}` : ""}
+              {revisionValue ? ` REV ${revisionValue}` : ""}
+              {descriptionValue ? ` - ${descriptionValue}` : ""}
             </h4>
-            <div className="text-muted small">{part?.category || ""}</div>
+            <div className="text-muted small">{categoryValue || ""}</div>
             {isSharedView ? (
               <div className="alert alert-info py-2 px-3 mt-2 mb-0 small">
                 Read-only shared view.
@@ -2100,7 +2336,7 @@ function isExternalDatasheetUrl(url: string): boolean {
 
               <div className="pd-info-row pd-file-row">
                 {(() => {
-                  const href = (part?.attrs?.link || part?.attrs?.oem_internet || "").toString().trim()
+                  const href = String(linkValue || "").trim()
                   return href ? (
                     <a className="btn btn-outline-primary btn-sm pd-file-btn" href={href} target="_blank" rel="noreferrer">
                       Link
