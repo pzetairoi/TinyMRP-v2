@@ -1264,11 +1264,17 @@ def import_bom_zip(
                         seen.add(key)
 
                         try:
-                            part_doc = Part.objects(part_number__iexact=pn, revision__iexact=rev).only("attrs").first()
+                            part_doc = (
+                                Part.objects(part_number__iexact=pn, revision__iexact=rev)
+                                .only("attrs", "canonical", "description", "revision", "category", "uom")
+                                .first()
+                            )
+                            part_attrs = harvest_part_attrs(part_doc) if part_doc else {}
                             found = discover_part_files(
                                 pn,
                                 rev,
-                                approved=bool(approved_value(harvest_part_attrs(part_doc))) if part_doc else None,
+                                approved=bool(approved_value(part_attrs)) if part_doc else None,
+                                attrs=part_attrs,
                             )
                         except Exception as exc:
                             _report_issue(

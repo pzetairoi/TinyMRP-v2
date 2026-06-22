@@ -74,3 +74,51 @@ def test_discover_part_files_prefers_source_scope(app, tmp_path):
         assert unapproved[("pdf", False)]["http_url"].startswith("http://wip.local/files/")
         assert approved[("pdf", False)]["abs_path"].startswith(str(rel_root))
         assert approved[("pdf", False)]["http_url"].startswith("http://released.local/files/")
+
+
+def test_discover_part_files_still_finds_convention_named_datasheet(app, tmp_path):
+    with app.app_context():
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+
+        pn = "DS-BASE"
+        rev = "A"
+        base = f"{pn}_REV_{rev}"
+        _touch(tmp_path / "datasheet" / f"{base}.pdf")
+
+        found = discover_part_files(pn, rev)
+
+        datasheet = found.get(("datasheet", False))
+        assert datasheet is not None
+        assert datasheet["rel_path"] == f"datasheet/{base}.pdf"
+
+
+def test_discover_part_files_prefers_attr_named_datasheet(app, tmp_path):
+    with app.app_context():
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+
+        pn = "DS-ATTR"
+        rev = "A"
+        base = f"{pn}_REV_{rev}"
+        _touch(tmp_path / "datasheet" / f"{base}.pdf", b"generic")
+        _touch(tmp_path / "datasheet" / "vendor-file.pdf", b"vendor")
+
+        found = discover_part_files(pn, rev, attrs={"datasheet": "vendor-file.pdf"})
+
+        datasheet = found.get(("datasheet", False))
+        assert datasheet is not None
+        assert datasheet["rel_path"] == "datasheet/vendor-file.pdf"
+
+
+def test_discover_part_files_supports_attr_datasheet_relative_path(app, tmp_path):
+    with app.app_context():
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+
+        pn = "DS-REL"
+        rev = "A"
+        _touch(tmp_path / "DataSheet" / "Vendor-File.PDF", b"vendor")
+
+        found = discover_part_files(pn, rev, attrs={"datasheet": "datasheet/vendor-file.pdf"})
+
+        datasheet = found.get(("datasheet", False))
+        assert datasheet is not None
+        assert datasheet["rel_path"].casefold() == "datasheet/vendor-file.pdf"

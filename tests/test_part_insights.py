@@ -34,3 +34,30 @@ def test_part_insights_shape(client, user):
     assert data["deliverables_present"]["pdf"] is True
     assert "material" not in data["missing_fields"]
     assert data["where_used_count"] >= 1
+
+
+def test_datasheet_url_counts_as_present_in_parts_list_and_insights(client, user):
+    role = Role(name="datasheet_viewer", permissions=["items.view"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    part = Part(
+        part_number="HW-URL",
+        revision="A",
+        description="Purchased component",
+        processes=["hardware"],
+        attrs={"material": "Steel", "datasheet": "https://example.com/file.pdf"},
+    ).save()
+
+    list_resp = client.post("/api/parts_lazy", json={"first": 0, "rows": 25, "filters": {}})
+    assert list_resp.status_code == 200
+    rows = list_resp.get_json()["data"]
+    row = next(item for item in rows if item["part_number"] == part.part_number and item["revision"] == part.revision)
+    assert row["has_datasheet"] is True
+
+    insights_resp = client.get(f"/api/parts/{part.part_number}/insights?rev={part.revision}")
+    assert insights_resp.status_code == 200
+    data = insights_resp.get_json()
+    assert data["deliverables_present"]["datasheet"] is True
+    assert "datasheet" not in (data.get("deliverables_missing_recommended") or [])

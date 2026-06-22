@@ -7,6 +7,7 @@ from mongoengine.queryset.visitor import Q
 from io import BytesIO
 import re
 import os
+from urllib.parse import urlsplit
 
 from app.models.part import Part
 from app.models.job import Job
@@ -26,7 +27,7 @@ from app.services.insights import (
     recommended_deliverables,
 )
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
-from app.services.filescan import discover_part_files, upsert_part_files
+from app.services.filescan import datasheet_url_from_attrs, discover_part_files, upsert_part_files
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.extra_files import extra_file_url_for
 from app.services.acl import (
@@ -120,6 +121,10 @@ def _deliverables_present(pn: str, rev: str | None) -> dict:
     for f in q.only("ext_group"):
         if f.ext_group:
             groups.add(f.ext_group.lower())
+    part = _find_part_doc(pn, rev_clean)
+    attrs = harvest_part_attrs(part) if part else {}
+    if datasheet_url_from_attrs(attrs):
+        groups.add("datasheet")
     return {
         "pdf": "pdf" in groups,
         "png": "png" in groups,
@@ -741,6 +746,14 @@ def parts_lazy():
             if not pn_clean:
                 continue
             pairs.add((pn_clean, _clean_rev_value(getattr(row, "revision", "") or "")))
+        if group_norm == "datasheet":
+            for part in Part.objects().only("part_number", "revision", "attrs", "canonical", "description", "category", "uom"):
+                pn_clean = (getattr(part, "part_number", None) or "").strip()
+                if not pn_clean:
+                    continue
+                attrs = harvest_part_attrs(part)
+                if datasheet_url_from_attrs(attrs):
+                    pairs.add((pn_clean, _normalized_revision(part, attrs)))
         return pairs
 
     def _approval_q(expected: bool) -> Q:
@@ -971,6 +984,12 @@ def parts_lazy():
         for f in qf.only("part_number", "revision", "ext_group"):
             key = (f.part_number, _clean_rev_value(f.revision or ""))
             coverage.setdefault(key, set()).add((f.ext_group or "").lower())
+        for part in parts_list:
+            attrs = harvest_part_attrs(part)
+            if not datasheet_url_from_attrs(attrs):
+                continue
+            key = (part.part_number, _normalized_revision(part, attrs))
+            coverage.setdefault(key, set()).add("datasheet")
         return coverage
 
     needs_scan = any([
@@ -1156,11 +1175,6 @@ def part_detail():
     norm_rev = _normalized_revision(p, attrs)
     meta = current_app.config.get("PROCESS_META", {})
     proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
-    _, _, summary_field_values = _context_field_values(
-        p,
-        "part_detail_summary",
-        extra={"part_number": p.part_number, "revision": norm_rev},
-    )
 
     preview_urls = preview_png_urls_for(p.part_number, norm_rev)
     drawing_urls = drawing_png_urls_for(p.part_number, norm_rev)
@@ -1179,7 +1193,11 @@ def part_detail():
         name = os.path.basename(f.rel_path or f.path or "")
         return name or "file"
 
-    files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": [], "ply": [], "stl": []}
+    files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": [], "ply": [], "stl": [], "datasheet": []}
+    datasheet_url = datasheet_url_from_attrs(attrs)
+    if datasheet_url:
+        datasheet_name = os.path.basename(urlsplit(datasheet_url).path) or "datasheet"
+        files["datasheet"].append({"url": datasheet_url, "rel": "", "name": datasheet_name})
     for f in (
         PartFile.objects(part_number__iexact=p.part_number, revision__iexact=norm_rev)
         .only("ext_group", "rel_path", "path", "http_url")
@@ -1187,6 +1205,12 @@ def part_detail():
     ):
         if f.ext_group in files:
             files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path or "", "name": file_label(f)})
+    datasheet_summary_url = files["datasheet"][0]["url"] if files["datasheet"] else ""
+    _, _, summary_field_values = _context_field_values(
+        p,
+        "part_detail_summary",
+        extra={"part_number": p.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
+    )
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
     approver_identity = _attr_identity(attrs, "approvedby", "approved_by", "approved", "checkedby")
@@ -1672,7 +1696,15 @@ def part_refresh_files(pn):
     upserts_total = 0
     refreshed: list[dict] = []
     for pn_i, rev_i in pairs:
-        found = discover_part_files(pn_i, rev_i)
+        part_doc = (
+            p
+            if p.part_number.lower() == pn_i.lower() and _clean_rev_value(p.revision or "") == _clean_rev_value(rev_i)
+            else Part.objects(part_number__iexact=pn_i, revision__iexact=rev_i)
+            .only("attrs", "canonical", "description", "revision", "category", "uom")
+            .first()
+        )
+        part_attrs = harvest_part_attrs(part_doc) if part_doc else {}
+        found = discover_part_files(pn_i, rev_i, attrs=part_attrs)
         recs = []
         for (group, is_dwg), meta in (found or {}).items():
             rec = dict(meta)
