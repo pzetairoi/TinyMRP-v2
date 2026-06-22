@@ -54,6 +54,36 @@ const FALLBACK_PART_FIELDS: FieldDefinition[] = [
   { id: 'process', label: 'Process', kind: 'builtin', filterable: true, sortable: true },
 ]
 
+function defaultColumnMatchMode(field: FieldDefinition) {
+  return field.data_type === 'boolean' ? FilterMatchMode.EQUALS : FilterMatchMode.CONTAINS
+}
+
+function defaultColumnFilterMeta(field: FieldDefinition) {
+  return {
+    value: field.data_type === 'boolean' ? null : '',
+    matchMode: defaultColumnMatchMode(field),
+  }
+}
+
+function ensureColumnFilters(filters: DataTableFilterMeta, fields: FieldDefinition[]) {
+  let changed = false
+  const next = { ...filters } as DataTableFilterMeta
+
+  for (const field of fields) {
+    if (field.filterable === false) continue
+    const current = (next as any)?.[field.id]
+    const normalized = {
+      ...defaultColumnFilterMeta(field),
+      ...(current && typeof current === 'object' ? current : {}),
+    }
+    if (current?.value === normalized.value && current?.matchMode === normalized.matchMode) continue
+    ;(next as any)[field.id] = normalized
+    changed = true
+  }
+
+  return changed ? next : filters
+}
+
 export default function PartsPage() {
   const sp = new URLSearchParams(window.location.search)
   const pickMode = sp.get('pick') === '1' || sp.get('pick') === 'true'
@@ -190,6 +220,23 @@ export default function PartsPage() {
   const selectedPartsFieldIds = fieldConfig
     ? selectedFieldIds(fieldConfig, fieldPreferences, 'parts_list')
     : defaultPartsFieldIds
+  const selectedPartsFields = useMemo(() => {
+    const byId = new Map(partsFields.map((field) => [field.id, field]))
+    return selectedPartsFieldIds
+      .map((fieldId) => byId.get(fieldId))
+      .filter((field): field is FieldDefinition => Boolean(field))
+  }, [partsFields, selectedPartsFieldIds])
+  const tableFilters = useMemo(
+    () => ensureColumnFilters(lazy.filters, selectedPartsFields),
+    [lazy.filters, selectedPartsFields],
+  )
+
+  useEffect(() => {
+    setLazy((s) => {
+      const filters = ensureColumnFilters(s.filters, selectedPartsFields)
+      return filters === s.filters ? s : { ...s, filters }
+    })
+  }, [selectedPartsFields])
 
   async function persistPartsFieldSelection(fieldIds: string[]) {
     if (!fieldConfig) return
@@ -267,7 +314,7 @@ export default function PartsPage() {
 
   function renderColumnFilter(field: FieldDefinition) {
     if (field.data_type !== 'boolean') return undefined
-    const rawValue = (lazy.filters as any)?.[field.id]?.value
+    const rawValue = (tableFilters as any)?.[field.id]?.value
     const value = rawValue === true ? 'true' : rawValue === false ? 'false' : ''
     return (
       <select
@@ -562,7 +609,7 @@ export default function PartsPage() {
         lazy paginator totalRecords={totalRecords} rows={lazy.rows} first={lazy.first}
         loading={loading}
         dataKey="id"
-        filters={lazy.filters}
+        filters={tableFilters}
         sortField={lazy.sortField} sortOrder={lazy.sortOrder}
         onPage={(e) => setLazy(s => ({...s, first: e.first, rows: e.rows}))}
         onSort={(e) =>
@@ -577,19 +624,18 @@ export default function PartsPage() {
         stripedRows responsiveLayout="scroll"
         rowClassName={pickMode ? () => 'pick-row' : undefined}
       >
-        {selectedPartsFieldIds.map((fieldId) => {
-          const field = partsFields.find((item) => item.id === fieldId)
-          if (!field) return null
+        {selectedPartsFields.map((field) => {
           return (
             <Column
               key={field.id}
               field={field.id}
+              filterField={field.id}
               header={field.id === 'thumbnail' ? '' : field.label}
               sortable={field.sortable !== false}
               filter={field.filterable !== false}
               showFilterMenu={false}
-              filterMatchMode={field.data_type === 'boolean' ? 'equals' : 'contains'}
-              filterMatchModeOptions={field.data_type === 'boolean' ? ['equals'] : ['contains']}
+              filterMatchMode={defaultColumnMatchMode(field)}
+              filterMatchModeOptions={[defaultColumnMatchMode(field)]}
               filterPlaceholder={field.data_type === 'boolean' ? undefined : fieldFilterPlaceholder(field)}
               filterElement={renderColumnFilter(field)}
               body={(row) => renderFieldCell(field, row as Part)}
