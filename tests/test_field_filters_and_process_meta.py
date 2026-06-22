@@ -1,4 +1,5 @@
 from app.models.artifact import PartFile
+from app.models.app_settings import AppSettings
 from app.models.auth import Role, User
 from app.models.bom import BOMLink
 from app.models.part import Part
@@ -192,9 +193,24 @@ def test_admin_settings_can_override_and_reset_process_library(client):
     )
     assert resp.status_code == 302
 
+    settings = AppSettings.objects().first()
+    assert settings is not None
+    assert "purchase" in (settings.process_meta or {})
+    assert settings.process_meta["coating"]["icon"] == "spray.svg"
+    assert settings.process_meta["coating"]["color"] == "1, 2, 3"
+    assert settings.process_meta["coating"]["aliases"] == ["powder coat", "paint shop"]
+    assert settings.process_meta["coating"]["file_groups"] == ["pdf", "datasheet"]
+
+    page = client.get("/admin/settings")
+    assert page.status_code == 200
+    body = page.data.decode("utf-8")
+    assert 'value="coating"' in body
+    assert 'value="powder coat, paint shop"' in body
+
     meta_resp = client.get("/api/process_meta")
     assert meta_resp.status_code == 200
     meta = meta_resp.get_json()
+    assert "purchase" in meta
     assert meta["coating"]["icon"] == "spray.svg"
     assert meta["coating"]["color"] == "1, 2, 3"
     assert meta["coating"]["aliases"] == ["powder coat", "paint shop"]
@@ -203,6 +219,37 @@ def test_admin_settings_can_override_and_reset_process_library(client):
     reset_resp = client.post("/admin/settings", data={"reset_process_library": "1"})
     assert reset_resp.status_code == 302
 
+    settings.reload()
+    assert settings.process_meta == {}
+
     reset_meta = client.get("/api/process_meta").get_json()
     assert "coating" not in reset_meta
     assert "purchase" in reset_meta
+
+
+def test_admin_settings_recompute_reclassifies_existing_parts_with_custom_process(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    with client.application.app_context():
+        part = Part(part_number="ANO-100", revision="A", description="Bracket", attrs={"process": "anodizing"}).save()
+    part.reload()
+    assert part.processes == ["others"]
+    assert (part.canonical or {}).get("processes") == ["others"]
+
+    resp = client.post(
+        "/admin/settings",
+        data={
+            "process_name": ["anodising"],
+            "process_icon": ["unknown.svg"],
+            "process_color": ["118, 113, 113"],
+            "process_aliases": ["anodize, anodizing"],
+            "process_file_groups": ["pdf"],
+            "recompute_process_library": "1",
+        },
+    )
+    assert resp.status_code == 302
+
+    part.reload()
+    assert part.processes == ["anodising"]
+    assert (part.canonical or {}).get("processes") == ["anodising"]

@@ -4,6 +4,8 @@ import os
 import re
 from typing import Any, Dict, Iterable, List
 
+_MISSING = object()
+
 _DEFAULT = {
     "purchase": {
         "color": "112, 48, 160",
@@ -120,17 +122,29 @@ def sanitize_process_meta(raw: Any, *, ensure_defaults: bool = True) -> Dict[str
         if not name:
             continue
         entry = payload if isinstance(payload, dict) else {}
-        aliases = _uniq(_norm(alias) for alias in (entry.get("aliases") or []))
-        if isinstance(entry.get("aliases"), str):
-            aliases = _uniq(_norm(alias) for alias in re.split(r"[,;\r\n]+", str(entry.get("aliases") or "")))
+        default_entry = _DEFAULT.get(name) or _DEFAULT.get("others") or {}
+        raw_aliases = entry.get("aliases") if "aliases" in entry else _MISSING
+        if raw_aliases is _MISSING:
+            aliases = _uniq(_norm(alias) for alias in (default_entry.get("aliases") or []))
+        elif isinstance(raw_aliases, str):
+            aliases = _uniq(_norm(alias) for alias in re.split(r"[,;\r\n]+", str(raw_aliases or "")))
+        else:
+            aliases = _uniq(_norm(alias) for alias in (raw_aliases or []))
         aliases = [alias for alias in aliases if alias and alias != name]
 
-        file_groups_raw = entry.get("file_groups") or entry.get("required_files") or entry.get("files") or []
+        raw_file_groups = _MISSING
+        for key in ("file_groups", "required_files", "files"):
+            if key in entry:
+                raw_file_groups = entry.get(key)
+                break
+        if raw_file_groups is _MISSING:
+            file_groups_raw = list(default_entry.get("file_groups") or [])
+        else:
+            file_groups_raw = raw_file_groups or []
         if isinstance(file_groups_raw, str):
             file_groups_raw = re.split(r"[,;\r\n]+", file_groups_raw)
         file_groups = _uniq(_clean_file_group(item) for item in (file_groups_raw or []))
 
-        default_entry = _DEFAULT.get(name) or _DEFAULT.get("others") or {}
         out: Dict[str, Any] = {
             "color": _clean_color(entry.get("color"), default_entry.get("color", "118, 113, 113")),
             "icon": _clean_icon(entry.get("icon"), default_entry.get("icon", "unknown.svg")),
@@ -163,8 +177,12 @@ def _with_alias_index(meta: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, An
 
 def load_process_meta(path: str | None = None, overrides: Any | None = None) -> Dict:
     base = default_process_meta(path)
+    meta = copy.deepcopy(base)
     custom = sanitize_process_meta(overrides) if overrides else {}
-    meta = custom or base
+    for name, item in custom.items():
+        if str(name).startswith("_"):
+            continue
+        meta[name] = copy.deepcopy(item)
     if "others" not in meta:
         meta["others"] = copy.deepcopy(base.get("others") or _DEFAULT["others"])
     return _with_alias_index(meta)
