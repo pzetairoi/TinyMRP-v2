@@ -51,6 +51,7 @@ from app.services.field_config import (
     context_field_ids,
     field_requires_runtime_scan,
     file_field_group,
+    field_uses_materialized_value,
     field_index as field_config_index,
     get_field_config,
     matches_field_filter_value,
@@ -581,6 +582,7 @@ def parts_lazy():
     parts_context_ids = context_field_ids("parts_list", field_config)
     field_meta = field_config_index(field_config)
     runtime_filter_ids = {field_id for field_id in parts_context_ids if field_requires_runtime_scan(field_id, field_config)}
+    materialized_filter_ids = {field_id for field_id in parts_context_ids if field_uses_materialized_value(field_id, field_config)}
     sortable_ids = {field_id for field_id in parts_context_ids if field_meta.get(field_id, {}).get("sortable")}
     filterable_ids = {field_id for field_id in parts_context_ids if field_meta.get(field_id, {}).get("filterable")}
 
@@ -690,6 +692,7 @@ def parts_lazy():
         if field_id in {"material", "process"}:
             continue
         data_type = str(field_meta.get(field_id, {}).get("data_type") or "text")
+        uses_materialized_value = field_id in materialized_filter_ids
         raw_value = filter_value(filters, field_id, FILTER_MISSING)
         if data_type == "image":
             continue
@@ -705,7 +708,7 @@ def parts_lazy():
                     if expected is not None:
                         q = q & _file_filter_q(field_id, expected)
                         continue
-                if field_id in runtime_filter_ids:
+                if field_id in runtime_filter_ids or uses_materialized_value:
                     typed_filter_specs.append((field_id, data_type, raw_value))
                 else:
                     next_q = _apply_typed_db_filter(q, field_id, data_type, raw_value)
@@ -714,7 +717,7 @@ def parts_lazy():
                     else:
                         q = next_q
             continue
-        if field_id in runtime_filter_ids:
+        if field_id in runtime_filter_ids or uses_materialized_value:
             if raw_value is not FILTER_MISSING and raw_value not in (None, ""):
                 runtime_filter_specs.append((field_id, data_type, raw_value))
             continue
@@ -728,7 +731,7 @@ def parts_lazy():
     material_val = filter_value(filters, "material", "")
     material_val_norm = str(material_val or "").strip().lower()
     if material_val_norm not in {"__missing__", "missing", "(missing)"}:
-        if "material" in runtime_filter_ids and material_val not in (None, ""):
+        if ("material" in runtime_filter_ids or "material" in materialized_filter_ids) and material_val not in (None, ""):
             runtime_filter_specs.append(("material", str(field_meta.get("material", {}).get("data_type") or "text"), material_val))
         else:
             paths = query_paths_for_field("material", field_config)
@@ -736,7 +739,7 @@ def parts_lazy():
                 q = add_contains_filter(q, paths, material_val)
 
     finish_val = filter_value(filters, "finish", "")
-    if "finish" in runtime_filter_ids and finish_val not in (None, ""):
+    if ("finish" in runtime_filter_ids or "finish" in materialized_filter_ids) and finish_val not in (None, ""):
         runtime_filter_specs.append(("finish", str(field_meta.get("finish", {}).get("data_type") or "text"), finish_val))
     else:
         paths = query_paths_for_field("finish", field_config)
