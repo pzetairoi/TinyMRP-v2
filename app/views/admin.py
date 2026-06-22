@@ -111,6 +111,35 @@ def _parse_process_meta(form) -> dict:
         )
     return sanitize_process_meta(rows)
 
+
+def _saved_process_meta(form) -> dict:
+    # Persist the effective library so defaults remain stable across reloads/restarts.
+    submitted = _parse_process_meta(form)
+    return sanitize_process_meta(load_process_meta(overrides=submitted or None))
+
+
+def _active_process_meta(settings) -> dict:
+    stored = getattr(settings, "process_meta", None) if settings else None
+    return load_process_meta(overrides=stored or None)
+
+
+def _process_rows_from_meta(process_meta: dict) -> list[dict]:
+    rows = []
+    for name, meta in (process_meta or {}).items():
+        if str(name).startswith("_"):
+            continue
+        rows.append(
+            {
+                "name": name,
+                "icon": (meta or {}).get("icon", ""),
+                "color": (meta or {}).get("color", ""),
+                "aliases": list((meta or {}).get("aliases") or []),
+                "file_groups": list((meta or {}).get("file_groups") or []),
+            }
+        )
+    rows.sort(key=lambda item: item["name"])
+    return rows
+
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 @bp.get("/")
@@ -166,7 +195,7 @@ def admin_settings():
         if request.form.get("reset_process_library") in ("1", "true", "on"):
             settings.process_meta = {}
         else:
-            settings.process_meta = _parse_process_meta(request.form)
+            settings.process_meta = _saved_process_meta(request.form)
 
         remove_logo = bool(request.form.get("remove_logo") in ("on", "true", "1", True))
         upload = request.files.get("brand_logo")
@@ -204,6 +233,7 @@ def admin_settings():
 
         settings.updated_at = datetime.utcnow()
         settings.save()
+        process_meta = _active_process_meta(settings)
         try:
             current_app.config["HARDWARE_FOLDERS"] = settings.hardware_folders or []
             current_app.config["FLAT_PATTERN_PAGE_NAMES"] = settings.flat_pattern_page_names or []
@@ -213,7 +243,7 @@ def admin_settings():
             current_app.config["ARENA_FILE_LINK_BASE_URL"] = settings.arena_file_link_base_url or ""
             from app.services.app_settings import resolve_file_sources
             file_sources = resolve_file_sources(settings)
-            current_app.config["PROCESS_META"] = load_process_meta(overrides=settings.process_meta or None)
+            current_app.config["PROCESS_META"] = process_meta
             current_app.config["FILE_SOURCES"] = file_sources
             if file_sources:
                 primary_source = file_sources[0]
@@ -234,9 +264,6 @@ def admin_settings():
                 from app.services.canonical_fields import rebuild_all_part_canonical_fields
                 from app.services.part_materialized import rebuild_part_materialized_fields
 
-                process_meta = current_app.config.get("PROCESS_META", {}) or load_process_meta(
-                    overrides=settings.process_meta or None
-                )
                 canonical_report = rebuild_all_part_canonical_fields(process_meta=process_meta)
                 materialized_report = rebuild_part_materialized_fields()
                 errors = int(materialized_report.get("errors") or 0)
@@ -272,21 +299,9 @@ def admin_settings():
             flash("Settings updated.", "success")
         return redirect(url_for("admin.admin_settings"))
 
-    process_meta = current_app.config.get("PROCESS_META", {}) or {}
-    process_rows = []
-    for name, meta in process_meta.items():
-        if str(name).startswith("_"):
-            continue
-        process_rows.append(
-            {
-                "name": name,
-                "icon": (meta or {}).get("icon", ""),
-                "color": (meta or {}).get("color", ""),
-                "aliases": list((meta or {}).get("aliases") or []),
-                "file_groups": list((meta or {}).get("file_groups") or []),
-            }
-        )
-    process_rows.sort(key=lambda item: item["name"])
+    process_meta = _active_process_meta(settings)
+    current_app.config["PROCESS_META"] = process_meta
+    process_rows = _process_rows_from_meta(process_meta)
     blank_process_row = {"name": "", "icon": "", "color": "", "aliases": [], "file_groups": []}
     for _ in range(5):
         process_rows.append(dict(blank_process_row))

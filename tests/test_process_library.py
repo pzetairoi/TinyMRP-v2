@@ -18,6 +18,11 @@ def test_custom_process_library_normalizes_aliases():
         }
     )
 
+    assert "purchase" in meta
+    assert "hardware" in meta
+    assert normalize_processes({"process": "welding"}, meta) == ["welding"]
+    assert normalize_processes({"process": "machining"}, meta) == ["machine"]
+    assert normalize_processes({"process": "fastener"}, meta) == ["hardware"]
     assert normalize_processes({"process": "anodizing"}, meta) == ["anodising"]
     assert normalize_processes({"process": "not in library"}, meta) == ["others"]
 
