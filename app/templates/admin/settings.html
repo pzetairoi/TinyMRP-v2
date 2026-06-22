@@ -199,14 +199,24 @@
 
     <div class="card shadow-sm mb-3">
       <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between gap-2">
-          <h5 class="card-title mb-0">Process library</h5>
-          <button class="btn btn-sm btn-outline-secondary" type="submit" name="reset_process_library" value="1">
-            Restore defaults
-          </button>
+        <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+          <div>
+            <h5 class="card-title mb-0">Process library</h5>
+            <p class="text-muted small mt-2 mb-0">
+              Manage canonical process names, icons, colors, aliases, and required file groups. Add custom processes here so future imports classify them directly instead of falling back to <code>others</code>.
+            </p>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-primary" type="button" id="addProcessRow">
+              Add process
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" type="submit" name="reset_process_library" value="1">
+              Restore defaults
+            </button>
+          </div>
         </div>
         <p class="text-muted small mt-2">
-          Manage canonical process names, icons, colors, aliases, and required file groups. Leave blank rows unused.
+          After adding a new process or alias, use <strong>Save settings + recompute existing parts</strong> to reclassify existing parts that were previously stored as <code>others</code>.
         </p>
         <datalist id="processIconList">
           {% for icon in process_icon_choices %}
@@ -225,7 +235,7 @@
                 <th>Required files</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody id="processRows">
               {% for row in process_rows %}
               <tr>
                 <td>
@@ -254,7 +264,38 @@
       </div>
     </div>
 
-    <button class="btn btn-primary" type="submit">Save settings</button>
+    <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-primary" type="submit">Save settings</button>
+      <button class="btn btn-outline-primary" type="submit" name="recompute_process_library" value="1">
+        Save settings + recompute existing parts
+      </button>
+    </div>
   </form>
 </div>
+
+<script>
+(function () {
+  const button = document.getElementById('addProcessRow');
+  const tbody = document.getElementById('processRows');
+  if (!button || !tbody) return;
+
+  function cell(inputHtml) {
+    const td = document.createElement('td');
+    td.innerHTML = inputHtml;
+    return td;
+  }
+
+  button.addEventListener('click', function () {
+    const tr = document.createElement('tr');
+    tr.appendChild(cell('<input class="form-control form-control-sm" type="text" name="process_name" placeholder="anodising">'));
+    tr.appendChild(cell('<input class="form-control form-control-sm" type="text" name="process_icon" list="processIconList" placeholder="unknown.svg">'));
+    tr.appendChild(cell('<input class="form-control form-control-sm" type="text" name="process_color" placeholder="118, 113, 113">'));
+    tr.appendChild(cell('<input class="form-control form-control-sm" type="text" name="process_aliases" placeholder="anodize, anodizing">'));
+    tr.appendChild(cell('<input class="form-control form-control-sm" type="text" name="process_file_groups" placeholder="pdf, datasheet">'));
+    tbody.appendChild(tr);
+    const firstInput = tr.querySelector('input[name="process_name"]');
+    if (firstInput) firstInput.focus();
+  });
+})();
+</script>
 {% endblock %}
