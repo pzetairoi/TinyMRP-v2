@@ -1,6 +1,6 @@
 import os, mimetypes
 from urllib.parse import unquote
-from flask import Blueprint, current_app, send_file, abort, request
+from flask import Blueprint, current_app, send_file, abort, request, g
 from flask_login import login_required, current_user
 from app.services.audit import log_action
 from app.services.acl import allowed_parts_for, part_is_allowed
@@ -131,6 +131,8 @@ def view(token: str):
     if not resolved:
         abort(404)
     pf, kind = resolved
+    if kind == "preview":
+        g.allow_frame_embedding = True
     # ACL: enforce PN/REV access
     try:
         allowed = allowed_parts_for(current_user)

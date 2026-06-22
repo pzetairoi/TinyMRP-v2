@@ -20,6 +20,7 @@ export default defineConfig(({ command }) => {
       port: 5173, strictPort: true,
       proxy: {
         '/api':        { target: backend, changeOrigin: true },
+        '/files':      { target: backend, changeOrigin: true },
         '/extfiles':   { target: backend, changeOrigin: true },
         '/deliverables': { target: backend, changeOrigin: true }, // optional
       },

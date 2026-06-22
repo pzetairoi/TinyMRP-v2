@@ -56,6 +56,16 @@ type FileRow = {
 
 type PreviewFormat = "3mf" | "ply" | "stl";
 
+type DatasheetOption = {
+  key: string;
+  url: string;
+  ext: string;
+  label: string;
+  file: FileRow;
+  isExternal: boolean;
+  canPreview: boolean;
+};
+
 type ChildRow = {
   child_pn: string;
   child_desc: string;
@@ -395,6 +405,7 @@ export default function PartDetailPage() {
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
   const [images, setImages] = useState<string[]>([]);
   const [selectedPreviewKey, setSelectedPreviewKey] = useState<string>("");
+  const [selectedDatasheetKey, setSelectedDatasheetKey] = useState<string>("");
 
   // Doc Packs state
   type DocOpts = { file_types: string[]; processes: string[] };
@@ -548,6 +559,69 @@ function bestUrl(f: FileRow): string {
   return "";
 }
 
+function fileNameFromUrl(url: string): string {
+  const text = String(url || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = new URL(text, window.location.origin);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return decodeURIComponent(parts[parts.length - 1] || "");
+  } catch {
+    const clean = text.split("#", 1)[0].split("?", 1)[0];
+    const parts = clean.split("/").filter(Boolean);
+    return decodeURIComponent(parts[parts.length - 1] || "");
+  }
+}
+
+function extensionFromFileRowOrUrl(file: FileRow, url: string): string {
+  const explicit = String(file.ext || "").trim().toLowerCase();
+  if (explicit) return explicit;
+  const relName = String(file.name || file.rel_path || "").trim();
+  const urlName = fileNameFromUrl(url);
+  const source = relName || urlName;
+  const idx = source.lastIndexOf(".");
+  return idx >= 0 ? source.slice(idx + 1).toLowerCase() : "";
+}
+
+function isPdfLike(ext: string, url: string): boolean {
+  const extNorm = String(ext || "").trim().toLowerCase();
+  if (extNorm === "pdf") return true;
+  return fileNameFromUrl(url).toLowerCase().endsWith(".pdf");
+}
+
+function isImageLike(ext: string, url: string): boolean {
+  const extNorm = String(ext || "").trim().toLowerCase();
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes(extNorm)) return true;
+  const lowerName = fileNameFromUrl(url).toLowerCase();
+  return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"].some((suffix) => lowerName.endsWith(suffix));
+}
+
+function bestDatasheetUrl(f: FileRow): string {
+  const direct = f.url || f.http_url || (Array.isArray(f.urls) ? f.urls[0] : "");
+  if (direct) {
+    const text = String(direct).trim();
+    if (/^https?:\/\//i.test(text)) return text;
+    try {
+      const u = new URL(text, window.location.origin);
+      if (u.origin === window.location.origin) return u.toString();
+    } catch {
+      if (text.startsWith("/")) return text;
+    }
+  }
+
+  return bestUrl(f);
+}
+
+function isExternalDatasheetUrl(url: string): boolean {
+  const text = String(url || "").trim();
+  if (!text || !/^https?:\/\//i.test(text)) return false;
+  try {
+    return new URL(text).origin !== window.location.origin;
+  } catch {
+    return true;
+  }
+}
+
 
 
   function normalizeFileRow(raw: any): FileRow {
@@ -641,7 +715,11 @@ function bestUrl(f: FileRow): string {
     const value = summaryValue(field.id);
     if (field.data_type === "link") {
       const href = String(value || "").trim();
-      return href ? <a href={href} target="_blank" rel="noreferrer">{field.label}</a> : <span><strong>{field.label}:</strong> -</span>;
+      return href ? (
+        <a className="btn btn-outline-secondary btn-sm pd-file-btn" href={href} target="_blank" rel="noreferrer">
+          {field.label}
+        </a>
+      ) : <span><strong>{field.label}:</strong> -</span>;
     }
     return <span><strong>{field.label}:</strong> {formatFieldValue(value)}</span>;
   }
@@ -1167,10 +1245,36 @@ function bestUrl(f: FileRow): string {
     return options;
   }, [fileGroups]);
 
+  const datasheetOptions = useMemo(() => {
+    const items = fileGroups["datasheet"] || [];
+    return items.reduce<DatasheetOption[]>((options, file, idx) => {
+      const url = bestDatasheetUrl(file);
+      if (!url) return options;
+      const ext = extensionFromFileRowOrUrl(file, url);
+      const isExternal = isExternalDatasheetUrl(url);
+      const label =
+        file.name ||
+        (file.rel_path ? file.rel_path.split("/").pop() : "") ||
+        fileNameFromUrl(url) ||
+        `datasheet ${idx + 1}`;
+      const keySource = file.rel_path || file.name || url || `datasheet ${idx + 1}`;
+      options.push({
+        key: `datasheet:${keySource}`,
+        url,
+        ext,
+        label,
+        file,
+        isExternal,
+        canPreview: !isExternal,
+      });
+      return options;
+    }, []);
+  }, [fileGroups]);
+
   const firstLinks = useMemo(() => {
-    const pick = (k: string) => {
+    const pick = (k: string, urlResolver: (file: FileRow) => string = bestUrl) => {
       const arr = fileGroups[k] || [];
-      const href = arr.length ? bestUrl(arr[0]) : "";
+      const href = arr.length ? urlResolver(arr[0]) : "";
       return href ? { href, count: arr.length } : null;
     };
     return {
@@ -1178,7 +1282,7 @@ function bestUrl(f: FileRow): string {
       step: pick("step"),
       pdf: pick("pdf"),
       dxf: pick("dxf"),
-      datasheet: pick("datasheet"),
+      datasheet: pick("datasheet", bestDatasheetUrl),
       threeMF: pick("3mf"),
       ply: pick("ply"),
       stl: pick("stl"),
@@ -1205,6 +1309,25 @@ function bestUrl(f: FileRow): string {
     if (threeDOptions.length === 1) return threeDOptions[0];
     return threeDOptions.find((opt) => opt.key === selectedPreviewKey) || null;
   }, [threeDOptions, selectedPreviewKey]);
+
+  useEffect(() => {
+    if (datasheetOptions.length === 0) {
+      setSelectedDatasheetKey("");
+      return;
+    }
+    if (datasheetOptions.some((opt) => opt.key === selectedDatasheetKey)) {
+      return;
+    }
+    const preferred = datasheetOptions.find((opt) => opt.canPreview) || datasheetOptions[0];
+    setSelectedDatasheetKey(preferred?.key || "");
+  }, [datasheetOptions, selectedDatasheetKey]);
+
+  const activeDatasheet = useMemo(() => {
+    if (datasheetOptions.length === 0) return null;
+    return datasheetOptions.find((opt) => opt.key === selectedDatasheetKey) || datasheetOptions[0] || null;
+  }, [datasheetOptions, selectedDatasheetKey]);
+
+  const hasDatasheetPreview = datasheetOptions.length > 0;
 
   const previewUrl = activePreview?.url ?? null;
   const previewFormat = activePreview?.format ?? null;
@@ -1624,6 +1747,12 @@ function bestUrl(f: FileRow): string {
   // consider that we have a drawing. Otherwise, hide the Drawing tab and
   // default to All attributes.
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
+
+  useEffect(() => {
+    if (!hasDrawing && hasDatasheetPreview) {
+      setTabIndex(0)
+    }
+  }, [effectiveRev, hasDrawing, hasDatasheetPreview, isSharedView, pn])
 
   async function saveNotes() {
     if (!canPartsNote || !part) return
@@ -2102,7 +2231,58 @@ function bestUrl(f: FileRow): string {
               )}
             </TabPanel>
             )}
-            
+            {hasDatasheetPreview && (
+              <TabPanel header="Datasheet">
+                <div className="pd-datasheet-viewer p-3">
+                  <div className="pd-datasheet-toolbar">
+                    {datasheetOptions.length > 1 && (
+                      <div>
+                        <label className="form-label small" htmlFor="datasheetSelect">
+                          Datasheet file
+                        </label>
+                        <select
+                          id="datasheetSelect"
+                          className="form-select form-select-sm"
+                          value={selectedDatasheetKey}
+                          onChange={(e) => setSelectedDatasheetKey(e.target.value)}
+                        >
+                          {datasheetOptions.map((opt) => (
+                            <option key={opt.key} value={opt.key}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {activeDatasheet && (
+                      <a
+                        className="btn btn-outline-secondary btn-sm"
+                        href={activeDatasheet.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open datasheet
+                      </a>
+                    )}
+                  </div>
+                  {activeDatasheet ? (
+                    !activeDatasheet.canPreview ? (
+                      <div className="alert alert-secondary mb-0">
+                        External datasheet links are not embedded. Use the button above to open the source document.
+                      </div>
+                    ) : isImageLike(activeDatasheet.ext, activeDatasheet.url) ? (
+                      <img src={activeDatasheet.url} alt="Datasheet" className="pd-datasheet-image" />
+                    ) : isPdfLike(activeDatasheet.ext, activeDatasheet.url) ? (
+                      <iframe src={activeDatasheet.url} title="Datasheet" className="pd-datasheet-frame" />
+                    ) : (
+                      <iframe src={activeDatasheet.url} title="Datasheet" className="pd-datasheet-frame" />
+                    )
+                  ) : (
+                    <div className="text-muted">No datasheet preview available.</div>
+                  )}
+                </div>
+              </TabPanel>
+            )}
 
             
 
