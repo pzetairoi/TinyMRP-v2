@@ -377,6 +377,52 @@ def test_filters_use_resolved_values_for_custom_and_remapped_fields(client):
     assert [row["part_number"] for row in global_resp.get_json()["data"]] == ["FLT-RAW-2"]
 
 
+def test_parts_lazy_filters_custom_text_without_materialized_field_values(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    client.put(
+        "/api/admin/field-config",
+        json={
+            "custom_fields": [
+                {"id": "legacy_code", "label": "Legacy Code", "source_path": "attrs.Legacy Code", "data_type": "text"},
+            ],
+            "contexts": {
+                "parts_list": {
+                    "allowed_field_ids": ["part_number", "description", "legacy_code"],
+                    "default_field_ids": ["part_number", "description", "legacy_code"],
+                }
+            },
+        },
+    )
+
+    Part(
+        part_number="STALE-100",
+        revision="A",
+        description="Legacy",
+        attrs={"Legacy Code": "LEG-100"},
+    ).save(sync_materialized=False)
+    Part(
+        part_number="STALE-200",
+        revision="A",
+        description="Legacy",
+        attrs={"Legacy Code": "LEG-200"},
+    ).save(sync_materialized=False)
+
+    stale = Part.objects(part_number="STALE-100", revision="A").first()
+    assert stale is not None
+    assert dict(stale.field_values or {}) == {}
+
+    resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"legacy_code": {"value": "LEG-100"}}},
+    )
+    assert resp.status_code == 200
+    rows = resp.get_json()["data"]
+    assert [row["part_number"] for row in rows] == ["STALE-100"]
+    assert rows[0]["legacy_code"] == "LEG-100"
+
+
 def test_admin_can_rebuild_search_fields_for_existing_parts(client):
     admin = _admin_user()
     _login(client, admin)
