@@ -369,6 +369,31 @@ export default function AdminFieldsPage() {
     }
   }
 
+  async function rebuildSearchFields() {
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const resp = await apiFetch<{ config: FieldConfigPayload; report: { scanned: number; updated: number; errors: number } }>(
+        '/api/admin/field-config/rebuild-search-fields',
+        { method: 'POST' },
+      )
+      setConfig({
+        fields: [...(resp.config.fields || [])],
+        contexts: cloneContexts(resp.config.contexts || {}),
+        canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
+      })
+      setMessage(
+        `Searchable part fields rebuilt for ${resp.report.updated} of ${resp.report.scanned} parts.` +
+          (resp.report.errors ? ` Errors: ${resp.report.errors}.` : ''),
+      )
+    } catch (err) {
+      setError((err as ApiError).message || 'Failed to rebuild searchable part fields.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (error && !config) {
     return <div className="text-danger">{error}</div>
   }
@@ -450,6 +475,23 @@ export default function AdminFieldsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="card p-3 mb-4">
+        <div className="d-flex align-items-center justify-content-between mb-3">
+          <div>
+            <h5 className="mb-0">Searchable Part Fields</h5>
+            <div className="text-muted small">
+              Use this after changing field mappings or after upgrading from older data so custom fields and file availability filters work correctly.
+            </div>
+          </div>
+          <button className="btn btn-outline-primary" onClick={rebuildSearchFields} disabled={saving}>
+            {saving ? 'Working...' : 'Rebuild searchable part fields'}
+          </button>
+        </div>
+        <div className="small text-muted">
+          This rebuild updates canonical mirrors where needed, materialized custom/remapped field values, and file availability coverage on existing parts.
         </div>
       </div>
 

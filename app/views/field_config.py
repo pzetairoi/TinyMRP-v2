@@ -6,6 +6,7 @@ from app.services.api_auth import api_auth_required, get_request_user
 from app.services.acl import user_has_permission
 from app.services.canonical_fields import rebuild_all_part_canonical_fields
 from app.services.field_config import discover_part_attr_fields, get_field_config, reset_field_config, save_field_config
+from app.services.part_materialized import rebuild_part_materialized_fields
 from app.services.user_settings import get_or_create_settings, settings_to_dict
 
 bp = Blueprint("field_config_api", __name__, url_prefix="/api")
@@ -81,4 +82,14 @@ def field_config_rebuild_canonical_fields():
     if not _is_admin(user):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     report = rebuild_all_part_canonical_fields()
+    return jsonify({"ok": True, "report": report, "config": get_field_config()})
+
+
+@bp.post("/admin/field-config/rebuild-search-fields")
+@api_auth_required
+def field_config_rebuild_search_fields():
+    user = get_request_user()
+    if not _is_admin(user):
+        return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
+    report = rebuild_part_materialized_fields()
     return jsonify({"ok": True, "report": report, "config": get_field_config()})

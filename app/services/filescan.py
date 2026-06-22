@@ -155,6 +155,10 @@ def datasheet_url_from_attrs(attrs: Optional[Dict[str, Any]]) -> Optional[str]:
     return None
 
 
+def datasheet_attr_present(attrs: Optional[Dict[str, Any]]) -> bool:
+    return bool(_datasheet_attr_values(attrs))
+
+
 def _safe_datasheet_rel(value: str) -> Optional[str]:
     text = str(value or "").strip().replace("\\", "/")
     if not text or _is_http_url(text):
@@ -332,6 +336,7 @@ def upsert_part_files_detailed(
     """
     n = 0
     changes: List[Dict[str, Any]] = []
+    affected_pairs: set[tuple[str, str]] = set()
     for r in recs or []:
         rpn = pn or r.get("pn") or r.get("part_number")
         rrev = (rev if rev is not None else r.get("rev") or r.get("revision") or "")
@@ -413,6 +418,7 @@ def upsert_part_files_detailed(
         # Upsert
         PartFile.objects(**query).modify(upsert=True, new=True, **updates)  # type: ignore
         n += 1
+        affected_pairs.add((str(rpn), str(rrev or "")))
         if action == "added" or changed_fields:
             changes.append(
                 {
@@ -427,7 +433,13 @@ def upsert_part_files_detailed(
                 }
             )
 
-    return {"count": n, "changes": changes}
+    materialized = {"scanned": 0, "updated": 0}
+    if affected_pairs:
+        from app.services.part_materialized import sync_materialized_fields_for_pairs
+
+        materialized = sync_materialized_fields_for_pairs(affected_pairs)
+
+    return {"count": n, "changes": changes, "materialized": materialized}
 
 
 def upsert_part_files(

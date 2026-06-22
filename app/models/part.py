@@ -1,5 +1,5 @@
 # app/models/part.py
-from mongoengine import Document, StringField, ListField, DictField, DateTimeField
+from mongoengine import BooleanField, DateTimeField, DictField, Document, ListField, StringField
 from datetime import datetime
 
 DB_ALIAS = "tinymrp-v2"
@@ -10,6 +10,7 @@ class Part(Document):
     description = StringField(default="")
     processes   = ListField(StringField(), default=list)
     canonical   = DictField(default=dict)
+    field_values = DictField(default=dict)
     category    = StringField(default="")
     uom         = StringField(default="EA")
     manufacturer= StringField(default="")
@@ -17,6 +18,16 @@ class Part(Document):
     status      = StringField(default="active")
     docs        = ListField(StringField())
     attrs       = DictField()
+    file_groups = ListField(StringField(), default=list)
+    has_pdf = BooleanField(default=False)
+    has_png = BooleanField(default=False)
+    has_dxf = BooleanField(default=False)
+    has_step = BooleanField(default=False)
+    has_edr = BooleanField(default=False)
+    has_3mf = BooleanField(default=False)
+    has_ply = BooleanField(default=False)
+    has_stl = BooleanField(default=False)
+    has_datasheet = BooleanField(default=False)
     notes_search = StringField(default="")
     comments_search = StringField(default="")
     created_at  = DateTimeField(default=datetime.utcnow)
@@ -27,13 +38,24 @@ class Part(Document):
         "indexes": [
             { "fields": ["part_number", "revision"], "unique": True, "name": "unique_part_rev" },
             { "fields": ["part_number"], "name": "part_number_idx" },
+            { "fields": ["revision"], "name": "parts_revision_idx" },
             { "fields": ["updated_at"], "name": "parts_updated_at_idx" },
             { "fields": ["processes"], "name": "parts_processes_idx" },
             { "fields": ["description"], "name": "parts_description_idx" },
             { "fields": ["notes_search"], "name": "parts_notes_search_idx" },
             { "fields": ["comments_search"], "name": "parts_comments_search_idx" },
+            { "fields": ["category"], "name": "parts_category_idx" },
+            { "fields": ["status"], "name": "parts_status_idx" },
+            { "fields": ["manufacturer"], "name": "parts_manufacturer_idx" },
+            { "fields": ["mfr_part"], "name": "parts_mfr_part_idx" },
             { "fields": ["canonical.material"], "name": "parts_canonical_material_idx" },
             { "fields": ["canonical.finish"], "name": "parts_canonical_finish_idx" },
+            { "fields": ["canonical.mass"], "name": "parts_canonical_mass_idx" },
+            { "fields": ["canonical.datasheet"], "name": "parts_canonical_datasheet_idx" },
+            { "fields": ["canonical.approved_by"], "name": "parts_canonical_approved_by_idx" },
+            { "fields": ["file_groups"], "name": "parts_file_groups_idx" },
+            { "fields": ["has_pdf"], "name": "parts_has_pdf_idx" },
+            { "fields": ["has_datasheet"], "name": "parts_has_datasheet_idx" },
         ],
         "db_alias": DB_ALIAS
     }
@@ -43,3 +65,10 @@ class Part(Document):
         if self.revision:
             return f"{self.part_number}-{self.revision}"
         return self.part_number
+
+    def save(self, *args, sync_materialized: bool = True, **kwargs):
+        if sync_materialized:
+            from app.services.part_materialized import sync_part_materialized_fields
+
+            sync_part_materialized_fields(self)
+        return super().save(*args, **kwargs)

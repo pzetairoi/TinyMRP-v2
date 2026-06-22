@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import Iterable, List, Optional
 from flask import current_app
 from app.models.artifact import PartFile
 from app.services.files_access import file_url_for, public_file_urls_enabled
+from app.services.part_norm import clean_rev
 
 def _urls_for(pn: str, rev: Optional[str], *, is_dwg: bool):
     """Return best-first URLs for preview/drawing PNGs.
@@ -33,6 +34,37 @@ def drawing_png_urls_for(pn: str, rev: str | None):
 # kept for backward compat – use only for places that truly want preview images
 def thumb_urls_for(pn: str, rev: str | None):
     return preview_png_urls_for(pn, rev)
+
+
+def preview_png_urls_map(pairs: Iterable[tuple[str, str | None]]) -> dict[tuple[str, str], List[str]]:
+    requested: dict[tuple[str, str], tuple[str, str]] = {}
+    for pn, rev in pairs:
+        pn_clean = str(pn or "").strip()
+        rev_clean = clean_rev(rev or "")
+        if not pn_clean:
+            continue
+        requested[(pn_clean.lower(), rev_clean.lower())] = (pn_clean, rev_clean)
+    if not requested:
+        return {}
+
+    http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
+    out: dict[tuple[str, str], List[str]] = {}
+    pn_list = sorted({pn for pn, _rev in requested.values()})
+    rows = (
+        PartFile.objects(part_number__in=pn_list, ext_group="png", is_dwg=False)
+        .only("part_number", "revision", "rel_path", "http_url", "thumb_rel_path", "mtime", "mtime_iso")
+        .order_by("-mtime_iso", "-mtime", "rel_path")
+    )
+    for row in rows:
+        match = requested.get((str(getattr(row, "part_number", "") or "").strip().lower(), clean_rev(getattr(row, "revision", "") or "").lower()))
+        if not match or match in out:
+            continue
+        out[match] = _dedup_urls(_urls_for_doc(row, http_base, prefer_thumb=True))
+    return out
+
+
+def thumb_urls_map(pairs: Iterable[tuple[str, str | None]]) -> dict[tuple[str, str], List[str]]:
+    return preview_png_urls_map(pairs)
 
 
 # helper: build URL list for a single PartFile doc
