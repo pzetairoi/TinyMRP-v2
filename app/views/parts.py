@@ -685,9 +685,11 @@ def parts_lazy():
         )
 
     q = Q()
+    fallback_base_q = Q()
     generic_filter_ids: list[str] = []
     typed_filter_specs: list[tuple[str, str, Any]] = []
     runtime_filter_specs: list[tuple[str, str, Any]] = []
+    materialized_filter_specs: list[tuple[str, str, Any]] = []
     for field_id in filterable_ids:
         if field_id in {"material", "process"}:
             continue
@@ -696,28 +698,46 @@ def parts_lazy():
         raw_value = filter_value(filters, field_id, FILTER_MISSING)
         if data_type == "image":
             continue
+        if uses_materialized_value:
+            if raw_value is FILTER_MISSING or raw_value in (None, ""):
+                continue
+            if data_type in {"boolean", "number"}:
+                next_q = _apply_typed_db_filter(q, field_id, data_type, raw_value)
+                if next_q is not None:
+                    q = next_q
+            else:
+                paths = query_paths_for_field(field_id, field_config)
+                if paths:
+                    q = add_contains_filter(q, paths, raw_value)
+            materialized_filter_specs.append((field_id, data_type, raw_value))
+            continue
         if data_type in {"boolean", "number"}:
             if raw_value is not FILTER_MISSING and raw_value not in (None, ""):
                 if data_type == "boolean" and field_id == "approved":
                     expected = boolean_filter_value(raw_value)
                     if expected is not None:
                         q = q & _approval_q(expected)
+                        fallback_base_q = fallback_base_q & _approval_q(expected)
                         continue
                 if data_type == "boolean" and file_field_group(field_id):
                     expected = boolean_filter_value(raw_value)
                     if expected is not None:
                         q = q & _file_filter_q(field_id, expected)
+                        fallback_base_q = fallback_base_q & _file_filter_q(field_id, expected)
                         continue
-                if field_id in runtime_filter_ids or uses_materialized_value:
+                if field_id in runtime_filter_ids:
                     typed_filter_specs.append((field_id, data_type, raw_value))
                 else:
                     next_q = _apply_typed_db_filter(q, field_id, data_type, raw_value)
+                    next_fallback_q = _apply_typed_db_filter(fallback_base_q, field_id, data_type, raw_value)
                     if next_q is None:
                         typed_filter_specs.append((field_id, data_type, raw_value))
                     else:
                         q = next_q
+                        if next_fallback_q is not None:
+                            fallback_base_q = next_fallback_q
             continue
-        if field_id in runtime_filter_ids or uses_materialized_value:
+        if field_id in runtime_filter_ids:
             if raw_value is not FILTER_MISSING and raw_value not in (None, ""):
                 runtime_filter_specs.append((field_id, data_type, raw_value))
             continue
@@ -726,25 +746,39 @@ def parts_lazy():
     for field_id in generic_filter_ids:
         paths = query_paths_for_field(field_id, field_config)
         if paths:
-            q = add_contains_filter(q, paths, filter_value(filters, field_id, ""))
+            raw_value = filter_value(filters, field_id, "")
+            q = add_contains_filter(q, paths, raw_value)
+            fallback_base_q = add_contains_filter(fallback_base_q, paths, raw_value)
 
     material_val = filter_value(filters, "material", "")
     material_val_norm = str(material_val or "").strip().lower()
     if material_val_norm not in {"__missing__", "missing", "(missing)"}:
-        if ("material" in runtime_filter_ids or "material" in materialized_filter_ids) and material_val not in (None, ""):
+        if "material" in materialized_filter_ids and material_val not in (None, ""):
+            paths = query_paths_for_field("material", field_config)
+            if paths:
+                q = add_contains_filter(q, paths, material_val)
+            materialized_filter_specs.append(("material", str(field_meta.get("material", {}).get("data_type") or "text"), material_val))
+        elif "material" in runtime_filter_ids and material_val not in (None, ""):
             runtime_filter_specs.append(("material", str(field_meta.get("material", {}).get("data_type") or "text"), material_val))
         else:
             paths = query_paths_for_field("material", field_config)
             if paths:
                 q = add_contains_filter(q, paths, material_val)
+                fallback_base_q = add_contains_filter(fallback_base_q, paths, material_val)
 
     finish_val = filter_value(filters, "finish", "")
-    if ("finish" in runtime_filter_ids or "finish" in materialized_filter_ids) and finish_val not in (None, ""):
+    if "finish" in materialized_filter_ids and finish_val not in (None, ""):
+        paths = query_paths_for_field("finish", field_config)
+        if paths:
+            q = add_contains_filter(q, paths, finish_val)
+        materialized_filter_specs.append(("finish", str(field_meta.get("finish", {}).get("data_type") or "text"), finish_val))
+    elif "finish" in runtime_filter_ids and finish_val not in (None, ""):
         runtime_filter_specs.append(("finish", str(field_meta.get("finish", {}).get("data_type") or "text"), finish_val))
     else:
         paths = query_paths_for_field("finish", field_config)
         if paths:
             q = add_contains_filter(q, paths, finish_val)
+            fallback_base_q = add_contains_filter(fallback_base_q, paths, finish_val)
 
     meta = current_app.config.get("PROCESS_META", {}) or {}
 
@@ -778,10 +812,13 @@ def parts_lazy():
     proc_val_norm = str(proc_val or "").strip().lower()
     if proc_val_norm in {"hardware", "fastener", "fasteners"}:
         q = q & (_process_filter_q("hardware") | or_contains(category_paths, "hardware"))
+        fallback_base_q = fallback_base_q & (_process_filter_q("hardware") | or_contains(category_paths, "hardware"))
     elif proc_val_norm in {"sheet metal", "sheetmetal", "sheet"}:
         q = q & (_process_filter_q(proc_val_norm) | or_contains(category_paths, "sheet") | or_contains(material_paths, "sheet"))
+        fallback_base_q = fallback_base_q & (_process_filter_q(proc_val_norm) | or_contains(category_paths, "sheet") | or_contains(material_paths, "sheet"))
     elif proc_val_norm:
         q = q & _process_filter_q(proc_val_norm)
+        fallback_base_q = fallback_base_q & _process_filter_q(proc_val_norm)
 
     global_value = filter_value(filters, "global", "")
     if global_value:
@@ -800,6 +837,7 @@ def parts_lazy():
             for path in global_paths:
                 or_q = or_q | Q(**{f"{path}__icontains": term})
             q = q & or_q
+            fallback_base_q = fallback_base_q & or_q
 
     job_id = body.get("job") or request.args.get("job")
     job_filter_enabled = bool(job_id) and str(body.get("job_only", "true")).lower() != "false"
@@ -813,6 +851,7 @@ def parts_lazy():
             }
             if pairs:
                 q = q & pairs_query(pairs)
+                fallback_base_q = fallback_base_q & pairs_query(pairs)
 
     used_in_job = flag_enabled(filters, "used_in_job")
     job_number_filter = str(filter_value(filters, "job_number", "") or "").strip()
@@ -829,6 +868,7 @@ def parts_lazy():
         if not pairs:
             return jsonify({"data": [], "totalRecords": 0})
         q = q & pairs_query(pairs)
+        fallback_base_q = fallback_base_q & pairs_query(pairs)
 
     allowed_scope = allowed_parts_for(current_user)
     if isinstance(allowed_scope, set):
@@ -844,12 +884,23 @@ def parts_lazy():
             else:
                 allowed_q = allowed_q | Q(part_number__iexact=pn_clean)
         q = q & allowed_q
+        fallback_base_q = fallback_base_q & allowed_q
 
     qs = Part.objects(q)
+    fallback_qs = Part.objects(fallback_base_q)
 
     if material_val_norm in {"__missing__", "missing", "(missing)"}:
         material_query = _mongo_path(primary_query_path("material", field_config) or "attrs__material")
         qs = qs.filter(
+            __raw__={
+                "$or": [
+                    {material_query: {"$exists": False}},
+                    {material_query: ""},
+                    {material_query: None},
+                ]
+            }
+        )
+        fallback_qs = fallback_qs.filter(
             __raw__={
                 "$or": [
                     {material_query: {"$exists": False}},
@@ -865,6 +916,28 @@ def parts_lazy():
 
     if approved_only_filter:
         qs = qs.filter(_approval_q(True))
+        fallback_qs = fallback_qs.filter(_approval_q(True))
+
+    def _missing_materialized_q(field_ids: set[str]) -> Q:
+        out = Q()
+        for field_id in field_ids:
+            out = out | Q(__raw__={f"field_values.{field_id}": {"$exists": False}})
+        return out
+
+    def _sort_value(values: dict[str, Any], part: Part, rev: str, data_type: str):
+        value = values.get(sort_field)
+        if data_type == "number":
+            try:
+                return float(value)
+            except Exception:
+                return float("-inf") if sort_order == -1 else float("inf")
+        if data_type == "boolean":
+            return 1 if bool(value) else 0
+        if sort_field == "part_number":
+            return str(getattr(part, "part_number", "") or "").lower()
+        if sort_field == "revision":
+            return str(values.get("revision", rev) or rev or "").lower()
+        return str(value or "").lower()
 
     def _coverage_map(parts_list: list[Part]) -> dict[tuple[str, str], set[str]]:
         return batch_file_groups_for_parts(parts_list)
@@ -942,6 +1015,80 @@ def parts_lazy():
         )
         coverage = _coverage_map(docs)
         resolved_cache = {}
+
+        fallback_limit = max(first + rows, rows)
+        if materialized_filter_specs and filtered < fallback_limit:
+            stale_filter_ids = {field_id for field_id, _data_type, _raw_value in materialized_filter_specs}
+            stale_candidates_qs = fallback_qs.filter(_missing_materialized_q(stale_filter_ids))
+            stale_candidates = list(
+                stale_candidates_qs.only("part_number", "revision", "description", "category", "attrs", "processes", "file_groups", "field_values")
+            )
+            fallback_docs: list[Part] = []
+            fallback_values_cache: dict[tuple[str, str], dict[str, Any]] = {}
+            fallback_sort_type = str((field_meta.get(sort_field) or {}).get("data_type") or "text")
+            fallback_field_ids = {field_id for field_id, _data_type, _raw_value in materialized_filter_specs}
+            if sort_field:
+                fallback_field_ids.add(sort_field)
+            fallback_field_ids.update({"part_number", "revision"})
+
+            for part in stale_candidates:
+                attrs = harvest_part_attrs(part)
+                rev = _normalized_revision(part, attrs)
+                values = resolve_part_field_values(
+                    part,
+                    fallback_field_ids,
+                    attrs=attrs,
+                    config=field_config,
+                    extra={"part_number": part.part_number, "revision": rev},
+                )
+                if any(not matches_field_filter_value(values.get(field_id), raw_value, data_type) for field_id, data_type, raw_value in materialized_filter_specs):
+                    continue
+                fallback_values_cache[(part.part_number, rev)] = values
+                fallback_docs.append(part)
+
+            if fallback_docs:
+                db_prefix = list(
+                    qs.order_by(order_by)
+                    .only("part_number", "revision", "description", "category", "attrs", "processes", "file_groups", "field_values")
+                    .limit(fallback_limit)
+                )
+                combined = db_prefix + fallback_docs
+                combined_sort_values = dict(fallback_values_cache)
+                for part in db_prefix:
+                    attrs = harvest_part_attrs(part)
+                    rev = _normalized_revision(part, attrs)
+                    key = (part.part_number, rev)
+                    if key in combined_sort_values:
+                        continue
+                    combined_sort_values[key] = resolve_part_field_values(
+                        part,
+                        fallback_field_ids,
+                        attrs=attrs,
+                        config=field_config,
+                        extra={"part_number": part.part_number, "revision": rev},
+                    )
+                combined.sort(
+                    key=lambda part: (
+                        _sort_value(
+                            combined_sort_values.get(
+                                (
+                                    part.part_number,
+                                    _normalized_revision(part, harvest_part_attrs(part)),
+                                ),
+                                {},
+                            ),
+                            part,
+                            _normalized_revision(part, harvest_part_attrs(part)),
+                            fallback_sort_type,
+                        ),
+                        str(getattr(part, "part_number", "") or "").lower(),
+                        str(_normalized_revision(part, harvest_part_attrs(part)) or "").lower(),
+                    ),
+                    reverse=sort_order == -1,
+                )
+                filtered += len(fallback_docs)
+                docs = combined[first:first + rows]
+                coverage = _coverage_map(docs)
 
     thumb_map = thumb_urls_map([(part.part_number, _normalized_revision(part, harvest_part_attrs(part))) for part in docs])
 
