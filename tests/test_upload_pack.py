@@ -21,8 +21,11 @@ def _make_bom_zip(
     extra_entries: dict[str, bytes],
     *,
     bom_with_utf8_bom: bool = False,
+    flat_overrides: dict | None = None,
 ) -> bytes:
     flat = {"partnumber": pn, "revision": rev, "description": "Test part"}
+    if flat_overrides:
+        flat.update(flat_overrides)
     flat_txt = "\n".join([repr(flat)])
     tree_txt = "\n".join(
         [
@@ -240,6 +243,46 @@ def test_upload_pack_report_includes_existing_part_file_changes(client, app, use
     kinds = {item.get("kind") for item in file_changes}
     assert "deliverable" in kinds
     assert "extra_file" in kinds
+
+
+def test_upload_pack_scans_attr_named_datasheet_when_other_deliverables_are_parsed(client, app, user, tmp_path):
+    role = Role(name="importer_datasheet", permissions=["import.bom", "items.view", "items.edit"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    with app.app_context():
+        app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+        app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+        app.config["EXTRA_FILES_ALLOWED"] = True
+
+    pn = "PN-DS-PACK"
+    rev = "A"
+    entries = {
+        f"deliverables/pdf/{pn}_REV_{rev}.pdf": b"pdf",
+        "deliverables/datasheet/vendor-file.pdf": b"datasheet",
+    }
+    zip_bytes = _make_bom_zip(
+        pn,
+        rev,
+        entries,
+        flat_overrides={"datasheet": "vendor-file.pdf"},
+    )
+
+    resp = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(zip_bytes), "pack.zip")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+
+    datasheet = PartFile.objects(
+        part_number=pn,
+        revision=rev,
+        ext_group="datasheet",
+        rel_path="datasheet/vendor-file.pdf",
+    ).first()
+    assert datasheet is not None
 
 
 def test_direct_extra_upload_empty_rev(client, app, user, tmp_path):

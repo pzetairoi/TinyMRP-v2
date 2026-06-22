@@ -15,7 +15,7 @@ from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, drawing_urls_for
-from app.services.attrs import harvest_part_attrs
+from app.services.attrs import approved_value, harvest_part_attrs
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.views.whereused import _rows_for_child_pn
@@ -1189,22 +1189,31 @@ def part_detail():
             return f"{http_base}/{f.rel_path}"
         return file_url_for(f)
 
+    def datasheet_file_url(f: PartFile):
+        return file_url_for(f, kind="preview")
+
     def file_label(f: PartFile) -> str:
         name = os.path.basename(f.rel_path or f.path or "")
         return name or "file"
 
     files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": [], "ply": [], "stl": [], "datasheet": []}
-    datasheet_url = datasheet_url_from_attrs(attrs)
-    if datasheet_url:
-        datasheet_name = os.path.basename(urlsplit(datasheet_url).path) or "datasheet"
-        files["datasheet"].append({"url": datasheet_url, "rel": "", "name": datasheet_name})
     for f in (
         PartFile.objects(part_number__iexact=p.part_number, revision__iexact=norm_rev)
         .only("ext_group", "rel_path", "path", "http_url")
         .order_by("ext_group", "rel_path")
     ):
         if f.ext_group in files:
-            files[f.ext_group].append({"url": to_url(f), "rel": f.rel_path or "", "name": file_label(f)})
+            files[f.ext_group].append(
+                {
+                    "url": datasheet_file_url(f) if f.ext_group == "datasheet" else to_url(f),
+                    "rel": f.rel_path or "",
+                    "name": file_label(f),
+                }
+            )
+    datasheet_url = datasheet_url_from_attrs(attrs)
+    if datasheet_url:
+        datasheet_name = os.path.basename(urlsplit(datasheet_url).path) or "datasheet"
+        files["datasheet"].append({"url": datasheet_url, "rel": "", "name": datasheet_name})
     datasheet_summary_url = files["datasheet"][0]["url"] if files["datasheet"] else ""
     _, _, summary_field_values = _context_field_values(
         p,
@@ -1704,7 +1713,12 @@ def part_refresh_files(pn):
             .first()
         )
         part_attrs = harvest_part_attrs(part_doc) if part_doc else {}
-        found = discover_part_files(pn_i, rev_i, attrs=part_attrs)
+        found = discover_part_files(
+            pn_i,
+            rev_i,
+            approved=bool(approved_value(part_attrs)) if part_doc else None,
+            attrs=part_attrs,
+        )
         recs = []
         for (group, is_dwg), meta in (found or {}).items():
             rec = dict(meta)

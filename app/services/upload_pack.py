@@ -321,6 +321,7 @@ def import_upload_pack(
     extras_written = 0
     deliverable_artifact_recs: List[Dict[str, Any]] = []
     deliverable_pairs: set[Tuple[str, str]] = set()
+    needs_datasheet_storage_scan = False
 
     zip_open_start = _stage_start()
     with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
@@ -427,6 +428,8 @@ def import_upload_pack(
                                         "size": float(os.path.getsize(dest_abs)),
                                     }
                                 )
+                        elif group == "datasheet":
+                            needs_datasheet_storage_scan = True
                     except Exception:
                         pass
                 deliverables_written += 1
@@ -557,7 +560,7 @@ def import_upload_pack(
         bom_start = _stage_start()
         # If the ZIP has no deliverables (or we couldn't parse any deliverable filenames into PN/REV),
         # fall back to scanning storage so BOM-only uploads still register all available files.
-        scan_storage = len(deliverable_artifact_recs) == 0
+        scan_storage = len(deliverable_artifact_recs) == 0 or needs_datasheet_storage_scan
         bom_result = import_bom_zip(
             file_bytes,
             filename,

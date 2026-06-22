@@ -148,9 +148,16 @@ def test_part_detail_includes_datasheet_files_and_attr_url(client, app, user, tm
     payload = resp.get_json() or {}
     datasheets = payload.get("files", {}).get("datasheet")
     assert isinstance(datasheets, list)
-    assert datasheets[0]["url"] == "https://example.com/file.pdf"
-    assert any(item.get("rel") == "datasheet/vendor-file.pdf" for item in datasheets)
-    assert payload["part"]["field_values"]["datasheet"] == datasheets[0]["url"]
+    local_item = next((item for item in datasheets if item.get("rel") == "datasheet/vendor-file.pdf"), None)
+    assert local_item is not None
+    assert "/files/view/" in (local_item.get("url") or "")
+    assert any(item.get("url") == "https://example.com/file.pdf" for item in datasheets)
+    assert payload["part"]["field_values"]["datasheet"] == local_item["url"]
+
+    local_preview = client.get(local_item["url"])
+    assert local_preview.status_code == 200
+    assert "X-Frame-Options" not in local_preview.headers
+    assert "Content-Security-Policy" not in local_preview.headers
 
     with app.app_context():
         config = get_field_config()

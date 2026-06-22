@@ -378,12 +378,15 @@ def create_app(config_object=None):
         @app.after_request
         def _security_headers(resp):
             resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-            resp.headers.setdefault("X-Frame-Options", "DENY")
             resp.headers.setdefault("Referrer-Policy", "no-referrer-when-downgrade")
             resp.headers.setdefault("X-XSS-Protection", "1; mode=block")
             resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
             if request.is_secure:
                 resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+            allow_frame_embedding = bool(getattr(g, "allow_frame_embedding", False))
+            if not allow_frame_embedding:
+                resp.headers.setdefault("X-Frame-Options", "DENY")
 
             files_prefix = (app.config.get("FILES_URL_PREFIX") or "").strip()
             img_src = ["'self'", "data:", "blob:", "https:"]
@@ -393,20 +396,21 @@ def create_app(config_object=None):
                 connect_src.append(files_prefix)
             script_src = ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"]
             style_src = ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"]
-            csp = " ".join([
-                "default-src 'self';",
-                "base-uri 'self';",
-                "object-src 'none';",
-                "frame-ancestors 'none';",
-                f"script-src {' '.join(script_src)};",
-                f"style-src {' '.join(style_src)};",
-                f"img-src {' '.join(img_src)};",
-                "font-src 'self' data: https://cdn.jsdelivr.net;",
-                f"connect-src {' '.join(connect_src)};",
-            ])
-            if security_mode == "strict":
-                csp = " ".join([csp, "form-action 'self';", "upgrade-insecure-requests;"])
-            resp.headers.setdefault("Content-Security-Policy", csp)
+            if not allow_frame_embedding:
+                csp = " ".join([
+                    "default-src 'self';",
+                    "base-uri 'self';",
+                    "object-src 'none';",
+                    "frame-ancestors 'none';",
+                    f"script-src {' '.join(script_src)};",
+                    f"style-src {' '.join(style_src)};",
+                    f"img-src {' '.join(img_src)};",
+                    "font-src 'self' data: https://cdn.jsdelivr.net;",
+                    f"connect-src {' '.join(connect_src)};",
+                ])
+                if security_mode == "strict":
+                    csp = " ".join([csp, "form-action 'self';", "upgrade-insecure-requests;"])
+                resp.headers.setdefault("Content-Security-Policy", csp)
             return resp
 
     # CORS handling (dynamic allowlist; safe by default)
