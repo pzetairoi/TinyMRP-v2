@@ -135,6 +135,7 @@ def admin_metrics():
 def admin_settings():
     settings = get_app_settings(create=True)
     if request.method == "POST":
+        recompute_processes = request.form.get("recompute_process_library") in ("1", "true", "on")
         tz = (request.form.get("timezone") or "").strip()
         if tz:
             try:
@@ -227,7 +228,48 @@ def admin_settings():
             log_action("admin.settings.update", resource_type="settings", resource="app_settings")
         except Exception:
             pass
-        flash("Settings updated.", "success")
+
+        if recompute_processes:
+            try:
+                from app.services.canonical_fields import rebuild_all_part_canonical_fields
+                from app.services.part_materialized import rebuild_part_materialized_fields
+
+                process_meta = current_app.config.get("PROCESS_META", {}) or load_process_meta(
+                    overrides=settings.process_meta or None
+                )
+                canonical_report = rebuild_all_part_canonical_fields(process_meta=process_meta)
+                materialized_report = rebuild_part_materialized_fields()
+                errors = int(materialized_report.get("errors") or 0)
+                status = "warning" if errors else "success"
+                flash(
+                    "Settings updated. Recomputed existing parts: "
+                    f"scanned={canonical_report.get('scanned', 0)}, "
+                    f"process/canonical updates={canonical_report.get('updated', 0)}, "
+                    f"materialized updates={materialized_report.get('updated', 0)}, "
+                    f"errors={errors}.",
+                    status,
+                )
+                try:
+                    log_action(
+                        "admin.settings.process_recompute",
+                        resource_type="settings",
+                        resource=(
+                            f"scanned={canonical_report.get('scanned', 0)},"
+                            f"updated={canonical_report.get('updated', 0)},"
+                            f"materialized={materialized_report.get('updated', 0)},"
+                            f"errors={errors}"
+                        ),
+                    )
+                except Exception:
+                    pass
+            except Exception as exc:
+                try:
+                    current_app.logger.exception("Process library recompute failed")
+                except Exception:
+                    pass
+                flash(f"Settings saved, but process recompute failed: {exc}", "error")
+        else:
+            flash("Settings updated.", "success")
         return redirect(url_for("admin.admin_settings"))
 
     process_meta = current_app.config.get("PROCESS_META", {}) or {}
@@ -245,8 +287,9 @@ def admin_settings():
             }
         )
     process_rows.sort(key=lambda item: item["name"])
-    while len(process_rows) < 8:
-        process_rows.append({"name": "", "icon": "", "color": "", "aliases": [], "file_groups": []})
+    blank_process_row = {"name": "", "icon": "", "color": "", "aliases": [], "file_groups": []}
+    for _ in range(5):
+        process_rows.append(dict(blank_process_row))
     image_root = os.path.join(current_app.root_path, "static", "images")
     process_icon_choices = sorted(
         [
@@ -454,4 +497,3 @@ def purge_parts():
         return redirect(url_for("admin.users_list"))
 
     return render_template("admin/purge_parts.html")
-
