@@ -16,6 +16,7 @@ from app.services.canonical_fields import (
     default_canonical_alias_entries,
     set_runtime_canonical_aliases,
 )
+from app.services.filescan import datasheet_url_from_attrs
 from app.services.part_annotations import annotation_payload
 from app.services.part_norm import clean_rev
 from app.services.processmeta import normalize_processes
@@ -234,9 +235,16 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "id": "datasheet",
         "label": "Datasheet",
         "kind": "builtin",
-        "data_type": "text",
+        "data_type": "link",
         "source_path": "part.canonical.datasheet",
-        "fallback_paths": ["part.canonical.datasheet", "attrs.datasheet"],
+        "fallback_paths": [
+            "part.canonical.datasheet",
+            "attrs.datasheet",
+            "attrs.oem_data_sheet",
+            "attrs.oem_datasheet",
+            "attrs.data_sheet",
+            "attrs.datasheet_url",
+        ],
         "source_locked": False,
         "sortable": True,
         "filterable": True,
@@ -1391,9 +1399,15 @@ def resolve_part_field_value(
         return _coerce_value(annotation_payload(part).get("comments_search"), data_type)
     if field_id == "approved":
         return bool(approved_value(attrs))
+    if field_id == "datasheet":
+        datasheet_url = datasheet_url_from_attrs(attrs)
+        if datasheet_url:
+            return _coerce_value(datasheet_url, data_type)
     file_group = file_field_group(field_id)
     if file_group:
         groups = coverage or set()
+        if file_group == "datasheet" and datasheet_url_from_attrs(attrs):
+            return True
         return file_group in groups
     if field_id in {"qty", "alt_group", "level", "level_qty", "total_qty"}:
         return _coerce_value(extra.get(field_id), data_type)

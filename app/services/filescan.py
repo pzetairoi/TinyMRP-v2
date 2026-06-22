@@ -1,12 +1,23 @@
 # app/services/filescan.py
 import os, re
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Tuple, Any, Optional
+from urllib.parse import urlsplit
 
 from flask import current_app
 from app.models.artifact import PartFile
 from app.services.app_settings import resolve_file_sources
+from app.services.canonical_fields import canonical_attr_key
+
+_DATASHEET_ATTR_KEYS = {
+    "datasheet",
+    "oem_data_sheet",
+    "oem_datasheet",
+    "data_sheet",
+    "datasheet_url",
+}
+_DATASHEET_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 
 def _sources(approved: Optional[bool] = None) -> List[Dict[str, Any]]:
     try:
@@ -108,7 +119,136 @@ def _rel_path_for(candidate: Path, local_root: Path) -> str:
     
     return str(candidate.relative_to(local_root)).replace("\\","/")
 
-def discover_part_files(pn: str, rev: str, *, approved: Optional[bool] = None) -> Dict[Tuple[str,bool], Dict]:
+def _is_http_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(str(value or "").strip())
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _datasheet_attr_values(attrs: Optional[Dict[str, Any]]) -> List[str]:
+    if not isinstance(attrs, dict):
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw_key, raw_value in attrs.items():
+        if canonical_attr_key(raw_key) not in _DATASHEET_ATTR_KEYS:
+            continue
+        values = raw_value if isinstance(raw_value, (list, tuple, set)) else [raw_value]
+        for item in values:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(text)
+    return out
+
+
+def datasheet_url_from_attrs(attrs: Optional[Dict[str, Any]]) -> Optional[str]:
+    for value in _datasheet_attr_values(attrs):
+        if _is_http_url(value):
+            return value
+    return None
+
+
+def _safe_datasheet_rel(value: str) -> Optional[str]:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text or _is_http_url(text):
+        return None
+    if text.startswith("/") or re.match(r"^[A-Za-z]:/", text):
+        return None
+    parts = [part for part in PurePosixPath(text).parts if part not in ("", ".")]
+    if not parts or parts[0].lower() != "datasheet" or any(part == ".." for part in parts):
+        return None
+    if Path(parts[-1]).suffix.lower() not in _DATASHEET_EXTENSIONS:
+        return None
+    return "/".join(parts)
+
+
+def _datasheet_rel_candidates(attrs: Optional[Dict[str, Any]]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in _datasheet_attr_values(attrs):
+        if _is_http_url(value):
+            continue
+        basename = os.path.basename(str(value or "").replace("\\", "/").rstrip("/\\"))
+        ext = Path(basename).suffix.lower()
+        safe_rel = _safe_datasheet_rel(value)
+        candidates = []
+        if safe_rel:
+            candidates.append(safe_rel)
+        if basename and ext in _DATASHEET_EXTENSIONS:
+            candidates.append(f"datasheet/{basename}")
+        for candidate in candidates:
+            token = candidate.casefold()
+            if token in seen:
+                continue
+            seen.add(token)
+            out.append(candidate)
+    return out
+
+
+def _build_record(
+    p: Path,
+    local_root: Path,
+    http: str,
+    source: Dict[str, Any],
+    source_rank: int,
+    *,
+    is_dwg: bool,
+    match_priority: int = 1,
+) -> Dict[str, Any]:
+    stat = p.stat()
+    rel_path = _rel_path_for(p, local_root)
+    return {
+        "ext": p.suffix.lstrip("."),
+        "rel_path": rel_path,
+        "abs_path": str(p),
+        "http_url": (http.rstrip("/") + "/" + rel_path) if http else None,
+        "size": float(stat.st_size),
+        "mtime_iso": datetime.fromtimestamp(stat.st_mtime),
+        "is_dwg": is_dwg,
+        "source": str(source.get("id") or "scan"),
+        "meta_info": {
+            "source_id": str(source.get("id") or ""),
+            "source_label": str(source.get("label") or ""),
+            "source_root": str(source.get("local_root") or ""),
+            "source_priority": int(source.get("priority") or (source_rank + 1)),
+        },
+        "_source_rank": source_rank,
+        "_match_priority": match_priority,
+    }
+
+
+def _prefer_record(prev: Optional[Dict[str, Any]], record: Dict[str, Any]) -> bool:
+    if prev is None:
+        return True
+    prev_match = int(prev.get("_match_priority", 1))
+    new_match = int(record.get("_match_priority", 1))
+    if new_match < prev_match:
+        return True
+    if new_match > prev_match:
+        return False
+    prev_rank = int(prev.get("_source_rank", 10**6))
+    new_rank = int(record.get("_source_rank", 10**6))
+    if new_rank < prev_rank:
+        return True
+    if new_rank > prev_rank:
+        return False
+    return prev["mtime_iso"] < record["mtime_iso"]
+
+
+def discover_part_files(
+    pn: str,
+    rev: str,
+    *,
+    approved: Optional[bool] = None,
+    attrs: Optional[Dict[str, Any]] = None,
+) -> Dict[Tuple[str,bool], Dict]:
     """
     Return a dict keyed by (ext_group, is_dwg) -> record {ext, rel_path, http_url, size, mtime_iso}.
     When multiple sources contain the same artifact, source preference wins and mtime breaks ties inside
@@ -119,50 +259,49 @@ def discover_part_files(pn: str, rev: str, *, approved: Optional[bool] = None) -
         return {}
 
     found: Dict[Tuple[str, bool], Dict[str, Any]] = {}
+    datasheet_candidates = _datasheet_rel_candidates(attrs)
     for source_rank, source in enumerate(sources):
         local_root = Path(str(source.get("local_root") or "").strip())
         if not local_root:
             continue
         http = str(source.get("url_prefix") or "").strip()
+        for candidate_rel in datasheet_candidates:
+            p = _find_case_insensitive(local_root, candidate_rel)
+            if not p:
+                continue
+            key = ("datasheet", False)
+            record = _build_record(
+                p,
+                local_root,
+                http,
+                source,
+                source_rank,
+                is_dwg=False,
+                match_priority=0,
+            )
+            if _prefer_record(found.get(key), record):
+                found[key] = record
+
         for ext_group, leaf, is_dwg in _expectations_for(pn, rev):
             candidate_rel = f"{ext_group}/{leaf}"
             p = _find_case_insensitive(local_root, candidate_rel)
             if not p:
                 continue
-            stat = p.stat()
             key = (ext_group, is_dwg)
-            rel_path = _rel_path_for(p, local_root)
-            record: Dict[str, Any] = {
-                "ext": p.suffix.lstrip("."),
-                "rel_path": rel_path,
-                "abs_path": str(p),
-                "http_url": (http.rstrip("/") + "/" + rel_path) if http else None,
-                "size": float(stat.st_size),
-                "mtime_iso": datetime.fromtimestamp(stat.st_mtime),
-                "is_dwg": is_dwg,
-                "source": str(source.get("id") or "scan"),
-                "meta_info": {
-                    "source_id": str(source.get("id") or ""),
-                    "source_label": str(source.get("label") or ""),
-                    "source_root": str(source.get("local_root") or ""),
-                    "source_priority": int(source.get("priority") or (source_rank + 1)),
-                },
-                "_source_rank": source_rank,
-            }
-
-            prev = found.get(key)
-            if prev is None:
-                found[key] = record
-                continue
-            prev_rank = int(prev.get("_source_rank", 10**6))
-            if source_rank < prev_rank:
-                found[key] = record
-                continue
-            if source_rank == prev_rank and prev["mtime_iso"] < record["mtime_iso"]:
+            record = _build_record(
+                p,
+                local_root,
+                http,
+                source,
+                source_rank,
+                is_dwg=is_dwg,
+            )
+            if _prefer_record(found.get(key), record):
                 found[key] = record
 
     for record in found.values():
         record.pop("_source_rank", None)
+        record.pop("_match_priority", None)
     return found
 
 

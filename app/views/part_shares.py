@@ -249,13 +249,6 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
     attrs = harvest_part_attrs(part)
     public_attrs = filtered_part_attrs(part, attrs)
     norm_rev = _normalized_revision(part, attrs)
-    _config, _attrs, summary_field_values = _context_field_values(
-        part,
-        "part_detail_summary",
-        extra={"part_number": part.part_number, "revision": norm_rev},
-    )
-    summary_field_values["notes"] = ""
-    summary_field_values["comments"] = ""
 
     preview_urls = _share_preview_urls_for(share, raw_token, part.part_number, norm_rev, is_dwg=False)
     drawing_urls = _share_preview_urls_for(share, raw_token, part.part_number, norm_rev, is_dwg=True)
@@ -271,6 +264,14 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
             continue
         name = os.path.basename(pf.rel_path or pf.path or "") or "file"
         files[ext_group].append({"url": _shared_part_file_url(share, raw_token, pf), "rel": pf.rel_path or "", "name": name})
+    datasheet_summary_url = files["datasheet"][0]["url"] if files["datasheet"] else ""
+    _config, _attrs, summary_field_values = _context_field_values(
+        part,
+        "part_detail_summary",
+        extra={"part_number": part.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
+    )
+    summary_field_values["notes"] = ""
+    summary_field_values["comments"] = ""
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
     approver_identity = _attr_identity(attrs, "approvedby", "approved_by", "approved", "checkedby")
