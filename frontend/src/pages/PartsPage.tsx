@@ -63,6 +63,7 @@ export default function PartsPage() {
 
   const [rows, setRows] = useState<Part[]>([])
   const [search, setSearch] = useState(initialQ)
+  const [debouncedSearch, setDebouncedSearch] = useState(initialQ)
   const [loading, setLoading] = useState(false)
   const [totalRecords, setTotal] = useState(0)
   const [selectedByKey, setSelectedByKey] = useState<Record<string, Part>>({})
@@ -120,6 +121,26 @@ export default function PartsPage() {
       }
     })()
   }, [pickMode])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 300)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    setLazy((s) => {
+      const current = String((s.filters as any)?.global?.value || '')
+      if (current === debouncedSearch) return s
+      return {
+        ...s,
+        first: 0,
+        filters: {
+          ...s.filters,
+          global: { ...(s.filters as any)?.global, value: debouncedSearch },
+        } as DataTableFilterMeta,
+      }
+    })
+  }, [debouncedSearch])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -279,18 +300,7 @@ export default function PartsPage() {
           type="search"
           placeholder={pickMode ? "Search PN or description" : "Search parts, notes, comments"}
           value={search}
-          onChange={(e) => {
-            const val = e.target.value
-            setSearch(val)
-            setLazy((s) => ({
-              ...s,
-              first: 0,
-              filters: {
-                ...s.filters,
-                global: { ...(s.filters as any)?.global, value: val },
-              } as DataTableFilterMeta,
-            }))
-          }}
+          onChange={(e) => setSearch(e.target.value)}
         />
         {pickMode && jobId && (
           <div className="form-check ms-2">

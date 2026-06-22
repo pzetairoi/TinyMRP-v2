@@ -16,7 +16,7 @@ from app.services.canonical_fields import (
     default_canonical_alias_entries,
     set_runtime_canonical_aliases,
 )
-from app.services.filescan import datasheet_url_from_attrs
+from app.services.filescan import datasheet_attr_present, datasheet_url_from_attrs
 from app.services.part_annotations import annotation_payload
 from app.services.part_norm import clean_rev
 from app.services.processmeta import normalize_processes
@@ -380,6 +380,8 @@ DEFAULT_FIELDS.extend(
             "label": label,
             "kind": "special",
             "data_type": "boolean",
+            "source_path": f"part.{field_id}",
+            "fallback_paths": [f"part.{field_id}"],
             "source_locked": True,
             "sortable": False,
             "filterable": True,
@@ -768,6 +770,10 @@ def _number_filter(value: Any) -> Optional[tuple[str, float, Optional[float]]]:
         return None
     op = match.group(1) or "="
     return (op, float(match.group(2)), None)
+
+
+def number_filter_value(value: Any) -> Optional[tuple[str, float, Optional[float]]]:
+    return _number_filter(value)
 
 
 def _value_as_number(value: Any) -> Optional[float]:
@@ -1349,6 +1355,8 @@ def query_paths_for_field(field_id: str, config: Optional[Dict[str, Any]] = None
     field = field_index(config).get(field_id)
     if not field:
         return []
+    if field_uses_materialized_value(field_id, config):
+        return [f"field_values__{field_id}"]
     out: List[str] = []
     for source_path in effective_source_paths(field_id, config):
         mongo_path = mongo_field_from_source(source_path)
@@ -1360,6 +1368,26 @@ def query_paths_for_field(field_id: str, config: Optional[Dict[str, Any]] = None
 def primary_query_path(field_id: str, config: Optional[Dict[str, Any]] = None) -> Optional[str]:
     paths = query_paths_for_field(field_id, config)
     return paths[0] if paths else None
+
+
+def field_uses_materialized_value(field_id: str, config: Optional[Dict[str, Any]] = None) -> bool:
+    config = config or get_field_config()
+    field = field_index(config).get(field_id)
+    if not field:
+        return False
+    if str(field.get("kind") or "") == "custom":
+        return True
+    default_field = _default_builtin_map().get(field_id)
+    if not default_field or field.get("source_locked"):
+        return False
+    current_source = _normalize_source_path(field.get("source_path"))
+    default_source = _normalize_source_path(default_field.get("source_path"))
+    return bool(current_source and default_source and current_source != default_source)
+
+
+def materialized_field_ids(config: Optional[Dict[str, Any]] = None) -> List[str]:
+    config = config or get_field_config()
+    return [field["id"] for field in config.get("fields", []) if field_uses_materialized_value(field["id"], config)]
 
 
 def resolve_part_field_value(
@@ -1406,9 +1434,13 @@ def resolve_part_field_value(
     file_group = file_field_group(field_id)
     if file_group:
         groups = coverage or set()
-        if file_group == "datasheet" and datasheet_url_from_attrs(attrs):
+        if file_group == "datasheet" and datasheet_attr_present(attrs):
             return True
-        return file_group in groups
+        if groups:
+            return file_group in groups
+        if part is not None:
+            return bool(getattr(part, field_id, False))
+        return False
     if field_id in {"qty", "alt_group", "level", "level_qty", "total_qty"}:
         return _coerce_value(extra.get(field_id), data_type)
 
@@ -1430,19 +1462,9 @@ def field_requires_runtime_scan(field_id: str, config: Optional[Dict[str, Any]] 
     field = field_index(config).get(field_id)
     if not field:
         return False
-    kind = str(field.get("kind") or "")
-    if kind == "custom":
-        return True
-    if kind == "special":
+    if query_paths_for_field(field_id, config):
         return False
-    default_field = _default_builtin_map().get(field_id)
-    if not default_field:
-        return True
-    if field.get("source_locked"):
-        return False
-    current_source = _normalize_source_path(field.get("source_path"))
-    default_source = _normalize_source_path(default_field.get("source_path"))
-    return bool(current_source and default_source and current_source != default_source)
+    return field_id not in {"process", "approved"}
 
 
 def resolve_part_field_values(

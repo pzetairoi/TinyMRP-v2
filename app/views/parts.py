@@ -14,7 +14,7 @@ from app.models.job import Job
 from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
-from app.services.thumbs import thumb_urls_for, drawing_urls_for
+from app.services.thumbs import drawing_urls_for, thumb_urls_for, thumb_urls_map
 from app.services.attrs import approved_value, harvest_part_attrs
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
@@ -27,7 +27,12 @@ from app.services.insights import (
     recommended_deliverables,
 )
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
-from app.services.filescan import datasheet_url_from_attrs, discover_part_files, upsert_part_files
+from app.services.filescan import (
+    datasheet_attr_present,
+    datasheet_url_from_attrs,
+    discover_part_files,
+    upsert_part_files,
+)
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.extra_files import extra_file_url_for
 from app.services.acl import (
@@ -42,15 +47,28 @@ from app.services.acl import (
 from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.services.field_config import (
+    boolean_filter_value,
     context_field_ids,
     field_requires_runtime_scan,
     file_field_group,
     field_index as field_config_index,
     get_field_config,
     matches_field_filter_value,
+    number_filter_value,
     primary_query_path,
     query_paths_for_field,
     resolve_part_field_values,
+)
+from app.services.part_materialized import batch_file_groups_for_parts
+from app.services.part_query import (
+    MISSING as FILTER_MISSING,
+    add_contains_filter,
+    exclude_pairs_query,
+    filter_value,
+    flag_enabled,
+    or_contains,
+    pairs_query,
+    terms,
 )
 from app.services.arena_export import build_arena_bom_csv, build_arena_file_links_csv
 from app.services.parts_delete import delete_part_and_refs_cascade
@@ -123,7 +141,7 @@ def _deliverables_present(pn: str, rev: str | None) -> dict:
             groups.add(f.ext_group.lower())
     part = _find_part_doc(pn, rev_clean)
     attrs = harvest_part_attrs(part) if part else {}
-    if datasheet_url_from_attrs(attrs):
+    if datasheet_attr_present(attrs):
         groups.add("datasheet")
     return {
         "pdf": "pdf" in groups,
@@ -555,126 +573,49 @@ def parts_lazy():
     body = request.get_json(force=True, silent=True) or {}
     first = int(body.get("first", 0))
     rows = int(body.get("rows", 25))
-    sort_field = (body.get("sortField") or "part_number")
-    sort_order = int(body.get("sortOrder", 1))  # 1 asc, -1 desc
-    filters = body.get("filters", {})
+    sort_field = body.get("sortField") or "part_number"
+    sort_order = int(body.get("sortOrder", 1))
+    filters = body.get("filters", {}) or {}
 
     field_config = get_field_config()
-    parts_field_ids = context_field_ids("parts_list", field_config)
+    parts_context_ids = context_field_ids("parts_list", field_config)
     field_meta = field_config_index(field_config)
-    runtime_filter_ids = {field_id for field_id in parts_field_ids if field_requires_runtime_scan(field_id, field_config)}
-    sortable_ids = {field_id for field_id in parts_field_ids if field_meta.get(field_id, {}).get("sortable")}
-    filterable_ids = {field_id for field_id in parts_field_ids if field_meta.get(field_id, {}).get("filterable")}
+    runtime_filter_ids = {field_id for field_id in parts_context_ids if field_requires_runtime_scan(field_id, field_config)}
+    sortable_ids = {field_id for field_id in parts_context_ids if field_meta.get(field_id, {}).get("sortable")}
+    filterable_ids = {field_id for field_id in parts_context_ids if field_meta.get(field_id, {}).get("filterable")}
+
     if sort_field not in sortable_ids:
         sort_field = "part_number"
     runtime_sort = field_requires_runtime_scan(sort_field, field_config)
-    mapped = None if runtime_sort else primary_query_path(sort_field, field_config)
-    if not runtime_sort and not mapped:
+    mapped_sort = None if runtime_sort else primary_query_path(sort_field, field_config)
+    if not runtime_sort and not mapped_sort:
         sort_field = "part_number"
-        mapped = primary_query_path(sort_field, field_config) or "part_number"
-    order_by = f"-{mapped}" if mapped and sort_order == -1 else (mapped or "part_number")
+        mapped_sort = primary_query_path(sort_field, field_config) or "part_number"
+    order_by = f"-{mapped_sort}" if mapped_sort and sort_order == -1 else (mapped_sort or "part_number")
 
-    def _terms(s: str):
-        return [t for t in re.split(r"\s+", (s or "").strip().lower()) if t]
+    def _mongo_path(path: str) -> str:
+        return str(path or "").replace("__", ".")
 
-    _missing = object()
+    def _field_false_or_missing_q(path: str) -> Q:
+        return Q(**{path: False}) | Q(__raw__={_mongo_path(path): {"$exists": False}})
 
-    def _filter_value(key: str, default: Any = _missing):
-        raw = filters.get(key)
-        if not isinstance(raw, dict):
-            return default
-        if "value" in raw:
-            return raw.get("value")
-        constraints = raw.get("constraints")
-        if isinstance(constraints, list):
-            for item in constraints:
-                if not isinstance(item, dict) or "value" not in item:
-                    continue
-                value = item.get("value")
-                if value not in (None, ""):
-                    return value
-                if isinstance(value, bool):
-                    return value
-        return default
-
-    def add_filter(q: Q, key: str, *fields):
-        raw_value = _filter_value(key, "")
-        val = str(raw_value or "").strip()
-        if not val or val.startswith("__"):
-            return q
-        for t in _terms(val):
-            or_q = Q()
-            for fld in fields:
-                or_q = or_q | Q(**{f"{fld}__icontains": t})
-            q = q & or_q
-        return q
-
-    def add_field_filter(q: Q, key: str):
-        if key not in filterable_ids:
-            return q
-        raw_value = _filter_value(key, "")
-        val = str(raw_value or "").strip()
-        if not val or val.startswith("__"):
-            return q
-        paths = query_paths_for_field(key, field_config)
-        if not paths:
-            return q
-        for t in _terms(val):
-            or_q = Q()
-            for fld in paths:
-                or_q = or_q | Q(**{f"{fld}__icontains": t})
-            q = q & or_q
-        return q
-
-    def _bool_filter_value(value: Any) -> bool | None:
-        if isinstance(value, bool):
-            return value
-        if value is None:
-            return None
-        text = str(value).strip().lower()
-        if not text:
-            return None
-        if text in ("1", "true", "yes", "y", "on"):
-            return True
-        if text in ("0", "false", "no", "n", "off", "missing"):
-            return False
-        return None
-
-    def _number_filter(value: Any) -> tuple[str, float, float | None] | None:
-        text = str(value or "").strip()
-        if not text:
-            return None
-        range_match = re.match(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:\.\.|to|-)\s*(-?\d+(?:\.\d+)?)\s*$", text, re.I)
-        if range_match:
-            left = float(range_match.group(1))
-            right = float(range_match.group(2))
-            return ("range", min(left, right), max(left, right))
-        compare_match = re.match(r"^\s*(<=|>=|=|<|>)?\s*(-?\d+(?:\.\d+)?)\s*$", text)
-        if compare_match:
-            op = compare_match.group(1) or "="
-            target = float(compare_match.group(2))
-            return (op, target, None)
-        return None
-
-    def add_typed_field_filter(q: Q, key: str, data_type: str, raw_value: Any):
+    def _apply_typed_db_filter(q: Q, key: str, data_type: str, raw_value: Any):
         paths = query_paths_for_field(key, field_config)
         if not paths:
             return None
-
         if data_type == "boolean":
-            expected = _bool_filter_value(raw_value)
+            expected = boolean_filter_value(raw_value)
             if expected is None:
-                return add_field_filter(q, key)
+                return None
             or_q = Q()
-            for fld in paths:
-                or_q = or_q | Q(**{fld: expected})
+            for path in paths:
+                or_q = or_q | Q(**{path: expected})
             return q & or_q
-
         if data_type == "number":
-            parsed = _number_filter(raw_value)
+            parsed = number_filter_value(raw_value)
             path = primary_query_path(key, field_config)
             if parsed is None or not path:
-                return add_field_filter(q, key)
+                return add_contains_filter(q, paths, raw_value)
             op, start, end = parsed
             if op == "range":
                 return q & Q(**{f"{path}__gte": start}) & Q(**{f"{path}__lte": end})
@@ -687,54 +628,12 @@ def parts_lazy():
             if op == "<=":
                 return q & Q(**{f"{path}__lte": start})
             return q & Q(**{path: start})
-
-        return add_field_filter(q, key)
-
-    def _flag_enabled(key: str) -> bool:
-        val = _filter_value(key)
-        if isinstance(val, bool):
-            return val
-        if val is None:
-            return False
-        return str(val).strip().lower() in ("true", "1", "yes", "y", "on")
-
-    def _or_contains(paths: list[str], term: str) -> Q:
-        out = Q()
-        for fld in paths:
-            out = out | Q(**{f"{fld}__icontains": term})
-        return out
+        return add_contains_filter(q, paths, raw_value)
 
     def _or_array_regex(field: str, term: str) -> Q:
         if not term:
             return Q()
         return Q(__raw__={field: {"$regex": re.escape(term), "$options": "i"}})
-
-    def _pairs_q(pairs: set[tuple[str, str]]):
-        pair_q = Q()
-        for pn, rev in pairs:
-            pn_clean = (pn or "").strip()
-            if not pn_clean:
-                continue
-            rev_clean = _clean_rev_value(rev)
-            pair_q = pair_q | Q(part_number__iexact=pn_clean, revision__iexact=rev_clean)
-        return pair_q
-
-    def _exclude_pairs_q(pairs: set[tuple[str, str]]) -> Q:
-        clauses: list[dict[str, object]] = []
-        for pn, rev in pairs:
-            pn_clean = (pn or "").strip()
-            if not pn_clean:
-                continue
-            rev_clean = _clean_rev_value(rev)
-            clauses.append(
-                {
-                    "part_number": {"$regex": f"^{re.escape(pn_clean)}$", "$options": "i"},
-                    "revision": {"$regex": f"^{re.escape(rev_clean)}$", "$options": "i"},
-                }
-            )
-        if not clauses:
-            return Q()
-        return Q(__raw__={"$nor": clauses})
 
     def _file_pairs_for_group(group: str) -> set[tuple[str, str]]:
         pairs: set[tuple[str, str]] = set()
@@ -742,32 +641,33 @@ def parts_lazy():
         if not group_norm:
             return pairs
         for row in PartFile.objects(ext_group=group_norm).only("part_number", "revision"):
-            pn_clean = (getattr(row, "part_number", None) or "").strip()
+            pn_clean = str(getattr(row, "part_number", None) or "").strip()
             if not pn_clean:
                 continue
             pairs.add((pn_clean, _clean_rev_value(getattr(row, "revision", "") or "")))
         if group_norm == "datasheet":
             for part in Part.objects().only("part_number", "revision", "attrs", "canonical", "description", "category", "uom"):
-                pn_clean = (getattr(part, "part_number", None) or "").strip()
+                pn_clean = str(getattr(part, "part_number", None) or "").strip()
                 if not pn_clean:
                     continue
                 attrs = harvest_part_attrs(part)
-                if datasheet_url_from_attrs(attrs):
+                if datasheet_attr_present(attrs):
                     pairs.add((pn_clean, _normalized_revision(part, attrs)))
         return pairs
+
+    def _file_filter_q(field_id: str, expected: bool) -> Q:
+        path = primary_query_path(field_id, field_config) or field_id
+        base_q = Q(**{path: True}) if expected else _field_false_or_missing_q(path)
+        pairs = _file_pairs_for_group(file_field_group(field_id) or "")
+        if expected:
+            return base_q | pairs_query(pairs) if pairs else base_q
+        return (base_q & exclude_pairs_query(pairs)) if pairs else base_q
 
     def _approval_q(expected: bool) -> Q:
         empty_values = [None, "", "n/a", "N/A", "na", "NA", "none", "None", "null", "NULL", "0", "false", "False", "FALSE"]
         keys = ["attrs.approvedby", "attrs.approved_by", "attrs.approved"]
         if expected:
-            return Q(
-                __raw__={
-                    "$or": [
-                        {key: {"$exists": True, "$nin": empty_values}}
-                        for key in keys
-                    ]
-                }
-            )
+            return Q(__raw__={"$or": [{key: {"$exists": True, "$nin": empty_values}} for key in keys]})
         return Q(
             __raw__={
                 "$and": [
@@ -783,75 +683,76 @@ def parts_lazy():
         )
 
     q = Q()
-    parts_context_ids = context_field_ids("parts_list", field_config)
-    generic_filter_ids = []
+    generic_filter_ids: list[str] = []
     typed_filter_specs: list[tuple[str, str, Any]] = []
     runtime_filter_specs: list[tuple[str, str, Any]] = []
     for field_id in filterable_ids:
         if field_id in {"material", "process"}:
             continue
         data_type = str(field_meta.get(field_id, {}).get("data_type") or "text")
-        raw_value = _filter_value(field_id)
+        raw_value = filter_value(filters, field_id, FILTER_MISSING)
         if data_type == "image":
             continue
         if data_type in {"boolean", "number"}:
-            if raw_value is not _missing and raw_value not in (None, ""):
+            if raw_value is not FILTER_MISSING and raw_value not in (None, ""):
                 if data_type == "boolean" and field_id == "approved":
-                    expected = _bool_filter_value(raw_value)
+                    expected = boolean_filter_value(raw_value)
                     if expected is not None:
                         q = q & _approval_q(expected)
                         continue
-                if data_type == "boolean":
-                    file_group = file_field_group(field_id)
-                    if file_group:
-                        expected = _bool_filter_value(raw_value)
-                        if expected is not None:
-                            pairs = _file_pairs_for_group(file_group)
-                            if expected and not pairs:
-                                return jsonify({"data": [], "totalRecords": 0})
-                            if pairs:
-                                q = q & (_pairs_q(pairs) if expected else _exclude_pairs_q(pairs))
-                            continue
+                if data_type == "boolean" and file_field_group(field_id):
+                    expected = boolean_filter_value(raw_value)
+                    if expected is not None:
+                        q = q & _file_filter_q(field_id, expected)
+                        continue
                 if field_id in runtime_filter_ids:
                     typed_filter_specs.append((field_id, data_type, raw_value))
                 else:
-                    next_q = add_typed_field_filter(q, field_id, data_type, raw_value)
+                    next_q = _apply_typed_db_filter(q, field_id, data_type, raw_value)
                     if next_q is None:
                         typed_filter_specs.append((field_id, data_type, raw_value))
                     else:
                         q = next_q
             continue
         if field_id in runtime_filter_ids:
-            if raw_value is not _missing and raw_value not in (None, ""):
+            if raw_value is not FILTER_MISSING and raw_value not in (None, ""):
                 runtime_filter_specs.append((field_id, data_type, raw_value))
             continue
         generic_filter_ids.append(field_id)
+
     for field_id in generic_filter_ids:
-        q = add_field_filter(q, field_id)
-    material_val = _filter_value("material", "")
+        paths = query_paths_for_field(field_id, field_config)
+        if paths:
+            q = add_contains_filter(q, paths, filter_value(filters, field_id, ""))
+
+    material_val = filter_value(filters, "material", "")
     material_val_norm = str(material_val or "").strip().lower()
-    if material_val_norm not in ("__missing__", "missing", "(missing)"):
+    if material_val_norm not in {"__missing__", "missing", "(missing)"}:
         if "material" in runtime_filter_ids and material_val not in (None, ""):
             runtime_filter_specs.append(("material", str(field_meta.get("material", {}).get("data_type") or "text"), material_val))
         else:
-            q = add_field_filter(q, "material")
-    finish_val = _filter_value("finish", "")
+            paths = query_paths_for_field("material", field_config)
+            if paths:
+                q = add_contains_filter(q, paths, material_val)
+
+    finish_val = filter_value(filters, "finish", "")
     if "finish" in runtime_filter_ids and finish_val not in (None, ""):
         runtime_filter_specs.append(("finish", str(field_meta.get("finish", {}).get("data_type") or "text"), finish_val))
     else:
-        q = add_field_filter(q, "finish")
+        paths = query_paths_for_field("finish", field_config)
+        if paths:
+            q = add_contains_filter(q, paths, finish_val)
+
     meta = current_app.config.get("PROCESS_META", {}) or {}
 
     def _process_filter_q(text: str) -> Q:
         raw_text = str(text or "").strip()
         if not raw_text:
             return Q()
-
         normalized_terms = normalize_processes({"processes": [raw_text]}, meta)
-        raw_terms = _terms(raw_text)
+        raw_terms = terms(raw_text)
         if raw_text.lower() not in raw_terms:
             raw_terms.insert(0, raw_text.lower())
-
         or_q = Q()
         if normalized_terms:
             or_q = or_q | Q(processes__in=normalized_terms)
@@ -870,82 +771,69 @@ def parts_lazy():
     category_paths = query_paths_for_field("category", field_config) or ["attrs__category", "category"]
     material_paths = query_paths_for_field("material", field_config) or ["attrs__material"]
     proc_key = "process" if "process" in filters else "processes"
-    proc_val = _filter_value(proc_key, "")
+    proc_val = filter_value(filters, proc_key, "")
     proc_val_norm = str(proc_val or "").strip().lower()
-    if proc_val_norm in ("hardware", "fastener", "fasteners"):
-        q = q & (
-            _process_filter_q("hardware")
-            | _or_contains(category_paths, "hardware")
-        )
-    elif proc_val_norm in ("sheet metal", "sheetmetal", "sheet"):
-        q = q & (
-            _process_filter_q(proc_val_norm)
-            | _or_contains(category_paths, "sheet")
-            | _or_contains(material_paths, "sheet")
-        )
-    else:
-        if proc_val_norm:
-            q = q & _process_filter_q(proc_val_norm)
-    g = _filter_value("global", "")
+    if proc_val_norm in {"hardware", "fastener", "fasteners"}:
+        q = q & (_process_filter_q("hardware") | or_contains(category_paths, "hardware"))
+    elif proc_val_norm in {"sheet metal", "sheetmetal", "sheet"}:
+        q = q & (_process_filter_q(proc_val_norm) | or_contains(category_paths, "sheet") | or_contains(material_paths, "sheet"))
+    elif proc_val_norm:
+        q = q & _process_filter_q(proc_val_norm)
 
-    if g:
+    global_value = filter_value(filters, "global", "")
+    if global_value:
         global_paths: list[str] = []
-        for field_id in parts_field_ids:
-            if field_id == "process":
+        for field_id in parts_context_ids:
+            if field_id == "process" or field_id in runtime_filter_ids:
                 continue
-            if field_id in runtime_filter_ids:
+            data_type = str(field_meta.get(field_id, {}).get("data_type") or "text")
+            if data_type not in {"text", "link"}:
                 continue
-            for fld in query_paths_for_field(field_id, field_config):
-                if fld not in global_paths:
-                    global_paths.append(fld)
+            for path in query_paths_for_field(field_id, field_config):
+                if path not in global_paths:
+                    global_paths.append(path)
+        for term in terms(global_value):
+            or_q = _process_filter_q(term)
+            for path in global_paths:
+                or_q = or_q | Q(**{f"{path}__icontains": term})
+            q = q & or_q
 
-        for t in _terms(str(g)):
-            orq = _process_filter_q(t)
-            for fld in global_paths:
-                orq = orq | Q(**{f"{fld}__icontains": t})
-            q = q & orq
-
-    # Optional job filter: limit to BOM parts for that job unless explicitly bypassed
     job_id = body.get("job") or request.args.get("job")
     job_filter_enabled = bool(job_id) and str(body.get("job_only", "true")).lower() != "false"
     if job_filter_enabled and job_id:
         job = Job.objects(id=job_id).first()
         if job and job.bom:
-            pairs = set()
-            for line in job.bom:
-                pn_line = (line.pn or "").strip()
-                if not pn_line:
-                    continue
-                pairs.add((pn_line, _clean_rev_value(line.rev)))
+            pairs = {
+                ((line.pn or "").strip(), _clean_rev_value(line.rev))
+                for line in (job.bom or [])
+                if (line.pn or "").strip()
+            }
             if pairs:
-                q = q & _pairs_q(pairs)
+                q = q & pairs_query(pairs)
 
-    # Optional "used in job" filter (with optional job number substring)
-    used_in_job = _flag_enabled("used_in_job")
-    job_number_filter = str(_filter_value("job_number", "") or "").strip()
+    used_in_job = flag_enabled(filters, "used_in_job")
+    job_number_filter = str(filter_value(filters, "job_number", "") or "").strip()
     if used_in_job:
         job_qs = Job.objects(is_deleted=False)
         if job_number_filter:
             job_qs = job_qs.filter(job_number__icontains=job_number_filter)
-        pairs = set()
-        for j in job_qs.only("bom"):
-            for line in (j.bom or []):
-                pn_line = (line.pn or "").strip()
-                if not pn_line:
-                    continue
-                pairs.add((pn_line, _clean_rev_value(line.rev)))
+        pairs: set[tuple[str, str]] = set()
+        for job in job_qs.only("bom"):
+            for line in (job.bom or []):
+                pn_line = str(line.pn or "").strip()
+                if pn_line:
+                    pairs.add((pn_line, _clean_rev_value(line.rev)))
         if not pairs:
             return jsonify({"data": [], "totalRecords": 0})
-        q = q & _pairs_q(pairs)
+        q = q & pairs_query(pairs)
 
-    # ACL filter for restricted viewers
     allowed_scope = allowed_parts_for(current_user)
     if isinstance(allowed_scope, set):
         if not allowed_scope:
             return jsonify({"data": [], "totalRecords": 0})
         allowed_q = Q()
         for pn, rev in allowed_scope:
-            pn_clean = (pn or "").strip()
+            pn_clean = str(pn or "").strip()
             if not pn_clean:
                 continue
             if rev:
@@ -956,8 +844,8 @@ def parts_lazy():
 
     qs = Part.objects(q)
 
-    if material_val_norm in ("__missing__", "missing", "(missing)"):
-        material_query = (primary_query_path("material", field_config) or "attrs__material").replace("__", ".")
+    if material_val_norm in {"__missing__", "missing", "(missing)"}:
+        material_query = _mongo_path(primary_query_path("material", field_config) or "attrs__material")
         qs = qs.filter(
             __raw__={
                 "$or": [
@@ -968,102 +856,67 @@ def parts_lazy():
             }
         )
 
-    full_files_filter = _flag_enabled("full_files")
-    approved_only_filter = _flag_enabled("approved_only")
-    min_props_filter = _flag_enabled("min_props")
+    full_files_filter = flag_enabled(filters, "full_files")
+    approved_only_filter = flag_enabled(filters, "approved_only")
+    min_props_filter = flag_enabled(filters, "min_props")
 
     if approved_only_filter:
         qs = qs.filter(_approval_q(True))
 
     def _coverage_map(parts_list: list[Part]) -> dict[tuple[str, str], set[str]]:
-        if not parts_list:
-            return {}
-        pn_list = list({p.part_number for p in parts_list if p.part_number})
-        qf = PartFile.objects(part_number__in=pn_list)
-        coverage: dict[tuple[str, str], set[str]] = {}
-        for f in qf.only("part_number", "revision", "ext_group"):
-            key = (f.part_number, _clean_rev_value(f.revision or ""))
-            coverage.setdefault(key, set()).add((f.ext_group or "").lower())
-        for part in parts_list:
-            attrs = harvest_part_attrs(part)
-            if not datasheet_url_from_attrs(attrs):
-                continue
-            key = (part.part_number, _normalized_revision(part, attrs))
-            coverage.setdefault(key, set()).add("datasheet")
-        return coverage
+        return batch_file_groups_for_parts(parts_list)
 
-    needs_scan = any([
-        full_files_filter,
-        min_props_filter,
-        bool(typed_filter_specs),
-        bool(runtime_filter_specs),
-        runtime_sort,
-    ])
+    needs_scan = any(
+        [
+            full_files_filter,
+            min_props_filter,
+            bool(typed_filter_specs),
+            bool(runtime_filter_specs),
+            runtime_sort,
+        ]
+    )
 
     if needs_scan:
         scan_order_by = order_by if not runtime_sort else "part_number"
-        all_docs = list(
-            qs.order_by(scan_order_by).only("part_number", "revision", "description", "category", "attrs", "processes")
-        )
-        scan_requires_coverage = bool(full_files_filter)
-        if not scan_requires_coverage:
-            scan_requires_coverage = any(bool(file_field_group(field_id)) for field_id, _data_type, _raw_value in typed_filter_specs)
-        if not scan_requires_coverage:
-            scan_requires_coverage = any(bool(file_field_group(field_id)) for field_id, _data_type, _raw_value in runtime_filter_specs)
-        if not scan_requires_coverage and runtime_sort:
-            scan_requires_coverage = bool(file_field_group(sort_field))
-
+        all_docs = list(qs.order_by(scan_order_by).only("part_number", "revision", "description", "category", "attrs", "processes"))
         scan_requires_values = bool(runtime_sort or typed_filter_specs or runtime_filter_specs)
-        coverage = _coverage_map(all_docs) if scan_requires_coverage else {}
-        filtered_docs = []
+        coverage = _coverage_map(all_docs) if full_files_filter or scan_requires_values else {}
+        filtered_docs: list[Part] = []
         resolved_cache: dict[tuple[str, str], dict[str, Any]] = {}
-        for p in all_docs:
-            attrs = harvest_part_attrs(p)
-            rev = _normalized_revision(p, attrs)
-            groups = coverage.get((p.part_number, rev)) or set()
-            proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
-            if min_props_filter and not _min_props_ok(p, attrs, proc_list):
+        for part in all_docs:
+            attrs = harvest_part_attrs(part)
+            rev = _normalized_revision(part, attrs)
+            groups = coverage.get((part.part_number, rev)) or set()
+            proc_list = normalize_process_list(attrs, list(part.processes or []), meta)
+            if min_props_filter and not _min_props_ok(part, attrs, proc_list):
                 continue
             if full_files_filter and not _full_files_ok(proc_list, groups, meta):
                 continue
-            key = (p.part_number, rev)
             values: dict[str, Any] = {}
             if scan_requires_values:
                 values = resolve_part_field_values(
-                    p,
+                    part,
                     parts_context_ids,
                     attrs=attrs,
                     config=field_config,
-                    extra={"part_number": p.part_number, "revision": rev},
-                    coverage=groups if scan_requires_coverage else None,
+                    extra={"part_number": part.part_number, "revision": rev},
+                    coverage=groups,
                 )
-            typed_match = True
-            for field_id, data_type, raw_value in typed_filter_specs:
-                if not matches_field_filter_value(values.get(field_id), raw_value, data_type):
-                    typed_match = False
-                    break
-            if not typed_match:
+            if any(not matches_field_filter_value(values.get(field_id), raw_value, data_type) for field_id, data_type, raw_value in typed_filter_specs):
                 continue
-            runtime_match = True
-            for field_id, data_type, raw_value in runtime_filter_specs:
-                if not matches_field_filter_value(values.get(field_id), raw_value, data_type):
-                    runtime_match = False
-                    break
-            if not runtime_match:
+            if any(not matches_field_filter_value(values.get(field_id), raw_value, data_type) for field_id, data_type, raw_value in runtime_filter_specs):
                 continue
- 
             if values:
-                resolved_cache[key] = values
-            filtered_docs.append(p)
+                resolved_cache[(part.part_number, rev)] = values
+            filtered_docs.append(part)
         if runtime_sort:
             sort_type = str((field_meta.get(sort_field) or {}).get("data_type") or "text")
-            reverse = (sort_order == -1)
+            reverse = sort_order == -1
 
             def _runtime_sort_key(doc: Part):
                 attrs = harvest_part_attrs(doc)
                 rev = _normalized_revision(doc, attrs)
-                values = resolved_cache.get((doc.part_number, rev)) or {}
-                value = values.get(sort_field)
+                value = (resolved_cache.get((doc.part_number, rev)) or {}).get(sort_field)
                 if sort_type == "number":
                     try:
                         return float(value)
@@ -1080,25 +933,27 @@ def parts_lazy():
         filtered = qs.count()
         docs = list(
             qs.order_by(order_by)
-            .only("part_number", "revision", "description", "category", "attrs", "processes")
+            .only("part_number", "revision", "description", "category", "attrs", "processes", "file_groups", "field_values")
             .skip(first)
             .limit(rows)
         )
         coverage = _coverage_map(docs)
         resolved_cache = {}
 
+    thumb_map = thumb_urls_map([(part.part_number, _normalized_revision(part, harvest_part_attrs(part))) for part in docs])
+
     out = []
-    for p in docs:
-        attrs = harvest_part_attrs(p)
-        pn = p.part_number
-        rev = _normalized_revision(p, attrs)
+    for part in docs:
+        attrs = harvest_part_attrs(part)
+        pn = part.part_number
+        rev = _normalized_revision(part, attrs)
         groups = coverage.get((pn, rev)) or set()
-        process_list = normalize_process_list(attrs, list(p.processes or []), current_app.config.get("PROCESS_META", {}))
-        thumb_list = thumb_urls_for(pn, rev)
+        process_list = normalize_process_list(attrs, list(part.processes or []), current_app.config.get("PROCESS_META", {}))
+        thumb_list = thumb_map.get((pn, rev)) or []
         values = dict(resolved_cache.get((pn, rev)) or {})
         if not values:
             values = resolve_part_field_values(
-                p,
+                part,
                 parts_context_ids,
                 attrs=attrs,
                 config=field_config,

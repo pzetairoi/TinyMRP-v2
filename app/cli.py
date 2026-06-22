@@ -19,6 +19,7 @@ from flask import current_app
 
 from app.services.attrs import harvest_part_attrs, merge_save_part_attrs
 from app.services.part_annotations import bulk_sync_annotation_search_fields
+from app.services.part_materialized import rebuild_part_materialized_fields
 from app.services.password_policy import validate_admin_password
 
 
@@ -773,6 +774,18 @@ def annotations_backfill():
     click.echo(result)
 
 
+@click.group()
+def parts():
+    """Part search/materialized field utilities"""
+
+
+@parts.command("rebuild-search-fields")
+@with_appcontext
+def parts_rebuild_search_fields():
+    report = rebuild_part_materialized_fields()
+    click.echo(report)
+
+
 
 def init_app(app):
     # ... your existing CLI registrations ...
@@ -785,6 +798,7 @@ def init_app(app):
     app.cli.add_command(data)
     app.cli.add_command(attrs)
     app.cli.add_command(annotations)
+    app.cli.add_command(parts)
 
     # Audit diagnostics group
     import click

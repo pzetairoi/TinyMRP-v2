@@ -7,7 +7,7 @@ from app.models.auth import Role, User
 from app.models.bom import BOMLink
 from app.models.part import Part
 from app.services.docpacks import DocPackOptions, build_docpack
-from app.services.field_config import save_field_config
+from app.services.field_config import field_requires_runtime_scan, query_paths_for_field, save_field_config
 
 
 def _login(client, user):
@@ -362,6 +362,72 @@ def test_filters_use_resolved_values_for_custom_and_remapped_fields(client):
     )
     assert custom_resp.status_code == 200
     assert [row["part_number"] for row in custom_resp.get_json()["data"]] == ["FLT-RAW-2"]
+
+    config = client.get("/api/field-config").get_json()["config"]
+    assert query_paths_for_field("description", config) == ["field_values__description"]
+    assert query_paths_for_field("legacy_code", config) == ["field_values__legacy_code"]
+    assert field_requires_runtime_scan("description", config) is False
+    assert field_requires_runtime_scan("legacy_code", config) is False
+
+    global_resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"global": {"value": "LC-200"}}},
+    )
+    assert global_resp.status_code == 200
+    assert [row["part_number"] for row in global_resp.get_json()["data"]] == ["FLT-RAW-2"]
+
+
+def test_admin_can_rebuild_search_fields_for_existing_parts(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    legacy = Part(
+        part_number="REB-100",
+        revision="A",
+        description="Legacy part",
+        attrs={"Legacy Code": "LEG-100", "datasheet": "vendor-file.pdf"},
+    ).save()
+
+    save_resp = client.put(
+        "/api/admin/field-config",
+        json={
+            "custom_fields": [
+                {"id": "legacy_code", "label": "Legacy Code", "source_path": "attrs.Legacy Code", "data_type": "text"},
+            ],
+            "contexts": {
+                "parts_list": {
+                    "allowed_field_ids": ["part_number", "description", "legacy_code", "has_datasheet"],
+                    "default_field_ids": ["part_number", "description", "legacy_code", "has_datasheet"],
+                }
+            },
+        },
+    )
+    assert save_resp.status_code == 200
+
+    rebuild_resp = client.post("/api/admin/field-config/rebuild-search-fields")
+    assert rebuild_resp.status_code == 200
+    report = rebuild_resp.get_json()["report"]
+    assert report["updated"] >= 1
+    assert report["errors"] == 0
+
+    legacy.reload()
+    assert legacy.field_values["legacy_code"] == "LEG-100"
+    assert legacy.has_datasheet is True
+    assert "datasheet" in (legacy.file_groups or [])
+
+    list_resp = client.post(
+        "/api/parts_lazy",
+        json={
+            "first": 0,
+            "rows": 25,
+            "filters": {
+                "legacy_code": {"value": "LEG-100"},
+                "has_datasheet": {"value": True},
+            },
+        },
+    )
+    assert list_resp.status_code == 200
+    assert [row["part_number"] for row in list_resp.get_json()["data"]] == [legacy.part_number]
 
 
 def test_admin_can_rebuild_canonical_fields_using_custom_aliases(client):
