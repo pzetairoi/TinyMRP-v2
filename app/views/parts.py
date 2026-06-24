@@ -15,7 +15,7 @@ from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
 from app.services.thumbs import drawing_urls_for, thumb_urls_for, thumb_urls_map
-from app.services.attrs import approval_filter_raw, approved_value, harvest_part_attrs
+from app.services.attrs import approval_field_values, approval_filter_raw, approved_value, harvest_part_attrs
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.views.whereused import _rows_for_child_pn
@@ -1210,6 +1210,7 @@ def part_detail():
         "part_detail_summary",
         extra={"part_number": p.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
     )
+    summary_field_values.update(approval_field_values(attrs))
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
     approver_identity = str(approved_value(attrs) or "").strip()

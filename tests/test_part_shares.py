@@ -215,3 +215,47 @@ def test_non_admin_cannot_create_public_share(client):
     _login(client, viewer)
     resp = client.post("/api/parts/PN-NO-SHARE/shares", json={"rev": "A", "expires_in_days": 30})
     assert resp.status_code == 403
+
+
+def test_public_share_part_detail_treats_placeholder_approval_alias_as_unapproved(client, app):
+    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin = _make_user("admin-share-approval@example.com", roles=[admin_role])
+    _login(client, admin)
+
+    config_resp = client.put(
+        "/api/admin/field-config",
+        json={
+            "canonical_aliases": [
+                {
+                    "field_id": "approved_by",
+                    "aliases": ["approved_by", "approvedby", "approved", "EngineeringApproval"],
+                }
+            ]
+        },
+    )
+    assert config_resp.status_code == 200
+
+    part = Part(
+        part_number="PN-SHARE-APR",
+        revision="A",
+        description="Shared Approval Placeholder",
+        attrs={"EngineeringApproval": "Approver", "approveddate": "2026-06-24"},
+    ).save()
+
+    create_resp = client.post(
+        f"/api/parts/{part.part_number}/shares",
+        json={"rev": part.revision, "expires_in_days": 30, "allow_attributes": True},
+    )
+    assert create_resp.status_code == 200
+    create_payload = create_resp.get_json()
+    public_client = app.test_client()
+
+    detail_resp = public_client.get(
+        f"/api/share/part/{create_payload['share_id']}/{create_payload['share_token']}/part_detail?pn={part.part_number}&rev={part.revision}"
+    )
+    assert detail_resp.status_code == 200
+    detail = detail_resp.get_json()
+
+    assert detail["part"]["field_values"]["approved"] is False
+    assert detail["part"]["field_values"]["approved_by"] == ""
+    assert detail["part"]["field_values"]["approved_date"] == "2026-06-24"

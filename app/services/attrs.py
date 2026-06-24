@@ -117,6 +117,16 @@ def approved_value(attrs: Dict[str, Any]) -> Any:
     return approved_by_value(attrs)
 
 
+def approval_field_values(attrs: Dict[str, Any]) -> Dict[str, Any]:
+    approver = approved_by_value(attrs or {})
+    approved_date = approved_date_value(attrs or {})
+    return {
+        "approved": bool(approver),
+        "approved_by": str(approver or "").strip(),
+        "approved_date": str(approved_date or "").strip(),
+    }
+
+
 def _normalize_alias_group(attrs: Dict[str, Any], aliases: Iterable[str], canonical_key: str, *, blankish) -> None:
     if not isinstance(attrs, dict):
         return
