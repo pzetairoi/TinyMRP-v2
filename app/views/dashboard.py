@@ -255,10 +255,7 @@ def dashboard_summary():
     missing_process_raw = {
         "$or": [{"processes": {"$exists": False}}, {"processes": {"$size": 0}}],
     }
-    approved_raw = approval_filter_raw(
-        ["canonical.approved_by", "attrs.approvedby", "attrs.approved_by", "attrs.approved"],
-        approved=True,
-    )
+    approved_raw = approval_filter_raw(approved=True)
 
     missing_material = base.filter(__raw__=missing_material_raw).count()
     missing_description = base.filter(__raw__=missing_description_raw).count()

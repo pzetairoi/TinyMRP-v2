@@ -1,21 +1,26 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Iterable, List, Tuple
 
 from app.services.canonical_fields import (
+    APPROVAL_VOID_RE,
+    APPROVED_BY_ATTR_ALIASES,
+    APPROVED_DATE_ATTR_ALIASES,
+    approved_by_attr_value,
+    approved_date_attr_value,
     canonical_attr_key,
     canonical_attrs_for_part,
     default_normalized_attr_alias_map,
     extract_canonical_fields,
+    is_blankish_approval,
     sync_part_canonical_fields,
 )
 
 ALIASES: Dict[str, str] = default_normalized_attr_alias_map()
 
 REQUIRED_KEYS: Iterable[str] = (
-    "approvedby",
-    "approveddate",
+    "approved_by",
+    "approved_date",
     "drawnby",
     "drawndate",
     "checkeddate",
@@ -40,44 +45,35 @@ REQUIRED_KEYS: Iterable[str] = (
     "spare_part",
 )
 
-# Add default title-block placeholder tokens here so approval remains based on
-# meaningful approver data rather than field-label defaults.
-_APPROVAL_EMPTY = {
-    "",
-    "-",
-    "--",
-    "0",
-    "approved",
-    "approved by",
-    "approved_by",
-    "approver",
-    "false",
-    "n/a",
-    "na",
-    "none",
-    "null",
-    "pending",
-    "tbc",
-    "tbd",
-}
-_APPROVAL_EMPTY_RE = re.compile(
-    r"^\s*(?:"
-    + "|".join(sorted(re.escape(token) for token in _APPROVAL_EMPTY))
-    + r")\s*$",
-    re.IGNORECASE,
-)
-
-
 def _is_blankish_approval(value: Any) -> bool:
+    return is_blankish_approval(value)
+
+
+def _is_blankish_text(value: Any) -> bool:
     if value is None:
         return True
-    if isinstance(value, bool):
-        return not value
-    return bool(_APPROVAL_EMPTY_RE.match(str(value)))
+    return not str(value).strip()
 
 
-def approval_filter_raw(keys: Iterable[str], *, approved: bool) -> Dict[str, Any]:
-    fields = [str(key or "").strip() for key in keys if str(key or "").strip()]
+def approval_query_keys(*, include_canonical: bool = True, include_legacy: bool = True) -> List[str]:
+    keys: List[str] = []
+    if include_canonical:
+        keys.extend(["canonical.approved_by", "attrs.approved_by"])
+    if include_legacy:
+        keys.extend(["attrs.approvedby", "attrs.approved"])
+    seen = set()
+    out: List[str] = []
+    for key in keys:
+        token = str(key or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
+
+
+def approval_filter_raw(keys: Iterable[str] | None = None, *, approved: bool) -> Dict[str, Any]:
+    fields = [str(key or "").strip() for key in (keys or approval_query_keys()) if str(key or "").strip()]
     if not fields:
         return {}
 
@@ -88,7 +84,7 @@ def approval_filter_raw(keys: Iterable[str], *, approved: bool) -> Dict[str, Any
                     "$and": [
                         {field: {"$exists": True}},
                         {field: {"$nin": [None, False, 0]}},
-                        {field: {"$not": _APPROVAL_EMPTY_RE}},
+                        {field: {"$not": APPROVAL_VOID_RE}},
                     ]
                 }
                 for field in fields
@@ -101,7 +97,7 @@ def approval_filter_raw(keys: Iterable[str], *, approved: bool) -> Dict[str, Any
                 "$or": [
                     {field: {"$exists": False}},
                     {field: {"$in": [None, False, 0]}},
-                    {field: _APPROVAL_EMPTY_RE},
+                    {field: APPROVAL_VOID_RE},
                 ]
             }
             for field in fields
@@ -109,28 +105,49 @@ def approval_filter_raw(keys: Iterable[str], *, approved: bool) -> Dict[str, Any
     }
 
 
+def approved_by_value(attrs: Dict[str, Any]) -> Any:
+    return approved_by_attr_value(attrs)
+
+
+def approved_date_value(attrs: Dict[str, Any]) -> Any:
+    return approved_date_attr_value(attrs)
+
+
 def approved_value(attrs: Dict[str, Any]) -> Any:
+    return approved_by_value(attrs)
+
+
+def _normalize_alias_group(attrs: Dict[str, Any], aliases: Iterable[str], canonical_key: str, *, blankish) -> None:
     if not isinstance(attrs, dict):
-        return None
-    for key in ("approvedby", "approved_by", "approved"):
-        if key in attrs and not _is_blankish_approval(attrs.get(key)):
-            return attrs.get(key)
-    for key, value in attrs.items():
-        key_l = canonical_attr_key(key)
-        if key_l in ("approvedby", "approved_by", "approved") and not _is_blankish_approval(value):
-            return value
-    return None
+        return
+    alias_tokens = {canonical_attr_key(alias) for alias in aliases if canonical_attr_key(alias)}
+    matching_keys = [key for key in list(attrs.keys()) if canonical_attr_key(key) in alias_tokens]
+    value = None
+    if tuple(aliases) == tuple(APPROVED_BY_ATTR_ALIASES):
+        value = approved_by_value(attrs)
+    elif tuple(aliases) == tuple(APPROVED_DATE_ATTR_ALIASES):
+        value = approved_date_value(attrs)
+    else:
+        for key in matching_keys:
+            raw_value = attrs.get(key)
+            if not blankish(raw_value):
+                value = raw_value
+                break
+    for key in matching_keys:
+        attrs.pop(key, None)
+    if value is not None:
+        attrs[canonical_key] = value
 
 
 def _normalize_approved_fields(attrs: Dict[str, Any]) -> None:
-    if not isinstance(attrs, dict):
-        return
-    value = approved_value(attrs)
-    if value is None:
-        return
-    attrs["approvedby"] = value
-    attrs["approved_by"] = value
-    attrs["approved"] = value
+    _normalize_alias_group(attrs, APPROVED_BY_ATTR_ALIASES, "approved_by", blankish=_is_blankish_approval)
+    _normalize_alias_group(attrs, APPROVED_DATE_ATTR_ALIASES, "approved_date", blankish=_is_blankish_text)
+
+
+def normalize_record_attrs(raw: Dict[str, Any] | None) -> Dict[str, Any]:
+    attrs = dict(raw or {})
+    _normalize_approved_fields(attrs)
+    return attrs
 
 
 def comments_search_text(value: Any) -> str:
@@ -161,7 +178,7 @@ def comments_search_text(value: Any) -> str:
 
 
 def process_attributes(raw_attrs: Dict[str, Any] | None) -> Tuple[Dict[str, Any], List[str]]:
-    attrs = dict(raw_attrs or {})
+    attrs = normalize_record_attrs(raw_attrs)
     canonical = extract_canonical_fields(attrs)
     return attrs, list(canonical.get("processes") or [])
 
@@ -248,6 +265,6 @@ def harvest_part_attrs(part) -> Dict[str, Any]:
 
 
 def merge_save_part_attrs(part, incoming: Dict[str, Any]) -> None:
-    part.attrs = dict(incoming or {})
+    part.attrs = normalize_record_attrs(incoming)
     sync_part_canonical_fields(part, raw_attrs=part.attrs)
     part.save()

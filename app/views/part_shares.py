@@ -13,7 +13,7 @@ from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.models.part import Part
 from app.models.part_share import PartShareLink
-from app.services.attrs import harvest_part_attrs
+from app.services.attrs import approved_value, harvest_part_attrs
 from app.services.part_annotations import filtered_part_attrs
 from app.services.audit import log_action
 from app.services.extra_files import extra_abs_path, extra_file_token_for, extra_root, resolve_extra_file_token
@@ -274,7 +274,7 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
     summary_field_values["comments"] = ""
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
-    approver_identity = _attr_identity(attrs, "approvedby", "approved_by", "approved", "checkedby")
+    approver_identity = str(approved_value(attrs) or "").strip()
     raw_comments = attrs.get("comments")
     if not isinstance(raw_comments, list):
         raw_comments = []

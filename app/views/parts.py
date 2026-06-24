@@ -666,10 +666,7 @@ def parts_lazy():
         return (base_q & exclude_pairs_query(pairs)) if pairs else base_q
 
     def _approval_q(expected: bool) -> Q:
-        raw = approval_filter_raw(
-            ["canonical.approved_by", "attrs.approvedby", "attrs.approved_by", "attrs.approved"],
-            approved=expected,
-        )
+        raw = approval_filter_raw(approved=expected)
         return Q(__raw__=raw)
 
     q = Q()
@@ -1215,7 +1212,7 @@ def part_detail():
     )
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
-    approver_identity = _attr_identity(attrs, "approvedby", "approved_by", "approved", "checkedby")
+    approver_identity = str(approved_value(attrs) or "").strip()
     raw_comments = list(notes_comments.get("comments") or [])
     identity_keys = [uploader_identity, approver_identity]
     identity_keys.extend(str((comment or {}).get("author") or "").strip() for comment in raw_comments)

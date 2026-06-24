@@ -635,7 +635,7 @@ def _excel_bom_bytes(
         selected_field_ids = ["thumbnail", "part_number", "revision", "description", "total_qty", "level", "level_qty"]
 
     ignore = {field_id.lower() for field_id in selected_field_ids}
-    ignore.update({"oem_partnumber", "approvedby", "approved_by", "approved"})
+    ignore.update({"oem_partnumber", "approvedby", "approved_by", "approved", "approveddate", "approved_date"})
     header_attrs = sorted([k for k in attr_keys if k and k.lower() not in ignore]) if include_all_fields else []
     header_fields = list(selected_field_ids) + header_attrs
     header_labels = [
@@ -1883,7 +1883,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[da
     proc_text = ", ".join([p for p in _part_processes(pdoc) if p])
 
     author = ""
-    for key in ("author", "drawnby", "checkedby", "approvedby"):
+    for key in ("author", "drawnby", "checkedby", "approved_by"):
         v = (attrs or {}).get(key)
         if v and str(v).strip():
             author = str(v).strip()

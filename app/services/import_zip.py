@@ -12,7 +12,7 @@ from collections import defaultdict
 # Import necessary services for file scanning and upserting
 from app.services.filescan import discover_part_files, upsert_part_files_detailed
 # Import necessary services for attributes normalization and merging
-from app.services.attrs import approved_value, harvest_part_attrs, process_attributes
+from app.services.attrs import approved_value, harvest_part_attrs, normalize_record_attrs, process_attributes
 from app.services.canonical_fields import sync_part_canonical_fields
 from app.services.part_annotations import migrate_legacy_annotations
 from app.services.processmeta import normalize_processes
@@ -128,7 +128,7 @@ def _apply_part_update(
     seed_tag: str,
     override_mode: str,
 ) -> None:
-    incoming_attrs = dict(norm.get("attrs") or {})
+    incoming_attrs = normalize_record_attrs(norm.get("attrs") or {})
     incoming_attrs["seed"] = seed_tag
     _, incoming_processes = process_attributes(incoming_attrs)
     hardware_override = _is_hardware_by_folder(incoming_attrs) or _is_hardware_by_process(incoming_attrs)
@@ -141,14 +141,14 @@ def _apply_part_update(
             migrate_legacy_annotations(part)
         except Exception:
             pass
-    existing_attrs = dict(getattr(part, "attrs", {}) or {})
+    existing_attrs = normalize_record_attrs(getattr(part, "attrs", {}) or {})
     replace_existing = is_new or _should_replace_existing(existing_attrs, incoming_attrs, override_mode)
 
     if replace_existing:
         part.description = norm.get("description") or ""
         part.category = norm.get("category") or ""
         part.uom = norm.get("uom") or "EA"
-        part.attrs = _merge_attrs_replace(existing_attrs, incoming_attrs)
+        part.attrs = normalize_record_attrs(_merge_attrs_replace(existing_attrs, incoming_attrs))
         sync_part_canonical_fields(
             part,
             raw_attrs=part.attrs,
@@ -170,7 +170,7 @@ def _apply_part_update(
         part.category = norm.get("category") or ""
     if not _has_value(getattr(part, "uom", None)):
         part.uom = norm.get("uom") or "EA"
-    part.attrs = _merge_attrs_preserve(existing_attrs, incoming_attrs)
+    part.attrs = normalize_record_attrs(_merge_attrs_preserve(existing_attrs, incoming_attrs))
     sync_part_canonical_fields(
         part,
         raw_attrs=part.attrs,
