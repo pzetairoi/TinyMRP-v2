@@ -12,7 +12,7 @@ from mongoengine.queryset.visitor import Q
 from app.models.part import Part
 from app.models.artifact import PartFile
 from app.models.bom import BOMLink
-from app.services.attrs import harvest_part_attrs
+from app.services.attrs import approval_filter_raw, harvest_part_attrs
 from app.services.acl import allowed_parts_for, require_items_view
 from app.services.insights import classify_part
 
@@ -255,14 +255,10 @@ def dashboard_summary():
     missing_process_raw = {
         "$or": [{"processes": {"$exists": False}}, {"processes": {"$size": 0}}],
     }
-    approved_raw = {
-        "$or": [
-            {"canonical.approved_by": {"$exists": True, "$ne": ""}},
-            {"attrs.approvedby": {"$exists": True, "$ne": ""}},
-            {"attrs.approved_by": {"$exists": True, "$ne": ""}},
-            {"attrs.approved": {"$exists": True, "$nin": ["", "no", "false", "0"]}},
-        ]
-    }
+    approved_raw = approval_filter_raw(
+        ["canonical.approved_by", "attrs.approvedby", "attrs.approved_by", "attrs.approved"],
+        approved=True,
+    )
 
     missing_material = base.filter(__raw__=missing_material_raw).count()
     missing_description = base.filter(__raw__=missing_description_raw).count()

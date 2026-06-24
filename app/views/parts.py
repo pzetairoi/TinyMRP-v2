@@ -15,7 +15,7 @@ from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
 from app.services.thumbs import drawing_urls_for, thumb_urls_for, thumb_urls_map
-from app.services.attrs import approved_value, harvest_part_attrs
+from app.services.attrs import approval_filter_raw, approved_value, harvest_part_attrs
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.views.whereused import _rows_for_child_pn
@@ -666,23 +666,11 @@ def parts_lazy():
         return (base_q & exclude_pairs_query(pairs)) if pairs else base_q
 
     def _approval_q(expected: bool) -> Q:
-        empty_values = [None, "", "n/a", "N/A", "na", "NA", "none", "None", "null", "NULL", "0", "false", "False", "FALSE"]
-        keys = ["attrs.approvedby", "attrs.approved_by", "attrs.approved"]
-        if expected:
-            return Q(__raw__={"$or": [{key: {"$exists": True, "$nin": empty_values}} for key in keys]})
-        return Q(
-            __raw__={
-                "$and": [
-                    {
-                        "$or": [
-                            {key: {"$exists": False}},
-                            {key: {"$in": empty_values}},
-                        ]
-                    }
-                    for key in keys
-                ]
-            }
+        raw = approval_filter_raw(
+            ["canonical.approved_by", "attrs.approvedby", "attrs.approved_by", "attrs.approved"],
+            approved=expected,
         )
+        return Q(__raw__=raw)
 
     q = Q()
     fallback_base_q = Q()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Iterable, List, Tuple
 
 from app.services.canonical_fields import (
@@ -39,7 +40,32 @@ REQUIRED_KEYS: Iterable[str] = (
     "spare_part",
 )
 
-_APPROVAL_EMPTY = {"", "n/a", "na", "none", "null", "0", "false"}
+# Add default title-block placeholder tokens here so approval remains based on
+# meaningful approver data rather than field-label defaults.
+_APPROVAL_EMPTY = {
+    "",
+    "-",
+    "--",
+    "0",
+    "approved",
+    "approved by",
+    "approved_by",
+    "approver",
+    "false",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "pending",
+    "tbc",
+    "tbd",
+}
+_APPROVAL_EMPTY_RE = re.compile(
+    r"^\s*(?:"
+    + "|".join(sorted(re.escape(token) for token in _APPROVAL_EMPTY))
+    + r")\s*$",
+    re.IGNORECASE,
+)
 
 
 def _is_blankish_approval(value: Any) -> bool:
@@ -47,7 +73,40 @@ def _is_blankish_approval(value: Any) -> bool:
         return True
     if isinstance(value, bool):
         return not value
-    return str(value).strip().lower() in _APPROVAL_EMPTY
+    return bool(_APPROVAL_EMPTY_RE.match(str(value)))
+
+
+def approval_filter_raw(keys: Iterable[str], *, approved: bool) -> Dict[str, Any]:
+    fields = [str(key or "").strip() for key in keys if str(key or "").strip()]
+    if not fields:
+        return {}
+
+    if approved:
+        return {
+            "$or": [
+                {
+                    "$and": [
+                        {field: {"$exists": True}},
+                        {field: {"$nin": [None, False, 0]}},
+                        {field: {"$not": _APPROVAL_EMPTY_RE}},
+                    ]
+                }
+                for field in fields
+            ]
+        }
+
+    return {
+        "$and": [
+            {
+                "$or": [
+                    {field: {"$exists": False}},
+                    {field: {"$in": [None, False, 0]}},
+                    {field: _APPROVAL_EMPTY_RE},
+                ]
+            }
+            for field in fields
+        ]
+    }
 
 
 def approved_value(attrs: Dict[str, Any]) -> Any:
