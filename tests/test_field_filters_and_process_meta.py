@@ -130,6 +130,30 @@ def test_parts_lazy_supports_constraint_style_filter_payloads(client):
     assert [row["part_number"] for row in rows] == ["CST-200"]
 
 
+def test_parts_lazy_global_search_matches_part_number_and_description_with_other_filters(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    Part(part_number="INV-100", revision="A", description="Fixture Plate", attrs={"approvedby": "QA"}).save()
+    Part(part_number="INV-200", revision="A", description="Fixture Plate", attrs={}).save()
+    Part(part_number="FIX-300", revision="A", description="Inventory Bracket", attrs={"approvedby": "QA"}).save()
+
+    resp = client.post(
+        "/api/parts_lazy",
+        json={
+            "first": 0,
+            "rows": 25,
+            "filters": {
+                "global": {"value": "inv fixture"},
+                "approved_only": {"value": True},
+            },
+        },
+    )
+    assert resp.status_code == 200
+    rows = resp.get_json()["data"]
+    assert [row["part_number"] for row in rows] == ["INV-100"]
+
+
 def test_bom_tree_and_whereused_include_extended_file_availability(client):
     admin = _admin_user()
     _login(client, admin)

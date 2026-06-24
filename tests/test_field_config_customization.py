@@ -371,7 +371,7 @@ def test_filters_use_resolved_values_for_custom_and_remapped_fields(client):
 
     global_resp = client.post(
         "/api/parts_lazy",
-        json={"first": 0, "rows": 25, "filters": {"global": {"value": "LC-200"}}},
+        json={"first": 0, "rows": 25, "filters": {"global": {"value": "raw-2 charlie"}}},
     )
     assert global_resp.status_code == 200
     assert [row["part_number"] for row in global_resp.get_json()["data"]] == ["FLT-RAW-2"]

@@ -49,11 +49,13 @@ from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.services.field_config import (
     boolean_filter_value,
     context_field_ids,
+    effective_source_paths,
     field_requires_runtime_scan,
     file_field_group,
     field_uses_materialized_value,
     field_index as field_config_index,
     get_field_config,
+    mongo_field_from_source,
     matches_field_filter_value,
     number_filter_value,
     primary_query_path,
@@ -808,17 +810,20 @@ def parts_lazy():
     global_value = filter_value(filters, "global", "")
     if global_value:
         global_paths: list[str] = []
-        for field_id in parts_context_ids:
-            if field_id == "process" or field_id in runtime_filter_ids:
-                continue
-            data_type = str(field_meta.get(field_id, {}).get("data_type") or "text")
-            if data_type not in {"text", "link"}:
-                continue
+
+        def _append_search_path(path: str | None) -> None:
+            if path and path not in global_paths:
+                global_paths.append(path)
+
+        for field_id, fallback_path in (("part_number", "part_number"), ("description", "description")):
             for path in query_paths_for_field(field_id, field_config):
-                if path not in global_paths:
-                    global_paths.append(path)
+                _append_search_path(path)
+            for source_path in effective_source_paths(field_id, field_config):
+                _append_search_path(mongo_field_from_source(source_path))
+            _append_search_path(fallback_path)
+
         for term in terms(global_value):
-            or_q = _process_filter_q(term)
+            or_q = Q()
             for path in global_paths:
                 or_q = or_q | Q(**{f"{path}__icontains": term})
             q = q & or_q
