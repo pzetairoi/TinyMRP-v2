@@ -13,7 +13,7 @@ from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.models.part import Part
 from app.models.part_share import PartShareLink
-from app.services.attrs import approved_value, harvest_part_attrs
+from app.services.attrs import approval_field_values, approved_value, harvest_part_attrs
 from app.services.part_annotations import filtered_part_attrs
 from app.services.audit import log_action
 from app.services.extra_files import extra_abs_path, extra_file_token_for, extra_root, resolve_extra_file_token
@@ -270,6 +270,7 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
         "part_detail_summary",
         extra={"part_number": part.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
     )
+    summary_field_values.update(approval_field_values(attrs))
     summary_field_values["notes"] = ""
     summary_field_values["comments"] = ""
 

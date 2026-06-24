@@ -621,6 +621,7 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "oem_partnumber",
             "datasheet",
             "classified",
+            "approved",
             "approved_by",
             "approved_date",
             "drawn_by",

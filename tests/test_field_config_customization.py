@@ -521,3 +521,36 @@ def test_admin_can_rebuild_canonical_fields_using_custom_aliases(client):
     detail = detail_resp.get_json()
     assert detail["part"]["processes"] == ["lasercut", "machine"]
     assert detail["part"]["process"] == "lasercut, machine"
+
+
+def test_part_detail_exposes_placeholder_approval_alias_as_unapproved(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    save_resp = client.put(
+        "/api/admin/field-config",
+        json={
+            "canonical_aliases": [
+                {
+                    "field_id": "approved_by",
+                    "aliases": ["approved_by", "approvedby", "approved", "EngineeringApproval"],
+                }
+            ]
+        },
+    )
+    assert save_resp.status_code == 200
+
+    part = Part(
+        part_number="APR-DETAIL",
+        revision="A",
+        description="Approval Placeholder",
+        attrs={"EngineeringApproval": "Approver", "approveddate": "2026-06-24"},
+    ).save()
+
+    detail_resp = client.get(f"/api/part_detail?pn={part.part_number}&rev={part.revision}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.get_json()
+
+    assert detail["part"]["field_values"]["approved"] is False
+    assert detail["part"]["field_values"]["approved_by"] == ""
+    assert detail["part"]["field_values"]["approved_date"] == "2026-06-24"
