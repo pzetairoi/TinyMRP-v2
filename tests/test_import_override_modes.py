@@ -4,6 +4,7 @@ import zipfile
 
 from app.models.part import Part
 from app.services.import_zip import import_bom_zip
+from app.services.part_annotations import annotation_payload
 
 
 def _make_zip(flat_rows):
@@ -67,6 +68,7 @@ def test_import_override_modes_upgrade_approved_and_preserve_notes(app):
                 "description": "Released Description",
                 "material": "Stainless",
                 "approvedby": "QA",
+                "approveddate": "2026-01-15",
             }
         ]
     )
@@ -85,9 +87,13 @@ def test_import_override_modes_upgrade_approved_and_preserve_notes(app):
     assert part is not None
     assert part.description == "Released Description"
     assert part.attrs.get("material") == "Stainless"
-    assert part.attrs.get("approvedby") == "QA"
-    assert part.attrs.get("notes") == "Operator note"
-    assert part.attrs.get("comments") == [{"text": "Keep me"}]
+    assert part.attrs.get("approved_by") == "QA"
+    assert part.attrs.get("approved_date") == "2026-01-15"
+    assert part.attrs.get("approvedby") is None
+    assert part.attrs.get("approved") is None
+    payload = annotation_payload(part)
+    assert payload.get("notes") == "Operator note"
+    assert [row.get("text") for row in (payload.get("comments") or [])] == ["Keep me"]
 
 
 def test_import_default_mode_overrides_unapproved_parts(app):
@@ -157,4 +163,4 @@ def test_import_default_mode_preserves_existing_approved_parts(app):
     assert part is not None
     assert part.description == "Approved Description"
     assert part.attrs.get("material") == "Titanium"
-    assert part.attrs.get("approvedby") == "QA"
+    assert part.attrs.get("approved_by") == "QA"
