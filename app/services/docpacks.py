@@ -1216,10 +1216,7 @@ def _visual_list_pdf(
             approved = False
             if pdoc is not None:
                 a = harvest_part_attrs(pdoc)
-                raw = approved_value(a)
-                raw = str(raw).strip()
-                if raw:
-                    approved = raw.lower() not in ('', 'n/a', 'na', 'none', 'null', '0', 'false')
+                approved = bool(approved_value(a))
             show_notapproved = True
             if procs_lower and any(p in ('hardware', 'purchase', 'others') for p in procs_lower):
                 show_notapproved = False

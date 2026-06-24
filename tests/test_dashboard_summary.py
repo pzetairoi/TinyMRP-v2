@@ -37,3 +37,24 @@ def test_dashboard_summary_shape(client, user):
     assert "top_processes" in data
     assert "recent_parts" in data
     assert "top_hardware" in data
+
+
+def test_dashboard_summary_excludes_placeholder_approval_values(client, user):
+    role = Role(name="viewer", permissions=["items.view"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    Part(part_number="APR-REAL", revision="A", description="Approved", attrs={"approvedby": "QA"}).save()
+    Part(part_number="APR-RAW", revision="A", description="Placeholder raw", attrs={"approved": "Approved"}).save()
+    Part(
+        part_number="APR-CANON",
+        revision="A",
+        description="Placeholder canonical",
+        canonical={"approved_by": "Approved By"},
+    ).save()
+
+    resp = client.get("/api/dashboard/summary")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["counts"]["approved"] == 1

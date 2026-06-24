@@ -80,6 +80,13 @@ def test_parts_lazy_filters_approved_from_checkbox_and_string_false(client):
 
     Part(part_number="APR-100", revision="A", description="Approved", attrs={"approvedby": "QA"}).save()
     Part(part_number="APR-200", revision="A", description="Pending", attrs={}).save()
+    Part(part_number="APR-250", revision="A", description="Placeholder raw", attrs={"approved": "Approved"}).save()
+    Part(
+        part_number="APR-300",
+        revision="A",
+        description="Placeholder canonical",
+        canonical={"approved_by": "Approved By"},
+    ).save()
 
     approved_resp = client.post(
         "/api/parts_lazy",
@@ -95,7 +102,7 @@ def test_parts_lazy_filters_approved_from_checkbox_and_string_false(client):
     )
     assert unapproved_resp.status_code == 200
     unapproved_rows = unapproved_resp.get_json()["data"]
-    assert [row["part_number"] for row in unapproved_rows] == ["APR-200"]
+    assert [row["part_number"] for row in unapproved_rows] == ["APR-200", "APR-250", "APR-300"]
 
 
 def test_parts_lazy_supports_constraint_style_filter_payloads(client):
