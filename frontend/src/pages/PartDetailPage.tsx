@@ -55,6 +55,7 @@ type FileRow = {
 };
 
 type PreviewFormat = "3mf" | "ply" | "stl";
+const PREVIEW_FORMAT_PRIORITY: PreviewFormat[] = ["ply", "3mf", "stl"];
 
 type DatasheetOption = {
   key: string;
@@ -1427,9 +1428,7 @@ function isExternalDatasheetUrl(url: string): boolean {
         options.push({ key: `${fmt}:${idx}`, url, format: fmt, label: labelFor(file, fmt, idx) });
       });
     };
-    addGroup("3mf");
-    addGroup("ply");
-    addGroup("stl");
+    PREVIEW_FORMAT_PRIORITY.forEach(addGroup);
     return options;
   }, [fileGroups]);
 
@@ -1485,17 +1484,19 @@ function isExternalDatasheetUrl(url: string): boolean {
   );
 
   useEffect(() => {
-    if (threeDOptions.length <= 1) {
-      setSelectedPreviewKey(threeDOptions[0]?.key || "");
-    } else {
+    if (threeDOptions.length === 0) {
       setSelectedPreviewKey("");
+      return;
     }
-  }, [threeDOptions]);
+    if (threeDOptions.some((opt) => opt.key === selectedPreviewKey)) {
+      return;
+    }
+    setSelectedPreviewKey(threeDOptions[0]?.key || "");
+  }, [threeDOptions, selectedPreviewKey]);
 
   const activePreview = useMemo(() => {
     if (threeDOptions.length === 0) return null;
-    if (threeDOptions.length === 1) return threeDOptions[0];
-    return threeDOptions.find((opt) => opt.key === selectedPreviewKey) || null;
+    return threeDOptions.find((opt) => opt.key === selectedPreviewKey) || threeDOptions[0] || null;
   }, [threeDOptions, selectedPreviewKey]);
 
   useEffect(() => {
@@ -2568,7 +2569,6 @@ function isExternalDatasheetUrl(url: string): boolean {
                       value={selectedPreviewKey}
                       onChange={(e) => setSelectedPreviewKey(e.target.value)}
                     >
-                      <option value="">Select a 3D file...</option>
                       {threeDOptions.map((opt) => (
                         <option key={opt.key} value={opt.key}>
                           {opt.label}
