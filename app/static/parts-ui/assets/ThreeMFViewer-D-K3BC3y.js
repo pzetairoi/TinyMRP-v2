@@ -1,4 +1,4 @@
-import{r as Xt,j as te}from"./index-DoAUfHkz.js";/**
+import{r as Xt,j as te}from"./index-Bm823MIx.js";/**
  * @license
  * Copyright 2010-2025 Three.js Authors
  * SPDX-License-Identifier: MIT
