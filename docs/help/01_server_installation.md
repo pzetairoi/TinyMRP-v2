@@ -4,9 +4,27 @@ This page covers first deployment, safe updates, and operating basics for TinyMR
 
 ## Deployment Options
 
-### Recommended: Docker Compose
+### Recommended: Guided Ubuntu deployment
 
-Use Docker for production or pilot environments. It is the easiest path for repeatable updates.
+Use the guided Linux deployment scripts for production and pilot environments. This path uses:
+
+- Docker for the app containers
+- Caddy as the public reverse proxy
+- automatic HTTPS certificate management
+- private MongoDB containers
+- built-in DNS guidance and DNS validation
+
+Main guide:
+
+- `deploy/README.md`
+
+Main commands:
+
+```bash
+sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
+sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
+sudo ./deploy/scripts/doctor.sh
+```
 
 ### Hardened Windows LAN-Only (No Docker)
 
@@ -22,43 +40,70 @@ Use direct Python and Node only for development and debugging.
 
 ## Prerequisites
 
-- Access to a host with Docker and Docker Compose.
-- MongoDB connection string (`MONGO_URI`), local or hosted.
-- A file root where deliverables are stored and readable by the app.
-- Access to edit environment variables and run CLI commands.
+- Ubuntu host with internet access on ports `80` and `443`.
+- A domain or subdomain you can point to the server.
+- Access to edit DNS records at your DNS provider.
+- `sudo` access on the host.
 
-## First-Time Setup (Docker)
+## First-Time Setup (Guided Ubuntu)
 
-### 1) Prepare environment file
+### 1) Install host services
 
-- Copy an example such as `.env.server.example` to `.env`.
-- Set at least:
-  - `SECRET_KEY`
-  - `SECURITY_PASSWORD_SALT`
-  - `MONGO_URI`
-  - `FILES_LOCAL_ROOT` (or equivalent file root key in your setup)
-  - `HTTP_PORT`
-
-### 2) Start the stack
-
-Run from repository root:
-
-```powershell
-docker compose up -d --build
+```bash
+sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
 ```
 
-### 3) Seed roles and create first admin
+This stores host config in `/srv/tinymrp/host/.env` and starts the shared Caddy reverse proxy.
 
-```powershell
-docker compose exec app flask --app run.py user seed-roles
-docker compose exec app flask --app run.py user create --email admin@yourcompany.com --password <password>
-docker compose exec app flask --app run.py user grant-admin --email admin@yourcompany.com
+### 2) Create an instance
+
+```bash
+sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
 ```
 
-### 4) Open TinyMRP
+The script:
 
-- URL: `http://<server>:<HTTP_PORT>`
-- Login with the admin account.
+- detects the public IP
+- prints the exact DNS record to create
+- waits for DNS to resolve correctly
+- creates the app and private MongoDB containers
+- creates the Caddy route
+- enables HTTPS automatically for public domains
+
+### 3) Open TinyMRP
+
+- URL: `https://company1.tinymrp.com`
+- Login with the generated admin account from the installer output.
+
+## DNS And Domain Setup
+
+Examples:
+
+- `company1.tinymrp.com` -> `A company1 <server-ip>`
+- `tinymrp.customercompany.com` -> `A tinymrp <server-ip>`
+- `customercompany.com` -> `A @ <server-ip>`
+- `cloud.tinymrp.com` -> `A cloud <server-ip>`
+
+If the host has IPv6, the scripts also print an optional `AAAA` record.
+
+## Nextcloud
+
+Use the matching installer for a public Nextcloud domain:
+
+```bash
+sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+```
+
+## Local VM Mode
+
+For local-only testing:
+
+```bash
+sudo ./deploy/scripts/install-host.sh --local-mode http
+sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
+```
+
+Local domains such as `demo.test.local` and `demo.localhost` do not use public Let's Encrypt certificates.
 
 ## Windows LAN-Only Setup (No Docker)
 

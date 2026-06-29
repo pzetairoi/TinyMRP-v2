@@ -466,114 +466,55 @@ docker compose up -d --force-recreate app
 
 ---
 
-## Production Deployment (Ubuntu + Docker)
+## Guided Host Deployment (Ubuntu + Caddy)
 
-This repo includes a ready-to-run Docker Compose stack (`mongo`, `app`, `nginx`). Follow these steps on a fresh Ubuntu server.
+The recommended production path is now the guided multi-instance deployment under [`deploy/README.md`](deploy/README.md).
 
-1) Install Docker + Compose plugin
+Default behavior:
 
-```bash
-sudo apt-get update && sudo apt-get install -y ca-certificates curl gnupg
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release; echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-sudo apt-get update && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-```
+- Caddy is the shared reverse proxy on ports `80` and `443`.
+- Caddy obtains and renews HTTPS certificates automatically.
+- Each TinyMRP instance gets its own private Docker network and MongoDB container.
+- MongoDB is never published on the host.
+- DNS guidance and validation are built into the scripts.
 
-2) Get the repo onto the server
+Typical flow:
 
 ```bash
-sudo mkdir -p /opt && cd /opt
-sudo git clone <your-repo-url> tinymrp_v2
-cd /opt/tinymrp_v2
+sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
+sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
+sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+sudo ./deploy/scripts/doctor.sh
 ```
 
-3) Prepare the Deliverables folder (host path)
+Minimal operator input:
 
-```bash
-sudo mkdir -p /srv/tinymrp/deliverables
-# For testing, ensure the container can write thumbnails here
-sudo chmod 0777 /srv/tinymrp/deliverables
-# (optional tighter) sudo chown -R 1000:1000 /srv/tinymrp/deliverables
-```
+- `install-host.sh`
+  - ACME email
+  - optional base domain
+- `create-instance.sh`
+  - instance name
+  - final public domain
 
-4) Configure environment (.env)
+DNS examples:
 
-Edit your local `.env` and set at minimum:
+- `company1.tinymrp.com` -> `A company1 <server-ip>`
+- `tinymrp.customercompany.com` -> `A tinymrp <server-ip>`
+- `customercompany.com` -> `A @ <server-ip>`
+- `cloud.tinymrp.com` -> `A cloud <server-ip>`
 
-- `DELIVERABLES_DIR=/srv/tinymrp/deliverables` (Linux absolute path)
-- `HTTP_PORT=80` (or another free port if 80 is taken)
-- Set strong `SECRET_KEY` and `SECURITY_PASSWORD_SALT`.
-- If these are left empty in compat mode, TinyMRP will generate and persist them to `instance/runtime_secrets.json`.
-- Optional first-run admin seed: `TINYMRP_SEED_ADMIN=true`, `TINYMRP_ADMIN_EMAIL`, `TINYMRP_ADMIN_PASSWORD`.
+For full DNS examples, local VM mode, and Nextcloud details, see [`deploy/README.md`](deploy/README.md).
 
-5) Build and start
+### Legacy Single-Stack Compose Path
 
-```bash
-sudo docker compose up -d --build
-docker compose ps
-```
+The repo still includes the original single-stack Compose setup in `docker-compose.yml` (`mongo`, `app`, `nginx`). Keep using that only if you want the older manual, single-instance deployment shape.
 
-6) Test
+Quick notes for that legacy path:
 
-- App: `http://YOUR_SERVER_IP/` (or `http://YOUR_SERVER_IP:<HTTP_PORT>`)
-- Files: served through the app with `/files/view/<token>` (no public listing).
-- First login: only if you enabled `TINYMRP_SEED_ADMIN=true`; use `TINYMRP_ADMIN_EMAIL`/`TINYMRP_ADMIN_PASSWORD` (or the one-time password logged on first boot in compat mode).
-
-### Recovery CLI (user/role management)
-
-```powershell
-# List users and roles
-flask --app run.py user list
-flask --app run.py role list
-
-# Reset password
-flask --app run.py user set-password --email user@example.com
-
-# Grant/revoke roles
-flask --app run.py user grant-role --email user@example.com --role admin
-flask --app run.py user revoke-role --email user@example.com --role viewer
-
-# Bootstrap a new admin (creates user if missing)
-flask --app run.py user bootstrap-admin --email admin@example.com --password ChangeMe123!
-```
-
-Docker usage:
-
-```bash
-docker compose exec app flask --app run.py user list
-```
-
-### Mappings & Paths (repo-specific)
-
-- Port mapping:
-  - `docker-compose.yml` -> `nginx.ports`: host `${HTTP_PORT}` -> container `80`.
-  - Set `HTTP_PORT` in `.env`.
-- Deliverables bind mount:
-  - `.env` -> `DELIVERABLES_DIR=/srv/tinymrp/deliverables`.
-  - `docker-compose.yml` mounts `${DELIVERABLES_DIR}` to `/data/deliverables` in both `app` and `nginx`.
-- App file roots and URL prefix:
-  - `docker-compose.yml` sets `FILES_LOCAL_ROOT=/data/deliverables` and `FILES_URL_PREFIX=/deliverables` for the app.
-  - Backend reads these in `app/__init__.py` and also exposes legacy aliases `FILE_ROOT_LOCAL`/`FILE_ROOT_HTTP` for internal services.
-- Nginx protected paths:
-  - `docker/nginx/nginx.conf` exposes an internal `/__files/` location for X-Accel-Redirect and protects `/deliverables/` with `auth_request`.
-- Frontend file base:
-  - `frontend/.env.production` should be empty unless you intentionally enable `FILES_PUBLIC_URLS=true`.
-
-### First-Run Seeding
-
-On first boot, the app always seeds built-in roles. Admin users are only created if you opt in with:
-
-- `TINYMRP_SEED_ADMIN=true`
-- `TINYMRP_ADMIN_EMAIL`
-- `TINYMRP_ADMIN_PASSWORD` (or a one-time generated password in compat mode)
-
-### Troubleshooting Quick Checks
-
-- Port busy - change `.env: HTTP_PORT` and `docker compose up -d`.
-- App 502 - `docker compose logs -f app` and `docker compose logs -f nginx`.
-- Files 404 - verify host folder path and mounts: `docker compose exec app sh -lc 'ls -la /data/deliverables'`.
-- Thumbnails not writing - relax perms on `/srv/tinymrp/deliverables` during testing.
+- `HTTP_PORT` maps the host port to the internal `nginx` container on port `80`.
+- `DELIVERABLES_DIR` is bind-mounted into both `app` and `nginx` at `/data/deliverables`.
+- `FILES_LOCAL_ROOT=/data/deliverables` and `FILES_URL_PREFIX=/deliverables` stay the expected app-side values.
+- `docker/nginx/nginx.conf` still handles protected file delivery with `auth_request` and `X-Accel-Redirect`.
 
 ---
 

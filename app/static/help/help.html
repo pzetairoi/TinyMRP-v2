@@ -57,8 +57,24 @@
 <h1 id="server-and-web-app-installation">Server And Web App Installation</h1>
 <p>This page covers first deployment, safe updates, and operating basics for TinyMRP v2.</p>
 <h2 id="deployment-options">Deployment Options</h2>
-<h3 id="recommended-docker-compose">Recommended: Docker Compose</h3>
-<p>Use Docker for production or pilot environments. It is the easiest path for repeatable updates.</p>
+<h3 id="recommended-guided-ubuntu-deployment">Recommended: Guided Ubuntu deployment</h3>
+<p>Use the guided Linux deployment scripts for production and pilot environments. This path uses:</p>
+<ul>
+<li>Docker for the app containers</li>
+<li>Caddy as the public reverse proxy</li>
+<li>automatic HTTPS certificate management</li>
+<li>private MongoDB containers</li>
+<li>built-in DNS guidance and DNS validation</li>
+</ul>
+<p>Main guide:</p>
+<ul>
+<li><code>deploy/README.md</code></li>
+</ul>
+<p>Main commands:</p>
+<pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
+sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
+sudo ./deploy/scripts/doctor.sh
+</code></pre>
 <h3 id="hardened-windows-lan-only-no-docker">Hardened Windows LAN-Only (No Docker)</h3>
 <p>Use this when IT requires a Windows workstation deployment with internal-only access.</p>
 <ul>
@@ -70,39 +86,52 @@
 <p>Use direct Python and Node only for development and debugging.</p>
 <h2 id="prerequisites">Prerequisites</h2>
 <ul>
-<li>Access to a host with Docker and Docker Compose.</li>
-<li>MongoDB connection string (<code>MONGO_URI</code>), local or hosted.</li>
-<li>A file root where deliverables are stored and readable by the app.</li>
-<li>Access to edit environment variables and run CLI commands.</li>
+<li>Ubuntu host with internet access on ports <code>80</code> and <code>443</code>.</li>
+<li>A domain or subdomain you can point to the server.</li>
+<li>Access to edit DNS records at your DNS provider.</li>
+<li><code>sudo</code> access on the host.</li>
 </ul>
-<h2 id="first-time-setup-docker">First-Time Setup (Docker)</h2>
-<h3 id="1-prepare-environment-file">1) Prepare environment file</h3>
-<ul>
-<li>Copy an example such as <code>.env.server.example</code> to <code>.env</code>.</li>
-<li>Set at least:
-<ul>
-<li><code>SECRET_KEY</code></li>
-<li><code>SECURITY_PASSWORD_SALT</code></li>
-<li><code>MONGO_URI</code></li>
-<li><code>FILES_LOCAL_ROOT</code> (or equivalent file root key in your setup)</li>
-<li><code>HTTP_PORT</code></li>
-</ul>
-</li>
-</ul>
-<h3 id="2-start-the-stack">2) Start the stack</h3>
-<p>Run from repository root:</p>
-<pre><code class="language-powershell">docker compose up -d --build
+<h2 id="first-time-setup-guided-ubuntu">First-Time Setup (Guided Ubuntu)</h2>
+<h3 id="1-install-host-services">1) Install host services</h3>
+<pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
 </code></pre>
-<h3 id="3-seed-roles-and-create-first-admin">3) Seed roles and create first admin</h3>
-<pre><code class="language-powershell">docker compose exec app flask --app run.py user seed-roles
-docker compose exec app flask --app run.py user create --email admin@yourcompany.com --password &lt;password&gt;
-docker compose exec app flask --app run.py user grant-admin --email admin@yourcompany.com
+<p>This stores host config in <code>/srv/tinymrp/host/.env</code> and starts the shared Caddy reverse proxy.</p>
+<h3 id="2-create-an-instance">2) Create an instance</h3>
+<pre><code class="language-bash">sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
 </code></pre>
-<h3 id="4-open-tinymrp">4) Open TinyMRP</h3>
+<p>The script:</p>
 <ul>
-<li>URL: <code>http://&lt;server&gt;:&lt;HTTP_PORT&gt;</code></li>
-<li>Login with the admin account.</li>
+<li>detects the public IP</li>
+<li>prints the exact DNS record to create</li>
+<li>waits for DNS to resolve correctly</li>
+<li>creates the app and private MongoDB containers</li>
+<li>creates the Caddy route</li>
+<li>enables HTTPS automatically for public domains</li>
 </ul>
+<h3 id="3-open-tinymrp">3) Open TinyMRP</h3>
+<ul>
+<li>URL: <code>https://company1.tinymrp.com</code></li>
+<li>Login with the generated admin account from the installer output.</li>
+</ul>
+<h2 id="dns-and-domain-setup">DNS And Domain Setup</h2>
+<p>Examples:</p>
+<ul>
+<li><code>company1.tinymrp.com</code> -&gt; <code>A company1 &lt;server-ip&gt;</code></li>
+<li><code>tinymrp.customercompany.com</code> -&gt; <code>A tinymrp &lt;server-ip&gt;</code></li>
+<li><code>customercompany.com</code> -&gt; <code>A @ &lt;server-ip&gt;</code></li>
+<li><code>cloud.tinymrp.com</code> -&gt; <code>A cloud &lt;server-ip&gt;</code></li>
+</ul>
+<p>If the host has IPv6, the scripts also print an optional <code>AAAA</code> record.</p>
+<h2 id="nextcloud">Nextcloud</h2>
+<p>Use the matching installer for a public Nextcloud domain:</p>
+<pre><code class="language-bash">sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+</code></pre>
+<h2 id="local-vm-mode">Local VM Mode</h2>
+<p>For local-only testing:</p>
+<pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --local-mode http
+sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
+</code></pre>
+<p>Local domains such as <code>demo.test.local</code> and <code>demo.localhost</code> do not use public Let's Encrypt certificates.</p>
 <h2 id="windows-lan-only-setup-no-docker">Windows LAN-Only Setup (No Docker)</h2>
 <p>Use this path for service-based Windows deployment with NGINX reverse proxy + Waitress.</p>
 <ol>
@@ -955,6 +984,11 @@ extra/
 <td>Admin only</td>
 </tr>
 <tr>
+<td><code>/ui/admin/fields</code></td>
+<td>See in app.</td>
+<td>Admin only</td>
+</tr>
+<tr>
 <td><code>/ui/upload-pack</code></td>
 <td>See in app.</td>
 <td>Requires login</td>
@@ -977,6 +1011,61 @@ extra/
 </tr>
 </tbody>
 </table>
+<h3 id="appviewspartsharespy">app\views\part_shares.py</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/api/parts/&lt;path:pn&gt;/shares</code></td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/parts/&lt;path:pn&gt;/shares</code></td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/api/parts/&lt;path:pn&gt;/shares/&lt;share_id&gt;</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/bom_flat</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/bom_tree</code></td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/docpacks/build</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/docpacks/options</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/field-config</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/files_overview</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/part_detail</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/part_images</code></td>
+</tr>
+</tbody>
+</table>
 <h2 id="environment-variables">Environment variables</h2>
 <table>
 <thead>
@@ -989,7 +1078,7 @@ extra/
 <tbody>
 <tr>
 <td><code>DELIVERABLES_DIR</code></td>
-<td><code>C:/CADEXPORT/Deliverables</code></td>
+<td><code>C:/CADEXPORT</code></td>
 <td></td>
 </tr>
 <tr>
@@ -1033,8 +1122,23 @@ extra/
 <td></td>
 </tr>
 <tr>
+<td><code>TINYMRP_ADMIN_EMAIL</code></td>
+<td><code>admin@example.com</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>TINYMRP_ADMIN_PASSWORD</code></td>
+<td><code>ChangeMe123!</code></td>
+<td></td>
+</tr>
+<tr>
 <td><code>TINYMRP_SECURITY_MODE</code></td>
 <td><code>compat</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>TINYMRP_SEED_ADMIN</code></td>
+<td><code>true</code></td>
 <td></td>
 </tr>
 <tr>
