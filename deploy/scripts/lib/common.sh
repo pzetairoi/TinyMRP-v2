@@ -59,6 +59,10 @@ host_dir() {
   printf '%s\n' "${TINYMRP_HOST_DIR:-$(tinymrp_root)/host}"
 }
 
+host_releases_dir() {
+  printf '%s\n' "$(host_dir)/releases"
+}
+
 host_env_file() {
   printf '%s\n' "${TINYMRP_HOST_ENV_FILE:-$(host_dir)/.env}"
 }
@@ -99,6 +103,10 @@ instance_compose_file() {
   printf '%s\n' "$(instance_dir "$1")/compose.yml"
 }
 
+instance_updates_dir() {
+  printf '%s\n' "$(instance_dir "$1")/updates"
+}
+
 nextcloud_dir() {
   printf '%s\n' "${TINYMRP_NEXTCLOUD_DIR:-$(tinymrp_root)/nextcloud}"
 }
@@ -125,6 +133,7 @@ ensure_dir() {
 
 ensure_host_layout() {
   ensure_dir "$(host_dir)"
+  ensure_dir "$(host_releases_dir)"
   ensure_dir "$(caddy_routes_dir)"
   ensure_dir "$(caddy_data_dir)"
   ensure_dir "$(caddy_state_dir)"
@@ -140,6 +149,26 @@ require_root() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+require_docker_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v docker-compose >/dev/null 2>&1; then
+    return 0
+  fi
+  die "Docker Compose is not installed."
+}
+
+strict_instance_name() {
+  local raw="$1"
+  local normalized
+  normalized="$(sanitize_instance_name "$raw")"
+  if [ "$normalized" != "$raw" ]; then
+    die "Invalid instance name: ${raw}. Use the exact deployed instance name."
+  fi
+  printf '%s\n' "$normalized"
 }
 
 prompt_value() {
@@ -597,6 +626,108 @@ docker_compose_file() {
   local compose_file="$1"
   shift
   docker_compose -f "$compose_file" "$@"
+}
+
+render_instance_compose() {
+  local repo_root_path="$1"
+  local env_file="$2"
+  local app_container_name="$3"
+  local mongo_container_name="$4"
+  local mongo_db="$5"
+  local mongo_data_dir="$6"
+  local deliverables_dir="$7"
+  local project_name="$8"
+  local private_network_name="$9"
+  local app_image="${10:-tinymrp-app:latest}"
+
+  cat <<EOF
+name: ${project_name}
+
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: ${mongo_container_name}
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: ${mongo_db}
+    volumes:
+      - type: bind
+        source: ${mongo_data_dir}
+        target: /data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - private
+
+  app:
+    image: ${app_image}
+    build:
+      context: ${repo_root_path}
+      dockerfile: docker/app/Dockerfile
+    container_name: ${app_container_name}
+    restart: unless-stopped
+    env_file:
+      - ${env_file}
+    depends_on:
+      - mongo
+    volumes:
+      - type: bind
+        source: ${deliverables_dir}
+        target: /data/deliverables
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - private
+      - proxy
+
+networks:
+  private:
+    name: ${private_network_name}
+    internal: true
+  proxy:
+    external: true
+    name: $(proxy_network_name)
+EOF
+}
+
+write_instance_compose_file() {
+  local compose_file="$1"
+  local repo_root_path="$2"
+  local env_file="$3"
+  local app_container_name="$4"
+  local mongo_container_name="$5"
+  local mongo_db="$6"
+  local mongo_data_dir="$7"
+  local deliverables_dir="$8"
+  local project_name="$9"
+  local private_network_name="${10}"
+  local app_image="${11:-tinymrp-app:latest}"
+  local tmp_file
+
+  tmp_file="$(mktemp)"
+  render_instance_compose \
+    "$repo_root_path" \
+    "$env_file" \
+    "$app_container_name" \
+    "$mongo_container_name" \
+    "$mongo_db" \
+    "$mongo_data_dir" \
+    "$deliverables_dir" \
+    "$project_name" \
+    "$private_network_name" \
+    "$app_image" >"$tmp_file"
+
+  if [ -f "$compose_file" ] && cmp -s "$tmp_file" "$compose_file"; then
+    rm -f "$tmp_file"
+    return 0
+  fi
+  mv "$tmp_file" "$compose_file"
 }
 
 ensure_proxy_network() {

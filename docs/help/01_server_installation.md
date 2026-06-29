@@ -24,7 +24,18 @@ Main commands:
 ```bash
 sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
 sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
+sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1
 sudo ./deploy/scripts/doctor.sh
+```
+
+Operational update commands:
+
+```bash
+sudo ./deploy/scripts/update-repo.sh
+sudo ./deploy/scripts/update-instance.sh company1
+sudo ./deploy/scripts/update-all-instances.sh
+sudo ./deploy/scripts/rollback-instance.sh company1
 ```
 
 ### Hardened Windows LAN-Only (No Docker)
@@ -102,6 +113,65 @@ Use the matching installer for a public Nextcloud domain:
 
 ```bash
 sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+```
+
+Then link one or more TinyMRP instances without editing Compose or running `occ` commands by hand:
+
+```bash
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/link-nextcloud-instance.sh company2
+```
+
+This keeps TinyMRP as the storage owner. Deliverables stay under `/srv/tinymrp/instances/<instance>/deliverables`, Nextcloud mounts them read-only under `/mnt/tinymrp-deliverables/<instance>`, and the default Caddy deployment keeps `FILES_ACCEL_REDIRECT_PREFIX=""`.
+
+## Updating And Rollback
+
+Repository update:
+
+```bash
+cd /opt/TinyMRP-v2
+sudo ./deploy/scripts/update-repo.sh
+```
+
+Per-instance update:
+
+```bash
+sudo ./deploy/scripts/update-instance.sh company1
+```
+
+Batch update:
+
+```bash
+sudo ./deploy/scripts/update-all-instances.sh
+```
+
+Rollback:
+
+```bash
+sudo ./deploy/scripts/rollback-instance.sh company1
+```
+
+Per-instance update metadata lives under `/srv/tinymrp/instances/<instance>/updates/`.
+
+Backed up automatically before each update:
+
+- `.env`
+- `compose.yml`
+- current update state
+- the instance Caddy route file if present
+
+Not touched by the normal update flow:
+
+- MongoDB data
+- deliverables
+- generated secrets
+
+If a release requires a migration, stop after `update-repo.sh`, take a manual MongoDB backup, update one pilot instance first, and only then continue with the rest of the fleet.
+
+To pin one instance to an older tested build:
+
+```bash
+sudo ./deploy/scripts/update-instance.sh company1 --image tinymrp-app:abc123def456 --git-commit 0123456789abcdef
 ```
 
 ## Deliverables Smoke Test

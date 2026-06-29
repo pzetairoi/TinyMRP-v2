@@ -485,8 +485,16 @@ Typical flow:
 sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
 sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
 sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1
 sudo ./deploy/scripts/doctor.sh
 ```
+
+Update and rollback commands for that deployment path live in [`deploy/README.md`](deploy/README.md):
+
+- `sudo ./deploy/scripts/update-repo.sh`
+- `sudo ./deploy/scripts/update-instance.sh company1`
+- `sudo ./deploy/scripts/update-all-instances.sh`
+- `sudo ./deploy/scripts/rollback-instance.sh company1`
 
 Minimal operator input:
 
@@ -496,6 +504,12 @@ Minimal operator input:
 - `create-instance.sh`
   - instance name
   - final public domain
+- `install-nextcloud.sh`
+  - final Nextcloud domain
+- `link-nextcloud-instance.sh`
+  - deployed TinyMRP instance name
+
+Nextcloud integration stays deployment-side. TinyMRP keeps ownership of `/srv/tinymrp/instances/<instance>/deliverables`, Nextcloud mounts that path read-only under `/mnt/tinymrp-deliverables/<instance>`, and the default Caddy deployment continues to rely on `FILES_ACCEL_REDIRECT_PREFIX=""`.
 
 DNS examples:
 

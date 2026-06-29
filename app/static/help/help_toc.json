@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-29 21:21 UTC",
-  "commit": "cc912d5",
+  "generated_at": "2026-06-29 22:24 UTC",
+  "commit": "4620b32",
   "items": [
     {
       "id": "start-here-by-role",
@@ -95,6 +95,11 @@
     {
       "id": "nextcloud",
       "title": "Nextcloud",
+      "level": 2
+    },
+    {
+      "id": "updating-and-rollback",
+      "title": "Updating And Rollback",
       "level": 2
     },
     {
