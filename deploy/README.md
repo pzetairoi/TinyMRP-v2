@@ -7,6 +7,7 @@ Default behavior:
 - Caddy is the reverse proxy.
 - Caddy manages HTTPS certificates automatically.
 - TinyMRP app containers stay private behind Caddy.
+- Protected deliverables stay on the normal TinyMRP app route when Caddy fronts the instance.
 - MongoDB stays private and is never published on the host.
 - Each TinyMRP instance gets its own private Docker network and database.
 - All public traffic enters through the shared `tinymrp_proxy` Docker network.
@@ -107,6 +108,21 @@ sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com --admin-e
 sudo ./deploy/scripts/create-instance.sh company1 company1.test.local --local-mode internal-tls
 ```
 
+## Protected deliverables under Caddy
+
+New guided instances are generated with:
+
+- `FILES_LOCAL_ROOT="/data/deliverables"`
+- `FILES_URL_PREFIX="/deliverables"`
+- `FILES_PUBLIC_URLS="false"`
+- `FILES_ACCEL_REDIRECT_PREFIX=""`
+
+The bind mount stays:
+
+- `/srv/tinymrp/instances/<instance>/deliverables:/data/deliverables`
+
+This is intentional. In the default guided deployment, Caddy proxies requests to the TinyMRP app and protected deliverables are served through the normal TinyMRP file route. `FILES_ACCEL_REDIRECT_PREFIX="/__files"` is an Nginx `X-Accel-Redirect` setting and must stay empty for Caddy unless you explicitly build and validate a Caddy-compatible protected static offload flow.
+
 ## DNS and domain setup
 
 The script prints the exact record name and value. Use the examples below to check what to expect.
@@ -202,10 +218,36 @@ It checks:
 - firewall rules for `80` and `443`
 - public IPv4 and IPv6 detection
 - each instance route points to the correct app container
+- each app container prints `FILES_LOCAL_ROOT` and can read it
+- each host deliverables folder is mounted into the app container
+- Caddy instances are not using a non-empty `FILES_ACCEL_REDIRECT_PREFIX`
+- `/__files` is not configured unless a matching reverse-proxy internal file route exists
 - each instance domain resolves to the expected IP
 - each instance endpoint responds
 - MongoDB is not exposed publicly
 - Nextcloud DNS and endpoint health if installed
+
+## Deliverables smoke test
+
+After creating or updating an instance, run this regression check:
+
+1. Create a small Upload Pack that includes files under `deliverables/png` and `deliverables/pdf`.
+2. Import the Upload Pack in TinyMRP and confirm the BOM is created.
+3. Verify the imported files exist on the host under `/srv/tinymrp/instances/<instance>/deliverables`.
+4. Verify the app container sees the same files under `/data/deliverables`.
+5. Verify TinyMRP can display or download those files through the normal `/deliverables` route after import.
+6. Verify the response path does not depend on a `"/__files"` redirect in the default Caddy deployment.
+
+## Recover an existing broken Caddy instance
+
+If an older instance was generated with `FILES_ACCEL_REDIRECT_PREFIX="/__files"`, clear it and recreate the app container:
+
+```bash
+cd /srv/tinymrp/instances/<instance>
+sudo cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)"
+sudo sed -i 's#^FILES_ACCEL_REDIRECT_PREFIX=.*#FILES_ACCEL_REDIRECT_PREFIX=""#' .env
+sudo docker compose up -d --force-recreate
+```
 
 ## Local VM mode
 

@@ -102,6 +102,8 @@ MONGO_URI=mongodb://localhost:27017/tinymrp-v2
 FILES_LOCAL_ROOT=${FILES_DIR}
 FILES_URL_PREFIX=/Deliverables
 FILES_PUBLIC_URLS=false
+# Nginx-only: keep this only when deploy/nginx.server.conf is installed with the
+# matching internal /__files location for X-Accel-Redirect.
 FILES_ACCEL_REDIRECT_PREFIX=/__files
 SECRET_KEY=${SECRET_KEY}
 SECURITY_PASSWORD_SALT=${SALT_KEY}
