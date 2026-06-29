@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-02-24 10:36 UTC",
-  "commit": "3a4aaf0",
+  "generated_at": "2026-06-28 04:53 UTC",
+  "commit": "8d98e31",
   "items": [
     {
       "id": "start-here-by-role",
@@ -48,8 +48,8 @@
       "level": 2
     },
     {
-      "id": "recommended-docker-compose",
-      "title": "Recommended: Docker Compose",
+      "id": "recommended-guided-ubuntu-deployment",
+      "title": "Recommended: Guided Ubuntu deployment",
       "level": 3
     },
     {
@@ -68,29 +68,39 @@
       "level": 2
     },
     {
-      "id": "first-time-setup-docker",
-      "title": "First-Time Setup (Docker)",
+      "id": "first-time-setup-guided-ubuntu",
+      "title": "First-Time Setup (Guided Ubuntu)",
       "level": 2
     },
     {
-      "id": "1-prepare-environment-file",
-      "title": "1) Prepare environment file",
+      "id": "1-install-host-services",
+      "title": "1) Install host services",
       "level": 3
     },
     {
-      "id": "2-start-the-stack",
-      "title": "2) Start the stack",
+      "id": "2-create-an-instance",
+      "title": "2) Create an instance",
       "level": 3
     },
     {
-      "id": "3-seed-roles-and-create-first-admin",
-      "title": "3) Seed roles and create first admin",
+      "id": "3-open-tinymrp",
+      "title": "3) Open TinyMRP",
       "level": 3
     },
     {
-      "id": "4-open-tinymrp",
-      "title": "4) Open TinyMRP",
-      "level": 3
+      "id": "dns-and-domain-setup",
+      "title": "DNS And Domain Setup",
+      "level": 2
+    },
+    {
+      "id": "nextcloud",
+      "title": "Nextcloud",
+      "level": 2
+    },
+    {
+      "id": "local-vm-mode",
+      "title": "Local VM Mode",
+      "level": 2
     },
     {
       "id": "windows-lan-only-setup-no-docker",
@@ -645,6 +655,11 @@
     {
       "id": "appviewsimporterpy",
       "title": "app\\views\\importer.py",
+      "level": 3
+    },
+    {
+      "id": "appviewspartsharespy",
+      "title": "app\\views\\part_shares.py",
       "level": 3
     },
     {

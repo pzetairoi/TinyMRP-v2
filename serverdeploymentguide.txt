@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Legacy single-host guide.
+# For the guided Caddy + multi-instance deployment path, use deploy/README.md and deploy/scripts/*.sh.
+
 ### ===== EDIT THESE =====
 DOMAIN="tinymrp.com"          # set to your real domain (or leave "_" for IP-only)
 REPO_URL="https://github.com/pzetairoi/TinyMRP-v2.git"
