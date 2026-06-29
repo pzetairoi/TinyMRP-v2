@@ -29,82 +29,6 @@ validate_local_mode() {
   esac
 }
 
-write_instance_compose_file() {
-  local compose_file="$1"
-  local repo_root_path="$2"
-  local env_file="$3"
-  local app_container_name="$4"
-  local mongo_container_name="$5"
-  local mongo_db="$6"
-  local mongo_data_dir="$7"
-  local deliverables_dir="$8"
-  local project_name="$9"
-  local private_network_name="${10}"
-  local tmp_file
-
-  tmp_file="$(mktemp)"
-  cat >"$tmp_file" <<EOF
-name: ${project_name}
-
-services:
-  mongo:
-    image: mongo:6.0
-    container_name: ${mongo_container_name}
-    restart: unless-stopped
-    environment:
-      MONGO_INITDB_DATABASE: ${mongo_db}
-    volumes:
-      - type: bind
-        source: ${mongo_data_dir}
-        target: /data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - private
-
-  app:
-    image: tinymrp-app:latest
-    build:
-      context: ${repo_root_path}
-      dockerfile: docker/app/Dockerfile
-    container_name: ${app_container_name}
-    restart: unless-stopped
-    env_file:
-      - ${env_file}
-    depends_on:
-      - mongo
-    volumes:
-      - type: bind
-        source: ${deliverables_dir}
-        target: /data/deliverables
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
-    networks:
-      - private
-      - proxy
-
-networks:
-  private:
-    name: ${private_network_name}
-    internal: true
-  proxy:
-    external: true
-    name: $(proxy_network_name)
-EOF
-
-  if [ -f "$compose_file" ] && cmp -s "$tmp_file" "$compose_file"; then
-    rm -f "$tmp_file"
-    return 0
-  fi
-  mv "$tmp_file" "$compose_file"
-}
-
 wait_for_public_endpoint() {
   local domain="$1"
   local tls_mode="$2"
@@ -318,7 +242,8 @@ write_instance_compose_file \
   "$MONGO_DATA_DIR" \
   "$DELIVERABLES_DIR" \
   "$COMPOSE_PROJECT_NAME" \
-  "$PRIVATE_NETWORK_NAME"
+  "$PRIVATE_NETWORK_NAME" \
+  "tinymrp-app:latest"
 
 ensure_proxy_network
 docker_compose_file "$INSTANCE_COMPOSE" config -q

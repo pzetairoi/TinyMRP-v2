@@ -4,11 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=deploy/scripts/lib/common.sh
 . "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=deploy/scripts/lib/nextcloud.sh
+. "${SCRIPT_DIR}/lib/nextcloud.sh"
 
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./deploy/scripts/install-nextcloud.sh <domain> [--skip-dns-check] [--admin-user admin] [--admin-password '<secret>'] [--local-mode http|internal-tls]
+  sudo ./deploy/scripts/install-nextcloud.sh [domain] [--skip-dns-check] [--admin-user admin] [--admin-password '<secret>'] [--local-mode http|internal-tls]
 
 Examples:
   sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
@@ -25,68 +27,6 @@ validate_local_mode() {
       die "Unsupported local mode: $1. Use http or internal-tls."
       ;;
   esac
-}
-
-write_nextcloud_compose_file() {
-  local compose_file="$1"
-  local env_file="$2"
-  local app_container_name="$3"
-  local db_container_name="$4"
-  local html_dir="$5"
-  local db_dir="$6"
-  local project_name="$7"
-  local private_network_name="$8"
-  local tmp_file
-
-  tmp_file="$(mktemp)"
-  cat >"$tmp_file" <<EOF
-name: ${project_name}
-
-services:
-  db:
-    image: mariadb:11
-    container_name: ${db_container_name}
-    restart: unless-stopped
-    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
-    env_file:
-      - ${env_file}
-    volumes:
-      - type: bind
-        source: ${db_dir}
-        target: /var/lib/mysql
-    networks:
-      - private
-
-  app:
-    image: nextcloud:apache
-    container_name: ${app_container_name}
-    restart: unless-stopped
-    env_file:
-      - ${env_file}
-    depends_on:
-      - db
-    volumes:
-      - type: bind
-        source: ${html_dir}
-        target: /var/www/html
-    networks:
-      - private
-      - proxy
-
-networks:
-  private:
-    name: ${private_network_name}
-    internal: true
-  proxy:
-    external: true
-    name: $(proxy_network_name)
-EOF
-
-  if [ -f "$compose_file" ] && cmp -s "$tmp_file" "$compose_file"; then
-    rm -f "$tmp_file"
-    return 0
-  fi
-  mv "$tmp_file" "$compose_file"
 }
 
 wait_for_nextcloud_endpoint() {
@@ -109,13 +49,11 @@ if [ "${1-}" = "-h" ] || [ "${1-}" = "--help" ]; then
   exit 0
 fi
 
-if [ $# -lt 1 ]; then
-  usage
-  exit 1
+DOMAIN=""
+if [ $# -gt 0 ] && [[ "${1-}" != --* ]]; then
+  DOMAIN="$(lower "$1")"
+  shift
 fi
-
-DOMAIN="$(lower "$1")"
-shift
 
 SKIP_DNS_CHECK=0
 ADMIN_USER_ARG=""
@@ -155,9 +93,15 @@ if [ -n "$LOCAL_MODE_OVERRIDE" ]; then
   validate_local_mode "$LOCAL_MODE_OVERRIDE"
 fi
 
+if [ -z "$DOMAIN" ]; then
+  prompt_value DOMAIN "Enter the final Nextcloud domain"
+  DOMAIN="$(lower "$DOMAIN")"
+fi
+
 require_root
 require_cmd docker
 require_cmd python3
+require_docker_compose
 
 load_host_env
 if [ "${REVERSE_PROXY:-}" != "caddy" ] || [ -z "${ACME_EMAIL:-}" ]; then
@@ -197,6 +141,7 @@ NEXTCLOUD_DB_DIR="${NEXTCLOUD_ROOT}/db"
 ensure_dir "$NEXTCLOUD_ROOT"
 ensure_dir "$NEXTCLOUD_HTML_DIR"
 ensure_dir "$NEXTCLOUD_DB_DIR"
+ensure_nextcloud_links_dir
 chown -R 33:33 "$NEXTCLOUD_HTML_DIR"
 chmod 0775 "$NEXTCLOUD_HTML_DIR"
 chown -R 999:999 "$NEXTCLOUD_DB_DIR"

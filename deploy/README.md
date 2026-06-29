@@ -17,7 +17,12 @@ The scripts live in `deploy/scripts/`:
 - `install-host.sh`
 - `create-instance.sh`
 - `install-nextcloud.sh`
+- `link-nextcloud-instance.sh`
 - `doctor.sh`
+- `update-repo.sh`
+- `update-instance.sh`
+- `update-all-instances.sh`
+- `rollback-instance.sh`
 
 If your checkout did not preserve executable bits, run them as `bash ./deploy/scripts/<script>.sh ...` instead of `./deploy/scripts/<script>.sh ...`.
 
@@ -30,6 +35,7 @@ Host-level state is stored under `/srv/tinymrp`:
 - `/srv/tinymrp/caddy/routes/*.caddy`
 - `/srv/tinymrp/instances/<instance_name>/`
 - `/srv/tinymrp/nextcloud/`
+- `/srv/tinymrp/nextcloud/links/*.env`
 
 Host config in `/srv/tinymrp/host/.env` includes:
 
@@ -197,14 +203,50 @@ Use the same DNS and Caddy flow:
 sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
 ```
 
+If you omit the domain, the installer prompts only for the final Nextcloud hostname:
+
+```bash
+sudo ./deploy/scripts/install-nextcloud.sh
+```
+
 What it does:
 
 - validates DNS like the TinyMRP installer
 - starts private Nextcloud and MariaDB containers
 - adds the Nextcloud Caddy route
 - lets Caddy manage HTTPS automatically
+- generates admin credentials automatically
+- saves the generated credentials in `/srv/tinymrp/nextcloud/.env`
+- keeps TinyMRP deliverables outside Nextcloud's internal data folder
 
-## 4. Run deployment checks
+## 4. Link TinyMRP deliverables into Nextcloud
+
+After Nextcloud is installed, link any TinyMRP instance with one command:
+
+```bash
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/link-nextcloud-instance.sh company2
+```
+
+What it does:
+
+- adds a read-only bind mount from `/srv/tinymrp/instances/<instance>/deliverables` to `/mnt/tinymrp-deliverables/<instance>`
+- rewrites `/srv/tinymrp/nextcloud/compose.yml` from managed link metadata
+- recreates only the Nextcloud `app` container when the mount configuration changes
+- enables the Nextcloud `files_external` app automatically
+- creates the Nextcloud group `tinymrp-<instance>` if needed
+- creates or updates the external local storage entry `TinyMRP - <instance> Deliverables`
+- points the storage to `/mnt/tinymrp-deliverables/<instance>`
+- keeps the Docker mount read-only by default
+- runs a targeted Nextcloud external-storage scan when possible
+
+To unlink one instance without touching TinyMRP data:
+
+```bash
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --remove
+```
+
+## 5. Run deployment checks
 
 ```bash
 sudo ./deploy/scripts/doctor.sh
@@ -226,6 +268,169 @@ It checks:
 - each instance endpoint responds
 - MongoDB is not exposed publicly
 - Nextcloud DNS and endpoint health if installed
+- linked TinyMRP deliverables still exist on the host
+- Nextcloud can see each linked `/mnt/tinymrp-deliverables/<instance>` path
+- linked Nextcloud Docker mounts stay read-only
+- linked external storage entries and Nextcloud groups exist
+- deliverables are not being mounted inside Nextcloud's internal data directory
+
+## 6. Update the repository
+
+Run repository updates from the central TinyMRP checkout saved in `TINYMRP_REPO_ROOT`:
+
+```bash
+cd /opt/TinyMRP-v2
+sudo ./deploy/scripts/update-repo.sh
+```
+
+Useful variants:
+
+```bash
+sudo ./deploy/scripts/update-repo.sh --ref main --alias latest
+sudo ./deploy/scripts/update-repo.sh --ref v2.1.0 --alias stable
+sudo ./deploy/scripts/update-repo.sh --ref 0123456789abcdef --force
+```
+
+What it does:
+
+- checks Git working tree status first
+- refuses to continue if local changes exist unless `--force` is passed
+- fetches from the configured remote
+- moves the repo to the requested branch, tag, or commit
+- builds `tinymrp-app:<short_commit>`
+- optionally updates `tinymrp-app:latest` or `tinymrp-app:stable` after a successful build
+- records host-side build metadata under `/srv/tinymrp/host/releases/<timestamp>/`
+
+What it does not do:
+
+- it does not touch `/srv/tinymrp/instances/*`
+- it does not restart any company instance
+- it does not touch MongoDB data or deliverables
+
+## 7. Update one instance
+
+After `update-repo.sh` builds the target image, update one instance at a time:
+
+```bash
+sudo ./deploy/scripts/update-instance.sh company1
+```
+
+To pin or test a specific image:
+
+```bash
+sudo ./deploy/scripts/update-instance.sh company1 --image tinymrp-app:abc123def456
+sudo ./deploy/scripts/update-instance.sh company1 --image tinymrp-app:stable --git-commit 0123456789abcdef
+```
+
+What it does:
+
+- creates a per-run backup under `/srv/tinymrp/instances/<instance>/updates/<timestamp>/backup/`
+- stores update metadata and logs under `/srv/tinymrp/instances/<instance>/updates/<timestamp>/`
+- regenerates `compose.yml` from the current template while preserving instance-specific values from `.env`
+- updates only the app image tag in the compose file
+- recreates only the `app` container by default
+- leaves MongoDB running unless an operator explicitly performs a database restore during rollback
+- runs health checks and `doctor.sh --instance <instance> --skip-host-checks`
+- restores the previous compose file and previous app image automatically if post-update verification fails
+
+Backed up before each update:
+
+- instance `.env`
+- instance `compose.yml`
+- current per-instance update state
+- the generated Caddy route file for that instance, if present
+
+Never touched by the normal update path:
+
+- `deliverables/`
+- MongoDB data under `mongo/`
+- Caddy routes, unless you separately change the instance domain
+- generated secrets in `.env`
+
+## 8. Update all instances
+
+Roll out the currently built image to every instance one by one:
+
+```bash
+sudo ./deploy/scripts/update-all-instances.sh
+```
+
+Optional:
+
+```bash
+sudo ./deploy/scripts/update-all-instances.sh --continue-on-error
+sudo ./deploy/scripts/update-all-instances.sh --image tinymrp-app:stable --git-commit 0123456789abcdef
+```
+
+This script:
+
+- enumerates all instance env files under `/srv/tinymrp/instances/*/.env`
+- calls `update-instance.sh` for each instance in sequence
+- stops on the first failure by default
+- prints a summary of updated, skipped, failed, and rolled-back instances
+
+## 9. Roll back one instance
+
+Roll back the most recent app update for one instance:
+
+```bash
+sudo ./deploy/scripts/rollback-instance.sh company1
+```
+
+This restores:
+
+- the previous app image tag
+- the previous generated `compose.yml`
+
+This does not restore by default:
+
+- MongoDB data
+- deliverables
+
+If you have an operator-managed MongoDB backup and explicitly want to restore it during rollback:
+
+```bash
+sudo ./deploy/scripts/rollback-instance.sh company1 --restore-mongo-from /srv/backups/company1-mongo-20260630.tar.gz
+```
+
+The script requires interactive confirmation before replacing MongoDB data.
+
+## Update metadata and version tracking
+
+Each instance stores update records under:
+
+- `/srv/tinymrp/instances/<instance>/updates/`
+
+Each run records:
+
+- previous Git commit
+- new Git commit
+- previous image tag
+- new image tag
+- timestamp
+- update log path
+- backup path
+- health and doctor results
+
+The latest deployed app version is also recorded in `updates/current.env` for each instance.
+
+## Migrations and pinned versions
+
+If a release requires a database migration or any manual data conversion:
+
+1. Do not start with `update-all-instances.sh`.
+2. Take an operator-managed MongoDB backup outside the normal update scripts.
+3. Run `update-repo.sh` first.
+4. Update one pilot instance with `update-instance.sh`.
+5. Validate the release notes, app health, imports, deliverables, and exports before continuing.
+
+To keep one instance on an older tested build, pin it explicitly:
+
+```bash
+sudo ./deploy/scripts/update-instance.sh company1 --image tinymrp-app:abc123def456 --git-commit 0123456789abcdef
+```
+
+You can also use `rollback-instance.sh` to return to the previous recorded version.
 
 ## Deliverables smoke test
 
