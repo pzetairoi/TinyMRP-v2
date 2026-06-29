@@ -35,7 +35,9 @@ services:
       FILES_LOCAL_ROOT: /data/deliverables
       FILES_URL_PREFIX: /deliverables
       FILES_PUBLIC_URLS: "false"
-      FILES_ACCEL_REDIRECT_PREFIX: /__files
+      # Leave accel redirect empty unless you intentionally provision and test
+      # an Nginx internal route that matches the chosen prefix.
+      FILES_ACCEL_REDIRECT_PREFIX: ""
       # Seed a default admin (password is generated once and printed to container logs)
       TINYMRP_SEED_ADMIN: "true"
       # NOTE: Must be a syntactically valid, deliverable-looking email for email_validator.

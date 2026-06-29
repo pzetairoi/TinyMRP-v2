@@ -13,6 +13,7 @@ Use the guided Linux deployment scripts for production and pilot environments. T
 - automatic HTTPS certificate management
 - private MongoDB containers
 - built-in DNS guidance and DNS validation
+- TinyMRP app file serving for protected deliverables by default
 
 Main guide:
 
@@ -70,6 +71,15 @@ The script:
 - creates the Caddy route
 - enables HTTPS automatically for public domains
 
+Generated file-serving defaults for guided Caddy deployments:
+
+- `FILES_LOCAL_ROOT="/data/deliverables"`
+- `FILES_URL_PREFIX="/deliverables"`
+- `FILES_PUBLIC_URLS="false"`
+- `FILES_ACCEL_REDIRECT_PREFIX=""`
+
+Keep the deliverables bind mount at `/srv/tinymrp/instances/<instance>/deliverables:/data/deliverables`. Do not set `FILES_ACCEL_REDIRECT_PREFIX="/__files"` for Caddy unless you explicitly implement and validate a Caddy-compatible protected static offload flow.
+
 ### 3) Open TinyMRP
 
 - URL: `https://company1.tinymrp.com`
@@ -92,6 +102,26 @@ Use the matching installer for a public Nextcloud domain:
 
 ```bash
 sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+```
+
+## Deliverables Smoke Test
+
+After importing a small Upload Pack with files under `deliverables/png` and `deliverables/pdf`, verify:
+
+1. Files exist on the host under `/srv/tinymrp/instances/<instance>/deliverables`.
+2. The app container sees them under `/data/deliverables`.
+3. TinyMRP can display or download them through the normal `/deliverables` route.
+4. The default Caddy deployment is not relying on a `"/__files"` redirect.
+
+## Recover A Broken Caddy Instance
+
+If an existing Caddy deployment still has `FILES_ACCEL_REDIRECT_PREFIX="/__files"`, run:
+
+```bash
+cd /srv/tinymrp/instances/<instance>
+sudo cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)"
+sudo sed -i 's#^FILES_ACCEL_REDIRECT_PREFIX=.*#FILES_ACCEL_REDIRECT_PREFIX=""#' .env
+sudo docker compose up -d --force-recreate
 ```
 
 ## Local VM Mode

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-28 04:53 UTC",
-  "commit": "8d98e31",
+  "generated_at": "2026-06-29 21:21 UTC",
+  "commit": "cc912d5",
   "items": [
     {
       "id": "start-here-by-role",
@@ -95,6 +95,16 @@
     {
       "id": "nextcloud",
       "title": "Nextcloud",
+      "level": 2
+    },
+    {
+      "id": "deliverables-smoke-test",
+      "title": "Deliverables Smoke Test",
+      "level": 2
+    },
+    {
+      "id": "recover-a-broken-caddy-instance",
+      "title": "Recover A Broken Caddy Instance",
       "level": 2
     },
     {

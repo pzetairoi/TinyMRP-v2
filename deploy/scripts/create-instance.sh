@@ -253,7 +253,9 @@ SECURITY_PASSWORD_SALT="${SECURITY_PASSWORD_SALT:-$(random_secret 48)}"
 FILES_LOCAL_ROOT="/data/deliverables"
 FILES_URL_PREFIX="/deliverables"
 FILES_PUBLIC_URLS="false"
-FILES_ACCEL_REDIRECT_PREFIX="/__files"
+# The guided multi-instance deployment uses Caddy. Protected deliverables stay on
+# the normal app route, so Nginx X-Accel-Redirect must remain disabled here.
+FILES_ACCEL_REDIRECT_PREFIX=""
 FLASK_ENV="production"
 TINYMRP_SECURITY_MODE="${TINYMRP_SECURITY_MODE:-compat}"
 INSTANCE_URL="$(primary_url_for_domain "$DOMAIN" "$TLS_MODE")"

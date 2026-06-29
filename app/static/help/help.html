@@ -65,6 +65,7 @@
 <li>automatic HTTPS certificate management</li>
 <li>private MongoDB containers</li>
 <li>built-in DNS guidance and DNS validation</li>
+<li>TinyMRP app file serving for protected deliverables by default</li>
 </ul>
 <p>Main guide:</p>
 <ul>
@@ -108,6 +109,14 @@ sudo ./deploy/scripts/doctor.sh
 <li>creates the Caddy route</li>
 <li>enables HTTPS automatically for public domains</li>
 </ul>
+<p>Generated file-serving defaults for guided Caddy deployments:</p>
+<ul>
+<li><code>FILES_LOCAL_ROOT=&quot;/data/deliverables&quot;</code></li>
+<li><code>FILES_URL_PREFIX=&quot;/deliverables&quot;</code></li>
+<li><code>FILES_PUBLIC_URLS=&quot;false&quot;</code></li>
+<li><code>FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;</code></li>
+</ul>
+<p>Keep the deliverables bind mount at <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables:/data/deliverables</code>. Do not set <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;/__files&quot;</code> for Caddy unless you explicitly implement and validate a Caddy-compatible protected static offload flow.</p>
 <h3 id="3-open-tinymrp">3) Open TinyMRP</h3>
 <ul>
 <li>URL: <code>https://company1.tinymrp.com</code></li>
@@ -125,6 +134,21 @@ sudo ./deploy/scripts/doctor.sh
 <h2 id="nextcloud">Nextcloud</h2>
 <p>Use the matching installer for a public Nextcloud domain:</p>
 <pre><code class="language-bash">sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+</code></pre>
+<h2 id="deliverables-smoke-test">Deliverables Smoke Test</h2>
+<p>After importing a small Upload Pack with files under <code>deliverables/png</code> and <code>deliverables/pdf</code>, verify:</p>
+<ol>
+<li>Files exist on the host under <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables</code>.</li>
+<li>The app container sees them under <code>/data/deliverables</code>.</li>
+<li>TinyMRP can display or download them through the normal <code>/deliverables</code> route.</li>
+<li>The default Caddy deployment is not relying on a <code>&quot;/__files&quot;</code> redirect.</li>
+</ol>
+<h2 id="recover-a-broken-caddy-instance">Recover A Broken Caddy Instance</h2>
+<p>If an existing Caddy deployment still has <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;/__files&quot;</code>, run:</p>
+<pre><code class="language-bash">cd /srv/tinymrp/instances/&lt;instance&gt;
+sudo cp .env &quot;.env.bak.$(date +%Y%m%d-%H%M%S)&quot;
+sudo sed -i 's#^FILES_ACCEL_REDIRECT_PREFIX=.*#FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;#' .env
+sudo docker compose up -d --force-recreate
 </code></pre>
 <h2 id="local-vm-mode">Local VM Mode</h2>
 <p>For local-only testing:</p>

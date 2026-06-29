@@ -22,6 +22,59 @@ note() {
   WARNINGS=$((WARNINGS + 1))
 }
 
+container_running() {
+  [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null || true)" = "true" ]
+}
+
+container_env_value_live() {
+  local container_name="$1"
+  local key="$2"
+  docker exec "$container_name" sh -lc "printf '%s' \"\${$key-}\"" 2>/dev/null | tr -d '\r'
+}
+
+container_mount_source() {
+  local container_name="$1"
+  local destination="$2"
+  docker inspect -f "{{range .Mounts}}{{if eq .Destination \"$destination\"}}{{println .Source}}{{end}}{{end}}" "$container_name" 2>/dev/null | head -n 1
+}
+
+nginx_internal_route_present() {
+  local prefix="$1"
+  local normalized_prefix="${prefix%/}/"
+  local location_snippet="location ^~ ${normalized_prefix}"
+  local config_dump=""
+
+  if command -v nginx >/dev/null 2>&1; then
+    config_dump="$(nginx -T 2>/dev/null || true)"
+    if [ -n "$config_dump" ] \
+      && printf '%s\n' "$config_dump" | grep -Fq "$location_snippet" \
+      && printf '%s\n' "$config_dump" | grep -Fq "internal;"; then
+      return 0
+    fi
+  fi
+
+  if [ -d /etc/nginx ] \
+    && grep -R -Fq "$location_snippet" /etc/nginx 2>/dev/null \
+    && grep -R -Fq "internal;" /etc/nginx 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+proxy_has_matching_internal_file_route() {
+  local accel_prefix="$1"
+  case "${REVERSE_PROXY:-}" in
+    nginx)
+      [ -n "$accel_prefix" ] || return 1
+      nginx_internal_route_present "$accel_prefix"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 check_firewall() {
   if command -v ufw >/dev/null 2>&1; then
     if ufw status 2>/dev/null | head -n 1 | grep -q "Status: active"; then
@@ -90,10 +143,16 @@ check_domain_dns_once() {
 check_instance() {
   local env_file="$1"
   local route_file=""
-  local route_prefix=""
   local route_target=""
+  local expected_deliverables_dir=""
+  local configured_local_root=""
+  local container_local_root=""
+  local container_accel_prefix=""
+  local mount_source=""
+  local accel_prefix_for_checks=""
+  local container_values_loaded=0
 
-  unset INSTANCE_NAME INSTANCE_DOMAIN INSTANCE_URL TLS_MODE APP_CONTAINER_NAME MONGO_CONTAINER_NAME
+  unset INSTANCE_NAME INSTANCE_DOMAIN INSTANCE_URL TLS_MODE APP_CONTAINER_NAME MONGO_CONTAINER_NAME DELIVERABLES_DIR FILES_LOCAL_ROOT FILES_ACCEL_REDIRECT_PREFIX
   load_env_file "$env_file"
 
   if [ -z "${INSTANCE_NAME:-}" ] || [ -z "${INSTANCE_DOMAIN:-}" ]; then
@@ -117,6 +176,73 @@ check_instance() {
     fail "Instance ${INSTANCE_NAME}: MongoDB is exposed through published ports"
   else
     pass "Instance ${INSTANCE_NAME}: MongoDB is not publicly exposed"
+  fi
+
+  if docker container inspect "${APP_CONTAINER_NAME}" >/dev/null 2>&1; then
+    if container_running "${APP_CONTAINER_NAME}"; then
+      container_values_loaded=1
+      container_local_root="$(container_env_value_live "${APP_CONTAINER_NAME}" "FILES_LOCAL_ROOT")"
+      container_accel_prefix="$(container_env_value_live "${APP_CONTAINER_NAME}" "FILES_ACCEL_REDIRECT_PREFIX")"
+
+      if [ -n "$container_local_root" ]; then
+        pass "Instance ${INSTANCE_NAME}: app container FILES_LOCAL_ROOT=${container_local_root}"
+      else
+        fail "Instance ${INSTANCE_NAME}: app container does not expose FILES_LOCAL_ROOT"
+      fi
+    else
+      fail "Instance ${INSTANCE_NAME}: app container ${APP_CONTAINER_NAME} is not running, so in-container file checks were skipped"
+    fi
+  fi
+
+  configured_local_root="${FILES_LOCAL_ROOT:-}"
+  if [ "$container_values_loaded" -eq 1 ]; then
+    if [ -n "$configured_local_root" ] && [ "$container_local_root" != "$configured_local_root" ]; then
+      note "Instance ${INSTANCE_NAME}: .env FILES_LOCAL_ROOT=${configured_local_root} but the running app container is using ${container_local_root}. Recreate the app container if config changed."
+    fi
+
+    if docker exec "${APP_CONTAINER_NAME}" sh -lc 'root="${FILES_LOCAL_ROOT:-}"; [ -n "$root" ] && [ -d "$root" ]' >/dev/null 2>&1; then
+      pass "Instance ${INSTANCE_NAME}: FILES_LOCAL_ROOT exists inside the app container"
+    else
+      fail "Instance ${INSTANCE_NAME}: FILES_LOCAL_ROOT does not exist inside the app container"
+    fi
+
+    if docker exec "${APP_CONTAINER_NAME}" sh -lc 'root="${FILES_LOCAL_ROOT:-}"; [ -n "$root" ] && [ -r "$root" ] && ls "$root" >/dev/null 2>&1' >/dev/null 2>&1; then
+      pass "Instance ${INSTANCE_NAME}: app container can read FILES_LOCAL_ROOT"
+    else
+      fail "Instance ${INSTANCE_NAME}: app container cannot read FILES_LOCAL_ROOT"
+    fi
+
+    expected_deliverables_dir="${DELIVERABLES_DIR:-$(instance_dir "$INSTANCE_NAME")/deliverables}"
+    mount_source="$(container_mount_source "${APP_CONTAINER_NAME}" "${container_local_root:-/data/deliverables}")"
+    if [ -z "$mount_source" ]; then
+      fail "Instance ${INSTANCE_NAME}: no host bind mount was found for ${container_local_root:-/data/deliverables} inside the app container"
+    elif [ "$mount_source" = "$expected_deliverables_dir" ]; then
+      pass "Instance ${INSTANCE_NAME}: host deliverables mount ${mount_source} -> ${container_local_root:-/data/deliverables}"
+    else
+      fail "Instance ${INSTANCE_NAME}: app container mount source is ${mount_source}, expected ${expected_deliverables_dir}"
+    fi
+  fi
+
+  accel_prefix_for_checks="${FILES_ACCEL_REDIRECT_PREFIX:-}"
+  if [ "$container_values_loaded" -eq 1 ]; then
+    accel_prefix_for_checks="$container_accel_prefix"
+    if [ "$container_accel_prefix" != "${FILES_ACCEL_REDIRECT_PREFIX:-}" ]; then
+      note "Instance ${INSTANCE_NAME}: .env FILES_ACCEL_REDIRECT_PREFIX=${FILES_ACCEL_REDIRECT_PREFIX:-<empty>} but the running app container is using ${container_accel_prefix:-<empty>}. Recreate the app container if config changed."
+    fi
+  fi
+
+  if [ "${REVERSE_PROXY:-}" = "caddy" ] && [ -n "$accel_prefix_for_checks" ]; then
+    fail "Instance ${INSTANCE_NAME}: Caddy deployment is using FILES_ACCEL_REDIRECT_PREFIX=${accel_prefix_for_checks}. X-Accel-Redirect is Nginx-only; set it to empty and recreate ${APP_CONTAINER_NAME}."
+  elif [ -z "$accel_prefix_for_checks" ]; then
+    pass "Instance ${INSTANCE_NAME}: FILES_ACCEL_REDIRECT_PREFIX is empty for ${REVERSE_PROXY:-unknown}"
+  fi
+
+  if [ "$accel_prefix_for_checks" = "/__files" ]; then
+    if proxy_has_matching_internal_file_route "$accel_prefix_for_checks"; then
+      pass "Instance ${INSTANCE_NAME}: reverse proxy has a matching internal route for ${accel_prefix_for_checks}"
+    else
+      fail "Instance ${INSTANCE_NAME}: FILES_ACCEL_REDIRECT_PREFIX=/__files but no matching ${REVERSE_PROXY:-unknown} internal file route was detected"
+    fi
   fi
 
   route_file="$(caddy_routes_dir)/tinymrp-${INSTANCE_NAME}.caddy"

@@ -44,7 +44,7 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `FILES_URL_PREFIX`: URL prefix for protected files when Nginx is fronting the app (e.g. `/deliverables`).
   - Optional `FILES_UPSTREAM_BASE`: upstream file server base URL if proxying.
   - `FILES_PUBLIC_URLS=false`: allow direct public file URLs (off by default).
-  - `FILES_ACCEL_REDIRECT_PREFIX=/__files`: internal Nginx location used for X-Accel-Redirect.
+  - `FILES_ACCEL_REDIRECT_PREFIX`: optional internal Nginx location used for `X-Accel-Redirect`; leave this empty for the guided Caddy deployment and any setup that does not create and verify a matching internal route.
   - `FILES_ALLOW_LEGACY_TOKENS=false`: allow legacy base64 file tokens (off by default).
 - Optional:
   - `TINYMRP_SECURITY_MODE=compat|strict`: security profile (default compat).
@@ -477,6 +477,7 @@ Default behavior:
 - Each TinyMRP instance gets its own private Docker network and MongoDB container.
 - MongoDB is never published on the host.
 - DNS guidance and validation are built into the scripts.
+- Protected deliverables stay on the normal TinyMRP app route, so `FILES_ACCEL_REDIRECT_PREFIX` is empty by default.
 
 Typical flow:
 
@@ -514,7 +515,8 @@ Quick notes for that legacy path:
 - `HTTP_PORT` maps the host port to the internal `nginx` container on port `80`.
 - `DELIVERABLES_DIR` is bind-mounted into both `app` and `nginx` at `/data/deliverables`.
 - `FILES_LOCAL_ROOT=/data/deliverables` and `FILES_URL_PREFIX=/deliverables` stay the expected app-side values.
-- `docker/nginx/nginx.conf` still handles protected file delivery with `auth_request` and `X-Accel-Redirect`.
+- `docker/nginx/nginx.conf` still includes the protected `/deliverables` and optional `X-Accel-Redirect` paths.
+- Keep `FILES_ACCEL_REDIRECT_PREFIX` empty unless you intentionally enable and validate a matching Nginx internal route such as `"/__files"`.
 
 ---
 

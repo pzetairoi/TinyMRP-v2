@@ -32,7 +32,9 @@ services:
       FILES_LOCAL_ROOT: /data/deliverables
       FILES_URL_PREFIX: ${FILES_URL_PREFIX:-/deliverables}
       FILES_PUBLIC_URLS: ${FILES_PUBLIC_URLS:-false}
-      FILES_ACCEL_REDIRECT_PREFIX: ${FILES_ACCEL_REDIRECT_PREFIX:-/__files}
+      # Leave accel redirect empty unless you intentionally provision and test
+      # an Nginx internal route that matches the chosen prefix.
+      FILES_ACCEL_REDIRECT_PREFIX: "${FILES_ACCEL_REDIRECT_PREFIX:-}"
       # Optional: enable HTTP proxy to an external file server
       # FILES_UPSTREAM_BASE: ${FILES_UPSTREAM_BASE}
       FILES_UPSTREAM_ALLOWED_HOSTS: ${FILES_UPSTREAM_ALLOWED_HOSTS}
