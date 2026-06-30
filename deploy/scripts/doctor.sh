@@ -60,6 +60,18 @@ container_mount_rw() {
   docker inspect -f "{{range .Mounts}}{{if eq .Destination \"$destination\"}}{{println .RW}}{{end}}{{end}}" "$container_name" 2>/dev/null | head -n 1
 }
 
+nextcloud_can_write_mount() {
+  local container_name="$1"
+  local mount_path="$2"
+  docker exec -u 33 "$container_name" sh -lc '
+    target="$1"
+    probe="$target/.nextcloud-write-test"
+    rm -f "$probe"
+    touch "$probe"
+    rm -f "$probe"
+  ' sh "$mount_path" >/dev/null 2>&1
+}
+
 nginx_internal_route_present() {
   local prefix="$1"
   local normalized_prefix="${prefix%/}/"
@@ -395,6 +407,8 @@ check_nextcloud_link() {
   local mount_row_json=""
   local mount_groups=""
   local mount_users=""
+  local expected_mode="ro"
+  local admin_user_name=""
 
   unset INSTANCE_NAME HOST_DELIVERABLES_PATH NEXTCLOUD_MOUNT_PATH NEXTCLOUD_GROUP_NAME NEXTCLOUD_STORAGE_NAME NEXTCLOUD_STORAGE_MOUNT_POINT LINK_ACCESS_MODE
   load_env_file "$link_file"
@@ -407,6 +421,13 @@ check_nextcloud_link() {
   NEXTCLOUD_GROUP_NAME="${NEXTCLOUD_GROUP_NAME:-$(nextcloud_group_name_for_instance "$INSTANCE_NAME")}"
   NEXTCLOUD_STORAGE_NAME="${NEXTCLOUD_STORAGE_NAME:-$(nextcloud_storage_name_for_instance "$INSTANCE_NAME")}"
   NEXTCLOUD_STORAGE_MOUNT_POINT="${NEXTCLOUD_STORAGE_MOUNT_POINT:-$(nextcloud_storage_mount_point_for_instance "$INSTANCE_NAME")}"
+  expected_mode="$(normalize_nextcloud_access_mode "${LINK_ACCESS_MODE:-ro}" 2>/dev/null || printf '%s' 'ro')"
+  if admin_user_name="$(read_nextcloud_admin_user)"; then
+    :
+  else
+    admin_user_name="admin"
+    note "Nextcloud link ${INSTANCE_NAME}: no explicit Nextcloud admin user was found in $(nextcloud_env_file); using admin for group checks"
+  fi
 
   if [ -d "${HOST_DELIVERABLES_PATH}" ]; then
     pass "Nextcloud link ${INSTANCE_NAME}: host deliverables folder exists"
@@ -417,7 +438,7 @@ check_nextcloud_link() {
   if [[ "${NEXTCLOUD_MOUNT_PATH}" == "$(nextcloud_link_mount_root)"/* ]]; then
     pass "Nextcloud link ${INSTANCE_NAME}: mount path stays under $(nextcloud_link_mount_root)"
   else
-    note "Nextcloud link ${INSTANCE_NAME}: mount path ${NEXTCLOUD_MOUNT_PATH} is outside $(nextcloud_link_mount_root)"
+    note "Nextcloud link ${INSTANCE_NAME}: mount path ${NEXTCLOUD_MOUNT_PATH} is outside $(nextcloud_link_mount_root). Do not mount TinyMRP deliverables inside Nextcloud internal data."
   fi
 
   mount_source="$(container_mount_source "${nextcloud_container_name}" "${NEXTCLOUD_MOUNT_PATH}")"
@@ -432,8 +453,16 @@ check_nextcloud_link() {
   mount_rw="$(container_mount_rw "${nextcloud_container_name}" "${NEXTCLOUD_MOUNT_PATH}")"
   if [ "$mount_rw" = "false" ]; then
     pass "Nextcloud link ${INSTANCE_NAME}: Docker bind mount is read-only"
-  elif [ -n "$mount_rw" ]; then
-    note "Nextcloud link ${INSTANCE_NAME}: Docker bind mount is writable"
+    if [ "$expected_mode" = "rw" ]; then
+      fail "Nextcloud link ${INSTANCE_NAME}: bidirectional mode is configured but the Docker bind mount is read-only"
+    fi
+  elif [ "$mount_rw" = "true" ]; then
+    pass "Nextcloud link ${INSTANCE_NAME}: Docker bind mount is bidirectional/read-write"
+    if [ "$expected_mode" = "ro" ]; then
+      fail "Nextcloud link ${INSTANCE_NAME}: read-only mode is configured but the Docker bind mount is writable"
+    else
+      note "Nextcloud can modify or delete TinyMRP deliverables for ${INSTANCE_NAME}"
+    fi
   else
     note "Nextcloud link ${INSTANCE_NAME}: Docker bind mount mode could not be determined"
   fi
@@ -444,10 +473,26 @@ check_nextcloud_link() {
     note "Nextcloud link ${INSTANCE_NAME}: Nextcloud container cannot read ${NEXTCLOUD_MOUNT_PATH}"
   fi
 
+  if [ "$expected_mode" = "rw" ]; then
+    if nextcloud_can_write_mount "${nextcloud_container_name}" "${NEXTCLOUD_MOUNT_PATH}"; then
+      pass "Nextcloud link ${INSTANCE_NAME}: Nextcloud can write to ${NEXTCLOUD_MOUNT_PATH}"
+    else
+      fail "Nextcloud link ${INSTANCE_NAME}: bidirectional mode is configured but Nextcloud cannot write to ${NEXTCLOUD_MOUNT_PATH}"
+    fi
+  fi
+
   if [ -n "${NEXTCLOUD_GROUP_NAME:-}" ] && nextcloud_group_exists "${nextcloud_container_name}" "${NEXTCLOUD_GROUP_NAME}"; then
     pass "Nextcloud link ${INSTANCE_NAME}: Nextcloud group ${NEXTCLOUD_GROUP_NAME} exists"
   else
     note "Nextcloud link ${INSTANCE_NAME}: Nextcloud group ${NEXTCLOUD_GROUP_NAME:-<unset>} is missing"
+  fi
+
+  if [ -n "$admin_user_name" ] && nextcloud_group_exists "${nextcloud_container_name}" "${NEXTCLOUD_GROUP_NAME}"; then
+    if nextcloud_group_has_user "${nextcloud_container_name}" "${NEXTCLOUD_GROUP_NAME}" "${admin_user_name}"; then
+      pass "Nextcloud link ${INSTANCE_NAME}: admin user ${admin_user_name} belongs to ${NEXTCLOUD_GROUP_NAME}"
+    else
+      note "Nextcloud link ${INSTANCE_NAME}: admin user ${admin_user_name} does not belong to ${NEXTCLOUD_GROUP_NAME}"
+    fi
   fi
 
   mount_row_json="$(nextcloud_external_mount_record_json "${nextcloud_container_name}" "${NEXTCLOUD_STORAGE_MOUNT_POINT:-}" "${NEXTCLOUD_MOUNT_PATH}" 2>/dev/null || true)"

@@ -230,15 +230,62 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company2
 
 What it does:
 
-- adds a read-only bind mount from `/srv/tinymrp/instances/<instance>/deliverables` to `/mnt/tinymrp-deliverables/<instance>`
-- writes a managed `/srv/tinymrp/nextcloud/compose.override.yml` for TinyMRP deliverables mounts
+- prompts for the access mode unless you pass a flag
+- defaults to the safer read-only mode
+- writes a managed `/srv/tinymrp/nextcloud/compose.tinymrp-deliverables.override.yml` for TinyMRP deliverables mounts
+- preserves unrelated user `compose.override.yml` content
 - recreates only the Nextcloud `app` container when the mount configuration changes
 - enables the Nextcloud `files_external` app automatically
 - creates the Nextcloud group `tinymrp-<instance>` if needed
+- adds the configured Nextcloud admin user to that group
 - creates or updates the external local storage entry `TinyMRP - <instance> Deliverables`
 - points the storage to `/mnt/tinymrp-deliverables/<instance>`
-- keeps the Docker mount read-only by default
-- runs a targeted Nextcloud external-storage scan when possible
+- runs `php occ files:scan --all`
+- verifies the mount from inside the Nextcloud container
+- verifies the requested read-only or bidirectional mount mode
+- installs `acl` and applies ACLs for UID `1000` and UID `33` only when bidirectional mode is requested
+
+Access modes:
+
+- Read-only is the default and safest mode. Nextcloud can view, download, and share TinyMRP deliverables, but cannot modify or delete them.
+- Bidirectional mode is required when Windows or Mac Nextcloud desktop clients must upload or sync files back into `/srv/tinymrp/instances/<instance>/deliverables`.
+- Bidirectional mode is higher risk because Nextcloud users can modify or delete files that TinyMRP uses.
+
+Recommended default:
+
+- use read-only for customer sharing and download workflows
+- use bidirectional only for trusted internal sync workflows
+
+Non-interactive examples:
+
+```bash
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+```
+
+`--non-interactive` requires either `--read-only` or `--bidirectional`.
+
+Mount behavior:
+
+- read-only mode: `/srv/tinymrp/instances/<instance>/deliverables:/mnt/tinymrp-deliverables/<instance>:ro`
+- bidirectional mode: `/srv/tinymrp/instances/<instance>/deliverables:/mnt/tinymrp-deliverables/<instance>:rw`
+
+The script is idempotent:
+
+- it does not duplicate Docker mounts
+- it does not duplicate Nextcloud external storage entries
+- it detects and prints the existing access mode
+- it can upgrade a linked instance from read-only to bidirectional
+- it asks for confirmation before downgrading from bidirectional to read-only
+
+Safety notes:
+
+- TinyMRP remains the storage owner for `/srv/tinymrp/instances/<instance>/deliverables`
+- deliverables are not moved into Nextcloud internal data
+- the script does not use `chmod 777`
+- the confirmed Caddy deliverables fix stays unchanged: `FILES_ACCEL_REDIRECT_PREFIX=""`
 
 To unlink one instance without touching TinyMRP data:
 
@@ -270,8 +317,10 @@ It checks:
 - Nextcloud DNS and endpoint health if installed
 - linked TinyMRP deliverables still exist on the host
 - Nextcloud can see each linked `/mnt/tinymrp-deliverables/<instance>` path
-- linked Nextcloud Docker mounts stay read-only
+- linked Nextcloud Docker mounts match the configured read-only or bidirectional mode
 - linked external storage entries and Nextcloud groups exist
+- the configured Nextcloud admin user belongs to the matching group
+- bidirectional mounts are writable from inside Nextcloud when enabled
 - deliverables are not being mounted inside Nextcloud's internal data directory
 
 ## 6. Update the repository

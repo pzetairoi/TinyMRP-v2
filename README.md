@@ -508,8 +508,21 @@ Minimal operator input:
   - final Nextcloud domain
 - `link-nextcloud-instance.sh`
   - deployed TinyMRP instance name
+  - read-only or bidirectional access mode, unless you pass a flag
 
-Nextcloud integration stays deployment-side. TinyMRP keeps ownership of `/srv/tinymrp/instances/<instance>/deliverables`, Nextcloud mounts that path read-only under `/mnt/tinymrp-deliverables/<instance>`, and the default Caddy deployment continues to rely on `FILES_ACCEL_REDIRECT_PREFIX=""`.
+Nextcloud integration stays deployment-side. TinyMRP keeps ownership of `/srv/tinymrp/instances/<instance>/deliverables`, and `link-nextcloud-instance.sh` now prompts for either read-only sharing mode or bidirectional sync mode. Read-only stays the safest default and mounts deliverables under `/mnt/tinymrp-deliverables/<instance>` without write access. Bidirectional mode is available for trusted internal workflows that need desktop-client uploads or sync back into the VPS deliverables folder. The default Caddy deployment continues to rely on `FILES_ACCEL_REDIRECT_PREFIX=""`.
+
+Useful commands:
+
+```bash
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+```
+
+`--non-interactive` requires either `--read-only` or `--bidirectional`.
 
 DNS examples:
 
