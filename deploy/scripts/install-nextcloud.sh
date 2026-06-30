@@ -228,8 +228,8 @@ write_nextcloud_compose_file \
   "$NEXTCLOUD_PRIVATE_NETWORK"
 
 ensure_proxy_network
-docker_compose_file "$NEXTCLOUD_COMPOSE" config -q
-docker_compose_file "$NEXTCLOUD_COMPOSE" up -d
+nextcloud_compose_in_dir "$NEXTCLOUD_ROOT" config -q
+nextcloud_compose_in_dir "$NEXTCLOUD_ROOT" up -d
 
 wait_for_container_ready "$NEXTCLOUD_CONTAINER_NAME" 300 || die "Nextcloud app container failed to become ready."
 

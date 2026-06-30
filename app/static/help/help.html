@@ -147,7 +147,26 @@ sudo ./deploy/scripts/rollback-instance.sh company1
 <pre><code class="language-bash">sudo ./deploy/scripts/link-nextcloud-instance.sh company1
 sudo ./deploy/scripts/link-nextcloud-instance.sh company2
 </code></pre>
-<p>This keeps TinyMRP as the storage owner. Deliverables stay under <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables</code>, Nextcloud mounts them read-only under <code>/mnt/tinymrp-deliverables/&lt;instance&gt;</code>, and the default Caddy deployment keeps <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;</code>.</p>
+<p>This keeps TinyMRP as the storage owner. Deliverables stay under <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables</code>, the script writes a managed <code>/srv/tinymrp/nextcloud/compose.tinymrp-deliverables.override.yml</code>, and the default Caddy deployment keeps <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;</code>.</p>
+<p>The link script now asks which mode to use unless you pass a flag:</p>
+<ul>
+<li>Read-only is the default and safest option. Nextcloud can view, download, and share deliverables, but cannot change them.</li>
+<li>Bidirectional mode is needed for trusted Windows or Mac Nextcloud desktop-client workflows that must upload or sync files back into the VPS deliverables folder.</li>
+<li>Bidirectional mode is higher risk because Nextcloud users can modify or delete TinyMRP deliverables.</li>
+</ul>
+<p>Recommended default:</p>
+<ul>
+<li>use read-only for customer sharing and downloads</li>
+<li>use bidirectional only for trusted internal sync workflows</li>
+</ul>
+<p>Examples:</p>
+<pre><code class="language-bash">sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+</code></pre>
+<p><code>--non-interactive</code> requires either <code>--read-only</code> or <code>--bidirectional</code>.</p>
 <h2 id="updating-and-rollback">Updating And Rollback</h2>
 <p>Repository update:</p>
 <pre><code class="language-bash">cd /opt/TinyMRP-v2

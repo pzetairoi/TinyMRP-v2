@@ -10,24 +10,89 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./deploy/scripts/link-nextcloud-instance.sh <instance_name> [--remove]
+  sudo ./deploy/scripts/link-nextcloud-instance.sh <instance_name> [--read-only|--bidirectional|--read-write] [--non-interactive] [--remove]
 
 Examples:
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs
+  sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --read-only
+  sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --bidirectional
+  sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --non-interactive --read-only
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --remove
 EOF
 }
 
-nextcloud_compose_override_has_substantive_content() {
-  local override_file="$1"
-  [ -f "$override_file" ] || return 1
-  grep -Eq '^[[:space:]]*[^#[:space:]]' "$override_file"
+normalize_access_mode() {
+  case "$1" in
+    ro|read-only|readonly)
+      printf '%s\n' "ro"
+      ;;
+    rw|read-write|readwrite|bidirectional)
+      printf '%s\n' "rw"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
-nextcloud_compose_override_is_managed() {
-  local override_file="$1"
-  [ -f "$override_file" ] || return 1
-  grep -Fqx "$(nextcloud_override_marker)" "$override_file"
+access_mode_label() {
+  case "$1" in
+    ro)
+      printf '%s\n' "read-only"
+      ;;
+    rw)
+      printf '%s\n' "bidirectional/read-write"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
+prompt_access_mode() {
+  local instance_name="$1"
+  local current_mode="${2:-}"
+  local choice=""
+
+  printf 'How should Nextcloud access TinyMRP deliverables for instance %s?\n\n' "$instance_name"
+  printf '1) Read-only / sharing mode\n'
+  printf '   Nextcloud can view, download, and share TinyMRP deliverables.\n'
+  printf '   Safer default. Nextcloud cannot modify or delete TinyMRP files.\n\n'
+  printf '2) Bidirectional sync mode\n'
+  printf '   Nextcloud can upload, modify, and delete files in TinyMRP deliverables.\n'
+  printf '   Required if Windows/Mac Nextcloud clients must sync files back into the VPS deliverables folder.\n'
+  printf '   Higher risk: Nextcloud users can alter TinyMRP deliverables.\n\n'
+  if [ -n "$current_mode" ]; then
+    printf 'Current mode: %s\n\n' "$(access_mode_label "$current_mode")"
+  fi
+
+  while :; do
+    if [ ! -t 0 ]; then
+      printf '%s\n' "ro"
+      return 0
+    fi
+    read -r -p "Choose [1/2] (default: 1): " choice || true
+    choice="$(trim "$choice")"
+    case "$choice" in
+      ""|1)
+        printf '%s\n' "ro"
+        return 0
+        ;;
+      2)
+        printf '%s\n' "rw"
+        return 0
+        ;;
+      *)
+        warn "Enter 1 for read-only or 2 for bidirectional sync."
+        ;;
+    esac
+  done
+}
+
+file_contains_marker() {
+  local file_path="$1"
+  [ -f "$file_path" ] || return 1
+  grep -Fqx "$(nextcloud_override_marker)" "$file_path"
 }
 
 backup_file_with_timestamp() {
@@ -38,6 +103,32 @@ backup_file_with_timestamp() {
   backup_path="${file_path}.bak.$(date +%Y%m%d-%H%M%S)"
   cp "$file_path" "$backup_path"
   printf '%s\n' "$backup_path"
+}
+
+migrate_legacy_managed_override() {
+  local legacy_file="$1"
+  local managed_file="$2"
+  local backup_path=""
+
+  if [ ! -f "$legacy_file" ] || ! file_contains_marker "$legacy_file"; then
+    return 1
+  fi
+
+  if [ -f "$managed_file" ]; then
+    backup_path="$(backup_file_with_timestamp "$legacy_file" || true)"
+    rm -f "$legacy_file"
+    if [ -n "$backup_path" ]; then
+      info "Backed up legacy managed override ${legacy_file} to ${backup_path} before removing it."
+    fi
+    return 0
+  fi
+
+  backup_path="$(backup_file_with_timestamp "$legacy_file" || true)"
+  mv "$legacy_file" "$managed_file"
+  if [ -n "$backup_path" ]; then
+    info "Backed up ${legacy_file} to ${backup_path} before migrating it to ${managed_file}."
+  fi
+  return 0
 }
 
 count_nextcloud_links() {
@@ -52,7 +143,16 @@ count_nextcloud_links() {
   printf '%s\n' "$count"
 }
 
-render_nextcloud_managed_override() {
+managed_override_contains_instance() {
+  local override_file="$1"
+  local host_path="$2"
+  local mount_path="$3"
+
+  [ -f "$override_file" ] || return 1
+  grep -Fq "$host_path" "$override_file" && grep -Fq "$mount_path" "$override_file"
+}
+
+render_managed_override() {
   local app_service_name="$1"
 
   cat <<EOF
@@ -64,7 +164,7 @@ EOF
   render_nextcloud_link_mounts
 }
 
-write_nextcloud_managed_override_file() {
+write_managed_override() {
   local override_file="$1"
   local app_service_name="$2"
   local link_count=0
@@ -73,14 +173,8 @@ write_nextcloud_managed_override_file() {
 
   link_count="$(count_nextcloud_links)"
 
-  if [ -f "$override_file" ] \
-    && ! nextcloud_compose_override_is_managed "$override_file" \
-    && nextcloud_compose_override_has_substantive_content "$override_file"; then
-    return 2
-  fi
-
   if [ "$link_count" -eq 0 ]; then
-    if [ -f "$override_file" ] && nextcloud_compose_override_is_managed "$override_file"; then
+    if [ -f "$override_file" ]; then
       backup_path="$(backup_file_with_timestamp "$override_file" || true)"
       rm -f "$override_file"
       if [ -n "$backup_path" ]; then
@@ -92,7 +186,7 @@ write_nextcloud_managed_override_file() {
   fi
 
   tmp_file="$(mktemp)"
-  render_nextcloud_managed_override "$app_service_name" >"$tmp_file"
+  render_managed_override "$app_service_name" >"$tmp_file"
 
   if [ -f "$override_file" ] && cmp -s "$tmp_file" "$override_file"; then
     rm -f "$tmp_file"
@@ -110,11 +204,51 @@ write_nextcloud_managed_override_file() {
   return 0
 }
 
-nextcloud_compose() {
-  (
-    cd "$(nextcloud_dir)" >/dev/null 2>&1 || exit 1
-    docker_compose "$@"
-  )
+ensure_acl_support() {
+  if command -v setfacl >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    info "Installing acl package for bidirectional Nextcloud access."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y acl >/dev/null 2>&1 \
+      || { apt-get update -y >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y acl >/dev/null 2>&1; }
+  elif command -v dnf >/dev/null 2>&1; then
+    info "Installing acl package for bidirectional Nextcloud access."
+    dnf install -y acl >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then
+    info "Installing acl package for bidirectional Nextcloud access."
+    yum install -y acl >/dev/null 2>&1
+  else
+    die "Bidirectional mode requires setfacl, but no supported package manager was found to install acl."
+  fi
+
+  command -v setfacl >/dev/null 2>&1 || die "Failed to install setfacl for bidirectional mode."
+}
+
+apply_bidirectional_acls() {
+  local deliverables_path="$1"
+  ensure_acl_support
+  setfacl -R -m u:1000:rwx,u:33:rwx "$deliverables_path"
+  setfacl -R -d -m u:1000:rwx,u:33:rwx "$deliverables_path"
+}
+
+nextcloud_mount_visible_in_container() {
+  local container_name="$1"
+  local mount_path="$2"
+  docker exec "$container_name" sh -lc 'target="$1"; test -d "$target"' sh "$mount_path" >/dev/null 2>&1
+}
+
+nextcloud_can_write_mount() {
+  local container_name="$1"
+  local mount_path="$2"
+  docker exec -u 33 "$container_name" sh -lc '
+    target="$1"
+    probe="$target/.nextcloud-write-test"
+    rm -f "$probe"
+    touch "$probe"
+    rm -f "$probe"
+  ' sh "$mount_path" >/dev/null 2>&1
 }
 
 container_mount_source_for_path() {
@@ -129,28 +263,40 @@ container_mount_rw_for_path() {
   docker inspect -f "{{range .Mounts}}{{if eq .Destination \"$destination\"}}{{println .RW}}{{end}}{{end}}" "$container_name" 2>/dev/null | head -n 1
 }
 
-nextcloud_mount_visible_in_container() {
-  local container_name="$1"
-  local mount_path="$2"
-  docker exec "$container_name" sh -lc 'target="$1"; test -d "$target"' sh "$mount_path" >/dev/null 2>&1
-}
-
 ensure_nextcloud_app_service_ready() {
-  local app_service_name="$1"
-  local app_container_name="$2"
+  local root_dir="$1"
+  local app_service_name="$2"
+  local app_container_name="$3"
 
-  nextcloud_compose config -q
-  nextcloud_compose up -d "$app_service_name"
+  nextcloud_compose_in_dir "$root_dir" config -q
+  nextcloud_compose_in_dir "$root_dir" up -d "$app_service_name"
   wait_for_container_ready "$app_container_name" 300 || die "Nextcloud app container ${app_container_name} failed to become ready."
 }
 
 INSTANCE_NAME=""
 REMOVE_LINK=0
+NON_INTERACTIVE=0
+REQUESTED_MODE=""
+MODE_FLAG_SOURCE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --remove)
       REMOVE_LINK=1
+      shift
+      ;;
+    --read-only)
+      REQUESTED_MODE="ro"
+      MODE_FLAG_SOURCE="flag"
+      shift
+      ;;
+    --bidirectional|--read-write)
+      REQUESTED_MODE="rw"
+      MODE_FLAG_SOURCE="flag"
+      shift
+      ;;
+    --non-interactive)
+      NON_INTERACTIVE=1
       shift
       ;;
     -h|--help)
@@ -174,6 +320,14 @@ if [ -z "$INSTANCE_NAME" ]; then
   exit 1
 fi
 
+if [ "$REMOVE_LINK" -eq 1 ] && [ -n "$REQUESTED_MODE" ]; then
+  die "Do not combine --remove with access-mode flags."
+fi
+
+if [ "$NON_INTERACTIVE" -eq 1 ] && [ "$REMOVE_LINK" -eq 0 ] && [ -z "$REQUESTED_MODE" ]; then
+  die "--non-interactive requires either --read-only or --bidirectional."
+fi
+
 require_root
 require_cmd docker
 require_cmd python3
@@ -185,6 +339,7 @@ NEXTCLOUD_ROOT="$(nextcloud_dir)"
 NEXTCLOUD_ENV="$(nextcloud_env_file)"
 NEXTCLOUD_COMPOSE="$(nextcloud_compose_file)"
 NEXTCLOUD_OVERRIDE="$(nextcloud_override_file)"
+NEXTCLOUD_LEGACY_OVERRIDE="$(nextcloud_legacy_managed_override_file)"
 NEXTCLOUD_LINK_FILE="$(nextcloud_link_file "$INSTANCE_NAME")"
 NEXTCLOUD_MOUNT_PATH="$(nextcloud_mount_path_for_instance "$INSTANCE_NAME")"
 NEXTCLOUD_GROUP_NAME="$(nextcloud_group_name_for_instance "$INSTANCE_NAME")"
@@ -204,6 +359,9 @@ elif [ ! -d "$INSTANCE_DELIVERABLES" ]; then
   warn "Instance deliverables folder ${INSTANCE_DELIVERABLES} does not exist. Continuing with Nextcloud cleanup only."
 fi
 
+ensure_nextcloud_links_dir
+migrate_legacy_managed_override "$NEXTCLOUD_LEGACY_OVERRIDE" "$NEXTCLOUD_OVERRIDE" || true
+
 unset NEXTCLOUD_CONTAINER_NAME
 load_env_file "$NEXTCLOUD_ENV"
 NEXTCLOUD_CONTAINER_NAME="$(resolve_nextcloud_app_container_name || true)"
@@ -215,21 +373,63 @@ NEXTCLOUD_APP_SERVICE_NAME="$(resolve_nextcloud_app_service_name "$NEXTCLOUD_ROO
 if NEXTCLOUD_ADMIN_USER_NAME="$(read_nextcloud_admin_user)"; then
   :
 else
+  NEXTCLOUD_ADMIN_USER_NAME="admin"
   warn "No Nextcloud admin user variable was found in ${NEXTCLOUD_ENV}. Falling back to admin."
 fi
 
-ensure_nextcloud_links_dir
+CURRENT_MODE=""
+MANAGED_OVERRIDE_HAD_INSTANCE=0
+if [ -f "$NEXTCLOUD_LINK_FILE" ]; then
+  unset LINK_ACCESS_MODE
+  load_env_file "$NEXTCLOUD_LINK_FILE"
+  CURRENT_MODE="$(normalize_access_mode "${LINK_ACCESS_MODE:-ro}" 2>/dev/null || printf '%s' 'ro')"
+fi
+
+if managed_override_contains_instance "$NEXTCLOUD_OVERRIDE" "$INSTANCE_DELIVERABLES" "$NEXTCLOUD_MOUNT_PATH"; then
+  MANAGED_OVERRIDE_HAD_INSTANCE=1
+fi
+
+CURRENT_MOUNT_SOURCE="$(container_mount_source_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")"
+CURRENT_MOUNT_RW="$(container_mount_rw_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")"
+CURRENT_MOUNT_VISIBLE=0
+if nextcloud_mount_visible_in_container "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
+  CURRENT_MOUNT_VISIBLE=1
+fi
+
+if [ -z "$CURRENT_MODE" ] && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ]; then
+  if [ "$CURRENT_MOUNT_RW" = "true" ]; then
+    CURRENT_MODE="rw"
+  elif [ "$CURRENT_MOUNT_RW" = "false" ]; then
+    CURRENT_MODE="ro"
+  fi
+fi
+
+if [ -n "$CURRENT_MODE" ]; then
+  info "Detected existing Nextcloud access mode for ${INSTANCE_NAME}: $(access_mode_label "$CURRENT_MODE")."
+fi
+
+if [ "$REMOVE_LINK" -eq 0 ]; then
+  if [ -z "$REQUESTED_MODE" ]; then
+    REQUESTED_MODE="$(prompt_access_mode "$INSTANCE_NAME" "$CURRENT_MODE")"
+  fi
+
+  if [ "$CURRENT_MODE" = "rw" ] && [ "$REQUESTED_MODE" = "ro" ] && [ "$NON_INTERACTIVE" -eq 0 ] && [ "$MODE_FLAG_SOURCE" != "flag" ]; then
+    if ! confirm "Downgrade Nextcloud access for ${INSTANCE_NAME} from bidirectional to read-only"; then
+      die "Nextcloud access-mode change cancelled."
+    fi
+  fi
+fi
 
 if [ "$REMOVE_LINK" -eq 0 ]; then
   if write_nextcloud_link_file \
     "$INSTANCE_NAME" \
     "$INSTANCE_DELIVERABLES" \
     "$NEXTCLOUD_MOUNT_PATH" \
-    "ro" \
+    "$REQUESTED_MODE" \
     "$NEXTCLOUD_GROUP_NAME" \
     "$NEXTCLOUD_STORAGE_NAME" \
     "$NEXTCLOUD_STORAGE_MOUNT_POINT"; then
-    info "Recorded Nextcloud link metadata for ${INSTANCE_NAME}."
+    info "Recorded Nextcloud link metadata for ${INSTANCE_NAME} with $(access_mode_label "$REQUESTED_MODE") access."
   else
     info "Nextcloud link metadata already up to date for ${INSTANCE_NAME}."
   fi
@@ -241,80 +441,92 @@ else
   fi
 fi
 
-CURRENT_MOUNT_SOURCE="$(container_mount_source_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")"
-CURRENT_MOUNT_RW="$(container_mount_rw_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")"
-CURRENT_MOUNT_VISIBLE=0
-if nextcloud_mount_visible_in_container "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
-  CURRENT_MOUNT_VISIBLE=1
+USE_EXISTING_EXTERNAL_MOUNT=0
+if [ "$REMOVE_LINK" -eq 0 ] \
+  && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ] \
+  && [ "$CURRENT_MOUNT_VISIBLE" -eq 1 ] \
+  && [ "$CURRENT_MOUNT_RW" = "$([ "$REQUESTED_MODE" = "rw" ] && printf true || printf false)" ] \
+  && ! managed_override_contains_instance "$NEXTCLOUD_OVERRIDE" "$INSTANCE_DELIVERABLES" "$NEXTCLOUD_MOUNT_PATH"; then
+  USE_EXISTING_EXTERNAL_MOUNT=1
+  info "The running Nextcloud app container already has the expected ${REQUESTED_MODE} Docker mount for ${INSTANCE_NAME}. Leaving Compose files untouched."
 fi
 
 OVERRIDE_CHANGED=0
-OVERRIDE_SAFE=1
-USE_EXISTING_DOCKER_MOUNT=0
-if [ "$REMOVE_LINK" -eq 0 ] \
-  && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ] \
-  && [ "$CURRENT_MOUNT_RW" = "false" ] \
-  && [ ! -f "$NEXTCLOUD_OVERRIDE" ]; then
-  USE_EXISTING_DOCKER_MOUNT=1
-  warn "The Nextcloud app container already has the expected read-only deliverables mount. Leaving Compose files untouched to avoid creating a duplicate mount."
-fi
-
-if [ "$USE_EXISTING_DOCKER_MOUNT" -eq 0 ]; then
-  WRITE_OVERRIDE_STATUS=0
-  write_nextcloud_managed_override_file "$NEXTCLOUD_OVERRIDE" "$NEXTCLOUD_APP_SERVICE_NAME" || WRITE_OVERRIDE_STATUS=$?
-  case "$WRITE_OVERRIDE_STATUS" in
-    0)
-      OVERRIDE_CHANGED=1
-      ;;
-    1)
-      ;;
-    2)
-      OVERRIDE_SAFE=0
-      ;;
-    *)
-      die "Failed to update ${NEXTCLOUD_OVERRIDE}."
-      ;;
-  esac
-fi
-
-if [ "$OVERRIDE_SAFE" -eq 0 ]; then
-  if [ "$REMOVE_LINK" -eq 0 ] && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ] && [ "$CURRENT_MOUNT_RW" = "false" ]; then
-    warn "${NEXTCLOUD_OVERRIDE} contains unmanaged content. Reusing the existing Docker mount and leaving the override untouched."
-  elif [ "$REMOVE_LINK" -eq 0 ] && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ]; then
-    die "${NEXTCLOUD_OVERRIDE} contains unmanaged content and the existing Docker mount for ${NEXTCLOUD_MOUNT_PATH} is not read-only."
-  elif [ "$REMOVE_LINK" -eq 1 ]; then
-    warn "${NEXTCLOUD_OVERRIDE} contains unmanaged content. The Nextcloud external storage entry will be removed, but the Docker override file was not changed."
-  else
-    die "${NEXTCLOUD_OVERRIDE} contains unmanaged content and the expected mount is not already present. Refusing to overwrite unrelated Docker Compose override content."
+if [ "$USE_EXISTING_EXTERNAL_MOUNT" -eq 0 ]; then
+  if write_managed_override "$NEXTCLOUD_OVERRIDE" "$NEXTCLOUD_APP_SERVICE_NAME"; then
+    OVERRIDE_CHANGED=1
   fi
 fi
 
 NEEDS_APP_RECREATE=0
-if [ "$OVERRIDE_CHANGED" -eq 1 ] \
-  || { [ -f "$NEXTCLOUD_OVERRIDE" ] && [ "$CURRENT_MOUNT_SOURCE" != "$INSTANCE_DELIVERABLES" ]; } \
-  || { [ -f "$NEXTCLOUD_OVERRIDE" ] && [ "$CURRENT_MOUNT_RW" != "false" ] && [ "$REMOVE_LINK" -eq 0 ]; } \
-  || { [ "$REMOVE_LINK" -eq 0 ] && [ "$CURRENT_MOUNT_VISIBLE" -eq 0 ]; } \
-  || { [ "$REMOVE_LINK" -eq 1 ] && [ -f "$NEXTCLOUD_OVERRIDE" ] && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ]; }; then
+if [ "$USE_EXISTING_EXTERNAL_MOUNT" -eq 0 ] && [ "$OVERRIDE_CHANGED" -eq 1 ]; then
+  NEEDS_APP_RECREATE=1
+fi
+if [ "$REMOVE_LINK" -eq 0 ] && [ "$CURRENT_MOUNT_VISIBLE" -eq 0 ]; then
+  NEEDS_APP_RECREATE=1
+fi
+if [ "$REMOVE_LINK" -eq 0 ] && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ] && [ "$CURRENT_MOUNT_RW" != "$([ "$REQUESTED_MODE" = "rw" ] && printf true || printf false)" ]; then
+  if managed_override_contains_instance "$NEXTCLOUD_OVERRIDE" "$INSTANCE_DELIVERABLES" "$NEXTCLOUD_MOUNT_PATH"; then
+    NEEDS_APP_RECREATE=1
+  elif [ -n "$CURRENT_MOUNT_SOURCE" ]; then
+    die "The existing Docker mount for ${NEXTCLOUD_MOUNT_PATH} is not managed by TinyMRP and uses the wrong access mode."
+  fi
+fi
+if [ "$REMOVE_LINK" -eq 1 ] && { [ "$MANAGED_OVERRIDE_HAD_INSTANCE" -eq 1 ] || [ "$CURRENT_MOUNT_VISIBLE" -eq 1 ]; }; then
   NEEDS_APP_RECREATE=1
 fi
 
-if [ "$NEEDS_APP_RECREATE" -eq 1 ] && [ "$OVERRIDE_SAFE" -eq 1 ] && [ "$USE_EXISTING_DOCKER_MOUNT" -eq 0 ]; then
-  ensure_nextcloud_app_service_ready "$NEXTCLOUD_APP_SERVICE_NAME" "$NEXTCLOUD_CONTAINER_NAME"
+if [ "$REMOVE_LINK" -eq 0 ] && [ "$REQUESTED_MODE" = "rw" ]; then
+  warn "Bidirectional mode allows Nextcloud users to modify or delete TinyMRP deliverables for ${INSTANCE_NAME}."
+  apply_bidirectional_acls "$INSTANCE_DELIVERABLES"
 fi
 
-if [ "$REMOVE_LINK" -eq 0 ]; then
+if [ "$NEEDS_APP_RECREATE" -eq 1 ]; then
+  ensure_nextcloud_app_service_ready "$NEXTCLOUD_ROOT" "$NEXTCLOUD_APP_SERVICE_NAME" "$NEXTCLOUD_CONTAINER_NAME"
+fi
+
+ACTUAL_MOUNT_SOURCE="$(container_mount_source_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")"
+ACTUAL_MOUNT_RW="$(container_mount_rw_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")"
+
+if [ "$REMOVE_LINK" -eq 1 ]; then
+  if nextcloud_mount_visible_in_container "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
+    warn "Nextcloud mount ${NEXTCLOUD_MOUNT_PATH} is still visible after unlink. Inspect the active Docker Compose files."
+  fi
+else
   if ! nextcloud_mount_visible_in_container "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
     printf 'FAIL: Nextcloud mount is not visible inside %s at %s\n' "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH" >&2
     die "Nextcloud app container does not expose ${NEXTCLOUD_MOUNT_PATH}."
   fi
 
-  if [ "$(container_mount_source_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")" != "$INSTANCE_DELIVERABLES" ]; then
-    printf 'FAIL: Nextcloud mount source for %s is not %s\n' "$NEXTCLOUD_MOUNT_PATH" "$INSTANCE_DELIVERABLES" >&2
+  if [ "$ACTUAL_MOUNT_SOURCE" != "$INSTANCE_DELIVERABLES" ]; then
+    printf 'FAIL: Nextcloud mount source for %s is %s, expected %s\n' "$NEXTCLOUD_MOUNT_PATH" "${ACTUAL_MOUNT_SOURCE:-<missing>}" "$INSTANCE_DELIVERABLES" >&2
     die "Nextcloud app container is not using the expected host deliverables bind mount."
   fi
-else
-  if [ "$OVERRIDE_SAFE" -eq 1 ] && nextcloud_mount_visible_in_container "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
-    warn "Nextcloud mount ${NEXTCLOUD_MOUNT_PATH} is still visible after unlink. Inspect ${NEXTCLOUD_OVERRIDE} and the active Compose files."
+
+  if [ "$REQUESTED_MODE" = "ro" ] && [ "$ACTUAL_MOUNT_RW" != "false" ]; then
+    printf 'FAIL: Nextcloud mount %s is writable but read-only mode was requested.\n' "$NEXTCLOUD_MOUNT_PATH" >&2
+    die "Nextcloud mount mode verification failed."
+  fi
+
+  if [ "$REQUESTED_MODE" = "rw" ] && [ "$ACTUAL_MOUNT_RW" != "true" ]; then
+    printf 'FAIL: Nextcloud mount %s is read-only but bidirectional mode was requested.\n' "$NEXTCLOUD_MOUNT_PATH" >&2
+    die "Nextcloud mount mode verification failed."
+  fi
+
+  if [ "$REQUESTED_MODE" = "rw" ]; then
+    if nextcloud_can_write_mount "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
+      pass_message="Nextcloud write test passed for ${NEXTCLOUD_MOUNT_PATH}"
+      info "$pass_message"
+    else
+      if [ "$ACTUAL_MOUNT_RW" != "true" ]; then
+        printf 'FAIL: Nextcloud cannot write to %s because the Docker mount is not read-write.\n' "$NEXTCLOUD_MOUNT_PATH" >&2
+      else
+        printf 'FAIL: Nextcloud cannot write to %s. The Docker mount is read-write, so the likely cause is host filesystem permissions or ACLs.\n' "$NEXTCLOUD_MOUNT_PATH" >&2
+      fi
+      die "Bidirectional write verification failed."
+    fi
+  else
+    info "Skipping active write test because read-only mode was selected."
   fi
 fi
 
@@ -362,11 +574,7 @@ MOUNT_ROW_JSON="$(nextcloud_external_mount_record_json "$NEXTCLOUD_CONTAINER_NAM
 if [ -n "$MOUNT_ROW_JSON" ]; then
   MOUNT_ID="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "mount_id" 2>/dev/null || true)"
   EXISTING_MOUNT_POINT="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "mount_point" 2>/dev/null || true)"
-  if [ "$EXISTING_MOUNT_POINT" != "$NEXTCLOUD_STORAGE_MOUNT_POINT" ] && [ -n "$EXISTING_MOUNT_POINT" ]; then
-    warn "A Nextcloud external storage entry for ${NEXTCLOUD_MOUNT_PATH} already exists at ${EXISTING_MOUNT_POINT}. Reusing it instead of creating a duplicate."
-  else
-    info "Nextcloud external storage ${NEXTCLOUD_STORAGE_NAME} already exists."
-  fi
+  info "Nextcloud external storage ${NEXTCLOUD_STORAGE_NAME} already exists at ${EXISTING_MOUNT_POINT:-${NEXTCLOUD_STORAGE_MOUNT_POINT}}."
 else
   nextcloud_occ \
     "$NEXTCLOUD_CONTAINER_NAME" \
@@ -413,4 +621,4 @@ printf 'Nextcloud compose service name: %s\n' "$NEXTCLOUD_APP_SERVICE_NAME"
 printf 'Nextcloud container name: %s\n' "$NEXTCLOUD_CONTAINER_NAME"
 printf 'External storage name: %s\n' "$NEXTCLOUD_STORAGE_NAME"
 printf 'Group name: %s\n' "$NEXTCLOUD_GROUP_NAME"
-printf 'Access mode: read-only\n'
+printf 'Access mode: %s\n' "$(access_mode_label "$REQUESTED_MODE")"

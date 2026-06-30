@@ -4,6 +4,34 @@ nextcloud_link_mount_root() {
   printf '%s\n' "/mnt/tinymrp-deliverables"
 }
 
+normalize_nextcloud_access_mode() {
+  case "$1" in
+    ro|read-only|readonly)
+      printf '%s\n' "ro"
+      ;;
+    rw|read-write|readwrite|bidirectional)
+      printf '%s\n' "rw"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+nextcloud_access_mode_label() {
+  case "$1" in
+    ro)
+      printf '%s\n' "read-only"
+      ;;
+    rw)
+      printf '%s\n' "bidirectional/read-write"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
 nextcloud_group_name_for_instance() {
   printf 'tinymrp-%s\n' "$1"
 }
@@ -20,7 +48,15 @@ nextcloud_mount_path_for_instance() {
   printf '%s/%s\n' "$(nextcloud_link_mount_root)" "$1"
 }
 
+nextcloud_user_override_file() {
+  printf '%s\n' "$(nextcloud_dir)/compose.override.yml"
+}
+
 nextcloud_override_file() {
+  printf '%s\n' "$(nextcloud_dir)/compose.tinymrp-deliverables.override.yml"
+}
+
+nextcloud_legacy_managed_override_file() {
   printf '%s\n' "$(nextcloud_dir)/compose.override.yml"
 }
 
@@ -310,12 +346,28 @@ PY
 
 nextcloud_compose_services() {
   local root_dir="${1:-$(nextcloud_dir)}"
+  {
+    nextcloud_compose_in_dir "$root_dir" ps --services 2>/dev/null || true
+    nextcloud_compose_in_dir "$root_dir" config --services 2>/dev/null || true
+  } | awk 'NF && !seen[$0]++'
+}
+
+nextcloud_compose_in_dir() {
+  local root_dir="${1:-$(nextcloud_dir)}"
+  shift || true
+  local -a compose_args=()
+
+  compose_args+=(-f "$(nextcloud_compose_file)")
+  if [ -f "$(nextcloud_user_override_file)" ]; then
+    compose_args+=(-f "$(nextcloud_user_override_file)")
+  fi
+  if [ -f "$(nextcloud_override_file)" ]; then
+    compose_args+=(-f "$(nextcloud_override_file)")
+  fi
+
   (
     cd "$root_dir" >/dev/null 2>&1 || exit 1
-    {
-      docker_compose ps --services 2>/dev/null || true
-      docker_compose config --services 2>/dev/null || true
-    } | awk 'NF && !seen[$0]++'
+    docker_compose "${compose_args[@]}" "$@"
   )
 }
 

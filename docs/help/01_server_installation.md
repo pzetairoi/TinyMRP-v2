@@ -122,7 +122,30 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company1
 sudo ./deploy/scripts/link-nextcloud-instance.sh company2
 ```
 
-This keeps TinyMRP as the storage owner. Deliverables stay under `/srv/tinymrp/instances/<instance>/deliverables`, Nextcloud mounts them read-only under `/mnt/tinymrp-deliverables/<instance>`, and the default Caddy deployment keeps `FILES_ACCEL_REDIRECT_PREFIX=""`.
+This keeps TinyMRP as the storage owner. Deliverables stay under `/srv/tinymrp/instances/<instance>/deliverables`, the script writes a managed `/srv/tinymrp/nextcloud/compose.tinymrp-deliverables.override.yml`, and the default Caddy deployment keeps `FILES_ACCEL_REDIRECT_PREFIX=""`.
+
+The link script now asks which mode to use unless you pass a flag:
+
+- Read-only is the default and safest option. Nextcloud can view, download, and share deliverables, but cannot change them.
+- Bidirectional mode is needed for trusted Windows or Mac Nextcloud desktop-client workflows that must upload or sync files back into the VPS deliverables folder.
+- Bidirectional mode is higher risk because Nextcloud users can modify or delete TinyMRP deliverables.
+
+Recommended default:
+
+- use read-only for customer sharing and downloads
+- use bidirectional only for trusted internal sync workflows
+
+Examples:
+
+```bash
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+```
+
+`--non-interactive` requires either `--read-only` or `--bidirectional`.
 
 ## Updating And Rollback
 
