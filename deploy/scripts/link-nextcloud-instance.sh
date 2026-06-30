@@ -18,12 +18,129 @@ Examples:
 EOF
 }
 
-ensure_nextcloud_app_ready() {
-  local compose_file="$1"
+nextcloud_compose_override_has_substantive_content() {
+  local override_file="$1"
+  [ -f "$override_file" ] || return 1
+  grep -Eq '^[[:space:]]*[^#[:space:]]' "$override_file"
+}
+
+nextcloud_compose_override_is_managed() {
+  local override_file="$1"
+  [ -f "$override_file" ] || return 1
+  grep -Fqx "$(nextcloud_override_marker)" "$override_file"
+}
+
+backup_file_with_timestamp() {
+  local file_path="$1"
+  local backup_path=""
+
+  [ -f "$file_path" ] || return 1
+  backup_path="${file_path}.bak.$(date +%Y%m%d-%H%M%S)"
+  cp "$file_path" "$backup_path"
+  printf '%s\n' "$backup_path"
+}
+
+count_nextcloud_links() {
+  local count=0
+  local link_file=""
+
+  while IFS= read -r link_file; do
+    [ -f "$link_file" ] || continue
+    count=$((count + 1))
+  done < <(iter_nextcloud_link_files)
+
+  printf '%s\n' "$count"
+}
+
+render_nextcloud_managed_override() {
+  local app_service_name="$1"
+
+  cat <<EOF
+$(nextcloud_override_marker)
+services:
+  ${app_service_name}:
+    volumes:
+EOF
+  render_nextcloud_link_mounts
+}
+
+write_nextcloud_managed_override_file() {
+  local override_file="$1"
+  local app_service_name="$2"
+  local link_count=0
+  local tmp_file=""
+  local backup_path=""
+
+  link_count="$(count_nextcloud_links)"
+
+  if [ -f "$override_file" ] \
+    && ! nextcloud_compose_override_is_managed "$override_file" \
+    && nextcloud_compose_override_has_substantive_content "$override_file"; then
+    return 2
+  fi
+
+  if [ "$link_count" -eq 0 ]; then
+    if [ -f "$override_file" ] && nextcloud_compose_override_is_managed "$override_file"; then
+      backup_path="$(backup_file_with_timestamp "$override_file" || true)"
+      rm -f "$override_file"
+      if [ -n "$backup_path" ]; then
+        info "Backed up ${override_file} to ${backup_path} before removing the managed override."
+      fi
+      return 0
+    fi
+    return 1
+  fi
+
+  tmp_file="$(mktemp)"
+  render_nextcloud_managed_override "$app_service_name" >"$tmp_file"
+
+  if [ -f "$override_file" ] && cmp -s "$tmp_file" "$override_file"; then
+    rm -f "$tmp_file"
+    return 1
+  fi
+
+  if [ -f "$override_file" ]; then
+    backup_path="$(backup_file_with_timestamp "$override_file" || true)"
+    if [ -n "$backup_path" ]; then
+      info "Backed up ${override_file} to ${backup_path} before updating the managed override."
+    fi
+  fi
+
+  mv "$tmp_file" "$override_file"
+  return 0
+}
+
+nextcloud_compose() {
+  (
+    cd "$(nextcloud_dir)" >/dev/null 2>&1 || exit 1
+    docker_compose "$@"
+  )
+}
+
+container_mount_source_for_path() {
+  local container_name="$1"
+  local destination="$2"
+  docker inspect -f "{{range .Mounts}}{{if eq .Destination \"$destination\"}}{{println .Source}}{{end}}{{end}}" "$container_name" 2>/dev/null | head -n 1
+}
+
+container_mount_rw_for_path() {
+  local container_name="$1"
+  local destination="$2"
+  docker inspect -f "{{range .Mounts}}{{if eq .Destination \"$destination\"}}{{println .RW}}{{end}}{{end}}" "$container_name" 2>/dev/null | head -n 1
+}
+
+nextcloud_mount_visible_in_container() {
+  local container_name="$1"
+  local mount_path="$2"
+  docker exec "$container_name" sh -lc 'target="$1"; test -d "$target"' sh "$mount_path" >/dev/null 2>&1
+}
+
+ensure_nextcloud_app_service_ready() {
+  local app_service_name="$1"
   local app_container_name="$2"
 
-  docker_compose_file "$compose_file" config -q
-  docker_compose_file "$compose_file" up -d --no-deps app
+  nextcloud_compose config -q
+  nextcloud_compose up -d "$app_service_name"
   wait_for_container_ready "$app_container_name" 300 || die "Nextcloud app container ${app_container_name} failed to become ready."
 }
 
@@ -67,26 +184,16 @@ INSTANCE_DELIVERABLES="${INSTANCE_ROOT}/deliverables"
 NEXTCLOUD_ROOT="$(nextcloud_dir)"
 NEXTCLOUD_ENV="$(nextcloud_env_file)"
 NEXTCLOUD_COMPOSE="$(nextcloud_compose_file)"
+NEXTCLOUD_OVERRIDE="$(nextcloud_override_file)"
+NEXTCLOUD_LINK_FILE="$(nextcloud_link_file "$INSTANCE_NAME")"
 NEXTCLOUD_MOUNT_PATH="$(nextcloud_mount_path_for_instance "$INSTANCE_NAME")"
 NEXTCLOUD_GROUP_NAME="$(nextcloud_group_name_for_instance "$INSTANCE_NAME")"
 NEXTCLOUD_STORAGE_NAME="$(nextcloud_storage_name_for_instance "$INSTANCE_NAME")"
 NEXTCLOUD_STORAGE_MOUNT_POINT="$(nextcloud_storage_mount_point_for_instance "$INSTANCE_NAME")"
-NEXTCLOUD_LINK_FILE="$(nextcloud_link_file "$INSTANCE_NAME")"
 
 [ -d "$NEXTCLOUD_ROOT" ] || die "Nextcloud is not installed under ${NEXTCLOUD_ROOT}"
 [ -f "$NEXTCLOUD_ENV" ] || die "Nextcloud env file not found at ${NEXTCLOUD_ENV}"
 [ -f "$NEXTCLOUD_COMPOSE" ] || die "Nextcloud compose file not found at ${NEXTCLOUD_COMPOSE}"
-
-unset NEXTCLOUD_CONTAINER_NAME NEXTCLOUD_DB_CONTAINER NEXTCLOUD_PROJECT_NAME NEXTCLOUD_PRIVATE_NETWORK
-load_env_file "$NEXTCLOUD_ENV"
-NEXTCLOUD_CONTAINER_NAME="${NEXTCLOUD_CONTAINER_NAME:-tinymrp-nextcloud-app}"
-NEXTCLOUD_DB_CONTAINER="${NEXTCLOUD_DB_CONTAINER:-tinymrp-nextcloud-db}"
-NEXTCLOUD_PROJECT_NAME="${NEXTCLOUD_PROJECT_NAME:-tinymrp-nextcloud}"
-NEXTCLOUD_PRIVATE_NETWORK="${NEXTCLOUD_PRIVATE_NETWORK:-tinymrp-nextcloud}"
-NEXTCLOUD_CONTAINER_NAME="$(resolve_nextcloud_app_container_name || true)"
-[ -n "$NEXTCLOUD_CONTAINER_NAME" ] || die "Unable to resolve the Nextcloud app container name."
-
-ensure_nextcloud_links_dir
 
 if [ "$REMOVE_LINK" -eq 0 ]; then
   [ -d "$INSTANCE_ROOT" ] || die "TinyMRP instance not found: ${INSTANCE_ROOT}"
@@ -96,6 +203,22 @@ elif [ ! -d "$INSTANCE_ROOT" ]; then
 elif [ ! -d "$INSTANCE_DELIVERABLES" ]; then
   warn "Instance deliverables folder ${INSTANCE_DELIVERABLES} does not exist. Continuing with Nextcloud cleanup only."
 fi
+
+unset NEXTCLOUD_CONTAINER_NAME
+load_env_file "$NEXTCLOUD_ENV"
+NEXTCLOUD_CONTAINER_NAME="$(resolve_nextcloud_app_container_name || true)"
+[ -n "$NEXTCLOUD_CONTAINER_NAME" ] || die "Unable to resolve the Nextcloud app container name."
+
+NEXTCLOUD_APP_SERVICE_NAME="$(resolve_nextcloud_app_service_name "$NEXTCLOUD_ROOT" "$NEXTCLOUD_CONTAINER_NAME" || true)"
+[ -n "$NEXTCLOUD_APP_SERVICE_NAME" ] || die "Unable to resolve the Nextcloud Docker Compose app service name from ${NEXTCLOUD_ROOT}."
+
+if NEXTCLOUD_ADMIN_USER_NAME="$(read_nextcloud_admin_user)"; then
+  :
+else
+  warn "No Nextcloud admin user variable was found in ${NEXTCLOUD_ENV}. Falling back to admin."
+fi
+
+ensure_nextcloud_links_dir
 
 if [ "$REMOVE_LINK" -eq 0 ]; then
   if write_nextcloud_link_file \
@@ -118,17 +241,82 @@ else
   fi
 fi
 
-write_nextcloud_compose_file \
-  "$NEXTCLOUD_COMPOSE" \
-  "$NEXTCLOUD_ENV" \
-  "${NEXTCLOUD_CONTAINER_NAME}" \
-  "${NEXTCLOUD_DB_CONTAINER}" \
-  "${NEXTCLOUD_ROOT}/html" \
-  "${NEXTCLOUD_ROOT}/db" \
-  "${NEXTCLOUD_PROJECT_NAME}" \
-  "${NEXTCLOUD_PRIVATE_NETWORK}"
+CURRENT_MOUNT_SOURCE="$(container_mount_source_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")"
+CURRENT_MOUNT_RW="$(container_mount_rw_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")"
+CURRENT_MOUNT_VISIBLE=0
+if nextcloud_mount_visible_in_container "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
+  CURRENT_MOUNT_VISIBLE=1
+fi
 
-ensure_nextcloud_app_ready "$NEXTCLOUD_COMPOSE" "$NEXTCLOUD_CONTAINER_NAME"
+OVERRIDE_CHANGED=0
+OVERRIDE_SAFE=1
+USE_EXISTING_DOCKER_MOUNT=0
+if [ "$REMOVE_LINK" -eq 0 ] \
+  && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ] \
+  && [ "$CURRENT_MOUNT_RW" = "false" ] \
+  && [ ! -f "$NEXTCLOUD_OVERRIDE" ]; then
+  USE_EXISTING_DOCKER_MOUNT=1
+  warn "The Nextcloud app container already has the expected read-only deliverables mount. Leaving Compose files untouched to avoid creating a duplicate mount."
+fi
+
+if [ "$USE_EXISTING_DOCKER_MOUNT" -eq 0 ]; then
+  WRITE_OVERRIDE_STATUS=0
+  write_nextcloud_managed_override_file "$NEXTCLOUD_OVERRIDE" "$NEXTCLOUD_APP_SERVICE_NAME" || WRITE_OVERRIDE_STATUS=$?
+  case "$WRITE_OVERRIDE_STATUS" in
+    0)
+      OVERRIDE_CHANGED=1
+      ;;
+    1)
+      ;;
+    2)
+      OVERRIDE_SAFE=0
+      ;;
+    *)
+      die "Failed to update ${NEXTCLOUD_OVERRIDE}."
+      ;;
+  esac
+fi
+
+if [ "$OVERRIDE_SAFE" -eq 0 ]; then
+  if [ "$REMOVE_LINK" -eq 0 ] && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ] && [ "$CURRENT_MOUNT_RW" = "false" ]; then
+    warn "${NEXTCLOUD_OVERRIDE} contains unmanaged content. Reusing the existing Docker mount and leaving the override untouched."
+  elif [ "$REMOVE_LINK" -eq 0 ] && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ]; then
+    die "${NEXTCLOUD_OVERRIDE} contains unmanaged content and the existing Docker mount for ${NEXTCLOUD_MOUNT_PATH} is not read-only."
+  elif [ "$REMOVE_LINK" -eq 1 ]; then
+    warn "${NEXTCLOUD_OVERRIDE} contains unmanaged content. The Nextcloud external storage entry will be removed, but the Docker override file was not changed."
+  else
+    die "${NEXTCLOUD_OVERRIDE} contains unmanaged content and the expected mount is not already present. Refusing to overwrite unrelated Docker Compose override content."
+  fi
+fi
+
+NEEDS_APP_RECREATE=0
+if [ "$OVERRIDE_CHANGED" -eq 1 ] \
+  || { [ -f "$NEXTCLOUD_OVERRIDE" ] && [ "$CURRENT_MOUNT_SOURCE" != "$INSTANCE_DELIVERABLES" ]; } \
+  || { [ -f "$NEXTCLOUD_OVERRIDE" ] && [ "$CURRENT_MOUNT_RW" != "false" ] && [ "$REMOVE_LINK" -eq 0 ]; } \
+  || { [ "$REMOVE_LINK" -eq 0 ] && [ "$CURRENT_MOUNT_VISIBLE" -eq 0 ]; } \
+  || { [ "$REMOVE_LINK" -eq 1 ] && [ -f "$NEXTCLOUD_OVERRIDE" ] && [ "$CURRENT_MOUNT_SOURCE" = "$INSTANCE_DELIVERABLES" ]; }; then
+  NEEDS_APP_RECREATE=1
+fi
+
+if [ "$NEEDS_APP_RECREATE" -eq 1 ] && [ "$OVERRIDE_SAFE" -eq 1 ] && [ "$USE_EXISTING_DOCKER_MOUNT" -eq 0 ]; then
+  ensure_nextcloud_app_service_ready "$NEXTCLOUD_APP_SERVICE_NAME" "$NEXTCLOUD_CONTAINER_NAME"
+fi
+
+if [ "$REMOVE_LINK" -eq 0 ]; then
+  if ! nextcloud_mount_visible_in_container "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
+    printf 'FAIL: Nextcloud mount is not visible inside %s at %s\n' "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH" >&2
+    die "Nextcloud app container does not expose ${NEXTCLOUD_MOUNT_PATH}."
+  fi
+
+  if [ "$(container_mount_source_for_path "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH")" != "$INSTANCE_DELIVERABLES" ]; then
+    printf 'FAIL: Nextcloud mount source for %s is not %s\n' "$NEXTCLOUD_MOUNT_PATH" "$INSTANCE_DELIVERABLES" >&2
+    die "Nextcloud app container is not using the expected host deliverables bind mount."
+  fi
+else
+  if [ "$OVERRIDE_SAFE" -eq 1 ] && nextcloud_mount_visible_in_container "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_MOUNT_PATH"; then
+    warn "Nextcloud mount ${NEXTCLOUD_MOUNT_PATH} is still visible after unlink. Inspect ${NEXTCLOUD_OVERRIDE} and the active Compose files."
+  fi
+fi
 
 if [ "$REMOVE_LINK" -eq 1 ]; then
   EXISTING_MOUNT_ID="$(nextcloud_external_mount_id "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_STORAGE_MOUNT_POINT" "$NEXTCLOUD_MOUNT_PATH" || true)"
@@ -143,7 +331,8 @@ if [ "$REMOVE_LINK" -eq 1 ]; then
   printf 'Instance unlinked: %s\n' "$INSTANCE_NAME"
   printf 'Host deliverables path: %s\n' "$INSTANCE_DELIVERABLES"
   printf 'Nextcloud mount path removed: %s\n' "$NEXTCLOUD_MOUNT_PATH"
-  printf 'Storage name removed: %s\n' "$NEXTCLOUD_STORAGE_NAME"
+  printf 'Nextcloud compose service name: %s\n' "$NEXTCLOUD_APP_SERVICE_NAME"
+  printf 'Nextcloud container name: %s\n' "$NEXTCLOUD_CONTAINER_NAME"
   exit 0
 fi
 
@@ -157,22 +346,28 @@ else
   info "Created Nextcloud group ${NEXTCLOUD_GROUP_NAME}."
 fi
 
+if nextcloud_user_exists "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_ADMIN_USER_NAME"; then
+  if nextcloud_group_has_user "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_GROUP_NAME" "$NEXTCLOUD_ADMIN_USER_NAME"; then
+    info "Nextcloud admin user ${NEXTCLOUD_ADMIN_USER_NAME} is already a member of ${NEXTCLOUD_GROUP_NAME}."
+  elif nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" group:adduser "$NEXTCLOUD_GROUP_NAME" "$NEXTCLOUD_ADMIN_USER_NAME" >/dev/null; then
+    info "Added ${NEXTCLOUD_ADMIN_USER_NAME} to ${NEXTCLOUD_GROUP_NAME}."
+  else
+    warn "Could not add ${NEXTCLOUD_ADMIN_USER_NAME} to ${NEXTCLOUD_GROUP_NAME}."
+  fi
+else
+  warn "Nextcloud user ${NEXTCLOUD_ADMIN_USER_NAME} does not exist, so it could not be added to ${NEXTCLOUD_GROUP_NAME}."
+fi
+
 MOUNT_ROW_JSON="$(nextcloud_external_mount_record_json "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_STORAGE_MOUNT_POINT" "$NEXTCLOUD_MOUNT_PATH" 2>/dev/null || true)"
 if [ -n "$MOUNT_ROW_JSON" ]; then
-  EXISTING_MOUNT_ID="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "mount_id" 2>/dev/null || true)"
+  MOUNT_ID="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "mount_id" 2>/dev/null || true)"
   EXISTING_MOUNT_POINT="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "mount_point" 2>/dev/null || true)"
+  if [ "$EXISTING_MOUNT_POINT" != "$NEXTCLOUD_STORAGE_MOUNT_POINT" ] && [ -n "$EXISTING_MOUNT_POINT" ]; then
+    warn "A Nextcloud external storage entry for ${NEXTCLOUD_MOUNT_PATH} already exists at ${EXISTING_MOUNT_POINT}. Reusing it instead of creating a duplicate."
+  else
+    info "Nextcloud external storage ${NEXTCLOUD_STORAGE_NAME} already exists."
+  fi
 else
-  EXISTING_MOUNT_ID=""
-  EXISTING_MOUNT_POINT=""
-fi
-
-if [ -n "$EXISTING_MOUNT_ID" ] && [ -n "$EXISTING_MOUNT_POINT" ] && [ "$EXISTING_MOUNT_POINT" != "$NEXTCLOUD_STORAGE_MOUNT_POINT" ]; then
-  warn "Nextcloud storage for ${INSTANCE_NAME} already exists at ${EXISTING_MOUNT_POINT}. Recreating it at ${NEXTCLOUD_STORAGE_MOUNT_POINT}."
-  nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:delete "$EXISTING_MOUNT_ID" --yes >/dev/null
-  EXISTING_MOUNT_ID=""
-fi
-
-if [ -z "$EXISTING_MOUNT_ID" ]; then
   nextcloud_occ \
     "$NEXTCLOUD_CONTAINER_NAME" \
     files_external:create \
@@ -183,74 +378,39 @@ if [ -z "$EXISTING_MOUNT_ID" ]; then
   info "Created Nextcloud external storage ${NEXTCLOUD_STORAGE_NAME}."
   MOUNT_ID="$(nextcloud_external_mount_id "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_STORAGE_MOUNT_POINT" "$NEXTCLOUD_MOUNT_PATH" || true)"
   [ -n "$MOUNT_ID" ] || die "Nextcloud storage was created but its mount ID could not be resolved."
-else
-  MOUNT_ID="$EXISTING_MOUNT_ID"
-  info "Nextcloud external storage ${NEXTCLOUD_STORAGE_NAME} is already configured."
 fi
 
-CURRENT_DATADIR="$(nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:config "$MOUNT_ID" get datadir 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
-if [ "$CURRENT_DATADIR" != "$NEXTCLOUD_MOUNT_PATH" ]; then
-  nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:config "$MOUNT_ID" set datadir "$NEXTCLOUD_MOUNT_PATH" >/dev/null
-  info "Updated Nextcloud external storage path to ${NEXTCLOUD_MOUNT_PATH}."
+GROUP_RESTRICTION_VERIFIED=0
+if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:applicable "$MOUNT_ID" --add-group "$NEXTCLOUD_GROUP_NAME" >/dev/null 2>&1; then
+  UPDATED_MOUNT_ROW_JSON="$(nextcloud_external_mount_record_json "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_STORAGE_MOUNT_POINT" "$NEXTCLOUD_MOUNT_PATH" 2>/dev/null || true)"
+  UPDATED_MOUNT_GROUPS=""
+  if [ -n "$UPDATED_MOUNT_ROW_JSON" ]; then
+    UPDATED_MOUNT_GROUPS="$(nextcloud_external_mount_row_field "$UPDATED_MOUNT_ROW_JSON" "applicable_groups" 2>/dev/null || true)"
+  fi
+  if [ -n "$UPDATED_MOUNT_GROUPS" ] && nextcloud_external_mount_list_contains "$UPDATED_MOUNT_GROUPS" "$NEXTCLOUD_GROUP_NAME"; then
+    GROUP_RESTRICTION_VERIFIED=1
+    info "Restricted Nextcloud external storage to ${NEXTCLOUD_GROUP_NAME}."
+  fi
 fi
 
-if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:option "$MOUNT_ID" set readonly true >/dev/null; then
-  info "Marked Nextcloud external storage ${MOUNT_ID} as read-only."
-else
-  warn "Nextcloud did not confirm the external-storage readonly option for mount ${MOUNT_ID}. The Docker bind mount is still read-only."
+if [ "$GROUP_RESTRICTION_VERIFIED" -eq 0 ]; then
+  warn "Group restriction could not be verified reliably for ${NEXTCLOUD_STORAGE_NAME}. Leaving the storage visible to ${NEXTCLOUD_ADMIN_USER_NAME} only when possible."
+  if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:applicable "$MOUNT_ID" --add-user "$NEXTCLOUD_ADMIN_USER_NAME" >/dev/null 2>&1; then
+    info "Added ${NEXTCLOUD_ADMIN_USER_NAME} as an explicit applicable user for ${NEXTCLOUD_STORAGE_NAME}."
+  else
+    warn "Could not add ${NEXTCLOUD_ADMIN_USER_NAME} as an explicit applicable user for ${NEXTCLOUD_STORAGE_NAME}."
+  fi
 fi
 
-MOUNT_ROW_JSON="$(nextcloud_external_mount_record_json "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_STORAGE_MOUNT_POINT" "$NEXTCLOUD_MOUNT_PATH" 2>/dev/null || true)"
-CURRENT_USERS=""
-CURRENT_GROUPS=""
-if [ -n "$MOUNT_ROW_JSON" ]; then
-  CURRENT_USERS="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "applicable_users" 2>/dev/null || true)"
-  CURRENT_GROUPS="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "applicable_groups" 2>/dev/null || true)"
-fi
-
-if [ -n "$CURRENT_USERS" ] && nextcloud_external_mount_list_has_entries "$CURRENT_USERS"; then
-  IFS=',' read -r -a CURRENT_USER_ITEMS <<<"$CURRENT_USERS"
-  for current_user in "${CURRENT_USER_ITEMS[@]}"; do
-    current_user="$(trim "$current_user")"
-    if [ -z "$current_user" ] || [[ "$(lower "$current_user")" == all* ]]; then
-      continue
-    fi
-    nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:applicable "$MOUNT_ID" --remove-user "$current_user" >/dev/null || true
-  done
-fi
-
-if [ -n "$CURRENT_GROUPS" ] && nextcloud_external_mount_list_has_entries "$CURRENT_GROUPS"; then
-  IFS=',' read -r -a CURRENT_GROUP_ITEMS <<<"$CURRENT_GROUPS"
-  for current_group in "${CURRENT_GROUP_ITEMS[@]}"; do
-    current_group="$(trim "$current_group")"
-    if [ -z "$current_group" ] || [[ "$(lower "$current_group")" == all* ]] || [ "$current_group" = "$NEXTCLOUD_GROUP_NAME" ]; then
-      continue
-    fi
-    nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:applicable "$MOUNT_ID" --remove-group "$current_group" >/dev/null || true
-  done
-fi
-
-if [ -z "$CURRENT_GROUPS" ] || ! nextcloud_external_mount_list_contains "$CURRENT_GROUPS" "$NEXTCLOUD_GROUP_NAME"; then
-  nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:applicable "$MOUNT_ID" --add-group "$NEXTCLOUD_GROUP_NAME" >/dev/null
-fi
-
-if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:verify "$MOUNT_ID" >/dev/null; then
-  info "Nextcloud verified external storage mount ${MOUNT_ID}."
-else
-  warn "Nextcloud reported a verification issue for mount ${MOUNT_ID}. Continuing to file scan."
-fi
-
-if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:scan "$MOUNT_ID" >/dev/null; then
-  info "Scanned Nextcloud external storage mount ${MOUNT_ID}."
-else
-  warn "Targeted external storage scan failed for mount ${MOUNT_ID}. Falling back to a full Nextcloud file scan."
-  nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files:scan --all >/dev/null
-fi
+nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files:scan --all >/dev/null
+info "Completed Nextcloud file scan."
 
 printf 'Nextcloud link complete.\n'
-printf 'Instance linked: %s\n' "$INSTANCE_NAME"
+printf 'Instance name: %s\n' "$INSTANCE_NAME"
 printf 'Host deliverables path: %s\n' "$INSTANCE_DELIVERABLES"
 printf 'Nextcloud mount path: %s\n' "$NEXTCLOUD_MOUNT_PATH"
-printf 'Nextcloud group: %s\n' "$NEXTCLOUD_GROUP_NAME"
-printf 'Storage name: %s\n' "$NEXTCLOUD_STORAGE_NAME"
+printf 'Nextcloud compose service name: %s\n' "$NEXTCLOUD_APP_SERVICE_NAME"
+printf 'Nextcloud container name: %s\n' "$NEXTCLOUD_CONTAINER_NAME"
+printf 'External storage name: %s\n' "$NEXTCLOUD_STORAGE_NAME"
+printf 'Group name: %s\n' "$NEXTCLOUD_GROUP_NAME"
 printf 'Access mode: read-only\n'
