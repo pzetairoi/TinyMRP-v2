@@ -18,6 +18,8 @@ The scripts live in `deploy/scripts/`:
 - `create-instance.sh`
 - `install-nextcloud-instance.sh`
 - `install-nextcloud.sh`
+- `scan-nextcloud-instance.sh`
+- `install-nextcloud-scan-job.sh`
 - `link-nextcloud-instance.sh`
 - `doctor.sh`
 - `update-repo.sh`
@@ -254,10 +256,18 @@ What it does:
 - adds the configured Nextcloud admin user to that group
 - creates or updates the external local storage entry `TinyMRP - <instance> Deliverables`
 - points the storage to `/mnt/tinymrp-deliverables/<instance>`
-- runs `php occ files:scan --all`
+- runs an immediate Nextcloud scan after linking
+- installs or updates a recurring Nextcloud scan job by default
 - verifies the mount from inside the Nextcloud container
 - verifies the requested read-only or bidirectional mount mode
 - installs `acl` and applies ACLs for UID `1000` and UID `33` only when bidirectional mode is requested
+
+Why the recurring scan job matters:
+
+- TinyMRP writes deliverables directly into `/srv/tinymrp/instances/<instance>/deliverables`
+- Nextcloud external storage keeps its own filecache
+- without a recurring scan, server-side TinyMRP imports may not propagate to Nextcloud desktop clients until a manual `occ` scan runs
+- the default link flow now scans immediately and then keeps rescanning on a timer
 
 Access modes:
 
@@ -277,6 +287,10 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --scan-interval-minutes 5
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --scan-now-only --read-only --non-interactive
+sudo ./deploy/scripts/install-nextcloud-scan-job.sh company1 --interval-minutes 5
+sudo ./deploy/scripts/scan-nextcloud-instance.sh company1
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
 ```
 
@@ -347,6 +361,9 @@ It checks:
 - linked external storage entries and Nextcloud groups exist
 - the configured Nextcloud admin user belongs to the matching group
 - bidirectional mounts are writable from inside Nextcloud when enabled
+- recurring Nextcloud scan jobs exist for linked instances
+- recurring scan jobs point to the correct TinyMRP instance and Nextcloud instance
+- linked instances warn when server-side TinyMRP file changes may not propagate to desktop clients automatically
 - deliverables are not being mounted inside Nextcloud's internal data directory
 
 ## Legacy shared/global Nextcloud
@@ -526,6 +543,17 @@ After creating or updating an instance, run this regression check:
 4. Verify the app container sees the same files under `/data/deliverables`.
 5. Verify TinyMRP can display or download those files through the normal `/deliverables` route after import.
 6. Verify the response path does not depend on a `"/__files"` redirect in the default Caddy deployment.
+
+## Nextcloud server-side sync smoke test
+
+To verify TinyMRP server-side deliverables changes propagate into Nextcloud:
+
+1. Create a test file on the host:
+   `/srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test.txt`
+2. Run:
+   `sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance>`
+3. Verify the file appears in the linked Nextcloud external storage.
+4. If a desktop client is connected, verify it downloads the new file after the scan job runs.
 
 ## Recover an existing broken Caddy instance
 

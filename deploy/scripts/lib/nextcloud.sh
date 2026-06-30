@@ -147,6 +147,38 @@ nextcloud_link_file() {
   printf '%s\n' "$(nextcloud_links_dir)/$1.env"
 }
 
+nextcloud_scan_job_basename() {
+  local instance_name="$1"
+  local selector="${2:-$1}"
+  printf 'tinymrp-nextcloud-scan-%s-%s\n' "$(nextcloud_display_name "$selector")" "$instance_name"
+}
+
+nextcloud_scan_systemd_service_name() {
+  printf '%s.service\n' "$(nextcloud_scan_job_basename "$1" "${2:-$1}")"
+}
+
+nextcloud_scan_systemd_timer_name() {
+  printf '%s.timer\n' "$(nextcloud_scan_job_basename "$1" "${2:-$1}")"
+}
+
+nextcloud_scan_systemd_service_file() {
+  printf '/etc/systemd/system/%s\n' "$(nextcloud_scan_systemd_service_name "$1" "${2:-$1}")"
+}
+
+nextcloud_scan_systemd_timer_file() {
+  printf '/etc/systemd/system/%s\n' "$(nextcloud_scan_systemd_timer_name "$1" "${2:-$1}")"
+}
+
+nextcloud_scan_cron_file() {
+  printf '/etc/cron.d/%s\n' "$(nextcloud_scan_job_basename "$1" "${2:-$1}")"
+}
+
+nextcloud_scan_log_file() {
+  local instance_name="$1"
+  local selector="${2:-$1}"
+  printf '/var/log/tinymrp-nextcloud-scan-%s-%s.log\n' "$(nextcloud_display_name "$selector")" "$instance_name"
+}
+
 ensure_nextcloud_links_dir() {
   ensure_dir "$(nextcloud_links_dir)"
 }
@@ -173,6 +205,11 @@ NEXTCLOUD_GROUP_NAME="${nextcloud_group_name}"
 NEXTCLOUD_STORAGE_NAME="${storage_name}"
 NEXTCLOUD_STORAGE_MOUNT_POINT="${storage_mount_point}"
 LINK_ACCESS_MODE="${access_mode}"
+LINK_SCAN_ENABLED="false"
+LINK_SCAN_INTERVAL_MINUTES="5"
+LINK_LAST_SCAN_JOB_TYPE="manual"
+LINK_NEXTCLOUD_INSTANCE="${instance_name}"
+LINK_EXTERNAL_MOUNT_ID=""
 EOF
 
   if [ -f "$link_file" ] && cmp -s "$tmp_file" "$link_file"; then
@@ -182,6 +219,25 @@ EOF
 
   mv "$tmp_file" "$link_file"
   return 0
+}
+
+nextcloud_link_metadata_value() {
+  local instance_name="$1"
+  local key="$2"
+  local link_file=""
+
+  link_file="$(nextcloud_link_file "$instance_name")"
+  [ -f "$link_file" ] || return 1
+  unset INSTANCE_NAME HOST_DELIVERABLES_PATH NEXTCLOUD_MOUNT_PATH NEXTCLOUD_GROUP_NAME NEXTCLOUD_STORAGE_NAME NEXTCLOUD_STORAGE_MOUNT_POINT LINK_ACCESS_MODE LINK_SCAN_ENABLED LINK_SCAN_INTERVAL_MINUTES LINK_LAST_SCAN_JOB_TYPE LINK_NEXTCLOUD_INSTANCE LINK_EXTERNAL_MOUNT_ID
+  load_env_file "$link_file"
+  case "$key" in
+    INSTANCE_NAME|HOST_DELIVERABLES_PATH|NEXTCLOUD_MOUNT_PATH|NEXTCLOUD_GROUP_NAME|NEXTCLOUD_STORAGE_NAME|NEXTCLOUD_STORAGE_MOUNT_POINT|LINK_ACCESS_MODE|LINK_SCAN_ENABLED|LINK_SCAN_INTERVAL_MINUTES|LINK_LAST_SCAN_JOB_TYPE|LINK_NEXTCLOUD_INSTANCE|LINK_EXTERNAL_MOUNT_ID)
+      eval "printf '%s\n' \"\${${key}:-}\""
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 remove_nextcloud_link_file() {

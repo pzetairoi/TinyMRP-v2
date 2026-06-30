@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./deploy/scripts/link-nextcloud-instance.sh <instance_name> [--nextcloud-instance <name|global>] [--read-only|--bidirectional|--read-write] [--non-interactive] [--remove]
+  sudo ./deploy/scripts/link-nextcloud-instance.sh <instance_name> [--nextcloud-instance <name|global>] [--read-only|--bidirectional|--read-write] [--scan-interval-minutes <n>] [--no-scan-job|--scan-now-only] [--non-interactive] [--remove]
 
 Examples:
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs
@@ -18,6 +18,8 @@ Examples:
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --nextcloud-instance global --read-only --non-interactive
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --read-only
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --bidirectional
+  sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --scan-interval-minutes 5
+  sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --scan-now-only
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --non-interactive --read-only
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --remove
 EOF
@@ -282,6 +284,8 @@ REMOVE_LINK=0
 NON_INTERACTIVE=0
 REQUESTED_MODE=""
 MODE_FLAG_SOURCE=""
+SCAN_INTERVAL_MINUTES=5
+INSTALL_SCAN_JOB=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -303,6 +307,14 @@ while [ $# -gt 0 ]; do
     --bidirectional|--read-write)
       REQUESTED_MODE="rw"
       MODE_FLAG_SOURCE="flag"
+      shift
+      ;;
+    --scan-interval-minutes)
+      SCAN_INTERVAL_MINUTES="${2-}"
+      shift 2
+      ;;
+    --no-scan-job|--scan-now-only)
+      INSTALL_SCAN_JOB=0
       shift
       ;;
     --non-interactive)
@@ -328,6 +340,15 @@ done
 if [ -z "$INSTANCE_NAME" ]; then
   usage
   exit 1
+fi
+
+case "$SCAN_INTERVAL_MINUTES" in
+  ''|*[!0-9]*)
+    die "--scan-interval-minutes must be a positive integer."
+    ;;
+esac
+if [ "$SCAN_INTERVAL_MINUTES" -lt 1 ]; then
+  die "--scan-interval-minutes must be at least 1."
 fi
 
 if [ "$REMOVE_LINK" -eq 1 ] && [ -n "$REQUESTED_MODE" ]; then
@@ -632,8 +653,21 @@ if [ "$GROUP_RESTRICTION_VERIFIED" -eq 0 ]; then
   fi
 fi
 
-nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files:scan --all >/dev/null
-info "Completed Nextcloud file scan."
+upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_NEXTCLOUD_INSTANCE" "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")"
+upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_SCAN_ENABLED" "$([ "$INSTALL_SCAN_JOB" -eq 1 ] && printf true || printf false)"
+upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_SCAN_INTERVAL_MINUTES" "$SCAN_INTERVAL_MINUTES"
+upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_LAST_SCAN_JOB_TYPE" "$([ "$INSTALL_SCAN_JOB" -eq 1 ] && printf pending || printf manual)"
+upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_EXTERNAL_MOUNT_ID" "${MOUNT_ID:-}"
+
+"${SCRIPT_DIR}/scan-nextcloud-instance.sh" "$INSTANCE_NAME" --nextcloud-instance "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")"
+info "Completed immediate Nextcloud scan for ${INSTANCE_NAME}."
+
+if [ "$INSTALL_SCAN_JOB" -eq 1 ]; then
+  "${SCRIPT_DIR}/install-nextcloud-scan-job.sh" "$INSTANCE_NAME" --nextcloud-instance "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")" --interval-minutes "$SCAN_INTERVAL_MINUTES"
+  info "Installed recurring Nextcloud scan job for ${INSTANCE_NAME}."
+else
+  note "Recurring Nextcloud scan job was not installed. Server-side TinyMRP file changes may not propagate to desktop clients automatically."
+fi
 
 printf 'Nextcloud link complete.\n'
 printf 'Instance name: %s\n' "$INSTANCE_NAME"
@@ -646,3 +680,5 @@ printf 'Nextcloud container name: %s\n' "$NEXTCLOUD_CONTAINER_NAME"
 printf 'External storage name: %s\n' "$NEXTCLOUD_STORAGE_NAME"
 printf 'Group name: %s\n' "$NEXTCLOUD_GROUP_NAME"
 printf 'Access mode: %s\n' "$(access_mode_label "$REQUESTED_MODE")"
+printf 'Recurring scan job: %s\n' "$([ "$INSTALL_SCAN_JOB" -eq 1 ] && printf enabled || printf disabled)"
+printf 'Scan interval minutes: %s\n' "$SCAN_INTERVAL_MINUTES"
