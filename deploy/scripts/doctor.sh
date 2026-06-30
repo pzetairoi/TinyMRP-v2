@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib/common.sh"
 # shellcheck source=deploy/scripts/lib/nextcloud.sh
 . "${SCRIPT_DIR}/lib/nextcloud.sh"
+# shellcheck source=deploy/scripts/lib/update.sh
+. "${SCRIPT_DIR}/lib/update.sh"
 
 FAILURES=0
 WARNINGS=0
@@ -130,6 +132,42 @@ nextcloud_doctor_label() {
   else
     printf 'Nextcloud instance %s\n' "$selector"
   fi
+}
+
+systemd_timer_expected() {
+  local instance_name="$1"
+  local selector="$2"
+  local timer_name=""
+  timer_name="$(nextcloud_scan_systemd_timer_name "$instance_name" "$selector")"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 1
+  fi
+  if [ ! -f "$(nextcloud_scan_systemd_timer_file "$instance_name" "$selector")" ]; then
+    return 1
+  fi
+  systemctl is-enabled "$timer_name" >/dev/null 2>&1 || systemctl is-active "$timer_name" >/dev/null 2>&1
+}
+
+systemd_service_points_to_expected_scan() {
+  local instance_name="$1"
+  local selector="$2"
+  local expected_command="$3"
+  local service_file=""
+
+  service_file="$(nextcloud_scan_systemd_service_file "$instance_name" "$selector")"
+  [ -f "$service_file" ] || return 1
+  grep -Fq "$expected_command" "$service_file"
+}
+
+cron_job_points_to_expected_scan() {
+  local instance_name="$1"
+  local selector="$2"
+  local expected_command="$3"
+  local cron_file=""
+
+  cron_file="$(nextcloud_scan_cron_file "$instance_name" "$selector")"
+  [ -f "$cron_file" ] || return 1
+  grep -Fq "$expected_command" "$cron_file"
 }
 
 while [ $# -gt 0 ]; do
@@ -469,8 +507,16 @@ check_nextcloud_link() {
   local mount_users=""
   local expected_mode="ro"
   local admin_user_name=""
+  local scan_enabled="false"
+  local scan_interval="5"
+  local scan_job_type="manual"
+  local linked_selector=""
+  local host_repo_root=""
+  local expected_scan_command=""
+  local expected_mount_id=""
+  local actual_mount_id=""
 
-  unset INSTANCE_NAME HOST_DELIVERABLES_PATH NEXTCLOUD_MOUNT_PATH NEXTCLOUD_GROUP_NAME NEXTCLOUD_STORAGE_NAME NEXTCLOUD_STORAGE_MOUNT_POINT LINK_ACCESS_MODE
+  unset INSTANCE_NAME HOST_DELIVERABLES_PATH NEXTCLOUD_MOUNT_PATH NEXTCLOUD_GROUP_NAME NEXTCLOUD_STORAGE_NAME NEXTCLOUD_STORAGE_MOUNT_POINT LINK_ACCESS_MODE LINK_SCAN_ENABLED LINK_SCAN_INTERVAL_MINUTES LINK_LAST_SCAN_JOB_TYPE LINK_NEXTCLOUD_INSTANCE LINK_EXTERNAL_MOUNT_ID
   load_env_file "$link_file"
 
   if [ -z "${INSTANCE_NAME:-}" ] || [ -z "${HOST_DELIVERABLES_PATH:-}" ] || [ -z "${NEXTCLOUD_MOUNT_PATH:-}" ]; then
@@ -482,6 +528,13 @@ check_nextcloud_link() {
   NEXTCLOUD_STORAGE_NAME="${NEXTCLOUD_STORAGE_NAME:-$(nextcloud_storage_name_for_instance "$INSTANCE_NAME")}"
   NEXTCLOUD_STORAGE_MOUNT_POINT="${NEXTCLOUD_STORAGE_MOUNT_POINT:-$(nextcloud_storage_mount_point_for_instance "$INSTANCE_NAME")}"
   expected_mode="$(normalize_nextcloud_access_mode "${LINK_ACCESS_MODE:-ro}" 2>/dev/null || printf '%s' 'ro')"
+  scan_enabled="${LINK_SCAN_ENABLED:-false}"
+  scan_interval="${LINK_SCAN_INTERVAL_MINUTES:-5}"
+  scan_job_type="${LINK_LAST_SCAN_JOB_TYPE:-manual}"
+  linked_selector="${LINK_NEXTCLOUD_INSTANCE:-$(nextcloud_instance_name_for_root "$(nextcloud_dir)")}"
+  expected_mount_id="${LINK_EXTERNAL_MOUNT_ID:-}"
+  host_repo_root="${TINYMRP_REPO_ROOT:-$(repo_root)}"
+  expected_scan_command="${host_repo_root}/deploy/scripts/scan-nextcloud-instance.sh ${INSTANCE_NAME} --nextcloud-instance ${linked_selector}"
   if admin_user_name="$(read_nextcloud_admin_user)"; then
     :
   else
@@ -563,6 +616,15 @@ check_nextcloud_link() {
 
   pass "Nextcloud link ${INSTANCE_NAME}: external storage entry exists"
 
+  if [ -n "$expected_mount_id" ]; then
+    actual_mount_id="$(nextcloud_external_mount_row_field "$mount_row_json" "mount_id" 2>/dev/null || true)"
+    if [ -n "$actual_mount_id" ] && [ "$actual_mount_id" = "$expected_mount_id" ]; then
+      pass "Nextcloud link ${INSTANCE_NAME}: external storage mount ID matches link metadata"
+    elif [ -n "$actual_mount_id" ]; then
+      note "Nextcloud link ${INSTANCE_NAME}: external storage mount ID is ${actual_mount_id}, link metadata recorded ${expected_mount_id}"
+    fi
+  fi
+
   mount_groups="$(nextcloud_external_mount_row_field "$mount_row_json" "applicable_groups" 2>/dev/null || true)"
   mount_users="$(nextcloud_external_mount_row_field "$mount_row_json" "applicable_users" 2>/dev/null || true)"
 
@@ -578,6 +640,36 @@ check_nextcloud_link() {
 
   if [ -n "$mount_users" ] && nextcloud_external_mount_list_has_entries "$mount_users"; then
     note "Nextcloud link ${INSTANCE_NAME}: external storage also applies to ${mount_users}"
+  fi
+
+  if [ "$scan_enabled" = "true" ]; then
+    if [ "$scan_job_type" = "systemd" ]; then
+      if systemd_timer_expected "$INSTANCE_NAME" "$linked_selector"; then
+        pass "Nextcloud link ${INSTANCE_NAME}: recurring scan timer exists for ${linked_selector}"
+      else
+        note "Nextcloud link ${INSTANCE_NAME}: recurring systemd scan timer is missing or inactive for ${linked_selector}"
+      fi
+      if systemd_service_points_to_expected_scan "$INSTANCE_NAME" "$linked_selector" "$expected_scan_command"; then
+        pass "Nextcloud link ${INSTANCE_NAME}: scan service points to the correct TinyMRP and Nextcloud instances"
+      else
+        note "Nextcloud link ${INSTANCE_NAME}: scan service does not point to the expected TinyMRP or Nextcloud instance"
+      fi
+    elif [ "$scan_job_type" = "cron" ]; then
+      if cron_job_points_to_expected_scan "$INSTANCE_NAME" "$linked_selector" "$expected_scan_command"; then
+        pass "Nextcloud link ${INSTANCE_NAME}: recurring cron scan job points to the correct TinyMRP and Nextcloud instances"
+      else
+        note "Nextcloud link ${INSTANCE_NAME}: recurring cron scan job is missing or points to the wrong TinyMRP or Nextcloud instance"
+      fi
+      if [ -f "$(nextcloud_scan_log_file "$INSTANCE_NAME" "$linked_selector")" ]; then
+        pass "Nextcloud link ${INSTANCE_NAME}: scan log exists at $(nextcloud_scan_log_file "$INSTANCE_NAME" "$linked_selector")"
+      else
+        note "Nextcloud link ${INSTANCE_NAME}: scan log does not exist yet at $(nextcloud_scan_log_file "$INSTANCE_NAME" "$linked_selector")"
+      fi
+    else
+      note "Nextcloud link ${INSTANCE_NAME}: scan metadata says LINK_SCAN_ENABLED=true but LINK_LAST_SCAN_JOB_TYPE=${scan_job_type}"
+    fi
+  else
+    note "Nextcloud link ${INSTANCE_NAME}: no recurring scan job is recorded. Server-side TinyMRP file changes may not propagate to desktop clients automatically."
   fi
 }
 

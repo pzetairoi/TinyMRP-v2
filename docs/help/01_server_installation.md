@@ -125,6 +125,12 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company2 --read-only --non-inte
 
 This keeps TinyMRP as the storage owner. Deliverables stay under `/srv/tinymrp/instances/<instance>/deliverables`, each company Nextcloud lives under `/srv/tinymrp/nextcloud/<instance>/`, the link script writes a managed `compose.tinymrp-deliverables.override.yml` inside that Nextcloud root, and the default Caddy deployment keeps `FILES_ACCEL_REDIRECT_PREFIX=""`.
 
+The link flow now also handles Nextcloud external-storage rescans for server-side TinyMRP file changes:
+
+- it runs an immediate scan after linking
+- it installs a recurring scan job by default
+- this keeps TinyMRP import and upload-pack files visible to Nextcloud desktop clients without a manual `occ` scan
+
 The link script now asks which mode to use unless you pass a flag:
 
 - Read-only is the default and safest option. Nextcloud can view, download, and share deliverables, but cannot change them.
@@ -140,16 +146,26 @@ Examples:
 
 ```bash
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/scan-nextcloud-instance.sh company1
+sudo ./deploy/scripts/install-nextcloud-scan-job.sh company1 --interval-minutes 5
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --scan-now-only --read-only --non-interactive
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
 ```
 
 `--non-interactive` requires either `--read-only` or `--bidirectional`.
 
 Legacy shared/global Nextcloud is still available through `install-nextcloud.sh`, but it is not the recommended path for multi-company deployments and it is not re-domained automatically. If you intentionally keep using it, target it with `--nextcloud-instance global`.
+
+Server-side Nextcloud sync smoke test:
+
+1. Create `/srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test.txt` on the host.
+2. Run `sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance>`.
+3. Verify the file appears in the linked Nextcloud external storage.
+4. If a desktop client is connected, verify it downloads the file after the scan job runs.
 
 ## Updating And Rollback
 
