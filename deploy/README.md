@@ -16,6 +16,7 @@ The scripts live in `deploy/scripts/`:
 
 - `install-host.sh`
 - `create-instance.sh`
+- `install-nextcloud-instance.sh`
 - `install-nextcloud.sh`
 - `link-nextcloud-instance.sh`
 - `doctor.sh`
@@ -34,7 +35,13 @@ Host-level state is stored under `/srv/tinymrp`:
 - `/srv/tinymrp/caddy/Caddyfile`
 - `/srv/tinymrp/caddy/routes/*.caddy`
 - `/srv/tinymrp/instances/<instance_name>/`
-- `/srv/tinymrp/nextcloud/`
+- `/srv/tinymrp/nextcloud/<instance_name>/`
+- `/srv/tinymrp/nextcloud/<instance_name>/links/*.env`
+
+Legacy shared/global Nextcloud, if you intentionally keep using it, remains under:
+
+- `/srv/tinymrp/nextcloud/.env`
+- `/srv/tinymrp/nextcloud/compose.yml`
 - `/srv/tinymrp/nextcloud/links/*.env`
 
 Host config in `/srv/tinymrp/host/.env` includes:
@@ -195,44 +202,51 @@ Skip this only when you mean it:
 sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com --skip-dns-check
 ```
 
-## 3. Install Nextcloud on the same host
+## 3. Install per-company Nextcloud on the same host
 
-Use the same DNS and Caddy flow:
+The recommended multi-company path is one independent Nextcloud per TinyMRP company instance:
+
+```bash
+sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
+sudo ./deploy/scripts/install-nextcloud-instance.sh company2 cloud.company2.tinymrp.com
+```
+
+What it does:
+
+- validates that the matching TinyMRP instance exists first
+- creates `/srv/tinymrp/nextcloud/<instance_name>/`
+- writes per-instance `.env` and `compose.yml`
+- starts private Nextcloud and MariaDB containers with unique names
+- connects only the Nextcloud app container to the shared Caddy proxy network
+- adds a per-instance Caddy route such as `nextcloud-company1.caddy`
+- lets Caddy manage HTTPS automatically
+- generates admin credentials automatically
+- keeps TinyMRP deliverables outside Nextcloud's internal data folder
+
+Legacy shared/global mode still exists for backwards compatibility:
 
 ```bash
 sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
 ```
 
-If you omit the domain, the installer prompts only for the final Nextcloud hostname:
-
-```bash
-sudo ./deploy/scripts/install-nextcloud.sh
-```
-
-What it does:
-
-- validates DNS like the TinyMRP installer
-- starts private Nextcloud and MariaDB containers
-- adds the Nextcloud Caddy route
-- lets Caddy manage HTTPS automatically
-- generates admin credentials automatically
-- saves the generated credentials in `/srv/tinymrp/nextcloud/.env`
-- keeps TinyMRP deliverables outside Nextcloud's internal data folder
+That installs one shared Nextcloud under `/srv/tinymrp/nextcloud`. It is not the recommended path for multi-company deployments, and it will not automatically re-domain or overwrite an existing legacy install.
 
 ## 4. Link TinyMRP deliverables into Nextcloud
 
-After Nextcloud is installed, link any TinyMRP instance with one command:
+After a company Nextcloud is installed, link that company instance with one command:
 
 ```bash
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1
-sudo ./deploy/scripts/link-nextcloud-instance.sh company2
+sudo ./deploy/scripts/link-nextcloud-instance.sh company2 --read-only --non-interactive
 ```
+
+By default, `link-nextcloud-instance.sh <instance>` now targets the same-name Nextcloud instance under `/srv/tinymrp/nextcloud/<instance>`.
 
 What it does:
 
 - prompts for the access mode unless you pass a flag
 - defaults to the safer read-only mode
-- writes a managed `/srv/tinymrp/nextcloud/compose.tinymrp-deliverables.override.yml` for TinyMRP deliverables mounts
+- writes a managed `/srv/tinymrp/nextcloud/<nextcloud_instance>/compose.tinymrp-deliverables.override.yml` for TinyMRP deliverables mounts
 - preserves unrelated user `compose.override.yml` content
 - recreates only the Nextcloud `app` container when the mount configuration changes
 - enables the Nextcloud `files_external` app automatically
@@ -263,9 +277,16 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
 ```
 
 `--non-interactive` requires either `--read-only` or `--bidirectional`.
+
+If you explicitly need to keep using one legacy shared/global Nextcloud, target it with:
+
+```bash
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
+```
 
 Mount behavior:
 
@@ -297,6 +318,9 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --remove
 
 ```bash
 sudo ./deploy/scripts/doctor.sh
+sudo ./deploy/scripts/doctor.sh --instance company1
+sudo ./deploy/scripts/doctor.sh --nextcloud-instance company1
+sudo ./deploy/scripts/doctor.sh --all
 ```
 
 It checks:
@@ -314,7 +338,9 @@ It checks:
 - each instance domain resolves to the expected IP
 - each instance endpoint responds
 - MongoDB is not exposed publicly
+- each per-instance Nextcloud root exists
 - Nextcloud DNS and endpoint health if installed
+- Nextcloud MariaDB is not exposed publicly
 - linked TinyMRP deliverables still exist on the host
 - Nextcloud can see each linked `/mnt/tinymrp-deliverables/<instance>` path
 - linked Nextcloud Docker mounts match the configured read-only or bidirectional mode
@@ -322,6 +348,15 @@ It checks:
 - the configured Nextcloud admin user belongs to the matching group
 - bidirectional mounts are writable from inside Nextcloud when enabled
 - deliverables are not being mounted inside Nextcloud's internal data directory
+
+## Legacy shared/global Nextcloud
+
+If you already have a legacy shared/global Nextcloud under `/srv/tinymrp/nextcloud`, leave it in place unless you plan a manual migration.
+
+- the deployment scripts do not delete it
+- the deployment scripts do not re-domain it automatically
+- new per-company installs should go under `/srv/tinymrp/nextcloud/<instance_name>`
+- if you need to keep linking to that legacy install, use `--nextcloud-instance global`
 
 ## 6. Update the repository
 

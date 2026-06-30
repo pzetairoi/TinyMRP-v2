@@ -4,6 +4,81 @@ nextcloud_link_mount_root() {
   printf '%s\n' "/mnt/tinymrp-deliverables"
 }
 
+nextcloud_selector_is_global() {
+  case "$(lower "${1:-}")" in
+    ""|global|legacy|shared)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+normalize_nextcloud_selector() {
+  local raw="${1:-}"
+  if nextcloud_selector_is_global "$raw"; then
+    printf '%s\n' "global"
+    return 0
+  fi
+  strict_instance_name "$raw"
+}
+
+nextcloud_root_for_selector() {
+  local selector="${1:-}"
+  if nextcloud_selector_is_global "$selector"; then
+    printf '%s\n' "$(nextcloud_base_dir)"
+  else
+    printf '%s\n' "$(nextcloud_instance_dir "$(strict_instance_name "$selector")")"
+  fi
+}
+
+nextcloud_display_name() {
+  local selector="${1:-}"
+  if nextcloud_selector_is_global "$selector"; then
+    printf '%s\n' "global"
+  else
+    printf '%s\n' "$(strict_instance_name "$selector")"
+  fi
+}
+
+nextcloud_route_name() {
+  local selector="${1:-}"
+  if nextcloud_selector_is_global "$selector"; then
+    printf '%s\n' "nextcloud"
+  else
+    printf 'nextcloud-%s\n' "$(strict_instance_name "$selector")"
+  fi
+}
+
+nextcloud_instance_name_for_root() {
+  local root_dir="$1"
+  if [ "$root_dir" = "$(nextcloud_base_dir)" ]; then
+    printf '%s\n' "global"
+  else
+    basename "$root_dir"
+  fi
+}
+
+iter_nextcloud_install_dirs() {
+  local base_dir=""
+  local root_dir=""
+
+  base_dir="$(nextcloud_base_dir)"
+  [ -d "$base_dir" ] || return 0
+
+  if [ -f "${base_dir}/.env" ] || [ -f "${base_dir}/compose.yml" ]; then
+    printf '%s\n' "$base_dir"
+  fi
+
+  while IFS= read -r root_dir; do
+    [ -d "$root_dir" ] || continue
+    if [ -f "${root_dir}/.env" ] || [ -f "${root_dir}/compose.yml" ]; then
+      printf '%s\n' "$root_dir"
+    fi
+  done < <(find "$base_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+}
+
 normalize_nextcloud_access_mode() {
   case "$1" in
     ro|read-only|readonly)

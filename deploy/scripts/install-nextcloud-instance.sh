@@ -10,16 +10,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./deploy/scripts/install-nextcloud.sh [domain] [--skip-dns-check] [--admin-user admin] [--admin-password '<secret>'] [--local-mode http|internal-tls]
+  sudo ./deploy/scripts/install-nextcloud-instance.sh <instance_name> <nextcloud_domain> [--skip-dns-check] [--admin-user admin] [--admin-password '<secret>'] [--local-mode http|internal-tls]
 
 Examples:
-  sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
-  sudo ./deploy/scripts/install-nextcloud.sh cloud.test.local --local-mode internal-tls
-
-Legacy/global mode:
-  This installs one shared Nextcloud under /srv/tinymrp/nextcloud.
-  For per-company Nextcloud, use:
-    sudo ./deploy/scripts/install-nextcloud-instance.sh <instance_name> <nextcloud_domain>
+  sudo ./deploy/scripts/install-nextcloud-instance.sh mecs cloud.mecs.tinymrp.com
+  sudo ./deploy/scripts/install-nextcloud-instance.sh test cloud.test.local --local-mode internal-tls
 EOF
 }
 
@@ -54,7 +49,12 @@ if [ "${1-}" = "-h" ] || [ "${1-}" = "--help" ]; then
   exit 0
 fi
 
+INSTANCE_NAME=""
 DOMAIN=""
+if [ $# -gt 0 ] && [[ "${1-}" != --* ]]; then
+  INSTANCE_NAME="$(strict_instance_name "$1")"
+  shift
+fi
 if [ $# -gt 0 ] && [[ "${1-}" != --* ]]; then
   DOMAIN="$(lower "$1")"
   shift
@@ -94,12 +94,17 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ -z "$INSTANCE_NAME" ]; then
+  usage
+  die "Instance name is required."
+fi
+
 if [ -n "$LOCAL_MODE_OVERRIDE" ]; then
   validate_local_mode "$LOCAL_MODE_OVERRIDE"
 fi
 
 if [ -z "$DOMAIN" ]; then
-  prompt_value DOMAIN "Enter the final Nextcloud domain"
+  prompt_value DOMAIN "Enter the final Nextcloud domain for ${INSTANCE_NAME}"
   DOMAIN="$(lower "$DOMAIN")"
 fi
 
@@ -108,8 +113,10 @@ require_cmd docker
 require_cmd python3
 require_docker_compose
 
-warn "install-nextcloud.sh installs one legacy shared/global Nextcloud under $(nextcloud_base_dir)."
-warn "For per-company Nextcloud, use install-nextcloud-instance.sh <instance_name> <domain>."
+INSTANCE_ROOT="$(instance_dir "$INSTANCE_NAME")"
+INSTANCE_DELIVERABLES="${INSTANCE_ROOT}/deliverables"
+[ -d "$INSTANCE_ROOT" ] || die "TinyMRP instance not found: ${INSTANCE_ROOT}"
+[ -d "$INSTANCE_DELIVERABLES" ] || die "TinyMRP deliverables folder not found: ${INSTANCE_DELIVERABLES}"
 
 load_host_env
 if [ "${REVERSE_PROXY:-}" != "caddy" ] || [ -z "${ACME_EMAIL:-}" ]; then
@@ -140,11 +147,16 @@ if ! is_local_domain "$DOMAIN"; then
   fi
 fi
 
+ensure_dir "$(nextcloud_base_dir)"
+export TINYMRP_NEXTCLOUD_DIR
+TINYMRP_NEXTCLOUD_DIR="$(nextcloud_instance_dir "$INSTANCE_NAME")"
+
 NEXTCLOUD_ROOT="$(nextcloud_dir)"
 NEXTCLOUD_ENV="$(nextcloud_env_file)"
 NEXTCLOUD_COMPOSE="$(nextcloud_compose_file)"
 NEXTCLOUD_HTML_DIR="${NEXTCLOUD_ROOT}/html"
 NEXTCLOUD_DB_DIR="${NEXTCLOUD_ROOT}/db"
+NEXTCLOUD_ROUTE_NAME="$(nextcloud_route_name "$INSTANCE_NAME")"
 
 ensure_dir "$NEXTCLOUD_ROOT"
 ensure_dir "$NEXTCLOUD_HTML_DIR"
@@ -158,19 +170,22 @@ chmod 0700 "$NEXTCLOUD_DB_DIR"
 EXISTING_INSTALL=0
 if [ -f "$NEXTCLOUD_ENV" ]; then
   EXISTING_INSTALL=1
-  unset NEXTCLOUD_DOMAIN NEXTCLOUD_URL NEXTCLOUD_TLS_MODE NEXTCLOUD_PROJECT_NAME NEXTCLOUD_CONTAINER_NAME NEXTCLOUD_DB_CONTAINER NEXTCLOUD_PRIVATE_NETWORK NEXTCLOUD_ADMIN_USER NEXTCLOUD_ADMIN_USERNAME NEXTCLOUD_ADMIN_PASSWORD MYSQL_DATABASE MYSQL_USER MYSQL_PASSWORD MYSQL_ROOT_PASSWORD MYSQL_HOST NEXTCLOUD_TRUSTED_DOMAINS OVERWRITEHOST OVERWRITEPROTOCOL OVERWRITECLIURL NEXTCLOUD_INIT_HTACCESS NEXTCLOUD_ROUTE_NAME
+  unset NEXTCLOUD_INSTANCE_NAME NEXTCLOUD_DOMAIN NEXTCLOUD_URL NEXTCLOUD_TLS_MODE NEXTCLOUD_PROJECT_NAME NEXTCLOUD_CONTAINER_NAME NEXTCLOUD_DB_CONTAINER NEXTCLOUD_PRIVATE_NETWORK NEXTCLOUD_ROUTE_NAME NEXTCLOUD_ADMIN_USER NEXTCLOUD_ADMIN_USERNAME NEXTCLOUD_ADMIN_PASSWORD MYSQL_DATABASE MYSQL_USER MYSQL_PASSWORD MYSQL_ROOT_PASSWORD MYSQL_HOST NEXTCLOUD_TRUSTED_DOMAINS OVERWRITEHOST OVERWRITEPROTOCOL OVERWRITECLIURL NEXTCLOUD_INIT_HTACCESS
   load_env_file "$NEXTCLOUD_ENV"
 fi
 
-if [ -n "${NEXTCLOUD_DOMAIN:-}" ] && [ "${NEXTCLOUD_DOMAIN}" != "$DOMAIN" ]; then
-  die "Legacy global Nextcloud is already configured for ${NEXTCLOUD_DOMAIN}. Refusing to re-domain it to ${DOMAIN}. Use install-nextcloud-instance.sh for per-company Nextcloud."
+if [ -n "${NEXTCLOUD_INSTANCE_NAME:-}" ] && [ "${NEXTCLOUD_INSTANCE_NAME}" != "$INSTANCE_NAME" ]; then
+  die "Nextcloud root ${NEXTCLOUD_ROOT} is already recorded for instance ${NEXTCLOUD_INSTANCE_NAME}, not ${INSTANCE_NAME}."
 fi
 
-NEXTCLOUD_PROJECT_NAME="${NEXTCLOUD_PROJECT_NAME:-tinymrp-nextcloud}"
-NEXTCLOUD_CONTAINER_NAME="${NEXTCLOUD_CONTAINER_NAME:-tinymrp-nextcloud-app}"
-NEXTCLOUD_DB_CONTAINER="${NEXTCLOUD_DB_CONTAINER:-tinymrp-nextcloud-db}"
-NEXTCLOUD_PRIVATE_NETWORK="${NEXTCLOUD_PRIVATE_NETWORK:-tinymrp-nextcloud}"
-NEXTCLOUD_ROUTE_NAME="${NEXTCLOUD_ROUTE_NAME:-$(nextcloud_route_name global)}"
+if [ -n "${NEXTCLOUD_DOMAIN:-}" ] && [ "${NEXTCLOUD_DOMAIN}" != "$DOMAIN" ]; then
+  die "Per-instance Nextcloud for ${INSTANCE_NAME} is already configured for ${NEXTCLOUD_DOMAIN}. Refusing to re-domain it to ${DOMAIN}."
+fi
+
+NEXTCLOUD_PROJECT_NAME="${NEXTCLOUD_PROJECT_NAME:-tinymrp-${INSTANCE_NAME}-nextcloud}"
+NEXTCLOUD_CONTAINER_NAME="${NEXTCLOUD_CONTAINER_NAME:-tinymrp-${INSTANCE_NAME}-nextcloud-app}"
+NEXTCLOUD_DB_CONTAINER="${NEXTCLOUD_DB_CONTAINER:-tinymrp-${INSTANCE_NAME}-nextcloud-db}"
+NEXTCLOUD_PRIVATE_NETWORK="${NEXTCLOUD_PRIVATE_NETWORK:-tinymrp-${INSTANCE_NAME}-nextcloud}"
 NEXTCLOUD_URL="$(primary_url_for_domain "$DOMAIN" "$TLS_MODE")"
 OVERWRITEPROTOCOL="https"
 if [ "$TLS_MODE" = "http" ]; then
@@ -207,6 +222,7 @@ else
   SHOW_GENERATED_CREDENTIALS=1
 fi
 
+upsert_env_value "$NEXTCLOUD_ENV" "NEXTCLOUD_INSTANCE_NAME" "$INSTANCE_NAME"
 upsert_env_value "$NEXTCLOUD_ENV" "NEXTCLOUD_DOMAIN" "$DOMAIN"
 upsert_env_value "$NEXTCLOUD_ENV" "NEXTCLOUD_URL" "$NEXTCLOUD_URL"
 upsert_env_value "$NEXTCLOUD_ENV" "NEXTCLOUD_TLS_MODE" "$TLS_MODE"
@@ -255,15 +271,17 @@ install_caddy_route "$NEXTCLOUD_ROUTE_NAME" "$DOMAIN" "$NEXTCLOUD_CONTAINER_NAME
 if wait_for_nextcloud_endpoint "$DOMAIN" "$TLS_MODE"; then
   info "Endpoint is responding at ${NEXTCLOUD_URL}"
 else
-  warn "The route was created, but the Nextcloud endpoint is not responding yet. Run sudo ./deploy/scripts/doctor.sh for diagnostics."
+  warn "The route was created, but the Nextcloud endpoint is not responding yet. Run sudo ./deploy/scripts/doctor.sh --nextcloud-instance ${INSTANCE_NAME} for diagnostics."
 fi
 
-printf '\nNextcloud deployment complete.\n'
-printf 'Domain: %s\n' "$DOMAIN"
+printf '\nPer-instance Nextcloud deployment complete.\n'
+printf 'TinyMRP instance: %s\n' "$INSTANCE_NAME"
+printf 'Nextcloud domain: %s\n' "$DOMAIN"
 printf 'URL: %s\n' "$NEXTCLOUD_URL"
+printf 'Nextcloud root: %s\n' "$NEXTCLOUD_ROOT"
 printf 'Nextcloud env: %s\n' "$NEXTCLOUD_ENV"
 printf 'Compose file: %s\n' "$NEXTCLOUD_COMPOSE"
-printf 'Mode: legacy shared/global Nextcloud\n'
+printf 'Deliverables path: %s\n' "$INSTANCE_DELIVERABLES"
 
 if [ "$SHOW_GENERATED_CREDENTIALS" -eq 1 ]; then
   printf '\nGenerated credentials (shown once):\n'

@@ -484,8 +484,8 @@ Typical flow:
 ```bash
 sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
 sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
-sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only --non-interactive
 sudo ./deploy/scripts/doctor.sh
 ```
 
@@ -504,22 +504,28 @@ Minimal operator input:
 - `create-instance.sh`
   - instance name
   - final public domain
+- `install-nextcloud-instance.sh`
+  - TinyMRP instance name
+  - final per-company Nextcloud domain
 - `install-nextcloud.sh`
-  - final Nextcloud domain
+  - legacy shared/global Nextcloud domain
 - `link-nextcloud-instance.sh`
   - deployed TinyMRP instance name
+  - optional `--nextcloud-instance <name|global>` override
   - read-only or bidirectional access mode, unless you pass a flag
 
-Nextcloud integration stays deployment-side. TinyMRP keeps ownership of `/srv/tinymrp/instances/<instance>/deliverables`, and `link-nextcloud-instance.sh` now prompts for either read-only sharing mode or bidirectional sync mode. Read-only stays the safest default and mounts deliverables under `/mnt/tinymrp-deliverables/<instance>` without write access. Bidirectional mode is available for trusted internal workflows that need desktop-client uploads or sync back into the VPS deliverables folder. The default Caddy deployment continues to rely on `FILES_ACCEL_REDIRECT_PREFIX=""`.
+Nextcloud integration stays deployment-side. The recommended multi-company path is one Nextcloud per TinyMRP company under `/srv/tinymrp/nextcloud/<instance>`. TinyMRP keeps ownership of `/srv/tinymrp/instances/<instance>/deliverables`, and `link-nextcloud-instance.sh` now defaults to the same-name Nextcloud instance while prompting for either read-only sharing mode or bidirectional sync mode. Read-only stays the safest default and mounts deliverables under `/mnt/tinymrp-deliverables/<instance>` without write access. Bidirectional mode is available for trusted internal workflows that need desktop-client uploads or sync back into the VPS deliverables folder. The default Caddy deployment continues to rely on `FILES_ACCEL_REDIRECT_PREFIX=""`.
 
 Useful commands:
 
 ```bash
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
 ```
 
 `--non-interactive` requires either `--read-only` or `--bidirectional`.
