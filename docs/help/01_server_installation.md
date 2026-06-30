@@ -24,8 +24,8 @@ Main commands:
 ```bash
 sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
 sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
-sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only --non-interactive
 sudo ./deploy/scripts/doctor.sh
 ```
 
@@ -109,20 +109,21 @@ If the host has IPv6, the scripts also print an optional `AAAA` record.
 
 ## Nextcloud
 
-Use the matching installer for a public Nextcloud domain:
+The recommended multi-company path is one independent Nextcloud per TinyMRP company instance:
 
 ```bash
-sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
+sudo ./deploy/scripts/install-nextcloud-instance.sh company2 cloud.company2.tinymrp.com
 ```
 
 Then link one or more TinyMRP instances without editing Compose or running `occ` commands by hand:
 
 ```bash
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1
-sudo ./deploy/scripts/link-nextcloud-instance.sh company2
+sudo ./deploy/scripts/link-nextcloud-instance.sh company2 --read-only --non-interactive
 ```
 
-This keeps TinyMRP as the storage owner. Deliverables stay under `/srv/tinymrp/instances/<instance>/deliverables`, the script writes a managed `/srv/tinymrp/nextcloud/compose.tinymrp-deliverables.override.yml`, and the default Caddy deployment keeps `FILES_ACCEL_REDIRECT_PREFIX=""`.
+This keeps TinyMRP as the storage owner. Deliverables stay under `/srv/tinymrp/instances/<instance>/deliverables`, each company Nextcloud lives under `/srv/tinymrp/nextcloud/<instance>/`, the link script writes a managed `compose.tinymrp-deliverables.override.yml` inside that Nextcloud root, and the default Caddy deployment keeps `FILES_ACCEL_REDIRECT_PREFIX=""`.
 
 The link script now asks which mode to use unless you pass a flag:
 
@@ -143,9 +144,12 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
 ```
 
 `--non-interactive` requires either `--read-only` or `--bidirectional`.
+
+Legacy shared/global Nextcloud is still available through `install-nextcloud.sh`, but it is not the recommended path for multi-company deployments and it is not re-domained automatically. If you intentionally keep using it, target it with `--nextcloud-instance global`.
 
 ## Updating And Rollback
 

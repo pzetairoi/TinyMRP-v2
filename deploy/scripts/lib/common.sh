@@ -107,8 +107,16 @@ instance_updates_dir() {
   printf '%s\n' "$(instance_dir "$1")/updates"
 }
 
+nextcloud_base_dir() {
+  printf '%s\n' "${TINYMRP_NEXTCLOUD_BASE_DIR:-$(tinymrp_root)/nextcloud}"
+}
+
 nextcloud_dir() {
-  printf '%s\n' "${TINYMRP_NEXTCLOUD_DIR:-$(tinymrp_root)/nextcloud}"
+  printf '%s\n' "${TINYMRP_NEXTCLOUD_DIR:-$(nextcloud_base_dir)}"
+}
+
+nextcloud_instance_dir() {
+  printf '%s\n' "$(nextcloud_base_dir)/$1"
 }
 
 nextcloud_env_file() {
@@ -138,7 +146,7 @@ ensure_host_layout() {
   ensure_dir "$(caddy_data_dir)"
   ensure_dir "$(caddy_state_dir)"
   ensure_dir "$(instances_dir)"
-  ensure_dir "$(nextcloud_dir)"
+  ensure_dir "$(nextcloud_base_dir)"
 }
 
 require_root() {

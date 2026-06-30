@@ -10,10 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./deploy/scripts/link-nextcloud-instance.sh <instance_name> [--read-only|--bidirectional|--read-write] [--non-interactive] [--remove]
+  sudo ./deploy/scripts/link-nextcloud-instance.sh <instance_name> [--nextcloud-instance <name|global>] [--read-only|--bidirectional|--read-write] [--non-interactive] [--remove]
 
 Examples:
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs
+  sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --nextcloud-instance mecs
+  sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --nextcloud-instance global --read-only --non-interactive
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --read-only
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --bidirectional
   sudo ./deploy/scripts/link-nextcloud-instance.sh mecs --non-interactive --read-only
@@ -274,6 +276,8 @@ ensure_nextcloud_app_service_ready() {
 }
 
 INSTANCE_NAME=""
+NEXTCLOUD_SELECTOR=""
+NEXTCLOUD_SELECTOR_FROM_FLAG=0
 REMOVE_LINK=0
 NON_INTERACTIVE=0
 REQUESTED_MODE=""
@@ -284,6 +288,12 @@ while [ $# -gt 0 ]; do
     --remove)
       REMOVE_LINK=1
       shift
+      ;;
+    --nextcloud-instance)
+      [ -n "${2-}" ] || die "--nextcloud-instance requires a value."
+      NEXTCLOUD_SELECTOR="$(normalize_nextcloud_selector "${2-}")"
+      NEXTCLOUD_SELECTOR_FROM_FLAG=1
+      shift 2
       ;;
     --read-only)
       REQUESTED_MODE="ro"
@@ -335,6 +345,11 @@ require_docker_compose
 
 INSTANCE_ROOT="$(instance_dir "$INSTANCE_NAME")"
 INSTANCE_DELIVERABLES="${INSTANCE_ROOT}/deliverables"
+if [ -z "$NEXTCLOUD_SELECTOR" ]; then
+  NEXTCLOUD_SELECTOR="$INSTANCE_NAME"
+fi
+export TINYMRP_NEXTCLOUD_DIR
+TINYMRP_NEXTCLOUD_DIR="$(nextcloud_root_for_selector "$NEXTCLOUD_SELECTOR")"
 NEXTCLOUD_ROOT="$(nextcloud_dir)"
 NEXTCLOUD_ENV="$(nextcloud_env_file)"
 NEXTCLOUD_COMPOSE="$(nextcloud_compose_file)"
@@ -346,7 +361,12 @@ NEXTCLOUD_GROUP_NAME="$(nextcloud_group_name_for_instance "$INSTANCE_NAME")"
 NEXTCLOUD_STORAGE_NAME="$(nextcloud_storage_name_for_instance "$INSTANCE_NAME")"
 NEXTCLOUD_STORAGE_MOUNT_POINT="$(nextcloud_storage_mount_point_for_instance "$INSTANCE_NAME")"
 
-[ -d "$NEXTCLOUD_ROOT" ] || die "Nextcloud is not installed under ${NEXTCLOUD_ROOT}"
+[ -d "$NEXTCLOUD_ROOT" ] || {
+  if [ "$NEXTCLOUD_SELECTOR_FROM_FLAG" -eq 0 ] && [ -f "$(nextcloud_base_dir)/.env" ]; then
+    die "Per-instance Nextcloud is not installed under ${NEXTCLOUD_ROOT}. If you mean the legacy global Nextcloud, rerun with --nextcloud-instance global."
+  fi
+  die "Nextcloud instance ${NEXTCLOUD_SELECTOR} is not installed under ${NEXTCLOUD_ROOT}"
+}
 [ -f "$NEXTCLOUD_ENV" ] || die "Nextcloud env file not found at ${NEXTCLOUD_ENV}"
 [ -f "$NEXTCLOUD_COMPOSE" ] || die "Nextcloud compose file not found at ${NEXTCLOUD_COMPOSE}"
 
@@ -541,8 +561,10 @@ if [ "$REMOVE_LINK" -eq 1 ]; then
 
   printf 'Nextcloud unlink complete.\n'
   printf 'Instance unlinked: %s\n' "$INSTANCE_NAME"
+  printf 'Nextcloud instance: %s\n' "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")"
   printf 'Host deliverables path: %s\n' "$INSTANCE_DELIVERABLES"
   printf 'Nextcloud mount path removed: %s\n' "$NEXTCLOUD_MOUNT_PATH"
+  printf 'Nextcloud root: %s\n' "$NEXTCLOUD_ROOT"
   printf 'Nextcloud compose service name: %s\n' "$NEXTCLOUD_APP_SERVICE_NAME"
   printf 'Nextcloud container name: %s\n' "$NEXTCLOUD_CONTAINER_NAME"
   exit 0
@@ -615,8 +637,10 @@ info "Completed Nextcloud file scan."
 
 printf 'Nextcloud link complete.\n'
 printf 'Instance name: %s\n' "$INSTANCE_NAME"
+printf 'Nextcloud instance: %s\n' "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")"
 printf 'Host deliverables path: %s\n' "$INSTANCE_DELIVERABLES"
 printf 'Nextcloud mount path: %s\n' "$NEXTCLOUD_MOUNT_PATH"
+printf 'Nextcloud root: %s\n' "$NEXTCLOUD_ROOT"
 printf 'Nextcloud compose service name: %s\n' "$NEXTCLOUD_APP_SERVICE_NAME"
 printf 'Nextcloud container name: %s\n' "$NEXTCLOUD_CONTAINER_NAME"
 printf 'External storage name: %s\n' "$NEXTCLOUD_STORAGE_NAME"

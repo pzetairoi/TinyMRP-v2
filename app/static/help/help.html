@@ -74,8 +74,8 @@
 <p>Main commands:</p>
 <pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --base-domain tinymrp.com
 sudo ./deploy/scripts/create-instance.sh company1 company1.tinymrp.com
-sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
-sudo ./deploy/scripts/link-nextcloud-instance.sh company1
+sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only --non-interactive
 sudo ./deploy/scripts/doctor.sh
 </code></pre>
 <p>Operational update commands:</p>
@@ -140,14 +140,15 @@ sudo ./deploy/scripts/rollback-instance.sh company1
 </ul>
 <p>If the host has IPv6, the scripts also print an optional <code>AAAA</code> record.</p>
 <h2 id="nextcloud">Nextcloud</h2>
-<p>Use the matching installer for a public Nextcloud domain:</p>
-<pre><code class="language-bash">sudo ./deploy/scripts/install-nextcloud.sh cloud.tinymrp.com
+<p>The recommended multi-company path is one independent Nextcloud per TinyMRP company instance:</p>
+<pre><code class="language-bash">sudo ./deploy/scripts/install-nextcloud-instance.sh company1 cloud.company1.tinymrp.com
+sudo ./deploy/scripts/install-nextcloud-instance.sh company2 cloud.company2.tinymrp.com
 </code></pre>
 <p>Then link one or more TinyMRP instances without editing Compose or running <code>occ</code> commands by hand:</p>
 <pre><code class="language-bash">sudo ./deploy/scripts/link-nextcloud-instance.sh company1
-sudo ./deploy/scripts/link-nextcloud-instance.sh company2
+sudo ./deploy/scripts/link-nextcloud-instance.sh company2 --read-only --non-interactive
 </code></pre>
-<p>This keeps TinyMRP as the storage owner. Deliverables stay under <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables</code>, the script writes a managed <code>/srv/tinymrp/nextcloud/compose.tinymrp-deliverables.override.yml</code>, and the default Caddy deployment keeps <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;</code>.</p>
+<p>This keeps TinyMRP as the storage owner. Deliverables stay under <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables</code>, each company Nextcloud lives under <code>/srv/tinymrp/nextcloud/&lt;instance&gt;/</code>, the link script writes a managed <code>compose.tinymrp-deliverables.override.yml</code> inside that Nextcloud root, and the default Caddy deployment keeps <code>FILES_ACCEL_REDIRECT_PREFIX=&quot;&quot;</code>.</p>
 <p>The link script now asks which mode to use unless you pass a flag:</p>
 <ul>
 <li>Read-only is the default and safest option. Nextcloud can view, download, and share deliverables, but cannot change them.</li>
@@ -165,8 +166,10 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --bidirectional
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --read-only
 sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --non-interactive --bidirectional
+sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance global --read-only --non-interactive
 </code></pre>
 <p><code>--non-interactive</code> requires either <code>--read-only</code> or <code>--bidirectional</code>.</p>
+<p>Legacy shared/global Nextcloud is still available through <code>install-nextcloud.sh</code>, but it is not the recommended path for multi-company deployments and it is not re-domained automatically. If you intentionally keep using it, target it with <code>--nextcloud-instance global</code>.</p>
 <h2 id="updating-and-rollback">Updating And Rollback</h2>
 <p>Repository update:</p>
 <pre><code class="language-bash">cd /opt/TinyMRP-v2

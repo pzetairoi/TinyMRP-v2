@@ -10,16 +10,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FAILURES=0
 WARNINGS=0
 TARGET_INSTANCE=""
+TARGET_NEXTCLOUD_INSTANCE=""
+RUN_ALL_CHECKS=0
 SKIP_HOST_CHECKS=0
 
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./deploy/scripts/doctor.sh [--instance <instance_name>] [--skip-host-checks]
+  sudo ./deploy/scripts/doctor.sh [--instance <instance_name>] [--nextcloud-instance <instance_name|global>] [--all] [--skip-host-checks]
 
 Examples:
   sudo ./deploy/scripts/doctor.sh
   sudo ./deploy/scripts/doctor.sh --instance company1
+  sudo ./deploy/scripts/doctor.sh --nextcloud-instance company1
+  sudo ./deploy/scripts/doctor.sh --nextcloud-instance global
+  sudo ./deploy/scripts/doctor.sh --all
   sudo ./deploy/scripts/doctor.sh --instance company1 --skip-host-checks
 EOF
 }
@@ -109,11 +114,38 @@ proxy_has_matching_internal_file_route() {
   esac
 }
 
+restore_nextcloud_context() {
+  local saved_context="$1"
+  if [ "$saved_context" = "__unset__" ]; then
+    unset TINYMRP_NEXTCLOUD_DIR
+  else
+    export TINYMRP_NEXTCLOUD_DIR="$saved_context"
+  fi
+}
+
+nextcloud_doctor_label() {
+  local selector="$1"
+  if nextcloud_selector_is_global "$selector"; then
+    printf '%s\n' "Nextcloud global"
+  else
+    printf 'Nextcloud instance %s\n' "$selector"
+  fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --instance)
       TARGET_INSTANCE="$(strict_instance_name "${2-}")"
       shift 2
+      ;;
+    --nextcloud-instance)
+      [ -n "${2-}" ] || die "--nextcloud-instance requires a value."
+      TARGET_NEXTCLOUD_INSTANCE="$(normalize_nextcloud_selector "${2-}")"
+      shift 2
+      ;;
+    --all)
+      RUN_ALL_CHECKS=1
+      shift
       ;;
     --skip-host-checks)
       SKIP_HOST_CHECKS=1
@@ -321,67 +353,93 @@ check_instance() {
   fi
 }
 
-check_nextcloud() {
-  local env_file="$1"
+check_nextcloud_install() {
+  local nextcloud_root="$1"
+  local selector="$2"
+  local env_file=""
   local route_file=""
   local route_target=""
   local link_file=""
   local linked_instances=0
+  local saved_nextcloud_dir=""
+  local label=""
+  local route_name=""
 
-  unset NEXTCLOUD_DOMAIN NEXTCLOUD_URL NEXTCLOUD_TLS_MODE NEXTCLOUD_CONTAINER_NAME NEXTCLOUD_DB_CONTAINER
+  saved_nextcloud_dir="${TINYMRP_NEXTCLOUD_DIR-__unset__}"
+  export TINYMRP_NEXTCLOUD_DIR="$nextcloud_root"
+  env_file="$(nextcloud_env_file)"
+  label="$(nextcloud_doctor_label "$selector")"
+  route_name="$(nextcloud_route_name "$selector")"
+
+  if [ ! -d "$nextcloud_root" ]; then
+    fail "${label}: root directory not found at ${nextcloud_root}"
+    restore_nextcloud_context "$saved_nextcloud_dir"
+    return 0
+  fi
+  pass "${label}: root exists at ${nextcloud_root}"
+
+  if [ ! -f "$env_file" ]; then
+    fail "${label}: env file not found at ${env_file}"
+    restore_nextcloud_context "$saved_nextcloud_dir"
+    return 0
+  fi
+
+  unset NEXTCLOUD_DOMAIN NEXTCLOUD_URL NEXTCLOUD_TLS_MODE NEXTCLOUD_CONTAINER_NAME NEXTCLOUD_DB_CONTAINER NEXTCLOUD_ROUTE_NAME
   load_env_file "$env_file"
+  route_name="${NEXTCLOUD_ROUTE_NAME:-$route_name}"
 
   if [ -z "${NEXTCLOUD_DOMAIN:-}" ]; then
-    note "Nextcloud env exists but NEXTCLOUD_DOMAIN is not set"
+    note "${label}: env exists but NEXTCLOUD_DOMAIN is not set"
+    restore_nextcloud_context "$saved_nextcloud_dir"
     return 0
   fi
 
   if docker container inspect "${NEXTCLOUD_CONTAINER_NAME}" >/dev/null 2>&1; then
-    pass "Nextcloud: app container exists"
+    pass "${label}: app container exists"
     if container_running "${NEXTCLOUD_CONTAINER_NAME}"; then
-      pass "Nextcloud: app container is running"
+      pass "${label}: app container is running"
     else
-      fail "Nextcloud: app container ${NEXTCLOUD_CONTAINER_NAME} is not running"
+      fail "${label}: app container ${NEXTCLOUD_CONTAINER_NAME} is not running"
     fi
   else
-    fail "Nextcloud: app container ${NEXTCLOUD_CONTAINER_NAME} not found"
+    fail "${label}: app container ${NEXTCLOUD_CONTAINER_NAME} not found"
   fi
 
   if docker container inspect "${NEXTCLOUD_DB_CONTAINER}" >/dev/null 2>&1; then
-    pass "Nextcloud: database container exists"
+    pass "${label}: database container exists"
     if container_running "${NEXTCLOUD_DB_CONTAINER}"; then
-      pass "Nextcloud: database container is running"
+      pass "${label}: database container is running"
     else
-      fail "Nextcloud: database container ${NEXTCLOUD_DB_CONTAINER} is not running"
+      fail "${label}: database container ${NEXTCLOUD_DB_CONTAINER} is not running"
     fi
   else
-    fail "Nextcloud: database container ${NEXTCLOUD_DB_CONTAINER} not found"
+    fail "${label}: database container ${NEXTCLOUD_DB_CONTAINER} not found"
   fi
 
   if docker port "${NEXTCLOUD_DB_CONTAINER}" 3306 2>/dev/null | grep -q .; then
-    fail "Nextcloud: MariaDB is exposed through published ports"
+    fail "${label}: MariaDB is exposed through published ports"
   else
-    pass "Nextcloud: MariaDB is not publicly exposed"
+    pass "${label}: MariaDB is not publicly exposed"
   fi
 
-  route_file="$(caddy_routes_dir)/nextcloud.caddy"
+  route_file="$(caddy_routes_dir)/${route_name}.caddy"
   route_target="reverse_proxy ${NEXTCLOUD_CONTAINER_NAME}:80"
   if [ -f "$route_file" ] && grep -Fq "$route_target" "$route_file"; then
-    pass "Nextcloud: Caddy route points to ${NEXTCLOUD_CONTAINER_NAME}"
+    pass "${label}: Caddy route points to ${NEXTCLOUD_CONTAINER_NAME}"
   else
-    fail "Nextcloud: Caddy route file is missing or points to the wrong container"
+    fail "${label}: Caddy route file is missing or points to the wrong container"
   fi
 
   if is_local_domain "${NEXTCLOUD_DOMAIN}"; then
-    note "Nextcloud: local domain ${NEXTCLOUD_DOMAIN} skips public DNS checks"
+    note "${label}: local domain ${NEXTCLOUD_DOMAIN} skips public DNS checks"
   else
-    check_domain_dns_once "Nextcloud" "${NEXTCLOUD_DOMAIN}" "${PUBLIC_IPV4}" "${PUBLIC_IPV6:-}"
+    check_domain_dns_once "${label}" "${NEXTCLOUD_DOMAIN}" "${PUBLIC_IPV4}" "${PUBLIC_IPV6:-}"
   fi
 
   if endpoint_responds "${NEXTCLOUD_DOMAIN}" "${NEXTCLOUD_TLS_MODE}"; then
-    pass "Nextcloud: endpoint responds at ${NEXTCLOUD_URL}"
+    pass "${label}: endpoint responds at ${NEXTCLOUD_URL}"
   else
-    fail "Nextcloud: endpoint is not responding at ${NEXTCLOUD_URL}"
+    fail "${label}: endpoint is not responding at ${NEXTCLOUD_URL}"
   fi
 
   while IFS= read -r link_file; do
@@ -393,10 +451,12 @@ check_nextcloud() {
   done < <(iter_nextcloud_link_files)
 
   if [ "$linked_instances" -eq 0 ]; then
-    note "Nextcloud: no TinyMRP instances are linked"
+    note "${label}: no TinyMRP instances are linked"
   else
-    pass "Nextcloud: ${linked_instances} linked TinyMRP instance(s) recorded"
+    pass "${label}: ${linked_instances} linked TinyMRP instance(s) recorded"
   fi
+
+  restore_nextcloud_context "$saved_nextcloud_dir"
 }
 
 check_nextcloud_link() {
@@ -599,32 +659,59 @@ if [ "$SKIP_HOST_CHECKS" -eq 0 ]; then
 fi
 
 INSTANCE_COUNT=0
+RUN_INSTANCE_CHECKS=0
+RUN_NEXTCLOUD_CHECKS=0
+if [ "$RUN_ALL_CHECKS" -eq 1 ] || { [ -z "$TARGET_INSTANCE" ] && [ -z "$TARGET_NEXTCLOUD_INSTANCE" ]; }; then
+  RUN_INSTANCE_CHECKS=1
+  RUN_NEXTCLOUD_CHECKS=1
+fi
 if [ -n "$TARGET_INSTANCE" ]; then
-  TARGET_ENV_FILE="$(instance_env_file "$TARGET_INSTANCE")"
-  if [ -f "$TARGET_ENV_FILE" ]; then
-    INSTANCE_COUNT=1
-    check_instance "$TARGET_ENV_FILE"
-  else
-    fail "Instance ${TARGET_INSTANCE}: env file not found at ${TARGET_ENV_FILE}"
-  fi
-else
-  for env_file in "$(instances_dir)"/*/.env; do
-    if [ ! -f "$env_file" ]; then
-      continue
+  RUN_INSTANCE_CHECKS=1
+fi
+if [ -n "$TARGET_NEXTCLOUD_INSTANCE" ]; then
+  RUN_NEXTCLOUD_CHECKS=1
+fi
+
+if [ "$RUN_INSTANCE_CHECKS" -eq 1 ]; then
+  if [ -n "$TARGET_INSTANCE" ]; then
+    TARGET_ENV_FILE="$(instance_env_file "$TARGET_INSTANCE")"
+    if [ -f "$TARGET_ENV_FILE" ]; then
+      INSTANCE_COUNT=1
+      check_instance "$TARGET_ENV_FILE"
+    else
+      fail "Instance ${TARGET_INSTANCE}: env file not found at ${TARGET_ENV_FILE}"
     fi
-    INSTANCE_COUNT=$((INSTANCE_COUNT + 1))
-    check_instance "$env_file"
-  done
+  else
+    for env_file in "$(instances_dir)"/*/.env; do
+      if [ ! -f "$env_file" ]; then
+        continue
+      fi
+      INSTANCE_COUNT=$((INSTANCE_COUNT + 1))
+      check_instance "$env_file"
+    done
+  fi
+
+  if [ "$INSTANCE_COUNT" -eq 0 ]; then
+    note "No TinyMRP instance env files found under $(instances_dir)"
+  fi
 fi
 
-if [ "$INSTANCE_COUNT" -eq 0 ]; then
-  note "No TinyMRP instance env files found under $(instances_dir)"
-fi
+NEXTCLOUD_COUNT=0
+if [ "$RUN_NEXTCLOUD_CHECKS" -eq 1 ]; then
+  if [ -n "$TARGET_NEXTCLOUD_INSTANCE" ]; then
+    NEXTCLOUD_COUNT=1
+    check_nextcloud_install "$(nextcloud_root_for_selector "$TARGET_NEXTCLOUD_INSTANCE")" "$TARGET_NEXTCLOUD_INSTANCE"
+  else
+    while IFS= read -r nextcloud_root; do
+      [ -n "$nextcloud_root" ] || continue
+      NEXTCLOUD_COUNT=$((NEXTCLOUD_COUNT + 1))
+      check_nextcloud_install "$nextcloud_root" "$(nextcloud_instance_name_for_root "$nextcloud_root")"
+    done < <(iter_nextcloud_install_dirs)
+  fi
 
-if [ -z "$TARGET_INSTANCE" ] && [ "$SKIP_HOST_CHECKS" -eq 0 ] && [ -f "$(nextcloud_env_file)" ]; then
-  check_nextcloud "$(nextcloud_env_file)"
-elif [ -z "$TARGET_INSTANCE" ] && [ "$SKIP_HOST_CHECKS" -eq 0 ]; then
-  note "Nextcloud is not installed"
+  if [ "$NEXTCLOUD_COUNT" -eq 0 ]; then
+    note "No Nextcloud installs found under $(nextcloud_base_dir)"
+  fi
 fi
 
 printf '\nDoctor summary: %s failure(s), %s warning(s)\n' "$FAILURES" "$WARNINGS"
