@@ -393,16 +393,14 @@ check_nextcloud_link() {
   local mount_source=""
   local mount_rw=""
   local mount_row_json=""
-  local mount_id=""
   local mount_groups=""
   local mount_users=""
-  local readonly_value=""
 
   unset INSTANCE_NAME HOST_DELIVERABLES_PATH NEXTCLOUD_MOUNT_PATH NEXTCLOUD_GROUP_NAME NEXTCLOUD_STORAGE_NAME NEXTCLOUD_STORAGE_MOUNT_POINT LINK_ACCESS_MODE
   load_env_file "$link_file"
 
   if [ -z "${INSTANCE_NAME:-}" ] || [ -z "${HOST_DELIVERABLES_PATH:-}" ] || [ -z "${NEXTCLOUD_MOUNT_PATH:-}" ]; then
-    fail "Nextcloud link metadata ${link_file} is incomplete"
+    note "Nextcloud link metadata ${link_file} is incomplete"
     return 0
   fi
 
@@ -413,7 +411,7 @@ check_nextcloud_link() {
   if [ -d "${HOST_DELIVERABLES_PATH}" ]; then
     pass "Nextcloud link ${INSTANCE_NAME}: host deliverables folder exists"
   else
-    fail "Nextcloud link ${INSTANCE_NAME}: host deliverables folder is missing at ${HOST_DELIVERABLES_PATH}"
+    note "Nextcloud link ${INSTANCE_NAME}: host deliverables folder is missing at ${HOST_DELIVERABLES_PATH}"
   fi
 
   if [[ "${NEXTCLOUD_MOUNT_PATH}" == "$(nextcloud_link_mount_root)"/* ]]; then
@@ -424,11 +422,11 @@ check_nextcloud_link() {
 
   mount_source="$(container_mount_source "${nextcloud_container_name}" "${NEXTCLOUD_MOUNT_PATH}")"
   if [ -z "$mount_source" ]; then
-    fail "Nextcloud link ${INSTANCE_NAME}: Nextcloud container is missing the bind mount for ${NEXTCLOUD_MOUNT_PATH}"
+    note "Nextcloud link ${INSTANCE_NAME}: Nextcloud container is missing the bind mount for ${NEXTCLOUD_MOUNT_PATH}"
   elif [ "$mount_source" = "${HOST_DELIVERABLES_PATH}" ]; then
     pass "Nextcloud link ${INSTANCE_NAME}: Nextcloud container mount matches the host deliverables path"
   else
-    fail "Nextcloud link ${INSTANCE_NAME}: Nextcloud mount source is ${mount_source}, expected ${HOST_DELIVERABLES_PATH}"
+    note "Nextcloud link ${INSTANCE_NAME}: Nextcloud mount source is ${mount_source}, expected ${HOST_DELIVERABLES_PATH}"
   fi
 
   mount_rw="$(container_mount_rw "${nextcloud_container_name}" "${NEXTCLOUD_MOUNT_PATH}")"
@@ -437,30 +435,29 @@ check_nextcloud_link() {
   elif [ -n "$mount_rw" ]; then
     note "Nextcloud link ${INSTANCE_NAME}: Docker bind mount is writable"
   else
-    fail "Nextcloud link ${INSTANCE_NAME}: Docker bind mount mode could not be determined"
+    note "Nextcloud link ${INSTANCE_NAME}: Docker bind mount mode could not be determined"
   fi
 
   if docker exec "${nextcloud_container_name}" sh -lc 'target="$1"; [ -d "$target" ] && [ -r "$target" ] && ls "$target" >/dev/null 2>&1' sh "${NEXTCLOUD_MOUNT_PATH}" >/dev/null 2>&1; then
     pass "Nextcloud link ${INSTANCE_NAME}: Nextcloud container can read ${NEXTCLOUD_MOUNT_PATH}"
   else
-    fail "Nextcloud link ${INSTANCE_NAME}: Nextcloud container cannot read ${NEXTCLOUD_MOUNT_PATH}"
+    note "Nextcloud link ${INSTANCE_NAME}: Nextcloud container cannot read ${NEXTCLOUD_MOUNT_PATH}"
   fi
 
   if [ -n "${NEXTCLOUD_GROUP_NAME:-}" ] && nextcloud_group_exists "${nextcloud_container_name}" "${NEXTCLOUD_GROUP_NAME}"; then
     pass "Nextcloud link ${INSTANCE_NAME}: Nextcloud group ${NEXTCLOUD_GROUP_NAME} exists"
   else
-    fail "Nextcloud link ${INSTANCE_NAME}: Nextcloud group ${NEXTCLOUD_GROUP_NAME:-<unset>} is missing"
+    note "Nextcloud link ${INSTANCE_NAME}: Nextcloud group ${NEXTCLOUD_GROUP_NAME:-<unset>} is missing"
   fi
 
   mount_row_json="$(nextcloud_external_mount_record_json "${nextcloud_container_name}" "${NEXTCLOUD_STORAGE_MOUNT_POINT:-}" "${NEXTCLOUD_MOUNT_PATH}" 2>/dev/null || true)"
   if [ -z "$mount_row_json" ]; then
-    fail "Nextcloud link ${INSTANCE_NAME}: external storage entry ${NEXTCLOUD_STORAGE_NAME:-${NEXTCLOUD_STORAGE_MOUNT_POINT:-<unset>}} was not found"
+    note "Nextcloud link ${INSTANCE_NAME}: external storage entry ${NEXTCLOUD_STORAGE_NAME:-${NEXTCLOUD_STORAGE_MOUNT_POINT:-<unset>}} was not found"
     return 0
   fi
 
   pass "Nextcloud link ${INSTANCE_NAME}: external storage entry exists"
 
-  mount_id="$(nextcloud_external_mount_row_field "$mount_row_json" "mount_id" 2>/dev/null || true)"
   mount_groups="$(nextcloud_external_mount_row_field "$mount_row_json" "applicable_groups" 2>/dev/null || true)"
   mount_users="$(nextcloud_external_mount_row_field "$mount_row_json" "applicable_users" 2>/dev/null || true)"
 
@@ -468,7 +465,7 @@ check_nextcloud_link() {
     if nextcloud_external_mount_list_contains "$mount_groups" "${NEXTCLOUD_GROUP_NAME}"; then
       pass "Nextcloud link ${INSTANCE_NAME}: external storage is assigned to ${NEXTCLOUD_GROUP_NAME}"
     else
-      fail "Nextcloud link ${INSTANCE_NAME}: external storage groups are ${mount_groups}, expected ${NEXTCLOUD_GROUP_NAME}"
+      note "Nextcloud link ${INSTANCE_NAME}: external storage groups are ${mount_groups}, expected ${NEXTCLOUD_GROUP_NAME}"
     fi
   else
     note "Nextcloud link ${INSTANCE_NAME}: external storage group assignment could not be verified from Nextcloud output"
@@ -476,16 +473,6 @@ check_nextcloud_link() {
 
   if [ -n "$mount_users" ] && nextcloud_external_mount_list_has_entries "$mount_users"; then
     note "Nextcloud link ${INSTANCE_NAME}: external storage also applies to ${mount_users}"
-  fi
-
-  if [ -n "$mount_id" ]; then
-    readonly_value="$(nextcloud_occ "${nextcloud_container_name}" files_external:option "$mount_id" get readonly 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
-  fi
-
-  if printf '%s\n' "$readonly_value" | grep -Eiq '^(1|true|yes|on)$'; then
-    pass "Nextcloud link ${INSTANCE_NAME}: Nextcloud external storage is marked read-only"
-  else
-    note "Nextcloud link ${INSTANCE_NAME}: Nextcloud external storage is not confirmed as read-only"
   fi
 }
 

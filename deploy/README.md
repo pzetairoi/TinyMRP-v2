@@ -231,7 +231,7 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company2
 What it does:
 
 - adds a read-only bind mount from `/srv/tinymrp/instances/<instance>/deliverables` to `/mnt/tinymrp-deliverables/<instance>`
-- rewrites `/srv/tinymrp/nextcloud/compose.yml` from managed link metadata
+- writes a managed `/srv/tinymrp/nextcloud/compose.override.yml` for TinyMRP deliverables mounts
 - recreates only the Nextcloud `app` container when the mount configuration changes
 - enables the Nextcloud `files_external` app automatically
 - creates the Nextcloud group `tinymrp-<instance>` if needed

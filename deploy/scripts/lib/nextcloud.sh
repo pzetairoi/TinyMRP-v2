@@ -20,6 +20,14 @@ nextcloud_mount_path_for_instance() {
   printf '%s/%s\n' "$(nextcloud_link_mount_root)" "$1"
 }
 
+nextcloud_override_file() {
+  printf '%s\n' "$(nextcloud_dir)/compose.override.yml"
+}
+
+nextcloud_override_marker() {
+  printf '%s\n' "# Managed by TinyMRP link-nextcloud-instance.sh"
+}
+
 nextcloud_links_dir() {
   printf '%s\n' "$(nextcloud_dir)/links"
 }
@@ -247,6 +255,150 @@ for raw in lines:
 
 raise SystemExit(1)
 PY
+}
+
+compose_service_name_for_container_name_from_file() {
+  local compose_file="$1"
+  local container_name="$2"
+
+  python3 - "$compose_file" "$container_name" <<'PY'
+import sys
+
+compose_path = sys.argv[1]
+target_container_name = sys.argv[2]
+
+with open(compose_path, "r", encoding="utf-8") as handle:
+    lines = handle.readlines()
+
+service_indent = None
+in_services = False
+current_service = None
+
+for raw in lines:
+    line = raw.rstrip("\n")
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+
+    indent = len(line) - len(line.lstrip(" "))
+    if stripped == "services:":
+        in_services = True
+        service_indent = indent
+        current_service = None
+        continue
+
+    if in_services and indent <= service_indent and stripped.endswith(":") and stripped != "services:":
+        in_services = False
+        current_service = None
+
+    if not in_services:
+        continue
+
+    if indent == service_indent + 2 and stripped.endswith(":"):
+        current_service = stripped[:-1]
+        continue
+
+    if current_service and indent > service_indent + 2 and stripped.startswith("container_name:"):
+        value = stripped.split(":", 1)[1].strip()
+        if value == target_container_name:
+            print(current_service)
+            raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+nextcloud_compose_services() {
+  local root_dir="${1:-$(nextcloud_dir)}"
+  (
+    cd "$root_dir" >/dev/null 2>&1 || exit 1
+    {
+      docker_compose ps --services 2>/dev/null || true
+      docker_compose config --services 2>/dev/null || true
+    } | awk 'NF && !seen[$0]++'
+  )
+}
+
+resolve_nextcloud_app_service_name() {
+  local root_dir="${1:-$(nextcloud_dir)}"
+  local app_container_name="${2:-}"
+  local declared_service_name=""
+  local service_name=""
+  local container_id=""
+  local resolved_container_name=""
+  local -a services=()
+  local -a non_db_services=()
+
+  if [ -f "$(nextcloud_env_file)" ]; then
+    unset NEXTCLOUD_APP_SERVICE NEXTCLOUD_SERVICE_NAME
+    load_env_file "$(nextcloud_env_file)"
+    declared_service_name="${NEXTCLOUD_APP_SERVICE:-${NEXTCLOUD_SERVICE_NAME:-}}"
+  fi
+
+  if [ -n "$declared_service_name" ]; then
+    printf '%s\n' "$declared_service_name"
+    return 0
+  fi
+
+  if [ -z "$app_container_name" ]; then
+    app_container_name="$(resolve_nextcloud_app_container_name 2>/dev/null || true)"
+  fi
+
+  while IFS= read -r service_name; do
+    [ -n "$service_name" ] || continue
+    services+=("$service_name")
+  done < <(nextcloud_compose_services "$root_dir")
+
+  if [ -n "$app_container_name" ]; then
+    for service_name in "${services[@]}"; do
+      container_id="$(
+        cd "$root_dir" >/dev/null 2>&1 \
+          && docker_compose ps -q "$service_name" 2>/dev/null | head -n 1
+      )"
+      if [ -z "$container_id" ]; then
+        continue
+      fi
+      resolved_container_name="$(docker inspect -f '{{.Name}}' "$container_id" 2>/dev/null | sed 's#^/##')"
+      if [ "$resolved_container_name" = "$app_container_name" ]; then
+        printf '%s\n' "$service_name"
+        return 0
+      fi
+    done
+
+    if [ -f "$(nextcloud_compose_file)" ]; then
+      service_name="$(compose_service_name_for_container_name_from_file "$(nextcloud_compose_file)" "$app_container_name" 2>/dev/null || true)"
+      if [ -n "$service_name" ]; then
+        printf '%s\n' "$service_name"
+        return 0
+      fi
+    fi
+  fi
+
+  for service_name in "${services[@]}"; do
+    case "$(lower "$service_name")" in
+      app|nextcloud|web)
+        printf '%s\n' "$service_name"
+        return 0
+        ;;
+    esac
+  done
+
+  for service_name in "${services[@]}"; do
+    case "$(lower "$service_name")" in
+      db|database|mariadb|mysql)
+        ;;
+      *)
+        non_db_services+=("$service_name")
+        ;;
+    esac
+  done
+
+  if [ "${#non_db_services[@]}" -eq 1 ]; then
+    printf '%s\n' "${non_db_services[0]}"
+    return 0
+  fi
+
+  return 1
 }
 
 resolve_nextcloud_app_container_name() {
@@ -566,4 +718,75 @@ nextcloud_group_exists() {
   local container_name="$1"
   local group_name="$2"
   nextcloud_occ "$container_name" group:info "$group_name" >/dev/null 2>&1
+}
+
+nextcloud_group_has_user() {
+  local container_name="$1"
+  local group_name="$2"
+  local user_name="$3"
+  local raw_output=""
+
+  raw_output="$(nextcloud_occ "$container_name" group:info "$group_name" --output=json_pretty 2>/dev/null || nextcloud_occ "$container_name" group:info "$group_name" 2>/dev/null || true)"
+  [ -n "$raw_output" ] || return 1
+
+  GROUP_INFO_RAW="$raw_output" python3 - "$user_name" <<'PY'
+import json
+import os
+import sys
+
+user_name = sys.argv[1]
+text = os.environ["GROUP_INFO_RAW"]
+
+def contains_user(value):
+    if isinstance(value, str):
+        return value == user_name
+    if isinstance(value, list):
+        return any(contains_user(item) for item in value)
+    if isinstance(value, dict):
+        return any(contains_user(item) for item in value.values())
+    return False
+
+try:
+    parsed = json.loads(text)
+except json.JSONDecodeError:
+    parsed = None
+
+if parsed is not None and contains_user(parsed):
+    raise SystemExit(0)
+
+for raw_line in text.splitlines():
+    line = raw_line.strip()
+    if line.startswith("-"):
+        candidate = line[1:].strip()
+        if candidate == user_name:
+            raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+nextcloud_user_exists() {
+  local container_name="$1"
+  local user_name="$2"
+  nextcloud_occ "$container_name" user:info "$user_name" >/dev/null 2>&1
+}
+
+read_nextcloud_admin_user() {
+  if [ -f "$(nextcloud_env_file)" ]; then
+    unset NEXTCLOUD_ADMIN_USER NEXTCLOUD_ADMIN_USERNAME
+    load_env_file "$(nextcloud_env_file)"
+  fi
+
+  if [ -n "${NEXTCLOUD_ADMIN_USER:-}" ]; then
+    printf '%s\n' "${NEXTCLOUD_ADMIN_USER}"
+    return 0
+  fi
+
+  if [ -n "${NEXTCLOUD_ADMIN_USERNAME:-}" ]; then
+    printf '%s\n' "${NEXTCLOUD_ADMIN_USERNAME}"
+    return 0
+  fi
+
+  printf '%s\n' "admin"
+  return 1
 }
