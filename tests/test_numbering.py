@@ -239,8 +239,51 @@ def test_ensure_presets_seeds_simple_recommended_scheme():
     scheme = NumberingScheme.objects(name="Default: PART-SEQ6").first()
     assert scheme is not None
     assert scheme.is_recommended is True
+    assert NumberingScheme.objects(is_preset=True).count() == 1
     assert [segment.get("kind") for segment in scheme.pattern_segments] == ["literal", "seq"]
     assert scheme.pattern_segments[0].get("value") == "PART"
+    assert scheme.pattern_segments[1].get("auto_counter") is True
+
+
+def test_ensure_presets_removes_legacy_seeded_presets():
+    NumberingScheme(
+        name="Preset B: TYPE-YYYY-SEQ5",
+        is_active=True,
+        is_preset=True,
+        pattern_segments=[
+            {"kind": "field", "field": "type", "casing": "upper"},
+            {"kind": "date", "fmt": "YYYY"},
+            {"kind": "seq", "padding": 5, "base": 10},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 5, "base": 10, "start_at": 1, "reset_policy": "yearly"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+    NumberingScheme(
+        name="Preset C: FAM-SUB-SEQ6",
+        is_active=True,
+        is_preset=True,
+        pattern_segments=[
+            {"kind": "field", "field": "family", "casing": "upper"},
+            {"kind": "field", "field": "subfamily", "casing": "upper"},
+            {"kind": "seq", "padding": 6, "base": 10},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 6, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+
+    ensure_presets()
+
+    assert NumberingScheme.objects(name="Preset B: TYPE-YYYY-SEQ5").first() is None
+    assert NumberingScheme.objects(name="Preset C: FAM-SUB-SEQ6").first() is None
+    assert NumberingScheme.objects(name="Default: PART-SEQ6").first() is not None
 
 
 def test_ensure_presets_does_not_add_duplicate_recommended_scheme():

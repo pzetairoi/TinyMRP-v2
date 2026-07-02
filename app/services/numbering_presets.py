@@ -11,7 +11,7 @@ PRESETS = [
         "name": "Default: PART-SEQ6",
         "pattern_segments": [
             {"kind": "literal", "value": "PART"},
-            {"kind": "seq", "padding": 6, "base": 10},
+            {"kind": "seq", "padding": 6, "base": 10, "start_at": 1, "auto_counter": True},
         ],
         "separator": "-",
         "scope_mode": "global",
@@ -23,71 +23,61 @@ PRESETS = [
         "visibility": "quickstart",
         "description": "Recommended: PART-SEQ6",
     },
-    {
-        "name": "Preset B: TYPE-YYYY-SEQ5",
-        "pattern_segments": [
-            {"kind": "field", "field": "type", "casing": "upper"},
-            {"kind": "date", "fmt": "YYYY"},
-            {"kind": "seq", "padding": 5, "base": 10},
-        ],
-        "separator": "-",
-        "scope_mode": "global",
-        "seq": {"padding": 5, "base": 10, "start_at": 1, "reset_policy": "yearly"},
-        "revision": {"policy": "alpha", "start": "A"},
-        "validation_rules": {"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        "is_preset": True,
-        "is_recommended": False,
-        "visibility": "quickstart",
-        "description": "TYPE-YYYY-SEQ5",
-    },
-    {
-        "name": "Preset C: FAM-SUB-SEQ6",
-        "pattern_segments": [
-            {"kind": "field", "field": "family", "casing": "upper"},
-            {"kind": "field", "field": "subfamily", "casing": "upper"},
-            {"kind": "seq", "padding": 6, "base": 10},
-        ],
-        "separator": "-",
-        "scope_mode": "global",
-        "seq": {"padding": 6, "base": 10, "start_at": 1, "reset_policy": "never"},
-        "revision": {"policy": "alpha", "start": "A"},
-        "validation_rules": {"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        "is_preset": True,
-        "is_recommended": False,
-        "visibility": "quickstart",
-        "description": "FAM-SUB-SEQ6",
-    },
 ]
+
+LEGACY_PRESET_NAMES = {
+    "Preset B: TYPE-YYYY-SEQ5",
+    "Preset C: FAM-SUB-SEQ6",
+}
 
 
 def ensure_presets() -> None:
+    _remove_legacy_presets()
+
+    preset = PRESETS[0]
     if NumberingScheme.objects().count() == 0:
-        for preset in PRESETS:
-            NumberingScheme(**preset, is_active=True, audit={"created_at": datetime.utcnow()}).save()
+        NumberingScheme(**preset, is_active=True, audit={"created_at": datetime.utcnow()}).save()
         return
 
-    has_recommended = NumberingScheme.objects(is_recommended=True, is_active=True).first() is not None
+    existing = NumberingScheme.objects(name=preset["name"]).first()
+    if not existing:
+        preset_data = dict(preset)
+        has_recommended = NumberingScheme.objects(is_recommended=True, is_active=True).first() is not None
+        preset_data["is_recommended"] = not has_recommended
+        NumberingScheme(**preset_data, is_active=True, audit={"created_at": datetime.utcnow()}).save()
+        return
 
-    for preset in PRESETS:
-        existing = NumberingScheme.objects(name=preset["name"]).first()
-        if not existing:
-            preset_data = dict(preset)
-            if preset_data.get("is_recommended") and has_recommended:
-                preset_data["is_recommended"] = False
-            elif preset_data.get("is_recommended"):
-                has_recommended = True
-            NumberingScheme(**preset_data, is_active=True, audit={"created_at": datetime.utcnow()}).save()
-            continue
+    has_other_recommended = NumberingScheme.objects(
+        is_recommended=True,
+        is_active=True,
+        id__ne=existing.id,
+    ).first() is not None
+    updates = {
+        "name": preset["name"],
+        "pattern_segments": preset["pattern_segments"],
+        "separator": preset["separator"],
+        "scope_mode": preset["scope_mode"],
+        "scope_keys": preset.get("scope_keys", []),
+        "seq": preset["seq"],
+        "revision": preset["revision"],
+        "validation_rules": preset["validation_rules"],
+        "is_active": True,
+        "is_preset": preset["is_preset"],
+        "visibility": preset["visibility"],
+        "description": preset["description"],
+        "is_recommended": not has_other_recommended,
+    }
+    existing.update(**{f"set__{k}": v for k, v in updates.items()})
 
-        updates = {
-            "is_preset": preset["is_preset"],
-            "visibility": preset["visibility"],
-            "description": preset["description"],
-        }
-        if preset["is_recommended"] and not has_recommended:
-            updates["is_recommended"] = True
-            has_recommended = True
-        existing.update(**{f"set__{k}": v for k, v in updates.items()})
+
+def _remove_legacy_presets() -> None:
+    if not LEGACY_PRESET_NAMES:
+        return
+
+    NumberingScheme.objects(
+        is_preset=True,
+        name__in=list(LEGACY_PRESET_NAMES),
+    ).delete()
 
 
 def get_recommended_scheme() -> Optional[NumberingScheme]:

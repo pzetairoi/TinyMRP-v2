@@ -96,6 +96,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         private GroupBox _numberingSeqOverrideGroup;
         private Label _numberingSeqOverrideNote;
         private readonly List<NumericUpDown> _numberingSeqOverrides = new List<NumericUpDown>();
+        private readonly Dictionary<string, List<int>> _sequenceOverrideCache = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         private CheckBox _renameAutoCheck;
         private ComboBox _renameModeCombo;
         private CheckBox _renameAppendRevisionCheck;
@@ -798,9 +799,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             _presetCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
             _presetCombo.Items.AddRange(new object[]
             {
-                "Template 1: PART-SEQ6",
-                "Template 2: ITEM-SEQ6",
-                "Template 3: SEQ6 only"
+                "Template: PART-SEQ6"
             });
             var btnApplyPreset = new Button { Text = "Apply template", AutoSize = true };
             btnApplyPreset.Click += OnApplyPreset;
@@ -1505,12 +1504,15 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
             List<NumberingSegmentDefinition> sequenceSegments = GetSequenceSegments(scheme);
             int autoSequenceIndex = GetAutomaticSequenceIndex(scheme);
+            List<int> rememberedValues = GetStoredSequenceOverrideValues(scheme);
 
             for (int i = 0; i < seqCount; i++)
             {
                 NumberingSegmentDefinition sequenceSegment = i < sequenceSegments.Count ? sequenceSegments[i] : null;
                 bool isAutomatic = i == autoSequenceIndex || (autoSequenceIndex < 0 && seqCount == 1);
-                int startAt = GetSequenceStartValue(scheme, sequenceSegment, isAutomatic);
+                int startAt = rememberedValues != null && i < rememberedValues.Count && rememberedValues[i] > 0
+                    ? rememberedValues[i]
+                    : GetSequenceStartValue(scheme, sequenceSegment, isAutomatic);
                 var row = new TableLayoutPanel
                 {
                     ColumnCount = 2,
@@ -1543,6 +1545,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                     {
                         _seqStartUpDown.Value = upDown.Value;
                     }
+
+                    RememberCurrentSequenceOverrides(scheme);
                 };
                 row.Controls.Add(label, 0, 0);
                 row.Controls.Add(upDown, 1, 0);
@@ -1557,6 +1561,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 _numberingSeqOverridePanel.Controls.Add(_numberingSeqOverrideNote);
             }
 
+            RememberCurrentSequenceOverrides(scheme);
             _numberingSeqOverridePanel.ResumeLayout();
         }
 
@@ -1630,6 +1635,161 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             return fallback;
+        }
+
+        private List<int> GetStoredSequenceOverrideValues(NumberingSchemeDefinition scheme)
+        {
+            string key = GetSequenceOverrideKey(scheme);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return null;
+            }
+
+            if (!_sequenceOverrideCache.TryGetValue(key, out List<int> values) || values == null || values.Count == 0)
+            {
+                return null;
+            }
+
+            return new List<int>(values);
+        }
+
+        private void RememberCurrentSequenceOverrides(NumberingSchemeDefinition scheme)
+        {
+            RememberSequenceOverrideValues(scheme, BuildSequenceOverrideValues(scheme));
+        }
+
+        private void RememberSequenceOverrideValues(NumberingSchemeDefinition scheme, List<int> values)
+        {
+            string key = GetSequenceOverrideKey(scheme);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return;
+            }
+
+            if (values == null || values.Count == 0)
+            {
+                _sequenceOverrideCache.Remove(key);
+                return;
+            }
+
+            _sequenceOverrideCache[key] = new List<int>(values);
+        }
+
+        private string GetSequenceOverrideKey(NumberingSchemeDefinition scheme)
+        {
+            if (scheme == null)
+            {
+                return string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(scheme.Id))
+            {
+                return scheme.Id.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(scheme.Name))
+            {
+                return "name:" + scheme.Name.Trim();
+            }
+
+            return string.Empty;
+        }
+
+        private void ApplySequenceOverrideStateFromResponse(NumberingSchemeDefinition scheme, ApiResponse response, bool useNextValueAfter)
+        {
+            if (scheme == null || response == null || response.Data == null || _numberingSeqOverrides.Count == 0)
+            {
+                return;
+            }
+
+            List<int> values = ParseSequenceValuesFromResponse(response);
+            if (values.Count == 0)
+            {
+                return;
+            }
+
+            int autoSequenceIndex = NumberingJson.GetInt(response.Data, "auto_sequence_index", GetAutomaticSequenceIndex(scheme));
+            if (useNextValueAfter && autoSequenceIndex >= 0 && autoSequenceIndex < values.Count)
+            {
+                int nextValueAfter = NumberingJson.GetInt(response.Data, "next_value_after", 0);
+                if (nextValueAfter > 0)
+                {
+                    values[autoSequenceIndex] = nextValueAfter;
+                }
+            }
+
+            ApplySequenceOverrideValuesToUi(scheme, values, autoSequenceIndex);
+        }
+
+        private List<int> ParseSequenceValuesFromResponse(ApiResponse response)
+        {
+            var values = new List<int>();
+            if (response == null || response.Data == null || !response.Data.ContainsKey("sequence_values_used"))
+            {
+                return values;
+            }
+
+            foreach (object item in NumberingJson.AsList(response.Data["sequence_values_used"]))
+            {
+                int parsed;
+                if (item != null && int.TryParse(item.ToString(), out parsed))
+                {
+                    values.Add(Math.Max(1, parsed));
+                }
+            }
+
+            return values;
+        }
+
+        private void ApplySequenceOverrideValuesToUi(NumberingSchemeDefinition scheme, List<int> values, int autoSequenceIndex)
+        {
+            if (scheme == null || values == null || values.Count == 0 || _numberingSeqOverrides.Count == 0)
+            {
+                return;
+            }
+
+            int count = Math.Min(values.Count, _numberingSeqOverrides.Count);
+            for (int i = 0; i < count; i++)
+            {
+                NumericUpDown upDown = _numberingSeqOverrides[i];
+                decimal nextValue = ClampNumericValue(upDown, values[i]);
+                if (upDown.Value != nextValue)
+                {
+                    upDown.Value = nextValue;
+                }
+            }
+
+            if (_seqStartUpDown != null && autoSequenceIndex >= 0 && autoSequenceIndex < count)
+            {
+                decimal autoValue = ClampNumericValue(_seqStartUpDown, values[autoSequenceIndex]);
+                if (_seqStartUpDown.Value != autoValue)
+                {
+                    _seqStartUpDown.Value = autoValue;
+                }
+            }
+
+            RememberSequenceOverrideValues(scheme, values);
+        }
+
+        private decimal ClampNumericValue(NumericUpDown control, int value)
+        {
+            if (control == null)
+            {
+                return Math.Max(1, value);
+            }
+
+            decimal nextValue = Math.Max(1, value);
+            if (nextValue < control.Minimum)
+            {
+                return control.Minimum;
+            }
+
+            if (nextValue > control.Maximum)
+            {
+                return control.Maximum;
+            }
+
+            return nextValue;
         }
 
         private string GetPreferredText(TextBox primary, TextBox fallback)
@@ -2451,6 +2611,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            ApplySequenceOverrideStateFromResponse(GetQuickSchemeSelection(), response, false);
             string partNumber = NumberingJson.GetString(response.Data, "candidate_part_number") ?? string.Empty;
             string revision = NumberingJson.GetString(response.Data, "candidate_revision") ?? string.Empty;
             string display = NumberingJson.GetString(response.Data, "display_code_candidate") ?? string.Empty;
@@ -2515,6 +2676,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            ApplySequenceOverrideStateFromResponse(GetQuickSchemeSelection(), response, false);
             string partNumber = NumberingJson.GetString(response.Data, "candidate_part_number");
             string revision = NumberingJson.GetString(response.Data, "candidate_revision");
             string display = NumberingJson.GetString(response.Data, "display_code_candidate");
@@ -2616,6 +2778,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            ApplySequenceOverrideStateFromResponse(GetQuickSchemeSelection(), response, true);
             string partNumber = NumberingJson.GetString(response.Data, "part_number");
             string revision = NumberingJson.GetString(response.Data, "revision");
             string display = NumberingJson.GetString(response.Data, "display_code");
@@ -2686,6 +2849,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            ApplySequenceOverrideStateFromResponse(GetQuickSchemeSelection(), response, true);
             string partNumber = NumberingJson.GetString(response.Data, "part_number");
             string revision = NumberingJson.GetString(response.Data, "revision");
             string display = NumberingJson.GetString(response.Data, "display_code");
@@ -3071,6 +3235,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            ApplySequenceOverrideStateFromResponse(GetQuickSchemeSelection(), response, true);
             string partNumber = NumberingJson.GetString(response.Data, "part_number");
             string revision = NumberingJson.GetString(response.Data, "revision");
             string display = NumberingJson.GetString(response.Data, "display_code");
@@ -3694,6 +3859,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             _loadedSchemes.Clear();
+            _sequenceOverrideCache.Clear();
             _loadedSchemes.AddRange(schemes);
             PopulateSchemeCombo(_schemeCombo, _loadedSchemes, true);
             PopulateSchemeCombo(_advancedSchemeCombo, _loadedSchemes, false);
@@ -3861,17 +4027,9 @@ namespace TinyMRP.SolidWorksAddin.UI
                 presetIndex = 0;
             }
 
-            if (presetIndex == 0)
+            if (presetIndex >= 0)
             {
                 NumberingSchemeCatalog.ApplyBasicTemplate(_currentScheme, "PART", 6, true);
-            }
-            else if (presetIndex == 1)
-            {
-                NumberingSchemeCatalog.ApplyBasicTemplate(_currentScheme, "ITEM", 6, true);
-            }
-            else
-            {
-                NumberingSchemeCatalog.ApplyBasicTemplate(_currentScheme, string.Empty, 6, false);
             }
             ApplySchemeToUi(_currentScheme);
         }
