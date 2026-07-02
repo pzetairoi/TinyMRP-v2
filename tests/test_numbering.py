@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.models.numbering import NumberingScheme
+from app.models.part import Part
 from app.services.numbering import (
     allocate_number,
     bucket_for_reset_policy,
@@ -231,6 +232,101 @@ def test_allocate_multi_sequence_accepts_manual_sequence_override():
     assert not errors
     assert result["part_number"] == "PART-01-12"
     assert result["sequence_values_used"] == [1, 12]
+
+
+def test_allocate_manual_sequence_change_starts_independent_auto_series():
+    scheme = NumberingScheme(
+        name="ManualThenAuto",
+        pattern_segments=[
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 3, "base": 10, "start_at": 1},
+            {"kind": "seq", "padding": 3, "base": 10, "auto_counter": True},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+
+    first, first_errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=False,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+        sequence_values=[1, 1],
+    )
+    second, second_errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=False,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+        sequence_values=[1, 1],
+    )
+    reset_series, reset_errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=False,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+        sequence_values=[21, 1],
+    )
+
+    assert not first_errors
+    assert not second_errors
+    assert not reset_errors
+    assert first["part_number"] == "PART-001-001"
+    assert second["part_number"] == "PART-001-002"
+    assert reset_series["part_number"] == "PART-021-001"
+    assert first["counter_key"] != reset_series["counter_key"]
+
+
+def test_allocate_skips_existing_part_numbers_within_manual_series():
+    scheme = NumberingScheme(
+        name="ManualSeriesSkipExisting",
+        pattern_segments=[
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 3, "base": 10, "start_at": 1},
+            {"kind": "seq", "padding": 3, "base": 10, "auto_counter": True},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+    Part(
+        part_number="PART-021-001",
+        revision="A",
+        description="Existing",
+        uom="EA",
+        attrs={},
+    ).save()
+
+    result, errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=False,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+        sequence_values=[21, 1],
+    )
+
+    assert not errors
+    assert result["part_number"] == "PART-021-002"
+    assert result["sequence_values_used"] == [21, 2]
 
 
 def test_ensure_presets_seeds_simple_recommended_scheme():
