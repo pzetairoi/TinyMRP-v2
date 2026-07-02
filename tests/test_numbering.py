@@ -8,6 +8,7 @@ from app.services.numbering import (
     revision_for_existing,
     validate_scheme_definition,
 )
+from app.services.numbering_presets import ensure_presets
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -118,3 +119,37 @@ def test_concurrent_allocate_unique():
         results = list(executor.map(lambda _: alloc(), range(10)))
 
     assert len(results) == len(set(results))
+
+
+def test_ensure_presets_seeds_simple_recommended_scheme():
+    ensure_presets()
+
+    scheme = NumberingScheme.objects(name="Default: PART-SEQ6").first()
+    assert scheme is not None
+    assert scheme.is_recommended is True
+    assert [segment.get("kind") for segment in scheme.pattern_segments] == ["literal", "seq"]
+    assert scheme.pattern_segments[0].get("value") == "PART"
+
+
+def test_ensure_presets_does_not_add_duplicate_recommended_scheme():
+    NumberingScheme(
+        name="Existing Recommended",
+        is_active=True,
+        is_recommended=True,
+        pattern_segments=[
+            {"kind": "literal", "value": "EXISTING"},
+            {"kind": "seq", "padding": 3, "base": 10},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+
+    ensure_presets()
+
+    recommended = list(NumberingScheme.objects(is_recommended=True))
+    assert len(recommended) == 1
+    assert recommended[0].name == "Existing Recommended"

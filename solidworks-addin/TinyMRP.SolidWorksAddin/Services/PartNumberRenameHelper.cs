@@ -132,6 +132,47 @@ namespace TinyMRP.SolidWorksAddin.Services
             return true;
         }
 
+        public static bool TryBuildUnsavedTargetPath(
+            string targetDirectory,
+            string partNumber,
+            string extension,
+            Func<string, bool> exists,
+            out string targetPath,
+            out string message)
+        {
+            targetPath = string.Empty;
+            message = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(targetDirectory))
+            {
+                message = "Choose a target folder before saving.";
+                return false;
+            }
+
+            string baseName = BuildBaseName(partNumber, string.Empty, false);
+            if (string.IsNullOrWhiteSpace(baseName))
+            {
+                message = "Part number is required to save.";
+                return false;
+            }
+
+            string ext = extension ?? string.Empty;
+            if (ext.Length > 0 && !ext.StartsWith(".", StringComparison.Ordinal))
+            {
+                ext = "." + ext;
+            }
+
+            targetPath = Path.Combine(targetDirectory, baseName + ext);
+            if ((exists ?? File.Exists)(targetPath))
+            {
+                message = "Target file already exists: " + targetPath;
+                targetPath = string.Empty;
+                return false;
+            }
+
+            return true;
+        }
+
         public static RenameDecision EvaluateRenameDecision(string currentPath, bool isReferenced, RenameMode mode)
         {
             if (string.IsNullOrWhiteSpace(currentPath))
