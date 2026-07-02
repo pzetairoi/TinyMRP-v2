@@ -601,7 +601,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             _numberingPresetCombo.SelectedIndexChanged += OnNumberingPresetSelected;
             _numberingPresetRefreshButton = new Button { Text = "Refresh", AutoSize = true };
             _numberingPresetRefreshButton.Click += OnRefreshSchemes;
-            AddField(quickLayout, "Numbering preset", CreateInlineField(_numberingPresetCombo, _numberingPresetRefreshButton));
+            AddField(quickLayout, "Numbering scheme", CreateInlineField(_numberingPresetCombo, _numberingPresetRefreshButton));
 
             var quickContextLayout = new TableLayoutPanel
             {
@@ -846,15 +846,15 @@ namespace TinyMRP.SolidWorksAddin.UI
             _presetCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
             _presetCombo.Items.AddRange(new object[]
             {
-                "Preset 1: TYPE-SEQ6",
-                "Preset 2: TYPE-YYYY-SEQ5",
-                "Preset 3: FAM-SUB-SEQ6"
+                "Template 1: PART-SEQ6",
+                "Template 2: ITEM-SEQ6",
+                "Template 3: SEQ6 only"
             });
-            var btnApplyPreset = new Button { Text = "Apply preset", AutoSize = true };
+            var btnApplyPreset = new Button { Text = "Apply template", AutoSize = true };
             btnApplyPreset.Click += OnApplyPreset;
             presetPanel.Controls.Add(_presetCombo);
             presetPanel.Controls.Add(btnApplyPreset);
-            AddSection(panel, CreateGroupBox("Presets", presetPanel));
+            AddSection(panel, CreateGroupBox("Templates", presetPanel));
 
             var patternLayout = CreateFormLayout();
             _separatorText = new TextBox { Width = 80 };
@@ -993,7 +993,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             btnValidate.Click += OnValidateScheme;
             var btnSaveScheme = new Button { Text = "Save scheme", AutoSize = true };
             btnSaveScheme.Click += OnSaveScheme;
-            var btnDeactivate = new Button { Text = "Deactivate", AutoSize = true };
+            var btnDeactivate = new Button { Text = "Delete scheme", AutoSize = true };
             btnDeactivate.Click += OnDeactivateScheme;
             _validationResultLabel = new Label { AutoSize = true, Text = "" };
             schemeActions.Controls.Add(btnValidate);
@@ -1080,8 +1080,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             _quickSchemeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
             _quickRefreshSchemesButton = new Button { Text = "Refresh", AutoSize = true };
             _quickRefreshSchemesButton.Click += OnQuickRefreshSchemes;
-            AddField(schemeLayout, "Preset scheme", CreateInlineField(_quickSchemeCombo, _quickRefreshSchemesButton));
-            AddSection(panel, CreateGroupBox("Preset scheme", schemeLayout));
+            AddField(schemeLayout, "Numbering scheme", CreateInlineField(_quickSchemeCombo, _quickRefreshSchemesButton));
+            AddSection(panel, CreateGroupBox("Numbering scheme", schemeLayout));
 
             var defaultsLayout = CreateFormLayout();
             _quickApplyModeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
@@ -1830,7 +1830,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 return scheme.Id;
             }
-            if (combo != null && combo.Tag is string tagValue)
+            if (combo != null && combo.Items.Count == 0 && combo.Tag is string tagValue)
             {
                 return tagValue;
             }
@@ -2539,7 +2539,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             string schemeId = GetSchemeIdFromCombo(_quickSchemeCombo);
             if (string.IsNullOrWhiteSpace(schemeId))
             {
-                MessageBox.Show("Select a preset scheme.", "TinyMRP",
+                MessageBox.Show("Select a numbering scheme.", "TinyMRP",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -2611,7 +2611,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
             if (string.IsNullOrWhiteSpace(schemeId))
             {
-                SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
+                SetNumberingStatus("Select a numbering scheme first.", Color.Maroon);
                 return;
             }
 
@@ -2690,7 +2690,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
             if (string.IsNullOrWhiteSpace(schemeId))
             {
-                SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
+                SetNumberingStatus("Select a numbering scheme first.", Color.Maroon);
                 return;
             }
 
@@ -2770,7 +2770,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
             if (string.IsNullOrWhiteSpace(schemeId))
             {
-                SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
+                SetNumberingStatus("Select a numbering scheme first.", Color.Maroon);
                 return;
             }
 
@@ -3194,7 +3194,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
             if (string.IsNullOrWhiteSpace(schemeId))
             {
-                SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
+                SetNumberingStatus("Select a numbering scheme first.", Color.Maroon);
                 return;
             }
 
@@ -3553,7 +3553,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             if (_currentScheme == null)
             {
-                _currentScheme = new NumberingSchemeDefinition { IsActive = true };
+                _currentScheme = NumberingSchemeCatalog.CreateBasicScheme();
             }
 
             if (_presetCombo != null && _presetCombo.SelectedIndex < 0)
@@ -3694,22 +3694,22 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_schemeCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
             {
                 _schemeCombo.Tag = config.NumberingSchemeId;
-                SelectComboItem(_schemeCombo, config.NumberingSchemeId);
+                SelectSchemeOrFallback(_schemeCombo, config.NumberingSchemeId, false);
             }
             if (_quickSchemeCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
             {
                 _quickSchemeCombo.Tag = config.NumberingSchemeId;
-                SelectComboItem(_quickSchemeCombo, config.NumberingSchemeId);
+                SelectSchemeOrFallback(_quickSchemeCombo, config.NumberingSchemeId, true);
             }
             if (_numberingPresetCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
             {
                 _numberingPresetCombo.Tag = config.NumberingSchemeId;
-                SelectComboItem(_numberingPresetCombo, config.NumberingSchemeId);
+                SelectSchemeOrFallback(_numberingPresetCombo, config.NumberingSchemeId, true);
             }
             if (_advancedSchemeCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
             {
                 _advancedSchemeCombo.Tag = config.NumberingSchemeId;
-                SelectComboItem(_advancedSchemeCombo, config.NumberingSchemeId);
+                SelectSchemeOrFallback(_advancedSchemeCombo, config.NumberingSchemeId, false);
             }
 
             if (_quickPartNumberPropText != null)
@@ -3856,7 +3856,10 @@ namespace TinyMRP.SolidWorksAddin.UI
             PopulateSchemeCombo(_schemeCombo, _loadedSchemes, true);
             PopulateSchemeCombo(_advancedSchemeCombo, _loadedSchemes, false);
             PopulateQuickSchemeCombo();
-            SetNumberingStatus("Schemes loaded.", Color.DarkGreen);
+            List<NumberingSchemeDefinition> selectableSchemes = GetQuickSchemes();
+            SetNumberingStatus(
+                selectableSchemes.Count > 0 ? "Schemes loaded." : "No active numbering schemes are available.",
+                selectableSchemes.Count > 0 ? Color.DarkGreen : Color.Maroon);
             MaybeAutoAssignNumbering(false);
         }
 
@@ -3870,7 +3873,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             combo.Items.Clear();
             if (includeNew)
             {
-                combo.Items.Add(new NumberingSchemeDefinition { Name = "(new scheme)", IsActive = true });
+                combo.Items.Add(NumberingSchemeCatalog.CreateBasicScheme(NumberingSchemeCatalog.NewSchemePlaceholderName));
             }
 
             if (schemes != null)
@@ -3889,11 +3892,12 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             if (!string.IsNullOrWhiteSpace(preferredId))
             {
-                SelectComboItem(combo, preferredId);
+                SelectSchemeOrFallback(combo, preferredId, false);
             }
             else if (combo.Items.Count > 0)
             {
                 combo.SelectedIndex = 0;
+                combo.Tag = GetSchemeIdFromCombo(combo);
             }
         }
 
@@ -3930,51 +3934,61 @@ namespace TinyMRP.SolidWorksAddin.UI
                 preferredId = AddinContext.Config != null ? AddinContext.Config.NumberingSchemeId : string.Empty;
             }
 
+            SelectSchemeOrFallback(combo, preferredId, true);
+        }
+
+        private void SelectSchemeOrFallback(ComboBox combo, string preferredId, bool preferRecommended)
+        {
+            if (combo == null)
+            {
+                return;
+            }
+
+            if (combo.Items.Count == 0)
+            {
+                combo.SelectedIndex = -1;
+                combo.Tag = string.IsNullOrWhiteSpace(preferredId) ? string.Empty : preferredId.Trim();
+                return;
+            }
+
             if (!string.IsNullOrWhiteSpace(preferredId))
             {
                 SelectComboItem(combo, preferredId);
-            }
-            else
-            {
-                NumberingSchemeDefinition recommended = null;
-                foreach (NumberingSchemeDefinition scheme in quickSchemes)
+                if (combo.SelectedIndex >= 0)
                 {
+                    combo.Tag = GetSchemeIdFromCombo(combo);
+                    return;
+                }
+            }
+
+            if (preferRecommended)
+            {
+                for (int i = 0; i < combo.Items.Count; i++)
+                {
+                    NumberingSchemeDefinition scheme = combo.Items[i] as NumberingSchemeDefinition;
                     if (scheme != null && scheme.IsRecommended)
                     {
-                        recommended = scheme;
-                        break;
+                        combo.SelectedIndex = i;
+                        combo.Tag = scheme.Id ?? string.Empty;
+                        return;
                     }
                 }
-                if (recommended != null)
-                {
-                    SelectComboItem(combo, recommended.Id);
-                }
-                else if (combo.Items.Count > 0)
-                {
-                    combo.SelectedIndex = 0;
-                }
             }
+
+            if (combo.Items.Count > 0)
+            {
+                combo.SelectedIndex = 0;
+                combo.Tag = GetSchemeIdFromCombo(combo);
+                return;
+            }
+
+            combo.SelectedIndex = -1;
+            combo.Tag = string.Empty;
         }
 
         private List<NumberingSchemeDefinition> GetQuickSchemes()
         {
-            var output = new List<NumberingSchemeDefinition>();
-            foreach (NumberingSchemeDefinition scheme in _loadedSchemes)
-            {
-                if (scheme == null)
-                {
-                    continue;
-                }
-                if (scheme.IsPreset && !string.Equals(scheme.Visibility, "advanced_only", StringComparison.OrdinalIgnoreCase))
-                {
-                    output.Add(scheme);
-                }
-            }
-            if (output.Count == 0)
-            {
-                output.AddRange(_loadedSchemes);
-            }
-            return output;
+            return NumberingSchemeCatalog.GetSelectableSchemes(_loadedSchemes);
         }
 
         private void OnSchemeSelected(object sender, EventArgs e)
@@ -3996,10 +4010,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             if (_currentScheme == null)
             {
-                _currentScheme = new NumberingSchemeDefinition();
+                _currentScheme = NumberingSchemeCatalog.CreateBasicScheme();
             }
-
-            _currentScheme.PatternSegments.Clear();
 
             int presetIndex = _presetCombo != null ? _presetCombo.SelectedIndex : -1;
             if (presetIndex < 0)
@@ -4009,51 +4021,17 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             if (presetIndex == 0)
             {
-                _currentScheme.PatternSegments.Add(new NumberingSegmentDefinition { Kind = "field", Field = "type", Casing = "upper" });
-                _currentScheme.PatternSegments.Add(new NumberingSegmentDefinition { Kind = "seq", Padding = 6, Base = 10 });
-                _seqPaddingUpDown.Value = 6;
+                NumberingSchemeCatalog.ApplyBasicTemplate(_currentScheme, "PART", 6, true);
             }
             else if (presetIndex == 1)
             {
-                _currentScheme.PatternSegments.Add(new NumberingSegmentDefinition { Kind = "field", Field = "type", Casing = "upper" });
-                _currentScheme.PatternSegments.Add(new NumberingSegmentDefinition { Kind = "date", Fmt = "YYYY" });
-                _currentScheme.PatternSegments.Add(new NumberingSegmentDefinition { Kind = "seq", Padding = 5, Base = 10 });
-                _seqPaddingUpDown.Value = 5;
+                NumberingSchemeCatalog.ApplyBasicTemplate(_currentScheme, "ITEM", 6, true);
             }
             else
             {
-                _currentScheme.PatternSegments.Add(new NumberingSegmentDefinition { Kind = "field", Field = "family", Casing = "upper" });
-                _currentScheme.PatternSegments.Add(new NumberingSegmentDefinition { Kind = "field", Field = "subfamily", Casing = "upper" });
-                _currentScheme.PatternSegments.Add(new NumberingSegmentDefinition { Kind = "seq", Padding = 6, Base = 10 });
-                _seqPaddingUpDown.Value = 6;
+                NumberingSchemeCatalog.ApplyBasicTemplate(_currentScheme, string.Empty, 6, false);
             }
-
-            if (_separatorText != null)
-            {
-                _separatorText.Text = "-";
-            }
-
-            if (_seqBaseCombo != null)
-            {
-                _seqBaseCombo.SelectedIndex = 0;
-            }
-
-            if (_seqResetCombo != null)
-            {
-                _seqResetCombo.SelectedIndex = 0;
-            }
-
-            if (_revPolicyCombo != null)
-            {
-                _revPolicyCombo.SelectedIndex = 0;
-            }
-
-            if (_revStartText != null)
-            {
-                _revStartText.Text = "A";
-            }
-
-            UpdateSegmentsList();
+            ApplySchemeToUi(_currentScheme);
         }
 
         private void OnSegmentSelected(object sender, EventArgs e)
@@ -4261,14 +4239,24 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
-            ApiResponse response = client.DeleteScheme(schemeId);
-            if (!response.Ok)
+            DialogResult confirmDelete = MessageBox.Show(
+                "Delete this numbering scheme? This cannot be undone.",
+                "TinyMRP",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (confirmDelete != DialogResult.Yes)
             {
-                ShowApiError("Failed to deactivate scheme.", response);
                 return;
             }
 
-            MessageBox.Show("Scheme deactivated.", "TinyMRP",
+            ApiResponse response = client.DeleteScheme(schemeId);
+            if (!response.Ok)
+            {
+                ShowApiError("Failed to delete scheme.", response);
+                return;
+            }
+
+            MessageBox.Show("Scheme deleted.", "TinyMRP",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             OnRefreshSchemes(this, EventArgs.Empty);
         }
@@ -4579,7 +4567,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 string name = scheme.Name ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(scheme.Id) &&
-                    string.Equals(name, "(new scheme)", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(name, NumberingSchemeCatalog.NewSchemePlaceholderName, StringComparison.OrdinalIgnoreCase))
                 {
                     name = string.Empty;
                 }
@@ -4809,22 +4797,22 @@ namespace TinyMRP.SolidWorksAddin.UI
                 if (_quickSchemeCombo != null)
                 {
                     _quickSchemeCombo.Tag = settings.DefaultSchemeId;
-                    SelectComboItem(_quickSchemeCombo, settings.DefaultSchemeId);
+                    SelectSchemeOrFallback(_quickSchemeCombo, settings.DefaultSchemeId, true);
                 }
                 if (_numberingPresetCombo != null)
                 {
                     _numberingPresetCombo.Tag = settings.DefaultSchemeId;
-                    SelectComboItem(_numberingPresetCombo, settings.DefaultSchemeId);
+                    SelectSchemeOrFallback(_numberingPresetCombo, settings.DefaultSchemeId, true);
                 }
                 if (_advancedSchemeCombo != null)
                 {
                     _advancedSchemeCombo.Tag = settings.DefaultSchemeId;
-                    SelectComboItem(_advancedSchemeCombo, settings.DefaultSchemeId);
+                    SelectSchemeOrFallback(_advancedSchemeCombo, settings.DefaultSchemeId, false);
                 }
                 if (_schemeCombo != null)
                 {
                     _schemeCombo.Tag = settings.DefaultSchemeId;
-                    SelectComboItem(_schemeCombo, settings.DefaultSchemeId);
+                    SelectSchemeOrFallback(_schemeCombo, settings.DefaultSchemeId, false);
                 }
             }
 
