@@ -121,6 +121,23 @@ def test_concurrent_allocate_unique():
     assert len(results) == len(set(results))
 
 
+def test_validate_simple_literal_seq_scheme_with_start_at():
+    payload = {
+        "name": "PartSeq",
+        "separator": "-",
+        "seq": {"padding": 3, "base": 10, "start_at": 12, "reset_policy": "never"},
+        "pattern_segments": [
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 3, "base": 10},
+        ],
+    }
+    scheme, errors = normalize_scheme_payload(payload, "user@example.com", None)
+    assert not errors
+    v_errors, _, example = validate_scheme_definition(scheme)
+    assert not v_errors
+    assert example["part_number_example"] == "PART-012"
+
+
 def test_ensure_presets_seeds_simple_recommended_scheme():
     ensure_presets()
 

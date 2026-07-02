@@ -5,7 +5,8 @@ from flask_security import current_user
 from mongoengine.errors import NotUniqueError, DoesNotExist, ValidationError
 
 from app.extensions import csrf
-from app.models.numbering import NumberingScheme
+from app.models.numbering import NumberingScheme, NumberingCounter
+from app.models.user_settings import UserSettings
 from app.services.acl import user_has_permission
 from app.services.api_auth import api_auth_required, get_request_user
 from app.services.numbering import (
@@ -170,9 +171,13 @@ def delete_scheme(scheme_id: str):
         scheme = NumberingScheme.objects.get(id=scheme_id)
     except (DoesNotExist, ValidationError):
         return _json_error("not_found", "Scheme not found.", status=404)
-    scheme.is_active = False
-    scheme.save()
-    return jsonify({"ok": True})
+
+    scheme_id_text = str(scheme.id)
+    UserSettings.objects(default_scheme_id=scheme_id_text).update(set__default_scheme_id="")
+    NumberingCounter.objects(counter_key__startswith=f"scheme:{scheme_id_text}|").delete()
+    NumberingScheme.objects(id=scheme.id).delete()
+
+    return jsonify({"ok": True, "deleted_scheme_id": scheme_id_text})
 
 
 @bp.post("/schemes/validate")

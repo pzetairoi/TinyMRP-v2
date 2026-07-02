@@ -4,6 +4,7 @@ from flask import jsonify
 
 from app.models.api_token import ApiToken
 from app.models.numbering import NumberingScheme
+from app.models.user_settings import UserSettings
 from app.services.api_tokens import create_token
 
 
@@ -100,6 +101,73 @@ def test_settings_and_numbering_with_bearer(client, user):
     allocate_data = allocate.get_json()
     assert allocate.status_code == 200
     assert allocate_data["ok"] is True
+
+
+def test_simple_scheme_create_respects_start_at(client, user, monkeypatch):
+    import app.views.numbering as numbering_view
+
+    monkeypatch.setattr(numbering_view, "user_has_permission", lambda _user, _perm: True)
+    _, raw = create_token(user, "simple-scheme")
+    headers = _auth_headers(raw)
+
+    resp = client.post("/api/numbering/schemes", headers=headers, json={
+        "name": "PART-SEQ",
+        "is_active": True,
+        "separator": "-",
+        "seq": {"padding": 3, "base": 10, "start_at": 25, "reset_policy": "never"},
+        "revision": {"policy": "alpha", "start": "A"},
+        "validation_rules": {"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        "pattern_segments": [
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 3, "base": 10},
+        ],
+    })
+
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["ok"] is True
+    assert data["scheme"]["seq"]["start_at"] == 25
+    assert data["example"]["part_number_example"] == "PART-025"
+
+
+def test_delete_scheme_removes_document_and_clears_default_scheme(client, user, monkeypatch):
+    import app.views.numbering as numbering_view
+
+    monkeypatch.setattr(numbering_view, "user_has_permission", lambda _user, _perm: True)
+    _, raw = create_token(user, "delete-scheme")
+    headers = _auth_headers(raw)
+
+    scheme = NumberingScheme(
+        name="DeleteMe",
+        pattern_segments=[
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 3, "base": 10},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 3, "base": 10, "start_at": 7, "reset_policy": "never"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+
+    client.put("/api/me/settings", headers=headers, json={
+        "default_scheme_id": str(scheme.id),
+        "default_context": {},
+        "sw_property_map": {"part_number_prop": "PN", "revision_prop": "Rev", "display_code_prop": "Code"},
+        "apply_mode": "active_config",
+        "ui_preferences": {"show_advanced": False},
+    })
+
+    resp = client.delete(f"/api/numbering/schemes/{scheme.id}", headers=headers)
+    data = resp.get_json()
+
+    assert resp.status_code == 200
+    assert data["ok"] is True
+    assert NumberingScheme.objects(id=scheme.id).first() is None
+    settings = UserSettings.objects(user_id=user).first()
+    assert settings is not None
+    assert settings.default_scheme_id == ""
 
 
 def test_legacy_aliases_require_auth(client):

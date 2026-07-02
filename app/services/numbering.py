@@ -138,6 +138,10 @@ def validate_scheme_definition(scheme: Dict[str, Any], context: Dict[str, Any] |
         errors.append("scope_mode must be one of: " + ", ".join(sorted(ALLOWED_SCOPE_MODES)))
 
     seq = scheme.get("seq") or {}
+    start_at = _coerce_int(seq.get("start_at"), DEFAULT_SEQ["start_at"])
+    if start_at <= 0:
+        errors.append("seq.start_at must be > 0.")
+
     reset_policy = str(seq.get("reset_policy") or DEFAULT_SEQ["reset_policy"])
     if reset_policy not in ALLOWED_RESET_POLICIES:
         errors.append("seq.reset_policy must be one of: " + ", ".join(sorted(ALLOWED_RESET_POLICIES)))

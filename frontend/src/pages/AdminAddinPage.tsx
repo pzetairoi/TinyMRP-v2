@@ -72,6 +72,11 @@ const EMPTY_SCHEME: Scheme = {
   pattern_segments: [],
 }
 
+const DEFAULT_NEW_SEGMENTS: Segment[] = [
+  { kind: 'literal', value: 'PART' },
+  { kind: 'seq', padding: 6, base: 10 },
+]
+
 function createEmptySegment(kind: 'literal' | 'seq' = 'literal'): Segment {
   if (kind === 'seq') {
     return { kind: 'seq', padding: 6, base: 10 }
@@ -128,7 +133,24 @@ function segmentLabel(segment: Segment, index: number) {
 }
 
 function formatApiError(err: unknown, fallback: string) {
-  return (err as ApiError).message || fallback
+  const apiError = err as ApiError
+  if (apiError?.details?.length) {
+    return `${apiError.message || fallback} ${apiError.details.join(' ')}`
+  }
+  return apiError?.message || fallback
+}
+
+function createNewSchemeState() {
+  const scheme = cloneScheme({
+    seq: { ...EMPTY_SCHEME.seq, start_at: 1 },
+    pattern_segments: DEFAULT_NEW_SEGMENTS,
+  })
+  const segments = DEFAULT_NEW_SEGMENTS.map(cloneSegment)
+  return {
+    scheme,
+    segments,
+    draft: cloneSegment(DEFAULT_NEW_SEGMENTS[0]),
+  }
 }
 
 export default function AdminAddinPage() {
@@ -153,10 +175,11 @@ export default function AdminAddinPage() {
 
   useEffect(() => {
     if (!selectedSchemeId) {
-      setEditingScheme(cloneScheme())
-      setSegments([])
+      const next = createNewSchemeState()
+      setEditingScheme(next.scheme)
+      setSegments(next.segments)
       setSelectedSegmentIndex(-1)
-      setSegmentDraft(createEmptySegment())
+      setSegmentDraft(next.draft)
       return
     }
 
@@ -270,6 +293,55 @@ export default function AdminAddinPage() {
     setEditingScheme((prev) => ({ ...prev, ...patch }))
   }
 
+  function getLocalSchemeErrors(requireName: boolean) {
+    const errors: string[] = []
+    if (requireName && !(editingScheme.name || '').trim()) {
+      errors.push('Scheme name is required.')
+    }
+
+    if (!segments.length) {
+      errors.push('Add at least one segment.')
+      return errors
+    }
+
+    const startAt = Number(editingScheme.seq?.start_at ?? 1)
+    if (!Number.isFinite(startAt) || startAt < 1) {
+      errors.push('Start at must be 1 or greater.')
+    }
+
+    let hasSequence = false
+    segments.forEach((segment, index) => {
+      const kind = getSegmentKind(segment)
+      if (kind === 'literal') {
+        if (!(segment.value || '').trim()) {
+          errors.push(`Segment ${index + 1}: literal value is required.`)
+        }
+        return
+      }
+
+      if (kind === 'seq') {
+        hasSequence = true
+        const padding = Number(segment.padding ?? 6)
+        const base = Number(segment.base ?? 10)
+        if (!Number.isFinite(padding) || padding < 1) {
+          errors.push(`Segment ${index + 1}: sequence padding must be 1 or greater.`)
+        }
+        if (base !== 10 && base !== 36) {
+          errors.push(`Segment ${index + 1}: sequence base must be 10 or 36.`)
+        }
+        return
+      }
+
+      errors.push(`Segment ${index + 1}: only literal and sequence segments are supported here.`)
+    })
+
+    if (!hasSequence) {
+      errors.push('Add at least one sequence segment.')
+    }
+
+    return errors
+  }
+
   function buildSchemePayload() {
     const firstSeqSegment = segments.find((segment) => getSegmentKind(segment) === 'seq')
     const nextSeqPadding = Number(firstSeqSegment?.padding ?? editingScheme.seq?.padding ?? 6)
@@ -328,6 +400,11 @@ export default function AdminAddinPage() {
   async function validateEditingScheme() {
     setError(null)
     setMessage(null)
+    const localErrors = getLocalSchemeErrors(false)
+    if (localErrors.length) {
+      setError(localErrors.join(' '))
+      return
+    }
     try {
       const payload = buildSchemePayload()
       const resp = await apiFetch<{ example: { part_number_example?: string; revision_example?: string } }>(
@@ -360,12 +437,13 @@ export default function AdminAddinPage() {
       return
     }
 
-    const payload = buildSchemePayload()
-    if (!payload.name) {
-      setError('Scheme name is required.')
+    const localErrors = getLocalSchemeErrors(true)
+    if (localErrors.length) {
+      setError(localErrors.join(' '))
       return
     }
 
+    const payload = buildSchemePayload()
     try {
       let nextSelectedSchemeId = selectedSchemeId
       if (selectedSchemeId) {
@@ -391,20 +469,25 @@ export default function AdminAddinPage() {
     }
   }
 
-  async function deactivateEditingScheme() {
+  async function deleteEditingScheme() {
     setError(null)
     setMessage(null)
     if (!selectedSchemeId) {
       setError('Select a scheme first.')
       return
     }
+
+    if (!window.confirm('Delete this numbering scheme? This cannot be undone.')) {
+      return
+    }
+
     try {
       await apiFetch(`/api/numbering/schemes/${selectedSchemeId}`, { method: 'DELETE' })
-      setMessage('Scheme deactivated.')
+      setMessage('Scheme deleted.')
       setSelectedSchemeId('')
       await loadSchemes()
     } catch (err) {
-      setError(formatApiError(err, 'Failed to deactivate scheme.'))
+      setError(formatApiError(err, 'Failed to delete scheme.'))
     }
   }
 
@@ -427,6 +510,12 @@ export default function AdminAddinPage() {
   function addSegment(kindOverride?: 'literal' | 'seq') {
     if (hasLegacySegments) return
     const kind = kindOverride || (getSegmentKind(segmentDraft) === 'seq' ? 'seq' : 'literal')
+    if (kind === 'literal' && !(segmentDraft.value || '').trim()) {
+      setError('Enter a literal value before adding a literal segment.')
+      return
+    }
+
+    setError(null)
     const nextSegment =
       kind === 'seq'
         ? {
@@ -448,6 +537,12 @@ export default function AdminAddinPage() {
   function updateSegment() {
     if (hasLegacySegments || selectedSegmentIndex < 0) return
     const kind = getSegmentKind(segmentDraft) === 'seq' ? 'seq' : 'literal'
+    if (kind === 'literal' && !(segmentDraft.value || '').trim()) {
+      setError('Literal value is required.')
+      return
+    }
+
+    setError(null)
     const nextSegment =
       kind === 'seq'
         ? {
@@ -650,7 +745,7 @@ export default function AdminAddinPage() {
         </div>
 
         <div className="row g-2 mb-3">
-          <div className="col-md-5">
+          <div className="col-md-4">
             <label className="form-label small">Name</label>
             <input
               className="form-control"
@@ -658,12 +753,29 @@ export default function AdminAddinPage() {
               onChange={(e) => updateEditingScheme({ name: e.target.value })}
             />
           </div>
-          <div className="col-md-4">
+          <div className="col-md-3">
             <label className="form-label small">Separator</label>
             <input
               className="form-control"
               value={editingScheme.separator || '-'}
               onChange={(e) => updateEditingScheme({ separator: e.target.value })}
+            />
+          </div>
+          <div className="col-md-2">
+            <label className="form-label small">Start at</label>
+            <input
+              className="form-control"
+              type="number"
+              min={1}
+              value={editingScheme.seq?.start_at ?? 1}
+              onChange={(e) =>
+                updateEditingScheme({
+                  seq: {
+                    ...editingScheme.seq,
+                    start_at: Math.max(1, Number(e.target.value) || 1),
+                  },
+                })
+              }
             />
           </div>
           <div className="col-md-3">
@@ -830,8 +942,8 @@ export default function AdminAddinPage() {
           <button className="btn btn-primary" onClick={() => void saveEditingScheme()} disabled={hasLegacySegments}>
             Save scheme
           </button>
-          <button className="btn btn-outline-danger" onClick={() => void deactivateEditingScheme()} disabled={!selectedSchemeId}>
-            Deactivate
+          <button className="btn btn-outline-danger" onClick={() => void deleteEditingScheme()} disabled={!selectedSchemeId}>
+            Delete scheme
           </button>
         </div>
       </div>
