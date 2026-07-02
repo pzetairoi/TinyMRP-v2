@@ -76,11 +76,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         private TextBox _quickAuthTokenText;
         private ComboBox _quickSchemeCombo;
         private Button _quickRefreshSchemesButton;
-        private TextBox _quickContextTypeText;
-        private TextBox _quickContextFamilyText;
-        private TextBox _quickContextSubfamilyText;
-        private TextBox _quickContextProjectText;
-        private TextBox _quickContextSiteText;
         private ComboBox _quickApplyModeCombo;
         private TextBox _quickPartNumberPropText;
         private TextBox _quickRevisionPropText;
@@ -93,11 +88,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Button _numberingAllocateRenameButton;
         private ComboBox _numberingPresetCombo;
         private Button _numberingPresetRefreshButton;
-        private TextBox _numberingContextTypeText;
-        private TextBox _numberingContextFamilyText;
-        private TextBox _numberingContextSubfamilyText;
-        private TextBox _numberingContextProjectText;
-        private TextBox _numberingContextSiteText;
         private TextBox _numberingPreviewPartText;
         private TextBox _numberingPreviewRevisionText;
         private TextBox _numberingPreviewDisplayText;
@@ -124,7 +114,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         private TextBox _revisionPropText;
         private TextBox _displayCodePropText;
         private bool _syncingConfigFields;
-        private bool _syncingContextFields;
         private readonly Dictionary<string, Control[]> _quickContextRows = new Dictionary<string, Control[]>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Control[]> _numberingContextRows = new Dictionary<string, Control[]>(StringComparer.OrdinalIgnoreCase);
         private ComboBox _schemeCombo;
@@ -159,11 +148,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         private ComboBox _segmentSeqBaseCombo;
         private ComboBox _segmentDateFmtCombo;
         private Label _validationResultLabel;
-        private TextBox _contextTypeText;
-        private TextBox _contextFamilyText;
-        private TextBox _contextSubfamilyText;
-        private TextBox _contextProjectText;
-        private TextBox _contextSiteText;
         private Label _previewResultLabel;
         private ComboBox _revisionActionCombo;
         private TextBox _existingPartNumberText;
@@ -603,26 +587,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             _numberingPresetRefreshButton.Click += OnRefreshSchemes;
             AddField(quickLayout, "Numbering scheme", CreateInlineField(_numberingPresetCombo, _numberingPresetRefreshButton));
 
-            var quickContextLayout = new TableLayoutPanel
-            {
-                ColumnCount = 2,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock = DockStyle.Fill
-            };
-            quickContextLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
-            quickContextLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));
-            _numberingContextTypeText = new TextBox { Width = 200 };
-            AddContextRow(quickContextLayout, "Type", _numberingContextTypeText, "type", _numberingContextRows);
-            _numberingContextFamilyText = new TextBox { Width = 200 };
-            AddContextRow(quickContextLayout, "Family", _numberingContextFamilyText, "family", _numberingContextRows);
-            _numberingContextSubfamilyText = new TextBox { Width = 200 };
-            AddContextRow(quickContextLayout, "Subfamily", _numberingContextSubfamilyText, "subfamily", _numberingContextRows);
-            _numberingContextProjectText = new TextBox { Width = 200 };
-            AddContextRow(quickContextLayout, "Project", _numberingContextProjectText, "project", _numberingContextRows);
-            _numberingContextSiteText = new TextBox { Width = 200 };
-            AddContextRow(quickContextLayout, "Site", _numberingContextSiteText, "site", _numberingContextRows);
-
             var previewBox = new TableLayoutPanel
             {
                 ColumnCount = 2,
@@ -654,7 +618,6 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var quickWrap = CreateStackPanel();
             AddStackRow(quickWrap, quickLayout);
-            AddStackRow(quickWrap, quickContextLayout);
             _numberingSeqOverridePanel = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
@@ -704,19 +667,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             _schemeVisibilityCombo.Items.AddRange(new object[] { "quickstart", "advanced_only" });
             AddField(schemeLayout, "Visibility", _schemeVisibilityCombo);
             AddSection(panel, CreateGroupBox("Scheme", schemeLayout));
-
-            var contextLayout = CreateFormLayout();
-            _contextTypeText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Type", _contextTypeText);
-            _contextFamilyText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Family", _contextFamilyText);
-            _contextSubfamilyText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Subfamily", _contextSubfamilyText);
-            _contextProjectText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Project", _contextProjectText);
-            _contextSiteText = new TextBox { Width = 140 };
-            AddField(contextLayout, "Site", _contextSiteText);
-            AddSection(panel, CreateGroupBox("Context", contextLayout));
 
             var mapLayout = CreateFormLayout();
             _numberingPartNumberPropText = new TextBox { Width = 200 };
@@ -1095,27 +1045,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(defaultsLayout, "Display code property", _quickDisplayCodePropText);
             AddSection(panel, CreateGroupBox("Numbering defaults", defaultsLayout));
 
-            var contextLayout = new TableLayoutPanel
-            {
-                ColumnCount = 2,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink
-            };
-            contextLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
-            contextLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60F));
-
-            _quickContextTypeText = new TextBox { Width = 200 };
-            AddQuickContextRow(contextLayout, "Type", _quickContextTypeText, "type");
-            _quickContextFamilyText = new TextBox { Width = 200 };
-            AddQuickContextRow(contextLayout, "Family", _quickContextFamilyText, "family");
-            _quickContextSubfamilyText = new TextBox { Width = 200 };
-            AddQuickContextRow(contextLayout, "Subfamily", _quickContextSubfamilyText, "subfamily");
-            _quickContextProjectText = new TextBox { Width = 200 };
-            AddQuickContextRow(contextLayout, "Project", _quickContextProjectText, "project");
-            _quickContextSiteText = new TextBox { Width = 200 };
-            AddQuickContextRow(contextLayout, "Site", _quickContextSiteText, "site");
-            AddSection(panel, CreateGroupBox("Context", contextLayout));
-
             var paths = CreateFormLayout();
             _deliverablesFolderText = new TextBox { Width = 200 };
             AddField(paths, "Output folder", CreateFolderPicker(_deliverablesFolderText, OnBrowseDeliverables));
@@ -1296,28 +1225,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             return page;
         }
 
-        private void AddQuickContextRow(TableLayoutPanel table, string labelText, TextBox textBox, string key)
-        {
-            AddContextRow(table, labelText, textBox, key, _quickContextRows);
-        }
-
-        private void AddContextRow(TableLayoutPanel table, string labelText, TextBox textBox, string key, Dictionary<string, Control[]> rowMap)
-        {
-            if (table == null || textBox == null || rowMap == null)
-            {
-                return;
-            }
-
-            int row = table.RowCount;
-            table.RowCount++;
-            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            var label = new Label { Text = labelText, AutoSize = true, Anchor = AnchorStyles.Left };
-            textBox.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            table.Controls.Add(label, 0, row);
-            table.Controls.Add(textBox, 1, row);
-            rowMap[key] = new[] { (Control)label, textBox };
-        }
-
         private void WireQuickStartSyncEvents()
         {
             if (_quickBackendUrlText != null)
@@ -1354,31 +1261,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_quickSchemeCombo != null)
             {
                 _quickSchemeCombo.SelectedIndexChanged += OnQuickSchemeSelected;
-            }
-            if (_quickContextTypeText != null)
-            {
-                _quickContextTypeText.TextChanged += (_, __) => SyncContextField(_quickContextTypeText, _contextTypeText);
-                _quickContextTypeText.TextChanged += (_, __) => SyncContextField(_quickContextTypeText, _numberingContextTypeText);
-            }
-            if (_quickContextFamilyText != null)
-            {
-                _quickContextFamilyText.TextChanged += (_, __) => SyncContextField(_quickContextFamilyText, _contextFamilyText);
-                _quickContextFamilyText.TextChanged += (_, __) => SyncContextField(_quickContextFamilyText, _numberingContextFamilyText);
-            }
-            if (_quickContextSubfamilyText != null)
-            {
-                _quickContextSubfamilyText.TextChanged += (_, __) => SyncContextField(_quickContextSubfamilyText, _contextSubfamilyText);
-                _quickContextSubfamilyText.TextChanged += (_, __) => SyncContextField(_quickContextSubfamilyText, _numberingContextSubfamilyText);
-            }
-            if (_quickContextProjectText != null)
-            {
-                _quickContextProjectText.TextChanged += (_, __) => SyncContextField(_quickContextProjectText, _contextProjectText);
-                _quickContextProjectText.TextChanged += (_, __) => SyncContextField(_quickContextProjectText, _numberingContextProjectText);
-            }
-            if (_quickContextSiteText != null)
-            {
-                _quickContextSiteText.TextChanged += (_, __) => SyncContextField(_quickContextSiteText, _contextSiteText);
-                _quickContextSiteText.TextChanged += (_, __) => SyncContextField(_quickContextSiteText, _numberingContextSiteText);
             }
         }
 
@@ -1467,24 +1349,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             finally
             {
                 _syncingConfigFields = false;
-            }
-        }
-
-        private void SyncContextField(TextBox source, TextBox target)
-        {
-            if (source == null || target == null || _syncingContextFields)
-            {
-                return;
-            }
-
-            try
-            {
-                _syncingContextFields = true;
-                target.Text = source.Text;
-            }
-            finally
-            {
-                _syncingContextFields = false;
             }
         }
 
@@ -1725,36 +1589,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 }
             }
             return fallbackValue ?? string.Empty;
-        }
-
-        private string GetContextValue(TextBox primary, TextBox fallback)
-        {
-            if (primary != null)
-            {
-                return primary.Text != null ? primary.Text.Trim() : string.Empty;
-            }
-            if (fallback != null)
-            {
-                return fallback.Text != null ? fallback.Text.Trim() : string.Empty;
-            }
-            return string.Empty;
-        }
-
-        private string GetContextValue(TextBox primary, TextBox fallback, TextBox tertiary)
-        {
-            if (primary != null)
-            {
-                return primary.Text != null ? primary.Text.Trim() : string.Empty;
-            }
-            if (fallback != null)
-            {
-                return fallback.Text != null ? fallback.Text.Trim() : string.Empty;
-            }
-            if (tertiary != null)
-            {
-                return tertiary.Text != null ? tertiary.Text.Trim() : string.Empty;
-            }
-            return string.Empty;
         }
 
         private void SelectApplyModeCombo(ComboBox combo, string applyMode)
@@ -2039,16 +1873,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 config.NumberingSchemeId = schemeId;
             }
 
-            if (_quickContextTypeText != null || _quickContextFamilyText != null || _quickContextSubfamilyText != null ||
-                _quickContextProjectText != null || _quickContextSiteText != null ||
-                _contextTypeText != null || _contextFamilyText != null || _contextSubfamilyText != null ||
-                _contextProjectText != null || _contextSiteText != null ||
-                _numberingContextTypeText != null || _numberingContextFamilyText != null ||
-                _numberingContextSubfamilyText != null || _numberingContextProjectText != null ||
-                _numberingContextSiteText != null)
-            {
-                config.NumberingContextDefaults = BuildContextDefaultsString();
-            }
+            config.NumberingContextDefaults = string.Empty;
             config.PartNumberProperty = GetPreferredText(
                 _quickPartNumberPropText ?? _numberingPartNumberPropText,
                 _partNumberPropText,
@@ -3674,23 +3499,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
-            Dictionary<string, string> defaults = ParseContextDefaults(config.NumberingContextDefaults);
-            SetContextField(_contextTypeText, defaults, "type");
-            SetContextField(_contextFamilyText, defaults, "family");
-            SetContextField(_contextSubfamilyText, defaults, "subfamily");
-            SetContextField(_contextProjectText, defaults, "project");
-            SetContextField(_contextSiteText, defaults, "site");
-            SetContextField(_quickContextTypeText, defaults, "type");
-            SetContextField(_quickContextFamilyText, defaults, "family");
-            SetContextField(_quickContextSubfamilyText, defaults, "subfamily");
-            SetContextField(_quickContextProjectText, defaults, "project");
-            SetContextField(_quickContextSiteText, defaults, "site");
-            SetContextField(_numberingContextTypeText, defaults, "type");
-            SetContextField(_numberingContextFamilyText, defaults, "family");
-            SetContextField(_numberingContextSubfamilyText, defaults, "subfamily");
-            SetContextField(_numberingContextProjectText, defaults, "project");
-            SetContextField(_numberingContextSiteText, defaults, "site");
-
             if (_schemeCombo != null && !string.IsNullOrWhiteSpace(config.NumberingSchemeId))
             {
                 _schemeCombo.Tag = config.NumberingSchemeId;
@@ -3764,7 +3572,7 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             if (_advancedContextJsonText != null)
             {
-                _advancedContextJsonText.Text = ContextToJson(defaults);
+                _advancedContextJsonText.Text = ContextToJson(new Dictionary<string, string>());
             }
 
             if (_existingPartNumberText != null && string.IsNullOrWhiteSpace(_existingPartNumberText.Text))
@@ -4699,35 +4507,17 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         private Dictionary<string, string> BuildContextFromUi()
         {
-            var context = new Dictionary<string, string>();
-            AddContextField(_contextTypeText, context, "type");
-            AddContextField(_contextFamilyText, context, "family");
-            AddContextField(_contextSubfamilyText, context, "subfamily");
-            AddContextField(_contextProjectText, context, "project");
-            AddContextField(_contextSiteText, context, "site");
-            return context;
+            return new Dictionary<string, string>();
         }
 
         private Dictionary<string, string> BuildContextFromQuickStart()
         {
-            var context = new Dictionary<string, string>();
-            AddContextField(_quickContextTypeText, context, "type");
-            AddContextField(_quickContextFamilyText, context, "family");
-            AddContextField(_quickContextSubfamilyText, context, "subfamily");
-            AddContextField(_quickContextProjectText, context, "project");
-            AddContextField(_quickContextSiteText, context, "site");
-            return context;
+            return new Dictionary<string, string>();
         }
 
         private Dictionary<string, string> BuildContextFromNumberingQuick()
         {
-            var context = new Dictionary<string, string>();
-            AddContextField(_numberingContextTypeText, context, "type");
-            AddContextField(_numberingContextFamilyText, context, "family");
-            AddContextField(_numberingContextSubfamilyText, context, "subfamily");
-            AddContextField(_numberingContextProjectText, context, "project");
-            AddContextField(_numberingContextSiteText, context, "site");
-            return context;
+            return new Dictionary<string, string>();
         }
 
         private Dictionary<string, string> BuildPropertyMapFromQuickStart()
@@ -4816,29 +4606,9 @@ namespace TinyMRP.SolidWorksAddin.UI
                 }
             }
 
-            if (settings.DefaultContext != null)
+            if (settings.DefaultContext != null && _advancedContextJsonText != null)
             {
-                SetContextField(_quickContextTypeText, settings.DefaultContext, "type");
-                SetContextField(_quickContextFamilyText, settings.DefaultContext, "family");
-                SetContextField(_quickContextSubfamilyText, settings.DefaultContext, "subfamily");
-                SetContextField(_quickContextProjectText, settings.DefaultContext, "project");
-                SetContextField(_quickContextSiteText, settings.DefaultContext, "site");
-                SetContextField(_numberingContextTypeText, settings.DefaultContext, "type");
-                SetContextField(_numberingContextFamilyText, settings.DefaultContext, "family");
-                SetContextField(_numberingContextSubfamilyText, settings.DefaultContext, "subfamily");
-                SetContextField(_numberingContextProjectText, settings.DefaultContext, "project");
-                SetContextField(_numberingContextSiteText, settings.DefaultContext, "site");
-
-                SetContextField(_contextTypeText, settings.DefaultContext, "type");
-                SetContextField(_contextFamilyText, settings.DefaultContext, "family");
-                SetContextField(_contextSubfamilyText, settings.DefaultContext, "subfamily");
-                SetContextField(_contextProjectText, settings.DefaultContext, "project");
-                SetContextField(_contextSiteText, settings.DefaultContext, "site");
-
-                if (_advancedContextJsonText != null)
-                {
-                    _advancedContextJsonText.Text = ContextToJson(settings.DefaultContext);
-                }
+                _advancedContextJsonText.Text = ContextToJson(settings.DefaultContext);
             }
 
             if (settings.PropertyMap != null)
@@ -4873,7 +4643,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 {
                     config.NumberingSchemeId = settings.DefaultSchemeId;
                 }
-                config.NumberingContextDefaults = BuildContextDefaultsString();
+                config.NumberingContextDefaults = string.Empty;
                 if (settings.PropertyMap != null)
                 {
                     if (settings.PropertyMap.TryGetValue("part_number_prop", out string partProp))
@@ -4891,65 +4661,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 }
                 config.NumberingApplyMode = settings.ApplyMode ?? config.NumberingApplyMode;
             }
-        }
-
-        private void SetContextField(TextBox textBox, Dictionary<string, string> context, string key)
-        {
-            if (textBox == null || context == null)
-            {
-                return;
-            }
-
-            if (context.TryGetValue(key, out string value))
-            {
-                textBox.Text = value ?? string.Empty;
-            }
-        }
-
-        private void AddContextField(TextBox textBox, Dictionary<string, string> context, string key)
-        {
-            if (textBox == null || context == null)
-            {
-                return;
-            }
-
-            string value = textBox.Text != null ? textBox.Text.Trim() : string.Empty;
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                context[key] = value;
-            }
-        }
-
-        private string BuildContextDefaultsString()
-        {
-            return string.Format(
-                "type={0};family={1};subfamily={2};project={3};site={4}",
-                GetContextValue(_quickContextTypeText, _contextTypeText, _numberingContextTypeText),
-                GetContextValue(_quickContextFamilyText, _contextFamilyText, _numberingContextFamilyText),
-                GetContextValue(_quickContextSubfamilyText, _contextSubfamilyText, _numberingContextSubfamilyText),
-                GetContextValue(_quickContextProjectText, _contextProjectText, _numberingContextProjectText),
-                GetContextValue(_quickContextSiteText, _contextSiteText, _numberingContextSiteText));
-        }
-
-        private Dictionary<string, string> ParseContextDefaults(string data)
-        {
-            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrWhiteSpace(data))
-            {
-                return values;
-            }
-
-            string[] parts = data.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (string part in parts)
-            {
-                string[] pair = part.Split(new[] { '=' }, 2);
-                if (pair.Length == 2)
-                {
-                    values[pair[0].Trim()] = pair[1].Trim();
-                }
-            }
-
-            return values;
         }
 
         private List<string> ParseScopeKeys(string data)
