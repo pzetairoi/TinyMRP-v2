@@ -69,6 +69,8 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.AreEqual("seq", scheme.PatternSegments[1].Kind);
             Assert.AreEqual(6, scheme.PatternSegments[1].Padding);
             Assert.AreEqual(10, scheme.PatternSegments[1].Base);
+            Assert.AreEqual(1, scheme.PatternSegments[1].StartAt);
+            Assert.IsTrue(scheme.PatternSegments[1].AutoCounter);
         }
 
         [TestMethod]
@@ -84,6 +86,7 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.AreEqual(1, scheme.PatternSegments.Count);
             Assert.AreEqual("seq", scheme.PatternSegments[0].Kind);
             Assert.AreEqual(1, scheme.Seq.StartAt);
+            Assert.IsTrue(scheme.PatternSegments[0].AutoCounter);
         }
     }
 }
