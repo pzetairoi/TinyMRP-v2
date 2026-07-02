@@ -222,7 +222,7 @@ def preview():
     if not scheme.is_active:
         return _json_error("inactive", "Scheme is inactive.", status=400)
 
-    result, errors = preview_number(scheme, payload.get("context") or {})
+    result, errors = preview_number(scheme, payload.get("context") or {}, payload.get("sequence_values"))
     if errors:
         return _json_error("validation_failed", "Preview failed.", errors, status=400)
     return jsonify({"ok": True, **result})
@@ -256,6 +256,7 @@ def allocate():
         existing_part_number,
         getattr(get_request_user(), "email", None),
         cad_ref,
+        payload.get("sequence_values"),
     )
     if errors:
         return _json_error("allocation_failed", "Allocation failed.", errors, status=400)

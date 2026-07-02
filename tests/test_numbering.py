@@ -138,6 +138,101 @@ def test_validate_simple_literal_seq_scheme_with_start_at():
     assert example["part_number_example"] == "PART-012"
 
 
+def test_validate_multi_sequence_requires_exactly_one_automatic_segment():
+    payload = {
+        "name": "DualSeqInvalid",
+        "separator": "-",
+        "seq": {"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
+        "pattern_segments": [
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 3, "base": 10, "start_at": 1},
+            {"kind": "seq", "padding": 3, "base": 10, "start_at": 7},
+        ],
+    }
+
+    scheme, errors = normalize_scheme_payload(payload, "user@example.com", None)
+    assert not errors
+    v_errors, _, _ = validate_scheme_definition(scheme)
+
+    assert any("Exactly one seq segment" in error for error in v_errors)
+
+
+def test_allocate_multi_sequence_only_increments_automatic_segment():
+    scheme = NumberingScheme(
+        name="DualSeqAuto",
+        pattern_segments=[
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 2, "base": 10, "auto_counter": True},
+            {"kind": "seq", "padding": 2, "base": 10, "start_at": 7},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 2, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+
+    result1, errors1 = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=False,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+    )
+    result2, errors2 = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=False,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+    )
+
+    assert not errors1
+    assert not errors2
+    assert result1["part_number"] == "PART-01-07"
+    assert result2["part_number"] == "PART-02-07"
+    assert result1["sequence_values_used"] == [1, 7]
+    assert result2["sequence_values_used"] == [2, 7]
+    assert result1["auto_sequence_index"] == 0
+
+
+def test_allocate_multi_sequence_accepts_manual_sequence_override():
+    scheme = NumberingScheme(
+        name="DualSeqOverride",
+        pattern_segments=[
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 2, "base": 10, "auto_counter": True},
+            {"kind": "seq", "padding": 2, "base": 10, "start_at": 7},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 2, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={"policy": "alpha", "start": "A"},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": datetime.utcnow()},
+    ).save()
+
+    result, errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=False,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email=None,
+        cad_ref=None,
+        sequence_values=[1, 12],
+    )
+
+    assert not errors
+    assert result["part_number"] == "PART-01-12"
+    assert result["sequence_values_used"] == [1, 12]
+
+
 def test_ensure_presets_seeds_simple_recommended_scheme():
     ensure_presets()
 

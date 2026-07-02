@@ -146,6 +146,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         private TextBox _segmentPadCharText;
         private NumericUpDown _segmentSeqPaddingUpDown;
         private ComboBox _segmentSeqBaseCombo;
+        private NumericUpDown _segmentSeqStartUpDown;
+        private CheckBox _segmentSeqAutoCheck;
         private ComboBox _segmentDateFmtCombo;
         private Label _validationResultLabel;
         private Label _previewResultLabel;
@@ -870,6 +872,11 @@ namespace TinyMRP.SolidWorksAddin.UI
             _segmentSeqBaseCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
             _segmentSeqBaseCombo.Items.AddRange(new object[] { "10", "36" });
             AddField(segmentForm, "Seq base", _segmentSeqBaseCombo);
+            _segmentSeqStartUpDown = new NumericUpDown { Width = 80, Minimum = 1, Maximum = 999999, Value = 1 };
+            AddField(segmentForm, "Manual start", _segmentSeqStartUpDown);
+            _segmentSeqAutoCheck = new CheckBox { Text = "Automatic counter", AutoSize = true };
+            _segmentSeqAutoCheck.CheckedChanged += (_, __) => UpdateSegmentEditorState();
+            AddField(segmentForm, "Seq mode", _segmentSeqAutoCheck);
             _segmentDateFmtCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
             _segmentDateFmtCombo.Items.AddRange(new object[] { "YYYY", "YY", "MM", "YYYYMM" });
             AddField(segmentForm, "Date format", _segmentDateFmtCombo);
@@ -909,7 +916,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             _seqBaseCombo.Items.AddRange(new object[] { "10", "36" });
             AddField(seqLayout, "Base", _seqBaseCombo);
             _seqStartUpDown = new NumericUpDown { Width = 80, Minimum = 1, Maximum = 999999, Value = 1 };
-            AddField(seqLayout, "Start at", _seqStartUpDown);
+            AddField(seqLayout, "Auto start", _seqStartUpDown);
             _seqResetCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
             _seqResetCombo.Items.AddRange(new object[] { "never", "yearly", "monthly", "by_project" });
             AddField(seqLayout, "Reset policy", _seqResetCombo);
@@ -1496,10 +1503,14 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 _numberingSeqOverrideGroup.Visible = true;
             }
-            int startAt = scheme != null && scheme.Seq != null ? scheme.Seq.StartAt : 1;
+            List<NumberingSegmentDefinition> sequenceSegments = GetSequenceSegments(scheme);
+            int autoSequenceIndex = GetAutomaticSequenceIndex(scheme);
 
             for (int i = 0; i < seqCount; i++)
             {
+                NumberingSegmentDefinition sequenceSegment = i < sequenceSegments.Count ? sequenceSegments[i] : null;
+                bool isAutomatic = i == autoSequenceIndex || (autoSequenceIndex < 0 && seqCount == 1);
+                int startAt = GetSequenceStartValue(scheme, sequenceSegment, isAutomatic);
                 var row = new TableLayoutPanel
                 {
                     ColumnCount = 2,
@@ -1512,7 +1523,9 @@ namespace TinyMRP.SolidWorksAddin.UI
 
                 var label = new Label
                 {
-                    Text = seqCount > 1 ? $"Sequence {i + 1} start" : "Sequence start",
+                    Text = seqCount > 1
+                        ? string.Format("Sequence {0} {1}", i + 1, isAutomatic ? "(Auto)" : "(Manual)")
+                        : "Sequence start",
                     AutoSize = true,
                     Anchor = AnchorStyles.Left
                 };
@@ -1524,10 +1537,9 @@ namespace TinyMRP.SolidWorksAddin.UI
                     Value = startAt,
                     Anchor = AnchorStyles.Left
                 };
-                int idx = i;
                 upDown.ValueChanged += (_, __) =>
                 {
-                    if (idx == 0 && _seqStartUpDown != null)
+                    if (isAutomatic && _seqStartUpDown != null)
                     {
                         _seqStartUpDown.Value = upDown.Value;
                     }
@@ -1541,6 +1553,7 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             if (_numberingSeqOverrideNote != null)
             {
+                _numberingSeqOverrideNote.Text = "Auto sequence uses this as the next minimum value. Manual sequences use these values for the current run.";
                 _numberingSeqOverridePanel.Controls.Add(_numberingSeqOverrideNote);
             }
 
@@ -1549,20 +1562,74 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         private int CountSequenceSegments(NumberingSchemeDefinition scheme)
         {
+            return GetSequenceSegments(scheme).Count;
+        }
+
+        private List<NumberingSegmentDefinition> GetSequenceSegments(NumberingSchemeDefinition scheme)
+        {
+            var segments = new List<NumberingSegmentDefinition>();
             if (scheme == null || scheme.PatternSegments == null)
             {
-                return 0;
+                return segments;
             }
 
-            int count = 0;
             foreach (NumberingSegmentDefinition segment in scheme.PatternSegments)
             {
                 if (segment != null && string.Equals(segment.Kind, "seq", StringComparison.OrdinalIgnoreCase))
                 {
-                    count++;
+                    segments.Add(segment);
                 }
             }
-            return count;
+
+            return segments;
+        }
+
+        private int GetAutomaticSequenceIndex(NumberingSchemeDefinition scheme)
+        {
+            List<NumberingSegmentDefinition> sequenceSegments = GetSequenceSegments(scheme);
+            if (sequenceSegments.Count == 0)
+            {
+                return -1;
+            }
+
+            if (sequenceSegments.Count == 1)
+            {
+                return 0;
+            }
+
+            int found = -1;
+            for (int i = 0; i < sequenceSegments.Count; i++)
+            {
+                if (!sequenceSegments[i].AutoCounter)
+                {
+                    continue;
+                }
+
+                if (found >= 0)
+                {
+                    return -1;
+                }
+
+                found = i;
+            }
+
+            return found;
+        }
+
+        private int GetSequenceStartValue(NumberingSchemeDefinition scheme, NumberingSegmentDefinition segment, bool isAutomatic)
+        {
+            int fallback = scheme != null && scheme.Seq != null ? scheme.Seq.StartAt : 1;
+            if (isAutomatic)
+            {
+                return fallback;
+            }
+
+            if (segment != null && segment.StartAt.HasValue && segment.StartAt.Value > 0)
+            {
+                return segment.StartAt.Value;
+            }
+
+            return fallback;
         }
 
         private string GetPreferredText(TextBox primary, TextBox fallback)
@@ -2259,7 +2326,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             else
             {
                 var context = BuildContextFromQuickStart();
-                ApiResponse preview = client.Preview(schemeId, context);
+                ApiResponse preview = client.Preview(schemeId, context, BuildSequenceOverrideValues(GetQuickSchemeSelection()));
                 AddDiagnosticResult(details, "Preview test", preview, preview.Ok ? "OK" : "Failed");
             }
 
@@ -2377,7 +2444,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
-            ApiResponse response = client.Preview(schemeId, BuildContextFromQuickStart());
+            ApiResponse response = client.Preview(schemeId, BuildContextFromQuickStart(), BuildSequenceOverrideValues(GetQuickSchemeSelection()));
             if (!response.Ok)
             {
                 ShowApiError("Preview failed.", response);
@@ -2440,9 +2507,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
-            ApplySequenceOverrideIfNeeded(GetQuickSchemeSelection());
-
-            ApiResponse response = client.Preview(schemeId, BuildContextFromNumberingQuick());
+            ApiResponse response = client.Preview(schemeId, BuildContextFromNumberingQuick(), BuildSequenceOverrideValues(GetQuickSchemeSelection()));
             if (!response.Ok)
             {
                 ShowApiError("Preview failed.", response);
@@ -2519,8 +2584,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
-            ApplySequenceOverrideIfNeeded(GetQuickSchemeSelection());
-
             ISldWorks app = AddinContext.SldWorks;
             if (app == null)
             {
@@ -2543,7 +2606,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 "new_part",
                 string.Empty,
                 true,
-                BuildCadRef(info));
+                BuildCadRef(info),
+                BuildSequenceOverrideValues(GetQuickSchemeSelection()));
 
             if (!response.Ok)
             {
@@ -2599,8 +2663,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
-            ApplySequenceOverrideIfNeeded(GetQuickSchemeSelection());
-
             string targetFolder;
             if (!TryPromptForAllocateSaveFolder(out targetFolder))
             {
@@ -2614,7 +2676,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 "new_part",
                 string.Empty,
                 true,
-                BuildCadRef(info));
+                BuildCadRef(info),
+                BuildSequenceOverrideValues(GetQuickSchemeSelection()));
 
             if (!response.Ok)
             {
@@ -2695,49 +2758,19 @@ namespace TinyMRP.SolidWorksAddin.UI
             return null;
         }
 
-        private void ApplySequenceOverrideIfNeeded(NumberingSchemeDefinition scheme)
+        private List<int> BuildSequenceOverrideValues(NumberingSchemeDefinition scheme)
         {
             if (scheme == null || _numberingSeqOverrides == null || _numberingSeqOverrides.Count == 0)
             {
-                return;
+                return null;
             }
 
-            int overrideValue = (int)_numberingSeqOverrides[0].Value;
-            if (overrideValue < 1)
+            var values = new List<int>();
+            foreach (NumericUpDown upDown in _numberingSeqOverrides)
             {
-                return;
+                values.Add((int)upDown.Value);
             }
-
-            if (scheme.Seq == null)
-            {
-                scheme.Seq = new SequenceSettings();
-            }
-
-            if (scheme.Seq.StartAt == overrideValue)
-            {
-                return;
-            }
-
-            NumberingApiClient client = GetNumberingClient();
-            if (client == null)
-            {
-                return;
-            }
-
-            int previous = scheme.Seq.StartAt;
-            scheme.Seq.StartAt = overrideValue;
-            ApiResponse response = client.UpdateScheme(scheme);
-            if (!response.Ok)
-            {
-                scheme.Seq.StartAt = previous;
-                SetNumberingStatus("Sequence start override requires scheme edit permission.", Color.DarkOrange);
-                return;
-            }
-
-            if (_seqStartUpDown != null && _seqStartUpDown.Value != overrideValue)
-            {
-                _seqStartUpDown.Value = overrideValue;
-            }
+            return values;
         }
 
         private void UpdateQuickPreviewFields(string partNumber, string revision, string display)
@@ -3029,7 +3062,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 "new_part",
                 string.Empty,
                 true,
-                BuildCadRef(info));
+                BuildCadRef(info),
+                BuildSequenceOverrideValues(GetQuickSchemeSelection()));
 
             if (!response.Ok)
             {
@@ -3858,6 +3892,17 @@ namespace TinyMRP.SolidWorksAddin.UI
             _segmentPadCharText.Text = segment.PadChar ?? string.Empty;
             _segmentSeqPaddingUpDown.Value = segment.Padding.HasValue ? segment.Padding.Value : _segmentSeqPaddingUpDown.Value;
             SelectComboItem(_segmentSeqBaseCombo, segment.Base.HasValue ? segment.Base.Value.ToString() : string.Empty);
+            if (_segmentSeqStartUpDown != null)
+            {
+                int segmentStart = segment.StartAt.HasValue && segment.StartAt.Value > 0
+                    ? segment.StartAt.Value
+                    : (_seqStartUpDown != null ? (int)_seqStartUpDown.Value : 1);
+                _segmentSeqStartUpDown.Value = segmentStart;
+            }
+            if (_segmentSeqAutoCheck != null)
+            {
+                _segmentSeqAutoCheck.Checked = segment.AutoCounter;
+            }
             SelectComboItem(_segmentDateFmtCombo, segment.Fmt);
             UpdateSegmentEditorState();
         }
@@ -3916,6 +3961,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             _currentScheme.PatternSegments.RemoveAt(index);
+            NormalizeSequenceSegments();
             UpdateSegmentsList();
             ClearSegmentEditor();
         }
@@ -3934,6 +3980,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             _currentScheme.PatternSegments.Add(segment);
+            NormalizeSequenceSegments();
             UpdateSegmentsList();
             if (_segmentsList != null)
             {
@@ -3961,6 +4008,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             _currentScheme.PatternSegments[index] = segment;
+            NormalizeSequenceSegments();
             UpdateSegmentsList();
             _segmentsList.SelectedIndex = index;
         }
@@ -4247,6 +4295,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             bool isField = kind == "field";
             bool isSeq = kind == "seq";
             bool isDate = kind == "date";
+            bool seqIsAutomatic = _segmentSeqAutoCheck != null && _segmentSeqAutoCheck.Checked;
 
             if (_segmentLiteralText != null) _segmentLiteralText.Enabled = isLiteral;
             if (_segmentFieldCombo != null) _segmentFieldCombo.Enabled = isField;
@@ -4255,6 +4304,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_segmentPadCharText != null) _segmentPadCharText.Enabled = isField;
             if (_segmentSeqPaddingUpDown != null) _segmentSeqPaddingUpDown.Enabled = isSeq;
             if (_segmentSeqBaseCombo != null) _segmentSeqBaseCombo.Enabled = isSeq;
+            if (_segmentSeqStartUpDown != null) _segmentSeqStartUpDown.Enabled = isSeq && !seqIsAutomatic;
+            if (_segmentSeqAutoCheck != null) _segmentSeqAutoCheck.Enabled = isSeq;
             if (_segmentDateFmtCombo != null) _segmentDateFmtCombo.Enabled = isDate;
         }
 
@@ -4268,6 +4319,14 @@ namespace TinyMRP.SolidWorksAddin.UI
             _segmentPadCharText.Text = string.Empty;
             _segmentSeqPaddingUpDown.Value = 6;
             SelectComboItem(_segmentSeqBaseCombo, "10");
+            if (_segmentSeqStartUpDown != null)
+            {
+                _segmentSeqStartUpDown.Value = _seqStartUpDown != null ? _seqStartUpDown.Value : 1;
+            }
+            if (_segmentSeqAutoCheck != null)
+            {
+                _segmentSeqAutoCheck.Checked = false;
+            }
             SelectComboItem(_segmentDateFmtCombo, "YYYY");
             UpdateSegmentEditorState();
         }
@@ -4329,6 +4388,14 @@ namespace TinyMRP.SolidWorksAddin.UI
                 }
                 int baseValue = ParseInt(GetComboText(_segmentSeqBaseCombo), 10);
                 segment.Base = baseValue;
+                if (_segmentSeqStartUpDown != null)
+                {
+                    segment.StartAt = (int)_segmentSeqStartUpDown.Value;
+                }
+                if (_segmentSeqAutoCheck != null)
+                {
+                    segment.AutoCounter = _segmentSeqAutoCheck.Checked;
+                }
             }
             else if (kind == "date")
             {
@@ -4345,6 +4412,43 @@ namespace TinyMRP.SolidWorksAddin.UI
             return segment;
         }
 
+        private void NormalizeSequenceSegments()
+        {
+            if (_currentScheme == null || _currentScheme.PatternSegments == null)
+            {
+                return;
+            }
+
+            List<NumberingSegmentDefinition> sequenceSegments = GetSequenceSegments(_currentScheme);
+            if (sequenceSegments.Count == 0)
+            {
+                return;
+            }
+
+            int autoIndex = -1;
+            for (int i = 0; i < sequenceSegments.Count; i++)
+            {
+                if (!sequenceSegments[i].AutoCounter)
+                {
+                    continue;
+                }
+
+                if (autoIndex < 0)
+                {
+                    autoIndex = i;
+                }
+                else
+                {
+                    sequenceSegments[i].AutoCounter = false;
+                }
+            }
+
+            if (autoIndex < 0)
+            {
+                sequenceSegments[0].AutoCounter = true;
+            }
+        }
+
         private void UpdateSegmentsList()
         {
             if (_segmentsList == null)
@@ -4356,6 +4460,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 _currentScheme = new NumberingSchemeDefinition();
             }
+
+            NormalizeSequenceSegments();
 
             _segmentsList.Items.Clear();
             foreach (NumberingSegmentDefinition segment in _currentScheme.PatternSegments)
@@ -4490,7 +4596,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             _currentScheme = scheme;
-            return scheme;
+            NormalizeSequenceSegments();
+            return _currentScheme;
         }
 
         private string GetSelectedSchemeId()
