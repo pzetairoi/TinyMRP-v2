@@ -194,6 +194,9 @@ else
   git pull --ff-only "$REMOTE_NAME" "$PREVIOUS_BRANCH"
 fi
 
+ensure_repo_shell_scripts_executable "$REPO_ROOT"
+pass "Repaired executable permissions for deploy shell scripts"
+
 NEW_COMMIT="$(git rev-parse HEAD)"
 SHORT_COMMIT="$(git rev-parse --short=12 "$NEW_COMMIT")"
 IMAGE_TAG="tinymrp-app:${SHORT_COMMIT}"

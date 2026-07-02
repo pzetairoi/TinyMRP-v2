@@ -1001,6 +1001,18 @@ endpoint_responds() {
   curl "${curl_args[@]}" "${scheme}://${domain}/" >/dev/null
 }
 
+ensure_repo_shell_scripts_executable() {
+  local repo_path="$1"
+  local scripts_root="${repo_path%/}/deploy/scripts"
+  local script_path=""
+
+  [ -d "$scripts_root" ] || return 0
+
+  while IFS= read -r -d '' script_path; do
+    chmod 0755 "$script_path"
+  done < <(find "$scripts_root" -type f -name '*.sh' -print0)
+}
+
 api_health_responds() {
   local domain="$1"
   local tls_mode="$2"
