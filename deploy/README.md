@@ -27,7 +27,7 @@ The scripts live in `deploy/scripts/`:
 - `update-all-instances.sh`
 - `rollback-instance.sh`
 
-If your checkout did not preserve executable bits, run them as `bash ./deploy/scripts/<script>.sh ...` instead of `./deploy/scripts/<script>.sh ...`.
+The deploy shell scripts are intended to be executable directly. `update-repo.sh` now repairs `deploy/scripts/*.sh` back to mode `0755` after each checkout/pull. If you are still on an older checkout that has not picked up that fix yet, run the first update as `bash ./deploy/scripts/update-repo.sh ...` or manually `chmod +x deploy/scripts/*.sh deploy/scripts/lib/*.sh` once.
 
 ## What the scripts create
 
