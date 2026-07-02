@@ -153,6 +153,7 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company2 --read-only --non-inte
 <ul>
 <li>it runs an immediate scan after linking</li>
 <li>it installs a recurring scan job by default</li>
+<li>it refreshes both the external-storage cache and the user-visible mount paths</li>
 <li>this keeps TinyMRP import and upload-pack files visible to Nextcloud desktop clients without a manual <code>occ</code> scan</li>
 </ul>
 <p>The link script now asks which mode to use unless you pass a flag:</p>
@@ -181,10 +182,13 @@ sudo ./deploy/scripts/link-nextcloud-instance.sh company1 --nextcloud-instance g
 <p>Legacy shared/global Nextcloud is still available through <code>install-nextcloud.sh</code>, but it is not the recommended path for multi-company deployments and it is not re-domained automatically. If you intentionally keep using it, target it with <code>--nextcloud-instance global</code>.</p>
 <p>Server-side Nextcloud sync smoke test:</p>
 <ol>
-<li>Create <code>/srv/tinymrp/instances/&lt;instance&gt;/deliverables/nextcloud-server-side-sync-test.txt</code> on the host.</li>
-<li>Run <code>sudo ./deploy/scripts/scan-nextcloud-instance.sh &lt;instance&gt;</code>.</li>
-<li>Verify the file appears in the linked Nextcloud external storage.</li>
-<li>If a desktop client is connected, verify it downloads the file after the scan job runs.</li>
+<li>Create the test folder and file on the host:
+<code>sudo install -d /srv/tinymrp/instances/&lt;instance&gt;/deliverables/nextcloud-server-side-sync-test</code>
+<code>printf 'server-side sync test\n' | sudo tee /srv/tinymrp/instances/&lt;instance&gt;/deliverables/nextcloud-server-side-sync-test/server-created.txt &gt;/dev/null</code></li>
+<li>Run <code>sudo ./deploy/scripts/scan-nextcloud-instance.sh &lt;instance&gt; --nextcloud-instance &lt;selector&gt;</code>.</li>
+<li>Confirm the scan output includes <code>PASS: User path scan completed for &lt;user&gt;/files/TinyMRP - &lt;instance&gt; Deliverables</code>.</li>
+<li>Verify the file appears in the Nextcloud web UI inside <code>TinyMRP - &lt;instance&gt; Deliverables/nextcloud-server-side-sync-test/server-created.txt</code>.</li>
+<li>If a desktop client is connected, verify it downloads the file after the scan job runs or immediately after the manual scan completes.</li>
 </ol>
 <h2 id="updating-and-rollback">Updating And Rollback</h2>
 <p>Repository update:</p>

@@ -129,6 +129,7 @@ The link flow now also handles Nextcloud external-storage rescans for server-sid
 
 - it runs an immediate scan after linking
 - it installs a recurring scan job by default
+- it refreshes both the external-storage cache and the user-visible mount paths
 - this keeps TinyMRP import and upload-pack files visible to Nextcloud desktop clients without a manual `occ` scan
 
 The link script now asks which mode to use unless you pass a flag:
@@ -162,10 +163,13 @@ Legacy shared/global Nextcloud is still available through `install-nextcloud.sh`
 
 Server-side Nextcloud sync smoke test:
 
-1. Create `/srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test.txt` on the host.
-2. Run `sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance>`.
-3. Verify the file appears in the linked Nextcloud external storage.
-4. If a desktop client is connected, verify it downloads the file after the scan job runs.
+1. Create the test folder and file on the host:
+   `sudo install -d /srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test`
+   `printf 'server-side sync test\n' | sudo tee /srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test/server-created.txt >/dev/null`
+2. Run `sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance> --nextcloud-instance <selector>`.
+3. Confirm the scan output includes `PASS: User path scan completed for <user>/files/TinyMRP - <instance> Deliverables`.
+4. Verify the file appears in the Nextcloud web UI inside `TinyMRP - <instance> Deliverables/nextcloud-server-side-sync-test/server-created.txt`.
+5. If a desktop client is connected, verify it downloads the file after the scan job runs or immediately after the manual scan completes.
 
 ## Updating And Rollback
 
