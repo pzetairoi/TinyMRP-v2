@@ -41,7 +41,7 @@ render_systemd_service() {
   local scan_command="$1"
   cat <<EOF
 [Unit]
-Description=TinyMRP Nextcloud external-storage scan for %i
+Description=TinyMRP Nextcloud external-storage and user-path scan for %i
 After=docker.service network-online.target
 Wants=network-online.target
 
@@ -213,6 +213,7 @@ printf 'Nextcloud instance: %s\n' "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR
 printf 'Nextcloud root: %s\n' "$NEXTCLOUD_ROOT"
 printf 'Interval minutes: %s\n' "$INTERVAL_MINUTES"
 printf 'Job type: %s\n' "$JOB_TYPE"
+printf 'Scan scope: external storage cache plus user-visible mount paths\n'
 if [ "$JOB_TYPE" = "systemd" ]; then
   printf 'Systemd service: %s\n' "$SERVICE_NAME"
   printf 'Systemd timer: %s\n' "$TIMER_NAME"

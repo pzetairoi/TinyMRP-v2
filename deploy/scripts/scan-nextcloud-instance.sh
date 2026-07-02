@@ -31,6 +31,29 @@ fail() {
   printf 'FAIL: %s\n' "$1" >&2
 }
 
+append_line_if_present() {
+  local target_file="$1"
+  local value="${2-}"
+
+  [ -n "$value" ] || return 0
+  printf '%s\n' "$value" >>"$target_file"
+}
+
+scan_nextcloud_user_path() {
+  local container_name="$1"
+  local user_name="$2"
+  local mount_point="$3"
+  local user_scan_path="${user_name}/files${mount_point}"
+
+  if nextcloud_occ "$container_name" files:scan --path="$user_scan_path" >/dev/null 2>&1; then
+    pass "User path scan completed for ${user_scan_path}"
+    return 0
+  fi
+
+  fail "User path scan failed for ${user_scan_path}"
+  return 1
+}
+
 INSTANCE_NAME=""
 NEXTCLOUD_SELECTOR=""
 
@@ -86,6 +109,7 @@ NEXTCLOUD_ROOT="$(nextcloud_dir)"
 NEXTCLOUD_ENV="$(nextcloud_env_file)"
 NEXTCLOUD_LINK_FILE="$(nextcloud_link_file "$INSTANCE_NAME")"
 NEXTCLOUD_MOUNT_PATH="$(nextcloud_mount_path_for_instance "$INSTANCE_NAME")"
+NEXTCLOUD_GROUP_NAME="$(nextcloud_group_name_for_instance "$INSTANCE_NAME")"
 NEXTCLOUD_STORAGE_NAME="$(nextcloud_storage_name_for_instance "$INSTANCE_NAME")"
 NEXTCLOUD_STORAGE_MOUNT_POINT="$(nextcloud_storage_mount_point_for_instance "$INSTANCE_NAME")"
 
@@ -93,9 +117,10 @@ NEXTCLOUD_STORAGE_MOUNT_POINT="$(nextcloud_storage_mount_point_for_instance "$IN
 [ -f "$NEXTCLOUD_ENV" ] || die "Nextcloud env file not found at ${NEXTCLOUD_ENV}"
 
 if [ -f "$NEXTCLOUD_LINK_FILE" ]; then
-  unset NEXTCLOUD_MOUNT_PATH NEXTCLOUD_STORAGE_NAME NEXTCLOUD_STORAGE_MOUNT_POINT LINK_EXTERNAL_MOUNT_ID
+  unset NEXTCLOUD_MOUNT_PATH NEXTCLOUD_GROUP_NAME NEXTCLOUD_STORAGE_NAME NEXTCLOUD_STORAGE_MOUNT_POINT LINK_EXTERNAL_MOUNT_ID
   load_env_file "$NEXTCLOUD_LINK_FILE"
   NEXTCLOUD_MOUNT_PATH="${NEXTCLOUD_MOUNT_PATH:-$(nextcloud_mount_path_for_instance "$INSTANCE_NAME")}"
+  NEXTCLOUD_GROUP_NAME="${NEXTCLOUD_GROUP_NAME:-$(nextcloud_group_name_for_instance "$INSTANCE_NAME")}"
   NEXTCLOUD_STORAGE_NAME="${NEXTCLOUD_STORAGE_NAME:-$(nextcloud_storage_name_for_instance "$INSTANCE_NAME")}"
   NEXTCLOUD_STORAGE_MOUNT_POINT="${NEXTCLOUD_STORAGE_MOUNT_POINT:-$(nextcloud_storage_mount_point_for_instance "$INSTANCE_NAME")}"
 else
@@ -113,27 +138,165 @@ pass "Nextcloud mount ${NEXTCLOUD_MOUNT_PATH} is visible inside ${NEXTCLOUD_CONT
 
 MOUNT_ROW_JSON="$(nextcloud_external_mount_record_json "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_STORAGE_MOUNT_POINT" "$NEXTCLOUD_MOUNT_PATH" 2>/dev/null || true)"
 MOUNT_ID=""
+RESOLVED_MOUNT_POINT="$NEXTCLOUD_STORAGE_MOUNT_POINT"
+APPLICABLE_USERS_RAW=""
+APPLICABLE_GROUPS_RAW=""
 if [ -n "$MOUNT_ROW_JSON" ]; then
   MOUNT_ID="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "mount_id" 2>/dev/null || true)"
+  RESOLVED_MOUNT_POINT="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "mount_point" 2>/dev/null || true)"
+  APPLICABLE_USERS_RAW="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "applicable_users" 2>/dev/null || true)"
+  APPLICABLE_GROUPS_RAW="$(nextcloud_external_mount_row_field "$MOUNT_ROW_JSON" "applicable_groups" 2>/dev/null || true)"
+fi
+RESOLVED_MOUNT_POINT="${RESOLVED_MOUNT_POINT:-$NEXTCLOUD_STORAGE_MOUNT_POINT}"
+
+if NEXTCLOUD_ADMIN_USER_NAME="$(read_nextcloud_admin_user)"; then
+  :
+else
+  NEXTCLOUD_ADMIN_USER_NAME="${NEXTCLOUD_ADMIN_USER_NAME:-admin}"
+  note "No Nextcloud admin user variable was found in ${NEXTCLOUD_ENV}. Falling back to ${NEXTCLOUD_ADMIN_USER_NAME}."
 fi
 
-SCAN_MODE="full"
+USER_LIST_FILE="$(mktemp)"
+SCANNED_PATHS_FILE="$(mktemp)"
+trap 'rm -f "$USER_LIST_FILE" "$SCANNED_PATHS_FILE"' EXIT
+
+if nextcloud_user_exists "$NEXTCLOUD_CONTAINER_NAME" "$NEXTCLOUD_ADMIN_USER_NAME"; then
+  append_line_if_present "$USER_LIST_FILE" "$NEXTCLOUD_ADMIN_USER_NAME"
+else
+  note "Configured Nextcloud admin user ${NEXTCLOUD_ADMIN_USER_NAME} does not exist in ${NEXTCLOUD_CONTAINER_NAME}; admin path scan will be skipped."
+fi
+
+if nextcloud_external_mount_list_has_entries "$APPLICABLE_USERS_RAW"; then
+  while IFS= read -r applicable_user; do
+    [ -n "$applicable_user" ] || continue
+    append_line_if_present "$USER_LIST_FILE" "$applicable_user"
+  done < <(nextcloud_external_mount_list_items "$APPLICABLE_USERS_RAW" 2>/dev/null || true)
+fi
+
+if nextcloud_external_mount_list_has_entries "$APPLICABLE_GROUPS_RAW"; then
+  while IFS= read -r applicable_group; do
+    [ -n "$applicable_group" ] || continue
+    if ! nextcloud_group_exists "$NEXTCLOUD_CONTAINER_NAME" "$applicable_group"; then
+      note "Applicable Nextcloud group ${applicable_group} is not present in ${NEXTCLOUD_CONTAINER_NAME}; skipping group user path scans."
+      continue
+    fi
+
+    GROUP_USERS_FOUND=0
+    while IFS= read -r group_user; do
+      [ -n "$group_user" ] || continue
+      GROUP_USERS_FOUND=1
+      append_line_if_present "$USER_LIST_FILE" "$group_user"
+    done < <(nextcloud_group_users "$NEXTCLOUD_CONTAINER_NAME" "$applicable_group" 2>/dev/null || true)
+
+    if [ "$GROUP_USERS_FOUND" -eq 0 ]; then
+      note "Applicable Nextcloud group ${applicable_group} has no discoverable users; no group user path scans were added."
+    fi
+  done < <(nextcloud_external_mount_list_items "$APPLICABLE_GROUPS_RAW" 2>/dev/null || true)
+fi
+
+if [ -s "$USER_LIST_FILE" ]; then
+  sort -u "$USER_LIST_FILE" -o "$USER_LIST_FILE"
+fi
+
+SCAN_MODE="mount-id+user-paths"
+FALLBACK_EXTERNAL_SCAN_ALL=0
+FALLBACK_FILES_SCAN_ALL=0
+EXTERNAL_SCAN_FAILED=0
+USER_SCAN_FAILED=0
+USER_SCAN_COUNT=0
 if [ -n "$MOUNT_ID" ]; then
-  SCAN_MODE="targeted"
   if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:scan "$MOUNT_ID" >/dev/null 2>&1; then
-    pass "Targeted Nextcloud external-storage scan completed for mount ${MOUNT_ID}"
+    pass "External mount ID scan completed for mount ${MOUNT_ID}"
   else
-    fail "Targeted Nextcloud external-storage scan failed for mount ${MOUNT_ID}"
-    exit 1
+    note "External mount ID scan failed for mount ${MOUNT_ID}. Falling back to files_external:scan --all."
+    FALLBACK_EXTERNAL_SCAN_ALL=1
+    if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:scan --all >/dev/null 2>&1; then
+      pass "Fallback external-storage scan completed for all mounts"
+      SCAN_MODE="external-all+user-paths"
+    else
+      note "Fallback files_external:scan --all failed. Falling back to files:scan --all."
+      FALLBACK_FILES_SCAN_ALL=1
+      SCAN_MODE="files-all+user-paths"
+      if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files:scan --all >/dev/null 2>&1; then
+        pass "Fallback Nextcloud files:scan --all completed"
+      else
+        fail "Fallback Nextcloud files:scan --all failed"
+        EXTERNAL_SCAN_FAILED=1
+      fi
+    fi
   fi
 else
-  note "Could not resolve a Nextcloud external-storage mount ID for ${NEXTCLOUD_MOUNT_PATH}. Falling back to files:scan --all."
-  if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files:scan --all >/dev/null 2>&1; then
-    pass "Fallback Nextcloud files:scan --all completed"
+  note "External mount ID scan is unavailable for ${NEXTCLOUD_MOUNT_PATH} because no mount ID could be resolved. Falling back to files_external:scan --all."
+  FALLBACK_EXTERNAL_SCAN_ALL=1
+  SCAN_MODE="external-all+user-paths"
+  if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:scan --all >/dev/null 2>&1; then
+    pass "Fallback external-storage scan completed for all mounts"
   else
-    fail "Fallback Nextcloud files:scan --all failed"
-    exit 1
+    note "Fallback files_external:scan --all failed. Falling back to files:scan --all."
+    FALLBACK_FILES_SCAN_ALL=1
+    SCAN_MODE="files-all+user-paths"
+    if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files:scan --all >/dev/null 2>&1; then
+      pass "Fallback Nextcloud files:scan --all completed"
+    else
+      fail "Fallback Nextcloud files:scan --all failed"
+      EXTERNAL_SCAN_FAILED=1
+    fi
   fi
+fi
+
+if [ ! -s "$USER_LIST_FILE" ]; then
+  fail "No Nextcloud users were resolved for user-visible path scanning under ${RESOLVED_MOUNT_POINT}"
+  USER_SCAN_FAILED=1
+else
+  while IFS= read -r scan_user; do
+    [ -n "$scan_user" ] || continue
+    append_line_if_present "$SCANNED_PATHS_FILE" "${scan_user}/files${RESOLVED_MOUNT_POINT}"
+    USER_SCAN_COUNT=$((USER_SCAN_COUNT + 1))
+    if ! scan_nextcloud_user_path "$NEXTCLOUD_CONTAINER_NAME" "$scan_user" "$RESOLVED_MOUNT_POINT"; then
+      USER_SCAN_FAILED=1
+    fi
+  done <"$USER_LIST_FILE"
+fi
+
+if [ "$FALLBACK_FILES_SCAN_ALL" -eq 1 ]; then
+  note "files:scan --all fallback was used because mount-specific external scans were unavailable or failed."
+else
+  pass "files:scan --all fallback was not required"
+fi
+
+if [ "$EXTERNAL_SCAN_FAILED" -ne 0 ] || [ "$USER_SCAN_FAILED" -ne 0 ]; then
+  if [ "$EXTERNAL_SCAN_FAILED" -ne 0 ]; then
+    fail "Nextcloud external-storage scan did not complete successfully."
+  fi
+  if [ "$USER_SCAN_FAILED" -ne 0 ]; then
+    fail "One or more user-visible Nextcloud path scans failed."
+  fi
+  if [ -f "$NEXTCLOUD_LINK_FILE" ]; then
+    upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_NEXTCLOUD_INSTANCE" "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")"
+    upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_EXTERNAL_MOUNT_ID" "$MOUNT_ID"
+  fi
+  printf '\nNextcloud scan incomplete.\n'
+  printf 'TinyMRP instance: %s\n' "$INSTANCE_NAME"
+  printf 'Nextcloud instance: %s\n' "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")"
+  printf 'Nextcloud root: %s\n' "$NEXTCLOUD_ROOT"
+  printf 'Nextcloud container: %s\n' "$NEXTCLOUD_CONTAINER_NAME"
+  printf 'Mount path: %s\n' "$NEXTCLOUD_MOUNT_PATH"
+  printf 'External storage name: %s\n' "$NEXTCLOUD_STORAGE_NAME"
+  printf 'Resolved mount point: %s\n' "$RESOLVED_MOUNT_POINT"
+  printf 'Scan mode: %s\n' "$SCAN_MODE"
+  printf 'files_external:scan --all fallback used: %s\n' "$([ "$FALLBACK_EXTERNAL_SCAN_ALL" -eq 1 ] && printf yes || printf no)"
+  printf 'files:scan --all fallback used: %s\n' "$([ "$FALLBACK_FILES_SCAN_ALL" -eq 1 ] && printf yes || printf no)"
+  if [ -n "$MOUNT_ID" ]; then
+    printf 'Mount ID: %s\n' "$MOUNT_ID"
+  fi
+  if [ -s "$SCANNED_PATHS_FILE" ]; then
+    printf 'Scanned user paths:\n'
+    while IFS= read -r scanned_path; do
+      [ -n "$scanned_path" ] || continue
+      printf '  - %s\n' "$scanned_path"
+    done <"$SCANNED_PATHS_FILE"
+  fi
+  exit 1
 fi
 
 if [ -f "$NEXTCLOUD_LINK_FILE" ]; then
@@ -148,7 +311,18 @@ printf 'Nextcloud root: %s\n' "$NEXTCLOUD_ROOT"
 printf 'Nextcloud container: %s\n' "$NEXTCLOUD_CONTAINER_NAME"
 printf 'Mount path: %s\n' "$NEXTCLOUD_MOUNT_PATH"
 printf 'External storage name: %s\n' "$NEXTCLOUD_STORAGE_NAME"
+printf 'Resolved mount point: %s\n' "$RESOLVED_MOUNT_POINT"
 printf 'Scan mode: %s\n' "$SCAN_MODE"
+printf 'User path scans completed: %s\n' "$USER_SCAN_COUNT"
+printf 'files_external:scan --all fallback used: %s\n' "$([ "$FALLBACK_EXTERNAL_SCAN_ALL" -eq 1 ] && printf yes || printf no)"
+printf 'files:scan --all fallback used: %s\n' "$([ "$FALLBACK_FILES_SCAN_ALL" -eq 1 ] && printf yes || printf no)"
 if [ -n "$MOUNT_ID" ]; then
   printf 'Mount ID: %s\n' "$MOUNT_ID"
+fi
+if [ -s "$SCANNED_PATHS_FILE" ]; then
+  printf 'Scanned user paths:\n'
+  while IFS= read -r scanned_path; do
+    [ -n "$scanned_path" ] || continue
+    printf '  - %s\n' "$scanned_path"
+  done <"$SCANNED_PATHS_FILE"
 fi

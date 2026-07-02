@@ -874,6 +874,35 @@ raise SystemExit(0)
 PY
 }
 
+nextcloud_external_mount_list_items() {
+  local raw_value="$1"
+
+  python3 - "$raw_value" <<'PY'
+import sys
+
+raw_value = sys.argv[1].strip()
+if not raw_value or raw_value.lower() in {"none", "-"}:
+    raise SystemExit(1)
+
+items = []
+seen = set()
+for item in raw_value.split(","):
+    cleaned = item.strip()
+    if not cleaned or cleaned.lower() == "all":
+        continue
+    if cleaned in seen:
+        continue
+    seen.add(cleaned)
+    items.append(cleaned)
+
+if not items:
+    raise SystemExit(1)
+
+for item in items:
+    print(item)
+PY
+}
+
 nextcloud_external_mount_option_enabled() {
   local raw_options="$1"
   local option_name="$2"
@@ -952,6 +981,70 @@ nextcloud_user_exists() {
   local container_name="$1"
   local user_name="$2"
   nextcloud_occ "$container_name" user:info "$user_name" >/dev/null 2>&1
+}
+
+nextcloud_group_users() {
+  local container_name="$1"
+  local group_name="$2"
+  local raw_output=""
+
+  raw_output="$(nextcloud_occ "$container_name" group:info "$group_name" --output=json_pretty 2>/dev/null || nextcloud_occ "$container_name" group:info "$group_name" 2>/dev/null || true)"
+  [ -n "$raw_output" ] || return 1
+
+  GROUP_INFO_RAW="$raw_output" python3 - <<'PY'
+import json
+import os
+
+text = os.environ["GROUP_INFO_RAW"]
+
+def add_user(candidate, users, seen):
+    if not isinstance(candidate, str):
+        return
+    cleaned = candidate.strip()
+    if not cleaned or cleaned in seen:
+        return
+    seen.add(cleaned)
+    users.append(cleaned)
+
+def flatten_strings(value, users, seen):
+    if isinstance(value, str):
+        add_user(value, users, seen)
+    elif isinstance(value, list):
+        for item in value:
+            flatten_strings(item, users, seen)
+    elif isinstance(value, dict):
+        for item in value.values():
+            flatten_strings(item, users, seen)
+
+users = []
+seen = set()
+
+try:
+    parsed = json.loads(text)
+except json.JSONDecodeError:
+    parsed = None
+
+if isinstance(parsed, dict):
+    for key, value in parsed.items():
+        if str(key).strip().lower() in {"users", "members"}:
+            flatten_strings(value, users, seen)
+
+if not users:
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("-"):
+            continue
+        candidate = line[1:].strip().rstrip(":")
+        if candidate.lower() in {"groupid", "displayname", "backends", "users", "members"}:
+            continue
+        add_user(candidate, users, seen)
+
+if not users:
+    raise SystemExit(1)
+
+for user in users:
+    print(user)
+PY
 }
 
 read_nextcloud_admin_user() {

@@ -266,8 +266,9 @@ Why the recurring scan job matters:
 
 - TinyMRP writes deliverables directly into `/srv/tinymrp/instances/<instance>/deliverables`
 - Nextcloud external storage keeps its own filecache
+- desktop clients also depend on the user-visible mount path cache and etags being refreshed
 - without a recurring scan, server-side TinyMRP imports may not propagate to Nextcloud desktop clients until a manual `occ` scan runs
-- the default link flow now scans immediately and then keeps rescanning on a timer
+- the default link flow now scans immediately and then keeps rescanning both the external storage cache and the visible user mount paths on a timer
 
 Access modes:
 
@@ -549,11 +550,13 @@ After creating or updating an instance, run this regression check:
 To verify TinyMRP server-side deliverables changes propagate into Nextcloud:
 
 1. Create a test file on the host:
-   `/srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test.txt`
+   `sudo install -d /srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test`
+   `printf 'server-side sync test\n' | sudo tee /srv/tinymrp/instances/<instance>/deliverables/nextcloud-server-side-sync-test/server-created.txt >/dev/null`
 2. Run:
-   `sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance>`
-3. Verify the file appears in the linked Nextcloud external storage.
-4. If a desktop client is connected, verify it downloads the new file after the scan job runs.
+   `sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance> --nextcloud-instance <selector>`
+3. Confirm the scan output includes one or more `PASS: User path scan completed for <user>/files/TinyMRP - <instance> Deliverables` lines.
+4. Verify the file appears in the Nextcloud web UI inside `TinyMRP - <instance> Deliverables/nextcloud-server-side-sync-test/server-created.txt`.
+5. If a desktop client is connected, verify it downloads the new file after the scan job runs or immediately after the manual scan completes.
 
 ## Recover an existing broken Caddy instance
 

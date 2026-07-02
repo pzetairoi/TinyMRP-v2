@@ -660,13 +660,13 @@ upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_LAST_SCAN_JOB_TYPE" "$([ "$INSTALL
 upsert_env_value "$NEXTCLOUD_LINK_FILE" "LINK_EXTERNAL_MOUNT_ID" "${MOUNT_ID:-}"
 
 "${SCRIPT_DIR}/scan-nextcloud-instance.sh" "$INSTANCE_NAME" --nextcloud-instance "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")"
-info "Completed immediate Nextcloud scan for ${INSTANCE_NAME}."
+info "Completed immediate Nextcloud scan for ${INSTANCE_NAME}, including user-visible mount paths."
 
 if [ "$INSTALL_SCAN_JOB" -eq 1 ]; then
   "${SCRIPT_DIR}/install-nextcloud-scan-job.sh" "$INSTANCE_NAME" --nextcloud-instance "$(nextcloud_display_name "$NEXTCLOUD_SELECTOR")" --interval-minutes "$SCAN_INTERVAL_MINUTES"
   info "Installed recurring Nextcloud scan job for ${INSTANCE_NAME}."
 else
-  note "Recurring Nextcloud scan job was not installed. Server-side TinyMRP file changes may not propagate to desktop clients automatically."
+  note "Recurring Nextcloud scan job was not installed. Server-side TinyMRP file changes may not propagate to desktop clients automatically because user-visible mount path scans will not rerun."
 fi
 
 printf 'Nextcloud link complete.\n'
