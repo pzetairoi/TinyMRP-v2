@@ -57,13 +57,12 @@ type Segment = {
   fmt?: string
 }
 
+const SIMPLE_SEGMENT_KINDS = new Set(['literal', 'seq'])
+
 const EMPTY_SCHEME: Scheme = {
   name: '',
   description: '',
   is_active: true,
-  is_preset: false,
-  is_recommended: false,
-  visibility: 'advanced_only',
   separator: '-',
   scope_mode: 'global',
   scope_keys: [],
@@ -73,16 +72,63 @@ const EMPTY_SCHEME: Scheme = {
   pattern_segments: [],
 }
 
-const EMPTY_SEGMENT: Segment = {
-  kind: 'literal',
-  value: '',
-  field: 'type',
-  casing: 'upper',
-  pad_left: undefined,
-  pad_char: '',
-  padding: 6,
-  base: 10,
-  fmt: 'YYYY',
+function createEmptySegment(kind: 'literal' | 'seq' = 'literal'): Segment {
+  if (kind === 'seq') {
+    return { kind: 'seq', padding: 6, base: 10 }
+  }
+  return { kind: 'literal', value: '' }
+}
+
+function cloneSegment(segment?: Segment): Segment {
+  const kind = getSegmentKind(segment)
+  if (kind === 'seq') {
+    return { ...createEmptySegment('seq'), ...segment }
+  }
+  if (kind === 'literal') {
+    return { ...createEmptySegment('literal'), ...segment }
+  }
+  return { ...(segment || {}) }
+}
+
+function cloneScheme(scheme?: Partial<Scheme>): Scheme {
+  return {
+    ...EMPTY_SCHEME,
+    ...scheme,
+    scope_keys: [...(scheme?.scope_keys || EMPTY_SCHEME.scope_keys || [])],
+    seq: { ...EMPTY_SCHEME.seq, ...(scheme?.seq || {}) },
+    revision: { ...EMPTY_SCHEME.revision, ...(scheme?.revision || {}) },
+    validation_rules: { ...EMPTY_SCHEME.validation_rules, ...(scheme?.validation_rules || {}) },
+    pattern_segments: (scheme?.pattern_segments || []).map(cloneSegment),
+  }
+}
+
+function getSegmentKind(segment?: Segment) {
+  return (segment?.kind || '').trim().toLowerCase()
+}
+
+function getUnsupportedSegmentKinds(items: Segment[]) {
+  const kinds = new Set<string>()
+  for (const segment of items) {
+    const kind = getSegmentKind(segment)
+    if (kind && !SIMPLE_SEGMENT_KINDS.has(kind)) {
+      kinds.add(kind)
+    }
+  }
+  return Array.from(kinds)
+}
+
+function segmentLabel(segment: Segment, index: number) {
+  const kind = getSegmentKind(segment)
+  if (!kind) return `Segment ${index + 1}`
+  if (kind === 'literal') return `Literal: ${segment.value || ''}`
+  if (kind === 'seq') return `Sequence: pad ${segment.padding ?? 6}, base ${segment.base ?? 10}`
+  if (kind === 'field') return `Legacy field: ${segment.field || ''}`
+  if (kind === 'date') return `Legacy date: ${segment.fmt || ''}`
+  return `Legacy ${kind}`
+}
+
+function formatApiError(err: unknown, fallback: string) {
+  return (err as ApiError).message || fallback
 }
 
 export default function AdminAddinPage() {
@@ -90,38 +136,48 @@ export default function AdminAddinPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [tokens, setTokens] = useState<Token[]>([])
   const [schemes, setSchemes] = useState<Scheme[]>([])
+  const [enabledDrafts, setEnabledDrafts] = useState<Record<string, boolean>>({})
   const [selectedSchemeId, setSelectedSchemeId] = useState('')
-  const [editingScheme, setEditingScheme] = useState<Scheme>({ ...EMPTY_SCHEME })
-  const [scopeKeysText, setScopeKeysText] = useState('')
+  const [editingScheme, setEditingScheme] = useState<Scheme>(cloneScheme())
   const [segments, setSegments] = useState<Segment[]>([])
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(-1)
-  const [segmentDraft, setSegmentDraft] = useState<Segment>({ ...EMPTY_SEGMENT })
+  const [segmentDraft, setSegmentDraft] = useState<Segment>(createEmptySegment())
+  const [savingEnabledChanges, setSavingEnabledChanges] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    loadUsers()
-    loadSchemes()
+    void loadUsers()
+    void loadSchemes()
   }, [])
 
   useEffect(() => {
     if (!selectedSchemeId) {
-      setEditingScheme({ ...EMPTY_SCHEME })
-      setScopeKeysText('')
+      setEditingScheme(cloneScheme())
       setSegments([])
       setSelectedSegmentIndex(-1)
-      setSegmentDraft({ ...EMPTY_SEGMENT })
+      setSegmentDraft(createEmptySegment())
       return
     }
+
     const found = schemes.find((scheme) => scheme.id === selectedSchemeId)
-    if (found) {
-      setEditingScheme({ ...EMPTY_SCHEME, ...found })
-      setScopeKeysText((found.scope_keys || []).join(', '))
-      setSegments(found.pattern_segments || [])
-      setSelectedSegmentIndex(-1)
-      setSegmentDraft({ ...EMPTY_SEGMENT })
+    if (!found) {
+      return
     }
+
+    const nextScheme = cloneScheme(found)
+    setEditingScheme(nextScheme)
+    setSegments(nextScheme.pattern_segments || [])
+    setSelectedSegmentIndex(-1)
+    setSegmentDraft(createEmptySegment())
   }, [selectedSchemeId, schemes])
+
+  const legacySegmentKinds = getUnsupportedSegmentKinds(segments)
+  const hasLegacySegments = legacySegmentKinds.length > 0
+  const changedEnabledCount = schemes.filter((scheme) => {
+    if (!scheme.id) return false
+    return (enabledDrafts[scheme.id] ?? !!scheme.is_active) !== !!scheme.is_active
+  }).length
 
   async function loadUsers() {
     setError(null)
@@ -129,7 +185,7 @@ export default function AdminAddinPage() {
       const resp = await apiFetch<{ users: User[] }>('/api/admin/users')
       setUsers(resp.users || [])
     } catch (err) {
-      setError((err as ApiError).message || 'Failed to load users.')
+      setError(formatApiError(err, 'Failed to load users.'))
     }
   }
 
@@ -140,7 +196,7 @@ export default function AdminAddinPage() {
       setSelectedUser(user)
       setTokens(resp.tokens || [])
     } catch (err) {
-      setError((err as ApiError).message || 'Failed to load tokens.')
+      setError(formatApiError(err, 'Failed to load tokens.'))
     }
   }
 
@@ -151,10 +207,10 @@ export default function AdminAddinPage() {
       await apiFetch(`/api/admin/users/${userId}/tokens/${tokenId}`, { method: 'DELETE' })
       setMessage('Token revoked.')
       if (selectedUser) {
-        loadUserTokens(selectedUser)
+        await loadUserTokens(selectedUser)
       }
     } catch (err) {
-      setError((err as ApiError).message || 'Failed to revoke token.')
+      setError(formatApiError(err, 'Failed to revoke token.'))
     }
   }
 
@@ -162,28 +218,51 @@ export default function AdminAddinPage() {
     setError(null)
     try {
       const resp = await apiFetch<{ schemes: Scheme[] }>('/api/numbering/schemes')
-      setSchemes(resp.schemes || [])
+      const nextSchemes = resp.schemes || []
+      const nextEnabledDrafts: Record<string, boolean> = {}
+      for (const scheme of nextSchemes) {
+        if (scheme.id) {
+          nextEnabledDrafts[scheme.id] = !!scheme.is_active
+        }
+      }
+      setSchemes(nextSchemes)
+      setEnabledDrafts(nextEnabledDrafts)
     } catch (err) {
-      setError((err as ApiError).message || 'Failed to load schemes.')
+      setError(formatApiError(err, 'Failed to load schemes.'))
     }
   }
 
-  async function updateScheme(scheme: Scheme) {
+  async function saveEnabledChanges() {
     setError(null)
     setMessage(null)
+
+    const changedSchemes = schemes.filter((scheme) => {
+      if (!scheme.id) return false
+      return (enabledDrafts[scheme.id] ?? !!scheme.is_active) !== !!scheme.is_active
+    })
+
+    if (!changedSchemes.length) {
+      setMessage('No enabled changes to save.')
+      return
+    }
+
+    setSavingEnabledChanges(true)
     try {
-      await apiFetch(`/api/numbering/schemes/${scheme.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          name: scheme.name,
-          is_preset: scheme.is_preset,
-          is_recommended: scheme.is_recommended,
-          visibility: scheme.visibility,
-        }),
-      })
-      setMessage('Scheme updated.')
+      for (const scheme of changedSchemes) {
+        await apiFetch(`/api/numbering/schemes/${scheme.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: scheme.name,
+            is_active: enabledDrafts[scheme.id!],
+          }),
+        })
+      }
+      await loadSchemes()
+      setMessage(`${changedSchemes.length} scheme${changedSchemes.length === 1 ? '' : 's'} updated.`)
     } catch (err) {
-      setError((err as ApiError).message || 'Failed to update scheme.')
+      setError(formatApiError(err, 'Failed to save enabled changes.'))
+    } finally {
+      setSavingEnabledChanges(false)
     }
   }
 
@@ -191,41 +270,21 @@ export default function AdminAddinPage() {
     setEditingScheme((prev) => ({ ...prev, ...patch }))
   }
 
-  function segmentLabel(seg: Segment, index: number) {
-    if (!seg) return `Segment ${index + 1}`
-    switch ((seg.kind || '').toLowerCase()) {
-      case 'literal':
-        return `Literal: ${seg.value || ''}`
-      case 'field':
-        return `Field: ${seg.field || ''}`
-      case 'seq':
-        return `Seq: ${seg.padding || ''}`
-      case 'date':
-        return `Date: ${seg.fmt || ''}`
-      default:
-        return seg.kind || `Segment ${index + 1}`
-    }
-  }
-
   function buildSchemePayload() {
-    const scopeKeys = scopeKeysText
-      .split(',')
-      .map((key) => key.trim())
-      .filter(Boolean)
+    const firstSeqSegment = segments.find((segment) => getSegmentKind(segment) === 'seq')
+    const nextSeqPadding = Number(firstSeqSegment?.padding ?? editingScheme.seq?.padding ?? 6)
+    const nextSeqBase = Number(firstSeqSegment?.base ?? editingScheme.seq?.base ?? 10)
+
     return {
       name: (editingScheme.name || '').trim(),
-      description: (editingScheme.description || '').trim(),
       is_active: !!editingScheme.is_active,
-      is_preset: !!editingScheme.is_preset,
-      is_recommended: !!editingScheme.is_recommended,
-      visibility: editingScheme.visibility || 'advanced_only',
       separator: editingScheme.separator || '-',
       scope_mode: editingScheme.scope_mode || 'global',
-      scope_keys: scopeKeys,
+      scope_keys: [...(editingScheme.scope_keys || [])],
       seq: {
-        padding: Number(editingScheme.seq?.padding || 6),
-        base: Number(editingScheme.seq?.base || 10),
-        start_at: Number(editingScheme.seq?.start_at || 1),
+        padding: nextSeqPadding,
+        base: nextSeqBase,
+        start_at: Number(editingScheme.seq?.start_at ?? 1),
         reset_policy: editingScheme.seq?.reset_policy || 'never',
       },
       revision: {
@@ -233,25 +292,35 @@ export default function AdminAddinPage() {
         start: editingScheme.revision?.start || 'A',
       },
       validation_rules: {
-        max_length: Number(editingScheme.validation_rules?.max_length || 32),
+        max_length: Number(editingScheme.validation_rules?.max_length ?? 32),
         allowed_charset: editingScheme.validation_rules?.allowed_charset || 'A-Z0-9-',
-        require_seq_segment: !!editingScheme.validation_rules?.require_seq_segment,
+        require_seq_segment: editingScheme.validation_rules?.require_seq_segment ?? true,
       },
-      pattern_segments: segments.map((seg) => {
-        const payload: Segment = { kind: seg.kind }
-        if (seg.kind === 'literal') payload.value = seg.value || ''
-        if (seg.kind === 'field') {
-          payload.field = seg.field || ''
-          if (seg.casing) payload.casing = seg.casing
-          if (seg.pad_left) payload.pad_left = Number(seg.pad_left)
-          if (seg.pad_char) payload.pad_char = seg.pad_char
+      pattern_segments: segments.map((segment) => {
+        const kind = getSegmentKind(segment)
+        if (kind === 'literal') {
+          return { kind, value: segment.value || '' }
         }
-        if (seg.kind === 'seq') {
-          if (seg.padding) payload.padding = Number(seg.padding)
-          if (seg.base) payload.base = Number(seg.base)
+        if (kind === 'seq') {
+          return {
+            kind,
+            padding: Number(segment.padding ?? nextSeqPadding),
+            base: Number(segment.base ?? nextSeqBase),
+          }
         }
-        if (seg.kind === 'date') payload.fmt = seg.fmt || ''
-        return payload
+        if (kind === 'field') {
+          return {
+            kind,
+            field: segment.field || '',
+            casing: segment.casing || 'upper',
+            pad_left: segment.pad_left,
+            pad_char: segment.pad_char || '',
+          }
+        }
+        if (kind === 'date') {
+          return { kind, fmt: segment.fmt || '' }
+        }
+        return { ...segment, kind }
       }),
     }
   }
@@ -274,15 +343,31 @@ export default function AdminAddinPage() {
         .join(' ')
       setMessage(sample ? `Valid. Example: ${sample}` : 'Valid.')
     } catch (err) {
-      setError((err as ApiError).message || 'Validation failed.')
+      setError(formatApiError(err, 'Validation failed.'))
     }
   }
 
   async function saveEditingScheme() {
     setError(null)
     setMessage(null)
+
+    if (hasLegacySegments) {
+      setError(
+        `This scheme uses legacy segment types: ${legacySegmentKinds.join(
+          ', ',
+        )}. It can still be used for allocation, but it cannot be saved from the simplified builder.`,
+      )
+      return
+    }
+
+    const payload = buildSchemePayload()
+    if (!payload.name) {
+      setError('Scheme name is required.')
+      return
+    }
+
     try {
-      const payload = buildSchemePayload()
+      let nextSelectedSchemeId = selectedSchemeId
       if (selectedSchemeId) {
         await apiFetch(`/api/numbering/schemes/${selectedSchemeId}`, {
           method: 'PUT',
@@ -295,13 +380,14 @@ export default function AdminAddinPage() {
           body: JSON.stringify(payload),
         })
         setMessage('Scheme created.')
-        const newId = resp.scheme?.id || ''
-        await loadSchemes()
-        if (newId) setSelectedSchemeId(newId)
+        nextSelectedSchemeId = resp.scheme?.id || ''
       }
       await loadSchemes()
+      if (nextSelectedSchemeId) {
+        setSelectedSchemeId(nextSelectedSchemeId)
+      }
     } catch (err) {
-      setError((err as ApiError).message || 'Failed to save scheme.')
+      setError(formatApiError(err, 'Failed to save scheme.'))
     }
   }
 
@@ -318,30 +404,75 @@ export default function AdminAddinPage() {
       setSelectedSchemeId('')
       await loadSchemes()
     } catch (err) {
-      setError((err as ApiError).message || 'Failed to deactivate scheme.')
+      setError(formatApiError(err, 'Failed to deactivate scheme.'))
     }
   }
 
-  function addSegment() {
-    setSegments((prev) => [...prev, { ...segmentDraft }])
-    setSegmentDraft({ ...EMPTY_SEGMENT })
-    setSelectedSegmentIndex(-1)
+  function setDraftKind(kind: 'literal' | 'seq') {
+    setSegmentDraft((prev) => {
+      if (kind === 'seq') {
+        return {
+          kind: 'seq',
+          padding: Number(prev.padding ?? editingScheme.seq?.padding ?? 6),
+          base: Number(prev.base ?? editingScheme.seq?.base ?? 10),
+        }
+      }
+      return {
+        kind: 'literal',
+        value: prev.value || '',
+      }
+    })
+  }
+
+  function addSegment(kindOverride?: 'literal' | 'seq') {
+    if (hasLegacySegments) return
+    const kind = kindOverride || (getSegmentKind(segmentDraft) === 'seq' ? 'seq' : 'literal')
+    const nextSegment =
+      kind === 'seq'
+        ? {
+            kind: 'seq',
+            padding: Number(segmentDraft.padding ?? editingScheme.seq?.padding ?? 6),
+            base: Number(segmentDraft.base ?? editingScheme.seq?.base ?? 10),
+          }
+        : {
+            kind: 'literal',
+            value: segmentDraft.value || '',
+          }
+
+    const nextSegments = [...segments, nextSegment]
+    setSegments(nextSegments)
+    setSelectedSegmentIndex(nextSegments.length - 1)
+    setSegmentDraft(cloneSegment(nextSegment))
   }
 
   function updateSegment() {
-    if (selectedSegmentIndex < 0) return
-    setSegments((prev) => prev.map((seg, idx) => (idx === selectedSegmentIndex ? { ...segmentDraft } : seg)))
+    if (hasLegacySegments || selectedSegmentIndex < 0) return
+    const kind = getSegmentKind(segmentDraft) === 'seq' ? 'seq' : 'literal'
+    const nextSegment =
+      kind === 'seq'
+        ? {
+            kind: 'seq',
+            padding: Number(segmentDraft.padding ?? editingScheme.seq?.padding ?? 6),
+            base: Number(segmentDraft.base ?? editingScheme.seq?.base ?? 10),
+          }
+        : {
+            kind: 'literal',
+            value: segmentDraft.value || '',
+          }
+
+    setSegments((prev) => prev.map((segment, index) => (index === selectedSegmentIndex ? nextSegment : segment)))
+    setSegmentDraft(cloneSegment(nextSegment))
   }
 
   function removeSegment() {
-    if (selectedSegmentIndex < 0) return
-    setSegments((prev) => prev.filter((_, idx) => idx !== selectedSegmentIndex))
+    if (hasLegacySegments || selectedSegmentIndex < 0) return
+    setSegments((prev) => prev.filter((_, index) => index !== selectedSegmentIndex))
     setSelectedSegmentIndex(-1)
-    setSegmentDraft({ ...EMPTY_SEGMENT })
+    setSegmentDraft(createEmptySegment())
   }
 
   function moveSegment(delta: number) {
-    if (selectedSegmentIndex < 0) return
+    if (hasLegacySegments || selectedSegmentIndex < 0) return
     const target = selectedSegmentIndex + delta
     if (target < 0 || target >= segments.length) return
     const next = [...segments]
@@ -349,6 +480,14 @@ export default function AdminAddinPage() {
     next.splice(target, 0, item)
     setSegments(next)
     setSelectedSegmentIndex(target)
+  }
+
+  function selectSegment(index: number) {
+    setSelectedSegmentIndex(index)
+    const selectedSegment = segments[index]
+    if (selectedSegment && SIMPLE_SEGMENT_KINDS.has(getSegmentKind(selectedSegment))) {
+      setSegmentDraft(cloneSegment(selectedSegment))
+    }
   }
 
   return (
@@ -374,7 +513,7 @@ export default function AdminAddinPage() {
                   <td>{user.email}</td>
                   <td>{user.roles?.join(', ') || '-'}</td>
                   <td>
-                    <button className="btn btn-sm btn-outline-secondary" onClick={() => loadUserTokens(user)}>
+                    <button className="btn btn-sm btn-outline-secondary" onClick={() => void loadUserTokens(user)}>
                       View tokens
                     </button>
                   </td>
@@ -416,7 +555,7 @@ export default function AdminAddinPage() {
                         {!token.revoked_at && (
                           <button
                             className="btn btn-sm btn-outline-danger"
-                            onClick={() => revokeToken(selectedUser.id, token.id)}
+                            onClick={() => void revokeToken(selectedUser.id, token.id)}
                           >
                             Revoke
                           </button>
@@ -439,68 +578,54 @@ export default function AdminAddinPage() {
       </div>
 
       <div className="card p-3">
-        <h5>Scheme presets</h5>
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+          <h5 className="mb-0">Numbering schemes</h5>
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => void saveEnabledChanges()}
+            disabled={savingEnabledChanges}
+          >
+            Save enabled changes
+          </button>
+        </div>
+        {changedEnabledCount > 0 && <div className="text-muted small mb-2">{changedEnabledCount} pending change(s).</div>}
         <div className="table-responsive">
           <table className="table table-sm">
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Preset</th>
-                <th>Recommended</th>
-                <th>Visibility</th>
-                <th />
+                <th>Enabled</th>
+                <th>Edit</th>
               </tr>
             </thead>
             <tbody>
-              {schemes.map((scheme, idx) => (
+              {schemes.map((scheme) => (
                 <tr key={scheme.id}>
                   <td>{scheme.name}</td>
                   <td>
                     <input
                       type="checkbox"
-                      checked={!!scheme.is_preset}
+                      checked={scheme.id ? enabledDrafts[scheme.id] ?? !!scheme.is_active : !!scheme.is_active}
                       onChange={(e) => {
-                        const next = [...schemes]
-                        next[idx] = { ...scheme, is_preset: e.target.checked }
-                        setSchemes(next)
+                        if (!scheme.id) return
+                        setEnabledDrafts((prev) => ({ ...prev, [scheme.id!]: e.target.checked }))
                       }}
                     />
                   </td>
                   <td>
-                    <input
-                      type="checkbox"
-                      checked={!!scheme.is_recommended}
-                      onChange={(e) => {
-                        const next = [...schemes]
-                        next[idx] = { ...scheme, is_recommended: e.target.checked }
-                        setSchemes(next)
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <select
-                      className="form-select form-select-sm"
-                      value={scheme.visibility || 'advanced_only'}
-                      onChange={(e) => {
-                        const next = [...schemes]
-                        next[idx] = { ...scheme, visibility: e.target.value }
-                        setSchemes(next)
-                      }}
+                    <button
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => setSelectedSchemeId(scheme.id || '')}
+                      disabled={!scheme.id}
                     >
-                      <option value="quickstart">quickstart</option>
-                      <option value="advanced_only">advanced_only</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button className="btn btn-sm btn-outline-primary" onClick={() => updateScheme(scheme)}>
-                      Save
+                      Edit
                     </button>
                   </td>
                 </tr>
               ))}
               {!schemes.length && (
                 <tr>
-                  <td colSpan={5} className="text-muted text-center">
+                  <td colSpan={3} className="text-muted text-center">
                     No schemes.
                   </td>
                 </tr>
@@ -525,7 +650,7 @@ export default function AdminAddinPage() {
         </div>
 
         <div className="row g-2 mb-3">
-          <div className="col-md-6">
+          <div className="col-md-5">
             <label className="form-label small">Name</label>
             <input
               className="form-control"
@@ -533,17 +658,17 @@ export default function AdminAddinPage() {
               onChange={(e) => updateEditingScheme({ name: e.target.value })}
             />
           </div>
-          <div className="col-md-6">
-            <label className="form-label small">Description</label>
+          <div className="col-md-4">
+            <label className="form-label small">Separator</label>
             <input
               className="form-control"
-              value={editingScheme.description || ''}
-              onChange={(e) => updateEditingScheme({ description: e.target.value })}
+              value={editingScheme.separator || '-'}
+              onChange={(e) => updateEditingScheme({ separator: e.target.value })}
             />
           </div>
           <div className="col-md-3">
-            <label className="form-label small">Active</label>
-            <div className="form-check">
+            <label className="form-label small d-block">Enabled</label>
+            <div className="form-check pt-2">
               <input
                 className="form-check-input"
                 type="checkbox"
@@ -556,340 +681,156 @@ export default function AdminAddinPage() {
               </label>
             </div>
           </div>
-          <div className="col-md-3">
-            <label className="form-label small">Preset</label>
-            <div className="form-check">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                checked={!!editingScheme.is_preset}
-                onChange={(e) => updateEditingScheme({ is_preset: e.target.checked })}
-                id="schemePresetCheck"
-              />
-              <label className="form-check-label" htmlFor="schemePresetCheck">
-                Preset
-              </label>
-            </div>
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Recommended</label>
-            <div className="form-check">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                checked={!!editingScheme.is_recommended}
-                onChange={(e) => updateEditingScheme({ is_recommended: e.target.checked })}
-                id="schemeRecommendedCheck"
-              />
-              <label className="form-check-label" htmlFor="schemeRecommendedCheck">
-                Recommended
-              </label>
-            </div>
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Visibility</label>
-            <select
-              className="form-select"
-              value={editingScheme.visibility || 'advanced_only'}
-              onChange={(e) => updateEditingScheme({ visibility: e.target.value })}
-            >
-              <option value="quickstart">quickstart</option>
-              <option value="advanced_only">advanced_only</option>
-            </select>
-          </div>
         </div>
 
-        <div className="row g-2 mb-3">
-          <div className="col-md-3">
-            <label className="form-label small">Separator</label>
-            <input
-              className="form-control"
-              value={editingScheme.separator || ''}
-              onChange={(e) => updateEditingScheme({ separator: e.target.value })}
-            />
+        {hasLegacySegments && (
+          <div className="alert alert-warning small">
+            This scheme uses legacy segment types: {legacySegmentKinds.join(', ')}. It can still be used for allocation,
+            but it must be converted before saving in the simplified builder.
           </div>
-          <div className="col-md-4">
-            <label className="form-label small">Scope mode</label>
-            <select
-              className="form-select"
-              value={editingScheme.scope_mode || 'global'}
-              onChange={(e) => updateEditingScheme({ scope_mode: e.target.value })}
-            >
-              <option value="global">global</option>
-              <option value="by_type">by_type</option>
-              <option value="by_family">by_family</option>
-              <option value="by_project">by_project</option>
-              <option value="custom_keys">custom_keys</option>
-            </select>
-          </div>
-          <div className="col-md-5">
-            <label className="form-label small">Scope keys (comma-separated)</label>
-            <input className="form-control" value={scopeKeysText} onChange={(e) => setScopeKeysText(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="row g-2 mb-3">
-          <div className="col-md-3">
-            <label className="form-label small">Seq padding</label>
-            <input
-              className="form-control"
-              type="number"
-              value={editingScheme.seq?.padding ?? 6}
-              onChange={(e) => updateEditingScheme({ seq: { ...editingScheme.seq, padding: Number(e.target.value) } })}
-            />
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Seq base</label>
-            <select
-              className="form-select"
-              value={editingScheme.seq?.base ?? 10}
-              onChange={(e) => updateEditingScheme({ seq: { ...editingScheme.seq, base: Number(e.target.value) } })}
-            >
-              <option value={10}>10</option>
-              <option value={36}>36</option>
-            </select>
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Start at</label>
-            <input
-              className="form-control"
-              type="number"
-              value={editingScheme.seq?.start_at ?? 1}
-              onChange={(e) => updateEditingScheme({ seq: { ...editingScheme.seq, start_at: Number(e.target.value) } })}
-            />
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Reset policy</label>
-            <select
-              className="form-select"
-              value={editingScheme.seq?.reset_policy ?? 'never'}
-              onChange={(e) => updateEditingScheme({ seq: { ...editingScheme.seq, reset_policy: e.target.value } })}
-            >
-              <option value="never">never</option>
-              <option value="yearly">yearly</option>
-              <option value="monthly">monthly</option>
-              <option value="by_project">by_project</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="row g-2 mb-3">
-          <div className="col-md-3">
-            <label className="form-label small">Revision policy</label>
-            <select
-              className="form-select"
-              value={editingScheme.revision?.policy ?? 'alpha'}
-              onChange={(e) => updateEditingScheme({ revision: { ...editingScheme.revision, policy: e.target.value } })}
-            >
-              <option value="alpha">alpha</option>
-              <option value="numeric">numeric</option>
-              <option value="none">none</option>
-            </select>
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Revision start</label>
-            <input
-              className="form-control"
-              value={editingScheme.revision?.start ?? 'A'}
-              onChange={(e) => updateEditingScheme({ revision: { ...editingScheme.revision, start: e.target.value } })}
-            />
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Max length</label>
-            <input
-              className="form-control"
-              type="number"
-              value={editingScheme.validation_rules?.max_length ?? 32}
-              onChange={(e) =>
-                updateEditingScheme({
-                  validation_rules: { ...editingScheme.validation_rules, max_length: Number(e.target.value) },
-                })
-              }
-            />
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Allowed charset</label>
-            <input
-              className="form-control"
-              value={editingScheme.validation_rules?.allowed_charset ?? 'A-Z0-9-'}
-              onChange={(e) =>
-                updateEditingScheme({
-                  validation_rules: { ...editingScheme.validation_rules, allowed_charset: e.target.value },
-                })
-              }
-            />
-          </div>
-          <div className="col-md-3">
-            <label className="form-label small">Require seq</label>
-            <div className="form-check">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                checked={!!editingScheme.validation_rules?.require_seq_segment}
-                onChange={(e) =>
-                  updateEditingScheme({
-                    validation_rules: { ...editingScheme.validation_rules, require_seq_segment: e.target.checked },
-                  })
-                }
-                id="requireSeqCheck"
-              />
-              <label className="form-check-label" htmlFor="requireSeqCheck">
-                Required
-              </label>
-            </div>
-          </div>
-        </div>
+        )}
 
         <div className="mb-3">
           <h6>Segments</h6>
-          <div className="row g-2">
+          <div className="row g-3">
             <div className="col-md-6">
               <ul className="list-group">
-                {segments.map((seg, idx) => (
+                {segments.map((segment, index) => (
                   <li
-                    key={`${seg.kind}-${idx}`}
-                    className={`list-group-item ${idx === selectedSegmentIndex ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedSegmentIndex(idx)
-                      setSegmentDraft({ ...seg })
-                    }}
+                    key={`${segment.kind || 'segment'}-${index}`}
+                    className={`list-group-item ${index === selectedSegmentIndex ? 'active' : ''}`}
+                    onClick={() => selectSegment(index)}
                     style={{ cursor: 'pointer' }}
                   >
-                    {segmentLabel(seg, idx)}
+                    {segmentLabel(segment, index)}
                   </li>
                 ))}
                 {!segments.length && <li className="list-group-item text-muted">No segments yet.</li>}
               </ul>
               <div className="mt-2 d-flex gap-2 flex-wrap">
-                <button className="btn btn-sm btn-outline-secondary" onClick={() => moveSegment(-1)}>
+                <button className="btn btn-sm btn-outline-secondary" onClick={() => moveSegment(-1)} disabled={hasLegacySegments}>
                   Up
                 </button>
-                <button className="btn btn-sm btn-outline-secondary" onClick={() => moveSegment(1)}>
+                <button className="btn btn-sm btn-outline-secondary" onClick={() => moveSegment(1)} disabled={hasLegacySegments}>
                   Down
                 </button>
-                <button className="btn btn-sm btn-outline-danger" onClick={removeSegment}>
+                <button className="btn btn-sm btn-outline-danger" onClick={removeSegment} disabled={hasLegacySegments}>
                   Remove
                 </button>
               </div>
             </div>
+
             <div className="col-md-6">
-              <label className="form-label small">Kind</label>
-              <select
-                className="form-select mb-2"
-                value={segmentDraft.kind || 'literal'}
-                onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: e.target.value })}
-              >
-                <option value="literal">literal</option>
-                <option value="field">field</option>
-                <option value="seq">seq</option>
-                <option value="date">date</option>
-              </select>
-              <label className="form-label small">Literal value</label>
-              <input
-                className="form-control mb-2"
-                value={segmentDraft.value || ''}
-                onChange={(e) => setSegmentDraft({ ...segmentDraft, value: e.target.value })}
-                disabled={segmentDraft.kind !== 'literal'}
-              />
-              <label className="form-label small">Field</label>
-              <input
-                className="form-control mb-2"
-                value={segmentDraft.field || ''}
-                onChange={(e) => setSegmentDraft({ ...segmentDraft, field: e.target.value })}
-                disabled={segmentDraft.kind !== 'field'}
-              />
-              <label className="form-label small">Casing</label>
-              <select
-                className="form-select mb-2"
-                value={segmentDraft.casing || 'upper'}
-                onChange={(e) => setSegmentDraft({ ...segmentDraft, casing: e.target.value })}
-                disabled={segmentDraft.kind !== 'field'}
-              >
-                <option value="upper">upper</option>
-                <option value="lower">lower</option>
-                <option value="none">none</option>
-              </select>
-              <div className="row g-2">
-                <div className="col-md-6">
-                  <label className="form-label small">Pad left</label>
-                  <input
-                    className="form-control mb-2"
-                    type="number"
-                    value={segmentDraft.pad_left ?? ''}
-                    onChange={(e) => setSegmentDraft({ ...segmentDraft, pad_left: Number(e.target.value) || undefined })}
-                    disabled={segmentDraft.kind !== 'field'}
-                  />
+              {hasLegacySegments ? (
+                <div className="alert alert-light border small mb-0">
+                  Legacy segment definitions are read-only here. You can still enable or disable the scheme from the
+                  table above.
                 </div>
-                <div className="col-md-6">
-                  <label className="form-label small">Pad char</label>
-                  <input
-                    className="form-control mb-2"
-                    value={segmentDraft.pad_char || ''}
-                    onChange={(e) => setSegmentDraft({ ...segmentDraft, pad_char: e.target.value })}
-                    disabled={segmentDraft.kind !== 'field'}
-                  />
-                </div>
-              </div>
-              <div className="row g-2">
-                <div className="col-md-6">
-                  <label className="form-label small">Seq padding</label>
-                  <input
-                    className="form-control mb-2"
-                    type="number"
-                    value={segmentDraft.padding ?? 6}
-                    onChange={(e) => setSegmentDraft({ ...segmentDraft, padding: Number(e.target.value) })}
-                    disabled={segmentDraft.kind !== 'seq'}
-                  />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label small">Seq base</label>
+              ) : (
+                <>
+                  <label className="form-label small">Kind</label>
                   <select
                     className="form-select mb-2"
-                    value={segmentDraft.base ?? 10}
-                    onChange={(e) => setSegmentDraft({ ...segmentDraft, base: Number(e.target.value) })}
-                    disabled={segmentDraft.kind !== 'seq'}
+                    value={getSegmentKind(segmentDraft) === 'seq' ? 'seq' : 'literal'}
+                    onChange={(e) => setDraftKind(e.target.value === 'seq' ? 'seq' : 'literal')}
                   >
-                    <option value={10}>10</option>
-                    <option value={36}>36</option>
+                    <option value="literal">literal</option>
+                    <option value="seq">seq</option>
                   </select>
-                </div>
-              </div>
-              <label className="form-label small">Date format</label>
-              <select
-                className="form-select mb-2"
-                value={segmentDraft.fmt || 'YYYY'}
-                onChange={(e) => setSegmentDraft({ ...segmentDraft, fmt: e.target.value })}
-                disabled={segmentDraft.kind !== 'date'}
-              >
-                <option value="YYYY">YYYY</option>
-                <option value="YY">YY</option>
-                <option value="MM">MM</option>
-                <option value="YYYYMM">YYYYMM</option>
-              </select>
 
-              <div className="d-flex gap-2 flex-wrap">
-                <button className="btn btn-sm btn-outline-primary" onClick={addSegment}>
-                  Add segment
-                </button>
-                <button className="btn btn-sm btn-outline-secondary" onClick={updateSegment}>
-                  Update
-                </button>
-                <button className="btn btn-sm btn-outline-secondary" onClick={() => setSegmentDraft({ ...EMPTY_SEGMENT })}>
-                  Clear
-                </button>
-              </div>
+                  {getSegmentKind(segmentDraft) === 'seq' ? (
+                    <div className="row g-2">
+                      <div className="col-md-6">
+                        <label className="form-label small">Padding</label>
+                        <input
+                          className="form-control mb-2"
+                          type="number"
+                          min={1}
+                          value={segmentDraft.padding ?? 6}
+                          onChange={(e) =>
+                            setSegmentDraft({
+                              kind: 'seq',
+                              padding: Number(e.target.value) || 6,
+                              base: Number(segmentDraft.base ?? 10),
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="col-md-6">
+                        <label className="form-label small">Base</label>
+                        <select
+                          className="form-select mb-2"
+                          value={segmentDraft.base ?? 10}
+                          onChange={(e) =>
+                            setSegmentDraft({
+                              kind: 'seq',
+                              padding: Number(segmentDraft.padding ?? 6),
+                              base: Number(e.target.value),
+                            })
+                          }
+                        >
+                          <option value={10}>10</option>
+                          <option value={36}>36</option>
+                        </select>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <label className="form-label small">Literal value</label>
+                      <input
+                        className="form-control mb-2"
+                        value={segmentDraft.value || ''}
+                        onChange={(e) => setSegmentDraft({ kind: 'literal', value: e.target.value })}
+                      />
+                    </>
+                  )}
+
+                  <div className="d-flex gap-2 flex-wrap">
+                    <button
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => {
+                        setDraftKind('literal')
+                        addSegment('literal')
+                      }}
+                    >
+                      Add literal segment
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => {
+                        setDraftKind('seq')
+                        addSegment('seq')
+                      }}
+                    >
+                      Add sequence segment
+                    </button>
+                    <button className="btn btn-sm btn-outline-secondary" onClick={updateSegment}>
+                      Update selected
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline-secondary"
+                      onClick={() => {
+                        setSelectedSegmentIndex(-1)
+                        setSegmentDraft(createEmptySegment())
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
 
         <div className="d-flex gap-2 flex-wrap">
-          <button className="btn btn-outline-secondary" onClick={validateEditingScheme}>
-            Validate
+          <button className="btn btn-outline-secondary" onClick={() => void validateEditingScheme()}>
+            Validate / preview
           </button>
-          <button className="btn btn-primary" onClick={saveEditingScheme}>
+          <button className="btn btn-primary" onClick={() => void saveEditingScheme()} disabled={hasLegacySegments}>
             Save scheme
           </button>
-          <button className="btn btn-outline-danger" onClick={deactivateEditingScheme}>
+          <button className="btn btn-outline-danger" onClick={() => void deactivateEditingScheme()} disabled={!selectedSchemeId}>
             Deactivate
           </button>
         </div>

@@ -64,5 +64,41 @@ namespace TinyMRP.SolidWorksAddin.Tests
             RenameDecision decision = PartNumberRenameHelper.EvaluateRenameDecision("C:\\Temp\\A.SLDPRT", true, RenameMode.RenameIfNotReferenced);
             Assert.IsFalse(decision.Allowed);
         }
+
+        [TestMethod]
+        public void TryBuildUnsavedTargetPath_UsesSanitizedAllocatedName()
+        {
+            string message;
+            string path;
+            bool ok = PartNumberRenameHelper.TryBuildUnsavedTargetPath(
+                @"C:\Temp",
+                "PN:01",
+                ".SLDPRT",
+                _ => false,
+                out path,
+                out message);
+
+            Assert.IsTrue(ok);
+            Assert.AreEqual(string.Empty, message);
+            Assert.AreEqual(@"C:\Temp\PN_01.SLDPRT", path);
+        }
+
+        [TestMethod]
+        public void TryBuildUnsavedTargetPath_BlocksExistingTarget()
+        {
+            string message;
+            string path;
+            bool ok = PartNumberRenameHelper.TryBuildUnsavedTargetPath(
+                @"C:\Temp",
+                "PN-01",
+                ".SLDPRT",
+                candidate => string.Equals(candidate, @"C:\Temp\PN-01.SLDPRT", StringComparison.OrdinalIgnoreCase),
+                out path,
+                out message);
+
+            Assert.IsFalse(ok);
+            Assert.AreEqual(string.Empty, path);
+            Assert.IsTrue(message.Contains("already exists"));
+        }
     }
 }

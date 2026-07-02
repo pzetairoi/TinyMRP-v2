@@ -8,9 +8,9 @@ from app.models.numbering import NumberingScheme
 
 PRESETS = [
     {
-        "name": "Preset A: TYPE-SEQ6",
+        "name": "Default: PART-SEQ6",
         "pattern_segments": [
-            {"kind": "field", "field": "type", "casing": "upper"},
+            {"kind": "literal", "value": "PART"},
             {"kind": "seq", "padding": 6, "base": 10},
         ],
         "separator": "-",
@@ -21,7 +21,7 @@ PRESETS = [
         "is_preset": True,
         "is_recommended": True,
         "visibility": "quickstart",
-        "description": "Recommended: TYPE-SEQ6",
+        "description": "Recommended: PART-SEQ6",
     },
     {
         "name": "Preset B: TYPE-YYYY-SEQ5",
@@ -71,7 +71,12 @@ def ensure_presets() -> None:
     for preset in PRESETS:
         existing = NumberingScheme.objects(name=preset["name"]).first()
         if not existing:
-            NumberingScheme(**preset, is_active=True, audit={"created_at": datetime.utcnow()}).save()
+            preset_data = dict(preset)
+            if preset_data.get("is_recommended") and has_recommended:
+                preset_data["is_recommended"] = False
+            elif preset_data.get("is_recommended"):
+                has_recommended = True
+            NumberingScheme(**preset_data, is_active=True, audit={"created_at": datetime.utcnow()}).save()
             continue
 
         updates = {

@@ -11,17 +11,29 @@ if (-not (Test-Path $issPath)) {
 $iss = Get-Content -Raw -Path $issPath
 
 $checks = @(
-  @{ Name = "ProgramData config path"; Pattern = "{commonappdata}\\TinyMRP\\TinyMRP_config.txt" },
-  @{ Name = "Override checkbox"; Pattern = "Override existing TinyMRP settings" },
-  @{ Name = "Backend URL field"; Pattern = "Backend URL" },
-  @{ Name = "Auth token field"; Pattern = "Auth token" },
-  @{ Name = "BackendUrl key"; Pattern = "BackendUrl=" },
-  @{ Name = "AuthToken key"; Pattern = "AuthToken=" }
+  @{
+    Name = "ProgramData config path"
+    Patterns = @(
+      "{commonappdata}\\TinyMRP\\TinyMRP_config.txt",
+      "{commonappdata}\TinyMRP\{#ConfigFileName}"
+    )
+  },
+  @{ Name = "Override checkbox"; Patterns = @("Override existing TinyMRP settings") },
+  @{ Name = "Backend URL field"; Patterns = @("Backend URL") },
+  @{ Name = "Auth token field"; Patterns = @("Auth token") },
+  @{ Name = "BackendUrl key"; Patterns = @("BackendUrl=") },
+  @{ Name = "AuthToken key"; Patterns = @("AuthToken=") }
 )
 
 Write-Host "Installer config logic checks:"
 foreach ($check in $checks) {
-  $ok = $iss -match [Regex]::Escape($check.Pattern)
+  $ok = $false
+  foreach ($pattern in $check.Patterns) {
+    if ($iss -match [Regex]::Escape($pattern)) {
+      $ok = $true
+      break
+    }
+  }
   $status = if ($ok) { "OK" } else { "MISSING" }
   Write-Host ("- {0}: {1}" -f $check.Name, $status)
 }

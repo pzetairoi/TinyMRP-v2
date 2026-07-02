@@ -89,6 +89,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Button _quickDiagnosticsButton;
         private Button _numberingPreviewButton;
         private Button _numberingAllocateButton;
+        private Button _numberingAllocateSaveButton;
         private Button _numberingAllocateRenameButton;
         private ComboBox _numberingPresetCombo;
         private Button _numberingPresetRefreshButton;
@@ -586,9 +587,11 @@ namespace TinyMRP.SolidWorksAddin.UI
             _numberingPreviewButton = CreateCommandButton("Preview Partnumber", OnNumberingPreview);
             _numberingAllocateButton = CreateCommandButton("Allocate & Apply", OnNumberingAllocate);
             _numberingAllocateButton.Visible = false;
+            _numberingAllocateSaveButton = CreateCommandButton("Allocate and Save", OnNumberingAllocateSave);
             _numberingAllocateRenameButton = CreateCommandButton("Allocate and rename", OnNumberingAllocateRename);
             commandStrip.Controls.Add(_numberingPreviewButton);
             commandStrip.Controls.Add(_numberingAllocateButton);
+            commandStrip.Controls.Add(_numberingAllocateSaveButton);
             commandStrip.Controls.Add(_numberingAllocateRenameButton);
             AddSection(panel, commandStrip);
 
@@ -1005,10 +1008,58 @@ namespace TinyMRP.SolidWorksAddin.UI
         private TabPage BuildConfigTab()
         {
             var page = CreateTabPage("Configuration");
-            var tabs = new TabControl { Dock = DockStyle.Fill };
-            tabs.TabPages.Add(BuildConfigQuickStartTab());
-            tabs.TabPages.Add(BuildConfigAdvancedTab());
-            page.Controls.Add(tabs);
+            var panel = CreateTabPanel();
+            page.Controls.Add(panel);
+
+            var connectionLayout = CreateFormLayout();
+            _deliverablesFolderText = new TextBox { Width = 220 };
+            AddField(connectionLayout, "Output folder", CreateFolderPicker(_deliverablesFolderText, OnBrowseDeliverables));
+            _quickBackendUrlText = new TextBox { Width = 220 };
+            AddField(connectionLayout, "Backend URL", _quickBackendUrlText);
+            _quickAuthTokenText = new TextBox { Width = 220, UseSystemPasswordChar = true };
+            AddField(connectionLayout, "Auth token", _quickAuthTokenText);
+
+            var connectionWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            connectionWrap.Controls.Add(connectionLayout);
+            connectionWrap.Controls.Add(new Label
+            {
+                Text = "Use the public TinyMRP origin and a raw API token. Templates and advanced defaults stay installed automatically.",
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                MaximumSize = new Size(520, 0)
+            });
+            AddSection(panel, CreateGroupBox("Connection", connectionWrap));
+
+            var actions = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            var btnSave = new Button { Text = "Save settings", AutoSize = true };
+            btnSave.Click += OnQuickSaveSettings;
+            var btnTest = new Button { Text = "Test connection", AutoSize = true };
+            btnTest.Click += OnQuickTestConnection;
+            var btnDefaults = new Button { Text = "Apply server defaults", AutoSize = true };
+            btnDefaults.Click += OnQuickApplyDefaults;
+            _quickDiagnosticsButton = new Button { Text = "Diagnostics", AutoSize = true };
+            _quickDiagnosticsButton.Click += OnQuickDiagnostics;
+            _configPathLabel = new Label { AutoSize = true };
+            actions.Controls.Add(btnSave);
+            actions.Controls.Add(btnTest);
+            actions.Controls.Add(btnDefaults);
+            actions.Controls.Add(_quickDiagnosticsButton);
+            actions.Controls.Add(_configPathLabel);
+            AddSection(panel, CreateGroupBox("Actions", actions));
+
+            WireQuickStartSyncEvents();
             return page;
         }
 
@@ -1689,6 +1740,23 @@ namespace TinyMRP.SolidWorksAddin.UI
             return string.Empty;
         }
 
+        private string GetContextValue(TextBox primary, TextBox fallback, TextBox tertiary)
+        {
+            if (primary != null)
+            {
+                return primary.Text != null ? primary.Text.Trim() : string.Empty;
+            }
+            if (fallback != null)
+            {
+                return fallback.Text != null ? fallback.Text.Trim() : string.Empty;
+            }
+            if (tertiary != null)
+            {
+                return tertiary.Text != null ? tertiary.Text.Trim() : string.Empty;
+            }
+            return string.Empty;
+        }
+
         private void SelectApplyModeCombo(ComboBox combo, string applyMode)
         {
             if (combo == null)
@@ -1971,11 +2039,29 @@ namespace TinyMRP.SolidWorksAddin.UI
                 config.NumberingSchemeId = schemeId;
             }
 
-            config.NumberingContextDefaults = BuildContextDefaultsString();
-            config.PartNumberProperty = GetPreferredText(_quickPartNumberPropText, _partNumberPropText, "PartNumber");
-            config.RevisionProperty = GetPreferredText(_quickRevisionPropText, _revisionPropText, "Revision");
-            config.DisplayCodeProperty = GetPreferredText(_quickDisplayCodePropText, _displayCodePropText, "DisplayCode");
-            config.NumberingApplyMode = ApplyModeFromCombo(_quickApplyModeCombo ?? _advancedApplyModeCombo);
+            if (_quickContextTypeText != null || _quickContextFamilyText != null || _quickContextSubfamilyText != null ||
+                _quickContextProjectText != null || _quickContextSiteText != null ||
+                _contextTypeText != null || _contextFamilyText != null || _contextSubfamilyText != null ||
+                _contextProjectText != null || _contextSiteText != null ||
+                _numberingContextTypeText != null || _numberingContextFamilyText != null ||
+                _numberingContextSubfamilyText != null || _numberingContextProjectText != null ||
+                _numberingContextSiteText != null)
+            {
+                config.NumberingContextDefaults = BuildContextDefaultsString();
+            }
+            config.PartNumberProperty = GetPreferredText(
+                _quickPartNumberPropText ?? _numberingPartNumberPropText,
+                _partNumberPropText,
+                config.PartNumberProperty ?? "PartNumber");
+            config.RevisionProperty = GetPreferredText(
+                _quickRevisionPropText ?? _numberingRevisionPropText,
+                _revisionPropText,
+                config.RevisionProperty ?? "Revision");
+            config.DisplayCodeProperty = GetPreferredText(
+                _quickDisplayCodePropText ?? _numberingDisplayCodePropText,
+                _displayCodePropText,
+                config.DisplayCodeProperty ?? "DisplayCode");
+            config.NumberingApplyMode = ApplyModeFromCombo(_quickApplyModeCombo ?? _advancedApplyModeCombo ?? _applyScopeCombo);
             config.AutoAssignGenericNames = _autoAssignGenericCheck != null && _autoAssignGenericCheck.Checked;
             config.AutoAssignAnyNames = _autoAssignAnyNameCheck != null && _autoAssignAnyNameCheck.Checked;
             config.ResolvePaths();
@@ -2402,6 +2488,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             try
             {
                 config.Save();
+                _numberingClient = null;
                 if (_configPathLabel != null)
                 {
                     _configPathLabel.Text = "Config: " + config.ConfigPath;
@@ -2411,28 +2498,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 MessageBox.Show("Failed to save config: " + ex.Message, "TinyMRP",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            UserSettingsDefinition settings = BuildUserSettingsFromQuickStart();
-            if (settings == null)
-            {
-                return;
-            }
-
-            _numberingClient = null;
-            NumberingApiClient client = GetNumberingClient();
-            if (client == null)
-            {
-                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            ApiResponse response = client.SaveUserSettings(settings);
-            if (!response.Ok)
-            {
-                ShowApiError("Failed to save settings.", response);
                 return;
             }
 
@@ -2581,6 +2646,33 @@ namespace TinyMRP.SolidWorksAddin.UI
             RunAllocateWorkflow(true);
         }
 
+        private void OnNumberingAllocateSave(object sender, EventArgs e)
+        {
+            ISldWorks app = AddinContext.SldWorks;
+            if (app == null)
+            {
+                MessageBox.Show("SolidWorks is not available.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            ActiveModelInfo info;
+            string error;
+            if (!SolidWorksDocumentHelper.TryGetActiveModel(app, out info, out error))
+            {
+                MessageBox.Show(error, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(info.Model.GetPathName()))
+            {
+                RunAllocateWorkflow(true);
+                return;
+            }
+
+            RunAllocateAndSaveWorkflow(info);
+        }
+
         private void RunAllocateWorkflow(bool forceRename)
         {
             NumberingApiClient client = GetNumberingClient();
@@ -2659,6 +2751,110 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             SetNumberingStatus("Allocated and applied.", Color.DarkGreen);
             TryRenameAfterAllocation(info, partNumber, revision, forceRename);
+        }
+
+        private void RunAllocateAndSaveWorkflow(ActiveModelInfo info)
+        {
+            NumberingApiClient client = GetNumberingClient();
+            if (client == null)
+            {
+                MessageBox.Show("Backend URL is not configured.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string schemeId = GetSchemeIdFromCombo(_numberingPresetCombo);
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                schemeId = GetDefaultSchemeId();
+            }
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                SetNumberingStatus("Select a numbering preset first.", Color.Maroon);
+                return;
+            }
+
+            ApplySequenceOverrideIfNeeded(GetQuickSchemeSelection());
+
+            string targetFolder;
+            if (!TryPromptForAllocateSaveFolder(out targetFolder))
+            {
+                SetNumberingStatus("Allocate and Save cancelled.", Color.DarkOrange);
+                return;
+            }
+
+            ApiResponse response = client.Allocate(
+                schemeId,
+                BuildContextFromNumberingQuick(),
+                "new_part",
+                string.Empty,
+                true,
+                BuildCadRef(info));
+
+            if (!response.Ok)
+            {
+                ShowApiError("Allocation failed.", response);
+                SetNumberingStatus("Allocation failed.", Color.Maroon);
+                return;
+            }
+
+            string partNumber = NumberingJson.GetString(response.Data, "part_number");
+            string revision = NumberingJson.GetString(response.Data, "revision");
+            string display = NumberingJson.GetString(response.Data, "display_code");
+            if (string.IsNullOrWhiteSpace(display))
+            {
+                display = BuildDisplayCode(partNumber, revision);
+            }
+
+            if (string.IsNullOrWhiteSpace(partNumber))
+            {
+                SetNumberingStatus("Allocation returned no part number.", Color.Maroon);
+                return;
+            }
+
+            UpdateQuickPreviewFields(partNumber, revision, display);
+
+            if (!ApplyNumberingToModelQuick(info, partNumber, revision, display, schemeId))
+            {
+                SetNumberingStatus("Failed to apply properties.", Color.Maroon);
+                return;
+            }
+
+            string extension;
+            if (!TryGetSolidWorksExtension(info.Model, out extension))
+            {
+                SetNumberingStatus("Unsupported SolidWorks document type.", Color.Maroon);
+                MessageBox.Show("Only part, assembly, and drawing documents are supported for Allocate and Save.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string targetPath;
+            string pathMessage;
+            if (!PartNumberRenameHelper.TryBuildUnsavedTargetPath(targetFolder, partNumber, extension, File.Exists, out targetPath, out pathMessage))
+            {
+                AddinLogger.Write("Allocate and Save target rejected: " + pathMessage);
+                SetNumberingStatus(pathMessage, Color.Maroon);
+                MessageBox.Show(pathMessage, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string saveMessage;
+            bool hadWarnings;
+            if (!TrySaveAllocatedModelToPath(info, targetPath, out saveMessage, out hadWarnings))
+            {
+                AddinLogger.Write("Allocate and Save failed: " + saveMessage);
+                SetNumberingStatus("Allocated, but save failed.", Color.Maroon);
+                ShowMessageWithDetails("Save failed", "Allocated, but Save As failed.", saveMessage);
+                return;
+            }
+
+            string successMessage = hadWarnings
+                ? "Allocated and saved with SolidWorks warnings."
+                : "Allocated and saved.";
+            AddinLogger.Write("Allocate and Save completed: " + targetPath);
+            SetNumberingStatus(successMessage, Color.DarkGreen);
+            ShowMessageWithDetails("Allocate and Save", successMessage, saveMessage);
         }
 
         private NumberingSchemeDefinition GetQuickSchemeSelection()
@@ -2849,6 +3045,98 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             SetNumberingStatus(result.Message, Color.DarkGreen);
+        }
+
+        private bool TryPromptForAllocateSaveFolder(out string targetFolder)
+        {
+            targetFolder = string.Empty;
+            string initialFolder = string.Empty;
+
+            TinyMrpConfig config = AddinContext.Config;
+            if (config != null && !string.IsNullOrWhiteSpace(config.DeliverablesFolder))
+            {
+                initialFolder = config.DeliverablesFolder;
+            }
+            if (string.IsNullOrWhiteSpace(initialFolder))
+            {
+                initialFolder = System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments);
+            }
+
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "Choose where to save the allocated SolidWorks file.";
+                dialog.ShowNewFolderButton = true;
+                if (!string.IsNullOrWhiteSpace(initialFolder) && Directory.Exists(initialFolder))
+                {
+                    dialog.SelectedPath = initialFolder;
+                }
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return false;
+                }
+
+                targetFolder = dialog.SelectedPath ?? string.Empty;
+                return !string.IsNullOrWhiteSpace(targetFolder);
+            }
+        }
+
+        private bool TryGetSolidWorksExtension(ModelDoc2 model, out string extension)
+        {
+            extension = string.Empty;
+            if (model == null)
+            {
+                return false;
+            }
+
+            switch (model.GetType())
+            {
+                case (int)swDocumentTypes_e.swDocPART:
+                    extension = ".sldprt";
+                    return true;
+                case (int)swDocumentTypes_e.swDocASSEMBLY:
+                    extension = ".sldasm";
+                    return true;
+                case (int)swDocumentTypes_e.swDocDRAWING:
+                    extension = ".slddrw";
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool TrySaveAllocatedModelToPath(ActiveModelInfo info, string targetPath, out string message, out bool hadWarnings)
+        {
+            message = string.Empty;
+            hadWarnings = false;
+
+            if (info == null || info.Model == null)
+            {
+                message = "Active document not found.";
+                return false;
+            }
+
+            int errors = 0;
+            int warnings = 0;
+            bool ok = info.Model.Extension.SaveAs(
+                targetPath,
+                (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                (int)swSaveAsOptions_e.swSaveAsOptions_Silent,
+                null,
+                ref errors,
+                ref warnings);
+
+            if (!ok)
+            {
+                message = "SolidWorks Save As failed. Errors=" + errors + " Warnings=" + warnings;
+                return false;
+            }
+
+            hadWarnings = warnings != 0;
+            message = "Saved to " + targetPath + System.Environment.NewLine +
+                "Errors=" + errors + System.Environment.NewLine +
+                "Warnings=" + warnings;
+            return true;
         }
 
         private void MaybeAutoAssignNumbering(bool userTriggered)
@@ -4648,11 +4936,11 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             return string.Format(
                 "type={0};family={1};subfamily={2};project={3};site={4}",
-                GetContextValue(_quickContextTypeText, _contextTypeText),
-                GetContextValue(_quickContextFamilyText, _contextFamilyText),
-                GetContextValue(_quickContextSubfamilyText, _contextSubfamilyText),
-                GetContextValue(_quickContextProjectText, _contextProjectText),
-                GetContextValue(_quickContextSiteText, _contextSiteText));
+                GetContextValue(_quickContextTypeText, _contextTypeText, _numberingContextTypeText),
+                GetContextValue(_quickContextFamilyText, _contextFamilyText, _numberingContextFamilyText),
+                GetContextValue(_quickContextSubfamilyText, _contextSubfamilyText, _numberingContextSubfamilyText),
+                GetContextValue(_quickContextProjectText, _contextProjectText, _numberingContextProjectText),
+                GetContextValue(_quickContextSiteText, _contextSiteText, _numberingContextSiteText));
         }
 
         private Dictionary<string, string> ParseContextDefaults(string data)
