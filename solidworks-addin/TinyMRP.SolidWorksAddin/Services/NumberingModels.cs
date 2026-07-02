@@ -104,6 +104,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         public string PadChar { get; set; }
         public int? Padding { get; set; }
         public int? Base { get; set; }
+        public int? StartAt { get; set; }
+        public bool AutoCounter { get; set; }
         public string Fmt { get; set; }
 
         public override string ToString()
@@ -115,7 +117,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                 case "field":
                     return "Field: " + (Field ?? string.Empty);
                 case "seq":
-                    return "Seq: " + (Padding.HasValue ? Padding.Value.ToString() : "default");
+                    return string.Format(
+                        "Seq: {0}, start {1}, pad {2}",
+                        AutoCounter ? "auto" : "manual",
+                        StartAt.HasValue ? StartAt.Value.ToString() : "default",
+                        Padding.HasValue ? Padding.Value.ToString() : "default");
                 case "date":
                     return "Date: " + (Fmt ?? string.Empty);
                 default:
@@ -159,6 +165,14 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         payload["base"] = Base.Value;
                     }
+                    if (StartAt.HasValue)
+                    {
+                        payload["start_at"] = StartAt.Value;
+                    }
+                    if (AutoCounter)
+                    {
+                        payload["auto_counter"] = true;
+                    }
                     break;
                 case "date":
                     payload["fmt"] = Fmt ?? string.Empty;
@@ -180,6 +194,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 PadChar = NumberingJson.GetString(data, "pad_char"),
                 Padding = NumberingJson.GetNullableInt(data, "padding"),
                 Base = NumberingJson.GetNullableInt(data, "base"),
+                StartAt = NumberingJson.GetNullableInt(data, "start_at"),
+                AutoCounter = NumberingJson.GetBool(data, "auto_counter", false),
                 Fmt = NumberingJson.GetString(data, "fmt"),
             };
         }

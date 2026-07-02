@@ -72,13 +72,17 @@ namespace TinyMRP.SolidWorksAddin.Services
             return Send("DELETE", "/api/numbering/schemes/" + schemeId, null);
         }
 
-        public ApiResponse Preview(string schemeId, Dictionary<string, string> context)
+        public ApiResponse Preview(string schemeId, Dictionary<string, string> context, List<int> sequenceValues = null)
         {
             var payload = new Dictionary<string, object>
             {
                 ["scheme_id"] = schemeId ?? string.Empty,
                 ["context"] = context ?? new Dictionary<string, string>(),
             };
+            if (sequenceValues != null && sequenceValues.Count > 0)
+            {
+                payload["sequence_values"] = sequenceValues;
+            }
             return Send("POST", "/api/numbering/preview", payload);
         }
 
@@ -111,7 +115,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             return Send("PUT", "/api/me/settings", payload);
         }
 
-        public ApiResponse Allocate(string schemeId, Dictionary<string, string> context, string action, string existingPartNumber, bool createPart, Dictionary<string, object> cadRef)
+        public ApiResponse Allocate(string schemeId, Dictionary<string, string> context, string action, string existingPartNumber, bool createPart, Dictionary<string, object> cadRef, List<int> sequenceValues = null)
         {
             var payload = new Dictionary<string, object>
             {
@@ -124,6 +128,10 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (cadRef != null)
             {
                 payload["cad_ref"] = cadRef;
+            }
+            if (sequenceValues != null && sequenceValues.Count > 0)
+            {
+                payload["sequence_values"] = sequenceValues;
             }
             return Send("POST", "/api/numbering/allocate", payload);
         }

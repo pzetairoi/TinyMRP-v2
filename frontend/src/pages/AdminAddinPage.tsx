@@ -54,6 +54,8 @@ type Segment = {
   pad_char?: string
   padding?: number
   base?: number
+  start_at?: number
+  auto_counter?: boolean
   fmt?: string
 }
 
@@ -74,12 +76,12 @@ const EMPTY_SCHEME: Scheme = {
 
 const DEFAULT_NEW_SEGMENTS: Segment[] = [
   { kind: 'literal', value: 'PART' },
-  { kind: 'seq', padding: 6, base: 10 },
+  { kind: 'seq', padding: 6, base: 10, start_at: 1, auto_counter: true },
 ]
 
 function createEmptySegment(kind: 'literal' | 'seq' = 'literal'): Segment {
   if (kind === 'seq') {
-    return { kind: 'seq', padding: 6, base: 10 }
+    return { kind: 'seq', padding: 6, base: 10, start_at: 1, auto_counter: false }
   }
   return { kind: 'literal', value: '' }
 }
@@ -126,10 +128,42 @@ function segmentLabel(segment: Segment, index: number) {
   const kind = getSegmentKind(segment)
   if (!kind) return `Segment ${index + 1}`
   if (kind === 'literal') return `Literal: ${segment.value || ''}`
-  if (kind === 'seq') return `Sequence: pad ${segment.padding ?? 6}, base ${segment.base ?? 10}`
+  if (kind === 'seq') {
+    const mode = segment.auto_counter ? 'auto' : 'manual'
+    return `Sequence ${index + 1}: ${mode}, start ${segment.start_at ?? 1}, pad ${segment.padding ?? 6}, base ${segment.base ?? 10}`
+  }
   if (kind === 'field') return `Legacy field: ${segment.field || ''}`
   if (kind === 'date') return `Legacy date: ${segment.fmt || ''}`
   return `Legacy ${kind}`
+}
+
+function normalizeSequenceSegments(items: Segment[]) {
+  const next = items.map(cloneSegment)
+  const sequenceIndexes = next
+    .map((segment, index) => ({ segment, index }))
+    .filter(({ segment }) => getSegmentKind(segment) === 'seq')
+    .map(({ index }) => index)
+
+  if (!sequenceIndexes.length) {
+    return next
+  }
+
+  let autoIndex = -1
+  sequenceIndexes.forEach((index) => {
+    if (!next[index].auto_counter) return
+    if (autoIndex === -1) {
+      autoIndex = index
+      return
+    }
+    next[index] = { ...next[index], auto_counter: false }
+  })
+
+  if (autoIndex === -1) {
+    const first = sequenceIndexes[0]
+    next[first] = { ...next[first], auto_counter: true }
+  }
+
+  return next
 }
 
 function formatApiError(err: unknown, fallback: string) {
@@ -177,7 +211,7 @@ export default function AdminAddinPage() {
     if (!selectedSchemeId) {
       const next = createNewSchemeState()
       setEditingScheme(next.scheme)
-      setSegments(next.segments)
+      setSegments(normalizeSequenceSegments(next.segments))
       setSelectedSegmentIndex(-1)
       setSegmentDraft(next.draft)
       return
@@ -190,7 +224,7 @@ export default function AdminAddinPage() {
 
     const nextScheme = cloneScheme(found)
     setEditingScheme(nextScheme)
-    setSegments(nextScheme.pattern_segments || [])
+    setSegments(normalizeSequenceSegments(nextScheme.pattern_segments || []))
     setSelectedSegmentIndex(-1)
     setSegmentDraft(createEmptySegment())
   }, [selectedSchemeId, schemes])
@@ -310,6 +344,7 @@ export default function AdminAddinPage() {
     }
 
     let hasSequence = false
+    let automaticSequenceCount = 0
     segments.forEach((segment, index) => {
       const kind = getSegmentKind(segment)
       if (kind === 'literal') {
@@ -321,13 +356,20 @@ export default function AdminAddinPage() {
 
       if (kind === 'seq') {
         hasSequence = true
+        if (segment.auto_counter) {
+          automaticSequenceCount += 1
+        }
         const padding = Number(segment.padding ?? 6)
         const base = Number(segment.base ?? 10)
+        const segmentStart = Number(segment.start_at ?? editingScheme.seq?.start_at ?? 1)
         if (!Number.isFinite(padding) || padding < 1) {
           errors.push(`Segment ${index + 1}: sequence padding must be 1 or greater.`)
         }
         if (base !== 10 && base !== 36) {
           errors.push(`Segment ${index + 1}: sequence base must be 10 or 36.`)
+        }
+        if (!Number.isFinite(segmentStart) || segmentStart < 1) {
+          errors.push(`Segment ${index + 1}: sequence start must be 1 or greater.`)
         }
         return
       }
@@ -339,13 +381,20 @@ export default function AdminAddinPage() {
       errors.push('Add at least one sequence segment.')
     }
 
+    const sequenceCount = segments.filter((segment) => getSegmentKind(segment) === 'seq').length
+    if (sequenceCount > 1 && automaticSequenceCount !== 1) {
+      errors.push('Exactly one sequence segment must be marked automatic when a scheme has multiple sequence segments.')
+    }
+
     return errors
   }
 
   function buildSchemePayload() {
-    const firstSeqSegment = segments.find((segment) => getSegmentKind(segment) === 'seq')
-    const nextSeqPadding = Number(firstSeqSegment?.padding ?? editingScheme.seq?.padding ?? 6)
-    const nextSeqBase = Number(firstSeqSegment?.base ?? editingScheme.seq?.base ?? 10)
+    const normalizedSegments = normalizeSequenceSegments(segments)
+    const autoSeqSegment = normalizedSegments.find((segment) => getSegmentKind(segment) === 'seq' && segment.auto_counter)
+    const firstSeqSegment = normalizedSegments.find((segment) => getSegmentKind(segment) === 'seq')
+    const nextSeqPadding = Number(autoSeqSegment?.padding ?? firstSeqSegment?.padding ?? editingScheme.seq?.padding ?? 6)
+    const nextSeqBase = Number(autoSeqSegment?.base ?? firstSeqSegment?.base ?? editingScheme.seq?.base ?? 10)
 
     return {
       name: (editingScheme.name || '').trim(),
@@ -368,7 +417,7 @@ export default function AdminAddinPage() {
         allowed_charset: editingScheme.validation_rules?.allowed_charset || 'A-Z0-9-',
         require_seq_segment: editingScheme.validation_rules?.require_seq_segment ?? true,
       },
-      pattern_segments: segments.map((segment) => {
+      pattern_segments: normalizedSegments.map((segment) => {
         const kind = getSegmentKind(segment)
         if (kind === 'literal') {
           return { kind, value: segment.value || '' }
@@ -378,6 +427,8 @@ export default function AdminAddinPage() {
             kind,
             padding: Number(segment.padding ?? nextSeqPadding),
             base: Number(segment.base ?? nextSeqBase),
+            start_at: Number(segment.start_at ?? editingScheme.seq?.start_at ?? 1),
+            auto_counter: !!segment.auto_counter,
           }
         }
         if (kind === 'field') {
@@ -498,6 +549,8 @@ export default function AdminAddinPage() {
           kind: 'seq',
           padding: Number(prev.padding ?? editingScheme.seq?.padding ?? 6),
           base: Number(prev.base ?? editingScheme.seq?.base ?? 10),
+          start_at: Math.max(1, Number(prev.start_at ?? editingScheme.seq?.start_at ?? 1) || 1),
+          auto_counter: !!prev.auto_counter,
         }
       }
       return {
@@ -522,16 +575,18 @@ export default function AdminAddinPage() {
             kind: 'seq',
             padding: Number(segmentDraft.padding ?? editingScheme.seq?.padding ?? 6),
             base: Number(segmentDraft.base ?? editingScheme.seq?.base ?? 10),
+            start_at: Math.max(1, Number(segmentDraft.start_at ?? editingScheme.seq?.start_at ?? 1) || 1),
+            auto_counter: !!segmentDraft.auto_counter,
           }
         : {
             kind: 'literal',
             value: segmentDraft.value || '',
           }
 
-    const nextSegments = [...segments, nextSegment]
+    const nextSegments = normalizeSequenceSegments([...segments, nextSegment])
     setSegments(nextSegments)
     setSelectedSegmentIndex(nextSegments.length - 1)
-    setSegmentDraft(cloneSegment(nextSegment))
+    setSegmentDraft(cloneSegment(nextSegments[nextSegments.length - 1]))
   }
 
   function updateSegment() {
@@ -549,19 +604,24 @@ export default function AdminAddinPage() {
             kind: 'seq',
             padding: Number(segmentDraft.padding ?? editingScheme.seq?.padding ?? 6),
             base: Number(segmentDraft.base ?? editingScheme.seq?.base ?? 10),
+            start_at: Math.max(1, Number(segmentDraft.start_at ?? editingScheme.seq?.start_at ?? 1) || 1),
+            auto_counter: !!segmentDraft.auto_counter,
           }
         : {
             kind: 'literal',
             value: segmentDraft.value || '',
           }
 
-    setSegments((prev) => prev.map((segment, index) => (index === selectedSegmentIndex ? nextSegment : segment)))
-    setSegmentDraft(cloneSegment(nextSegment))
+    const updatedSegments = normalizeSequenceSegments(
+      segments.map((segment, index) => (index === selectedSegmentIndex ? nextSegment : segment)),
+    )
+    setSegments(updatedSegments)
+    setSegmentDraft(cloneSegment(updatedSegments[selectedSegmentIndex]))
   }
 
   function removeSegment() {
     if (hasLegacySegments || selectedSegmentIndex < 0) return
-    setSegments((prev) => prev.filter((_, index) => index !== selectedSegmentIndex))
+    setSegments((prev) => normalizeSequenceSegments(prev.filter((_, index) => index !== selectedSegmentIndex)))
     setSelectedSegmentIndex(-1)
     setSegmentDraft(createEmptySegment())
   }
@@ -573,7 +633,7 @@ export default function AdminAddinPage() {
     const next = [...segments]
     const [item] = next.splice(selectedSegmentIndex, 1)
     next.splice(target, 0, item)
-    setSegments(next)
+    setSegments(normalizeSequenceSegments(next))
     setSelectedSegmentIndex(target)
   }
 
@@ -762,7 +822,7 @@ export default function AdminAddinPage() {
             />
           </div>
           <div className="col-md-2">
-            <label className="form-label small">Start at</label>
+            <label className="form-label small">Auto start</label>
             <input
               className="form-control"
               type="number"
@@ -884,6 +944,48 @@ export default function AdminAddinPage() {
                           <option value={10}>10</option>
                           <option value={36}>36</option>
                         </select>
+                      </div>
+                      <div className="col-md-6">
+                        <label className="form-label small">Static start</label>
+                        <input
+                          className="form-control mb-2"
+                          type="number"
+                          min={1}
+                          value={segmentDraft.start_at ?? 1}
+                          disabled={!!segmentDraft.auto_counter}
+                          onChange={(e) =>
+                            setSegmentDraft({
+                              kind: 'seq',
+                              padding: Number(segmentDraft.padding ?? 6),
+                              base: Number(segmentDraft.base ?? 10),
+                              start_at: Math.max(1, Number(e.target.value) || 1),
+                              auto_counter: !!segmentDraft.auto_counter,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="col-md-6">
+                        <label className="form-label small d-block">Mode</label>
+                        <div className="form-check pt-2">
+                          <input
+                            className="form-check-input"
+                            id="segmentAutoCounter"
+                            type="checkbox"
+                            checked={!!segmentDraft.auto_counter}
+                            onChange={(e) =>
+                              setSegmentDraft({
+                                kind: 'seq',
+                                padding: Number(segmentDraft.padding ?? 6),
+                                base: Number(segmentDraft.base ?? 10),
+                                start_at: Math.max(1, Number(segmentDraft.start_at ?? 1) || 1),
+                                auto_counter: e.target.checked,
+                              })
+                            }
+                          />
+                          <label className="form-check-label" htmlFor="segmentAutoCounter">
+                            Automatic counter
+                          </label>
+                        </div>
                       </div>
                     </div>
                   ) : (

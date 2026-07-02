@@ -62,7 +62,9 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 Kind = "seq",
                 Padding = normalizedPadding,
-                Base = 10
+                Base = 10,
+                StartAt = 1,
+                AutoCounter = true
             });
             scheme.PatternSegments = segments;
         }
