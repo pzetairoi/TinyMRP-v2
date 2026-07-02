@@ -389,6 +389,12 @@ check_instance() {
   else
     fail "Instance ${INSTANCE_NAME}: endpoint is not responding at ${INSTANCE_URL}"
   fi
+
+  if api_health_responds "${INSTANCE_DOMAIN}" "${TLS_MODE}"; then
+    pass "Instance ${INSTANCE_NAME}: /api/health returns JSON ok=true"
+  else
+    fail "Instance ${INSTANCE_NAME}: /api/health did not return JSON ok=true"
+  fi
 }
 
 check_nextcloud_install() {

@@ -29,6 +29,28 @@ def get_request_user() -> Optional[User]:
     return None
 
 
+def _token_error(code: str):
+    return jsonify({"ok": False, "error": code}), 401
+
+
+def authenticate_api_token():
+    user = getattr(g, "api_user", None)
+    if user:
+        return user, None
+
+    token_value = extract_token_value()
+    if not token_value:
+        return None, _token_error("token_required")
+
+    user, token_id = _user_from_token(token_value)
+    if not user:
+        return None, _token_error("invalid_token")
+
+    g.api_user = user
+    g.api_token_id = token_id
+    return user, None
+
+
 def api_auth_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -47,5 +69,16 @@ def api_auth_required(fn):
             "ok": False,
             "error": {"code": "unauthorized", "message": "Authentication required.", "details": []},
         }), 401
+
+    return wrapper
+
+
+def api_token_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        _, failure = authenticate_api_token()
+        if failure is not None:
+            return failure
+        return fn(*args, **kwargs)
 
     return wrapper

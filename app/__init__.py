@@ -449,11 +449,19 @@ def create_app(config_object=None):
     # Strict mode: /api requires a valid bearer token (no session fallback)
     from app.services.api_tokens import verify_token, touch_last_used
 
+    public_api_paths = {"/api/health"}
+
+    def _is_public_api_path(path: str | None) -> bool:
+        normalized = (path or "").rstrip("/")
+        return normalized in public_api_paths
+
     @app.before_request
     def _strict_api_token_guard():
         if not is_strict_mode():
             return None
         if not is_api_request(request.path):
+            return None
+        if _is_public_api_path(request.path):
             return None
         token_value = extract_token_value()
         if not token_value:
@@ -586,10 +594,24 @@ def create_app(config_object=None):
     from app.views.processmeta import bp as processmeta_bp
     app.register_blueprint(processmeta_bp)
 
+    from app.views.api_health import bp as api_health_bp
+    app.register_blueprint(api_health_bp)
+    try:
+        csrf.exempt(api_health_bp)
+    except Exception:
+        pass
+
     from app.views.numbering import bp as numbering_bp
     app.register_blueprint(numbering_bp)
     try:
         csrf.exempt(numbering_bp)
+    except Exception:
+        pass
+
+    from app.views.legacy_addin_api import bp as legacy_addin_api_bp
+    app.register_blueprint(legacy_addin_api_bp)
+    try:
+        csrf.exempt(legacy_addin_api_bp)
     except Exception:
         pass
 

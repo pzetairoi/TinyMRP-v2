@@ -41,13 +41,21 @@ Key settings in `TinyMRP_config.txt`:
 - `deliverables_folder`, `BOM_Folder` - output folder (same path used for deliverables + BOM)
 - `weblink` - base URL for the TinyMRP web UI
 - `BackendUrl` - API base URL (defaults to `weblink`)
-- `AuthToken` - optional bearer token for API calls
+- `AuthToken` - TinyMRP API token for API calls
 - `NumberingSchemeId` - default scheme to select
 - `NumberingContextDefaults` - default context fields for numbering
 - `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty` - custom property names
 - `NumberingApplyMode` - default apply mode (active_config|all_configs|selected_configs)
 - `AutoAssignGenericNames` - auto-assign for Part1/Assembly1 names (True|False)
 - `AutoAssignAnyNames` - allow auto-assign for any name (dangerous)
+
+Backend URL rules:
+
+- Correct: `https://company.example.com`
+- Correct for local/dev hosts: `http://tinymrp-lan.company.local`
+- Wrong: `company.example.com/api`
+- Wrong: `https://company.example.com/api`
+- Wrong: `https://company.example.com/api/numbering`
 
 ## Task pane tabs
 
@@ -70,6 +78,12 @@ Key settings in `TinyMRP_config.txt`:
 2. Open the Configuration tab -> **Quick Start**.
 3. Paste Backend URL + Auth token, then **Test connection**.
 4. Pick a preset scheme, enter minimal context, and **Save settings**.
+
+Token notes:
+
+- Use a TinyMRP API token, not the web password.
+- Paste the raw token into the add-in when you create it. The raw token cannot be recovered later because only its hash is stored.
+- If the instance was recreated, or `SECRET_KEY` / `SECURITY_PASSWORD_SALT` changed, old API tokens will stop working. Generate a new raw API token and paste it into the add-in.
 
 The add-in writes custom properties:
 

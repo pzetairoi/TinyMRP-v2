@@ -88,12 +88,16 @@ Checks:
 Checks in add-in Configuration tab:
 
 - Backend URL reachable from workstation.
+- Backend URL is the TinyMRP origin only, not `/api` or `/api/numbering`.
+- Auth token is a TinyMRP API token, not the web password.
 - Auth token is valid and not revoked.
-- `Test connection` response is successful.
+- `Test connection` reports both health and auth as successful.
 
 If still failing:
 
 - Regenerate token in `/ui/addin/tokens`.
+- If the instance was recreated, or `SECRET_KEY` / `SECURITY_PASSWORD_SALT` changed, old API tokens will no longer verify. Generate a new raw API token and paste it into the add-in.
+- Existing raw API tokens cannot be recovered from the database because only their hash is stored.
 - Ask admin to verify token status in `/ui/admin/addin`.
 
 ## Numbering Errors In Add-in

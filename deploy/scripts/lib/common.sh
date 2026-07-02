@@ -1000,3 +1000,26 @@ endpoint_responds() {
 
   curl "${curl_args[@]}" "${scheme}://${domain}/" >/dev/null
 }
+
+api_health_responds() {
+  local domain="$1"
+  local tls_mode="$2"
+  local scheme="https"
+  local -a curl_args=(-fsS --max-time 15 --resolve "${domain}:443:127.0.0.1")
+  local body=""
+
+  if [ "$tls_mode" = "http" ]; then
+    scheme="http"
+    curl_args=(-fsS --max-time 15 --resolve "${domain}:80:127.0.0.1")
+  elif [ "$tls_mode" = "internal-tls" ]; then
+    curl_args=(-k -fsS --max-time 15 --resolve "${domain}:443:127.0.0.1")
+  fi
+
+  body="$(curl "${curl_args[@]}" "${scheme}://${domain}/api/health" 2>/dev/null || true)"
+  [ -n "$body" ] || return 1
+  if printf '%s' "$body" | grep -Eq '^[[:space:]]*<'; then
+    return 1
+  fi
+
+  printf '%s' "$body" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'
+}
