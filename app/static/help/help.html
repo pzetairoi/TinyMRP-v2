@@ -505,11 +505,25 @@ extra/
 <h2 id="first-connection-recommended">First Connection (Recommended)</h2>
 <ol>
 <li>Open <code>Configuration</code> tab, <code>Quick Start</code>.</li>
-<li>Set <code>Backend URL</code> (use your internal LAN URL, for example <code>http://tinymrp-lan.company.local</code>).</li>
-<li>Paste token into <code>Auth token</code>.</li>
+<li>Set <code>Backend URL</code> to the public origin only:
+<ul>
+<li>Correct: <code>https://company.example.com</code></li>
+<li>Correct for local/dev hosts: <code>http://tinymrp-lan.company.local</code></li>
+<li>Wrong: <code>company.example.com/api</code></li>
+<li>Wrong: <code>https://company.example.com/api</code></li>
+<li>Wrong: <code>https://company.example.com/api/numbering</code></li>
+</ul>
+</li>
+<li>Paste a TinyMRP API token into <code>Auth token</code>. Do not use the web password.</li>
 <li>Click <code>Test connection</code>.</li>
 <li>Save settings.</li>
 </ol>
+<p>Token notes:</p>
+<ul>
+<li>Paste the raw token into the add-in when it is created.</li>
+<li>Existing raw API tokens cannot be recovered from the database because only their hash is stored.</li>
+<li>If the instance was recreated, or <code>SECRET_KEY</code> / <code>SECURITY_PASSWORD_SALT</code> changed, old API tokens stop working. Generate a new raw API token and paste it into the add-in.</li>
+</ul>
 <h2 id="where-settings-are-stored">Where Settings Are Stored</h2>
 <p>Config file: <code>TinyMRP_config.txt</code></p>
 <p>Read/write precedence:</p>
@@ -997,12 +1011,16 @@ extra/
 <p>Checks in add-in Configuration tab:</p>
 <ul>
 <li>Backend URL reachable from workstation.</li>
+<li>Backend URL is the TinyMRP origin only, not <code>/api</code> or <code>/api/numbering</code>.</li>
+<li>Auth token is a TinyMRP API token, not the web password.</li>
 <li>Auth token is valid and not revoked.</li>
-<li><code>Test connection</code> response is successful.</li>
+<li><code>Test connection</code> reports both health and auth as successful.</li>
 </ul>
 <p>If still failing:</p>
 <ul>
 <li>Regenerate token in <code>/ui/addin/tokens</code>.</li>
+<li>If the instance was recreated, or <code>SECRET_KEY</code> / <code>SECURITY_PASSWORD_SALT</code> changed, old API tokens will no longer verify. Generate a new raw API token and paste it into the add-in.</li>
+<li>Existing raw API tokens cannot be recovered from the database because only their hash is stored.</li>
 <li>Ask admin to verify token status in <code>/ui/admin/addin</code>.</li>
 </ul>
 <h2 id="numbering-errors-in-add-in">Numbering Errors In Add-in</h2>

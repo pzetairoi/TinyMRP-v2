@@ -8,6 +8,7 @@ from werkzeug.exceptions import Forbidden
 
 import app as app_module
 from app.models.auth import User, Role
+from app.services.api_tokens import create_token
 from app.files_proxy import _proxy
 
 
@@ -85,6 +86,60 @@ def test_strict_api_requires_token_even_with_session(monkeypatch):
     resp = client.get("/api/auth/check")
     assert resp.status_code == 401
     assert resp.get_json().get("error") == "token_required"
+
+
+def test_api_health_is_public_in_compat(monkeypatch):
+    app = _make_app(
+        monkeypatch,
+        TINYMRP_SECURITY_MODE="compat",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
+    )
+    client = app.test_client()
+    resp = client.get("/api/health")
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["ok"] is True
+    assert data["service"] == "tinymrp"
+    assert data["security_mode"] == "compat"
+
+
+def test_api_health_is_public_in_strict(monkeypatch):
+    app = _make_app(
+        monkeypatch,
+        TINYMRP_SECURITY_MODE="strict",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
+    )
+    client = app.test_client()
+    resp = client.get("/api/health")
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["ok"] is True
+    assert data["service"] == "tinymrp"
+    assert data["security_mode"] == "strict"
+
+
+def test_auth_check_requires_token_in_strict(monkeypatch):
+    app = _make_app(
+        monkeypatch,
+        TINYMRP_SECURITY_MODE="strict",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
+    )
+    user = User(email="strict-token@example.com", password="x", active=True, fs_uniquifier="u4").save()
+    _, raw = create_token(user, "strict-auth-check")
+    client = app.test_client()
+
+    unauthorized = client.get("/api/auth/check")
+    assert unauthorized.status_code == 401
+    assert unauthorized.get_json().get("error") == "token_required"
+
+    authorized = client.get("/api/auth/check", headers={"Authorization": f"Bearer {raw}"})
+    data = authorized.get_json()
+    assert authorized.status_code == 200
+    assert data["ok"] is True
+    assert data["user"]["email"] == user.email
 
 
 def test_session_csrf_blocks_cross_origin(monkeypatch):

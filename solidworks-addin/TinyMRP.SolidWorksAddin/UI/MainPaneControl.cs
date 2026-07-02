@@ -2235,10 +2235,36 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            ApiResponse health = client.HealthCheck();
+            if (!health.Ok)
+            {
+                ShowConnectionFailure(
+                    "Server not reachable or Backend URL/proxy is wrong.",
+                    health,
+                    health.ResponseIsHtml
+                        ? "The add-in reached a web page/login page instead of the JSON API."
+                        : null);
+                return;
+            }
+
             ApiResponse response = client.AuthCheck();
             if (!response.Ok)
             {
-                HandleApiError("Connection failed.", response, true);
+                if (ResponseHasErrorCode(response, "token_required"))
+                {
+                    ShowConnectionFailure("Server reachable, but Auth token is missing.", response, null);
+                }
+                else if (ResponseHasErrorCode(response, "invalid_token") || ResponseHasErrorCode(response, "unauthorized"))
+                {
+                    ShowConnectionFailure(
+                        "Server reachable, but the Auth token is invalid. Generate a new TinyMRP API token and paste the raw token into the add-in. Existing tokens may have been invalidated if the instance secret changed.",
+                        response,
+                        null);
+                }
+                else
+                {
+                    ShowConnectionFailure("Connection failed.", response, null);
+                }
                 return;
             }
 
@@ -2265,15 +2291,45 @@ namespace TinyMRP.SolidWorksAddin.UI
             TinyMrpConfig config = AddinContext.Config;
             details.Add("Backend URL: " + (config != null ? config.BackendUrl : ""));
             details.Add("Config path: " + (config != null ? config.ConfigPath : ""));
+            details.Add(string.Empty);
 
-            ApiResponse auth = client.AuthCheck();
-            details.Add("Auth check: " + (auth.Ok ? "OK" : "Failed"));
+            ApiResponse health = client.HealthCheck();
+            AddDiagnosticResult(details, "Health check", health, health.Ok ? "OK" : "Failed");
 
-            ApiResponse schemesResp = client.ListSchemes(out List<NumberingSchemeDefinition> schemes);
-            details.Add("Schemes: " + (schemesResp.Ok ? schemes.Count.ToString() : "Failed"));
+            ApiResponse auth = null;
+            if (health.Ok)
+            {
+                auth = client.AuthCheck();
+                AddDiagnosticResult(details, "Auth check", auth, auth.Ok ? "OK" : "Failed");
+            }
+            else
+            {
+                details.Add("Auth check: Skipped because the health check failed.");
+            }
 
-            ApiResponse settingsResp = client.GetUserSettings(out UserSettingsDefinition settings);
-            details.Add("Settings: " + (settingsResp.Ok ? "OK" : "Failed"));
+            List<NumberingSchemeDefinition> schemes = new List<NumberingSchemeDefinition>();
+            ApiResponse schemesResp = null;
+            if (auth != null && auth.Ok)
+            {
+                schemesResp = client.ListSchemes(out schemes);
+                AddDiagnosticResult(details, "Schemes load", schemesResp, schemesResp.Ok ? "OK (" + schemes.Count + " loaded)" : "Failed");
+            }
+            else
+            {
+                details.Add("Schemes load: Skipped because the auth check failed.");
+            }
+
+            UserSettingsDefinition settings = null;
+            ApiResponse settingsResp = null;
+            if (auth != null && auth.Ok)
+            {
+                settingsResp = client.GetUserSettings(out settings);
+                AddDiagnosticResult(details, "Settings load", settingsResp, settingsResp.Ok ? "OK" : "Failed");
+            }
+            else
+            {
+                details.Add("Settings load: Skipped because the auth check failed.");
+            }
 
             string schemeId = GetSchemeIdFromCombo(_quickSchemeCombo);
             if (settings != null && string.IsNullOrWhiteSpace(schemeId))
@@ -2281,11 +2337,19 @@ namespace TinyMRP.SolidWorksAddin.UI
                 schemeId = settings.DefaultSchemeId;
             }
 
-            if (!string.IsNullOrWhiteSpace(schemeId))
+            if (string.IsNullOrWhiteSpace(schemeId))
+            {
+                details.Add("Preview test: Skipped because no scheme is selected.");
+            }
+            else if (auth == null || !auth.Ok)
+            {
+                details.Add("Preview test: Skipped because the auth check failed.");
+            }
+            else
             {
                 var context = BuildContextFromQuickStart();
                 ApiResponse preview = client.Preview(schemeId, context);
-                details.Add("Preview: " + (preview.Ok ? "OK" : "Failed"));
+                AddDiagnosticResult(details, "Preview test", preview, preview.Ok ? "OK" : "Failed");
             }
 
             string detailText = string.Join(System.Environment.NewLine, details.ToArray());
@@ -4906,6 +4970,18 @@ namespace TinyMRP.SolidWorksAddin.UI
             HandleApiError(title, response, true);
         }
 
+        private void ShowConnectionFailure(string message, ApiResponse response, string extraDetail)
+        {
+            string details = BuildApiErrorDetails(response, extraDetail);
+            AddinLogger.Write("Connection failed: " + message);
+            if (!string.IsNullOrWhiteSpace(details))
+            {
+                AddinLogger.Write(details);
+            }
+            SetNumberingStatus(message, Color.Maroon);
+            ShowMessageWithDetails("Connection failed", message, details);
+        }
+
         private void HandleApiError(string title, ApiResponse response, bool showDialog)
         {
             if (response == null)
@@ -4919,11 +4995,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             string message = response.ErrorMessage ?? "Request failed.";
-            string details = string.Empty;
-            if (response.ErrorDetails.Count > 0)
-            {
-                details = string.Join("\n", response.ErrorDetails.ToArray());
-            }
+            string details = BuildApiErrorDetails(response, null);
 
             AddinLogger.Write(title + ": " + message);
             if (!string.IsNullOrWhiteSpace(details))
@@ -4936,6 +5008,101 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 ShowMessageWithDetails(title, message, details);
             }
+        }
+
+        private string BuildApiErrorDetails(ApiResponse response, string extraDetail)
+        {
+            if (response == null)
+            {
+                return extraDetail ?? string.Empty;
+            }
+
+            var lines = new List<string>();
+            if (!string.IsNullOrWhiteSpace(extraDetail))
+            {
+                lines.Add(extraDetail);
+            }
+            if (!string.IsNullOrWhiteSpace(response.RequestUrl))
+            {
+                lines.Add("Final URL: " + response.RequestUrl);
+            }
+            if (response.StatusCode > 0)
+            {
+                lines.Add("HTTP status: " + response.StatusCode.ToString());
+            }
+            if (!string.IsNullOrWhiteSpace(response.ErrorCode))
+            {
+                lines.Add("Error code: " + response.ErrorCode);
+            }
+            if (!string.IsNullOrWhiteSpace(response.ResponseSnippet))
+            {
+                lines.Add("Response snippet: " + response.ResponseSnippet);
+            }
+            if (response.ResponseIsHtml)
+            {
+                lines.Add("Reached an HTML page/login page instead of the JSON API.");
+            }
+
+            foreach (string detail in response.ErrorDetails)
+            {
+                if (!string.IsNullOrWhiteSpace(detail)
+                    && !string.Equals(detail, response.ResponseSnippet, StringComparison.Ordinal)
+                    && !lines.Contains(detail))
+                {
+                    lines.Add(detail);
+                }
+            }
+
+            return string.Join(System.Environment.NewLine, lines.ToArray());
+        }
+
+        private void AddDiagnosticResult(List<string> details, string label, ApiResponse response, string statusText)
+        {
+            if (details == null)
+            {
+                return;
+            }
+
+            if (response == null)
+            {
+                details.Add(label + ": Failed");
+                details.Add("Error: no response");
+                details.Add(string.Empty);
+                return;
+            }
+
+            details.Add(label + ": " + statusText);
+            if (!string.IsNullOrWhiteSpace(response.RequestUrl))
+            {
+                details.Add("URL: " + response.RequestUrl);
+            }
+            if (response.StatusCode > 0)
+            {
+                details.Add("HTTP status: " + response.StatusCode.ToString());
+            }
+            if (!response.Ok && !string.IsNullOrWhiteSpace(response.ErrorCode))
+            {
+                details.Add("Error code: " + response.ErrorCode);
+            }
+            if (!response.Ok && !string.IsNullOrWhiteSpace(response.ErrorMessage))
+            {
+                details.Add("Message: " + response.ErrorMessage);
+            }
+            if ((!response.Ok || response.ResponseIsHtml) && !string.IsNullOrWhiteSpace(response.ResponseSnippet))
+            {
+                details.Add("Response snippet: " + response.ResponseSnippet);
+            }
+            if (response.ResponseIsHtml)
+            {
+                details.Add("Note: reached an HTML page/login page instead of the JSON API.");
+            }
+            details.Add(string.Empty);
+        }
+
+        private static bool ResponseHasErrorCode(ApiResponse response, string code)
+        {
+            return response != null
+                && string.Equals(response.ErrorCode, code, StringComparison.OrdinalIgnoreCase);
         }
 
         private void ShowMessageWithDetails(string title, string message, string details)

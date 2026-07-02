@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from flask import jsonify
+
 from app.models.api_token import ApiToken
 from app.models.numbering import NumberingScheme
 from app.services.api_tokens import create_token
@@ -39,6 +41,13 @@ def test_auth_check_and_revoke(client, user):
     token_doc.update(set__revoked_at=datetime.utcnow())
     fail_resp = client.get("/api/auth/check", headers=_auth_headers(raw))
     assert fail_resp.status_code == 401
+    assert fail_resp.get_json()["error"] == "invalid_token"
+
+
+def test_auth_check_requires_token_without_session_fallback(client):
+    resp = client.get("/api/auth/check")
+    assert resp.status_code == 401
+    assert resp.get_json()["error"] == "token_required"
 
 
 def test_settings_and_numbering_with_bearer(client, user):
@@ -91,3 +100,31 @@ def test_settings_and_numbering_with_bearer(client, user):
     allocate_data = allocate.get_json()
     assert allocate.status_code == 200
     assert allocate_data["ok"] is True
+
+
+def test_legacy_aliases_require_auth(client):
+    assert client.get("/api/schemes").status_code == 401
+    assert client.get("/api/settings").status_code == 401
+    assert client.post("/api/preview", json={"scheme_id": "x"}).status_code == 401
+
+
+def test_legacy_aliases_forward_to_current_handlers(client, user, monkeypatch):
+    _, raw = create_token(user, "legacy-aliases")
+    headers = _auth_headers(raw)
+
+    import app.views.legacy_addin_api as legacy_addin_api
+
+    monkeypatch.setattr(legacy_addin_api, "list_schemes", lambda: jsonify({"ok": True, "alias": "schemes"}))
+    resp = client.get("/api/schemes", headers=headers)
+    assert resp.status_code == 200
+    assert resp.get_json()["alias"] == "schemes"
+
+    monkeypatch.setattr(legacy_addin_api, "get_settings", lambda: jsonify({"ok": True, "alias": "settings"}))
+    resp = client.get("/api/settings", headers=headers)
+    assert resp.status_code == 200
+    assert resp.get_json()["alias"] == "settings"
+
+    monkeypatch.setattr(legacy_addin_api, "preview", lambda: jsonify({"ok": True, "alias": "preview"}))
+    resp = client.post("/api/preview", headers=headers, json={"scheme_id": "x"})
+    assert resp.status_code == 200
+    assert resp.get_json()["alias"] == "preview"

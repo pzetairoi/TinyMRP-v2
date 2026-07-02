@@ -48,10 +48,21 @@ If startup is not checked, the add-in will not auto-load after restart.
 ## First Connection (Recommended)
 
 1. Open `Configuration` tab, `Quick Start`.
-2. Set `Backend URL` (use your internal LAN URL, for example `http://tinymrp-lan.company.local`).
-3. Paste token into `Auth token`.
+2. Set `Backend URL` to the public origin only:
+   - Correct: `https://company.example.com`
+   - Correct for local/dev hosts: `http://tinymrp-lan.company.local`
+   - Wrong: `company.example.com/api`
+   - Wrong: `https://company.example.com/api`
+   - Wrong: `https://company.example.com/api/numbering`
+3. Paste a TinyMRP API token into `Auth token`. Do not use the web password.
 4. Click `Test connection`.
 5. Save settings.
+
+Token notes:
+
+- Paste the raw token into the add-in when it is created.
+- Existing raw API tokens cannot be recovered from the database because only their hash is stored.
+- If the instance was recreated, or `SECRET_KEY` / `SECURITY_PASSWORD_SALT` changed, old API tokens stop working. Generate a new raw API token and paste it into the add-in.
 
 ## Where Settings Are Stored
 

@@ -125,6 +125,13 @@ rollback_from_backup() {
     return 1
   fi
 
+  if ! api_health_responds "${INSTANCE_DOMAIN}" "${TLS_MODE}"; then
+    fail "Rollback failed: restored /api/health check did not return JSON ok=true at ${INSTANCE_URL}/api/health."
+    RESULT="rollback_failed"
+    ROLLBACK_RESULT="failed"
+    return 1
+  fi
+
   if ! "${SCRIPT_DIR}/doctor.sh" --instance "$INSTANCE_NAME" --skip-host-checks; then
     fail "Rollback failed: doctor checks did not pass for ${INSTANCE_NAME}."
     RESULT="rollback_failed"
@@ -334,6 +341,13 @@ if ! endpoint_responds "${INSTANCE_DOMAIN}" "${TLS_MODE}"; then
   HEALTH_CHECK_RESULT="failed"
   fail "Endpoint is not responding at ${INSTANCE_URL} after the update."
   rollback_from_backup "public-endpoint"
+  exit 1
+fi
+
+if ! api_health_responds "${INSTANCE_DOMAIN}" "${TLS_MODE}"; then
+  HEALTH_CHECK_RESULT="failed"
+  fail "/api/health did not return JSON ok=true at ${INSTANCE_URL}/api/health after the update."
+  rollback_from_backup "api-health"
   exit 1
 fi
 

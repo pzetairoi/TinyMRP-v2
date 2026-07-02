@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, current_app
 
-from app.services.api_auth import api_auth_required, get_request_user
+from app.services.api_auth import api_token_required, get_request_user
 
 bp = Blueprint("auth_api", __name__, url_prefix="/api/auth")
 
 
 @bp.get("/check")
-@api_auth_required
+@api_token_required
 def auth_check():
     user = get_request_user()
     return jsonify({

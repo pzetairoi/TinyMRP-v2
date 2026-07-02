@@ -352,6 +352,7 @@ It checks:
 - `/__files` is not configured unless a matching reverse-proxy internal file route exists
 - each instance domain resolves to the expected IP
 - each instance endpoint responds
+- each instance `/api/health` returns JSON with `"ok": true`
 - MongoDB is not exposed publicly
 - each per-instance Nextcloud root exists
 - Nextcloud DNS and endpoint health if installed
@@ -432,8 +433,18 @@ What it does:
 - updates only the app image tag in the compose file
 - recreates only the `app` container by default
 - leaves MongoDB running unless an operator explicitly performs a database restore during rollback
-- runs health checks and `doctor.sh --instance <instance> --skip-host-checks`
+- runs health checks for both `/` and `/api/health`, then `doctor.sh --instance <instance> --skip-host-checks`
 - restores the previous compose file and previous app image automatically if post-update verification fails
+
+SolidWorks add-in connection notes:
+
+- Configure the add-in `Backend URL` as the public origin only:
+  - Correct: `https://company.example.com`
+  - Wrong: `company.example.com/api`
+  - Wrong: `https://company.example.com/api`
+- The add-in `Auth token` must be a TinyMRP API token, not the web password.
+- If an instance was recreated, or `SECRET_KEY` / `SECURITY_PASSWORD_SALT` changed, older API tokens will stop working. Generate a new raw API token and paste it into the add-in.
+- Existing raw API tokens cannot be recovered from the database because only their hash is stored.
 
 Backed up before each update:
 

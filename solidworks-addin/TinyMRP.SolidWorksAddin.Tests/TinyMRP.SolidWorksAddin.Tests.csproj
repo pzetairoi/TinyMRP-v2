@@ -3,10 +3,32 @@
     <TargetFramework>net48</TargetFramework>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+  <PropertyGroup>
+    <SolidWorksApiDir>$(ProgramFiles)\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SolidWorksApiDir>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\TinyMRP.SolidWorksAddin\TinyMRP.SolidWorksAddin.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swpublished">
+      <HintPath>$(SolidWorksApiDir)\SolidWorks.Interop.swpublished.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="MSTest.TestAdapter" Version="2.2.10" />
     <PackageReference Include="MSTest.TestFramework" Version="2.2.10" />
   </ItemGroup>
