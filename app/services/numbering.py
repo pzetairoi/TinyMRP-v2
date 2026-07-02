@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
+import hashlib
 import re
 
 from pymongo import ReturnDocument
@@ -291,6 +292,75 @@ def build_candidate_number(
     return candidate, errors, warnings
 
 
+def build_counter_series_key(
+    scheme: Dict[str, Any],
+    context: Dict[str, Any],
+    sequence_values: List[int] | None,
+    auto_seq_index: int,
+    now: datetime,
+) -> Tuple[str, List[str]]:
+    errors: List[str] = []
+
+    ctx = _normalize_context(context)
+    separator = str(scheme.get("separator") or "-")
+    seq_defaults = scheme.get("seq") or {}
+    segments = scheme.get("pattern_segments") or []
+    resolved_sequence_values = list(sequence_values or [])
+    sequence_index = 0
+    parts: List[str] = []
+
+    for seg in segments:
+        if not isinstance(seg, dict):
+            errors.append("segment must be an object.")
+            continue
+        kind = str(seg.get("kind") or "").lower().strip()
+        if kind == "literal":
+            parts.append(str(seg.get("value") or "").strip())
+        elif kind == "field":
+            field = str(seg.get("field") or "").strip().lower()
+            if not field:
+                errors.append("field segment missing field name.")
+                continue
+            value = ctx.get(field, "")
+            if not value:
+                errors.append(f"context missing field '{field}'.")
+                continue
+            casing = str(seg.get("casing") or "upper").lower()
+            value = _apply_casing(value, casing)
+            pad_left = seg.get("pad_left")
+            pad_char = str(seg.get("pad_char") or "0")[:1]
+            if pad_left is not None:
+                value = value.rjust(_coerce_int(pad_left, 0), pad_char)
+            parts.append(value)
+        elif kind == "seq":
+            if sequence_index == auto_seq_index:
+                parts.append("{AUTO}")
+            else:
+                padding = _coerce_int(seg.get("padding"), _coerce_int(seq_defaults.get("padding"), DEFAULT_SEQ["padding"]))
+                base = _coerce_int(seg.get("base"), _coerce_int(seq_defaults.get("base"), DEFAULT_SEQ["base"]))
+                if base not in (10, 36):
+                    errors.append("seq base must be 10 or 36.")
+                    continue
+                seq_start = _coerce_int(seg.get("start_at"), _coerce_int(seq_defaults.get("start_at"), DEFAULT_SEQ["start_at"]))
+                seq_value = resolved_sequence_values[sequence_index] if sequence_index < len(resolved_sequence_values) else seq_start
+                parts.append(_format_sequence(seq_value, padding, base))
+            sequence_index += 1
+        elif kind == "date":
+            fmt = str(seg.get("fmt") or "").strip()
+            if fmt not in ALLOWED_DATE_FORMATS:
+                errors.append("date fmt must be one of YYYY, YY, MM, YYYYMM.")
+                continue
+            parts.append(_format_date(now, fmt))
+        else:
+            errors.append(f"Unknown segment kind '{kind}'.")
+
+    if errors:
+        return "", errors
+
+    signature = separator.join(parts) if separator else "".join(parts)
+    return signature, []
+
+
 def build_scope_key(scheme: Dict[str, Any], context: Dict[str, Any]) -> Tuple[str, List[str]]:
     errors: List[str] = []
     ctx = _normalize_context(context)
@@ -340,10 +410,12 @@ def bucket_for_reset_policy(reset_policy: str, context: Dict[str, Any], now: dat
     return "", errors
 
 
-def compute_counter_key(scheme_id: str, scope_key: str, bucket: str) -> str:
+def compute_counter_key(scheme_id: str, scope_key: str, bucket: str, series_key: str = "") -> str:
     parts = [f"scheme:{scheme_id}", f"scope:{scope_key}"]
     if bucket:
         parts.append(f"bucket:{bucket}")
+    if series_key:
+        parts.append(f"series:{_hash_counter_series_key(series_key)}")
     return "|".join(parts)
 
 
@@ -353,6 +425,7 @@ def preview_number(
     sequence_values: Any = None,
 ) -> Tuple[Dict[str, Any], List[str]]:
     errors: List[str] = []
+    now = datetime.utcnow()
     scheme_dict = scheme_to_dict(scheme)
     seq_segments = _sequence_segments(scheme_dict.get("pattern_segments") or [])
     auto_seq_errors: List[str] = []
@@ -366,21 +439,37 @@ def preview_number(
 
     seq_defaults = scheme_dict.get("seq") or {}
     reset_policy = str(seq_defaults.get("reset_policy") or DEFAULT_SEQ["reset_policy"])
-    bucket, bucket_errors = bucket_for_reset_policy(reset_policy, context, datetime.utcnow())
+    bucket, bucket_errors = bucket_for_reset_policy(reset_policy, context, now)
     errors.extend(bucket_errors)
     if errors:
         return {}, errors
 
     resolved_sequence_values = _resolve_sequence_values(scheme_dict, sequence_values)
-    counter_key = compute_counter_key(str(scheme.id), scope_key, bucket)
+    counter_key = ""
     if auto_seq_index >= 0:
+        series_key, series_errors = build_counter_series_key(scheme_dict, context, resolved_sequence_values, auto_seq_index, now)
+        errors.extend(series_errors)
+        if errors:
+            return {}, errors
+        counter_key = compute_counter_key(str(scheme.id), scope_key, bucket, series_key)
         auto_start = resolved_sequence_values[auto_seq_index] if auto_seq_index < len(resolved_sequence_values) else _coerce_int(seq_defaults.get("start_at"), DEFAULT_SEQ["start_at"])
-        next_value = peek_next_sequence(counter_key, auto_start)
+        next_value, candidate, next_errors = _preview_next_available_sequence(
+            scheme_dict,
+            context,
+            resolved_sequence_values,
+            auto_seq_index,
+            counter_key,
+            auto_start,
+            now,
+        )
+        errors.extend(next_errors)
+        if errors:
+            return {}, errors
         if auto_seq_index < len(resolved_sequence_values):
             resolved_sequence_values[auto_seq_index] = next_value
-
-    candidate, cand_errors, _ = build_candidate_number(scheme_dict, context, resolved_sequence_values, datetime.utcnow())
-    errors.extend(cand_errors)
+    else:
+        candidate, cand_errors, _ = build_candidate_number(scheme_dict, context, resolved_sequence_values, now)
+        errors.extend(cand_errors)
     if errors:
         return {}, errors
 
@@ -409,6 +498,7 @@ def allocate_number(
     sequence_values: Any = None,
 ) -> Tuple[Dict[str, Any], List[str]]:
     errors: List[str] = []
+    now = datetime.utcnow()
     action = (requested_revision_action or "new_part").strip().lower()
     scheme_dict = scheme_to_dict(scheme)
     seq_segments = _sequence_segments(scheme_dict.get("pattern_segments") or [])
@@ -448,22 +538,38 @@ def allocate_number(
 
     seq_defaults = scheme_dict.get("seq") or {}
     reset_policy = str(seq_defaults.get("reset_policy") or DEFAULT_SEQ["reset_policy"])
-    bucket, bucket_errors = bucket_for_reset_policy(reset_policy, context, datetime.utcnow())
+    bucket, bucket_errors = bucket_for_reset_policy(reset_policy, context, now)
     errors.extend(bucket_errors)
     if errors:
         return {}, errors
 
     resolved_sequence_values = _resolve_sequence_values(scheme_dict, sequence_values)
-    counter_key = compute_counter_key(str(scheme.id), scope_key, bucket)
+    counter_key = ""
     seq_value = None
     if auto_seq_index >= 0:
+        series_key, series_errors = build_counter_series_key(scheme_dict, context, resolved_sequence_values, auto_seq_index, now)
+        errors.extend(series_errors)
+        if errors:
+            return {}, errors
+        counter_key = compute_counter_key(str(scheme.id), scope_key, bucket, series_key)
         auto_start = resolved_sequence_values[auto_seq_index] if auto_seq_index < len(resolved_sequence_values) else _coerce_int(seq_defaults.get("start_at"), DEFAULT_SEQ["start_at"])
-        seq_value = consume_sequence(counter_key, auto_start)
+        seq_value, candidate, next_errors = _consume_next_available_sequence(
+            scheme_dict,
+            context,
+            resolved_sequence_values,
+            auto_seq_index,
+            counter_key,
+            auto_start,
+            now,
+        )
+        errors.extend(next_errors)
+        if errors:
+            return {}, errors
         if auto_seq_index < len(resolved_sequence_values):
             resolved_sequence_values[auto_seq_index] = seq_value
-
-    candidate, cand_errors, _ = build_candidate_number(scheme_dict, context, resolved_sequence_values, datetime.utcnow())
-    errors.extend(cand_errors)
+    else:
+        candidate, cand_errors, _ = build_candidate_number(scheme_dict, context, resolved_sequence_values, now)
+        errors.extend(cand_errors)
     if errors:
         return {}, errors
 
@@ -471,7 +577,7 @@ def allocate_number(
     revision_start = str((scheme_dict.get("revision") or {}).get("start") or DEFAULT_REVISION["start"])
     revision = revision_for_new_part(revision_policy, revision_start)
 
-    if Part.objects(part_number=candidate, revision=revision).first():
+    if _part_number_exists(candidate):
         errors.append("part number already exists.")
         return {}, errors
 
@@ -576,6 +682,82 @@ def consume_sequence(counter_key: str, start_at: int) -> int:
         )
         return start_at
     return allocated
+
+
+def _preview_next_available_sequence(
+    scheme: Dict[str, Any],
+    context: Dict[str, Any],
+    sequence_values: List[int],
+    auto_seq_index: int,
+    counter_key: str,
+    start_at: int,
+    now: datetime,
+) -> Tuple[int, str, List[str]]:
+    next_value = peek_next_sequence(counter_key, start_at)
+    max_value = _max_sequence_value(scheme, auto_seq_index)
+
+    while next_value <= max_value:
+        candidate_values = list(sequence_values)
+        candidate_values[auto_seq_index] = next_value
+        candidate, errors, _ = build_candidate_number(scheme, context, candidate_values, now)
+        if errors:
+            return 0, "", errors
+        if not _part_number_exists(candidate):
+            return next_value, candidate, []
+        next_value += 1
+
+    return 0, "", ["No available automatic sequence values remain for this series."]
+
+
+def _consume_next_available_sequence(
+    scheme: Dict[str, Any],
+    context: Dict[str, Any],
+    sequence_values: List[int],
+    auto_seq_index: int,
+    counter_key: str,
+    start_at: int,
+    now: datetime,
+) -> Tuple[int, str, List[str]]:
+    next_start = max(int(start_at), 1)
+    max_value = _max_sequence_value(scheme, auto_seq_index)
+
+    while next_start <= max_value:
+        seq_value = consume_sequence(counter_key, next_start)
+        if seq_value > max_value:
+            break
+        candidate_values = list(sequence_values)
+        candidate_values[auto_seq_index] = seq_value
+        candidate, errors, _ = build_candidate_number(scheme, context, candidate_values, now)
+        if errors:
+            return 0, "", errors
+        if not _part_number_exists(candidate):
+            return seq_value, candidate, []
+        next_start = seq_value + 1
+
+    return 0, "", ["No available automatic sequence values remain for this series."]
+
+
+def _part_number_exists(part_number: str) -> bool:
+    return bool(part_number) and Part.objects(part_number=part_number).first() is not None
+
+
+def _max_sequence_value(scheme: Dict[str, Any], auto_seq_index: int) -> int:
+    seq_segments = _sequence_segments(scheme.get("pattern_segments") or [])
+    if auto_seq_index < 0 or auto_seq_index >= len(seq_segments):
+        return 0
+
+    seq_defaults = scheme.get("seq") or {}
+    segment = seq_segments[auto_seq_index]
+    padding = _coerce_int(segment.get("padding"), _coerce_int(seq_defaults.get("padding"), DEFAULT_SEQ["padding"]))
+    base = _coerce_int(segment.get("base"), _coerce_int(seq_defaults.get("base"), DEFAULT_SEQ["base"]))
+    return (base ** max(padding, 1)) - 1
+
+
+def _hash_counter_series_key(series_key: str) -> str:
+    value = (series_key or "").strip()
+    if not value:
+        return ""
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
 
 
 def build_display_code(part_number: str, revision: str) -> str:
