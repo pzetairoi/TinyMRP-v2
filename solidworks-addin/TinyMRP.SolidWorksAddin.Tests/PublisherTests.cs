@@ -127,6 +127,263 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.AreEqual(@"C:\vault\root.sldasm", GetField(queue[3], "ModelPath"));
         }
 
+        [TestMethod]
+        public void IsValidPlyFile_ValidAsciiWithVertices_ReturnsTrue()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string plyPath = Path.Combine(root, "valid_ascii.ply");
+
+            try
+            {
+                File.WriteAllText(plyPath, BuildValidAsciiPly(), Encoding.ASCII);
+
+                string reason;
+                bool valid = InvokePrivateWithOutString(publisher, "IsValidPlyFile", plyPath, out reason);
+
+                Assert.IsTrue(valid);
+                Assert.AreEqual(string.Empty, reason);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void IsValidPlyFile_HeaderOnly_ReturnsFalse()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string plyPath = Path.Combine(root, "header_only.ply");
+
+            try
+            {
+                File.WriteAllText(plyPath, BuildHeaderOnlyPly(3), Encoding.ASCII);
+
+                string reason;
+                bool valid = InvokePrivateWithOutString(publisher, "IsValidPlyFile", plyPath, out reason);
+
+                Assert.IsFalse(valid);
+                Assert.AreEqual("header-only file", reason);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void IsValidPlyFile_ZeroVertices_ReturnsFalse()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string plyPath = Path.Combine(root, "zero_vertices.ply");
+
+            try
+            {
+                File.WriteAllText(plyPath, BuildHeaderOnlyPly(0), Encoding.ASCII);
+
+                string reason;
+                bool valid = InvokePrivateWithOutString(publisher, "IsValidPlyFile", plyPath, out reason);
+
+                Assert.IsFalse(valid);
+                Assert.AreEqual("header has zero vertices", reason);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void IsValidPlyFile_MissingEndHeader_ReturnsFalse()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string plyPath = Path.Combine(root, "missing_end_header.ply");
+
+            try
+            {
+                File.WriteAllText(
+                    plyPath,
+                    "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\n0 0 0\n1 0 0\n0 1 0\n",
+                    Encoding.ASCII);
+
+                string reason;
+                bool valid = InvokePrivateWithOutString(publisher, "IsValidPlyFile", plyPath, out reason);
+
+                Assert.IsFalse(valid);
+                Assert.AreEqual("missing end_header", reason);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void IsValidPlyFile_NonPly_ReturnsFalse()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string plyPath = Path.Combine(root, "not_ply.ply");
+
+            try
+            {
+                File.WriteAllText(plyPath, "notply\nend_header\nbody\n", Encoding.ASCII);
+
+                string reason;
+                bool valid = InvokePrivateWithOutString(publisher, "IsValidPlyFile", plyPath, out reason);
+
+                Assert.IsFalse(valid);
+                Assert.AreEqual("first line does not start with ply", reason);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void ValidateExportedOutput_UsesPlyValidationAndGenericThresholds()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string validPlyPath = Path.Combine(root, "valid.ply");
+            string tinyStlPath = Path.Combine(root, "tiny.stl");
+            string validStlPath = Path.Combine(root, "valid.stl");
+
+            try
+            {
+                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
+                File.WriteAllText(tinyStlPath, "solid x\nendsolid x\n", Encoding.ASCII);
+                File.WriteAllText(validStlPath, BuildAsciiStl() + new string(' ', 256), Encoding.ASCII);
+
+                string reason;
+                bool validPly = InvokePrivateValidateExportedOutput(publisher, "ply", validPlyPath, out reason);
+                Assert.IsTrue(validPly);
+                Assert.AreEqual(string.Empty, reason);
+
+                bool tinyStlValid = InvokePrivateValidateExportedOutput(publisher, "stl", tinyStlPath, out reason);
+                Assert.IsFalse(tinyStlValid);
+                Assert.AreEqual("file too small", reason);
+
+                bool validStl = InvokePrivateValidateExportedOutput(publisher, "stl", validStlPath, out reason);
+                Assert.IsTrue(validStl);
+                Assert.AreEqual(string.Empty, reason);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void ExportSessionSerialization_RoundTripsQueueOptionsAndOutputs()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            var options = new PublishOptions
+            {
+                DeliverablesFolder = @"C:\out\deliverables",
+                BomFolder = @"C:\out\bom",
+                ExportPly = true,
+                ExportStl = true,
+                OverwriteFiles = true,
+                TopLevelOnly = true
+            };
+
+            Type plannedRefType = GetPlannedRefType();
+            Type listType = typeof(List<>).MakeGenericType(plannedRefType);
+            var queue = (IList)Activator.CreateInstance(listType);
+            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\root.sldasm", "MAIN", true, 0, 4, true));
+            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\part.sldprt", "DEFAULT", false, 2, 0, false));
+
+            object session = InvokePrivate(
+                publisher,
+                "CreateExportSessionState",
+                queue,
+                options,
+                @"C:\vault\root.sldasm",
+                "MAIN",
+                @"C:\plans\plan.txt",
+                @"C:\logs\export.log");
+
+            IList sessionQueue = (IList)GetField(session, "Queue");
+            object firstItem = sessionQueue[0];
+            SetField(firstItem, "Status", "done");
+            SetField(firstItem, "Attempts", 2);
+            SetField(firstItem, "PlyValidationReason", "replaced stale file");
+            IList outputs = (IList)GetField(firstItem, "Outputs");
+            outputs.Add(CreateExportedOutput("ply", @"C:\out\deliverables\ply\root.ply", 2048, true, string.Empty));
+
+            string json = (string)InvokePrivate(publisher, "SerializeExportSession", session);
+            Assert.IsFalse(string.IsNullOrWhiteSpace(json));
+
+            object roundTrip = InvokePrivate(publisher, "DeserializeExportSession", json);
+            Assert.IsNotNull(roundTrip);
+            Assert.AreEqual(@"C:\vault\root.sldasm", GetField(roundTrip, "RootModelPath"));
+            Assert.AreEqual("MAIN", GetField(roundTrip, "RootConfigurationName"));
+            Assert.AreEqual(@"C:\plans\plan.txt", GetField(roundTrip, "PlanPath"));
+            Assert.AreEqual(@"C:\logs\export.log", GetField(roundTrip, "LogPath"));
+
+            var roundTripOptions = (PublishOptions)GetField(roundTrip, "Options");
+            Assert.IsNotNull(roundTripOptions);
+            Assert.AreEqual(@"C:\out\deliverables", roundTripOptions.DeliverablesFolder);
+            Assert.IsTrue(roundTripOptions.ExportPly);
+            Assert.IsTrue(roundTripOptions.ExportStl);
+            Assert.IsTrue(roundTripOptions.OverwriteFiles);
+            Assert.IsTrue(roundTripOptions.TopLevelOnly);
+
+            IList roundTripQueue = (IList)GetField(roundTrip, "Queue");
+            Assert.AreEqual(2, roundTripQueue.Count);
+            Assert.AreEqual("done", GetField(roundTripQueue[0], "Status"));
+            Assert.AreEqual(2, GetField(roundTripQueue[0], "Attempts"));
+            IList roundTripOutputs = (IList)GetField(roundTripQueue[0], "Outputs");
+            Assert.AreEqual(1, roundTripOutputs.Count);
+            Assert.AreEqual("ply", GetField(roundTripOutputs[0], "Type"));
+            Assert.AreEqual(2048L, GetField(roundTripOutputs[0], "Bytes"));
+            Assert.AreEqual(true, GetField(roundTripOutputs[0], "Validated"));
+        }
+
+        [TestMethod]
+        public void PrepareSessionForResume_RevalidatesRunningDoneAndFailedItems()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string validPlyPath = Path.Combine(root, "done_valid.ply");
+            string invalidPlyPath = Path.Combine(root, "running_invalid.ply");
+
+            try
+            {
+                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
+                File.WriteAllText(invalidPlyPath, BuildHeaderOnlyPly(3), Encoding.ASCII);
+
+                object session = CreateExportSession("running");
+                IList queue = (IList)GetField(session, "Queue");
+                queue.Add(CreateExportSessionItem(@"C:\vault\done.sldprt", "A", "done",
+                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty)));
+                queue.Add(CreateExportSessionItem(@"C:\vault\running.sldprt", "B", "running",
+                    CreateExportedOutput("ply", invalidPlyPath, 0, false, string.Empty)));
+                queue.Add(CreateExportSessionItem(@"C:\vault\failed.sldprt", "C", "failed",
+                    CreateExportedOutput("ply", invalidPlyPath, 0, false, string.Empty)));
+
+                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
+
+                Assert.AreEqual("crashed_or_incomplete", GetField(session, "Status"));
+                Assert.AreEqual("done", GetField(queue[0], "Status"));
+                Assert.AreEqual(string.Empty, GetField(queue[0], "LastError"));
+                Assert.AreEqual("pending", GetField(queue[1], "Status"));
+                Assert.AreEqual("ply:header-only file", GetField(queue[1], "LastError"));
+                Assert.AreEqual("header-only file", GetField(queue[1], "PlyValidationReason"));
+                Assert.AreEqual("pending", GetField(queue[2], "Status"));
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
         private static object InvokePrivate(object target, string methodName, params object[] args)
         {
             MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
@@ -134,11 +391,34 @@ namespace TinyMRP.SolidWorksAddin.Tests
             return method.Invoke(target, args);
         }
 
+        private static bool InvokePrivateWithOutString(object target, string methodName, string path, out string reason)
+        {
+            object[] args = { path, null, null };
+            bool result = (bool)InvokePrivate(target, methodName, args);
+            reason = args[2] as string ?? string.Empty;
+            return result;
+        }
+
+        private static bool InvokePrivateValidateExportedOutput(object target, string type, string path, out string reason)
+        {
+            object[] args = { type, path, null, null };
+            bool result = (bool)InvokePrivate(target, "ValidateExportedOutput", args);
+            reason = args[3] as string ?? string.Empty;
+            return result;
+        }
+
         private static Type GetPlannedRefType()
         {
             Type plannedRefType = typeof(TinyMrpPublisher).GetNestedType("PlannedRef", BindingFlags.NonPublic);
             Assert.IsNotNull(plannedRefType);
             return plannedRefType;
+        }
+
+        private static Type GetNestedType(string nestedTypeName)
+        {
+            Type nestedType = typeof(TinyMrpPublisher).GetNestedType(nestedTypeName, BindingFlags.NonPublic);
+            Assert.IsNotNull(nestedType);
+            return nestedType;
         }
 
         private static object CreatePlannedRef(Type plannedRefType, string modelPath, string configurationName, bool isAssembly,
@@ -168,6 +448,65 @@ namespace TinyMRP.SolidWorksAddin.Tests
             field.SetValue(target, value);
         }
 
+        private static object CreateExportedOutput(string type, string path, long bytes, bool validated, string validationReason)
+        {
+            object output = Activator.CreateInstance(GetNestedType("ExportedOutputState"), true);
+            SetField(output, "Type", type);
+            SetField(output, "Path", path);
+            SetField(output, "Bytes", bytes);
+            SetField(output, "Validated", validated);
+            SetField(output, "ValidationReason", validationReason);
+            return output;
+        }
+
+        private static object CreateExportSessionItem(string modelPath, string configurationName, string status, params object[] outputs)
+        {
+            object item = Activator.CreateInstance(GetNestedType("ExportSessionItem"), true);
+            SetField(item, "ItemId", modelPath + "|" + configurationName);
+            SetField(item, "ModelPath", modelPath);
+            SetField(item, "ConfigurationName", configurationName);
+            SetField(item, "Status", status);
+
+            IList outputList = (IList)GetField(item, "Outputs");
+            foreach (object output in outputs)
+            {
+                outputList.Add(output);
+            }
+
+            return item;
+        }
+
+        private static object CreateExportSession(string status)
+        {
+            object session = Activator.CreateInstance(GetNestedType("ExportSessionState"), true);
+            SetField(session, "SchemaVersion", 1);
+            SetField(session, "SessionId", Guid.NewGuid().ToString("N"));
+            SetField(session, "CreatedUtc", DateTime.UtcNow.ToString("s"));
+            SetField(session, "UpdatedUtc", DateTime.UtcNow.ToString("s"));
+            SetField(session, "Status", status);
+            SetField(session, "RootModelPath", @"C:\vault\root.sldasm");
+            SetField(session, "RootConfigurationName", "MAIN");
+            SetField(session, "DeliverablesFolder", @"C:\out\deliverables");
+            SetField(session, "BomFolder", @"C:\out\bom");
+            SetField(session, "Options", new PublishOptions { ExportPly = true });
+            return session;
+        }
+
+        private static string CreateTempRoot()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "tinymrp_test_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            return root;
+        }
+
+        private static void DeleteDirectoryIfExists(string path)
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+            }
+        }
+
         private static string BuildAsciiStl()
         {
             return string.Join("\n", new[]
@@ -183,6 +522,54 @@ namespace TinyMRP.SolidWorksAddin.Tests
                 "endsolid test",
                 string.Empty
             });
+        }
+
+        private static string BuildHeaderOnlyPly(int vertexCount)
+        {
+            return string.Join("\n", new[]
+            {
+                "ply",
+                "format ascii 1.0",
+                "comment header-only test file",
+                "element vertex " + vertexCount,
+                "property float x",
+                "property float y",
+                "property float z",
+                "element face 1",
+                "property list uchar int vertex_indices",
+                "end_header",
+                string.Empty
+            });
+        }
+
+        private static string BuildValidAsciiPly()
+        {
+            string ply = string.Join("\n", new[]
+            {
+                "ply",
+                "format ascii 1.0",
+                "comment padded test file for minimum byte validation",
+                "comment another line to keep the sample above the mesh threshold",
+                "element vertex 3",
+                "property float x",
+                "property float y",
+                "property float z",
+                "element face 1",
+                "property list uchar int vertex_indices",
+                "end_header",
+                "0 0 0",
+                "1 0 0",
+                "0 1 0",
+                "3 0 1 2",
+                string.Empty
+            });
+
+            if (Encoding.ASCII.GetByteCount(ply) < 160)
+            {
+                ply += new string(' ', 160 - Encoding.ASCII.GetByteCount(ply));
+            }
+
+            return ply;
         }
     }
 }
