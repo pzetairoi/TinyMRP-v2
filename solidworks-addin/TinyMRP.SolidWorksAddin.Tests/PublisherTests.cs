@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -80,11 +81,91 @@ namespace TinyMRP.SolidWorksAddin.Tests
             }
         }
 
+        [TestMethod]
+        public void BuildTopLevelOnlyDeliverablesQueue_CreatesSingleRootEntry()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+
+            object queueObj = InvokePrivate(
+                publisher,
+                "BuildTopLevelOnlyDeliverablesQueue",
+                @"C:\vault\root.sldasm",
+                "MAIN",
+                true);
+
+            var queue = queueObj as IList;
+            Assert.IsNotNull(queue);
+            Assert.AreEqual(1, queue.Count);
+
+            object entry = queue[0];
+            Assert.AreEqual(@"C:\vault\root.sldasm", GetField(entry, "ModelPath"));
+            Assert.AreEqual("MAIN", GetField(entry, "ConfigurationName"));
+            Assert.AreEqual(true, GetField(entry, "IsAssembly"));
+            Assert.AreEqual(0, GetField(entry, "MaxDepth"));
+            Assert.AreEqual(0, GetField(entry, "SubtreeEstimate"));
+            Assert.AreEqual(true, GetField(entry, "IsRoot"));
+        }
+
+        [TestMethod]
+        public void SortDeliverablesQueue_OrdersPartsBeforeAssembliesAndRootLast()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            Type plannedRefType = GetPlannedRefType();
+            Type listType = typeof(List<>).MakeGenericType(plannedRefType);
+            var queue = (IList)Activator.CreateInstance(listType);
+
+            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\z_part.sldprt", "B", false, 3, 0, false));
+            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\a_part.sldprt", "A", false, 3, 0, false));
+            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\subassy.sldasm", "SUB", true, 4, 2, false));
+            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\root.sldasm", "ROOT", true, 0, 6, true));
+
+            InvokePrivate(publisher, "SortDeliverablesQueue", queue);
+
+            Assert.AreEqual(@"C:\vault\a_part.sldprt", GetField(queue[0], "ModelPath"));
+            Assert.AreEqual(@"C:\vault\z_part.sldprt", GetField(queue[1], "ModelPath"));
+            Assert.AreEqual(@"C:\vault\subassy.sldasm", GetField(queue[2], "ModelPath"));
+            Assert.AreEqual(@"C:\vault\root.sldasm", GetField(queue[3], "ModelPath"));
+        }
+
         private static object InvokePrivate(object target, string methodName, params object[] args)
         {
             MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.IsNotNull(method);
             return method.Invoke(target, args);
+        }
+
+        private static Type GetPlannedRefType()
+        {
+            Type plannedRefType = typeof(TinyMrpPublisher).GetNestedType("PlannedRef", BindingFlags.NonPublic);
+            Assert.IsNotNull(plannedRefType);
+            return plannedRefType;
+        }
+
+        private static object CreatePlannedRef(Type plannedRefType, string modelPath, string configurationName, bool isAssembly,
+            int maxDepth, int subtreeEstimate, bool isRoot)
+        {
+            object entry = Activator.CreateInstance(plannedRefType, true);
+            SetField(entry, "ModelPath", modelPath);
+            SetField(entry, "ConfigurationName", configurationName);
+            SetField(entry, "IsAssembly", isAssembly);
+            SetField(entry, "MaxDepth", maxDepth);
+            SetField(entry, "SubtreeEstimate", subtreeEstimate);
+            SetField(entry, "IsRoot", isRoot);
+            return entry;
+        }
+
+        private static object GetField(object target, string fieldName)
+        {
+            FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(field);
+            return field.GetValue(target);
+        }
+
+        private static void SetField(object target, string fieldName, object value)
+        {
+            FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);
+            Assert.IsNotNull(field);
+            field.SetValue(target, value);
         }
 
         private static string BuildAsciiStl()
