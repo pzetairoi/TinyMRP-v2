@@ -29,6 +29,22 @@ namespace TinyMRP.SolidWorksAddin.Services
         private const long MinPngBytes = 8 * 1024;
         private const long MinPdfBytes = 4 * 1024;
         private const long MinEdrawingBytes = 4 * 1024;
+        private const long MinGenericMeshBytes = 128;
+        private const long MinGenericCadBytes = 128;
+        private const int ExportSessionSchemaVersion = 1;
+        private const string ExportSessionStatusPlanned = "planned";
+        private const string ExportSessionStatusRunning = "running";
+        private const string ExportSessionStatusPauseRequested = "pause_requested";
+        private const string ExportSessionStatusPaused = "paused";
+        private const string ExportSessionStatusCancelled = "cancelled";
+        private const string ExportSessionStatusCompleted = "completed";
+        private const string ExportSessionStatusFailed = "failed";
+        private const string ExportSessionStatusCrashedOrIncomplete = "crashed_or_incomplete";
+        private const string ExportItemStatusPending = "pending";
+        private const string ExportItemStatusRunning = "running";
+        private const string ExportItemStatusDone = "done";
+        private const string ExportItemStatusFailed = "failed";
+        private const string ExportItemStatusSkipped = "skipped";
         private sealed class ModelEntry
         {
             public ModelDoc2 Model;
@@ -250,6 +266,50 @@ namespace TinyMRP.SolidWorksAddin.Services
             public int DwgFailDxf;
 
             public int FinalOpenDocs;
+        }
+
+        private sealed class ExportedOutputState
+        {
+            public string Type;
+            public string Path;
+            public long Bytes;
+            public bool Validated;
+            public string ValidationReason;
+        }
+
+        private sealed class ExportSessionItem
+        {
+            public string ItemId;
+            public string ModelPath;
+            public string ConfigurationName;
+            public bool IsAssembly;
+            public int MaxDepth;
+            public int SubtreeEstimate;
+            public bool IsRoot;
+            public string Status;
+            public string StartedUtc;
+            public string CompletedUtc;
+            public int Attempts;
+            public string LastError;
+            public string PlyValidationReason;
+            public List<ExportedOutputState> Outputs = new List<ExportedOutputState>();
+        }
+
+        private sealed class ExportSessionState
+        {
+            public int SchemaVersion;
+            public string SessionId;
+            public string CreatedUtc;
+            public string UpdatedUtc;
+            public string Status;
+            public string RootModelPath;
+            public string RootConfigurationName;
+            public string DeliverablesFolder;
+            public string BomFolder;
+            public PublishOptions Options;
+            public string PlanPath;
+            public string LogPath;
+            public List<ExportSessionItem> Queue = new List<ExportSessionItem>();
         }
 
         private sealed class UserPreferenceToggleScope : IDisposable
@@ -1114,11 +1174,14 @@ namespace TinyMRP.SolidWorksAddin.Services
         private readonly ISldWorks _swApp;
         private readonly TinyMrpConfig _config;
         private volatile bool _cancelRequested;
+        private volatile bool _pauseRequested;
         private readonly HashSet<string> _closeWarningOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _debugOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly object _sessionLock = new object();
         // Docs we explicitly opened with OpenDoc7 for batch exports (NOT the root or docs loaded only via assembly).
         private readonly HashSet<string> _explicitlyOpenedDocs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private ExportSummary _currentExportSummary;
+        private ExportSessionState _activeExportSession;
         private string _activeBatchRootTitle = string.Empty;
         private int _activeBatchRootDocType = 0;
 
@@ -1142,6 +1205,315 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private string UtcNowString()
+        {
+            return DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+        }
+
+        private PublishOptions ClonePublishOptions(PublishOptions options)
+        {
+            if (options == null)
+            {
+                return new PublishOptions();
+            }
+
+            return new PublishOptions
+            {
+                DeliverablesFolder = options.DeliverablesFolder,
+                BomFolder = options.BomFolder,
+                ExportPngModel = options.ExportPngModel,
+                ExportStep = options.ExportStep,
+                ExportEdrawing = options.ExportEdrawing,
+                Export3mf = options.Export3mf,
+                ExportPly = options.ExportPly,
+                ExportStl = options.ExportStl,
+                ExportPngDrawing = options.ExportPngDrawing,
+                ExportPdf = options.ExportPdf,
+                ExportDxf = options.ExportDxf,
+                ExportEdrawingDrawing = options.ExportEdrawingDrawing,
+                OverwriteFiles = options.OverwriteFiles,
+                TopLevelOnly = options.TopLevelOnly,
+                CreateUploadPack = options.CreateUploadPack,
+                UploadPackIncludeDeliverables = options.UploadPackIncludeDeliverables,
+                UploadPackIncludeExtras = options.UploadPackIncludeExtras
+            };
+        }
+
+        private ExportSessionItem CreateExportSessionItem(PlannedRef item)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+
+            return new ExportSessionItem
+            {
+                ItemId = BuildPlannedRefKey(item.ModelPath, item.ConfigurationName),
+                ModelPath = item.ModelPath ?? string.Empty,
+                ConfigurationName = item.ConfigurationName ?? string.Empty,
+                IsAssembly = item.IsAssembly,
+                MaxDepth = item.MaxDepth,
+                SubtreeEstimate = item.SubtreeEstimate,
+                IsRoot = item.IsRoot,
+                Status = ExportItemStatusPending
+            };
+        }
+
+        private ExportSessionState CreateExportSessionState(List<PlannedRef> queue, PublishOptions options, string rootModelPath,
+            string rootConfigName, string planPath, string logPath)
+        {
+            var state = new ExportSessionState
+            {
+                SchemaVersion = ExportSessionSchemaVersion,
+                SessionId = Guid.NewGuid().ToString("N"),
+                CreatedUtc = UtcNowString(),
+                UpdatedUtc = UtcNowString(),
+                Status = ExportSessionStatusPlanned,
+                RootModelPath = rootModelPath ?? string.Empty,
+                RootConfigurationName = rootConfigName ?? string.Empty,
+                DeliverablesFolder = options != null ? (options.DeliverablesFolder ?? string.Empty) : string.Empty,
+                BomFolder = options != null ? (options.BomFolder ?? string.Empty) : string.Empty,
+                Options = ClonePublishOptions(options),
+                PlanPath = planPath ?? string.Empty,
+                LogPath = logPath ?? string.Empty
+            };
+
+            if (queue != null)
+            {
+                foreach (PlannedRef item in queue)
+                {
+                    ExportSessionItem sessionItem = CreateExportSessionItem(item);
+                    if (sessionItem != null)
+                    {
+                        state.Queue.Add(sessionItem);
+                    }
+                }
+            }
+
+            return state;
+        }
+
+        private void SetActiveExportSession(ExportSessionState state)
+        {
+            lock (_sessionLock)
+            {
+                _activeExportSession = state;
+            }
+        }
+
+        private ExportSessionState GetActiveExportSession()
+        {
+            lock (_sessionLock)
+            {
+                return _activeExportSession;
+            }
+        }
+
+        private string GetExportSessionsDirectory()
+        {
+            string appData = System.Environment.GetFolderPath(System.Environment.SpecialFolder.ApplicationData);
+            return Path.Combine(appData, "TinyMRP", "export-sessions");
+        }
+
+        private string GetActiveExportSessionPath()
+        {
+            return Path.Combine(GetExportSessionsDirectory(), "active-export-session.json");
+        }
+
+        private string BuildArchivedExportSessionPath(string prefix)
+        {
+            string safePrefix = string.IsNullOrWhiteSpace(prefix) ? "session" : prefix.Trim();
+            string name = safePrefix + "-" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".json";
+            return Path.Combine(GetExportSessionsDirectory(), name);
+        }
+
+        private System.Web.Script.Serialization.JavaScriptSerializer CreateJsonSerializer()
+        {
+            var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+            try
+            {
+                serializer.MaxJsonLength = int.MaxValue;
+            }
+            catch
+            {
+                // ignore
+            }
+            return serializer;
+        }
+
+        private string SerializeExportSession(ExportSessionState state)
+        {
+            if (state == null)
+            {
+                return string.Empty;
+            }
+
+            return CreateJsonSerializer().Serialize(state);
+        }
+
+        private ExportSessionState DeserializeExportSession(string json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            try
+            {
+                return CreateJsonSerializer().Deserialize<ExportSessionState>(json);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void SaveExportSessionAtomic(ExportSessionState state, Action<string> errorLog)
+        {
+            if (state == null)
+            {
+                return;
+            }
+
+            try
+            {
+                state.UpdatedUtc = UtcNowString();
+                string dir = GetExportSessionsDirectory();
+                Directory.CreateDirectory(dir);
+
+                string finalPath = GetActiveExportSessionPath();
+                string tempPath = finalPath + ".tmp";
+                TextFileHelper.WriteAllTextUtf8NoBom(tempPath, SerializeExportSession(state));
+
+                if (File.Exists(finalPath))
+                {
+                    try
+                    {
+                        string backupPath = finalPath + ".bak";
+                        if (File.Exists(backupPath))
+                        {
+                            File.Delete(backupPath);
+                        }
+
+                        File.Replace(tempPath, finalPath, backupPath, true);
+                        if (File.Exists(backupPath))
+                        {
+                            File.Delete(backupPath);
+                        }
+                    }
+                    catch
+                    {
+                        if (File.Exists(finalPath))
+                        {
+                            File.Delete(finalPath);
+                        }
+
+                        File.Move(tempPath, finalPath);
+                    }
+                }
+                else
+                {
+                    File.Move(tempPath, finalPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "SESSION save failed: " + ex.Message);
+            }
+        }
+
+        private ExportSessionState LoadExportSession(string path, Action<string> errorLog)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                string json = File.ReadAllText(path, TextFileHelper.Utf8NoBom);
+                ExportSessionState state = DeserializeExportSession(json);
+                if (state == null)
+                {
+                    SafeLog(errorLog, "SESSION load failed: invalid json path=" + path);
+                    return null;
+                }
+
+                if (state.Queue == null)
+                {
+                    state.Queue = new List<ExportSessionItem>();
+                }
+
+                return state;
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "SESSION load failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private ExportSessionState LoadLatestIncompleteExportSession(Action<string> errorLog)
+        {
+            ExportSessionState state = LoadExportSession(GetActiveExportSessionPath(), errorLog);
+            if (state == null)
+            {
+                return null;
+            }
+
+            if (!IsSessionResumable(state.Status))
+            {
+                return null;
+            }
+
+            return state;
+        }
+
+        private bool IsSessionResumable(string status)
+        {
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                return true;
+            }
+
+            return !string.Equals(status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ArchiveCompletedExportSession(ExportSessionState state, Action<string> errorLog)
+        {
+            if (state == null)
+            {
+                return;
+            }
+
+            try
+            {
+                string activePath = GetActiveExportSessionPath();
+                if (!File.Exists(activePath))
+                {
+                    return;
+                }
+
+                string archivePath = BuildArchivedExportSessionPath("completed");
+                Directory.CreateDirectory(GetExportSessionsDirectory());
+                if (File.Exists(archivePath))
+                {
+                    File.Delete(archivePath);
+                }
+
+                File.Move(activePath, archivePath);
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "SESSION archive failed: " + ex.Message);
+            }
+        }
+
+        public bool HasIncompleteExportSession()
+        {
+            return LoadLatestIncompleteExportSession(null) != null;
+        }
+
         public void ProcessFiles(PublishOptions options, Action<string> log, Action<int, int> progress)
         {
             PublishOptions effective = NormalizeOptions(options);
@@ -1156,6 +1528,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             errorLog?.Invoke("START deliverables export");
 
             _currentExportSummary = new ExportSummary();
+            SetActiveExportSession(null);
 
             string BuildCompletionMessage(string statusLabel)
             {
@@ -1189,12 +1562,22 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
 
                 ResetCancel();
+                ResetPause();
                 _closeWarningOnce.Clear();
                 _debugOnce.Clear();
                 HashSet<string> uploadPackBases;
                 List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
                 string flatFile = TraverseModel(true, string.Empty, effective, log, null, progress, errorLog,
                     out uploadPackBases, out uploadPackExtras);
+
+                ExportSessionState activeSession = GetActiveExportSession();
+                if (activeSession != null &&
+                    string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase))
+                {
+                    Log(log, BuildCompletionMessage("Export paused"));
+                    return;
+                }
+
                 if (effective.CreateUploadPack)
                 {
                     try
@@ -1221,6 +1604,15 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
                 }
 
+                activeSession = GetActiveExportSession();
+                if (activeSession != null && IsSessionResumable(activeSession.Status))
+                {
+                    activeSession.Status = ExportSessionStatusCompleted;
+                    SaveExportSessionAtomic(activeSession, errorLog);
+                    ArchiveCompletedExportSession(activeSession, errorLog);
+                    SetActiveExportSession(null);
+                }
+
                 string completedLabel = "Export completed";
                 try
                 {
@@ -1244,10 +1636,27 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             catch (OperationCanceledException)
             {
+                ExportSessionState activeSession = GetActiveExportSession();
+                if (activeSession != null &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
+                {
+                    activeSession.Status = ExportSessionStatusCancelled;
+                    SaveExportSessionAtomic(activeSession, errorLog);
+                }
                 Log(log, BuildCompletionMessage("Export cancelled"));
             }
             catch (Exception ex)
             {
+                ExportSessionState activeSession = GetActiveExportSession();
+                if (activeSession != null &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
+                {
+                    activeSession.Status = ExportSessionStatusFailed;
+                    SaveExportSessionAtomic(activeSession, errorLog);
+                }
+
                 LogExportFailure(log, errorLog, "File creation failed: " + ex.Message);
                 if (ex is System.Runtime.InteropServices.COMException ||
                     (ex.InnerException is System.Runtime.InteropServices.COMException))
@@ -1300,10 +1709,215 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         // Reset cancel state so the UI button returns to its idle state.
                         ResetCancel();
+                        ResetPause();
                     }
                     catch
                     {
                         // ignore cancel-reset errors
+                    }
+
+                    _currentExportSummary = null;
+                }
+            }
+        }
+
+        private ExportRunLog OpenExportRunLog(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return CreateExportRunLog();
+            }
+
+            return new ExportRunLog(path);
+        }
+
+        public void ResumeLastExport(Action<string> log, Action<int, int> progress)
+        {
+            ExportSessionState session = LoadLatestIncompleteExportSession(null);
+            if (session == null)
+            {
+                throw new InvalidOperationException("No incomplete export session available.");
+            }
+
+            PublishOptions effective = NormalizeOptions(ClonePublishOptions(session.Options));
+            ExportRunLog runLog = OpenExportRunLog(session.LogPath);
+            Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
+            SetLastRunLogPath(runLog);
+            session.LogPath = runLog != null ? (runLog.Path ?? string.Empty) : (session.LogPath ?? string.Empty);
+            SetActiveExportSession(session);
+            errorLog?.Invoke("RESUME deliverables export session=" + (session.SessionId ?? string.Empty) +
+                             " status=" + (session.Status ?? string.Empty));
+
+            _currentExportSummary = new ExportSummary();
+
+            string BuildCompletionMessage(string statusLabel)
+            {
+                ExportSummary s = _currentExportSummary;
+                int ok = 0;
+                int fail = 0;
+                if (s != null)
+                {
+                    ok = s.ModelOk3mf + s.ModelOkStl + s.ModelOkPly + s.ModelOkStep + s.ModelOkEdraw + s.ModelOkPng +
+                         s.DwgOkPdf + s.DwgOkEdraw + s.DwgOkPng + s.DwgOkDxf;
+                    fail = s.ModelFail3mf + s.ModelFailStl + s.ModelFailPly + s.ModelFailStep + s.ModelFailEdraw + s.ModelFailPng +
+                           s.DwgFailPdf + s.DwgFailEdraw + s.DwgFailPng + s.DwgFailDxf;
+                }
+
+                return BuildRunLogMessage((statusLabel ?? "Export") + ": " + ok + " files created, " + fail + " failed.", runLog);
+            }
+
+            try
+            {
+                try
+                {
+                    HashSet<string> baselineIds = SnapshotOpenDocIds();
+                    _currentExportSummary.BaselineDocIds = baselineIds;
+                    _currentExportSummary.InitialOpenDocs = baselineIds.Count;
+                }
+                catch
+                {
+                    _currentExportSummary.BaselineDocIds = null;
+                    _currentExportSummary.InitialOpenDocs = 0;
+                }
+
+                ResetCancel();
+                ResetPause();
+                _closeWarningOnce.Clear();
+                _debugOnce.Clear();
+
+                PrepareSessionForResume(session, errorLog);
+                session.Status = ExportSessionStatusRunning;
+                SaveExportSessionAtomic(session, errorLog);
+
+                string deliverablesFolder = EnsureTrailingSlash(effective.DeliverablesFolder);
+                if (string.IsNullOrWhiteSpace(deliverablesFolder))
+                {
+                    throw new InvalidOperationException("Deliverables folder is empty.");
+                }
+
+                Directory.CreateDirectory(deliverablesFolder);
+                EnsureMediaFolders(deliverablesFolder);
+
+                var queue = new List<PlannedRef>();
+                if (session.Queue != null)
+                {
+                    for (int i = 0; i < session.Queue.Count; i++)
+                    {
+                        PlannedRef item = BuildPlannedRefFromSessionItem(session.Queue[i]);
+                        if (item != null)
+                        {
+                            queue.Add(item);
+                        }
+                    }
+                }
+
+                ProcessDeliverablesIsolated(
+                    queue,
+                    deliverablesFolder,
+                    effective,
+                    log,
+                    errorLog,
+                    progress,
+                    session.RootModelPath ?? string.Empty,
+                    session.RootConfigurationName ?? string.Empty,
+                    session);
+
+                ExportSessionState activeSession = GetActiveExportSession();
+                if (activeSession != null &&
+                    string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase))
+                {
+                    Log(log, BuildCompletionMessage("Export paused"));
+                    return;
+                }
+
+                if (activeSession != null)
+                {
+                    activeSession.Status = ExportSessionStatusCompleted;
+                    SaveExportSessionAtomic(activeSession, errorLog);
+                    ArchiveCompletedExportSession(activeSession, errorLog);
+                    SetActiveExportSession(null);
+                }
+
+                Log(log, BuildCompletionMessage("Export resumed and completed"));
+            }
+            catch (OperationCanceledException)
+            {
+                ExportSessionState activeSession = GetActiveExportSession();
+                if (activeSession != null &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
+                {
+                    activeSession.Status = ExportSessionStatusCancelled;
+                    SaveExportSessionAtomic(activeSession, errorLog);
+                }
+
+                Log(log, BuildCompletionMessage("Export cancelled"));
+            }
+            catch (Exception ex)
+            {
+                ExportSessionState activeSession = GetActiveExportSession();
+                if (activeSession != null &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
+                {
+                    activeSession.Status = ExportSessionStatusFailed;
+                    SaveExportSessionAtomic(activeSession, errorLog);
+                }
+
+                LogExportFailure(log, errorLog, "Resume failed: " + ex.Message);
+                if (ex is System.Runtime.InteropServices.COMException ||
+                    (ex.InnerException is System.Runtime.InteropServices.COMException))
+                {
+                    LogExceptionDetails(errorLog, "ResumeLastExport", ex);
+                }
+                Log(log, BuildCompletionMessage("Export resume failed"));
+            }
+            finally
+            {
+                try
+                {
+                    ExportSummary summary = _currentExportSummary;
+                    if (summary != null)
+                    {
+                        HashSet<string> finalIds = null;
+                        try
+                        {
+                            finalIds = SnapshotOpenDocIds();
+                            summary.FinalOpenDocs = finalIds.Count;
+                        }
+                        catch
+                        {
+                            finalIds = null;
+                            summary.FinalOpenDocs = 0;
+                        }
+
+                        summary.FinalPrivateMemoryBytes = GetPrivateMemoryBytes();
+                        WriteExportSummary(errorLog, summary, finalIds);
+                    }
+                }
+                catch
+                {
+                    // ignore summary errors
+                }
+                finally
+                {
+                    try
+                    {
+                        UpdateProgress(progress, 1, 1);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    try
+                    {
+                        ResetCancel();
+                        ResetPause();
+                    }
+                    catch
+                    {
+                        // ignore
                     }
 
                     _currentExportSummary = null;
@@ -2844,6 +3458,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                             }
 
                             string rootConfigName = swConf != null ? (swConf.Name ?? string.Empty) : string.Empty;
+                            ExportSessionState sessionState = CreateExportSessionState(
+                                plannedRefs,
+                                options,
+                                rootPathSnapshot,
+                                rootConfigName,
+                                planPath,
+                                LastRunLogPath);
+                            sessionState.Status = ExportSessionStatusPlanned;
+                            SetActiveExportSession(sessionState);
+                            SaveExportSessionAtomic(sessionState, errorLog);
                             List<ReopenDocInfo> cleanRoomReopen = null;
                             try
                             {
@@ -2858,7 +3482,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                                     errorLog,
                                     deliverablesProgress,
                                     rootPathSnapshot,
-                                    rootConfigName);
+                                    rootConfigName,
+                                    sessionState);
                             }
                             finally
                             {
@@ -3774,6 +4399,282 @@ namespace TinyMRP.SolidWorksAddin.Services
                     IsRoot = true
                 }
             };
+        }
+
+        private PlannedRef BuildPlannedRefFromSessionItem(ExportSessionItem item)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+
+            return new PlannedRef
+            {
+                ModelPath = item.ModelPath ?? string.Empty,
+                ConfigurationName = item.ConfigurationName ?? string.Empty,
+                IsAssembly = item.IsAssembly,
+                MaxDepth = item.MaxDepth,
+                SubtreeEstimate = item.SubtreeEstimate,
+                IsRoot = item.IsRoot
+            };
+        }
+
+        private ExportSessionItem FindSessionItem(ExportSessionState session, PlannedRef item)
+        {
+            if (session == null || session.Queue == null || item == null)
+            {
+                return null;
+            }
+
+            string id = BuildPlannedRefKey(item.ModelPath, item.ConfigurationName);
+            for (int i = 0; i < session.Queue.Count; i++)
+            {
+                ExportSessionItem candidate = session.Queue[i];
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(candidate.ItemId, id, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
+        }
+
+        private List<ExportedOutputState> BuildExpectedOutputsFromModel(ModelDoc2 model, string confName, string deliverablesFolder,
+            PublishOptions options, Action<string> errorLog)
+        {
+            var outputs = new List<ExportedOutputState>();
+            if (model == null || options == null)
+            {
+                return outputs;
+            }
+
+            string fileString = GetFileString(model, confName, errorLog);
+            if (string.IsNullOrWhiteSpace(fileString))
+            {
+                return outputs;
+            }
+
+            string modelPath = string.Empty;
+            string partNumber = string.Empty;
+            bool drawingExists = false;
+            try
+            {
+                modelPath = model.GetPathName() ?? string.Empty;
+            }
+            catch
+            {
+                modelPath = string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(modelPath))
+            {
+                try
+                {
+                    Configuration modelConf = model.GetConfigurationByName(confName) as Configuration;
+                    partNumber = BomPartNumber(modelConf, model, errorLog);
+                }
+                catch
+                {
+                    partNumber = string.Empty;
+                }
+
+                if (!string.IsNullOrWhiteSpace(partNumber))
+                {
+                    string drawingPath = OnlyFolder(modelPath) + partNumber + ".SLDDRW";
+                    drawingExists = File.Exists(drawingPath);
+                }
+            }
+
+            bool expectStep = options.ExportStep ||
+                              HasProcess(model, confName, "FOLDING") ||
+                              HasProcess(model, confName, "MACHINE") ||
+                              HasProcess(model, confName, "3D Laser");
+
+            if (options.ExportPngModel)
+            {
+                outputs.Add(new ExportedOutputState { Type = "png", Path = Path.Combine(deliverablesFolder, "png", fileString + ".png") });
+            }
+            if (expectStep)
+            {
+                outputs.Add(new ExportedOutputState { Type = "step", Path = Path.Combine(deliverablesFolder, "step", fileString + ".step") });
+            }
+            if (options.Export3mf)
+            {
+                outputs.Add(new ExportedOutputState { Type = "3mf", Path = Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf") });
+            }
+            if (options.ExportPly)
+            {
+                outputs.Add(new ExportedOutputState { Type = "ply", Path = Path.Combine(deliverablesFolder, "ply", fileString + ".ply") });
+            }
+            if (options.ExportStl)
+            {
+                outputs.Add(new ExportedOutputState { Type = "stl", Path = Path.Combine(deliverablesFolder, "stl", fileString + ".stl") });
+            }
+            if (options.ExportEdrawing)
+            {
+                string ext = model.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY ? ".easm" : ".eprt";
+                outputs.Add(new ExportedOutputState { Type = "edr", Path = Path.Combine(deliverablesFolder, "edr", fileString + ext) });
+            }
+            if (drawingExists && options.ExportPdf)
+            {
+                outputs.Add(new ExportedOutputState { Type = "pdf", Path = Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf") });
+            }
+            if (drawingExists && options.ExportDxf)
+            {
+                outputs.Add(new ExportedOutputState { Type = "dxf", Path = Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf") });
+            }
+            if (drawingExists && options.ExportPngDrawing)
+            {
+                outputs.Add(new ExportedOutputState { Type = "png", Path = Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png") });
+            }
+            if (drawingExists && options.ExportEdrawingDrawing)
+            {
+                outputs.Add(new ExportedOutputState { Type = "edrw", Path = Path.Combine(deliverablesFolder, "edr", fileString + ".edrw") });
+            }
+
+            return outputs;
+        }
+
+        private bool ValidateExpectedOutputs(List<ExportedOutputState> outputs, Action<string> errorLog, out string reason, out string plyReason)
+        {
+            reason = string.Empty;
+            plyReason = string.Empty;
+
+            if (outputs == null || outputs.Count == 0)
+            {
+                return false;
+            }
+
+            var failed = new List<string>();
+            foreach (ExportedOutputState output in outputs)
+            {
+                if (output == null)
+                {
+                    continue;
+                }
+
+                string outputReason;
+                bool valid = ValidateExportedOutput(output.Type, output.Path, errorLog, out outputReason);
+                output.Validated = valid;
+                output.ValidationReason = outputReason ?? string.Empty;
+                try
+                {
+                    output.Bytes = !string.IsNullOrWhiteSpace(output.Path) && File.Exists(output.Path)
+                        ? new FileInfo(output.Path).Length
+                        : 0;
+                }
+                catch
+                {
+                    output.Bytes = 0;
+                }
+
+                if (!valid)
+                {
+                    failed.Add((output.Type ?? string.Empty) + ":" + (outputReason ?? string.Empty));
+                    if (string.Equals(output.Type, "ply", StringComparison.OrdinalIgnoreCase))
+                    {
+                        plyReason = outputReason ?? string.Empty;
+                    }
+                }
+            }
+
+            if (failed.Count > 0)
+            {
+                reason = string.Join("; ", failed.ToArray());
+                return false;
+            }
+
+            return true;
+        }
+
+        private void PrepareSessionForResume(ExportSessionState session, Action<string> errorLog)
+        {
+            if (session == null || session.Queue == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < session.Queue.Count; i++)
+            {
+                ExportSessionItem item = session.Queue[i];
+                if (item == null)
+                {
+                    continue;
+                }
+
+                string status = item.Status ?? string.Empty;
+                if (string.Equals(status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(status, ExportItemStatusRunning, StringComparison.OrdinalIgnoreCase))
+                {
+                    string outputReason;
+                    string plyReason;
+                    bool valid = ValidateExpectedOutputs(item.Outputs, errorLog, out outputReason, out plyReason);
+                    if (valid)
+                    {
+                        item.Status = ExportItemStatusDone;
+                        item.LastError = string.Empty;
+                        item.PlyValidationReason = string.Empty;
+                    }
+                    else
+                    {
+                        item.Status = ExportItemStatusPending;
+                        item.LastError = outputReason ?? string.Empty;
+                        item.PlyValidationReason = plyReason ?? string.Empty;
+                    }
+                }
+                else if (string.Equals(status, ExportItemStatusFailed, StringComparison.OrdinalIgnoreCase))
+                {
+                    item.Status = ExportItemStatusPending;
+                }
+            }
+
+            if (string.Equals(session.Status, ExportSessionStatusRunning, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(session.Status, ExportSessionStatusPauseRequested, StringComparison.OrdinalIgnoreCase))
+            {
+                session.Status = ExportSessionStatusCrashedOrIncomplete;
+            }
+        }
+
+        private int CountCompletedSessionItems(ExportSessionState session)
+        {
+            if (session == null || session.Queue == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            for (int i = 0; i < session.Queue.Count; i++)
+            {
+                ExportSessionItem item = session.Queue[i];
+                if (item == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(item.Status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Status, ExportItemStatusSkipped, StringComparison.OrdinalIgnoreCase))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private bool IsItemAlreadyHandled(ExportSessionItem item)
+        {
+            if (item == null)
+            {
+                return false;
+            }
+
+            return string.Equals(item.Status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(item.Status, ExportItemStatusSkipped, StringComparison.OrdinalIgnoreCase);
         }
 
         private List<PlannedRef> PlanRefsForDeliverables(ModelDoc2 rootModel, Configuration rootConfig, Action<string> errorLog)
@@ -5753,8 +6654,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                                  options.OverwriteFiles);
 
             bool createPly = options.ExportPly &&
-                             ShouldExport(Path.Combine(deliverablesFolder, "ply", fileString + ".ply"),
-                                 options.OverwriteFiles);
+                             ShouldExportPlyOutput(Path.Combine(deliverablesFolder, "ply", fileString + ".ply"),
+                                 options.OverwriteFiles, null);
 
             bool createStl = options.ExportStl &&
                              ShouldExport(Path.Combine(deliverablesFolder, "stl", fileString + ".stl"),
@@ -7106,10 +8007,14 @@ namespace TinyMRP.SolidWorksAddin.Services
             Action<string> errorLog,
             Action<int, int> progress,
             string rootPath,
-            string rootConfigName)
+            string rootConfigName,
+            ExportSessionState sessionState)
         {
-            int total = queue != null ? queue.Count : 0;
-            UpdateProgress(progress, 0, total);
+            int total = sessionState != null && sessionState.Queue != null && sessionState.Queue.Count > 0
+                ? sessionState.Queue.Count
+                : (queue != null ? queue.Count : 0);
+            int processed = CountCompletedSessionItems(sessionState);
+            UpdateProgress(progress, processed, total);
 
             if (queue == null || queue.Count == 0)
             {
@@ -7154,6 +8059,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                 " keepSet=" + keepBase.Count +
                 " mem=" + GetPrivateMemoryBytes());
 
+            if (sessionState != null)
+            {
+                sessionState.Status = _pauseRequested ? ExportSessionStatusPauseRequested : ExportSessionStatusRunning;
+                SaveExportSessionAtomic(sessionState, errorLog);
+            }
+
             // Close the starting/root model so referenced model data can be released between items.
             string rootTitle = string.Empty;
             ModelDoc2 rootDoc = null;
@@ -7165,7 +8076,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 rootDoc = null;
             }
-            if (rootDoc == null)
+            if (rootDoc == null && string.IsNullOrWhiteSpace(rootPath))
             {
                 try
                 {
@@ -7232,13 +8143,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                         " openDocsBefore=" + SnapshotOpenDocIds().Count +
                         " mem=" + memoryBeforeRootClose);
 
-                    try
+                    if (rootDoc != null)
                     {
-                        ForceCloseDocNoSave(rootDoc, errorLog, "isolated-root-close");
-                    }
-                    catch
-                    {
-                        // ignore close errors; verification below will log warnings
+                        try
+                        {
+                            ForceCloseDocNoSave(rootDoc, errorLog, "isolated-root-close");
+                        }
+                        catch
+                        {
+                            // ignore close errors; verification below will log warnings
+                        }
                     }
 
                     bool stillOpen = false;
@@ -7325,14 +8239,20 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 int watchdogThreshold = baselineAfterRootClose + 3;
 
-                int processed = 0;
-
                 foreach (PlannedRef item in queue)
                 {
                     var itemTimer = System.Diagnostics.Stopwatch.StartNew();
                     string modelDesc = string.Empty;
                     ModelDoc2 model = null;
                     bool modelWasOpenBefore = false;
+                    ExportSessionItem sessionItem = FindSessionItem(sessionState, item);
+                    List<ExportedOutputState> expectedOutputs = null;
+                    string itemValidationReason = string.Empty;
+                    string itemPlyReason = string.Empty;
+                    bool itemValidated = false;
+                    bool itemWorkStarted = false;
+                    bool itemFailureCountedInSummary = false;
+                    bool shouldPauseAfterItem = false;
 
                     try
                     {
@@ -7345,15 +8265,42 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         modelDesc = (item.ModelPath ?? string.Empty) + "|" + (item.ConfigurationName ?? string.Empty);
 
+                        if (IsItemAlreadyHandled(sessionItem))
+                        {
+                            continue;
+                        }
+
+                        itemWorkStarted = true;
+
                         if (string.IsNullOrWhiteSpace(item.ModelPath))
                         {
                             SafeLog(errorLog, "SKIP: planned item has empty path: " + modelDesc);
+                            if (sessionItem != null)
+                            {
+                                sessionItem.Status = ExportItemStatusSkipped;
+                                sessionItem.CompletedUtc = UtcNowString();
+                                sessionItem.LastError = "empty path";
+                                SaveExportSessionAtomic(sessionState, errorLog);
+                            }
                             if (summary != null)
                             {
                                 summary.DeliverablePlansSkipped++;
                                 summary.DeliverableItemsSkipped++;
                             }
                             continue;
+                        }
+
+                        if (sessionItem != null)
+                        {
+                            sessionItem.Status = ExportItemStatusRunning;
+                            sessionItem.StartedUtc = UtcNowString();
+                            sessionItem.CompletedUtc = string.Empty;
+                            sessionItem.Attempts++;
+                            sessionItem.LastError = string.Empty;
+                            sessionItem.PlyValidationReason = string.Empty;
+                            sessionItem.Outputs = new List<ExportedOutputState>();
+                            sessionState.Status = _pauseRequested ? ExportSessionStatusPauseRequested : ExportSessionStatusRunning;
+                            SaveExportSessionAtomic(sessionState, errorLog);
                         }
 
                         SafeLog(errorLog,
@@ -7487,6 +8434,10 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         if (model == null)
                         {
+                            if (sessionItem != null && string.IsNullOrWhiteSpace(sessionItem.LastError))
+                            {
+                                sessionItem.LastError = "source model could not be opened";
+                            }
                             if (summary != null)
                             {
                                 summary.DeliverablePlansSkipped++;
@@ -7520,6 +8471,13 @@ namespace TinyMRP.SolidWorksAddin.Services
                         {
                             // ignore config switch errors
                         }
+
+                        expectedOutputs = BuildExpectedOutputsFromModel(
+                            model,
+                            item.ConfigurationName,
+                            deliverablesFolder,
+                            options,
+                            errorLog);
 
                         // Pre-export watchdog: if opening this model caused extra documents to open, close them now (keep baseline-visible + current model).
                         try
@@ -7570,17 +8528,38 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 LogExceptionDetails(errorLog, "IsolatedPlanBuild|" + modelDesc, ex);
                             }
 
+                            itemValidationReason = "deliverables planning failed: " + ex.Message;
+                            if (sessionItem != null)
+                            {
+                                sessionItem.LastError = itemValidationReason;
+                            }
                             plan = null;
                         }
 
                         bool hasExports = plan != null && (plan.HasModelExports() || plan.HasDrawingExports());
                         if (!hasExports)
                         {
-                            SafeLog(errorLog, "SKIP: no exports needed: " + modelDesc);
+                            bool hasExpectedOutputs = expectedOutputs != null && expectedOutputs.Count > 0;
+                            if (hasExpectedOutputs)
+                            {
+                                itemValidated = ValidateExpectedOutputs(expectedOutputs, errorLog, out itemValidationReason, out itemPlyReason);
+                                SafeLog(errorLog,
+                                    itemValidated
+                                        ? "SKIP: outputs already valid: " + modelDesc
+                                        : "SKIP validation failed for existing outputs: " + modelDesc + " reason=" + (itemValidationReason ?? string.Empty));
+                            }
+                            else
+                            {
+                                SafeLog(errorLog, "SKIP: no exports needed: " + modelDesc);
+                            }
+
                             if (summary != null)
                             {
                                 summary.DeliverablePlansSkipped++;
-                                summary.DeliverableItemsSkipped++;
+                                if (!hasExpectedOutputs)
+                                {
+                                    summary.DeliverableItemsSkipped++;
+                                }
                             }
                             continue;
                         }
@@ -7608,12 +8587,15 @@ namespace TinyMRP.SolidWorksAddin.Services
                             " openDocs=" + SnapshotOpenDocIds().Count +
                             " mem=" + GetPrivateMemoryBytes());
 
+                        itemValidated = ValidateExpectedOutputs(expectedOutputs, errorLog, out itemValidationReason, out itemPlyReason);
+
                         if (summary != null)
                         {
                             summary.DeliverablePlansExecuted++;
                             if (GetFailedExportCount(summary) > failCountBefore)
                             {
                                 summary.DeliverableItemsFailed++;
+                                itemFailureCountedInSummary = true;
                             }
                         }
                     }
@@ -7678,13 +8660,70 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         RunConservativeCleanupGc(errorLog, "isolated-post-item|" + (modelDesc ?? string.Empty));
 
+                        if (sessionItem != null && itemWorkStarted && !IsItemAlreadyHandled(sessionItem))
+                        {
+                            sessionItem.Outputs = expectedOutputs ?? new List<ExportedOutputState>();
+                            sessionItem.CompletedUtc = UtcNowString();
+
+                            if (expectedOutputs != null && expectedOutputs.Count > 0)
+                            {
+                                if (itemValidated)
+                                {
+                                    sessionItem.Status = ExportItemStatusDone;
+                                    sessionItem.LastError = string.Empty;
+                                    sessionItem.PlyValidationReason = string.Empty;
+                                }
+                                else
+                                {
+                                    sessionItem.Status = ExportItemStatusFailed;
+                                    sessionItem.LastError = !string.IsNullOrWhiteSpace(itemValidationReason)
+                                        ? itemValidationReason
+                                        : (sessionItem.LastError ?? "required outputs invalid");
+                                    sessionItem.PlyValidationReason = itemPlyReason ?? string.Empty;
+                                }
+                            }
+                            else if (string.Equals(sessionItem.Status, ExportItemStatusSkipped, StringComparison.OrdinalIgnoreCase))
+                            {
+                                // Already marked skipped.
+                            }
+                            else if (string.IsNullOrWhiteSpace(sessionItem.LastError))
+                            {
+                                sessionItem.Status = ExportItemStatusSkipped;
+                                sessionItem.LastError = "no required outputs";
+                            }
+                            else
+                            {
+                                sessionItem.Status = ExportItemStatusFailed;
+                            }
+                        }
+
+                        if (summary != null &&
+                            sessionItem != null &&
+                            string.Equals(sessionItem.Status, ExportItemStatusFailed, StringComparison.OrdinalIgnoreCase) &&
+                            !itemFailureCountedInSummary)
+                        {
+                            summary.DeliverableItemsFailed++;
+                            itemFailureCountedInSummary = true;
+                        }
+
+                        if (sessionState != null)
+                        {
+                            sessionState.Status = _pauseRequested
+                                ? ExportSessionStatusPauseRequested
+                                : ExportSessionStatusRunning;
+                            SaveExportSessionAtomic(sessionState, errorLog);
+                        }
+
                         itemTimer.Stop();
 
-                        processed++;
-                        UpdateProgress(progress, processed, total);
-                        if (summary != null)
+                        if (itemWorkStarted)
                         {
-                            summary.DeliverableItemsProcessed = processed;
+                            processed++;
+                            UpdateProgress(progress, processed, total);
+                            if (summary != null)
+                            {
+                                summary.DeliverableItemsProcessed = processed;
+                            }
                         }
 
                         SafeLog(errorLog,
@@ -7693,6 +8732,23 @@ namespace TinyMRP.SolidWorksAddin.Services
                             " openDocs=" + SnapshotOpenDocIds().Count +
                             " visibleDocs=" + GetOpenVisibleDocumentIds().Count +
                             " mem=" + GetPrivateMemoryBytes());
+
+                        if (_pauseRequested && itemWorkStarted)
+                        {
+                            if (sessionState != null)
+                            {
+                                sessionState.Status = ExportSessionStatusPaused;
+                                SaveExportSessionAtomic(sessionState, errorLog);
+                            }
+
+                            Log(log, "Export paused after item " + processed + "/" + total + ". Resume available.");
+                            shouldPauseAfterItem = true;
+                        }
+                    }
+
+                    if (shouldPauseAfterItem)
+                    {
+                        return;
                     }
                 }
             }
@@ -8615,6 +9671,467 @@ namespace TinyMRP.SolidWorksAddin.Services
             return overwrite || !File.Exists(path);
         }
 
+        private bool ShouldExportPlyOutput(string path, bool overwrite, Action<string> errorLog)
+        {
+            if (overwrite || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return true;
+            }
+
+            string reason;
+            bool valid = IsValidPlyFile(path, errorLog, out reason);
+            if (!valid)
+            {
+                SafeLog(errorLog, "PLY existing invalid, regenerating: " + path + " reason=" + (reason ?? string.Empty));
+            }
+
+            return !valid;
+        }
+
+        private long WaitForFileStable(string path, int timeoutMs, Action<string> errorLog)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return 0;
+            }
+
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(250, timeoutMs));
+            long lastSize = -1;
+            int stableChecks = 0;
+
+            while (DateTime.UtcNow <= deadline)
+            {
+                YieldAndCheckCancel();
+
+                long size = 0;
+                bool exists = false;
+                try
+                {
+                    exists = File.Exists(path);
+                    if (exists)
+                    {
+                        size = new FileInfo(path).Length;
+                    }
+                }
+                catch
+                {
+                    exists = false;
+                    size = 0;
+                }
+
+                if (exists)
+                {
+                    if (size == lastSize && size > 0)
+                    {
+                        stableChecks++;
+                        if (stableChecks >= 3)
+                        {
+                            return size;
+                        }
+                    }
+                    else
+                    {
+                        stableChecks = 0;
+                        lastSize = size;
+                    }
+                }
+
+                try
+                {
+                    System.Threading.Thread.Sleep(200);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            SafeLog(errorLog, "WAIT stable timeout: path=" + path + " size=" + lastSize);
+            return Math.Max(0, lastSize);
+        }
+
+        private bool ValidateExportedOutput(string type, string path, Action<string> errorLog, out string reason)
+        {
+            reason = string.Empty;
+            string normalizedType = (type ?? string.Empty).Trim().ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                reason = "missing file";
+                return false;
+            }
+
+            long bytes = 0;
+            try
+            {
+                bytes = new FileInfo(path).Length;
+            }
+            catch
+            {
+                bytes = 0;
+            }
+
+            if (normalizedType == "ply")
+            {
+                return IsValidPlyFile(path, errorLog, out reason);
+            }
+
+            if (normalizedType == "pdf")
+            {
+                if (bytes < MinPdfBytes)
+                {
+                    reason = "file too small";
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (normalizedType == "png")
+            {
+                if (bytes < MinPngBytes)
+                {
+                    reason = "file too small";
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (normalizedType == "edr" || normalizedType == "edrw" || normalizedType == "easm" || normalizedType == "eprt")
+            {
+                if (bytes < MinEdrawingBytes)
+                {
+                    reason = "file too small";
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (normalizedType == "stl" || normalizedType == "dxf")
+            {
+                if (bytes < MinGenericMeshBytes)
+                {
+                    reason = "file too small";
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (normalizedType == "step" || normalizedType == "3mf")
+            {
+                if (bytes < MinGenericCadBytes)
+                {
+                    reason = "file too small";
+                    return false;
+                }
+
+                return true;
+            }
+
+            if (bytes <= 0)
+            {
+                reason = "empty file";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool IsValidPlyFile(string path, Action<string> errorLog, out string reason)
+        {
+            reason = string.Empty;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                reason = "missing file";
+                return false;
+            }
+
+            long length = 0;
+            try
+            {
+                length = new FileInfo(path).Length;
+            }
+            catch
+            {
+                length = 0;
+            }
+
+            if (length <= 0)
+            {
+                reason = "empty file";
+                return false;
+            }
+
+            byte[] headerBytes;
+            int headerRead = 0;
+            try
+            {
+                int headerBufferLength = (int)Math.Min(length, 64 * 1024);
+                headerBytes = new byte[headerBufferLength];
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    headerRead = stream.Read(headerBytes, 0, headerBytes.Length);
+                }
+            }
+            catch (Exception ex)
+            {
+                reason = "read failed: " + ex.Message;
+                return false;
+            }
+
+            if (headerRead <= 0)
+            {
+                reason = "read failed";
+                return false;
+            }
+
+            string ascii = Encoding.ASCII.GetString(headerBytes, 0, headerRead);
+            int endHeaderIndex = ascii.IndexOf("end_header", StringComparison.Ordinal);
+            if (endHeaderIndex < 0)
+            {
+                reason = "missing end_header";
+                return false;
+            }
+
+            int lineEndIndex = ascii.IndexOf('\n', endHeaderIndex);
+            if (lineEndIndex < 0)
+            {
+                lineEndIndex = endHeaderIndex + "end_header".Length;
+            }
+
+            int headerLength = lineEndIndex + 1;
+            if (headerLength > headerRead)
+            {
+                headerLength = headerRead;
+            }
+
+            string headerText = ascii.Substring(0, Math.Min(headerLength, ascii.Length));
+            string[] lines = headerText.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length == 0 || !lines[0].TrimStart().StartsWith("ply", StringComparison.OrdinalIgnoreCase))
+            {
+                reason = "first line does not start with ply";
+                return false;
+            }
+
+            int vertexCount = -1;
+            int faceCount = -1;
+            bool binaryFormat = false;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = (lines[i] ?? string.Empty).Trim();
+                if (line.StartsWith("format", StringComparison.OrdinalIgnoreCase) &&
+                    line.IndexOf("binary", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    binaryFormat = true;
+                }
+
+                if (line.StartsWith("element vertex", StringComparison.OrdinalIgnoreCase))
+                {
+                    string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    int parsed;
+                    if (parts.Length >= 3 && int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
+                    {
+                        vertexCount = parsed;
+                    }
+                }
+                else if (line.StartsWith("element face", StringComparison.OrdinalIgnoreCase))
+                {
+                    string[] parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    int parsed;
+                    if (parts.Length >= 3 && int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
+                    {
+                        faceCount = parsed;
+                    }
+                }
+            }
+
+            if (vertexCount <= 0)
+            {
+                reason = vertexCount == 0 ? "header has zero vertices" : "missing element vertex";
+                return false;
+            }
+
+            long bodyLength = length - headerLength;
+            if (bodyLength <= 0)
+            {
+                reason = "header-only file";
+                return false;
+            }
+
+            if (binaryFormat)
+            {
+                long minExpectedBody = Math.Max(16L, vertexCount * 12L);
+                if (faceCount > 0)
+                {
+                    minExpectedBody += faceCount * 4L;
+                }
+
+                if (bodyLength < minExpectedBody)
+                {
+                    reason = "no meaningful body after end_header";
+                    return false;
+                }
+            }
+            else
+            {
+                string bodyText = ascii.Length > headerLength
+                    ? ascii.Substring(headerLength).Trim()
+                    : string.Empty;
+
+                if (string.IsNullOrWhiteSpace(bodyText) && bodyLength > 0)
+                {
+                    try
+                    {
+                        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                        {
+                            stream.Position = headerLength;
+                            byte[] bodyBuffer = new byte[(int)Math.Min(bodyLength, 512L)];
+                            int bodyRead = stream.Read(bodyBuffer, 0, bodyBuffer.Length);
+                            bodyText = bodyRead > 0
+                                ? Encoding.ASCII.GetString(bodyBuffer, 0, bodyRead).Trim()
+                                : string.Empty;
+                        }
+                    }
+                    catch
+                    {
+                        bodyText = string.Empty;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(bodyText))
+                {
+                    reason = "no meaningful body after end_header";
+                    return false;
+                }
+            }
+
+            if (length < MinGenericMeshBytes)
+            {
+                reason = "file too small";
+                return false;
+            }
+
+            return true;
+        }
+
+        private string BuildUniqueTempFilePath(string directory, string fileString, string extension)
+        {
+            string safeDirectory = !string.IsNullOrWhiteSpace(directory) ? directory : Path.GetTempPath();
+            Directory.CreateDirectory(safeDirectory);
+
+            string baseName = string.IsNullOrWhiteSpace(fileString) ? "export" : fileString;
+            string suffix = string.IsNullOrWhiteSpace(extension) ? ".tmp" : extension;
+            if (!suffix.StartsWith(".", StringComparison.Ordinal))
+            {
+                suffix = "." + suffix;
+            }
+
+            return Path.Combine(safeDirectory, baseName + "_" + Guid.NewGuid().ToString("N") + ".tmp" + suffix);
+        }
+
+        private string QuarantineInvalidExistingFile(string path, string reason, Action<string> errorLog)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                string badPath = path + ".bad";
+                if (File.Exists(badPath))
+                {
+                    File.Delete(badPath);
+                }
+
+                File.Move(path, badPath);
+                SafeLog(errorLog,
+                    "OUTPUT quarantined invalid file: path=" + path +
+                    " badPath=" + badPath +
+                    " reason=" + (reason ?? string.Empty));
+                return badPath;
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "OUTPUT quarantine failed: path=" + path + " (" + ex.Message + ")");
+                return string.Empty;
+            }
+        }
+
+        private bool PromoteTempFileToFinal(string tempPath, string finalPath, Action<string> errorLog)
+        {
+            if (string.IsNullOrWhiteSpace(tempPath) || string.IsNullOrWhiteSpace(finalPath) || !File.Exists(tempPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                string dir = Path.GetDirectoryName(finalPath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                if (File.Exists(finalPath))
+                {
+                    try
+                    {
+                        string backupPath = finalPath + ".replacebak";
+                        if (File.Exists(backupPath))
+                        {
+                            File.Delete(backupPath);
+                        }
+
+                        File.Replace(tempPath, finalPath, backupPath, true);
+                        if (File.Exists(backupPath))
+                        {
+                            File.Delete(backupPath);
+                        }
+                    }
+                    catch
+                    {
+                        File.Delete(finalPath);
+                        File.Move(tempPath, finalPath);
+                    }
+                }
+                else
+                {
+                    File.Move(tempPath, finalPath);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "OUTPUT promote failed: temp=" + tempPath + " final=" + finalPath + " (" + ex.Message + ")");
+                return false;
+            }
+        }
+
+        private void TryDeleteFileQuietly(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
+                // ignore cleanup errors
+            }
+        }
+
         private void ModelPublish(ModelDoc2 model, string confName, string fileString, string deliverablesFolder,
             bool png, bool step, bool edr, bool threeMf, bool ply, bool stl, Action<string> log, Action<string> errorLog)
         {
@@ -8663,14 +10180,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                 ModelView view = null;
                 bool prevGraphicsUpdate = true;
                 ExportActivationScope activation = null;
+                bool modelVisibleForExport = false;
 
                 ExportSummary summary = _currentExportSummary;
 
                 // Model exports generally do not require activating the document. However, view-dependent PNG
                 // export frequently requires the target model to be ACTIVE to avoid blank captures.
+                // PLY export for assemblies is also more reliable when the current isolated item is active/visible.
                 try
                 {
-                    if (png)
+                    if (png || ply)
                     {
                         string modelTitle = string.Empty;
                         try
@@ -8691,6 +10210,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                         {
                             // Ensure the model is visible while capturing; activation alone may not force a window refresh.
                             model.Visible = true;
+                            modelVisibleForExport = true;
                         }
                         catch
                         {
@@ -8702,6 +10222,45 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     TryShowConfiguration(model, confName);
                     YieldAndCheckCancel();
+
+                    if (ply)
+                    {
+                        try
+                        {
+                            model.ForceRebuild3(false);
+                        }
+                        catch
+                        {
+                            // ignore rebuild errors
+                        }
+
+                        try
+                        {
+                            model.GraphicsRedraw2();
+                        }
+                        catch
+                        {
+                            // ignore redraw errors
+                        }
+
+                        try
+                        {
+                            System.Windows.Forms.Application.DoEvents();
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+
+                        try
+                        {
+                            System.Threading.Thread.Sleep(50);
+                        }
+                        catch
+                        {
+                            // ignore
+                        }
+                    }
 
                     if (png)
                     {
@@ -8808,85 +10367,177 @@ namespace TinyMRP.SolidWorksAddin.Services
                     if (ply)
                     {
                         var t = System.Diagnostics.Stopwatch.StartNew();
-                        bool viaStlConversion = false;
                         if (summary != null)
                         {
                             summary.ModelAttemptPly++;
                         }
 
                         string plyPath = Path.Combine(deliverablesFolder, "ply", fileString + ".ply");
-                        errors = 0;
-                        warnings = 0;
+                        string tempPlyPath = BuildUniqueTempFilePath(Path.Combine(deliverablesFolder, "ply"), fileString, ".ply");
+                        string tempFallbackPlyPath = BuildUniqueTempFilePath(Path.Combine(deliverablesFolder, "ply"), fileString, ".ply");
+                        string tempStl = string.Empty;
+                        string quarantinedExisting = string.Empty;
                         string activeBefore = ActiveDocTitle();
-                        bool plyExported = model.Extension.SaveAs(plyPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        plyExported = plyExported && FileBytes(plyPath) > 0;
+                        bool directSaveOk = false;
+                        bool directValid = false;
+                        bool fallbackAttempted = false;
+                        bool fallbackValid = false;
+                        bool finalValid = false;
+                        long directBytes = 0;
+                        string directInvalidReason = string.Empty;
+                        string fallbackInvalidReason = string.Empty;
+                        string fallbackStlPath = string.Empty;
 
-                        if (!plyExported)
+                        try
                         {
-                            YieldAndCheckCancel();
-                            viaStlConversion = true;
-
-                            string sourceStl = stlExported ? stlPath : string.Empty;
-                            string tempStl = string.Empty;
-
-                            if (string.IsNullOrWhiteSpace(sourceStl))
+                            if (File.Exists(plyPath))
                             {
-                                tempStl = Path.Combine(Path.GetTempPath(),
-                                    fileString + "_" + Guid.NewGuid().ToString("N") + ".stl");
-                                errors = 0;
-                                warnings = 0;
-                                bool tempOk = model.Extension.SaveAs(tempStl, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                                if (tempOk && FileBytes(tempStl) > 0)
+                                string existingReason;
+                                if (!IsValidPlyFile(plyPath, errorLog, out existingReason))
                                 {
-                                    sourceStl = tempStl;
+                                    quarantinedExisting = QuarantineInvalidExistingFile(plyPath, existingReason, errorLog);
                                 }
                             }
 
-                            YieldAndCheckCancel();
-
-                            if (!string.IsNullOrWhiteSpace(sourceStl) && File.Exists(sourceStl))
+                            errors = 0;
+                            warnings = 0;
+                            directSaveOk = model.Extension.SaveAs(tempPlyPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                            directBytes = WaitForFileStable(tempPlyPath, 8000, errorLog);
+                            directValid = directSaveOk && IsValidPlyFile(tempPlyPath, errorLog, out directInvalidReason);
+                            if (!directValid && string.IsNullOrWhiteSpace(directInvalidReason))
                             {
-                                if (!TryConvertStlToPly(sourceStl, plyPath))
-                                {
-                                    LogExportFailure(log, errorLog, "PLY export failed: STL conversion failed.");
-                                }
-                            }
-                            else
-                            {
-                                LogExportFailure(log, errorLog, "PLY export failed: STL source unavailable.");
+                                directInvalidReason = directSaveOk ? "invalid PLY output" : "SaveAs returned false";
                             }
 
-                            if (!string.IsNullOrWhiteSpace(tempStl))
+                            if (!directValid)
                             {
-                                try
+                                SafeLog(errorLog,
+                                    "PLY direct invalid: " + (directInvalidReason ?? string.Empty) +
+                                    " path=" + tempPlyPath +
+                                    " bytes=" + directBytes);
+                                TryDeleteFileQuietly(tempPlyPath);
+
+                                YieldAndCheckCancel();
+                                fallbackAttempted = true;
+                                fallbackStlPath = stlExported ? stlPath : string.Empty;
+
+                                if (string.IsNullOrWhiteSpace(fallbackStlPath))
                                 {
-                                    File.Delete(tempStl);
+                                    tempStl = BuildUniqueTempFilePath(Path.GetTempPath(), fileString, ".stl");
+                                    errors = 0;
+                                    warnings = 0;
+                                    bool tempStlOk = model.Extension.SaveAs(tempStl, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                                    long tempStlBytes = WaitForFileStable(tempStl, 8000, errorLog);
+                                    string stlReason = string.Empty;
+                                    if (tempStlOk && ValidateExportedOutput("stl", tempStl, errorLog, out stlReason))
+                                    {
+                                        fallbackStlPath = tempStl;
+                                    }
+                                    else
+                                    {
+                                        fallbackInvalidReason = "temporary STL invalid: " + (stlReason ?? string.Empty) +
+                                            " bytes=" + tempStlBytes;
+                                    }
                                 }
-                                catch
+
+                                if (!string.IsNullOrWhiteSpace(fallbackStlPath) && File.Exists(fallbackStlPath))
                                 {
-                                    // ignore cleanup errors
+                                    if (TryConvertStlToPly(fallbackStlPath, tempFallbackPlyPath))
+                                    {
+                                        WaitForFileStable(tempFallbackPlyPath, 8000, errorLog);
+                                        fallbackValid = IsValidPlyFile(tempFallbackPlyPath, errorLog, out fallbackInvalidReason);
+                                        if (fallbackValid)
+                                        {
+                                            SafeLog(errorLog, "PLY fallback via STL ok path=" + tempFallbackPlyPath);
+                                        }
+                                        else
+                                        {
+                                            SafeLog(errorLog, "PLY fallback invalid: " + (fallbackInvalidReason ?? string.Empty));
+                                            TryDeleteFileQuietly(tempFallbackPlyPath);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        fallbackInvalidReason = "STL conversion failed";
+                                    }
                                 }
+                                else if (string.IsNullOrWhiteSpace(fallbackInvalidReason))
+                                {
+                                    fallbackInvalidReason = "STL source unavailable";
+                                }
+                            }
+
+                            if (directValid)
+                            {
+                                PromoteTempFileToFinal(tempPlyPath, plyPath, errorLog);
+                            }
+                            else if (fallbackValid)
+                            {
+                                PromoteTempFileToFinal(tempFallbackPlyPath, plyPath, errorLog);
+                            }
+
+                            string finalInvalidReason;
+                            finalValid = IsValidPlyFile(plyPath, errorLog, out finalInvalidReason);
+                            if (!finalValid && string.IsNullOrWhiteSpace(fallbackInvalidReason))
+                            {
+                                fallbackInvalidReason = string.IsNullOrWhiteSpace(finalInvalidReason)
+                                    ? "final PLY validation failed"
+                                    : finalInvalidReason;
+                            }
+                        }
+                        finally
+                        {
+                            if (!string.IsNullOrWhiteSpace(tempStl) &&
+                                string.Equals(tempStl, fallbackStlPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                fallbackStlPath = tempStl;
+                            }
+
+                            if (!string.Equals(tempPlyPath, plyPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                TryDeleteFileQuietly(tempPlyPath);
+                            }
+
+                            if (!string.Equals(tempFallbackPlyPath, plyPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                TryDeleteFileQuietly(tempFallbackPlyPath);
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(tempStl) &&
+                                !string.Equals(tempStl, stlPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                TryDeleteFileQuietly(tempStl);
                             }
                         }
 
                         long bytes = FileBytes(plyPath);
-                        bool plyOk = bytes > 0;
                         t.Stop();
                         SafeLog(errorLog,
                             "MODEL PLY ms=" + t.ElapsedMilliseconds +
-                            " ok=" + plyOk +
+                            " ok=" + finalValid +
+                            " directSaveOk=" + directSaveOk +
+                            " directValid=" + directValid +
+                            " directInvalidReason=" + (directInvalidReason ?? string.Empty) +
+                            " directBytes=" + directBytes +
+                            " fallbackAttempted=" + fallbackAttempted +
+                            " fallbackStlPath=" + (fallbackStlPath ?? string.Empty) +
+                            " fallbackValid=" + fallbackValid +
+                            " fallbackInvalidReason=" + (fallbackInvalidReason ?? string.Empty) +
+                            " finalValid=" + finalValid +
+                            " finalBytes=" + bytes +
+                            " activated=" + (activation != null && activation.Activated) +
+                            " visibleDuringExport=" + modelVisibleForExport +
                             " activeBefore=" + activeBefore +
                             " activeAfter=" + ActiveDocTitle() +
                             " errors=" + errors +
                             " warnings=" + warnings +
-                            " bytes=" + bytes +
-                            " viaStl=" + viaStlConversion +
+                            " quarantinedExisting=" + (quarantinedExisting ?? string.Empty) +
                             " path=" + plyPath);
                         if (summary != null)
                         {
-                            if (plyOk)
+                            if (finalValid)
                             {
                                 summary.ModelOkPly++;
                             }
@@ -8896,9 +10547,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                             }
                         }
 
-                        if (!plyOk)
+                        if (!finalValid)
                         {
-                            LogExportFailure(log, errorLog, "PLY export failed: " + plyPath);
+                            LogExportFailure(log, errorLog,
+                                "PLY export failed: direct invalid and STL fallback failed. final=" + plyPath +
+                                " directReason=" + (directInvalidReason ?? string.Empty) +
+                                " fallbackReason=" + (fallbackInvalidReason ?? string.Empty));
                         }
                     }
                     YieldAndCheckCancel();
@@ -12046,9 +13700,19 @@ namespace TinyMRP.SolidWorksAddin.Services
             _cancelRequested = true;
         }
 
+        public void RequestPause()
+        {
+            _pauseRequested = true;
+        }
+
         private void ResetCancel()
         {
             _cancelRequested = false;
+        }
+
+        private void ResetPause()
+        {
+            _pauseRequested = false;
         }
 
         private void ThrowIfCancelled()

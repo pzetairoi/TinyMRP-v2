@@ -50,6 +50,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Label _bomProgressLabel;
         private Label _actionStatusLabel;
         private Button _cancelButton;
+        private Button _pauseAfterItemButton;
+        private Button _resumeLastExportButton;
         private LinkLabel _openLogLink;
         private string _lastRunLogPath = string.Empty;
         private ProgressBar _toolsProgressBar;
@@ -389,6 +391,10 @@ namespace TinyMRP.SolidWorksAddin.UI
             _actionStatusLabel = new Label { AutoSize = true, Text = "" };
             _cancelButton = new Button { Text = "Cancel current task", AutoSize = true };
             _cancelButton.Click += OnCancelCurrentTask;
+            _pauseAfterItemButton = new Button { Text = "Pause after current item", AutoSize = true };
+            _pauseAfterItemButton.Click += OnPauseAfterCurrentItem;
+            _resumeLastExportButton = new Button { Text = "Resume last export", AutoSize = true };
+            _resumeLastExportButton.Click += OnResumeLastExport;
             _openLogLink = new LinkLabel { AutoSize = true, Text = "Open last run log", Visible = false };
             _openLogLink.LinkClicked += (_, __) => TryOpenLastRunLog();
             var progressWrap = new FlowLayoutPanel
@@ -401,6 +407,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             progressWrap.Controls.Add(progressLayout);
             progressWrap.Controls.Add(_actionStatusLabel);
             progressWrap.Controls.Add(_cancelButton);
+            progressWrap.Controls.Add(_pauseAfterItemButton);
+            progressWrap.Controls.Add(_resumeLastExportButton);
             progressWrap.Controls.Add(_openLogLink);
             AddSection(panel, CreateGroupBox("Progress", progressWrap));
 
@@ -2138,6 +2146,30 @@ namespace TinyMRP.SolidWorksAddin.UI
             // Keep the final status/progress from the publisher (includes per-run log path).
         }
 
+        private void OnResumeLastExport(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                MessageBox.Show("Publisher is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!publisher.HasIncompleteExportSession())
+            {
+                MessageBox.Show("No incomplete export session was found.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
+            SetStatus("Resuming last export...");
+            UpdateRunLogLink(string.Empty);
+            publisher.ResumeLastExport(Log, UpdatePublishProgress);
+            UpdateRunLogLink(publisher.LastRunLogPath);
+        }
+
         private void OnCreateUploadPack(object sender, EventArgs e)
         {
             TinyMrpPublisher publisher = AddinContext.Publisher;
@@ -2249,6 +2281,18 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             publisher.RequestCancel();
             SetStatus("Cancel requested...");
+        }
+
+        private void OnPauseAfterCurrentItem(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                return;
+            }
+
+            publisher.RequestPause();
+            SetStatus("Pause requested after current item...");
         }
 
         private void OnFreeze(bool freeze)
