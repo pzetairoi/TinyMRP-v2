@@ -8,6 +8,9 @@ using System.Text.RegularExpressions;
 using System.Globalization;
 using SolidWorks.Interop.sldworks;
 using SolidWorks.Interop.swconst;
+using System.Linq;
+
+
 
 namespace TinyMRP.SolidWorksAddin.Services
 {
@@ -3850,91 +3853,488 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private bool CloseTempAssemblyNoSaveNoPrompt(ModelDoc2 tempAssembly, Action<string> errorLog, string context)
+       private bool CloseTempAssemblyNoSaveNoPrompt(ModelDoc2 tempAssembly, Action<string> errorLog, string context)
+{
+    if (tempAssembly == null)
+    {
+        return true;
+    }
+
+    string contextText = context ?? string.Empty;
+
+    string title = string.Empty;
+    string normalizedTitle = string.Empty;
+    string path = string.Empty;
+    string fileName = string.Empty;
+    bool dirtyBeforeClose = false;
+
+    try
+    {
+        title = tempAssembly.GetTitle() ?? string.Empty;
+    }
+    catch
+    {
+        title = string.Empty;
+    }
+
+    try
+    {
+        normalizedTitle = NormalizeDocTitleForClose(title) ?? string.Empty;
+    }
+    catch
+    {
+        normalizedTitle = string.Empty;
+    }
+
+    try
+    {
+        path = tempAssembly.GetPathName() ?? string.Empty;
+    }
+    catch
+    {
+        path = string.Empty;
+    }
+
+    try
+    {
+        fileName = !string.IsNullOrWhiteSpace(path)
+            ? (Path.GetFileName(path) ?? string.Empty)
+            : string.Empty;
+    }
+    catch
+    {
+        fileName = string.Empty;
+    }
+
+    try
+    {
+        dirtyBeforeClose = tempAssembly.GetSaveFlag();
+    }
+    catch
+    {
+        dirtyBeforeClose = false;
+    }
+
+    SafeLog(errorLog,
+        "TEMP BOM ASM CloseDoc start" +
+        " context=" + contextText +
+        " title=" + (title ?? string.Empty) +
+        " normalizedTitle=" + (normalizedTitle ?? string.Empty) +
+        " fileName=" + (fileName ?? string.Empty) +
+        " path=" + (path ?? string.Empty) +
+        " dirtyBeforeClose=" + dirtyBeforeClose);
+
+    bool IsSameTempDoc(ModelDoc2 candidate)
+    {
+        if (candidate == null)
         {
-            if (tempAssembly == null)
+            return false;
+        }
+
+        string candidateTitle = string.Empty;
+        string candidatePath = string.Empty;
+
+        try
+        {
+            candidateTitle = candidate.GetTitle() ?? string.Empty;
+        }
+        catch
+        {
+            candidateTitle = string.Empty;
+        }
+
+        try
+        {
+            candidatePath = candidate.GetPathName() ?? string.Empty;
+        }
+        catch
+        {
+            candidatePath = string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(path) &&
+            !string.IsNullOrWhiteSpace(candidatePath) &&
+            string.Equals(candidatePath, path, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(title) &&
+            string.Equals(candidateTitle, title, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedTitle) &&
+            string.Equals(candidateTitle, normalizedTitle, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(fileName) &&
+            string.Equals(candidateTitle, fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    bool IsTempAssemblyStillOpen()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) &&
+                IsDocOpenByIdOrTitle(path, title))
             {
                 return true;
             }
+        }
+        catch
+        {
+            // Continue with other checks.
+        }
 
-            string title = string.Empty;
-            try
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(path) &&
+                IsDocOpenByIdOrTitle(path, normalizedTitle))
             {
-                title = tempAssembly.GetTitle() ?? string.Empty;
+                return true;
             }
-            catch
-            {
-                title = string.Empty;
-            }
+        }
+        catch
+        {
+            // Continue with other checks.
+        }
 
-            string closeTitle = NormalizeDocTitleForClose(title);
-            if (string.IsNullOrWhiteSpace(closeTitle))
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(title) &&
+                IsDocOpenByIdOrTitle(path, title))
             {
-                closeTitle = title ?? string.Empty;
+                return true;
             }
+        }
+        catch
+        {
+            // Continue with other checks.
+        }
 
-            string path = string.Empty;
-            try
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(normalizedTitle) &&
+                IsDocOpenByIdOrTitle(path, normalizedTitle))
             {
-                path = tempAssembly.GetPathName() ?? string.Empty;
+                return true;
             }
-            catch
+        }
+        catch
+        {
+            // Continue with other checks.
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(fileName) &&
+                IsDocOpenByIdOrTitle(path, fileName))
             {
-                path = string.Empty;
+                return true;
             }
+        }
+        catch
+        {
+            // Continue with final active-doc check.
+        }
 
-            ForceCloseDocNoSave(tempAssembly, errorLog, context);
-
-            bool closeOk = !IsDocOpenByIdOrTitle(path, closeTitle);
-            if (!closeOk)
+        try
+        {
+            ModelDoc2 activeDoc = _swApp.ActiveDoc as ModelDoc2;
+            if (IsSameTempDoc(activeDoc))
             {
+                return true;
+            }
+        }
+        catch
+        {
+            // Ignore.
+        }
+
+        return false;
+    }
+
+    void PumpSolidWorksMessages()
+    {
+        try
+        {
+            System.Windows.Forms.Application.DoEvents();
+        }
+        catch
+        {
+            // Ignore UI pump errors.
+        }
+    }
+
+    bool TryCloseDocByName(string closeName, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(closeName))
+        {
+            return false;
+        }
+
+        try
+        {
+            SafeLog(errorLog,
+                "TEMP BOM ASM CloseDoc attempt" +
+                " context=" + contextText +
+                " reason=" + reason +
+                " closeName=" + closeName);
+
+            _swApp.CloseDoc(closeName);
+        }
+        catch (Exception ex)
+        {
+            SafeLog(errorLog,
+                "TEMP BOM ASM CloseDoc failed" +
+                " context=" + contextText +
+                " reason=" + reason +
+                " closeName=" + closeName +
+                " error=" + ex.Message);
+        }
+
+        PumpSolidWorksMessages();
+
+        bool stillOpen = IsTempAssemblyStillOpen();
+
+        SafeLog(errorLog,
+            "TEMP BOM ASM CloseDoc result" +
+            " context=" + contextText +
+            " reason=" + reason +
+            " closeName=" + closeName +
+            " stillOpen=" + stillOpen);
+
+        return !stillOpen;
+    }
+
+    bool TryCloseActiveDocOnlyIfItIsTempAssembly()
+    {
+        try
+        {
+            ModelDoc2 activeDoc = _swApp.ActiveDoc as ModelDoc2;
+            if (!IsSameTempDoc(activeDoc))
+            {
+                string activeTitle = string.Empty;
+                string activePath = string.Empty;
+
                 try
                 {
-                    if (!string.IsNullOrWhiteSpace(closeTitle))
-                    {
-                        _swApp.QuitDoc(closeTitle);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    SafeLog(errorLog, "TEMP BOM ASM QuitDoc title failed context=" + (context ?? string.Empty) +
-                        " title=" + closeTitle + " error=" + ex.Message);
-                }
-
-                try
-                {
-                    string fileName = !string.IsNullOrWhiteSpace(path)
-                        ? (Path.GetFileName(path) ?? string.Empty)
-                        : string.Empty;
-                    if (!string.IsNullOrWhiteSpace(fileName))
-                    {
-                        _swApp.QuitDoc(fileName);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    SafeLog(errorLog, "TEMP BOM ASM QuitDoc file failed context=" + (context ?? string.Empty) +
-                        " path=" + (path ?? string.Empty) + " error=" + ex.Message);
-                }
-
-                try
-                {
-                    System.Windows.Forms.Application.DoEvents();
+                    activeTitle = activeDoc != null ? (activeDoc.GetTitle() ?? string.Empty) : string.Empty;
                 }
                 catch
                 {
-                    // ignore UI pump errors
+                    activeTitle = string.Empty;
                 }
 
-                closeOk = !IsDocOpenByIdOrTitle(path, closeTitle);
+                try
+                {
+                    activePath = activeDoc != null ? (activeDoc.GetPathName() ?? string.Empty) : string.Empty;
+                }
+                catch
+                {
+                    activePath = string.Empty;
+                }
+
+                SafeLog(errorLog,
+                    "TEMP BOM ASM CloseDoc empty-name skipped because active doc is not temp assembly" +
+                    " context=" + contextText +
+                    " tempTitle=" + (title ?? string.Empty) +
+                    " tempPath=" + (path ?? string.Empty) +
+                    " activeTitle=" + activeTitle +
+                    " activePath=" + activePath);
+
+                return false;
             }
 
-            SafeLog(errorLog, "TEMP BOM ASM close ok=" + closeOk +
-                " context=" + (context ?? string.Empty) +
-                " title=" + (closeTitle ?? string.Empty) +
+            SafeLog(errorLog,
+                "TEMP BOM ASM CloseDoc empty-name attempt on verified active temp assembly" +
+                " context=" + contextText +
+                " title=" + (title ?? string.Empty) +
                 " path=" + (path ?? string.Empty));
-            return closeOk;
+
+            // SOLIDWORKS API: CloseDoc("") closes the active document.
+            // We only do this after verifying the active document is the temp assembly.
+            _swApp.CloseDoc(string.Empty);
         }
+        catch (Exception ex)
+        {
+            SafeLog(errorLog,
+                "TEMP BOM ASM CloseDoc empty-name failed" +
+                " context=" + contextText +
+                " title=" + (title ?? string.Empty) +
+                " path=" + (path ?? string.Empty) +
+                " error=" + ex.Message);
+        }
+
+        PumpSolidWorksMessages();
+
+        bool stillOpen = IsTempAssemblyStillOpen();
+
+        SafeLog(errorLog,
+            "TEMP BOM ASM CloseDoc empty-name result" +
+            " context=" + contextText +
+            " stillOpen=" + stillOpen);
+
+        return !stillOpen;
+    }
+
+    try
+    {
+        tempAssembly.ClearSelection2(true);
+    }
+    catch
+    {
+        // Ignore.
+    }
+
+    // Activate the temp assembly without rebuilding.
+    // This makes CloseDoc("") safe later and helps SOLIDWORKS target the right document window.
+    try
+    {
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            int activateErrors = 0;
+
+            _swApp.ActivateDoc3(
+                title,
+                false,
+                (int)swRebuildOnActivation_e.swDontRebuildActiveDoc,
+                ref activateErrors);
+
+            SafeLog(errorLog,
+                "TEMP BOM ASM ActivateDoc3 before CloseDoc" +
+                " context=" + contextText +
+                " title=" + title +
+                " activateErrors=" + activateErrors);
+        }
+    }
+    catch (Exception ex)
+    {
+        SafeLog(errorLog,
+            "TEMP BOM ASM ActivateDoc3 before CloseDoc failed" +
+            " context=" + contextText +
+            " title=" + (title ?? string.Empty) +
+            " error=" + ex.Message);
+    }
+
+    PumpSolidWorksMessages();
+
+    // Build close-name list.
+    // Exact GetTitle() must be first. Normalized title is only a fallback.
+    List<string> closeNames = new List<string>();
+
+    void AddCloseName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        if (!closeNames.Any(x => string.Equals(x, value, StringComparison.OrdinalIgnoreCase)))
+        {
+            closeNames.Add(value);
+        }
+    }
+
+    AddCloseName(title);
+    AddCloseName(fileName);
+    AddCloseName(normalizedTitle);
+
+    // Full path is not normally what CloseDoc wants, but keep it as a last named fallback.
+    AddCloseName(path);
+
+    foreach (string closeName in closeNames)
+    {
+        if (TryCloseDocByName(closeName, "named-close"))
+        {
+            SafeLog(errorLog,
+                "TEMP BOM ASM close ok=true method=CloseDoc" +
+                " context=" + contextText +
+                " closeName=" + closeName +
+                " title=" + (title ?? string.Empty) +
+                " path=" + (path ?? string.Empty));
+
+            return true;
+        }
+    }
+
+    // Final CloseDoc path: empty name closes the active document.
+    // Only use it after verifying the active doc is still the temp assembly.
+    if (TryCloseActiveDocOnlyIfItIsTempAssembly())
+    {
+        SafeLog(errorLog,
+            "TEMP BOM ASM close ok=true method=CloseDocActiveEmptyName" +
+            " context=" + contextText +
+            " title=" + (title ?? string.Empty) +
+            " path=" + (path ?? string.Empty));
+
+        return true;
+    }
+
+    // Last-resort fallback only. QuitDoc should no longer be the primary close path.
+    foreach (string closeName in closeNames)
+    {
+        try
+        {
+            SafeLog(errorLog,
+                "TEMP BOM ASM QuitDoc fallback attempt" +
+                " context=" + contextText +
+                " closeName=" + closeName);
+
+            _swApp.QuitDoc(closeName);
+        }
+        catch (Exception ex)
+        {
+            SafeLog(errorLog,
+                "TEMP BOM ASM QuitDoc fallback failed" +
+                " context=" + contextText +
+                " closeName=" + closeName +
+                " error=" + ex.Message);
+        }
+
+        PumpSolidWorksMessages();
+
+        bool stillOpen = IsTempAssemblyStillOpen();
+
+        SafeLog(errorLog,
+            "TEMP BOM ASM QuitDoc fallback result" +
+            " context=" + contextText +
+            " closeName=" + closeName +
+            " stillOpen=" + stillOpen);
+
+        if (!stillOpen)
+        {
+            SafeLog(errorLog,
+                "TEMP BOM ASM close ok=true method=QuitDocFallback" +
+                " context=" + contextText +
+                " closeName=" + closeName +
+                " title=" + (title ?? string.Empty) +
+                " path=" + (path ?? string.Empty));
+
+            return true;
+        }
+    }
+
+    SafeLog(errorLog,
+        "TEMP BOM ASM close ok=false" +
+        " context=" + contextText +
+        " title=" + (title ?? string.Empty) +
+        " normalizedTitle=" + (normalizedTitle ?? string.Empty) +
+        " fileName=" + (fileName ?? string.Empty) +
+        " path=" + (path ?? string.Empty) +
+        " dirtyBeforeClose=" + dirtyBeforeClose);
+
+    return false;
+}
 
         private bool TryDeleteTempBomDirectory(string tempDirectory, Action<string> errorLog, string context)
         {
