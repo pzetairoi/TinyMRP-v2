@@ -1,5 +1,6 @@
 from mongoengine import Document, StringField, DateTimeField, DictField
 from datetime import datetime
+from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -22,7 +23,7 @@ class AuditLog(Document):
     - meta: optional dictionary with extra details
     """
 
-    ts = DateTimeField(default=datetime.utcnow)
+    ts = DateTimeField(default=utc_now)
     user_id = StringField()
     email = StringField()
     roles = StringField()

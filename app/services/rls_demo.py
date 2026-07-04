@@ -21,6 +21,7 @@ from app.models.api_token import ApiToken
 from app.services.api_tokens import create_token
 from app.services.biz_utils import calculate_order_totals
 from app.services.acl import apply_job_scope, apply_order_scope, allowed_parts_for
+from app.services.timezone_utils import utc_iso, utc_now
 
 
 DEMO_CUSTOMERS = [
@@ -200,7 +201,7 @@ def _upsert_bom(parent_pn: str, parent_rev: str, child_pn: str, child_rev: str, 
     ).first() or BOMLink(parent_pn=parent_pn, parent_rev=parent_rev, child_pn=child_pn, child_rev=child_rev)
     link.qty = qty
     link.uom = link.uom or "EA"
-    link.updated_at = datetime.utcnow()
+    link.updated_at = utc_now()
     link.save()
 
 
@@ -211,7 +212,7 @@ def _upsert_job(job_number: str, customer: Customer, vendors: List[Supplier], bo
     j.bom = bom_lines
     j.is_deleted = False
     j.status = j.status or "released"
-    j.updated_at = datetime.utcnow()
+    j.updated_at = utc_now()
     j.save()
     return j
 
@@ -229,7 +230,7 @@ def _upsert_order(order_number: str, kind: str, customer: Customer | None, suppl
     o.discount_amount = discount_total
     o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
     o.status = o.status or "confirmed"
-    o.updated_at = datetime.utcnow()
+    o.updated_at = utc_now()
     o.save()
     return o
 
@@ -391,7 +392,7 @@ def seed_rls_demo(reset: bool = False, domain: str = "demo.com", password: str |
                 writer.writerow([u.email, pwd_map[alias], ",".join([r.name for r in u.roles])])
             writer.writerow([])
             writer.writerow(["note", "Delete this file after use."])
-            writer.writerow(["generated_at", datetime.utcnow().isoformat() + "Z"])
+            writer.writerow(["generated_at", utc_iso(utc_now()) or ""])
 
     token_path = os.path.join(instance_dir, "rlsdemo_tokens.json")
     with open(token_path, "w", encoding="utf-8") as f:

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from mongoengine import DateTimeField, DictField, Document, ListField, StringField
+from app.services.timezone_utils import utc_now
 
 
 DB_ALIAS = "tinymrp-v2"
@@ -11,8 +12,8 @@ class PartAnnotation(Document):
     revision = StringField(default="")
     notes = StringField(default="")
     comments = ListField(DictField(), default=list)
-    created_at = DateTimeField(default=datetime.utcnow)
-    updated_at = DateTimeField(default=datetime.utcnow)
+    created_at = DateTimeField(default=utc_now)
+    updated_at = DateTimeField(default=utc_now)
 
     meta = {
         "collection": "part_annotations",

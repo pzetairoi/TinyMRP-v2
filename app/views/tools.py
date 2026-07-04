@@ -1,10 +1,11 @@
 from flask import Blueprint, render_template, request, send_file, current_app, redirect, url_for, abort, flash
 import os
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timezone
 from flask_login import login_required
 from app.services.acl import permissions_required
 from app.services.filenames import build_output_name
+from app.services.timezone_utils import format_display_ts, utc_now
 
 bp = Blueprint("tools", __name__, url_prefix="/tools")
 
@@ -44,7 +45,7 @@ def _addin_installers():
                         'name': name,
                         'url': url_for('tools.addin_download', filename=name),
                         'size': os.path.getsize(p),
-                        'modified': datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
+                        'modified': format_display_ts(datetime.fromtimestamp(mtime, tz=timezone.utc), fmt="%Y-%m-%d %H:%M %Z"),
                         'mtime': mtime,
                     })
     except Exception:
@@ -116,7 +117,7 @@ def excel_compile():
         # Save a temporary copy for parsing
         temp_root = os.path.join(current_app.instance_path, "excelcompile")
         os.makedirs(temp_root, exist_ok=True)
-        temp_input = os.path.join(temp_root, "upload_" + datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f") + ".xlsx")
+        temp_input = os.path.join(temp_root, "upload_" + utc_now().strftime("%Y%m%d_%H%M%S_%f") + ".xlsx")
         with open(temp_input, "wb") as f:
             f.write(raw)
 
@@ -137,10 +138,10 @@ def excel_compile():
                 file_root=file_root,
             )
 
-            out_name = build_output_name("excelcompile", "zip", max_len=96, include_time=False, now=datetime.utcnow())
+            out_name = build_output_name("excelcompile", "zip", max_len=96, include_time=False, now=utc_now())
             out_path = os.path.join(temp_root, out_name)
             if os.path.exists(out_path):
-                out_name = build_output_name("excelcompile", "zip", max_len=96, include_time=True, now=datetime.utcnow())
+                out_name = build_output_name("excelcompile", "zip", max_len=96, include_time=True, now=utc_now())
                 out_path = os.path.join(temp_root, out_name)
             with open(out_path, "wb") as f:
                 f.write(zip_bytes)

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from mongoengine import BooleanField, DateTimeField, Document, IntField, StringField
+from app.services.timezone_utils import utc_now
 
 
 DB_ALIAS = "tinymrp-v2"
@@ -14,7 +15,7 @@ class PartShareLink(Document):
     allow_children = BooleanField(default=False)
     allow_docpacks = BooleanField(default=False)
     allow_attributes = BooleanField(default=False)
-    created_at = DateTimeField(default=datetime.utcnow)
+    created_at = DateTimeField(default=utc_now)
     created_by_user_id = StringField()
     created_by_email = StringField()
     expires_at = DateTimeField()

@@ -7,6 +7,7 @@ DB_ALIAS = "tinymrp-v2"
 from .auth import User
 from .supplier import Supplier
 from .customer import Customer
+from app.services.timezone_utils import utc_now
 
 
 class JobBOMLine(EmbeddedDocument):
@@ -30,7 +31,7 @@ class JobStage(EmbeddedDocument):
 
 
 class JobNote(EmbeddedDocument):
-    ts = DateTimeField(default=datetime.utcnow)
+    ts = DateTimeField(default=utc_now)
     author = StringField()
     note = StringField()
 
@@ -61,8 +62,8 @@ class Job(Document):
     stages       = ListField(EmbeddedDocumentField(JobStage), default=list)
     notes        = ListField(EmbeddedDocumentField(JobNote), default=list)
     is_deleted   = BooleanField(default=False)
-    created_at   = DateTimeField(default=datetime.utcnow)
-    updated_at   = DateTimeField(default=datetime.utcnow)
+    created_at   = DateTimeField(default=utc_now)
+    updated_at   = DateTimeField(default=utc_now)
 
     meta = {
         "collection": "jobs",

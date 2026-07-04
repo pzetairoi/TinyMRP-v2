@@ -132,7 +132,7 @@
                     <td>{{ j.title or '-' }}</td>
                     <td><span class="badge badge-status status-{{ j.status|default('draft') }}">{{ j.status or 'draft' }}</span></td>
                     <td>{{ j.priority or '-' }}</td>
-                    <td>{{ j.scheduled_end.strftime('%Y-%m-%d') if j.scheduled_end else '-' }}</td>
+                    <td>{{ display_ts(j.scheduled_end, '%Y-%m-%d') if j.scheduled_end else '-' }}</td>
                   </tr>
                   {% endfor %}
                 {% else %}
@@ -177,7 +177,7 @@
                     <td>{{ o.kind }}</td>
                     <td>{{ o.job.job_number if o.job else '-' }}</td>
                     <td><span class="badge badge-status status-{{ o.status|default('draft') }}">{{ o.status or 'draft' }}</span></td>
-                    <td>{{ o.order_date.strftime('%Y-%m-%d') if o.order_date else '-' }}</td>
+                    <td>{{ display_ts(o.order_date, '%Y-%m-%d') if o.order_date else '-' }}</td>
                     <td>{{ '%.2f' % o.total if o.total is not none else '-' }}</td>
                   </tr>
                   {% endfor %}

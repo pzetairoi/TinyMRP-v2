@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from zoneinfo import ZoneInfo
 
 from flask import current_app, has_app_context
 
 from app.models.app_settings import AppSettings
+from app.services.timezone_utils import (
+    format_display_ts as _format_display_ts,
+    resolve_timezone,
+    resolve_timezone_name,
+    timezone_choices,
+    to_display_dt,
+    utc_now,
+)
 
 _DEFAULT_TIMEZONE = "UTC"
 _FILE_SOURCE_ID_RE = re.compile(r"[^a-z0-9]+")
@@ -111,65 +118,16 @@ def resolve_file_sources(
     raw_sources = getattr(settings, "file_sources", None) if settings else None
     return normalize_file_sources(raw_sources or [], fallback_root=fallback_root, fallback_url=fallback_url)
 
-
-def _safe_zoneinfo(name: str | None) -> Optional[ZoneInfo]:
-    name = (name or "").strip()
-    if not name:
-        return None
-    try:
-        return ZoneInfo(name)
-    except Exception:
-        return None
-
-
-def _system_timezone_name() -> str:
-    try:
-        tzinfo = datetime.now().astimezone().tzinfo
-        return getattr(tzinfo, "key", "") or ""
-    except Exception:
-        return ""
-
-
-def resolve_timezone() -> ZoneInfo:
-    settings = get_app_settings(create=False)
-    if settings and settings.timezone:
-        tz = _safe_zoneinfo(settings.timezone)
-        if tz:
-            return tz
-
-    cfg = (
-        current_app.config.get("DEFAULT_TIMEZONE")
-        or os.getenv("APP_TIMEZONE")
-        or os.getenv("TZ")
-        or ""
-    )
-    tz = _safe_zoneinfo(cfg)
-    if tz:
-        return tz
-
-    sys_name = _system_timezone_name()
-    tz = _safe_zoneinfo(sys_name)
-    if tz:
-        return tz
-    tz = _safe_zoneinfo(_DEFAULT_TIMEZONE)
-    if tz:
-        return tz
-    return timezone.utc
-
-
 def get_display_dt(build_ts: Optional[datetime] = None) -> datetime:
-    tz = resolve_timezone()
-    if build_ts is None:
-        return datetime.now(tz)
-    if build_ts.tzinfo is None:
-        local_tz = _safe_zoneinfo(_system_timezone_name()) or _safe_zoneinfo(_DEFAULT_TIMEZONE) or timezone.utc
-        build_ts = build_ts.replace(tzinfo=local_tz)
-    return build_ts.astimezone(tz)
+    return to_display_dt(build_ts or utc_now())
 
 
-def format_display_ts(build_ts: Optional[datetime] = None) -> str:
+def format_display_ts(
+    build_ts: Optional[datetime] = None,
+    fmt: str = "%Y-%m-%d %H:%M",
+) -> str:
     try:
-        return get_display_dt(build_ts).strftime("%Y-%m-%d %H:%M")
+        return _format_display_ts(build_ts, fmt=fmt)
     except Exception:
         return ""
 

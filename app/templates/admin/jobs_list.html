@@ -129,8 +129,8 @@
           <td><span class="badge badge-status status-{{ j.status|default('draft') }}">{{ (j.status or 'draft').replace('_',' ') }}</span></td>
           <td><span class="badge badge-priority priority-{{ j.priority|default('normal') }}">{{ (j.priority or 'normal') }}</span></td>
           <td>
-            <div class="small">{{ j.scheduled_start.strftime('%Y-%m-%d') if j.scheduled_start else '-' }}</div>
-            <div class="small text-muted">{{ j.scheduled_end.strftime('%Y-%m-%d') if j.scheduled_end else '' }}</div>
+            <div class="small">{{ display_ts(j.scheduled_start, '%Y-%m-%d') if j.scheduled_start else '-' }}</div>
+            <div class="small text-muted">{{ display_ts(j.scheduled_end, '%Y-%m-%d') if j.scheduled_end else '' }}</div>
           </td>
           <td style="min-width:140px;">
             {% set req = j.required_total or 0 %}

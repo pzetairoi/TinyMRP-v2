@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.models.numbering import NumberingScheme
+from app.services.timezone_utils import utc_now
 
 
 PRESETS = [
@@ -36,7 +37,7 @@ def ensure_presets() -> None:
 
     preset = PRESETS[0]
     if NumberingScheme.objects().count() == 0:
-        NumberingScheme(**preset, is_active=True, audit={"created_at": datetime.utcnow()}).save()
+        NumberingScheme(**preset, is_active=True, audit={"created_at": utc_now()}).save()
         return
 
     existing = NumberingScheme.objects(name=preset["name"]).first()
@@ -44,7 +45,7 @@ def ensure_presets() -> None:
         preset_data = dict(preset)
         has_recommended = NumberingScheme.objects(is_recommended=True, is_active=True).first() is not None
         preset_data["is_recommended"] = not has_recommended
-        NumberingScheme(**preset_data, is_active=True, audit={"created_at": datetime.utcnow()}).save()
+        NumberingScheme(**preset_data, is_active=True, audit={"created_at": utc_now()}).save()
         return
 
     has_other_recommended = NumberingScheme.objects(

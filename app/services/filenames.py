@@ -4,6 +4,8 @@ import re
 from datetime import datetime
 from typing import Optional
 
+from app.services.timezone_utils import utc_now
+
 _INVALID = re.compile(r'[<>:"/\\\\|?*]+')
 _WS = re.compile(r"\s+")
 
@@ -19,7 +21,7 @@ def safe_filename(value: str) -> str:
 
 
 def timestamp_suffix(now: Optional[datetime] = None, *, include_time: bool = False) -> str:
-    now = now or datetime.now()
+    now = now or utc_now()
     if include_time:
         return now.strftime("%Y%m%d_%H%M")
     return now.strftime("%Y%m%d")
@@ -51,4 +53,3 @@ def build_output_name(
         name = f"{safe}_{suffix}"
 
     return f"{name}{ext}"
-

@@ -8,6 +8,7 @@ from app.models.order import Order, OrderLine
 from app.models.part_revision import PartRevisionHistory
 from app.services.biz_utils import calculate_order_totals
 from app.services.parts_delete import delete_part_and_refs
+from app.services.timezone_utils import utc_now
 
 
 def test_delete_part_and_refs(app):
@@ -22,7 +23,7 @@ def test_delete_part_and_refs(app):
             rel_path="thumbs/PN-100.png",
             path="C:/tmp/PN-100.png",
         ).save()
-        PartRevisionHistory(part_number="PN-100", revision="A", created_at=datetime.utcnow()).save()
+        PartRevisionHistory(part_number="PN-100", revision="A", created_at=utc_now()).save()
         BOMLink(parent_pn="PN-100", parent_rev="A", child_pn="PN-200", child_rev="", qty=1).save()
         BOMLink(parent_pn="PN-300", parent_rev="", child_pn="PN-100", child_rev="A", qty=2).save()
 

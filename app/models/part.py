@@ -1,6 +1,7 @@
 # app/models/part.py
 from mongoengine import BooleanField, DateTimeField, DictField, Document, ListField, StringField
 from datetime import datetime
+from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -30,8 +31,8 @@ class Part(Document):
     has_datasheet = BooleanField(default=False)
     notes_search = StringField(default="")
     comments_search = StringField(default="")
-    created_at  = DateTimeField(default=datetime.utcnow)
-    updated_at  = DateTimeField(default=datetime.utcnow)
+    created_at  = DateTimeField(default=utc_now)
+    updated_at  = DateTimeField(default=utc_now)
 
     meta = {
         "collection": "parts",

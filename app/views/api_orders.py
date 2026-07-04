@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List
 
 from flask import Blueprint, jsonify, request
@@ -15,18 +14,17 @@ from app.services.api_auth import api_auth_required
 from app.services.biz_utils import generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines
 from app.services.acl import apply_order_scope
 from app.services.part_norm import clean_rev
-from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
+from app.services.timezone_utils import utc_now
+from app.views.api_helpers import (
+    add_datetime_fields,
+    ensure_permissions,
+    get_json,
+    json_error,
+    parse_datetime_param,
+    parse_pagination,
+)
 
 bp = Blueprint("orders_api", __name__, url_prefix="/api/orders")
-
-
-def _parse_date(value: str | None):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except Exception:
-        return None
 
 
 def _parse_address(data) -> Address | None:
@@ -62,14 +60,14 @@ def _parse_lines(items) -> List[OrderLine]:
             tax_pct=float(raw.get("tax_pct") or 0.0),
             qty_shipped=float(raw.get("qty_shipped") or 0.0),
             qty_received=float(raw.get("qty_received") or 0.0),
-            requested_delivery=_parse_date(raw.get("requested_delivery")),
+            requested_delivery=parse_datetime_param(raw.get("requested_delivery")),
         )
         out.append(line)
     return consolidate_order_lines(out)
 
 
 def _order_to_dict(o: Order):
-    return {
+    payload = {
         "order_number": o.order_number,
         "kind": o.kind,
         "description": o.description,
@@ -77,10 +75,6 @@ def _order_to_dict(o: Order):
         "customer": getattr(o.customer, "name", None),
         "supplier": getattr(o.supplier, "name", None),
         "job": getattr(o.job, "job_number", None),
-        "order_date": iso(o.order_date),
-        "requested_delivery": iso(o.requested_delivery),
-        "promised_delivery": iso(o.promised_delivery),
-        "actual_delivery": iso(o.actual_delivery),
         "subtotal": o.subtotal,
         "tax_amount": o.tax_amount,
         "shipping_cost": o.shipping_cost,
@@ -92,7 +86,6 @@ def _order_to_dict(o: Order):
         "carrier": o.carrier,
         "tracking_number": o.tracking_number,
         "approved_by": o.approved_by,
-        "approved_at": iso(o.approved_at),
         "rejection_reason": o.rejection_reason,
         "lines": [
             {
@@ -108,11 +101,23 @@ def _order_to_dict(o: Order):
                 "line_total": l.line_total,
                 "qty_shipped": l.qty_shipped,
                 "qty_received": l.qty_received,
-                "requested_delivery": iso(l.requested_delivery),
             }
             for l in (o.lines or [])
         ],
     }
+    for field_name, value in (
+        ("order_date", o.order_date),
+        ("requested_delivery", o.requested_delivery),
+        ("promised_delivery", o.promised_delivery),
+        ("actual_delivery", o.actual_delivery),
+        ("approved_at", o.approved_at),
+        ("created_at", o.created_at),
+        ("updated_at", o.updated_at),
+    ):
+        add_datetime_fields(payload, field_name, value)
+    for line_payload, line in zip(payload["lines"], o.lines or []):
+        add_datetime_fields(line_payload, "requested_delivery", line.requested_delivery)
+    return payload
 
 
 def _list_orders(args, user):
@@ -138,8 +143,8 @@ def _list_orders(args, user):
         if sup:
             q = q.filter(supplier=sup)
 
-    date_from = _parse_date(args.get("from"))
-    date_to = _parse_date(args.get("to"))
+    date_from = parse_datetime_param(args.get("from"))
+    date_to = parse_datetime_param(args.get("to"), end_of_day=True)
     if date_from:
         q = q.filter(order_date__gte=date_from)
     if date_to:
@@ -212,10 +217,10 @@ def create_order():
         kind=kind,
         status=(data.get("status") or "draft").strip(),
         customer_po=(data.get("customer_po") or "").strip(),
-        order_date=_parse_date(data.get("order_date")) or datetime.utcnow(),
-        requested_delivery=_parse_date(data.get("requested_delivery")),
-        promised_delivery=_parse_date(data.get("promised_delivery")),
-        actual_delivery=_parse_date(data.get("actual_delivery")),
+        order_date=parse_datetime_param(data.get("order_date")) or utc_now(),
+        requested_delivery=parse_datetime_param(data.get("requested_delivery")),
+        promised_delivery=parse_datetime_param(data.get("promised_delivery")),
+        actual_delivery=parse_datetime_param(data.get("actual_delivery")),
         shipping_cost=float(data.get("shipping_cost") or 0.0),
         discount_amount=float(data.get("discount_amount") or 0.0),
         currency=(data.get("currency") or "USD").strip(),
@@ -244,7 +249,7 @@ def create_order():
     if job_id:
         order.job = Job.objects(id=job_id).first()
 
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     order.save()
     return jsonify({"ok": True, "order": _order_to_dict(order)})
 
@@ -275,13 +280,13 @@ def update_order(order_number):
         if key in data:
             setattr(order, key, (data.get(key) or "").strip())
     if "order_date" in data:
-        order.order_date = _parse_date(data.get("order_date"))
+        order.order_date = parse_datetime_param(data.get("order_date"))
     if "requested_delivery" in data:
-        order.requested_delivery = _parse_date(data.get("requested_delivery"))
+        order.requested_delivery = parse_datetime_param(data.get("requested_delivery"))
     if "promised_delivery" in data:
-        order.promised_delivery = _parse_date(data.get("promised_delivery"))
+        order.promised_delivery = parse_datetime_param(data.get("promised_delivery"))
     if "actual_delivery" in data:
-        order.actual_delivery = _parse_date(data.get("actual_delivery"))
+        order.actual_delivery = parse_datetime_param(data.get("actual_delivery"))
     if "shipping_cost" in data:
         order.shipping_cost = float(data.get("shipping_cost") or 0.0)
     if "discount_amount" in data:
@@ -308,7 +313,7 @@ def update_order(order_number):
     if "job_id" in data:
         order.job = Job.objects(id=data.get("job_id")).first() if data.get("job_id") else None
 
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     order.save()
     return jsonify({"ok": True, "order": _order_to_dict(order)})
 
@@ -325,7 +330,7 @@ def delete_order(order_number):
     if order.status not in ("draft", "submitted", "cancelled"):
         return json_error("invalid_state", "Order cannot be deleted in this status.", 400)
     order.status = "cancelled"
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     order.save()
     return jsonify({"ok": True})
 
@@ -342,7 +347,7 @@ def order_submit(order_number):
     if not can_transition_order(order.status, "submitted"):
         return json_error("invalid_transition", "Status transition not allowed.", 400)
     order.status = "submitted"
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     order.save()
     return jsonify({"ok": True, "order": _order_to_dict(order)})
 
@@ -360,8 +365,8 @@ def order_approve(order_number):
         return json_error("invalid_transition", "Status transition not allowed.", 400)
     order.status = "confirmed"
     order.approved_by = getattr(user, "email", "")
-    order.approved_at = datetime.utcnow()
-    order.updated_at = datetime.utcnow()
+    order.approved_at = utc_now()
+    order.updated_at = utc_now()
     order.save()
     return jsonify({"ok": True, "order": _order_to_dict(order)})
 
@@ -381,8 +386,8 @@ def order_ship(order_number):
     order.status = "shipped"
     order.carrier = (data.get("carrier") or order.carrier or "").strip()
     order.tracking_number = (data.get("tracking_number") or order.tracking_number or "").strip()
-    order.actual_delivery = _parse_date(data.get("actual_delivery")) or order.actual_delivery
-    order.updated_at = datetime.utcnow()
+    order.actual_delivery = parse_datetime_param(data.get("actual_delivery")) or order.actual_delivery
+    order.updated_at = utc_now()
     order.save()
     return jsonify({"ok": True, "order": _order_to_dict(order)})
 
@@ -403,7 +408,7 @@ def order_status(order_number):
     if not can_transition_order(order.status, new_status):
         return json_error("invalid_transition", "Status transition not allowed.", 400)
     order.status = new_status
-    order.updated_at = datetime.utcnow()
+    order.updated_at = utc_now()
     order.save()
     return jsonify({"ok": True, "order": _order_to_dict(order)})
 
@@ -418,7 +423,7 @@ def order_stats():
     return jsonify({
         "ok": True,
         "status_counts": {s: base.filter(status=s).count() for s in ORDER_STATUS_FLOW.keys()},
-        "revenue_month": sum([float(o.total or 0.0) for o in base.filter(order_date__gte=datetime.utcnow().replace(day=1))]),
+        "revenue_month": sum([float(o.total or 0.0) for o in base.filter(order_date__gte=utc_now().replace(day=1))]),
         "avg_order_value": (sum([float(o.total or 0.0) for o in base]) / base.count()) if base.count() else 0.0,
     })
 

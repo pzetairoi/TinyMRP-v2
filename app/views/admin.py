@@ -1,7 +1,6 @@
 # app/views/admin.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask import abort
-from datetime import datetime
 from mongoengine.errors import DoesNotExist, ValidationError
 from flask_security import roles_required, current_user
 from flask_security.utils import hash_password
@@ -15,7 +14,13 @@ from ..models.user_settings import UserSettings
 from app.services.app_settings import branding_root, get_app_settings
 from app.services.password_policy import validate_admin_password
 from app.services.processmeta import load_process_meta, sanitize_process_meta
-from zoneinfo import ZoneInfo
+from app.services.timezone_utils import (
+    clear_timezone_cache,
+    format_display_ts,
+    resolve_timezone_name,
+    timezone_choices,
+    utc_now,
+)
 import os
 import re
 
@@ -163,16 +168,14 @@ def admin_metrics():
 @roles_required("admin")
 def admin_settings():
     settings = get_app_settings(create=True)
+    valid_timezones = set(timezone_choices())
     if request.method == "POST":
         recompute_processes = request.form.get("recompute_process_library") in ("1", "true", "on")
-        tz = (request.form.get("timezone") or "").strip()
-        if tz:
-            try:
-                ZoneInfo(tz)
-            except Exception:
-                flash("Invalid timezone. Use a valid IANA name like Australia/Melbourne.", "error")
-                return redirect(url_for("admin.admin_settings"))
-        settings.timezone = tz
+        submitted_timezone = (request.form.get("timezone") or "").strip()
+        timezone_name = submitted_timezone if submitted_timezone in valid_timezones else "UTC"
+        if submitted_timezone and submitted_timezone not in valid_timezones:
+            flash("Invalid timezone submitted. Reverted to UTC.", "error")
+        settings.timezone = timezone_name
 
         hw_raw = request.form.get("hardware_folders") or ""
         settings.hardware_folders = _parse_hw_folders(hw_raw)
@@ -231,10 +234,13 @@ def admin_settings():
         if remove_logo:
             settings.brand_logo_rel_path = ""
 
-        settings.updated_at = datetime.utcnow()
+        settings.updated_at = utc_now()
         settings.save()
+        clear_timezone_cache()
         process_meta = _active_process_meta(settings)
         try:
+            current_app.config["APP_TIMEZONE"] = timezone_name
+            current_app.config["DEFAULT_TIMEZONE"] = timezone_name
             current_app.config["HARDWARE_FOLDERS"] = settings.hardware_folders or []
             current_app.config["FLAT_PATTERN_PAGE_NAMES"] = settings.flat_pattern_page_names or []
             current_app.config["UPLOAD_PACK_MAX_ZIP_MB"] = settings.upload_pack_max_zip_mb or 0
@@ -321,6 +327,9 @@ def admin_settings():
     return render_template(
         "admin/settings.html",
         settings=settings,
+        timezone_choices=timezone_choices(),
+        selected_timezone=resolve_timezone_name(),
+        timezone_display_now=format_display_ts(utc_now(), fmt="%Y-%m-%d %H:%M:%S %Z"),
         process_rows=process_rows,
         process_icon_choices=process_icon_choices,
         hardware_folders_text=hw_display,
@@ -420,8 +429,8 @@ def users_create():
             email=email,
             password=hash_password(password),
             fs_uniquifier=secrets.token_hex(16),
-            password_changed_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            password_changed_at=utc_now(),
+            updated_at=utc_now(),
         )
         # initial roles from form
         role_ids = request.form.getlist("roles")
@@ -469,13 +478,13 @@ def users_edit(user_id):
                 flash(error, "error")
                 return redirect(url_for("admin.users_edit", user_id=user_id))
             u.password = hash_password(new_pw)
-            u.password_changed_at = datetime.utcnow()
+            u.password_changed_at = utc_now()
             try:
                 log_action("admin.user.password", resource_type="user", resource=str(u.email))
             except Exception:
                 pass
 
-        u.updated_at = datetime.utcnow()
+        u.updated_at = utc_now()
         u.save()
         try:
             log_action("admin.user.edit_roles", resource_type="user", resource=str(u.email))

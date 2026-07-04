@@ -7,6 +7,7 @@ from app.models.job import Job
 from app.models.supplier import Supplier
 from app.models.customer import Customer
 from app.models.order import Order, OrderLine
+from app.services.timezone_utils import utc_now
 
 
 JOB_STATUS_FLOW = {
@@ -31,7 +32,7 @@ ORDER_STATUS_FLOW = {
 
 
 def generate_job_number(now: datetime | None = None) -> str:
-    now = now or datetime.utcnow()
+    now = now or utc_now()
     date_tag = now.strftime("%Y%m%d")
     prefix = f"JOB-{date_tag}-"
     last = Job.objects(job_number__startswith=prefix).order_by("-job_number").first()
@@ -69,7 +70,7 @@ def generate_customer_code() -> str:
 
 
 def generate_order_number(kind: str, now: datetime | None = None) -> str:
-    now = now or datetime.utcnow()
+    now = now or utc_now()
     year = now.strftime("%Y")
     kind = (kind or "").lower().strip()
     prefix = "SO" if kind in ("sales", "sale", "sales_order") else "PO"

@@ -17,6 +17,7 @@ from app.services.user_profile import (
     sanitize_profile,
 )
 from app.services.user_settings import get_or_create_settings
+from app.services.timezone_utils import utc_now
 
 bp = Blueprint("main", __name__)
 
@@ -131,10 +132,10 @@ def app_profile_update():
         }
     )
     settings.profile = profile
-    settings.updated_at = datetime.utcnow()
+    settings.updated_at = utc_now()
     settings.save()
     try:
-        current_user.updated_at = datetime.utcnow()
+        current_user.updated_at = utc_now()
         current_user.save()
     except Exception:
         pass
@@ -162,8 +163,8 @@ def app_password_change():
         return redirect(url_for("main.app_home"))
 
     current_user.password = hash_password(request.form.get("new_password") or "")
-    current_user.password_changed_at = datetime.utcnow()
-    current_user.updated_at = datetime.utcnow()
+    current_user.password_changed_at = utc_now()
+    current_user.updated_at = utc_now()
     current_user.save()
     try:
         log_action("account.password.change", resource_type="user", resource=str(current_user.email or ""))

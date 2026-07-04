@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import base64
 import hmac
 import hashlib
@@ -12,6 +12,7 @@ from mongoengine.errors import NotUniqueError
 
 from app.models.api_token import ApiToken
 from app.models.auth import User
+from app.services.timezone_utils import utc_now
 
 TOKEN_PREFIX = "tmrp_"
 TOKEN_BYTES = 32
@@ -62,7 +63,7 @@ def verify_token(raw_token: str) -> Optional[ApiToken]:
         return None
     if token.revoked_at is not None:
         return None
-    if token.expires_at and token.expires_at <= datetime.utcnow():
+    if token.expires_at and token.expires_at <= utc_now():
         return None
     return token
 
@@ -73,7 +74,7 @@ _last_used_cache = {}
 def touch_last_used(token: ApiToken) -> None:
     if not token:
         return
-    now = datetime.utcnow()
+    now = utc_now()
     token_id = str(token.id)
     last = _last_used_cache.get(token_id)
     if last and now - last < timedelta(minutes=LAST_USED_MINUTES):

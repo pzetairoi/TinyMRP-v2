@@ -1,27 +1,17 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Blueprint, request, render_template, redirect, url_for, flash, current_app
 from flask_security import roles_required
 from mongoengine.queryset.visitor import Q
 
 from app.models.audit import AuditLog
 from app.services.audit import log_action
+from app.services.timezone_utils import local_input_value, parse_user_datetime, resolve_timezone_name
 from mongoengine import get_connection
 
 bp = Blueprint("admin_audit", __name__, url_prefix="/admin/audit")
 
 def _parse_dt(value: str | None, end: bool = False) -> datetime | None:
-    if not value:
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    try:
-        dt = datetime.fromisoformat(text)
-    except Exception:
-        return None
-    if end and len(text) <= 10:
-        dt = dt + timedelta(days=1) - timedelta(microseconds=1)
-    return dt
+    return parse_user_datetime(value, end_of_day=end)
 
 
 @bp.get("/")
@@ -99,11 +89,12 @@ def audit_list():
         endpoint=endpoint,
         method=method,
         resource_type=resource_type,
-        start=request.args.get("start") or "",
-        end=request.args.get("end") or "",
+        start=local_input_value(start),
+        end=local_input_value(end),
         alias=alias,
         uri=uri,
         ping_ok=ping_ok,
+        selected_timezone=resolve_timezone_name(),
     )
 
 

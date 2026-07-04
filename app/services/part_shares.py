@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from flask import current_app, has_request_context, request, url_for
@@ -11,6 +11,7 @@ from flask import current_app, has_request_context, request, url_for
 from app.models.audit import AuditLog
 from app.models.part_share import PartShareLink
 from app.services.part_norm import clean_rev
+from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
 
 
 def _secret() -> bytes:
@@ -53,7 +54,7 @@ def create_part_share(
         created_by_email=str(getattr(created_by, "email", "") or ""),
     )
     if expires_in_days > 0:
-        share.expires_at = datetime.utcnow() + timedelta(days=int(expires_in_days))
+        share.expires_at = utc_now() + timedelta(days=int(expires_in_days))
     share.save()
     return share, raw_token
 
@@ -68,7 +69,7 @@ def resolve_part_share(share_id: str, raw_token: str) -> tuple[PartShareLink | N
     if share.revoked_at:
         return share, "revoked"
     expires_at = getattr(share, "expires_at", None)
-    if expires_at and expires_at <= datetime.utcnow():
+    if expires_at and expires_at <= utc_now():
         return share, "expired"
     return share, "ok"
 
@@ -77,7 +78,7 @@ def share_status(share: PartShareLink) -> str:
     if getattr(share, "revoked_at", None):
         return "revoked"
     expires_at = getattr(share, "expires_at", None)
-    if expires_at and expires_at <= datetime.utcnow():
+    if expires_at and expires_at <= utc_now():
         return "expired"
     return "active"
 
@@ -101,12 +102,20 @@ def share_dict(share: PartShareLink) -> dict[str, Any]:
         "allow_docpacks": bool(getattr(share, "allow_docpacks", False)),
         "allow_attributes": bool(getattr(share, "allow_attributes", False)),
         "status": share_status(share),
-        "created_at": share.created_at.isoformat() if share.created_at else None,
+        "created_at": utc_iso(share.created_at),
+        "created_at_display": format_display_ts(share.created_at, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
+        "created_at_local": local_input_value(share.created_at) or None,
         "created_by_email": share.created_by_email or "",
-        "expires_at": share.expires_at.isoformat() if share.expires_at else None,
-        "revoked_at": share.revoked_at.isoformat() if share.revoked_at else None,
+        "expires_at": utc_iso(share.expires_at),
+        "expires_at_display": format_display_ts(share.expires_at, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
+        "expires_at_local": local_input_value(share.expires_at) or None,
+        "revoked_at": utc_iso(share.revoked_at),
+        "revoked_at_display": format_display_ts(share.revoked_at, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
+        "revoked_at_local": local_input_value(share.revoked_at) or None,
         "revoked_by_email": share.revoked_by_email or "",
-        "last_accessed_at": share.last_accessed_at.isoformat() if share.last_accessed_at else None,
+        "last_accessed_at": utc_iso(share.last_accessed_at),
+        "last_accessed_at_display": format_display_ts(share.last_accessed_at, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
+        "last_accessed_at_local": local_input_value(share.last_accessed_at) or None,
         "access_count": int(share.access_count or 0),
     }
 
@@ -131,7 +140,7 @@ def _client_ip() -> str:
 
 
 def record_part_share_access(share: PartShareLink, *, kind: str) -> None:
-    now = datetime.utcnow()
+    now = utc_now()
     ip = _client_ip()
     ua = _safe_str(request.headers.get("User-Agent") or "") if has_request_context() else ""
     share.update(

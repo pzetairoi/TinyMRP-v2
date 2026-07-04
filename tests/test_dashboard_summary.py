@@ -1,3 +1,6 @@
+from datetime import datetime
+
+from app.models.app_settings import AppSettings
 from app.models.auth import Role
 from app.models.part import Part
 from app.models.bom import BOMLink
@@ -58,3 +61,25 @@ def test_dashboard_summary_excludes_placeholder_approval_values(client, user):
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["counts"]["approved"] == 1
+
+
+def test_dashboard_recent_parts_include_display_timestamp(client, user):
+    role = Role(name="viewer", permissions=["items.view"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    AppSettings(timezone="Australia/Sydney").save()
+    Part(
+        part_number="DSP-100",
+        revision="A",
+        description="Display Timestamp",
+        updated_at=datetime(2024, 1, 1, 0, 0, 0),
+    ).save()
+
+    resp = client.get("/api/dashboard/summary")
+    assert resp.status_code == 200
+    rows = resp.get_json()["recent_parts"]
+    assert rows
+    assert rows[0]["updated_at"] == "2024-01-01T00:00:00Z"
+    assert rows[0]["updated_at_display"] == "2024-01-01 11:00:00 AEDT"

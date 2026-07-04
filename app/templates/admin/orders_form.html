@@ -43,8 +43,8 @@
               </select>
             </div>
             <div class="col-md-3">
-              <label class="form-label">Order date</label>
-              <input class="form-control" type="date" name="order_date" value="{{ order.order_date.strftime('%Y-%m-%d') if order and order.order_date else '' }}">
+              <label class="form-label">Order date ({{ app_timezone_name }})</label>
+              <input class="form-control" type="date" name="order_date" value="{{ local_date_input(order.order_date) if order and order.order_date else '' }}">
             </div>
             <div class="col-md-3">
               <label class="form-label">Currency</label>
@@ -119,12 +119,12 @@
               <input class="form-control" type="text" name="tracking_number" value="{{ order.tracking_number if order else '' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Requested delivery</label>
-              <input class="form-control" type="date" name="requested_delivery" value="{{ order.requested_delivery.strftime('%Y-%m-%d') if order and order.requested_delivery else '' }}">
+              <label class="form-label">Requested delivery ({{ app_timezone_name }})</label>
+              <input class="form-control" type="date" name="requested_delivery" value="{{ local_date_input(order.requested_delivery) if order and order.requested_delivery else '' }}">
             </div>
             <div class="col-md-4">
-              <label class="form-label">Promised delivery</label>
-              <input class="form-control" type="date" name="promised_delivery" value="{{ order.promised_delivery.strftime('%Y-%m-%d') if order and order.promised_delivery else '' }}">
+              <label class="form-label">Promised delivery ({{ app_timezone_name }})</label>
+              <input class="form-control" type="date" name="promised_delivery" value="{{ local_date_input(order.promised_delivery) if order and order.promised_delivery else '' }}">
             </div>
           </div>
 

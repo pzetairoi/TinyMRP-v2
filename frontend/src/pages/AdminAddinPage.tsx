@@ -12,8 +12,13 @@ type Token = {
   id: string
   label: string
   created_at?: string
+  created_at_display?: string
   last_used_at?: string
+  last_used_at_display?: string
   revoked_at?: string
+  revoked_at_display?: string
+  expires_at?: string
+  expires_at_display?: string
 }
 
 type Scheme = {
@@ -645,6 +650,10 @@ export default function AdminAddinPage() {
     }
   }
 
+  function renderTokenDate(display?: string, fallback?: string) {
+    return display || fallback || '-'
+  }
+
   return (
     <div className="p-3">
       <h3 className="mb-3">Add-in Admin</h3>
@@ -703,8 +712,8 @@ export default function AdminAddinPage() {
                   {tokens.map((token) => (
                     <tr key={token.id}>
                       <td>{token.label || '(no label)'}</td>
-                      <td>{token.created_at || '-'}</td>
-                      <td>{token.last_used_at || '-'}</td>
+                      <td>{renderTokenDate(token.created_at_display, token.created_at)}</td>
+                      <td>{renderTokenDate(token.last_used_at_display, token.last_used_at)}</td>
                       <td>{token.revoked_at ? 'Revoked' : 'Active'}</td>
                       <td>
                         {!token.revoked_at && (

@@ -3,7 +3,6 @@ import io
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify, send_file
 from flask_login import current_user
-from datetime import datetime
 from flask_security import roles_required
 from app.services.acl import (
     permissions_required,
@@ -25,6 +24,7 @@ from app.models.part import Part
 from app.services.biz_utils import generate_order_number, calculate_order_totals, consolidate_order_lines
 from app.services.order_scope import build_scope_pdf, build_scope_zip
 from app.services.part_norm import clean_rev
+from app.services.timezone_utils import parse_user_datetime, utc_now
 
 bp = Blueprint("admin_orders", __name__, url_prefix="/admin/orders")
 
@@ -76,7 +76,7 @@ def orders_list():
     date_from = _parse_date(request.args.get("from"))
     if date_from:
         qs = qs.filter(order_date__gte=date_from)
-    date_to = _parse_date(request.args.get("to"))
+    date_to = _parse_date(request.args.get("to"), end_of_day=True)
     if date_to:
         qs = qs.filter(order_date__lte=date_to)
     total_min = request.args.get("total_min")
@@ -296,13 +296,8 @@ def _canonical_pn(pn: str) -> str:
     return p.part_number if p else pn
 
 
-def _parse_date(value: str | None):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except Exception:
-        return None
+def _parse_date(value: str | None, *, end_of_day: bool = False):
+    return parse_user_datetime(value, end_of_day=end_of_day)
 
 
 @bp.route("/new", methods=["GET","POST"])
@@ -320,7 +315,7 @@ def orders_new():
         o.shipping_method = (request.form.get("shipping_method") or "").strip()
         o.carrier = (request.form.get("carrier") or "").strip()
         o.tracking_number = (request.form.get("tracking_number") or "").strip()
-        o.order_date = _parse_date(request.form.get("order_date")) or datetime.utcnow()
+        o.order_date = _parse_date(request.form.get("order_date")) or utc_now()
         o.requested_delivery = _parse_date(request.form.get("requested_delivery"))
         o.promised_delivery = _parse_date(request.form.get("promised_delivery"))
         o.shipping_cost = float(request.form.get("shipping_cost") or 0.0)
@@ -340,7 +335,7 @@ def orders_new():
         o.tax_amount = tax_total
         o.discount_amount = discount_total
         o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
-        o.updated_at = datetime.utcnow()
+        o.updated_at = utc_now()
         o.save()
         flash("Order created.", "success")
         return redirect(url_for("admin_orders.orders_edit", order_id=o.id))
@@ -393,7 +388,7 @@ def orders_edit(order_id):
             o.tax_amount = tax_total
             o.discount_amount = discount_total
             o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
-            o.updated_at = datetime.utcnow()
+            o.updated_at = utc_now()
             o.save()
     if request.method == "POST":
         o.order_number = (request.form.get("order_number") or o.order_number).strip()
@@ -423,7 +418,7 @@ def orders_edit(order_id):
         o.tax_amount = tax_total
         o.discount_amount = discount_total
         o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
-        o.updated_at = datetime.utcnow()
+        o.updated_at = utc_now()
         o.save()
         flash("Order updated.", "success")
         return redirect(url_for("admin_orders.orders_edit", order_id=o.id))
@@ -462,7 +457,7 @@ def orders_from_job(job_id):
         status="draft",
         job=job,
         customer=job.customer if job.customer else None,
-        order_date=datetime.utcnow(),
+        order_date=utc_now(),
         currency="USD",
     )
     lines = []
@@ -494,7 +489,7 @@ def orders_from_job(job_id):
     o.tax_amount = tax_total
     o.discount_amount = discount_total
     o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
-    o.updated_at = datetime.utcnow()
+    o.updated_at = utc_now()
     o.save()
     flash("Order created from job.", "success")
     return redirect(url_for("admin_orders.orders_edit", order_id=o.id))
@@ -544,7 +539,7 @@ def order_lines_json(order_id):
             o.tax_amount = tax_total
             o.discount_amount = discount_total
             o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
-            o.updated_at = datetime.utcnow()
+            o.updated_at = utc_now()
             o.save()
     rows = []
     for l in (o.lines or []):
@@ -588,7 +583,7 @@ def order_lines_update(order_id):
     o.tax_amount = tax_total
     o.discount_amount = discount_total
     o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
-    o.updated_at = datetime.utcnow()
+    o.updated_at = utc_now()
     o.save()
     return jsonify({"ok": True, "total": o.total})
 
@@ -607,6 +602,6 @@ def order_lines_remove(order_id):
         o.tax_amount = tax_total
         o.discount_amount = discount_total
         o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
-        o.updated_at = datetime.utcnow()
+        o.updated_at = utc_now()
         o.save()
     return jsonify({"ok": True, "removed": before - len(o.lines), "total": o.total})

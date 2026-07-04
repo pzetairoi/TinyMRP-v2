@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from threading import Lock
 from typing import Dict, List, Optional, Tuple
 
@@ -15,6 +15,8 @@ from app.models.bom import BOMLink
 from app.services.attrs import approval_filter_raw, harvest_part_attrs
 from app.services.acl import allowed_parts_for, require_items_view
 from app.services.insights import classify_part
+from app.services.timezone_utils import utc_now
+from app.views.api_helpers import add_datetime_fields
 
 
 bp = Blueprint("dashboard_api", __name__, url_prefix="/api/dashboard")
@@ -236,7 +238,7 @@ def dashboard_summary():
         _set_cache(cache_key, empty)
         return jsonify(empty)
 
-    since = datetime.utcnow() - timedelta(days=7)
+    since = utc_now() - timedelta(days=7)
     updated_7d = base.filter(updated_at__gte=since).count()
 
     missing_material_raw = {
@@ -276,9 +278,9 @@ def dashboard_summary():
                 "part_number": p.part_number,
                 "revision": rev,
                 "description": desc,
-                "updated_at": p.updated_at.isoformat() if p.updated_at else "",
             }
         )
+        add_datetime_fields(recent_parts[-1], "updated_at", p.updated_at)
 
     payload = {
         "counts": {"total_parts": total_parts, "updated_7d": updated_7d, "approved": approved_count},

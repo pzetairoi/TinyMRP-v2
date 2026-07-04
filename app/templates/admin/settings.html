@@ -26,24 +26,13 @@
     <div class="card shadow-sm mb-3">
       <div class="card-body">
         <h5 class="card-title">Timezone</h5>
-        <p class="text-muted small">Used for docpack timestamps and report headers.</p>
-        <input
-          class="form-control form-control-sm"
-          type="text"
-          name="timezone"
-          list="tzlist"
-          placeholder="Australia/Melbourne"
-          value="{{ settings.timezone or '' }}"
-        >
-        <datalist id="tzlist">
-          <option value="UTC"></option>
-          <option value="Australia/Melbourne"></option>
-          <option value="Australia/Sydney"></option>
-          <option value="Australia/Perth"></option>
-          <option value="America/New_York"></option>
-          <option value="America/Los_Angeles"></option>
-          <option value="Europe/London"></option>
-        </datalist>
+        <p class="text-muted small">Stored in UTC; displayed in this timezone across the UI and reports.</p>
+        <select class="form-select form-select-sm" name="timezone">
+          {% for tz in timezone_choices %}
+          <option value="{{ tz }}" {% if tz == selected_timezone %}selected{% endif %}>{{ tz }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Current local app time: {{ timezone_display_now or "-" }}</div>
       </div>
     </div>
 

@@ -48,12 +48,12 @@
               </select>
             </div>
             <div class="col-md-3">
-              <label class="form-label">Scheduled start</label>
-              <input class="form-control" type="date" name="scheduled_start" value="{{ job.scheduled_start.strftime('%Y-%m-%d') if job and job.scheduled_start else '' }}">
+              <label class="form-label">Scheduled start ({{ app_timezone_name }})</label>
+              <input class="form-control" type="date" name="scheduled_start" value="{{ local_date_input(job.scheduled_start) if job and job.scheduled_start else '' }}">
             </div>
             <div class="col-md-3">
-              <label class="form-label">Scheduled end</label>
-              <input class="form-control" type="date" name="scheduled_end" value="{{ job.scheduled_end.strftime('%Y-%m-%d') if job and job.scheduled_end else '' }}">
+              <label class="form-label">Scheduled end ({{ app_timezone_name }})</label>
+              <input class="form-control" type="date" name="scheduled_end" value="{{ local_date_input(job.scheduled_end) if job and job.scheduled_end else '' }}">
             </div>
           </div>
 
@@ -224,7 +224,7 @@
                     </td>
                     <td>{{ o.kind }}</td>
                     <td>{{ o.status }}</td>
-                    <td>{{ o.updated_at.strftime('%Y-%m-%d %H:%M') if o.updated_at else '' }}</td>
+                    <td>{{ display_ts(o.updated_at, '%Y-%m-%d %H:%M %Z') if o.updated_at else '' }}</td>
                   </tr>
                   {% endfor %}
                 </tbody>

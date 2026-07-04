@@ -12,6 +12,7 @@ from app.models.order import Order
 from app.models.part_revision import PartRevisionHistory
 from app.services.biz_utils import calculate_order_totals
 from app.services.part_norm import clean_rev
+from app.services.timezone_utils import utc_now
 
 
 def _match_pn_rev(pn: str, rev: str, target_pn: str, target_rev: str) -> bool:
@@ -61,7 +62,7 @@ def delete_part_and_refs(pn: str, rev: str | None) -> Dict[str, int]:
             if not _match_pn_rev(l.pn or "", l.rev or "", target_pn, target_rev)
         ]
         if len(job.bom) != before:
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utc_now()
             job.save()
             updated_jobs += 1
 
@@ -78,7 +79,7 @@ def delete_part_and_refs(pn: str, rev: str | None) -> Dict[str, int]:
             order.tax_amount = tax_amount
             order.discount_amount = discount_amount
             order.total = max(subtotal - discount_amount, 0.0) + tax_amount + float(order.shipping_cost or 0.0)
-            order.updated_at = datetime.utcnow()
+            order.updated_at = utc_now()
             order.save()
             updated_orders += 1
 

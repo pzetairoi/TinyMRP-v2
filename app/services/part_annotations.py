@@ -10,6 +10,7 @@ from app.models.part import Part
 from app.models.part_annotation import PartAnnotation
 from app.services.attrs import comments_search_text
 from app.services.part_norm import clean_rev
+from app.services.timezone_utils import utc_iso, utc_now
 
 
 ANNOTATION_ATTR_KEYS = {"notes", "comments", "comments_search"}
@@ -206,8 +207,8 @@ def migrate_legacy_annotations(part: Part) -> dict[str, Any]:
         doc = PartAnnotation(part_number=part.part_number, revision=clean_rev(part.revision or ""))
         doc.notes = str(legacy_payload.get("notes") or "")
         doc.comments = list(legacy_payload.get("comments") or [])
-        doc.created_at = datetime.utcnow()
-        doc.updated_at = datetime.utcnow()
+        doc.created_at = utc_now()
+        doc.updated_at = utc_now()
         doc.save()
         doc_changed = True
         _set_doc_cache(part, doc)
@@ -219,7 +220,7 @@ def migrate_legacy_annotations(part: Part) -> dict[str, Any]:
             doc.comments = list(legacy_payload.get("comments") or [])
             doc_changed = True
         if doc_changed:
-            doc.updated_at = datetime.utcnow()
+            doc.updated_at = utc_now()
             doc.save()
 
     part_changed = False
@@ -256,7 +257,7 @@ def set_part_notes(part: Part, notes: str) -> dict[str, Any]:
             doc = PartAnnotation(part_number=part.part_number, revision=clean_rev(part.revision or ""))
         doc.notes = notes_text
         doc.comments = comments
-        now = datetime.utcnow()
+        now = utc_now()
         if not getattr(doc, "created_at", None):
             doc.created_at = now
         doc.updated_at = now
@@ -272,7 +273,7 @@ def set_part_notes(part: Part, notes: str) -> dict[str, Any]:
     _set_payload_cache(part, payload)
     part.notes_search = str(payload.get("notes") or "")
     part.comments_search = str(payload.get("comments_search") or "")
-    part.updated_at = datetime.utcnow()
+    part.updated_at = utc_now()
     part.save()
     return payload
 
@@ -283,7 +284,7 @@ def add_part_comment(part: Part, *, author: str, text: str, ts: Optional[str] = 
     notes_text = str(getattr(doc, "notes", "") or "") if doc else ""
     comments = normalize_comment_rows(getattr(doc, "comments", []) if doc else [])
     comment = {
-        "ts": str(ts or datetime.utcnow().isoformat()),
+        "ts": str(ts or utc_iso(utc_now()) or ""),
         "author": str(author or "").strip(),
         "text": str(text or "").strip(),
     }
@@ -293,7 +294,7 @@ def add_part_comment(part: Part, *, author: str, text: str, ts: Optional[str] = 
         doc = PartAnnotation(part_number=part.part_number, revision=clean_rev(part.revision or ""))
     doc.notes = notes_text
     doc.comments = comments
-    now = datetime.utcnow()
+    now = utc_now()
     if not getattr(doc, "created_at", None):
         doc.created_at = now
     doc.updated_at = now
