@@ -45,6 +45,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         private const string ExportItemStatusDone = "done";
         private const string ExportItemStatusFailed = "failed";
         private const string ExportItemStatusSkipped = "skipped";
+        private const string ExportSkipReasonEmptyPath = "empty path";
+        private const string ExportSkipReasonNoRequiredOutputs = "no required outputs";
         private sealed class ModelEntry
         {
             public ModelDoc2 Model;
@@ -310,6 +312,18 @@ namespace TinyMRP.SolidWorksAddin.Services
             public string PlanPath;
             public string LogPath;
             public List<ExportSessionItem> Queue = new List<ExportSessionItem>();
+        }
+
+        private sealed class ResumePreparationStats
+        {
+            public int TotalItems;
+            public int CompletedItems;
+            public int PendingItems;
+            public int RunningReset;
+            public int FailedReset;
+            public int DoneReset;
+            public int SkippedReset;
+            public int UnknownReset;
         }
 
         private sealed class UserPreferenceToggleScope : IDisposable
@@ -1785,7 +1799,52 @@ namespace TinyMRP.SolidWorksAddin.Services
                 _closeWarningOnce.Clear();
                 _debugOnce.Clear();
 
-                PrepareSessionForResume(session, errorLog);
+                ResumePreparationStats resumeStats = PrepareSessionForResume(session, errorLog);
+                SaveExportSessionAtomic(session, errorLog);
+
+                var queue = BuildPendingResumeQueue(session, errorLog);
+                int totalItems = session.Queue != null ? session.Queue.Count : 0;
+                int completeItems = CountCompletedSessionItems(session);
+                int pendingItems = queue.Count;
+
+                errorLog?.Invoke(
+                    "RESUME plan: total=" + totalItems +
+                    " complete=" + completeItems +
+                    " pending=" + pendingItems +
+                    " failed=" + resumeStats.FailedReset +
+                    " runningReset=" + resumeStats.RunningReset +
+                    " doneReset=" + resumeStats.DoneReset +
+                    " skippedReset=" + resumeStats.SkippedReset +
+                    " unknownReset=" + resumeStats.UnknownReset);
+
+                if (pendingItems > 0)
+                {
+                    PlannedRef firstPending = queue[0];
+                    PlannedRef lastPending = queue[pendingItems - 1];
+                    errorLog?.Invoke(
+                        "RESUME pending range: first=" +
+                        BuildPlannedRefKey(firstPending.ModelPath, firstPending.ConfigurationName) +
+                        " path=" + (firstPending.ModelPath ?? string.Empty) +
+                        " conf=" + (firstPending.ConfigurationName ?? string.Empty) +
+                        " last=" +
+                        BuildPlannedRefKey(lastPending.ModelPath, lastPending.ConfigurationName) +
+                        " path=" + (lastPending.ModelPath ?? string.Empty) +
+                        " conf=" + (lastPending.ConfigurationName ?? string.Empty));
+                }
+
+                UpdateProgress(progress, completeItems, totalItems);
+
+                if (pendingItems == 0)
+                {
+                    session.Status = ExportSessionStatusCompleted;
+                    SaveExportSessionAtomic(session, errorLog);
+                    ArchiveCompletedExportSession(session, errorLog);
+                    SetActiveExportSession(null);
+                    Log(log, BuildRunLogMessage("Nothing left to resume. Existing completed items were kept.", runLog));
+                    return;
+                }
+
+                Log(log, "Resuming export: " + completeItems + "/" + totalItems + " already complete, " + pendingItems + " remaining.");
                 session.Status = ExportSessionStatusRunning;
                 SaveExportSessionAtomic(session, errorLog);
 
@@ -1797,19 +1856,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 Directory.CreateDirectory(deliverablesFolder);
                 EnsureMediaFolders(deliverablesFolder);
-
-                var queue = new List<PlannedRef>();
-                if (session.Queue != null)
-                {
-                    for (int i = 0; i < session.Queue.Count; i++)
-                    {
-                        PlannedRef item = BuildPlannedRefFromSessionItem(session.Queue[i]);
-                        if (item != null)
-                        {
-                            queue.Add(item);
-                        }
-                    }
-                }
 
                 ProcessDeliverablesIsolated(
                     queue,
@@ -4592,13 +4638,126 @@ namespace TinyMRP.SolidWorksAddin.Services
             return true;
         }
 
-        private void PrepareSessionForResume(ExportSessionState session, Action<string> errorLog)
+        private bool HasRecordedOutputs(ExportSessionItem item)
         {
-            if (session == null || session.Queue == null)
+            return item != null && item.Outputs != null && item.Outputs.Count > 0;
+        }
+
+        private string GetPlyValidationReason(List<ExportedOutputState> outputs)
+        {
+            if (outputs == null)
             {
-                return;
+                return string.Empty;
             }
 
+            for (int i = 0; i < outputs.Count; i++)
+            {
+                ExportedOutputState output = outputs[i];
+                if (output == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(output.Type, "ply", StringComparison.OrdinalIgnoreCase))
+                {
+                    return output.ValidationReason ?? string.Empty;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private bool IsDurableSkippedReason(string reason)
+        {
+            string normalized = (reason ?? string.Empty).Trim();
+            return string.Equals(normalized, ExportSkipReasonEmptyPath, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(normalized, ExportSkipReasonNoRequiredOutputs, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsSessionItemCompleteForResume(ExportSessionItem item, PublishOptions options, Action<string> errorLog,
+            out string reason)
+        {
+            _ = options;
+            reason = string.Empty;
+            if (item == null)
+            {
+                reason = "missing session item";
+                return false;
+            }
+
+            string status = (item.Status ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(status))
+            {
+                reason = "unknown or empty status";
+                return false;
+            }
+
+            if (string.Equals(status, ExportItemStatusPending, StringComparison.OrdinalIgnoreCase))
+            {
+                reason = !string.IsNullOrWhiteSpace(item.LastError) ? item.LastError : "item still pending";
+                return false;
+            }
+
+            if (string.Equals(status, ExportItemStatusFailed, StringComparison.OrdinalIgnoreCase))
+            {
+                reason = !string.IsNullOrWhiteSpace(item.LastError) ? item.LastError : "previous attempt failed";
+                return false;
+            }
+
+            if (string.Equals(status, ExportItemStatusRunning, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, ExportItemStatusSkipped, StringComparison.OrdinalIgnoreCase))
+            {
+                if (HasRecordedOutputs(item))
+                {
+                    string outputReason;
+                    string plyReason;
+                    bool valid = ValidateExpectedOutputs(item.Outputs, errorLog, out outputReason, out plyReason);
+                    if (valid)
+                    {
+                        return true;
+                    }
+
+                    reason = !string.IsNullOrWhiteSpace(outputReason) ? outputReason : "saved outputs invalid";
+                    return false;
+                }
+
+                if (string.Equals(status, ExportItemStatusSkipped, StringComparison.OrdinalIgnoreCase) &&
+                    IsDurableSkippedReason(item.LastError))
+                {
+                    reason = item.LastError ?? string.Empty;
+                    return true;
+                }
+
+                if (string.Equals(status, ExportItemStatusRunning, StringComparison.OrdinalIgnoreCase))
+                {
+                    reason = "item was running when previous export stopped";
+                    return false;
+                }
+
+                if (string.Equals(status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase))
+                {
+                    reason = "missing output records";
+                    return false;
+                }
+
+                reason = !string.IsNullOrWhiteSpace(item.LastError) ? item.LastError : "skipped item could not be verified";
+                return false;
+            }
+
+            reason = "unknown status: " + status;
+            return false;
+        }
+
+        private ResumePreparationStats PrepareSessionForResume(ExportSessionState session, Action<string> errorLog)
+        {
+            var stats = new ResumePreparationStats();
+            if (session == null || session.Queue == null)
+            {
+                return stats;
+            }
+
+            stats.TotalItems = session.Queue.Count;
             for (int i = 0; i < session.Queue.Count; i++)
             {
                 ExportSessionItem item = session.Queue[i];
@@ -4607,14 +4766,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                     continue;
                 }
 
-                string status = item.Status ?? string.Empty;
-                if (string.Equals(status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(status, ExportItemStatusRunning, StringComparison.OrdinalIgnoreCase))
+                string status = (item.Status ?? string.Empty).Trim();
+                string reason;
+                bool complete = IsSessionItemCompleteForResume(item, session.Options, null, out reason);
+                if (complete)
                 {
-                    string outputReason;
-                    string plyReason;
-                    bool valid = ValidateExpectedOutputs(item.Outputs, errorLog, out outputReason, out plyReason);
-                    if (valid)
+                    if (HasRecordedOutputs(item))
                     {
                         item.Status = ExportItemStatusDone;
                         item.LastError = string.Empty;
@@ -4622,15 +4779,43 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
                     else
                     {
-                        item.Status = ExportItemStatusPending;
-                        item.LastError = outputReason ?? string.Empty;
-                        item.PlyValidationReason = plyReason ?? string.Empty;
+                        item.Status = ExportItemStatusSkipped;
+                        if (string.IsNullOrWhiteSpace(item.LastError))
+                        {
+                            item.LastError = ExportSkipReasonNoRequiredOutputs;
+                        }
                     }
+
+                    continue;
+                }
+
+                if (string.Equals(status, ExportItemStatusRunning, StringComparison.OrdinalIgnoreCase))
+                {
+                    stats.RunningReset++;
                 }
                 else if (string.Equals(status, ExportItemStatusFailed, StringComparison.OrdinalIgnoreCase))
                 {
-                    item.Status = ExportItemStatusPending;
+                    stats.FailedReset++;
                 }
+                else if (string.Equals(status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase))
+                {
+                    stats.DoneReset++;
+                }
+                else if (string.Equals(status, ExportItemStatusSkipped, StringComparison.OrdinalIgnoreCase))
+                {
+                    stats.SkippedReset++;
+                }
+                else if (!string.Equals(status, ExportItemStatusPending, StringComparison.OrdinalIgnoreCase))
+                {
+                    stats.UnknownReset++;
+                }
+
+                item.Status = ExportItemStatusPending;
+                if (!string.IsNullOrWhiteSpace(reason))
+                {
+                    item.LastError = reason;
+                }
+                item.PlyValidationReason = GetPlyValidationReason(item.Outputs);
             }
 
             if (string.Equals(session.Status, ExportSessionStatusRunning, StringComparison.OrdinalIgnoreCase) ||
@@ -4638,6 +4823,50 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 session.Status = ExportSessionStatusCrashedOrIncomplete;
             }
+
+            stats.CompletedItems = CountCompletedSessionItems(session);
+            stats.PendingItems = stats.TotalItems - stats.CompletedItems;
+            SafeLog(errorLog,
+                "RESUME normalize: total=" + stats.TotalItems +
+                " complete=" + stats.CompletedItems +
+                " pending=" + stats.PendingItems +
+                " runningReset=" + stats.RunningReset +
+                " failedReset=" + stats.FailedReset +
+                " doneReset=" + stats.DoneReset +
+                " skippedReset=" + stats.SkippedReset +
+                " unknownReset=" + stats.UnknownReset);
+            return stats;
+        }
+
+        private List<PlannedRef> BuildPendingResumeQueue(ExportSessionState session, Action<string> errorLog)
+        {
+            var queue = new List<PlannedRef>();
+            if (session == null || session.Queue == null)
+            {
+                return queue;
+            }
+
+            for (int i = 0; i < session.Queue.Count; i++)
+            {
+                ExportSessionItem item = session.Queue[i];
+                string reason;
+                if (IsSessionItemCompleteForResume(item, session.Options, null, out reason))
+                {
+                    continue;
+                }
+
+                PlannedRef planned = BuildPlannedRefFromSessionItem(item);
+                if (planned != null)
+                {
+                    queue.Add(planned);
+                }
+                else
+                {
+                    SafeLog(errorLog, "RESUME queue skipped invalid item: " + (item != null ? (item.ItemId ?? string.Empty) : string.Empty));
+                }
+            }
+
+            return queue;
         }
 
         private int CountCompletedSessionItems(ExportSessionState session)
@@ -8279,7 +8508,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             {
                                 sessionItem.Status = ExportItemStatusSkipped;
                                 sessionItem.CompletedUtc = UtcNowString();
-                                sessionItem.LastError = "empty path";
+                                sessionItem.LastError = ExportSkipReasonEmptyPath;
                                 SaveExportSessionAtomic(sessionState, errorLog);
                             }
                             if (summary != null)
@@ -8689,7 +8918,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             else if (string.IsNullOrWhiteSpace(sessionItem.LastError))
                             {
                                 sessionItem.Status = ExportItemStatusSkipped;
-                                sessionItem.LastError = "no required outputs";
+                                sessionItem.LastError = ExportSkipReasonNoRequiredOutputs;
                             }
                             else
                             {
