@@ -2063,218 +2063,29 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
 
                 ThrowIfCancelled();
+                TryBuildBomWithSavedTempAssembly(swModel, bomFile, "BOM export", log, errorLog);
 
-                HashSet<string> baseline = SnapshotOpenDocIds();
+                string zipPath = exportTag + ".zip";
+                string zipFolderName = Path.GetFileName(exportTag);
+                string zipRoot = Path.Combine(
+                    Path.GetDirectoryName(exportTag) ?? pubFolder,
+                    zipFolderName + "_zip");
+                string innerFolder = Path.Combine(zipRoot, zipFolderName);
+                string bomInZip = Path.Combine(innerFolder, Path.GetFileName(bomFile));
+                string flatInZip = Path.Combine(innerFolder, Path.GetFileName(flatFile));
 
-                string template = string.Empty;
-                try
-                {
-                    template = _swApp.GetUserPreferenceStringValue(
-                        (int)swUserPreferenceStringValue_e.swDefaultTemplateAssembly) ?? string.Empty;
-                }
-                catch
-                {
-                    template = string.Empty;
-                }
+                TryDeleteDirectory(zipRoot);
+                Directory.CreateDirectory(innerFolder);
+                MoveFileIfExists(bomFile, bomInZip);
+                MoveFileIfExists(flatFile, flatInZip);
 
-                if (string.IsNullOrWhiteSpace(template))
+                if (File.Exists(zipPath))
                 {
-                    Log(log, "BOM export aborted: SolidWorks default assembly template is not set (Tools > Options > Default Templates).");
-                    return;
-                }
-
-                bool templateExists = false;
-                try
-                {
-                    templateExists = File.Exists(template);
-                }
-                catch
-                {
-                    templateExists = false;
-                }
-                if (!templateExists)
-                {
-                    Log(log, "BOM export aborted: default assembly template not found or inaccessible: " + template);
-                    return;
+                    File.Delete(zipPath);
                 }
 
-                ModelDoc2 assyDoc = _swApp.NewDocument(template, 0, 0, 0) as ModelDoc2;
-                AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
-                if (assyDoc == null || swAssembly == null)
-                {
-                    Log(log, "BOM export aborted: failed to create temporary assembly (template: " + template + ").");
-                    return;
-                }
-
-                string activeBeforeTempNorm = string.Empty;
-
-                try
-                {
-                    string activeBeforeTemp = string.Empty;
-                    try
-                    {
-                        ModelDoc2 activeDoc = _swApp.ActiveDoc as ModelDoc2;
-                        activeBeforeTemp = activeDoc != null ? (activeDoc.GetTitle() ?? string.Empty) : string.Empty;
-                    }
-                    catch
-                    {
-                        activeBeforeTemp = string.Empty;
-                    }
-
-                    activeBeforeTempNorm = NormalizeDocTitleForClose(activeBeforeTemp);
-                    if (string.IsNullOrWhiteSpace(activeBeforeTempNorm))
-                    {
-                        activeBeforeTempNorm = activeBeforeTemp ?? string.Empty;
-                    }
-
-                    using (new ExportDialogSuppressionScope(_swApp))
-                    using (new ExternalReferenceBatchOpenScope(_swApp))
-                    {
-                        try
-                        {
-                            // Temp assembly must never show UI tabs during BOM operations.
-                            assyDoc.Visible = false;
-                        }
-                        catch
-                        {
-                            // ignore
-                        }
-
-                        try
-                        {
-                            string tempTitle = assyDoc.GetTitle() ?? string.Empty;
-                            string activateTitle = NormalizeDocTitleForClose(tempTitle);
-                            if (string.IsNullOrWhiteSpace(activateTitle))
-                            {
-                                activateTitle = tempTitle;
-                            }
-
-                            int errors = 0;
-                            if (!string.IsNullOrWhiteSpace(activateTitle))
-                            {
-                                _swApp.ActivateDoc3(activateTitle, true,
-                                    (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors);
-                            }
-                        }
-                        catch
-                        {
-                            // ignore activation errors
-                        }
-
-                        try
-                        {
-                            assyDoc.Visible = false;
-                        }
-                        catch
-                        {
-                            // ignore
-                        }
-
-                        swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
-                        ModelDoc2 assyModel = assyDoc;
-
-                        Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
-                    if (assyConfig == null)
-                    {
-                        Log(log, "BOM export aborted: failed to read temporary assembly configuration.");
-                        return;
-                    }
-
-                    SetUnitPreferences(assyModel);
-                    ThrowIfCancelled();
-
-                    int bomX = 69;
-                    int bomY = 69;
-                    BomTableAnnotation bomTable = assyModel.Extension.InsertBomTable3(
-                        _config.BomTemplatePath,
-                        bomX,
-                        bomY,
-                        (int)swBomType_e.swBomType_Indented,
-                        assyConfig.Name,
-                        true,
-                        (int)swNumberingType_e.swNumberingType_Detailed,
-                        true);
-
-                    if (bomTable != null)
-                    {
-                        ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
-                        tableAnn.SaveAsText(bomFile, "\t");
-                        TextFileHelper.StripUtf8Bom(bomFile);
-                    }
-                    else
-                    {
-                        Log(log, "Failed to create BOM table.");
-                    }
-
-                        // Restore previously active document as soon as the BOM table is generated.
-                        try
-                        {
-                            if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
-                            {
-                                _swApp.ActivateDoc(activeBeforeTempNorm);
-                            }
-                        }
-                        catch
-                        {
-                            // ignore restore errors
-                        }
-
-                        try
-                        {
-                            assyDoc.Visible = false;
-                        }
-                        catch
-                        {
-                            // ignore
-                        }
-                    }
-
-                    string zipPath = exportTag + ".zip";
-                    string zipFolderName = Path.GetFileName(exportTag);
-                    string zipRoot = Path.Combine(
-                        Path.GetDirectoryName(exportTag) ?? pubFolder,
-                        zipFolderName + "_zip");
-                    string innerFolder = Path.Combine(zipRoot, zipFolderName);
-                    string bomInZip = Path.Combine(innerFolder, Path.GetFileName(bomFile));
-                    string flatInZip = Path.Combine(innerFolder, Path.GetFileName(flatFile));
-
-                    TryDeleteDirectory(zipRoot);
-                    Directory.CreateDirectory(innerFolder);
-                    MoveFileIfExists(bomFile, bomInZip);
-                    MoveFileIfExists(flatFile, flatInZip);
-
-                    if (File.Exists(zipPath))
-                    {
-                        File.Delete(zipPath);
-                    }
-
-                    CreateZipWithFolder(zipPath, zipFolderName, bomInZip, flatInZip);
-                    TryDeleteDirectory(zipRoot);
-                }
-                finally
-                {
-                    if (assyDoc != null)
-                    {
-                        using (new ExportDialogSuppressionScope(_swApp))
-                        using (new ExternalReferenceBatchOpenScope(_swApp))
-                        {
-                            try
-                            {
-                                if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
-                                {
-                                    _swApp.ActivateDoc(activeBeforeTempNorm);
-                                }
-                            }
-                            catch
-                            {
-                                // ignore restore errors
-                            }
-
-                            ForceCloseDocNoSave(assyDoc, errorLog, "BOM temp assembly close");
-                        }
-                    }
-                    CloseDocsNotInKeepSet(baseline, errorLog, "post BOM temp assembly cleanup");
-                }
+                CreateZipWithFolder(zipPath, zipFolderName, bomInZip, flatInZip);
+                TryDeleteDirectory(zipRoot);
 
                 Log(log, BuildRunLogMessage("BOM file generation finished.", runLog));
             }
@@ -3802,21 +3613,433 @@ namespace TinyMRP.SolidWorksAddin.Services
             return groups;
         }
 
-        private bool TryBuildTreeBom(ModelDoc2 rootModel, string treeBomPath, Action<string> log, Action<string> errorLog)
+        private string GetBomTempRootDirectory()
         {
-            if (rootModel == null || string.IsNullOrWhiteSpace(treeBomPath))
+            return Path.Combine(Path.GetTempPath(), "TinyMRP", "bom-temp");
+        }
+
+        private string BuildBomTempAssemblyPath(string token, out string tempDirectory)
+        {
+            string safeToken = !string.IsNullOrWhiteSpace(token) ? token.Trim() : Guid.NewGuid().ToString("N");
+            tempDirectory = Path.Combine(GetBomTempRootDirectory(), safeToken);
+            return Path.Combine(tempDirectory, "tinymrp_treebom_" + safeToken + ".SLDASM");
+        }
+
+        private bool IsPathUnderDirectory(string path, string directory)
+        {
+            if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(directory))
             {
                 return false;
             }
 
-            string modelPath = rootModel.GetPathName();
+            try
+            {
+                string fullPath = Path.GetFullPath(path)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string fullDirectory = Path.GetFullPath(directory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (string.Equals(fullPath, fullDirectory, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                string prefix = fullDirectory + Path.DirectorySeparatorChar;
+                return fullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void TrySetDocumentVisible(ModelDoc2 doc, bool visible)
+        {
+            if (doc == null)
+            {
+                return;
+            }
+
+            try
+            {
+                doc.Visible = visible;
+            }
+            catch
+            {
+                // ignore visibility errors
+            }
+        }
+
+        private string GetCurrentActiveDocumentTitle()
+        {
+            try
+            {
+                ModelDoc2 activeDoc = _swApp.ActiveDoc as ModelDoc2;
+                return activeDoc != null ? (activeDoc.GetTitle() ?? string.Empty) : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private void TryRestoreActiveDocument(string activeTitle, Action<string> errorLog, string context)
+        {
+            string activateTitle = NormalizeDocTitleForClose(activeTitle);
+            if (string.IsNullOrWhiteSpace(activateTitle))
+            {
+                activateTitle = activeTitle ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(activateTitle))
+            {
+                return;
+            }
+
+            try
+            {
+                _swApp.ActivateDoc(activateTitle);
+                SafeLog(errorLog, "TEMP BOM ASM restore active ok=True title=" + activateTitle + " context=" + (context ?? string.Empty));
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "TEMP BOM ASM restore active ok=False title=" + activateTitle +
+                    " context=" + (context ?? string.Empty) + " error=" + ex.Message);
+            }
+        }
+
+        private void TryActivateDocument(ModelDoc2 doc, Action<string> errorLog, string context)
+        {
+            if (doc == null)
+            {
+                return;
+            }
+
+            string tempTitle = string.Empty;
+            try
+            {
+                tempTitle = doc.GetTitle() ?? string.Empty;
+            }
+            catch
+            {
+                tempTitle = string.Empty;
+            }
+
+            string activateTitle = NormalizeDocTitleForClose(tempTitle);
+            if (string.IsNullOrWhiteSpace(activateTitle))
+            {
+                activateTitle = tempTitle;
+            }
+
+            if (string.IsNullOrWhiteSpace(activateTitle))
+            {
+                return;
+            }
+
+            int errors = 0;
+            bool ok = false;
+            try
+            {
+                object activated = _swApp.ActivateDoc3(
+                    activateTitle,
+                    true,
+                    (int)swRebuildOnActivation_e.swDontRebuildActiveDoc,
+                    ref errors);
+                ok = activated != null;
+            }
+            catch
+            {
+                ok = false;
+            }
+
+            SafeLog(errorLog, "TEMP BOM ASM activate ok=" + ok + " errors=" + errors +
+                " title=" + activateTitle + " context=" + (context ?? string.Empty));
+        }
+
+        private void TryRebuildDocument(ModelDoc2 doc, Action<string> errorLog, string context)
+        {
+            if (doc == null)
+            {
+                return;
+            }
+
+            try
+            {
+                bool rebuildOk = doc.ForceRebuild3(false);
+                SafeLog(errorLog, "TEMP BOM ASM rebuild ok=" + rebuildOk + " context=" + (context ?? string.Empty));
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "TEMP BOM ASM rebuild failed context=" + (context ?? string.Empty) + " error=" + ex.Message);
+            }
+        }
+
+        private bool TrySilentSaveAs(ModelDoc2 doc, string targetPath, Action<string> errorLog, string context,
+            out int errors, out int warnings)
+        {
+            errors = 0;
+            warnings = 0;
+            if (doc == null || string.IsNullOrWhiteSpace(targetPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                string directory = Path.GetDirectoryName(targetPath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                return doc.Extension.SaveAs(
+                    targetPath,
+                    (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent,
+                    null,
+                    ref errors,
+                    ref warnings);
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "TEMP BOM ASM saveas exception context=" + (context ?? string.Empty) +
+                    " path=" + targetPath + " error=" + ex.Message);
+                errors = 0;
+                warnings = 0;
+                return false;
+            }
+        }
+
+        private bool TrySilentSaveCurrent(ModelDoc2 doc, Action<string> errorLog, string context,
+            out int errors, out int warnings)
+        {
+            errors = 0;
+            warnings = 0;
+            if (doc == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return doc.Save3((int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref errors, ref warnings);
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "TEMP BOM ASM save exception context=" + (context ?? string.Empty) +
+                    " error=" + ex.Message);
+                errors = 0;
+                warnings = 0;
+                return false;
+            }
+        }
+
+        private bool CloseSavedTempAssemblyNoPrompt(ModelDoc2 tempAssembly, string tempAssemblyPath, Action<string> errorLog, string context)
+        {
+            if (tempAssembly == null)
+            {
+                return true;
+            }
+
+            string title = string.Empty;
+            try
+            {
+                title = tempAssembly.GetTitle() ?? string.Empty;
+            }
+            catch
+            {
+                title = string.Empty;
+            }
+
+            string closeTitle = NormalizeDocTitleForClose(title);
+            if (string.IsNullOrWhiteSpace(closeTitle))
+            {
+                closeTitle = title ?? string.Empty;
+            }
+
+            bool dirty = false;
+            try
+            {
+                dirty = tempAssembly.GetSaveFlag();
+            }
+            catch
+            {
+                dirty = false;
+            }
+
+            bool savedTempExists = false;
+            try
+            {
+                savedTempExists = !string.IsNullOrWhiteSpace(tempAssemblyPath) && File.Exists(tempAssemblyPath);
+            }
+            catch
+            {
+                savedTempExists = false;
+            }
+
+            if (dirty && savedTempExists)
+            {
+                int preCloseErrors;
+                int preCloseWarnings;
+                bool preCloseSaveOk = TrySilentSaveCurrent(tempAssembly, errorLog, context + " pre-close", out preCloseErrors, out preCloseWarnings);
+                SafeLog(errorLog, "TEMP BOM ASM pre-close save ok=" + preCloseSaveOk +
+                    " errors=" + preCloseErrors + " warnings=" + preCloseWarnings +
+                    " path=" + (tempAssemblyPath ?? string.Empty));
+            }
+
+            ForceCloseDocNoSave(tempAssembly, errorLog, context);
+
+            bool closeOk = !IsDocOpenByIdOrTitle(tempAssemblyPath, closeTitle);
+            if (!closeOk)
+            {
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(closeTitle))
+                    {
+                        _swApp.QuitDoc(closeTitle);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SafeLog(errorLog, "TEMP BOM ASM QuitDoc title failed context=" + (context ?? string.Empty) +
+                        " title=" + closeTitle + " error=" + ex.Message);
+                }
+
+                try
+                {
+                    string fileName = !string.IsNullOrWhiteSpace(tempAssemblyPath)
+                        ? (Path.GetFileName(tempAssemblyPath) ?? string.Empty)
+                        : string.Empty;
+                    if (!string.IsNullOrWhiteSpace(fileName))
+                    {
+                        _swApp.QuitDoc(fileName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SafeLog(errorLog, "TEMP BOM ASM QuitDoc file failed context=" + (context ?? string.Empty) +
+                        " path=" + (tempAssemblyPath ?? string.Empty) + " error=" + ex.Message);
+                }
+
+                try
+                {
+                    System.Windows.Forms.Application.DoEvents();
+                }
+                catch
+                {
+                    // ignore UI pump errors
+                }
+
+                closeOk = !IsDocOpenByIdOrTitle(tempAssemblyPath, closeTitle);
+            }
+
+            SafeLog(errorLog, "TEMP BOM ASM close ok=" + closeOk +
+                " context=" + (context ?? string.Empty) +
+                " title=" + (closeTitle ?? string.Empty) +
+                " path=" + (tempAssemblyPath ?? string.Empty));
+            return closeOk;
+        }
+
+        private bool TryDeleteTempBomDirectory(string tempDirectory, Action<string> errorLog, string context)
+        {
+            if (string.IsNullOrWhiteSpace(tempDirectory))
+            {
+                return true;
+            }
+
+            string tempRoot = GetBomTempRootDirectory();
+            if (!IsPathUnderDirectory(tempDirectory, tempRoot))
+            {
+                SafeLog(errorLog, "TEMP BOM ASM delete ok=False context=" + (context ?? string.Empty) +
+                    " path=" + tempDirectory + " reason=outside temp root");
+                return false;
+            }
+
+            string lastError = string.Empty;
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    if (!Directory.Exists(tempDirectory))
+                    {
+                        SafeLog(errorLog, "TEMP BOM ASM delete ok=True context=" + (context ?? string.Empty) +
+                            " path=" + tempDirectory);
+                        return true;
+                    }
+
+                    Directory.Delete(tempDirectory, true);
+                    if (!Directory.Exists(tempDirectory))
+                    {
+                        SafeLog(errorLog, "TEMP BOM ASM delete ok=True context=" + (context ?? string.Empty) +
+                            " path=" + tempDirectory);
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex.Message;
+                }
+
+                try
+                {
+                    System.Threading.Thread.Sleep(150);
+                }
+                catch
+                {
+                    // ignore sleep errors
+                }
+            }
+
+            SafeLog(errorLog, "TEMP BOM ASM delete ok=False context=" + (context ?? string.Empty) +
+                " path=" + tempDirectory + " error=" + (lastError ?? string.Empty));
+            return !Directory.Exists(tempDirectory);
+        }
+
+        private bool TryBuildBomWithSavedTempAssembly(
+            ModelDoc2 rootModel,
+            string outputBomPath,
+            string context,
+            Action<string> log,
+            Action<string> errorLog)
+        {
+            string contextLabel = !string.IsNullOrWhiteSpace(context) ? context.Trim() : "BOM export";
+            if (rootModel == null || string.IsNullOrWhiteSpace(outputBomPath))
+            {
+                return false;
+            }
+
+            string modelPath = string.Empty;
+            try
+            {
+                modelPath = rootModel.GetPathName() ?? string.Empty;
+            }
+            catch
+            {
+                modelPath = string.Empty;
+            }
+
             if (string.IsNullOrWhiteSpace(modelPath))
             {
-                Log(log, "Upload pack: active document must be saved to build TREEBOM.");
+                Log(log, contextLabel + " aborted: active document must be saved before building the temporary BOM assembly.");
                 return false;
             }
 
-            HashSet<string> baseline = SnapshotOpenDocIds();
+            HashSet<string> baseline;
+            try
+            {
+                baseline = SnapshotOpenDocIds();
+            }
+            catch
+            {
+                baseline = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            string activeBeforeTemp = GetCurrentActiveDocumentTitle();
+            string activeBeforeTempNorm = NormalizeDocTitleForClose(activeBeforeTemp);
+            if (string.IsNullOrWhiteSpace(activeBeforeTempNorm))
+            {
+                activeBeforeTempNorm = activeBeforeTemp ?? string.Empty;
+            }
 
             string template = string.Empty;
             try
@@ -3831,7 +4054,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             if (string.IsNullOrWhiteSpace(template))
             {
-                Log(log, "Upload pack: SolidWorks default assembly template is not set (Tools > Options > Default Templates).");
+                Log(log, contextLabel + " aborted: SolidWorks default assembly template is not set (Tools > Options > Default Templates).");
                 return false;
             }
 
@@ -3844,102 +4067,107 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 templateExists = false;
             }
+
             if (!templateExists)
             {
-                Log(log, "Upload pack: default assembly template not found or inaccessible: " + template);
+                Log(log, contextLabel + " aborted: default assembly template not found or inaccessible: " + template);
                 return false;
             }
 
-            ModelDoc2 assyDoc = _swApp.NewDocument(template, 0, 0, 0) as ModelDoc2;
-            AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
-            if (assyDoc == null || swAssembly == null)
-            {
-                Log(log, "Upload pack: failed to create temp assembly for TREEBOM (template: " + template + ").");
-                return false;
-            }
+            string tempDirectory;
+            string tempToken = Guid.NewGuid().ToString("N");
+            string tempAssemblyPath = BuildBomTempAssemblyPath(tempToken, out tempDirectory);
+            Directory.CreateDirectory(tempDirectory);
+            SafeLog(errorLog, "TEMP BOM ASM create path=" + tempAssemblyPath + " context=" + contextLabel);
 
-            string activeBeforeTemp = string.Empty;
+            ModelDoc2 assyDoc = null;
+            bool closeOk = true;
             try
             {
-                ModelDoc2 activeDoc = _swApp.ActiveDoc as ModelDoc2;
-                activeBeforeTemp = activeDoc != null ? (activeDoc.GetTitle() ?? string.Empty) : string.Empty;
-            }
-            catch
-            {
-                activeBeforeTemp = string.Empty;
-            }
+                assyDoc = _swApp.NewDocument(template, 0, 0, 0) as ModelDoc2;
+                AssemblyDoc swAssembly = assyDoc as AssemblyDoc;
+                if (assyDoc == null || swAssembly == null)
+                {
+                    Log(log, contextLabel + " aborted: failed to create temporary assembly (template: " + template + ").");
+                    return false;
+                }
 
-            string activeBeforeTempNorm = NormalizeDocTitleForClose(activeBeforeTemp);
-            if (string.IsNullOrWhiteSpace(activeBeforeTempNorm))
-            {
-                activeBeforeTempNorm = activeBeforeTemp ?? string.Empty;
-            }
-
-            try
-            {
                 using (new ExportDialogSuppressionScope(_swApp))
                 using (new ExternalReferenceBatchOpenScope(_swApp))
                 {
-                    try
-                    {
-                        // Temp assembly must never show UI tabs during TREEBOM operations.
-                        assyDoc.Visible = false;
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
+                    TrySetDocumentVisible(assyDoc, false);
+                    TryActivateDocument(assyDoc, errorLog, contextLabel);
 
-                    try
+                    int initialSaveErrors;
+                    int initialSaveWarnings;
+                    bool initialSaveOk = TrySilentSaveAs(assyDoc, tempAssemblyPath, errorLog, contextLabel + " initial",
+                        out initialSaveErrors, out initialSaveWarnings);
+                    SafeLog(errorLog, "TEMP BOM ASM initial save ok=" + initialSaveOk +
+                        " errors=" + initialSaveErrors +
+                        " warnings=" + initialSaveWarnings +
+                        " path=" + tempAssemblyPath);
+                    if (!initialSaveOk)
                     {
-                        string tempTitle = assyDoc.GetTitle() ?? string.Empty;
-                        string activateTitle = NormalizeDocTitleForClose(tempTitle);
-                        if (string.IsNullOrWhiteSpace(activateTitle))
-                        {
-                            activateTitle = tempTitle;
-                        }
-
-                        int errors = 0;
-                        if (!string.IsNullOrWhiteSpace(activateTitle))
-                        {
-                            _swApp.ActivateDoc3(activateTitle, true,
-                                (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors);
-                        }
-                    }
-                    catch
-                    {
-                        // ignore activation errors
-                    }
-
-                    try
-                    {
-                        assyDoc.Visible = false;
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
-
-                    swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
-                    ModelDoc2 assyModel = assyDoc;
-
-                    Configuration assyConfig = assyModel.GetActiveConfiguration() as Configuration;
-                    if (assyConfig == null)
-                    {
-                        Log(log, "Upload pack: failed to read assembly configuration.");
                         return false;
                     }
 
-                    SetUnitPreferences(assyModel);
+                    ThrowIfCancelled();
 
-                    string treeDir = Path.GetDirectoryName(treeBomPath);
-                    if (!string.IsNullOrWhiteSpace(treeDir))
+                    object addedComponent = null;
+                    try
                     {
-                        Directory.CreateDirectory(treeDir);
+                        addedComponent = swAssembly.AddComponent5(modelPath, 0, string.Empty, false, string.Empty, 0, 0, 0);
                     }
+                    catch (Exception ex)
+                    {
+                        SafeLog(errorLog, "TEMP BOM ASM add component exception context=" + contextLabel +
+                            " modelPath=" + modelPath + " error=" + ex.Message);
+                        addedComponent = null;
+                    }
+
+                    SafeLog(errorLog, "TEMP BOM ASM add component ok=" + (addedComponent != null) +
+                        " modelPath=" + modelPath + " context=" + contextLabel);
+                    if (addedComponent == null)
+                    {
+                        Log(log, contextLabel + ": failed to add the root model to the temporary assembly.");
+                        return false;
+                    }
+
+                    TryRebuildDocument(assyDoc, errorLog, contextLabel + " post-component");
+
+                    int postComponentSaveErrors;
+                    int postComponentSaveWarnings;
+                    bool postComponentSaveOk = TrySilentSaveCurrent(assyDoc, errorLog, contextLabel + " post-component",
+                        out postComponentSaveErrors, out postComponentSaveWarnings);
+                    SafeLog(errorLog, "TEMP BOM ASM post-component save ok=" + postComponentSaveOk +
+                        " errors=" + postComponentSaveErrors +
+                        " warnings=" + postComponentSaveWarnings +
+                        " path=" + tempAssemblyPath);
+                    if (!postComponentSaveOk)
+                    {
+                        return false;
+                    }
+
+                    ThrowIfCancelled();
+
+                    Configuration assyConfig = assyDoc.GetActiveConfiguration() as Configuration;
+                    if (assyConfig == null)
+                    {
+                        Log(log, contextLabel + ": failed to read temporary assembly configuration.");
+                        return false;
+                    }
+
+                    SetUnitPreferences(assyDoc);
+
+                    string outputDir = Path.GetDirectoryName(outputBomPath);
+                    if (!string.IsNullOrWhiteSpace(outputDir))
+                    {
+                        Directory.CreateDirectory(outputDir);
+                    }
+
                     int bomX = 69;
                     int bomY = 69;
-                    BomTableAnnotation bomTable = assyModel.Extension.InsertBomTable3(
+                    BomTableAnnotation bomTable = assyDoc.Extension.InsertBomTable3(
                         _config.BomTemplatePath,
                         bomX,
                         bomY,
@@ -3949,49 +4177,87 @@ namespace TinyMRP.SolidWorksAddin.Services
                         (int)swNumberingType_e.swNumberingType_Detailed,
                         true);
 
-                    if (bomTable != null)
+                    SafeLog(errorLog, "TEMP BOM ASM bom table ok=" + (bomTable != null) +
+                        " output=" + outputBomPath + " context=" + contextLabel);
+                    if (bomTable == null)
                     {
-                        ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
-                        tableAnn.SaveAsText(treeBomPath, "\t");
-                        TextFileHelper.StripUtf8Bom(treeBomPath);
-                        return true;
+                        Log(log, contextLabel + ": failed to create BOM table.");
+                        return false;
                     }
 
-                    Log(log, "Upload pack: failed to create BOM table.");
-                    return false;
+                    ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
+                    tableAnn.SaveAsText(outputBomPath, "\t");
+                    TextFileHelper.StripUtf8Bom(outputBomPath);
+                    bool outputCreated = File.Exists(outputBomPath);
+                    SafeLog(errorLog, "TEMP BOM ASM text export ok=" + outputCreated +
+                        " output=" + outputBomPath + " context=" + contextLabel);
+                    if (!outputCreated)
+                    {
+                        Log(log, contextLabel + ": BOM text export did not create the output file.");
+                        return false;
+                    }
+
+                    TryRestoreActiveDocument(activeBeforeTempNorm, errorLog, contextLabel + " post-text-export");
+                    TrySetDocumentVisible(assyDoc, false);
+
+                    int postBomSaveErrors;
+                    int postBomSaveWarnings;
+                    bool postBomSaveOk = TrySilentSaveCurrent(assyDoc, errorLog, contextLabel + " post-bom",
+                        out postBomSaveErrors, out postBomSaveWarnings);
+                    SafeLog(errorLog, "TEMP BOM ASM post-bom save ok=" + postBomSaveOk +
+                        " errors=" + postBomSaveErrors +
+                        " warnings=" + postBomSaveWarnings +
+                        " path=" + tempAssemblyPath);
+                    if (!postBomSaveOk)
+                    {
+                        return false;
+                    }
+
+                    return true;
                 }
             }
-             finally
-             {
-                using (new ExportDialogSuppressionScope(_swApp))
-                using (new ExternalReferenceBatchOpenScope(_swApp))
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "TEMP BOM ASM failed context=" + contextLabel +
+                    " path=" + tempAssemblyPath + " error=" + ex.Message);
+                return false;
+            }
+            finally
+            {
+                TryRestoreActiveDocument(activeBeforeTempNorm, errorLog, contextLabel + " finally");
+                TrySetDocumentVisible(assyDoc, false);
+
+                if (assyDoc != null)
                 {
-                    try
+                    using (new ExportDialogSuppressionScope(_swApp))
+                    using (new ExternalReferenceBatchOpenScope(_swApp))
                     {
-                        if (!string.IsNullOrWhiteSpace(activeBeforeTempNorm))
-                        {
-                            _swApp.ActivateDoc(activeBeforeTempNorm);
-                        }
+                        closeOk = CloseSavedTempAssemblyNoPrompt(assyDoc, tempAssemblyPath, errorLog, contextLabel + " temp assembly close");
                     }
-                    catch
-                    {
-                        // ignore restore errors
-                    }
-
-                    try
-                    {
-                        assyDoc.Visible = false;
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
-
-                    ForceCloseDocNoSave(assyDoc, errorLog, "TREEBOM temp assembly close");
-                    CloseDocsNotInKeepSet(baseline, errorLog, "post TREEBOM temp assembly cleanup");
                 }
-              }
-          }
+
+                CloseDocsNotInKeepSet(baseline, errorLog, "post " + contextLabel + " temp assembly cleanup");
+
+                if (closeOk)
+                {
+                    TryDeleteTempBomDirectory(tempDirectory, errorLog, contextLabel);
+                }
+                else
+                {
+                    SafeLog(errorLog, "TEMP BOM ASM delete ok=False context=" + contextLabel +
+                        " path=" + tempDirectory + " reason=document still open");
+                }
+            }
+        }
+
+        private bool TryBuildTreeBom(ModelDoc2 rootModel, string treeBomPath, Action<string> log, Action<string> errorLog)
+        {
+            return TryBuildBomWithSavedTempAssembly(rootModel, treeBomPath, "Upload pack TREEBOM", log, errorLog);
+        }
 
         private List<ModelEntry> GetEntriesForActiveDoc(bool includeChildren, out ModelDoc2 rootModel,
             out string rootTitle, out HashSet<string> initialDocs, out string startTitle)
