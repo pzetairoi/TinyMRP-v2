@@ -384,6 +384,139 @@ namespace TinyMRP.SolidWorksAddin.Tests
             }
         }
 
+        [TestMethod]
+        public void BuildPendingResumeQueue_ValidDoneItemIsExcludedEvenWhenOverwriteTrue()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string validPlyPath = Path.Combine(root, "done_valid_overwrite.ply");
+
+            try
+            {
+                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
+
+                object session = CreateExportSession("paused");
+                var options = (PublishOptions)GetField(session, "Options");
+                options.OverwriteFiles = true;
+
+                IList queue = (IList)GetField(session, "Queue");
+                queue.Add(CreateExportSessionItem(@"C:\vault\done.sldprt", "A", "done",
+                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty)));
+
+                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
+                IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
+
+                Assert.AreEqual("done", GetField(queue[0], "Status"));
+                Assert.AreEqual(0, pending.Count);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void BuildPendingResumeQueue_DoneItemWithMissingOutput_IsIncluded()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            object session = CreateExportSession("paused");
+            IList queue = (IList)GetField(session, "Queue");
+            queue.Add(CreateExportSessionItem(@"C:\vault\missing.sldprt", "A", "done",
+                CreateExportedOutput("ply", @"C:\does-not-exist\missing.ply", 0, false, string.Empty)));
+
+            InvokePrivate(publisher, "PrepareSessionForResume", session, null);
+            IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
+
+            Assert.AreEqual("pending", GetField(queue[0], "Status"));
+            Assert.AreEqual("ply:missing file", GetField(queue[0], "LastError"));
+            Assert.AreEqual(1, pending.Count);
+            Assert.AreEqual(@"C:\vault\missing.sldprt", GetField(pending[0], "ModelPath"));
+        }
+
+        [TestMethod]
+        public void BuildPendingResumeQueue_RunningItemWithValidOutputs_BecomesDoneAndIsExcluded()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string validPlyPath = Path.Combine(root, "running_valid.ply");
+
+            try
+            {
+                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
+
+                object session = CreateExportSession("running");
+                IList queue = (IList)GetField(session, "Queue");
+                queue.Add(CreateExportSessionItem(@"C:\vault\running-ok.sldprt", "A", "running",
+                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty)));
+
+                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
+                IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
+
+                Assert.AreEqual("done", GetField(queue[0], "Status"));
+                Assert.AreEqual(string.Empty, GetField(queue[0], "LastError"));
+                Assert.AreEqual(0, pending.Count);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void BuildPendingResumeQueue_FailedAndUnknownStatuses_AreIncluded()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string validPlyPath = Path.Combine(root, "unknown_valid.ply");
+
+            try
+            {
+                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
+
+                object session = CreateExportSession("failed");
+                IList queue = (IList)GetField(session, "Queue");
+
+                object failedItem = CreateExportSessionItem(@"C:\vault\failed.sldprt", "A", "failed",
+                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty));
+                SetField(failedItem, "LastError", "previous export failed");
+                queue.Add(failedItem);
+
+                queue.Add(CreateExportSessionItem(@"C:\vault\unknown.sldprt", "B", "mystery",
+                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty)));
+
+                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
+                IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
+
+                Assert.AreEqual("pending", GetField(queue[0], "Status"));
+                Assert.AreEqual("pending", GetField(queue[1], "Status"));
+                Assert.AreEqual(2, pending.Count);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void PrepareSessionForResume_DurableSkippedItemRemainsSkippedAndCountsComplete()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            object session = CreateExportSession("paused");
+            IList queue = (IList)GetField(session, "Queue");
+
+            object skippedItem = CreateExportSessionItem(@"C:\vault\skip.sldprt", "A", "skipped");
+            SetField(skippedItem, "LastError", "no required outputs");
+            queue.Add(skippedItem);
+
+            InvokePrivate(publisher, "PrepareSessionForResume", session, null);
+            IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
+            int completed = (int)InvokePrivate(publisher, "CountCompletedSessionItems", session);
+
+            Assert.AreEqual("skipped", GetField(queue[0], "Status"));
+            Assert.AreEqual(1, completed);
+            Assert.AreEqual(0, pending.Count);
+        }
+
         private static object InvokePrivate(object target, string methodName, params object[] args)
         {
             MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
