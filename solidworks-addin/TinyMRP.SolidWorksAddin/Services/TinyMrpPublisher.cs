@@ -1491,6 +1491,442 @@ namespace TinyMRP.SolidWorksAddin.Services
             return state;
         }
 
+        private string NormalizePathForComparison(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return Path.GetFullPath(path).Trim().TrimEnd('\\', '/');
+            }
+            catch
+            {
+                return (path ?? string.Empty).Trim().Replace('/', '\\').TrimEnd('\\');
+            }
+        }
+
+        private bool AreCurrentDeliverableSelectionsCoveredByPrevious(PublishOptions previous, PublishOptions current)
+        {
+            if (current == null)
+            {
+                return false;
+            }
+
+            if (previous == null)
+            {
+                return false;
+            }
+
+            if (current.ExportPngModel && !previous.ExportPngModel) return false;
+            if (current.ExportStep && !previous.ExportStep) return false;
+            if (current.ExportEdrawing && !previous.ExportEdrawing) return false;
+            if (current.Export3mf && !previous.Export3mf) return false;
+            if (current.ExportPly && !previous.ExportPly) return false;
+            if (current.ExportStl && !previous.ExportStl) return false;
+            if (current.ExportPngDrawing && !previous.ExportPngDrawing) return false;
+            if (current.ExportPdf && !previous.ExportPdf) return false;
+            if (current.ExportDxf && !previous.ExportDxf) return false;
+            if (current.ExportEdrawingDrawing && !previous.ExportEdrawingDrawing) return false;
+
+            return true;
+        }
+
+        private bool IsExportSessionCompatibleForReuse(ExportSessionState previous, string rootModelPath, string rootConfigName,
+            PublishOptions currentOptions)
+        {
+            if (previous == null || currentOptions == null || currentOptions.OverwriteFiles)
+            {
+                return false;
+            }
+
+            string currentRootPath = NormalizePathForComparison(rootModelPath);
+            string previousRootPath = NormalizePathForComparison(previous.RootModelPath);
+            if (!string.Equals(currentRootPath, previousRootPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string currentConfig = (rootConfigName ?? string.Empty).Trim();
+            string previousConfig = (previous.RootConfigurationName ?? string.Empty).Trim();
+            if (!string.Equals(currentConfig, previousConfig, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string currentDeliverables = NormalizePathForComparison(currentOptions.DeliverablesFolder);
+            string previousDeliverables = NormalizePathForComparison(previous.DeliverablesFolder);
+            if (!string.Equals(currentDeliverables, previousDeliverables, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return AreCurrentDeliverableSelectionsCoveredByPrevious(previous.Options, currentOptions);
+        }
+
+        private int GetReusableSessionStatusRank(string status)
+        {
+            string normalized = (status ?? string.Empty).Trim();
+            if (string.Equals(normalized, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
+            {
+                return 3;
+            }
+
+            if (string.Equals(normalized, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, ExportSessionStatusCancelled, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, ExportSessionStatusFailed, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, ExportSessionStatusCrashedOrIncomplete, StringComparison.OrdinalIgnoreCase))
+            {
+                return 2;
+            }
+
+            if (string.Equals(normalized, ExportSessionStatusRunning, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, ExportSessionStatusPauseRequested, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalized, ExportSessionStatusPlanned, StringComparison.OrdinalIgnoreCase))
+            {
+                return 1;
+            }
+
+            return 0;
+        }
+
+        private DateTime GetReusableSessionTimestampUtc(ExportSessionState session)
+        {
+            if (session == null)
+            {
+                return DateTime.MinValue;
+            }
+
+            string value = !string.IsNullOrWhiteSpace(session.UpdatedUtc)
+                ? session.UpdatedUtc
+                : (session.CreatedUtc ?? string.Empty);
+
+            DateTime parsed;
+            if (DateTime.TryParse(
+                    value,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                    out parsed))
+            {
+                return parsed;
+            }
+
+            return DateTime.MinValue;
+        }
+
+        private bool IsReusableSessionCandidateBetter(ExportSessionState candidate, ExportSessionState currentBest)
+        {
+            if (candidate == null)
+            {
+                return false;
+            }
+
+            if (currentBest == null)
+            {
+                return true;
+            }
+
+            int candidateCompleted = CountCompletedSessionItems(candidate);
+            int bestCompleted = CountCompletedSessionItems(currentBest);
+            if (candidateCompleted != bestCompleted)
+            {
+                return candidateCompleted > bestCompleted;
+            }
+
+            int candidatePending = candidate.Queue != null
+                ? Math.Max(0, candidate.Queue.Count - candidateCompleted)
+                : 0;
+            int bestPending = currentBest.Queue != null
+                ? Math.Max(0, currentBest.Queue.Count - bestCompleted)
+                : 0;
+            if (candidatePending != bestPending)
+            {
+                return candidatePending < bestPending;
+            }
+
+            int candidateStatusRank = GetReusableSessionStatusRank(candidate.Status);
+            int bestStatusRank = GetReusableSessionStatusRank(currentBest.Status);
+            if (candidateStatusRank != bestStatusRank)
+            {
+                return candidateStatusRank > bestStatusRank;
+            }
+
+            DateTime candidateTimestamp = GetReusableSessionTimestampUtc(candidate);
+            DateTime bestTimestamp = GetReusableSessionTimestampUtc(currentBest);
+            return candidateTimestamp > bestTimestamp;
+        }
+
+        private ExportSessionState LoadLatestReusableExportSession(string rootModelPath, string rootConfigName,
+            PublishOptions currentOptions, Action<string> errorLog)
+        {
+            if (currentOptions == null || currentOptions.OverwriteFiles)
+            {
+                return null;
+            }
+
+            var paths = new List<string>();
+            string activePath = GetActiveExportSessionPath();
+            if (!string.IsNullOrWhiteSpace(activePath) && File.Exists(activePath))
+            {
+                paths.Add(activePath);
+            }
+
+            try
+            {
+                string dir = GetExportSessionsDirectory();
+                if (Directory.Exists(dir))
+                {
+                    foreach (string path in Directory.GetFiles(dir, "*.json"))
+                    {
+                        if (!string.IsNullOrWhiteSpace(path))
+                        {
+                            paths.Add(path);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "SESSION reusable scan failed: " + ex.Message);
+            }
+
+            var uniquePaths = new HashSet<string>(paths, StringComparer.OrdinalIgnoreCase);
+            var ordered = new List<string>(uniquePaths);
+            ordered.Sort((a, b) =>
+            {
+                DateTime aTime;
+                DateTime bTime;
+                try
+                {
+                    aTime = File.GetLastWriteTimeUtc(a);
+                }
+                catch
+                {
+                    aTime = DateTime.MinValue;
+                }
+
+                try
+                {
+                    bTime = File.GetLastWriteTimeUtc(b);
+                }
+                catch
+                {
+                    bTime = DateTime.MinValue;
+                }
+
+                return bTime.CompareTo(aTime);
+            });
+
+            ExportSessionState best = null;
+            string bestPath = string.Empty;
+            foreach (string path in ordered)
+            {
+                ExportSessionState previous = LoadExportSession(path, null);
+                if (!IsExportSessionCompatibleForReuse(previous, rootModelPath, rootConfigName, currentOptions))
+                {
+                    continue;
+                }
+
+                SafeLog(errorLog,
+                    "SESSION reusable candidate: path=" + path +
+                    " status=" + (previous.Status ?? string.Empty) +
+                    " items=" + (previous.Queue != null ? previous.Queue.Count : 0));
+
+                ResumePreparationStats stats = PrepareSessionForResume(previous, null);
+                SafeLog(errorLog,
+                    "SESSION reusable candidate prepared: path=" + path +
+                    " complete=" + stats.CompletedItems +
+                    " pending=" + stats.PendingItems);
+
+                if (!IsReusableSessionCandidateBetter(previous, best))
+                {
+                    continue;
+                }
+
+                best = previous;
+                bestPath = path;
+            }
+
+            if (best != null)
+            {
+                SafeLog(errorLog,
+                    "SESSION reusable hit: path=" + bestPath +
+                    " status=" + (best.Status ?? string.Empty) +
+                    " items=" + (best.Queue != null ? best.Queue.Count : 0) +
+                    " complete=" + CountCompletedSessionItems(best));
+            }
+
+            return best;
+        }
+
+        private int SeedExportSessionFromPrevious(ExportSessionState current, ExportSessionState previous)
+        {
+            if (current == null || current.Queue == null || previous == null || previous.Queue == null)
+            {
+                return 0;
+            }
+
+            var previousById = new Dictionary<string, ExportSessionItem>(StringComparer.OrdinalIgnoreCase);
+            foreach (ExportSessionItem item in previous.Queue)
+            {
+                if (item == null || string.IsNullOrWhiteSpace(item.ItemId) || previousById.ContainsKey(item.ItemId))
+                {
+                    continue;
+                }
+
+                previousById[item.ItemId] = item;
+            }
+
+            int seeded = 0;
+            foreach (ExportSessionItem item in current.Queue)
+            {
+                if (item == null || string.IsNullOrWhiteSpace(item.ItemId))
+                {
+                    continue;
+                }
+
+                ExportSessionItem previousItem;
+                if (!previousById.TryGetValue(item.ItemId, out previousItem) || previousItem == null)
+                {
+                    continue;
+                }
+
+                List<ExportedOutputState> expectedOutputs = FilterReusedOutputsForCurrentSelection(
+                    previousItem.ExpectedOutputs,
+                    previous.Options,
+                    current.Options);
+                List<ExportedOutputState> outputs = FilterReusedOutputsForCurrentSelection(
+                    previousItem.Outputs,
+                    previous.Options,
+                    current.Options);
+                bool hadReusableOutputs = HasOutputExpectations(previousItem) || HasRecordedOutputs(previousItem);
+
+                if (hadReusableOutputs && expectedOutputs.Count == 0 && outputs.Count == 0)
+                {
+                    item.Status = ExportItemStatusSkipped;
+                    item.LastError = ExportSkipReasonNoRequiredOutputs;
+                    item.PlyValidationReason = string.Empty;
+                    item.ExpectedOutputs = expectedOutputs;
+                    item.Outputs = outputs;
+                    seeded++;
+                    continue;
+                }
+
+                item.Status = previousItem.Status ?? ExportItemStatusPending;
+                item.LastError = previousItem.LastError ?? string.Empty;
+                item.PlyValidationReason = previousItem.PlyValidationReason ?? string.Empty;
+                item.ExpectedOutputs = expectedOutputs;
+                item.Outputs = outputs;
+                seeded++;
+            }
+
+            return seeded;
+        }
+
+        private bool IsReusedOutputRequiredForCurrentSelection(ExportedOutputState output, PublishOptions previousOptions,
+            PublishOptions currentOptions)
+        {
+            if (output == null)
+            {
+                return false;
+            }
+
+            if (currentOptions == null)
+            {
+                return true;
+            }
+
+            string normalizedType = NormalizeExportType(output.Type, output.Path);
+            string path = output.Path ?? string.Empty;
+            switch (normalizedType)
+            {
+                case "png":
+                    return path.EndsWith("_DWG.png", StringComparison.OrdinalIgnoreCase)
+                        ? currentOptions.ExportPngDrawing
+                        : currentOptions.ExportPngModel;
+                case "3mf":
+                    return currentOptions.Export3mf;
+                case "stl":
+                    return currentOptions.ExportStl;
+                case "ply":
+                    return currentOptions.ExportPly;
+                case "pdf":
+                    return currentOptions.ExportPdf;
+                case "dxf":
+                    return currentOptions.ExportDxf;
+                case "easm":
+                case "eprt":
+                case "edr":
+                    return currentOptions.ExportEdrawing;
+                case "edrw":
+                    return currentOptions.ExportEdrawingDrawing;
+                case "step":
+                    // STEP can also be required by PROCESS flags, so keep reusable STEP expectations.
+                    _ = previousOptions;
+                    return true;
+                default:
+                    return true;
+            }
+        }
+
+        private List<ExportedOutputState> FilterReusedOutputsForCurrentSelection(List<ExportedOutputState> outputs,
+            PublishOptions previousOptions, PublishOptions currentOptions)
+        {
+            var filtered = new List<ExportedOutputState>();
+            if (outputs == null || outputs.Count == 0)
+            {
+                return filtered;
+            }
+
+            for (int i = 0; i < outputs.Count; i++)
+            {
+                ExportedOutputState output = outputs[i];
+                if (!IsReusedOutputRequiredForCurrentSelection(output, previousOptions, currentOptions))
+                {
+                    continue;
+                }
+
+                filtered.Add(new ExportedOutputState
+                {
+                    Type = output != null ? (output.Type ?? string.Empty) : string.Empty,
+                    Path = output != null ? (output.Path ?? string.Empty) : string.Empty,
+                    Bytes = output != null ? output.Bytes : 0,
+                    Validated = output != null && output.Validated,
+                    ValidationReason = output != null ? (output.ValidationReason ?? string.Empty) : string.Empty
+                });
+            }
+
+            return filtered;
+        }
+
+        private List<PlannedRef> BuildPendingQueueForNewExportSession(ExportSessionState sessionState, string rootModelPath,
+            string rootConfigName, PublishOptions currentOptions, Action<string> errorLog)
+        {
+            if (sessionState == null)
+            {
+                return new List<PlannedRef>();
+            }
+
+            ExportSessionState previous = LoadLatestReusableExportSession(rootModelPath, rootConfigName, currentOptions, errorLog);
+            if (previous != null)
+            {
+                int seeded = SeedExportSessionFromPrevious(sessionState, previous);
+                SafeLog(errorLog,
+                    "SESSION reusable seeded items=" + seeded +
+                    " total=" + (sessionState.Queue != null ? sessionState.Queue.Count : 0));
+            }
+
+            ResumePreparationStats stats = PrepareSessionForResume(sessionState, errorLog);
+            SafeLog(errorLog,
+                "SESSION pending queue prepared total=" + stats.TotalItems +
+                " complete=" + stats.CompletedItems +
+                " pending=" + stats.PendingItems);
+
+            return BuildPendingResumeQueue(sessionState, errorLog);
+        }
+
         private bool IsSessionResumable(string status)
         {
             if (string.IsNullOrWhiteSpace(status))
@@ -3331,6 +3767,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 rootConfigName,
                                 planPath,
                                 LastRunLogPath);
+                            List<PlannedRef> pendingRefs = BuildPendingQueueForNewExportSession(
+                                sessionState,
+                                rootPathSnapshot,
+                                rootConfigName,
+                                options,
+                                errorLog);
                             sessionState.Status = ExportSessionStatusPlanned;
                             SetActiveExportSession(sessionState);
                             SaveExportSessionAtomic(sessionState, errorLog);
@@ -3341,7 +3783,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                  cleanRoomReopen = CleanRoomCloseOtherVisibleDocuments(rootModel, log, errorLog);
 
                                  ProcessDeliverablesIsolated(
-                                     plannedRefs,
+                                     pendingRefs,
                                      deliverablesFolder,
                                      options,
                                     log,
