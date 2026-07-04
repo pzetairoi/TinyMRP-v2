@@ -696,6 +696,38 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
+        public void ForceCloseDocNoSave_UsesCloseDocWithoutQuitDocCalls()
+        {
+            string source = File.ReadAllText(GetPublisherSourcePath(), Encoding.UTF8);
+            int start = source.IndexOf("private void ForceCloseDocNoSave", StringComparison.Ordinal);
+            int end = source.IndexOf("private void CloseNonRootDocs", StringComparison.Ordinal);
+
+            Assert.IsTrue(start >= 0);
+            Assert.IsTrue(end > start);
+
+            string methodBody = source.Substring(start, end - start);
+            StringAssert.Contains(methodBody, "CloseDoc(");
+            StringAssert.Contains(methodBody, "CloseDoc(string.Empty)");
+            Assert.IsTrue(methodBody.IndexOf("_swApp.QuitDoc(", StringComparison.Ordinal) < 0);
+        }
+
+        [TestMethod]
+        public void CloseTempAssemblyNoSaveNoPrompt_UsesCloseDocWithoutQuitDocCalls()
+        {
+            string source = File.ReadAllText(GetPublisherSourcePath(), Encoding.UTF8);
+            int start = source.IndexOf("private bool CloseTempAssemblyNoSaveNoPrompt", StringComparison.Ordinal);
+            int end = source.IndexOf("private bool TryDeleteTempBomDirectory", StringComparison.Ordinal);
+
+            Assert.IsTrue(start >= 0);
+            Assert.IsTrue(end > start);
+
+            string methodBody = source.Substring(start, end - start);
+            StringAssert.Contains(methodBody, "CloseDoc(");
+            StringAssert.Contains(methodBody, "CloseDoc(string.Empty)");
+            Assert.IsTrue(methodBody.IndexOf("_swApp.QuitDoc(", StringComparison.Ordinal) < 0);
+        }
+
+        [TestMethod]
         public void DrawingDiscovery_RemainsPartNumberSlddrwConvention()
         {
             string source = File.ReadAllText(GetPublisherSourcePath(), Encoding.UTF8);
