@@ -999,17 +999,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                         afterVisible = IsTargetVisible();
                         if (afterVisible)
                         {
-                            SafeWrite("WARNING: " + closeTitle + " still visible after CloseDoc, escalating to QuitDoc");
-                            try
-                            {
-                                _swApp.QuitDoc(closeTitle);
-                            }
-                            catch
-                            {
-                                // ignore quit errors
-                            }
-
-                            afterVisible = IsTargetVisible();
+                            SafeWrite("WARNING: " + closeTitle + " still visible after CloseDoc");
                         }
                     }
                 }
@@ -4252,23 +4242,6 @@ namespace TinyMRP.SolidWorksAddin.Services
     // Full path is not normally what CloseDoc wants, but keep it as a last named fallback.
     AddCloseName(path);
 
-    foreach (string closeName in closeNames)
-    {
-        if (TryCloseDocByName(closeName, "named-close"))
-        {
-            SafeLog(errorLog,
-                "TEMP BOM ASM close ok=true method=CloseDoc" +
-                " context=" + contextText +
-                " closeName=" + closeName +
-                " title=" + (title ?? string.Empty) +
-                " path=" + (path ?? string.Empty));
-
-            return true;
-        }
-    }
-
-    // Final CloseDoc path: empty name closes the active document.
-    // Only use it after verifying the active doc is still the temp assembly.
     if (TryCloseActiveDocOnlyIfItIsTempAssembly())
     {
         SafeLog(errorLog,
@@ -4280,41 +4253,12 @@ namespace TinyMRP.SolidWorksAddin.Services
         return true;
     }
 
-    // Last-resort fallback only. QuitDoc should no longer be the primary close path.
     foreach (string closeName in closeNames)
     {
-        try
+        if (TryCloseDocByName(closeName, "named-close"))
         {
             SafeLog(errorLog,
-                "TEMP BOM ASM QuitDoc fallback attempt" +
-                " context=" + contextText +
-                " closeName=" + closeName);
-
-            _swApp.QuitDoc(closeName);
-        }
-        catch (Exception ex)
-        {
-            SafeLog(errorLog,
-                "TEMP BOM ASM QuitDoc fallback failed" +
-                " context=" + contextText +
-                " closeName=" + closeName +
-                " error=" + ex.Message);
-        }
-
-        PumpSolidWorksMessages();
-
-        bool stillOpen = IsTempAssemblyStillOpen();
-
-        SafeLog(errorLog,
-            "TEMP BOM ASM QuitDoc fallback result" +
-            " context=" + contextText +
-            " closeName=" + closeName +
-            " stillOpen=" + stillOpen);
-
-        if (!stillOpen)
-        {
-            SafeLog(errorLog,
-                "TEMP BOM ASM close ok=true method=QuitDocFallback" +
+                "TEMP BOM ASM close ok=true method=CloseDoc" +
                 " context=" + contextText +
                 " closeName=" + closeName +
                 " title=" + (title ?? string.Empty) +
@@ -6478,20 +6422,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                     // ignore
                 }
 
-                // Close via CloseDoc(title).
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(closeTitle))
-                    {
-                        _swApp.CloseDoc(closeTitle);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    SafeLog(errorLog, "CLOSE explicitly-opened FAILED via CloseDoc: " + closeTitle + " | " + ex.Message);
-                }
+                ForceCloseDocNoSave(doc, errorLog, "explicitly-opened");
 
-                // Verify whether it’s still in the open list; if so, as a last resort, try QuitDoc(title).
+                // Verify whether it is still in the open list after ForceCloseDocNoSave.
                 bool stillOpen = false;
                 try
                 {
@@ -6526,17 +6459,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 if (stillOpen)
                 {
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(closeTitle))
-                        {
-                            _swApp.QuitDoc(closeTitle);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        SafeLog(errorLog, "CLOSE explicitly-opened FAILED via QuitDoc: " + closeTitle + " | " + ex.Message);
-                    }
+                    SafeLog(errorLog, "CLOSE explicitly-opened still open after CloseDoc: " + closeTitle);
                 }
 
                 _explicitlyOpenedDocs.Remove(id);
@@ -13104,85 +13027,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                     " | visibleBeforeClose=" + visibleBeforeClose +
                                     " | visibleDocsBeforeClose=" + GetOpenVisibleDocumentIds().Count);
 
-                                try
-                                {
-                                    if (!string.IsNullOrWhiteSpace(closeTitle))
-                                    {
-                                        _swApp.CloseDoc(closeTitle);
-                                    }
-                                }
-                                catch
-                                {
-                                    // ignore close errors
-                                }
-
-                                bool stillVisible = false;
-                                try
-                                {
-                                    if (!string.IsNullOrWhiteSpace(drawingPath))
-                                    {
-                                        stillVisible = GetOpenVisibleDocumentIds().Contains(drawingPath);
-                                    }
-
-                                    if (!stillVisible)
-                                    {
-                                        string closeTitleNorm = NormalizeTitle(closeTitle);
-                                        if (string.IsNullOrWhiteSpace(closeTitleNorm))
-                                        {
-                                            closeTitleNorm = NormalizeTitle(drawTitle);
-                                        }
-
-                                        if (!string.IsNullOrWhiteSpace(closeTitleNorm))
-                                        {
-                                            foreach (ModelDoc2 d in GetVisibleDocuments())
-                                            {
-                                                if (d == null)
-                                                {
-                                                    continue;
-                                                }
-
-                                                string t = string.Empty;
-                                                try
-                                                {
-                                                    t = d.GetTitle() ?? string.Empty;
-                                                }
-                                                catch
-                                                {
-                                                    t = string.Empty;
-                                                }
-
-                                                if (!string.IsNullOrWhiteSpace(t) &&
-                                                    string.Equals(NormalizeTitle(t), closeTitleNorm, StringComparison.OrdinalIgnoreCase))
-                                                {
-                                                    stillVisible = true;
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                catch
-                                {
-                                    stillVisible = false;
-                                }
-
-                                if (stillVisible)
-                                {
-                                    SafeLog(errorLog,
-                                        "WARNING: " + (closeTitle ?? string.Empty) +
-                                        " still visible after CloseDoc, escalating to QuitDoc");
-                                    try
-                                    {
-                                        if (!string.IsNullOrWhiteSpace(closeTitle))
-                                        {
-                                            _swApp.QuitDoc(closeTitle);
-                                        }
-                                    }
-                                    catch
-                                    {
-                                        // ignore quit errors
-                                    }
-                                }
+                                ForceCloseDocNoSave(drawDoc, errorLog, "drawing export close");
 
                                 bool stillVisibleAfter = false;
                                 try
@@ -15074,17 +14919,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
                     catch
                     {
-                        try
-                        {
-                            if (!string.IsNullOrWhiteSpace(opened.Title))
-                            {
-                                _owner._swApp.QuitDoc(opened.Title);
-                            }
-                        }
-                        catch
-                        {
-                            // ignore close errors
-                        }
+                        // ignore close errors
                     }
 
                     ComInteropUtil.TryFinalReleaseComObject(opened.Doc);
@@ -15542,7 +15377,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 bool hideAttempted = false;
                 bool closeAttempted = false;
-                bool quitAttempted = false;
 
                 try
                 {
@@ -15557,19 +15391,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                 bool stillVisible = IsVisibleId(extraId);
                 if (stillVisible)
                 {
-                    string closeTitle = NormalizeDocTitleForClose(title);
-                    if (string.IsNullOrWhiteSpace(closeTitle))
-                    {
-                        closeTitle = title;
-                    }
-
                     try
                     {
-                        if (!string.IsNullOrWhiteSpace(closeTitle))
-                        {
-                            closeAttempted = true;
-                            _swApp.CloseDoc(closeTitle);
-                        }
+                        closeAttempted = true;
+                        ForceCloseDocNoSave(doc, log, "visible watchdog|" + (context ?? string.Empty));
                     }
                     catch
                     {
@@ -15577,33 +15402,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
 
                     stillVisible = IsVisibleId(extraId);
-                    if (stillVisible)
-                    {
-                        SafeLog(log,
-                            "WARNING: " + (closeTitle ?? string.Empty) +
-                            " still visible after CloseDoc, escalating to QuitDoc");
-                        try
-                        {
-                            if (!string.IsNullOrWhiteSpace(closeTitle))
-                            {
-                                quitAttempted = true;
-                                _swApp.QuitDoc(closeTitle);
-                            }
-                        }
-                        catch
-                        {
-                            // ignore quit errors
-                        }
-
-                        stillVisible = IsVisibleId(extraId);
-                    }
                 }
 
                 SafeLog(log,
                     "  WATCHDOG hid/closed: " + (string.IsNullOrWhiteSpace(title) ? extraId : title) +
                     " | hide=" + hideAttempted +
                     " close=" + closeAttempted +
-                    " quit=" + quitAttempted +
                     " stillVisible=" + stillVisible);
 
                 processed++;
@@ -16011,7 +15815,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             string normalized = title.Trim();
 
-            // SolidWorks shows dirty documents with a trailing "*" in the UI title, but API calls like CloseDoc/QuitDoc
+            // SolidWorks shows dirty documents with a trailing "*" in the UI title, but API calls like CloseDoc
             // typically expect the base document title.
             while (normalized.EndsWith("*", StringComparison.Ordinal))
             {
@@ -16185,6 +15989,180 @@ namespace TinyMRP.SolidWorksAddin.Services
                 return false;
             }
 
+            bool IsSameTargetDoc(ModelDoc2 candidate)
+            {
+                if (candidate == null)
+                {
+                    return false;
+                }
+
+                string candidateTitle = string.Empty;
+                string candidatePath = string.Empty;
+
+                try
+                {
+                    candidateTitle = candidate.GetTitle() ?? string.Empty;
+                }
+                catch
+                {
+                    candidateTitle = string.Empty;
+                }
+
+                try
+                {
+                    candidatePath = candidate.GetPathName() ?? string.Empty;
+                }
+                catch
+                {
+                    candidatePath = string.Empty;
+                }
+
+                if (!string.IsNullOrWhiteSpace(path) &&
+                    !string.IsNullOrWhiteSpace(candidatePath) &&
+                    string.Equals(candidatePath, path, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                if (!string.IsNullOrWhiteSpace(title) &&
+                    string.Equals(candidateTitle, title, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                string normalizedCandidateTitle = NormalizeDocTitleForClose(candidateTitle);
+                if (!string.IsNullOrWhiteSpace(closeTitle) &&
+                    (string.Equals(candidateTitle, closeTitle, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(normalizedCandidateTitle, closeTitle, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+
+                return !string.IsNullOrWhiteSpace(pathFileName) &&
+                       string.Equals(candidateTitle, pathFileName, StringComparison.OrdinalIgnoreCase);
+            }
+
+            bool TryCloseActiveDocOnlyIfTargetMatches(int pass)
+            {
+                try
+                {
+                    ModelDoc2 activeDoc = _swApp.ActiveDoc as ModelDoc2;
+                    if (!IsSameTargetDoc(activeDoc))
+                    {
+                        return false;
+                    }
+
+                    SafeLog(errorLog,
+                        "ForceClose: CloseDoc active candidate pass=" + pass +
+                        " context=" + (context ?? string.Empty) +
+                        " title=" + (title ?? string.Empty) +
+                        " closeTitle=" + (closeTitle ?? string.Empty) +
+                        " fileName=" + (pathFileName ?? string.Empty) +
+                        " path=" + (path ?? string.Empty));
+
+                    _swApp.CloseDoc(string.Empty);
+                }
+                catch (Exception ex)
+                {
+                    SafeLog(errorLog,
+                        "ForceClose: CloseDoc active candidate failed pass=" + pass +
+                        " context=" + (context ?? string.Empty) +
+                        " title=" + (title ?? string.Empty) +
+                        " closeTitle=" + (closeTitle ?? string.Empty) +
+                        " path=" + (path ?? string.Empty) +
+                        " error=" + ex.Message);
+                }
+
+                System.Windows.Forms.Application.DoEvents();
+                try
+                {
+                    System.Threading.Thread.Sleep(50);
+                }
+                catch
+                {
+                    // ignore sleep errors
+                }
+
+                return !IsStillOpen();
+            }
+
+            bool TryActivateTargetForClose(int pass)
+            {
+                string[] activateTitles = new[] { closeTitle, title };
+                for (int i = 0; i < activateTitles.Length; i++)
+                {
+                    string activateTitle = activateTitles[i] ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(activateTitle))
+                    {
+                        continue;
+                    }
+
+                    bool dup = false;
+                    for (int j = 0; j < i; j++)
+                    {
+                        string prev = activateTitles[j] ?? string.Empty;
+                        if (!string.IsNullOrWhiteSpace(prev) &&
+                            string.Equals(prev, activateTitle, StringComparison.OrdinalIgnoreCase))
+                        {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (dup)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        int activateErrors = 0;
+                        SafeLog(errorLog,
+                            "ForceClose: ActivateDoc3 before CloseDoc empty-name pass=" + pass +
+                            " context=" + (context ?? string.Empty) +
+                            " activateTitle=" + activateTitle +
+                            " title=" + (title ?? string.Empty) +
+                            " path=" + (path ?? string.Empty));
+
+                        _swApp.ActivateDoc3(
+                            activateTitle,
+                            false,
+                            (int)swRebuildOnActivation_e.swDontRebuildActiveDoc,
+                            ref activateErrors);
+
+                        SafeLog(errorLog,
+                            "ForceClose: ActivateDoc3 result before CloseDoc empty-name pass=" + pass +
+                            " context=" + (context ?? string.Empty) +
+                            " activateTitle=" + activateTitle +
+                            " activateErrors=" + activateErrors);
+                    }
+                    catch (Exception ex)
+                    {
+                        SafeLog(errorLog,
+                            "ForceClose: ActivateDoc3 failed before CloseDoc empty-name pass=" + pass +
+                            " context=" + (context ?? string.Empty) +
+                            " activateTitle=" + activateTitle +
+                            " error=" + ex.Message);
+                    }
+
+                    System.Windows.Forms.Application.DoEvents();
+                    try
+                    {
+                        System.Threading.Thread.Sleep(50);
+                    }
+                    catch
+                    {
+                        // ignore sleep errors
+                    }
+
+                    if (TryCloseActiveDocOnlyIfTargetMatches(pass))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
             bool prevCommand = false;
             bool prevUser = true;
             bool prevUserBackground = true;
@@ -16290,167 +16268,88 @@ namespace TinyMRP.SolidWorksAddin.Services
                         // ignore type/lightweight errors
                     }
 
-                    if (tempOrMissingFile)
+                    // Documented no-save behavior is CloseDoc("") on the active document, so prefer that first.
+                    if (TryCloseActiveDocOnlyIfTargetMatches(pass) || TryActivateTargetForClose(pass))
                     {
-                        string[] candidates = new[] { title, closeTitle, pathFileName };
-                        string used = string.Empty;
-                        for (int i = 0; i < candidates.Length; i++)
+                        return;
+                    }
+
+                    string[] candidates = tempOrMissingFile
+                        ? new[] { title, closeTitle, pathFileName, path }
+                        : new[] { closeTitle, title, pathFileName, path };
+                    string used = string.Empty;
+                    for (int i = 0; i < candidates.Length; i++)
+                    {
+                        string cand = candidates[i] ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(cand))
                         {
-                            string cand = candidates[i] ?? string.Empty;
-                            if (string.IsNullOrWhiteSpace(cand))
-                            {
-                                continue;
-                            }
+                            continue;
+                        }
 
-                            // Skip duplicates (case-insensitive).
-                            bool dup = false;
-                            for (int j = 0; j < i; j++)
+                        // Skip duplicates (case-insensitive).
+                        bool dup = false;
+                        for (int j = 0; j < i; j++)
+                        {
+                            string prev = candidates[j] ?? string.Empty;
+                            if (!string.IsNullOrWhiteSpace(prev) &&
+                                string.Equals(prev, cand, StringComparison.OrdinalIgnoreCase))
                             {
-                                string prev = candidates[j] ?? string.Empty;
-                                if (!string.IsNullOrWhiteSpace(prev) &&
-                                    string.Equals(prev, cand, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    dup = true;
-                                    break;
-                                }
-                            }
-                            if (dup)
-                            {
-                                continue;
-                            }
-
-                            SafeLog(errorLog,
-                                "ForceClose: QuitDoc temp candidate pass=" + pass +
-                                " context=" + (context ?? string.Empty) +
-                                " cand=" + cand +
-                                " title=" + (title ?? string.Empty) +
-                                " closeTitle=" + (closeTitle ?? string.Empty) +
-                                " fileName=" + (pathFileName ?? string.Empty) +
-                                " path=" + (path ?? string.Empty));
-
-                            try
-                            {
-                                _swApp.QuitDoc(cand);
-                            }
-                            catch
-                            {
-                                // ignore quit errors
-                            }
-
-                            System.Windows.Forms.Application.DoEvents();
-                            try
-                            {
-                                System.Threading.Thread.Sleep(50);
-                            }
-                            catch
-                            {
-                                // ignore sleep errors
-                            }
-
-                            if (!IsStillOpen())
-                            {
-                                used = cand;
+                                dup = true;
                                 break;
                             }
                         }
+                        if (dup)
+                        {
+                            continue;
+                        }
 
                         SafeLog(errorLog,
-                            "ForceClose: temp close result context=" + (context ?? string.Empty) +
-                            " used=" + (used ?? string.Empty) +
-                            " stillOpen=" + IsStillOpen() +
+                            "ForceClose: CloseDoc named candidate pass=" + pass +
+                            " context=" + (context ?? string.Empty) +
+                            " tempOrMissingFile=" + tempOrMissingFile +
+                            " cand=" + cand +
                             " title=" + (title ?? string.Empty) +
+                            " closeTitle=" + (closeTitle ?? string.Empty) +
+                            " fileName=" + (pathFileName ?? string.Empty) +
                             " path=" + (path ?? string.Empty));
+
+                        try
+                        {
+                            _swApp.CloseDoc(cand);
+                        }
+                        catch
+                        {
+                            // ignore close errors
+                        }
+
+                        System.Windows.Forms.Application.DoEvents();
+                        try
+                        {
+                            System.Threading.Thread.Sleep(50);
+                        }
+                        catch
+                        {
+                            // ignore sleep errors
+                        }
 
                         if (!IsStillOpen())
                         {
-                            return;
-                        }
-
-                        // Temp/unsaved docs must never fall back to CloseDoc (can trigger save UI).
-                        continue;
-                    }
-
-                    // a) QuitDoc (discard changes, no UI)
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(closeTitle))
-                        {
-                            _swApp.QuitDoc(closeTitle);
-                        }
-                        else if (!string.IsNullOrWhiteSpace(title))
-                        {
-                            _swApp.QuitDoc(title);
-                        }
-
-                        if (IsStillOpen() && !string.IsNullOrWhiteSpace(title) &&
-                            !string.Equals(title, closeTitle, StringComparison.OrdinalIgnoreCase))
-                        {
-                            _swApp.QuitDoc(title);
+                            used = cand;
+                            break;
                         }
                     }
-                    catch
-                    {
-                        // ignore quit errors
-                    }
 
-                    System.Windows.Forms.Application.DoEvents();
-                    try
-                    {
-                        System.Threading.Thread.Sleep(50);
-                    }
-                    catch
-                    {
-                        // ignore sleep errors
-                    }
+                    SafeLog(errorLog,
+                        "ForceClose: CloseDoc named result context=" + (context ?? string.Empty) +
+                        " used=" + (used ?? string.Empty) +
+                        " stillOpen=" + IsStillOpen() +
+                        " title=" + (title ?? string.Empty) +
+                        " path=" + (path ?? string.Empty));
 
                     if (!IsStillOpen())
                     {
                         return;
                     }
-
-                    if (allowCancel)
-                    {
-                        ThrowIfCancelled();
-                    }
-                    // b) CloseDoc (releases UI resources; may keep model data loaded if referenced)
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(closeTitle))
-                        {
-                            _swApp.CloseDoc(closeTitle);
-                        }
-                        else if (!string.IsNullOrWhiteSpace(title))
-                        {
-                            _swApp.CloseDoc(title);
-                        }
-
-                        if (IsStillOpen() && !string.IsNullOrWhiteSpace(title) &&
-                            !string.Equals(title, closeTitle, StringComparison.OrdinalIgnoreCase))
-                        {
-                            _swApp.CloseDoc(title);
-                        }
-                    }
-                    catch
-                    {
-                        // ignore close errors
-                    }
-
-                    System.Windows.Forms.Application.DoEvents();
-                    try
-                    {
-                        System.Threading.Thread.Sleep(50);
-                    }
-                    catch
-                    {
-                        // ignore sleep errors
-                    }
-                    if (!IsStillOpen())
-                    {
-                        return;
-                    }
-
-                    // Do NOT attempt CloseDoc("") (closes the active document) or ActivateDoc during cleanup.
-                    // Unattended batch export must never change the active doc as part of a close attempt.
                 }
             }
             finally
