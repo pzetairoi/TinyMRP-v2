@@ -1491,7 +1491,9 @@ function isExternalDatasheetUrl(url: string): boolean {
     if (threeDOptions.some((opt) => opt.key === selectedPreviewKey)) {
       return;
     }
-    setSelectedPreviewKey(threeDOptions[0]?.key || "");
+    const preferred =
+      threeDOptions.find((opt) => opt.format === "ply") || threeDOptions[0];
+    setSelectedPreviewKey(preferred?.key || "");
   }, [threeDOptions, selectedPreviewKey]);
 
   const activePreview = useMemo(() => {
@@ -2529,7 +2531,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                 <Suspense fallback={<div className="p-3">Loading 3D viewer...</div>}>
                   <ThreeMFViewer
                     url={previewUrl}
-                    format={previewFormat || "3mf"}
+                    format={previewFormat || "ply"}
                     height={520}
                   />
                 </Suspense>
@@ -2581,7 +2583,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                   <Suspense fallback={<div className="p-3">Loading 3D viewer...</div>}>
                     <ThreeMFViewer
                       url={previewUrl}
-                      format={previewFormat || "3mf"}
+                      format={previewFormat || "ply"}
                       height={520}
                     />
                   </Suspense>

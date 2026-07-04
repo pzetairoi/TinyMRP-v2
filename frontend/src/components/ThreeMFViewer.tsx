@@ -9,8 +9,30 @@ type MeshFormat = "3mf" | "ply" | "stl";
 type Props = { url: string; height?: number; format?: MeshFormat };
 type SectionRange = { min: number; max: number; step: number };
 type SectionAxis = "X" | "Y" | "Z";
+type LoadPhase =
+  | "checking"
+  | "confirm"
+  | "downloading"
+  | "parsing"
+  | "ready"
+  | "skipped";
 
-const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) => {
+const LARGE_PREVIEW_BYTES = 5 * 1024 * 1024;
+
+const parseContentLength = (value: string | null) => {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const formatBytes = (value: number | null) => {
+  if (value === null) return null;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "ply" }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -29,6 +51,8 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
   const measureGroupRef = useRef<THREE.Group | null>(null);
   const measurePointsRef = useRef<THREE.Vector3[]>([]);
   const resizeRef = useRef<(() => void) | null>(null);
+  const sizeCacheRef = useRef<Map<string, number>>(new Map());
+  const heightRef = useRef(height);
 
   const [err, setErr] = useState<string | null>(null);
   const [edgesOn, setEdgesOn] = useState(true);
@@ -49,6 +73,41 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     y: number;
     z: number;
   } | null>(null);
+  const [loadPhase, setLoadPhase] = useState<LoadPhase>("checking");
+  const [modelLoaded, setModelLoaded] = useState(false);
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState<number | null>(null);
+  const [confirmedPreviewKey, setConfirmedPreviewKey] = useState<string | null>(
+    null
+  );
+
+  const edgesOnRef = useRef(edgesOn);
+  const wireframeOnRef = useRef(wireframeOn);
+  const gridOnRef = useRef(gridOn);
+  const axesOnRef = useRef(axesOn);
+  const previewKey = `${format}:${url}`;
+
+  useEffect(() => {
+    edgesOnRef.current = edgesOn;
+  }, [edgesOn]);
+
+  useEffect(() => {
+    wireframeOnRef.current = wireframeOn;
+  }, [wireframeOn]);
+
+  useEffect(() => {
+    gridOnRef.current = gridOn;
+  }, [gridOn]);
+
+  useEffect(() => {
+    axesOnRef.current = axesOn;
+  }, [axesOn]);
+
+  useEffect(() => {
+    heightRef.current = height;
+    const id = requestAnimationFrame(() => resizeRef.current?.());
+    return () => cancelAnimationFrame(id);
+  }, [height]);
 
   const applyEdgesVisibility = (value: boolean) => {
     edgesRef.current.forEach((edge) => {
@@ -122,15 +181,33 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
 
   const clearMeasureObjects = () => {
     const group = measureGroupRef.current;
-    if (!group) return;
-    while (group.children.length > 0) {
-      const child = group.children[0];
-      group.remove(child);
-      disposeSceneObject(child);
+    if (group) {
+      while (group.children.length > 0) {
+        const child = group.children[0];
+        group.remove(child);
+        disposeSceneObject(child);
+      }
     }
     measurePointsRef.current = [];
     setMeasureValue(null);
     setMeasureDelta(null);
+  };
+
+  const disposeCurrentModel = () => {
+    const scene = sceneRef.current;
+    const model = modelRef.current;
+    if (model) {
+      scene?.remove(model);
+      disposeSceneObject(model);
+    }
+    modelRef.current = null;
+    edgesRef.current = [];
+    fitRef.current = null;
+    sectionBoundsRef.current = null;
+    setSectionRange(null);
+    setSectionOffset(0);
+    setModelLoaded(false);
+    clearMeasureObjects();
   };
 
   const addMeasureMarker = (point: THREE.Vector3) => {
@@ -196,7 +273,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
       scene.remove(gridRef.current);
     }
     const grid = new THREE.GridHelper(helperSize, 20, 0x888888, 0xdddddd);
-    grid.visible = gridOn;
+    grid.visible = gridOnRef.current;
     gridRef.current = grid;
     scene.add(grid);
 
@@ -204,7 +281,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
       scene.remove(axesRef.current);
     }
     const axes = new THREE.AxesHelper(Math.max(maxDim * 0.6, 5));
-    axes.visible = axesOn;
+    axes.visible = axesOnRef.current;
     axesRef.current = axes;
     scene.add(axes);
 
@@ -264,11 +341,69 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     }
   };
 
+  const buildMeshFromGeometry = (geometry: THREE.BufferGeometry) => {
+    if (!geometry.getAttribute("normal")) {
+      geometry.computeVertexNormals();
+    }
+    const hasColors = !!geometry.getAttribute("color");
+    const material = new THREE.MeshStandardMaterial({
+      color: hasColors ? 0xffffff : 0x9aa3b2,
+      metalness: 0.1,
+      roughness: 0.6,
+      vertexColors: hasColors,
+    });
+    return new THREE.Mesh(geometry, material);
+  };
+
+  const parseModelBuffer = (buffer: ArrayBuffer) => {
+    if (format === "3mf") {
+      return new ThreeMFLoader().parse(buffer);
+    }
+    if (format === "ply") {
+      return buildMeshFromGeometry(new PLYLoader().parse(buffer));
+    }
+    return buildMeshFromGeometry(new STLLoader().parse(buffer));
+  };
+
+  const onModelLoaded = (obj: THREE.Object3D) => {
+    const scene = sceneRef.current;
+    if (!scene) {
+      disposeSceneObject(obj);
+      return;
+    }
+
+    disposeCurrentModel();
+    modelRef.current = obj;
+    scene.add(obj);
+
+    const thresholdAngle = 20;
+    obj.traverse((child: any) => {
+      if (child.isMesh && child.geometry) {
+        const edgeGeo = new THREE.EdgesGeometry(child.geometry, thresholdAngle);
+        const edgeMat = new THREE.LineBasicMaterial({
+          color: 0x000000,
+          transparent: true,
+          opacity: 0.7,
+        });
+        const edges = new THREE.LineSegments(edgeGeo, edgeMat);
+        edges.visible = edgesOnRef.current;
+        child.add(edges);
+        edgesRef.current.push(edges);
+      }
+    });
+
+    applyEdgesVisibility(edgesOnRef.current);
+    applyWireframe(wireframeOnRef.current);
+    fitToView();
+    setErr(null);
+    setModelLoaded(true);
+    setLoadPhase("ready");
+  };
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    setErr(null);
     container.innerHTML = "";
 
     const scene = new THREE.Scene();
@@ -284,7 +419,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
-    const initialHeight = Math.max(container.clientHeight, height);
+    const initialHeight = Math.max(container.clientHeight, heightRef.current);
     renderer.setSize(container.clientWidth, initialHeight);
     renderer.setClearColor(0xffffff, 1);
     if ("outputColorSpace" in renderer) {
@@ -322,82 +457,12 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     clipPlaneRef.current = clipPlane;
     updateClipPlane(sectionOn, sectionOffset, sectionAxis, sectionFlip);
 
-    let model: THREE.Object3D | null = null;
-    edgesRef.current = [];
-
-    const onModelLoaded = (obj: THREE.Object3D) => {
-      model = obj;
-      modelRef.current = obj;
-      scene.add(obj);
-
-      const thresholdAngle = 20;
-      obj.traverse((child: any) => {
-        if (child.isMesh && child.geometry) {
-          const edgeGeo = new THREE.EdgesGeometry(
-            child.geometry,
-            thresholdAngle
-          );
-          const edgeMat = new THREE.LineBasicMaterial({
-            color: 0x000000,
-            transparent: true,
-            opacity: 0.7,
-          });
-          const edges = new THREE.LineSegments(edgeGeo, edgeMat);
-          edges.visible = edgesOn;
-          child.add(edges);
-          edgesRef.current.push(edges);
-        }
-      });
-
-      applyWireframe(wireframeOn);
-      fitToView();
-    };
-
-    const buildMeshFromGeometry = (geometry: THREE.BufferGeometry) => {
-      const hasNormals = !!geometry.getAttribute("normal");
-      if (!hasNormals) {
-        geometry.computeVertexNormals();
-      }
-      const hasColors = !!geometry.getAttribute("color");
-      const material = new THREE.MeshStandardMaterial({
-        color: hasColors ? 0xffffff : 0x9aa3b2,
-        metalness: 0.1,
-        roughness: 0.6,
-        vertexColors: hasColors,
-      });
-      return new THREE.Mesh(geometry, material);
-    };
-
-    const onError = (e: any) =>
-      setErr(`Failed to load 3D model: ${e?.message ?? "unknown error"}`);
-
-    if (format === "3mf") {
-      const loader = new ThreeMFLoader();
-      loader.load(url, onModelLoaded, undefined, onError);
-    } else if (format === "ply") {
-      const loader = new PLYLoader();
-      loader.load(
-        url,
-        (geometry) => onModelLoaded(buildMeshFromGeometry(geometry)),
-        undefined,
-        onError
-      );
-    } else {
-      const loader = new STLLoader();
-      loader.load(
-        url,
-        (geometry) => onModelLoaded(buildMeshFromGeometry(geometry)),
-        undefined,
-        onError
-      );
-    }
-
     const onResize = () => {
       if (!containerRef.current || !rendererRef.current || !cameraRef.current) {
         return;
       }
       const w = containerRef.current.clientWidth;
-      const h = Math.max(containerRef.current.clientHeight, height);
+      const h = Math.max(containerRef.current.clientHeight, heightRef.current);
       rendererRef.current.setSize(w, h);
       cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
@@ -417,38 +482,192 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
       controls.dispose();
+      disposeCurrentModel();
 
-      if (model) {
-        model.traverse((child: any) => {
-          if (child.isMesh) {
-            child.geometry?.dispose?.();
-            const m = child.material;
-            if (Array.isArray(m)) m.forEach((mm) => mm?.dispose?.());
-            else m?.dispose?.();
-          }
-          if (child.isLineSegments) {
-            child.geometry?.dispose?.();
-            const m = child.material;
-            if (Array.isArray(m)) m.forEach((mm) => mm?.dispose?.());
-            else m?.dispose?.();
-          }
-        });
+      if (gridRef.current) {
+        scene.remove(gridRef.current);
+        gridRef.current.geometry?.dispose?.();
+        (gridRef.current as any)?.material?.dispose?.();
+        gridRef.current = null;
       }
 
-      gridRef.current?.geometry?.dispose?.();
-      (gridRef.current as any)?.material?.dispose?.();
-      axesRef.current?.geometry?.dispose?.();
-      (axesRef.current as any)?.material?.dispose?.();
+      if (axesRef.current) {
+        scene.remove(axesRef.current);
+        axesRef.current.geometry?.dispose?.();
+        (axesRef.current as any)?.material?.dispose?.();
+        axesRef.current = null;
+      }
+
       if (measureGroupRef.current) {
-        disposeSceneObject(measureGroupRef.current);
         scene.remove(measureGroupRef.current);
         measureGroupRef.current = null;
       }
 
       renderer.dispose();
-      containerRef.current?.removeChild(renderer.domElement);
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+      rendererRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
+      sceneRef.current = null;
+      clipPlaneRef.current = null;
+      resizeRef.current = null;
     };
-  }, [url, height, format]);
+  }, []);
+
+  useEffect(() => {
+    if (!sceneRef.current) return;
+
+    let isActive = true;
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    const probePreviewSize = async () => {
+      try {
+        const response = await fetch(url, {
+          method: "HEAD",
+          signal,
+        });
+        if (!response.ok) return null;
+        const size = parseContentLength(response.headers.get("content-length"));
+        if (size !== null) {
+          sizeCacheRef.current.set(previewKey, size);
+        }
+        return size;
+      } catch (error) {
+        if ((error as any)?.name === "AbortError") {
+          throw error;
+        }
+        return null;
+      }
+    };
+
+    const readResponseBuffer = async (
+      response: Response,
+      initialSize: number | null
+    ) => {
+      let knownSize = initialSize;
+      const headerSize = parseContentLength(
+        response.headers.get("content-length")
+      );
+
+      if (headerSize !== null) {
+        knownSize = headerSize;
+        sizeCacheRef.current.set(previewKey, headerSize);
+        setTotalBytes(headerSize);
+        if (
+          headerSize > LARGE_PREVIEW_BYTES &&
+          confirmedPreviewKey !== previewKey
+        ) {
+          setLoadPhase("confirm");
+          controller.abort();
+          return null;
+        }
+      }
+
+      if (!response.body) {
+        const buffer = await response.arrayBuffer();
+        setDownloadedBytes(buffer.byteLength);
+        if (knownSize === null) {
+          setTotalBytes(buffer.byteLength);
+        }
+        return buffer;
+      }
+
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let received = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        chunks.push(value);
+        received += value.byteLength;
+        setDownloadedBytes(received);
+      }
+
+      if (knownSize === null) {
+        setTotalBytes(received);
+      }
+
+      const merged = new Uint8Array(received);
+      let offset = 0;
+      chunks.forEach((chunk) => {
+        merged.set(chunk, offset);
+        offset += chunk.byteLength;
+      });
+      return merged.buffer;
+    };
+
+    const loadModel = async () => {
+      disposeCurrentModel();
+      setErr(null);
+      setDownloadedBytes(0);
+      setTotalBytes(null);
+      setLoadPhase("checking");
+
+      try {
+        let knownSize = sizeCacheRef.current.get(previewKey) ?? null;
+
+        if (knownSize === null) {
+          knownSize = await probePreviewSize();
+          if (!isActive || signal.aborted) return;
+        }
+
+        if (knownSize !== null) {
+          setTotalBytes(knownSize);
+        }
+
+        if (
+          knownSize !== null &&
+          knownSize > LARGE_PREVIEW_BYTES &&
+          confirmedPreviewKey !== previewKey
+        ) {
+          setLoadPhase("confirm");
+          return;
+        }
+
+        setLoadPhase("downloading");
+        const response = await fetch(url, { signal });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const buffer = await readResponseBuffer(response, knownSize);
+        if (!buffer || !isActive || signal.aborted) return;
+
+        setLoadPhase("parsing");
+        const model = parseModelBuffer(buffer);
+        if (!isActive || signal.aborted) {
+          disposeSceneObject(model);
+          return;
+        }
+
+        onModelLoaded(model);
+      } catch (error) {
+        if (!isActive || (error as any)?.name === "AbortError") {
+          return;
+        }
+        disposeCurrentModel();
+        setLoadPhase("ready");
+        setErr(
+          `Failed to load 3D model: ${
+            error instanceof Error ? error.message : "unknown error"
+          }`
+        );
+      }
+    };
+
+    void loadModel();
+
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
+  }, [confirmedPreviewKey, format, previewKey, url]);
 
   useEffect(() => {
     if (controlsRef.current) {
@@ -561,6 +780,12 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     borderColor: active ? "#1f6feb" : "#c8c8c8",
     color: active ? "#ffffff" : "#333333",
   });
+  const primaryButtonStyle: React.CSSProperties = {
+    ...btnBase,
+    background: "#1f6feb",
+    borderColor: "#1f6feb",
+    color: "#ffffff",
+  };
 
   const viewerStyle: React.CSSProperties = {
     position: "relative",
@@ -569,6 +794,15 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
     background: "#ffffff",
     overflow: "hidden",
   };
+
+  const isDownloading = loadPhase === "downloading";
+  const hasKnownProgress = totalBytes !== null && totalBytes > 0;
+  const downloadPercent = hasKnownProgress
+    ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
+    : null;
+  const formattedTotal = formatBytes(totalBytes);
+  const formattedDownloaded = formatBytes(downloadedBytes);
+  const showOverlay = !err && loadPhase !== "ready";
 
   return (
     <div>
@@ -579,6 +813,133 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
       ) : (
         <div ref={viewerRef} style={viewerStyle}>
           <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+          {showOverlay ? (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 16,
+                background: "rgba(255,255,255,0.72)",
+                zIndex: 3,
+              }}
+            >
+              <div
+                role="status"
+                style={{
+                  width: "min(420px, 100%)",
+                  padding: 18,
+                  borderRadius: 10,
+                  border: "1px solid #dbe4ef",
+                  background: "rgba(255,255,255,0.96)",
+                  boxShadow: "0 8px 30px rgba(15, 23, 42, 0.12)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#1f2937",
+                    marginBottom: 8,
+                  }}
+                >
+                  {loadPhase === "confirm"
+                    ? "Large 3D preview"
+                    : loadPhase === "skipped"
+                    ? "Preview not downloaded"
+                    : loadPhase === "parsing"
+                    ? "Preparing 3D preview"
+                    : loadPhase === "downloading"
+                    ? "Downloading 3D preview"
+                    : "Checking preview size"}
+                </div>
+
+                <div
+                  style={{
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    color: "#475569",
+                    marginBottom:
+                      loadPhase === "confirm" || loadPhase === "skipped"
+                        ? 16
+                        : 12,
+                  }}
+                >
+                  {loadPhase === "confirm"
+                    ? formattedTotal
+                      ? `This 3D preview is ${formattedTotal}. Download it now?`
+                      : "This 3D preview is larger than 5 MB. Download it now?"
+                    : loadPhase === "skipped"
+                    ? "The 3D preview download was canceled before starting."
+                    : loadPhase === "parsing"
+                    ? "The file is downloaded. Building the 3D preview now."
+                    : loadPhase === "downloading"
+                    ? hasKnownProgress && downloadPercent !== null
+                      ? `Downloaded ${formattedDownloaded} of ${formattedTotal} (${downloadPercent}%).`
+                      : `Downloaded ${formattedDownloaded}.`
+                    : "Checking the file size before starting the download."}
+                </div>
+
+                {loadPhase === "checking" ||
+                loadPhase === "downloading" ||
+                loadPhase === "parsing" ? (
+                  <progress
+                    style={{ width: "100%", height: 12 }}
+                    value={
+                      isDownloading && hasKnownProgress
+                        ? downloadedBytes
+                        : undefined
+                    }
+                    max={isDownloading && hasKnownProgress ? totalBytes : undefined}
+                  />
+                ) : null}
+
+                {loadPhase === "confirm" ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                    }}
+                  >
+                    <button
+                      style={btnBase}
+                      type="button"
+                      onClick={() => setLoadPhase("skipped")}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      style={primaryButtonStyle}
+                      type="button"
+                      onClick={() => setConfirmedPreviewKey(previewKey)}
+                    >
+                      Download
+                    </button>
+                  </div>
+                ) : null}
+
+                {loadPhase === "skipped" ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                    }}
+                  >
+                    <button
+                      style={primaryButtonStyle}
+                      type="button"
+                      onClick={() => setConfirmedPreviewKey(previewKey)}
+                    >
+                      Download preview
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <div
             style={{
               position: "absolute",
@@ -594,6 +955,8 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "3mf" }) =
               background: "rgba(255,255,255,0.9)",
               alignItems: "center",
               zIndex: 2,
+              opacity: modelLoaded ? 1 : 0.6,
+              pointerEvents: modelLoaded ? "auto" : "none",
             }}
           >
             <button style={btnBase} type="button" onClick={fitToView}>
