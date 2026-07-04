@@ -25,7 +25,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         private static readonly bool EnableHideStatusLog = false;
         // Writes additional structured entries into the export run log (errorLog) to help diagnose batch issues.
         // Keep these entries terse and prefixed so they can be filtered easily.
-        private static readonly bool EnableExportDebugLog = true;
+        private static readonly bool EnableExportDebugLog = false;
         private const long MinPngBytes = 8 * 1024;
         private const long MinPdfBytes = 4 * 1024;
         private const long MinEdrawingBytes = 4 * 1024;
@@ -279,6 +279,20 @@ namespace TinyMRP.SolidWorksAddin.Services
             public string ValidationReason;
         }
 
+        private sealed class ExportOutputResult
+        {
+            public bool Success;
+            public bool Skipped;
+            public bool ExportCallOk;
+            public bool TempValidated;
+            public string Type;
+            public string FinalPath;
+            public string TempPath;
+            public string QuarantinedExistingPath;
+            public string Reason;
+            public long Bytes;
+        }
+
         private sealed class ExportSessionItem
         {
             public string ItemId;
@@ -294,6 +308,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             public int Attempts;
             public string LastError;
             public string PlyValidationReason;
+            public List<ExportedOutputState> ExpectedOutputs = new List<ExportedOutputState>();
             public List<ExportedOutputState> Outputs = new List<ExportedOutputState>();
         }
 
@@ -2058,12 +2073,13 @@ namespace TinyMRP.SolidWorksAddin.Services
                 string modelPath = swModel.GetPathName();
                 if (string.IsNullOrWhiteSpace(modelPath))
                 {
+                    ShowSaveBeforeExportPrompt("BOM export", swModel, "unsaved", errorLog);
                     Log(log, BuildRunLogMessage("BOM export aborted: active document must be saved before exporting BOM.", runLog));
                     return;
                 }
 
                 ThrowIfCancelled();
-                TryBuildBomWithSavedTempAssembly(swModel, bomFile, "BOM export", log, errorLog);
+                TryBuildBomWithUnsavedTempAssembly(swModel, bomFile, "BOM export", log, errorLog);
 
                 string zipPath = exportTag + ".zip";
                 string zipFolderName = Path.GetFileName(exportTag);
@@ -3834,7 +3850,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private bool CloseSavedTempAssemblyNoPrompt(ModelDoc2 tempAssembly, string tempAssemblyPath, Action<string> errorLog, string context)
+        private bool CloseTempAssemblyNoSaveNoPrompt(ModelDoc2 tempAssembly, Action<string> errorLog, string context)
         {
             if (tempAssembly == null)
             {
@@ -3857,39 +3873,19 @@ namespace TinyMRP.SolidWorksAddin.Services
                 closeTitle = title ?? string.Empty;
             }
 
-            bool dirty = false;
+            string path = string.Empty;
             try
             {
-                dirty = tempAssembly.GetSaveFlag();
+                path = tempAssembly.GetPathName() ?? string.Empty;
             }
             catch
             {
-                dirty = false;
-            }
-
-            bool savedTempExists = false;
-            try
-            {
-                savedTempExists = !string.IsNullOrWhiteSpace(tempAssemblyPath) && File.Exists(tempAssemblyPath);
-            }
-            catch
-            {
-                savedTempExists = false;
-            }
-
-            if (dirty && savedTempExists)
-            {
-                int preCloseErrors;
-                int preCloseWarnings;
-                bool preCloseSaveOk = TrySilentSaveCurrent(tempAssembly, errorLog, context + " pre-close", out preCloseErrors, out preCloseWarnings);
-                SafeLog(errorLog, "TEMP BOM ASM pre-close save ok=" + preCloseSaveOk +
-                    " errors=" + preCloseErrors + " warnings=" + preCloseWarnings +
-                    " path=" + (tempAssemblyPath ?? string.Empty));
+                path = string.Empty;
             }
 
             ForceCloseDocNoSave(tempAssembly, errorLog, context);
 
-            bool closeOk = !IsDocOpenByIdOrTitle(tempAssemblyPath, closeTitle);
+            bool closeOk = !IsDocOpenByIdOrTitle(path, closeTitle);
             if (!closeOk)
             {
                 try
@@ -3907,8 +3903,8 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 try
                 {
-                    string fileName = !string.IsNullOrWhiteSpace(tempAssemblyPath)
-                        ? (Path.GetFileName(tempAssemblyPath) ?? string.Empty)
+                    string fileName = !string.IsNullOrWhiteSpace(path)
+                        ? (Path.GetFileName(path) ?? string.Empty)
                         : string.Empty;
                     if (!string.IsNullOrWhiteSpace(fileName))
                     {
@@ -3918,7 +3914,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 catch (Exception ex)
                 {
                     SafeLog(errorLog, "TEMP BOM ASM QuitDoc file failed context=" + (context ?? string.Empty) +
-                        " path=" + (tempAssemblyPath ?? string.Empty) + " error=" + ex.Message);
+                        " path=" + (path ?? string.Empty) + " error=" + ex.Message);
                 }
 
                 try
@@ -3930,13 +3926,13 @@ namespace TinyMRP.SolidWorksAddin.Services
                     // ignore UI pump errors
                 }
 
-                closeOk = !IsDocOpenByIdOrTitle(tempAssemblyPath, closeTitle);
+                closeOk = !IsDocOpenByIdOrTitle(path, closeTitle);
             }
 
             SafeLog(errorLog, "TEMP BOM ASM close ok=" + closeOk +
                 " context=" + (context ?? string.Empty) +
                 " title=" + (closeTitle ?? string.Empty) +
-                " path=" + (tempAssemblyPath ?? string.Empty));
+                " path=" + (path ?? string.Empty));
             return closeOk;
         }
 
@@ -3995,7 +3991,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             return !Directory.Exists(tempDirectory);
         }
 
-        private bool TryBuildBomWithSavedTempAssembly(
+        private bool TryBuildBomWithUnsavedTempAssembly(
             ModelDoc2 rootModel,
             string outputBomPath,
             string context,
@@ -4020,6 +4016,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             if (string.IsNullOrWhiteSpace(modelPath))
             {
+                ShowSaveBeforeExportPrompt(contextLabel, rootModel, "unsaved", errorLog);
                 Log(log, contextLabel + " aborted: active document must be saved before building the temporary BOM assembly.");
                 return false;
             }
@@ -4078,7 +4075,10 @@ namespace TinyMRP.SolidWorksAddin.Services
             string tempToken = Guid.NewGuid().ToString("N");
             string tempAssemblyPath = BuildBomTempAssemblyPath(tempToken, out tempDirectory);
             Directory.CreateDirectory(tempDirectory);
-            SafeLog(errorLog, "TEMP BOM ASM create path=" + tempAssemblyPath + " context=" + contextLabel);
+            SafeLog(errorLog,
+                "TEMP BOM ASM create dir=" + tempDirectory +
+                " virtualPath=" + tempAssemblyPath +
+                " context=" + contextLabel);
 
             ModelDoc2 assyDoc = null;
             bool closeOk = true;
@@ -4097,19 +4097,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     TrySetDocumentVisible(assyDoc, false);
                     TryActivateDocument(assyDoc, errorLog, contextLabel);
-
-                    int initialSaveErrors;
-                    int initialSaveWarnings;
-                    bool initialSaveOk = TrySilentSaveAs(assyDoc, tempAssemblyPath, errorLog, contextLabel + " initial",
-                        out initialSaveErrors, out initialSaveWarnings);
-                    SafeLog(errorLog, "TEMP BOM ASM initial save ok=" + initialSaveOk +
-                        " errors=" + initialSaveErrors +
-                        " warnings=" + initialSaveWarnings +
-                        " path=" + tempAssemblyPath);
-                    if (!initialSaveOk)
-                    {
-                        return false;
-                    }
 
                     ThrowIfCancelled();
 
@@ -4135,19 +4122,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     TryRebuildDocument(assyDoc, errorLog, contextLabel + " post-component");
 
-                    int postComponentSaveErrors;
-                    int postComponentSaveWarnings;
-                    bool postComponentSaveOk = TrySilentSaveCurrent(assyDoc, errorLog, contextLabel + " post-component",
-                        out postComponentSaveErrors, out postComponentSaveWarnings);
-                    SafeLog(errorLog, "TEMP BOM ASM post-component save ok=" + postComponentSaveOk +
-                        " errors=" + postComponentSaveErrors +
-                        " warnings=" + postComponentSaveWarnings +
-                        " path=" + tempAssemblyPath);
-                    if (!postComponentSaveOk)
-                    {
-                        return false;
-                    }
-
                     ThrowIfCancelled();
 
                     Configuration assyConfig = assyDoc.GetActiveConfiguration() as Configuration;
@@ -4159,10 +4133,19 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     SetUnitPreferences(assyDoc);
 
-                    string outputDir = Path.GetDirectoryName(outputBomPath);
-                    if (!string.IsNullOrWhiteSpace(outputDir))
+                    string tempBomPath;
+                    bool skip;
+                    string prepareReason;
+                    string quarantinedExistingPath;
+                    if (!TryPrepareExportOutput("txt", outputBomPath, true, errorLog, out tempBomPath, out skip,
+                        out prepareReason, out quarantinedExistingPath))
                     {
-                        Directory.CreateDirectory(outputDir);
+                        Log(log, contextLabel + ": failed to prepare BOM output path.");
+                        SafeLog(errorLog,
+                            "TEMP BOM ASM prepare output failed context=" + contextLabel +
+                            " output=" + outputBomPath +
+                            " reason=" + (prepareReason ?? string.Empty));
+                        return false;
                     }
 
                     int bomX = 69;
@@ -4186,32 +4169,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
 
                     ITableAnnotation tableAnn = (ITableAnnotation)bomTable;
-                    tableAnn.SaveAsText(outputBomPath, "\t");
-                    TextFileHelper.StripUtf8Bom(outputBomPath);
-                    bool outputCreated = File.Exists(outputBomPath);
-                    SafeLog(errorLog, "TEMP BOM ASM text export ok=" + outputCreated +
-                        " output=" + outputBomPath + " context=" + contextLabel);
-                    if (!outputCreated)
+                    tableAnn.SaveAsText(tempBomPath, "\t");
+                    TextFileHelper.StripUtf8Bom(tempBomPath);
+
+                    ExportOutputResult exportResult = TryFinalizeExportedTempFile("txt", tempBomPath, outputBomPath, errorLog);
+                    exportResult.QuarantinedExistingPath = quarantinedExistingPath ?? string.Empty;
+                    SafeLog(errorLog,
+                        "TEMP BOM ASM text export ok=" + exportResult.Success +
+                        " tempValidated=" + exportResult.TempValidated +
+                        " bytes=" + exportResult.Bytes +
+                        " output=" + outputBomPath +
+                        " temp=" + (tempBomPath ?? string.Empty) +
+                        " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
+                        " reason=" + (exportResult.Reason ?? string.Empty) +
+                        " context=" + contextLabel);
+                    if (!exportResult.Success)
                     {
-                        Log(log, contextLabel + ": BOM text export did not create the output file.");
+                        Log(log, contextLabel + ": BOM text export failed.");
                         return false;
                     }
 
                     TryRestoreActiveDocument(activeBeforeTempNorm, errorLog, contextLabel + " post-text-export");
                     TrySetDocumentVisible(assyDoc, false);
-
-                    int postBomSaveErrors;
-                    int postBomSaveWarnings;
-                    bool postBomSaveOk = TrySilentSaveCurrent(assyDoc, errorLog, contextLabel + " post-bom",
-                        out postBomSaveErrors, out postBomSaveWarnings);
-                    SafeLog(errorLog, "TEMP BOM ASM post-bom save ok=" + postBomSaveOk +
-                        " errors=" + postBomSaveErrors +
-                        " warnings=" + postBomSaveWarnings +
-                        " path=" + tempAssemblyPath);
-                    if (!postBomSaveOk)
-                    {
-                        return false;
-                    }
 
                     return true;
                 }
@@ -4236,7 +4215,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     using (new ExportDialogSuppressionScope(_swApp))
                     using (new ExternalReferenceBatchOpenScope(_swApp))
                     {
-                        closeOk = CloseSavedTempAssemblyNoPrompt(assyDoc, tempAssemblyPath, errorLog, contextLabel + " temp assembly close");
+                        closeOk = CloseTempAssemblyNoSaveNoPrompt(assyDoc, errorLog, contextLabel + " temp assembly close");
                     }
                 }
 
@@ -4256,7 +4235,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         private bool TryBuildTreeBom(ModelDoc2 rootModel, string treeBomPath, Action<string> log, Action<string> errorLog)
         {
-            return TryBuildBomWithSavedTempAssembly(rootModel, treeBomPath, "Upload pack TREEBOM", log, errorLog);
+            return TryBuildBomWithUnsavedTempAssembly(rootModel, treeBomPath, "Upload pack TREEBOM", log, errorLog);
         }
 
         private List<ModelEntry> GetEntriesForActiveDoc(bool includeChildren, out ModelDoc2 rootModel,
@@ -4904,6 +4883,90 @@ namespace TinyMRP.SolidWorksAddin.Services
             return true;
         }
 
+        private List<ExportedOutputState> CloneOutputStates(List<ExportedOutputState> outputs)
+        {
+            var clone = new List<ExportedOutputState>();
+            if (outputs == null)
+            {
+                return clone;
+            }
+
+            for (int i = 0; i < outputs.Count; i++)
+            {
+                ExportedOutputState output = outputs[i];
+                if (output == null)
+                {
+                    continue;
+                }
+
+                clone.Add(new ExportedOutputState
+                {
+                    Type = output.Type ?? string.Empty,
+                    Path = output.Path ?? string.Empty,
+                    Bytes = output.Bytes,
+                    Validated = output.Validated,
+                    ValidationReason = output.ValidationReason ?? string.Empty
+                });
+            }
+
+            return clone;
+        }
+
+        private List<ExportedOutputState> FilterValidatedOutputs(List<ExportedOutputState> outputs)
+        {
+            var validated = new List<ExportedOutputState>();
+            if (outputs == null)
+            {
+                return validated;
+            }
+
+            for (int i = 0; i < outputs.Count; i++)
+            {
+                ExportedOutputState output = outputs[i];
+                if (output == null || !output.Validated)
+                {
+                    continue;
+                }
+
+                validated.Add(new ExportedOutputState
+                {
+                    Type = output.Type ?? string.Empty,
+                    Path = output.Path ?? string.Empty,
+                    Bytes = output.Bytes,
+                    Validated = true,
+                    ValidationReason = output.ValidationReason ?? string.Empty
+                });
+            }
+
+            return validated;
+        }
+
+        private List<ExportedOutputState> GetSessionOutputsForResumeValidation(ExportSessionItem item)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+
+            if (item.ExpectedOutputs != null && item.ExpectedOutputs.Count > 0)
+            {
+                return item.ExpectedOutputs;
+            }
+
+            return item.Outputs;
+        }
+
+        private bool HasOutputExpectations(ExportSessionItem item)
+        {
+            List<ExportedOutputState> outputs = GetSessionOutputsForResumeValidation(item);
+            return outputs != null && outputs.Count > 0;
+        }
+
+        private bool ValidateSessionItemOutputs(ExportSessionItem item, Action<string> errorLog, out string reason, out string plyReason)
+        {
+            return ValidateExpectedOutputs(GetSessionOutputsForResumeValidation(item), errorLog, out reason, out plyReason);
+        }
+
         private bool HasRecordedOutputs(ExportSessionItem item)
         {
             return item != null && item.Outputs != null && item.Outputs.Count > 0;
@@ -4974,11 +5037,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                 string.Equals(status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(status, ExportItemStatusSkipped, StringComparison.OrdinalIgnoreCase))
             {
-                if (HasRecordedOutputs(item))
+                if (HasOutputExpectations(item))
                 {
                     string outputReason;
                     string plyReason;
-                    bool valid = ValidateExpectedOutputs(item.Outputs, errorLog, out outputReason, out plyReason);
+                    bool valid = ValidateSessionItemOutputs(item, errorLog, out outputReason, out plyReason);
                     if (valid)
                     {
                         return true;
@@ -5037,11 +5100,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                 bool complete = IsSessionItemCompleteForResume(item, session.Options, null, out reason);
                 if (complete)
                 {
-                    if (HasRecordedOutputs(item))
+                    if (HasOutputExpectations(item))
                     {
                         item.Status = ExportItemStatusDone;
                         item.LastError = string.Empty;
                         item.PlyValidationReason = string.Empty;
+                        item.Outputs = FilterValidatedOutputs(GetSessionOutputsForResumeValidation(item));
                     }
                     else
                     {
@@ -5081,7 +5145,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     item.LastError = reason;
                 }
-                item.PlyValidationReason = GetPlyValidationReason(item.Outputs);
+                item.PlyValidationReason = GetPlyValidationReason(GetSessionOutputsForResumeValidation(item));
             }
 
             if (string.Equals(session.Status, ExportSessionStatusRunning, StringComparison.OrdinalIgnoreCase) ||
@@ -5923,72 +5987,17 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (!string.IsNullOrWhiteSpace(entry.ModelPath) && File.Exists(entry.ModelPath))
             {
                 int docType = DocumentTypeFromPath(entry.ModelPath);
-                ModelDoc2 opened = null;
-
-                DocumentSpecification spec = null;
-                try
-                {
-                    spec = _swApp.GetOpenDocSpec(entry.ModelPath) as DocumentSpecification;
-                }
-                catch
-                {
-                    spec = null;
-                }
-
-                if (spec == null)
-                {
-                    DebugExport(errorLog, "ResolveBatchModel: open spec FAILED " + entry.ModelPath);
-                    return null;
-                }
-
-                spec.DocumentType = docType;
-                spec.ReadOnly = true;
-                spec.Silent = true;
-                if (!string.IsNullOrWhiteSpace(entry.ConfigurationName))
-                {
-                    try
-                    {
-                        spec.ConfigurationName = entry.ConfigurationName;
-                    }
-                    catch
-                    {
-                        // ignore spec config errors
-                    }
-                }
-
                 int specErr = 0;
                 int specWarn = 0;
-                try
-                {
-                    specErr = spec.Error;
-                }
-                catch
-                {
-                    specErr = 0;
-                }
-                try
-                {
-                    specWarn = spec.Warning;
-                }
-                catch
-                {
-                    specWarn = 0;
-                }
-
                 DebugExport(errorLog, "ResolveBatchModel: opening " + entry.ModelPath + " type=" + docType +
-                                     " specErr=" + specErr + " specWarn=" + specWarn +
-                                     " readOnly=" + spec.ReadOnly + " silent=" + spec.Silent);
-                using (new ExportDialogSuppressionScope(_swApp))
-                using (new ExternalReferenceBatchOpenScope(_swApp))
-                {
-                    ThrowIfCancelled();
-                    opened = _swApp.OpenDoc7(spec) as ModelDoc2;
-                }
-                ComInteropUtil.TryFinalReleaseComObject(spec);
+                                     " conf=" + (entry.ConfigurationName ?? string.Empty));
+                ModelDoc2 opened = OpenDocReadOnlySilent(entry.ModelPath, docType, entry.ConfigurationName, errorLog,
+                    "ResolveBatchModel|" + DescribeModel(entry.ModelPath, entry.ModelTitle), out specErr, out specWarn);
                 if (opened != null)
                 {
                     openedHere = true;
-                    DebugExport(errorLog, "ResolveBatchModel: opened OK title=" + opened.GetTitle());
+                    DebugExport(errorLog, "ResolveBatchModel: opened OK title=" + opened.GetTitle() +
+                        " specErr=" + specErr + " specWarn=" + specWarn);
                     TryShowConfiguration(opened, entry.ConfigurationName);
                 }
                 else
@@ -8039,6 +8048,63 @@ namespace TinyMRP.SolidWorksAddin.Services
             return "Batch export aborted: root document must be saved and unmodified because the exporter closes/reopens it.";
         }
 
+        private string BuildSaveBeforeExportPromptMessage(string operationLabel, string documentTitle, string reason)
+        {
+            string operation = string.IsNullOrWhiteSpace(operationLabel) ? "export" : operationLabel.Trim();
+            string docLabel = string.IsNullOrWhiteSpace(documentTitle)
+                ? "The active document"
+                : ("\"" + documentTitle.Trim() + "\"");
+
+            string detail;
+            switch ((reason ?? string.Empty).Trim())
+            {
+                case "modified":
+                    detail = "It has unsaved changes.";
+                    break;
+                case "missingFile":
+                    detail = "Its saved file path is missing or inaccessible.";
+                    break;
+                default:
+                    detail = "It has not been saved yet.";
+                    break;
+            }
+
+            return docLabel + " must be saved before " + operation + ". " + detail +
+                   " Save it in SolidWorks, then start the " + operation + " again.";
+        }
+
+        private void ShowSaveBeforeExportPrompt(string operationLabel, ModelDoc2 doc, string reason, Action<string> errorLog = null)
+        {
+            string documentTitle = string.Empty;
+            try
+            {
+                documentTitle = doc != null ? (doc.GetTitle() ?? string.Empty) : string.Empty;
+            }
+            catch
+            {
+                documentTitle = string.Empty;
+            }
+
+            string message = BuildSaveBeforeExportPromptMessage(operationLabel, documentTitle, reason);
+            SafeLog(errorLog,
+                "EXPORT save-required prompt: operation=" + (operationLabel ?? string.Empty) +
+                " title=" + (documentTitle ?? string.Empty) +
+                " reason=" + (reason ?? string.Empty));
+
+            try
+            {
+                System.Windows.Forms.MessageBox.Show(
+                    message,
+                    "TinyMRP",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "EXPORT save-required prompt failed: " + ex.Message);
+            }
+        }
+
         private void EnsureRootDocSafeToCloseNoSave(ModelDoc2 rootModel, Action<string> log, Action<string> errorLog)
         {
             if (rootModel == null)
@@ -8062,6 +8128,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     path = string.Empty;
                 }
 
+                ShowSaveBeforeExportPrompt("batch export", rootModel, reason, errorLog);
                 string message = GetRootCloseRequiredAbortMessage();
                 LogExportFailure(log, errorLog,
                     message +
@@ -8793,6 +8860,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                             sessionItem.Attempts++;
                             sessionItem.LastError = string.Empty;
                             sessionItem.PlyValidationReason = string.Empty;
+                            sessionItem.ExpectedOutputs = new List<ExportedOutputState>();
                             sessionItem.Outputs = new List<ExportedOutputState>();
                             sessionState.Status = _pauseRequested ? ExportSessionStatusPauseRequested : ExportSessionStatusRunning;
                             SaveExportSessionAtomic(sessionState, errorLog);
@@ -9157,7 +9225,8 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         if (sessionItem != null && itemWorkStarted && !IsItemAlreadyHandled(sessionItem))
                         {
-                            sessionItem.Outputs = expectedOutputs ?? new List<ExportedOutputState>();
+                            sessionItem.ExpectedOutputs = CloneOutputStates(expectedOutputs);
+                            sessionItem.Outputs = FilterValidatedOutputs(expectedOutputs);
                             sessionItem.CompletedUtc = UtcNowString();
 
                             if (expectedOutputs != null && expectedOutputs.Count > 0)
@@ -9636,7 +9705,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (plan.HasModelExports())
             {
                 ModelPublish(model, plan.ConfigurationName, plan.FileString, deliverablesFolder,
-                    plan.ExportPngModel, plan.ExportStep, plan.ExportEdrawing, plan.Export3mf,
+                    overwriteFiles, plan.ExportPngModel, plan.ExportStep, plan.ExportEdrawing, plan.Export3mf,
                     plan.ExportPly, plan.ExportStl, log, errorLog);
 
                 YieldAndCheckCancel();
@@ -10066,9 +10135,9 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (plan.HasModelExports())
             {
                 try
-                {
+                    {
                     ModelPublish(model, plan.ConfigurationName, plan.FileString, deliverablesFolder,
-                        plan.ExportPngModel, plan.ExportStep, plan.ExportEdrawing, plan.Export3mf,
+                        overwriteFiles, plan.ExportPngModel, plan.ExportStep, plan.ExportEdrawing, plan.Export3mf,
                         plan.ExportPly, plan.ExportStl, log, errorLog);
                 }
                 catch (Exception ex)
@@ -10161,16 +10230,85 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private bool ShouldExport(string path, bool overwrite)
+        private string NormalizeExportType(string type, string path)
         {
-            return overwrite || !File.Exists(path);
+            string normalized = (type ?? string.Empty).Trim().ToLowerInvariant();
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized;
+            }
+
+            string ext = string.Empty;
+            try
+            {
+                ext = (Path.GetExtension(path) ?? string.Empty).Trim().ToLowerInvariant();
+            }
+            catch
+            {
+                ext = string.Empty;
+            }
+
+            switch (ext)
+            {
+                case ".3mf":
+                    return "3mf";
+                case ".stl":
+                    return "stl";
+                case ".ply":
+                    return "ply";
+                case ".step":
+                case ".stp":
+                    return "step";
+                case ".easm":
+                    return "easm";
+                case ".eprt":
+                    return "eprt";
+                case ".edrw":
+                    return "edrw";
+                case ".png":
+                    return "png";
+                case ".pdf":
+                    return "pdf";
+                case ".dxf":
+                    return "dxf";
+                case ".txt":
+                    return "txt";
+                case ".zip":
+                    return "zip";
+                default:
+                    return normalized;
+            }
         }
 
-        private bool ShouldExportPlyOutput(string path, bool overwrite, Action<string> errorLog)
+        private bool ShouldExport(string path, bool overwrite, Action<string> errorLog = null)
         {
             if (overwrite || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
                 return true;
+            }
+
+            string type = NormalizeExportType(null, path);
+            string reason;
+            bool valid = ValidateExportedOutput(type, path, errorLog, out reason);
+            if (valid)
+            {
+                SafeLog(errorLog, "OUTPUT skipped existing valid output: type=" + (type ?? string.Empty) + " path=" + path);
+                return false;
+            }
+
+            SafeLog(errorLog,
+                "OUTPUT existing invalid, regenerating: type=" + (type ?? string.Empty) +
+                " path=" + path +
+                " reason=" + (reason ?? string.Empty));
+            return true;
+        }
+
+        private bool ShouldExportPlyOutput(string path, bool overwrite, Action<string> errorLog)
+        {
+            bool shouldExport = ShouldExport(path, overwrite, errorLog);
+            if (shouldExport || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return shouldExport;
             }
 
             string reason;
@@ -10627,8 +10765,203 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private long GetFileSizeQuietly(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return 0;
+            }
+
+            try
+            {
+                return File.Exists(path) ? new FileInfo(path).Length : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private string CombineExportReasons(string primary, string secondary)
+        {
+            string a = (primary ?? string.Empty).Trim();
+            string b = (secondary ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(a))
+            {
+                return b;
+            }
+
+            if (string.IsNullOrWhiteSpace(b))
+            {
+                return a;
+            }
+
+            return a + "; " + b;
+        }
+
+        private bool TryPrepareExportOutput(string type, string finalPath, bool overwrite, Action<string> errorLog,
+            out string tempPath, out bool skip, out string reason, out string quarantinedExistingPath)
+        {
+            tempPath = string.Empty;
+            skip = false;
+            reason = string.Empty;
+            quarantinedExistingPath = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(finalPath))
+            {
+                reason = "missing final path";
+                return false;
+            }
+
+            string normalizedType = NormalizeExportType(type, finalPath);
+            string outputDirectory = Path.GetDirectoryName(finalPath);
+            if (!string.IsNullOrWhiteSpace(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            if (File.Exists(finalPath))
+            {
+                string existingReason;
+                bool existingValid = ValidateExportedOutput(normalizedType, finalPath, errorLog, out existingReason);
+                if (existingValid && !overwrite)
+                {
+                    skip = true;
+                    reason = "existing valid output";
+                    return true;
+                }
+
+                if (!existingValid)
+                {
+                    reason = existingReason ?? string.Empty;
+                    quarantinedExistingPath = QuarantineInvalidExistingFile(finalPath, existingReason, errorLog);
+                }
+            }
+
+            tempPath = BuildUniqueTempFilePath(
+                outputDirectory,
+                Path.GetFileNameWithoutExtension(finalPath),
+                Path.GetExtension(finalPath));
+            return true;
+        }
+
+        private ExportOutputResult TryFinalizeExportedTempFile(string type, string tempPath, string finalPath, Action<string> errorLog)
+        {
+            var result = new ExportOutputResult
+            {
+                Type = NormalizeExportType(type, finalPath),
+                TempPath = tempPath ?? string.Empty,
+                FinalPath = finalPath ?? string.Empty,
+                Reason = string.Empty
+            };
+
+            try
+            {
+                long stableBytes = WaitForFileStable(tempPath, 5000, errorLog);
+                string tempReason;
+                bool tempValid = ValidateExportedOutput(result.Type, tempPath, errorLog, out tempReason);
+                result.TempValidated = tempValid;
+                if (!tempValid)
+                {
+                    result.Reason = !string.IsNullOrWhiteSpace(tempReason)
+                        ? tempReason
+                        : (stableBytes <= 0 ? "temp file not created" : "temp file invalid");
+                    return result;
+                }
+
+                if (!PromoteTempFileToFinal(tempPath, finalPath, errorLog))
+                {
+                    result.Reason = "promote failed";
+                    return result;
+                }
+
+                WaitForFileStable(finalPath, 5000, errorLog);
+                string finalReason;
+                bool finalValid = ValidateExportedOutput(result.Type, finalPath, errorLog, out finalReason);
+                if (!finalValid)
+                {
+                    result.Reason = !string.IsNullOrWhiteSpace(finalReason) ? finalReason : "final validation failed";
+                    return result;
+                }
+
+                result.Success = true;
+                result.Bytes = GetFileSizeQuietly(finalPath);
+                return result;
+            }
+            finally
+            {
+                if (!string.Equals(tempPath, finalPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    TryDeleteFileQuietly(tempPath);
+                }
+            }
+        }
+
+        private ExportOutputResult ExportToTempAndPromote(string type, string finalPath, bool overwrite, Action<string> errorLog,
+            Func<string, bool> exportAction)
+        {
+            var result = new ExportOutputResult
+            {
+                Type = NormalizeExportType(type, finalPath),
+                FinalPath = finalPath ?? string.Empty,
+                Reason = string.Empty
+            };
+
+            string tempPath;
+            bool skip;
+            string prepareReason;
+            string quarantinedExistingPath;
+            if (!TryPrepareExportOutput(result.Type, finalPath, overwrite, errorLog, out tempPath, out skip, out prepareReason,
+                out quarantinedExistingPath))
+            {
+                result.Reason = prepareReason ?? string.Empty;
+                return result;
+            }
+
+            result.TempPath = tempPath ?? string.Empty;
+            result.QuarantinedExistingPath = quarantinedExistingPath ?? string.Empty;
+            if (skip)
+            {
+                result.Success = true;
+                result.Skipped = true;
+                result.Reason = prepareReason ?? string.Empty;
+                result.Bytes = GetFileSizeQuietly(finalPath);
+                return result;
+            }
+
+            string exportException = string.Empty;
+            bool exportCallOk = false;
+            try
+            {
+                exportCallOk = exportAction != null && exportAction(tempPath);
+            }
+            catch (Exception ex)
+            {
+                exportException = ex.Message ?? string.Empty;
+            }
+
+            ExportOutputResult finalized = TryFinalizeExportedTempFile(result.Type, tempPath, finalPath, errorLog);
+            finalized.ExportCallOk = exportCallOk;
+            finalized.QuarantinedExistingPath = result.QuarantinedExistingPath;
+
+            if (!finalized.Success)
+            {
+                if (!string.IsNullOrWhiteSpace(exportException))
+                {
+                    finalized.Reason = CombineExportReasons(finalized.Reason, "export exception: " + exportException);
+                }
+                else if (!exportCallOk)
+                {
+                    finalized.Reason = CombineExportReasons(finalized.Reason, "save call reported failure");
+                }
+            }
+
+            return finalized;
+        }
+
         private void ModelPublish(ModelDoc2 model, string confName, string fileString, string deliverablesFolder,
-            bool png, bool step, bool edr, bool threeMf, bool ply, bool stl, Action<string> log, Action<string> errorLog)
+            bool overwriteFiles, bool png, bool step, bool edr, bool threeMf, bool ply, bool stl, Action<string> log, Action<string> errorLog)
         {
             using (new ExportDialogSuppressionScope(_swApp))
             {
@@ -10782,19 +11115,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                         errors = 0;
                         warnings = 0;
                         string activeBefore = ActiveDocTitle();
-                        bool saveOk = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        long bytes = FileBytes(path);
-                        bool ok = saveOk && bytes > 0;
+                        ExportOutputResult exportResult = ExportToTempAndPromote("3mf", path, overwriteFiles, errorLog, tempPath =>
+                        {
+                            errors = 0;
+                            warnings = 0;
+                            return model.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        });
+                        long bytes = exportResult.Bytes;
+                        bool ok = exportResult.Success && !exportResult.Skipped;
                         t.Stop();
                         SafeLog(errorLog, "MODEL 3MF ms=" + t.ElapsedMilliseconds +
                                           " ok=" + ok +
-                                          " saveOk=" + saveOk +
+                                          " skipped=" + exportResult.Skipped +
+                                          " saveOk=" + exportResult.ExportCallOk +
+                                          " tempValidated=" + exportResult.TempValidated +
                                           " activeBefore=" + activeBefore +
                                           " activeAfter=" + ActiveDocTitle() +
                                           " errors=" + errors +
                                           " warnings=" + warnings +
                                           " bytes=" + bytes +
+                                          " reason=" + (exportResult.Reason ?? string.Empty) +
+                                          " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
                                           " path=" + path);
                         if (ok)
                         {
@@ -10803,7 +11145,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 summary.ModelOk3mf++;
                             }
                         }
-                        else
+                        else if (!exportResult.Skipped)
                         {
                             if (summary != null)
                             {
@@ -10827,19 +11169,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                         errors = 0;
                         warnings = 0;
                         string activeBefore = ActiveDocTitle();
-                        bool saveOk = model.Extension.SaveAs(stlPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        long bytes = FileBytes(stlPath);
-                        stlExported = saveOk && bytes > 0;
+                        ExportOutputResult exportResult = ExportToTempAndPromote("stl", stlPath, overwriteFiles, errorLog, tempPath =>
+                        {
+                            errors = 0;
+                            warnings = 0;
+                            return model.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        });
+                        long bytes = exportResult.Bytes;
+                        stlExported = exportResult.Success && !exportResult.Skipped;
                         t.Stop();
                         SafeLog(errorLog, "MODEL STL ms=" + t.ElapsedMilliseconds +
                                           " ok=" + stlExported +
-                                          " saveOk=" + saveOk +
+                                          " skipped=" + exportResult.Skipped +
+                                          " saveOk=" + exportResult.ExportCallOk +
+                                          " tempValidated=" + exportResult.TempValidated +
                                           " activeBefore=" + activeBefore +
                                           " activeAfter=" + ActiveDocTitle() +
                                           " errors=" + errors +
                                           " warnings=" + warnings +
                                           " bytes=" + bytes +
+                                          " reason=" + (exportResult.Reason ?? string.Empty) +
+                                          " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
                                           " path=" + stlPath);
                         if (stlExported)
                         {
@@ -10848,7 +11199,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 summary.ModelOkStl++;
                             }
                         }
-                        else
+                        else if (!exportResult.Skipped)
                         {
                             if (summary != null)
                             {
@@ -10872,6 +11223,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                         string tempFallbackPlyPath = BuildUniqueTempFilePath(Path.Combine(deliverablesFolder, "ply"), fileString, ".ply");
                         string tempStl = string.Empty;
                         string quarantinedExisting = string.Empty;
+                        bool skippedExisting = false;
                         string activeBefore = ActiveDocTitle();
                         bool directSaveOk = false;
                         bool directValid = false;
@@ -10879,107 +11231,104 @@ namespace TinyMRP.SolidWorksAddin.Services
                         bool fallbackValid = false;
                         bool finalValid = false;
                         long directBytes = 0;
+                        long finalBytes = 0;
                         string directInvalidReason = string.Empty;
                         string fallbackInvalidReason = string.Empty;
                         string fallbackStlPath = string.Empty;
 
                         try
                         {
-                            if (File.Exists(plyPath))
+                            string prepareReason;
+                            if (!TryPrepareExportOutput("ply", plyPath, overwriteFiles, errorLog, out tempPlyPath, out skippedExisting,
+                                out prepareReason, out quarantinedExisting))
                             {
-                                string existingReason;
-                                if (!IsValidPlyFile(plyPath, errorLog, out existingReason))
+                                directInvalidReason = prepareReason ?? string.Empty;
+                            }
+                            else if (skippedExisting)
+                            {
+                                finalValid = true;
+                                finalBytes = GetFileSizeQuietly(plyPath);
+                            }
+                            else
+                            {
+                                tempFallbackPlyPath = BuildUniqueTempFilePath(Path.Combine(deliverablesFolder, "ply"), fileString, ".ply");
+                                errors = 0;
+                                warnings = 0;
+                                directSaveOk = model.Extension.SaveAs(tempPlyPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                                directBytes = WaitForFileStable(tempPlyPath, 8000, errorLog);
+                                ExportOutputResult directResult = TryFinalizeExportedTempFile("ply", tempPlyPath, plyPath, errorLog);
+                                directResult.ExportCallOk = directSaveOk;
+                                directValid = directResult.Success;
+                                if (directValid)
                                 {
-                                    quarantinedExisting = QuarantineInvalidExistingFile(plyPath, existingReason, errorLog);
+                                    finalValid = true;
+                                    finalBytes = directResult.Bytes;
                                 }
-                            }
-
-                            errors = 0;
-                            warnings = 0;
-                            directSaveOk = model.Extension.SaveAs(tempPlyPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                            directBytes = WaitForFileStable(tempPlyPath, 8000, errorLog);
-                            directValid = directSaveOk && IsValidPlyFile(tempPlyPath, errorLog, out directInvalidReason);
-                            if (!directValid && string.IsNullOrWhiteSpace(directInvalidReason))
-                            {
-                                directInvalidReason = directSaveOk ? "invalid PLY output" : "SaveAs returned false";
-                            }
-
-                            if (!directValid)
-                            {
-                                SafeLog(errorLog,
-                                    "PLY direct invalid: " + (directInvalidReason ?? string.Empty) +
-                                    " path=" + tempPlyPath +
-                                    " bytes=" + directBytes);
-                                TryDeleteFileQuietly(tempPlyPath);
-
-                                YieldAndCheckCancel();
-                                fallbackAttempted = true;
-                                fallbackStlPath = stlExported ? stlPath : string.Empty;
-
-                                if (string.IsNullOrWhiteSpace(fallbackStlPath))
+                                else
                                 {
-                                    tempStl = BuildUniqueTempFilePath(Path.GetTempPath(), fileString, ".stl");
-                                    errors = 0;
-                                    warnings = 0;
-                                    bool tempStlOk = model.Extension.SaveAs(tempStl, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                                    long tempStlBytes = WaitForFileStable(tempStl, 8000, errorLog);
-                                    string stlReason = string.Empty;
-                                    if (tempStlOk && ValidateExportedOutput("stl", tempStl, errorLog, out stlReason))
-                                    {
-                                        fallbackStlPath = tempStl;
-                                    }
-                                    else
-                                    {
-                                        fallbackInvalidReason = "temporary STL invalid: " + (stlReason ?? string.Empty) +
-                                            " bytes=" + tempStlBytes;
-                                    }
+                                    directInvalidReason = directResult.Reason ?? string.Empty;
                                 }
 
-                                if (!string.IsNullOrWhiteSpace(fallbackStlPath) && File.Exists(fallbackStlPath))
+                                if (!directValid)
                                 {
-                                    if (TryConvertStlToPly(fallbackStlPath, tempFallbackPlyPath))
+                                    SafeLog(errorLog,
+                                        "PLY direct invalid: " + (directInvalidReason ?? string.Empty) +
+                                        " path=" + tempPlyPath +
+                                        " bytes=" + directBytes);
+
+                                    YieldAndCheckCancel();
+                                    fallbackAttempted = true;
+                                    fallbackStlPath = stlExported ? stlPath : string.Empty;
+
+                                    if (string.IsNullOrWhiteSpace(fallbackStlPath))
                                     {
-                                        WaitForFileStable(tempFallbackPlyPath, 8000, errorLog);
-                                        fallbackValid = IsValidPlyFile(tempFallbackPlyPath, errorLog, out fallbackInvalidReason);
-                                        if (fallbackValid)
+                                        tempStl = BuildUniqueTempFilePath(Path.GetTempPath(), fileString, ".stl");
+                                        errors = 0;
+                                        warnings = 0;
+                                        bool tempStlOk = model.Extension.SaveAs(tempStl, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                                        long tempStlBytes = WaitForFileStable(tempStl, 8000, errorLog);
+                                        string stlReason = string.Empty;
+                                        if (tempStlOk && ValidateExportedOutput("stl", tempStl, errorLog, out stlReason))
                                         {
-                                            SafeLog(errorLog, "PLY fallback via STL ok path=" + tempFallbackPlyPath);
+                                            fallbackStlPath = tempStl;
                                         }
                                         else
                                         {
-                                            SafeLog(errorLog, "PLY fallback invalid: " + (fallbackInvalidReason ?? string.Empty));
-                                            TryDeleteFileQuietly(tempFallbackPlyPath);
+                                            fallbackInvalidReason = "temporary STL invalid: " + (stlReason ?? string.Empty) +
+                                                " bytes=" + tempStlBytes;
                                         }
                                     }
-                                    else
+
+                                    if (!string.IsNullOrWhiteSpace(fallbackStlPath) && File.Exists(fallbackStlPath))
                                     {
-                                        fallbackInvalidReason = "STL conversion failed";
+                                        if (TryConvertStlToPly(fallbackStlPath, tempFallbackPlyPath))
+                                        {
+                                            ExportOutputResult fallbackResult = TryFinalizeExportedTempFile("ply", tempFallbackPlyPath, plyPath, errorLog);
+                                            fallbackValid = fallbackResult.Success;
+                                            if (fallbackValid)
+                                            {
+                                                finalValid = true;
+                                                finalBytes = fallbackResult.Bytes;
+                                                SafeLog(errorLog, "PLY fallback via STL ok path=" + tempFallbackPlyPath);
+                                            }
+                                            else
+                                            {
+                                                fallbackInvalidReason = fallbackResult.Reason ?? string.Empty;
+                                                SafeLog(errorLog, "PLY fallback invalid: " + (fallbackInvalidReason ?? string.Empty));
+                                            }
+                                        }
+                                        else
+                                        {
+                                            fallbackInvalidReason = "STL conversion failed";
+                                        }
+                                    }
+                                    else if (string.IsNullOrWhiteSpace(fallbackInvalidReason))
+                                    {
+                                        fallbackInvalidReason = "STL source unavailable";
                                     }
                                 }
-                                else if (string.IsNullOrWhiteSpace(fallbackInvalidReason))
-                                {
-                                    fallbackInvalidReason = "STL source unavailable";
-                                }
-                            }
-
-                            if (directValid)
-                            {
-                                PromoteTempFileToFinal(tempPlyPath, plyPath, errorLog);
-                            }
-                            else if (fallbackValid)
-                            {
-                                PromoteTempFileToFinal(tempFallbackPlyPath, plyPath, errorLog);
-                            }
-
-                            string finalInvalidReason;
-                            finalValid = IsValidPlyFile(plyPath, errorLog, out finalInvalidReason);
-                            if (!finalValid && string.IsNullOrWhiteSpace(fallbackInvalidReason))
-                            {
-                                fallbackInvalidReason = string.IsNullOrWhiteSpace(finalInvalidReason)
-                                    ? "final PLY validation failed"
-                                    : finalInvalidReason;
                             }
                         }
                         finally
@@ -11007,11 +11356,13 @@ namespace TinyMRP.SolidWorksAddin.Services
                             }
                         }
 
-                        long bytes = FileBytes(plyPath);
+                        long bytes = finalBytes > 0 ? finalBytes : FileBytes(plyPath);
+                        bool ok = finalValid && !skippedExisting;
                         t.Stop();
                         SafeLog(errorLog,
                             "MODEL PLY ms=" + t.ElapsedMilliseconds +
-                            " ok=" + finalValid +
+                            " ok=" + ok +
+                            " skipped=" + skippedExisting +
                             " directSaveOk=" + directSaveOk +
                             " directValid=" + directValid +
                             " directInvalidReason=" + (directInvalidReason ?? string.Empty) +
@@ -11032,17 +11383,17 @@ namespace TinyMRP.SolidWorksAddin.Services
                             " path=" + plyPath);
                         if (summary != null)
                         {
-                            if (finalValid)
+                            if (ok)
                             {
                                 summary.ModelOkPly++;
                             }
-                            else
+                            else if (!skippedExisting)
                             {
                                 summary.ModelFailPly++;
                             }
                         }
 
-                        if (!finalValid)
+                        if (!finalValid && !skippedExisting)
                         {
                             LogExportFailure(log, errorLog,
                                 "PLY export failed: direct invalid and STL fallback failed. final=" + plyPath +
@@ -11064,19 +11415,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                         errors = 0;
                         warnings = 0;
                         string activeBefore = ActiveDocTitle();
-                        bool saveOk = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        long bytes = FileBytes(path);
-                        bool ok = saveOk && bytes > 0;
+                        ExportOutputResult exportResult = ExportToTempAndPromote("step", path, overwriteFiles, errorLog, tempPath =>
+                        {
+                            errors = 0;
+                            warnings = 0;
+                            return model.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        });
+                        long bytes = exportResult.Bytes;
+                        bool ok = exportResult.Success && !exportResult.Skipped;
                         t.Stop();
                         SafeLog(errorLog, "MODEL STEP ms=" + t.ElapsedMilliseconds +
                                           " ok=" + ok +
-                                          " saveOk=" + saveOk +
+                                          " skipped=" + exportResult.Skipped +
+                                          " saveOk=" + exportResult.ExportCallOk +
+                                          " tempValidated=" + exportResult.TempValidated +
                                           " activeBefore=" + activeBefore +
                                           " activeAfter=" + ActiveDocTitle() +
                                           " errors=" + errors +
                                           " warnings=" + warnings +
                                           " bytes=" + bytes +
+                                          " reason=" + (exportResult.Reason ?? string.Empty) +
+                                          " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
                                           " path=" + path);
                         if (ok)
                         {
@@ -11085,7 +11445,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 summary.ModelOkStep++;
                             }
                         }
-                        else
+                        else if (!exportResult.Skipped)
                         {
                             if (summary != null)
                             {
@@ -11113,19 +11473,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                         errors = 0;
                         warnings = 0;
                         string activeBefore = ActiveDocTitle();
-                        bool saveOk = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        long bytes = FileBytes(path);
-                        bool ok = saveOk && bytes >= MinEdrawingBytes;
+                        ExportOutputResult exportResult = ExportToTempAndPromote(ext, path, overwriteFiles, errorLog, tempPath =>
+                        {
+                            errors = 0;
+                            warnings = 0;
+                            return model.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        });
+                        long bytes = exportResult.Bytes;
+                        bool ok = exportResult.Success && !exportResult.Skipped;
                         t.Stop();
                         SafeLog(errorLog, "MODEL EDR ms=" + t.ElapsedMilliseconds +
                                           " ok=" + ok +
-                                          " saveOk=" + saveOk +
+                                          " skipped=" + exportResult.Skipped +
+                                          " saveOk=" + exportResult.ExportCallOk +
+                                          " tempValidated=" + exportResult.TempValidated +
                                           " activeBefore=" + activeBefore +
                                           " activeAfter=" + ActiveDocTitle() +
                                           " errors=" + errors +
                                           " warnings=" + warnings +
                                           " bytes=" + bytes +
+                                          " reason=" + (exportResult.Reason ?? string.Empty) +
+                                          " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
                                           " path=" + path);
                         if (ok)
                         {
@@ -11134,7 +11503,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 summary.ModelOkEdraw++;
                             }
                         }
-                        else
+                        else if (!exportResult.Skipped)
                         {
                             if (summary != null)
                             {
@@ -11171,54 +11540,62 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         string path = Path.Combine(deliverablesFolder, "png", fileString + ".png");
 
-                        bool saveOk = false;
                         string exceptionText = string.Empty;
-                        try
+                        ExportOutputResult exportResult = ExportToTempAndPromote("png", path, overwriteFiles, errorLog, tempPath =>
                         {
-                            // Macro parity: rebuild + iso view + zoom fit + redraw before capture.
-                            model.ForceRebuild3(true);
-                            model.ShowNamedView2("Isometric", 7);
-                            model.ViewZoomtofit2();
-
-                            if (view != null)
-                            {
-                                view.EnableGraphicsUpdate = true;
-                            }
-
-                            model.GraphicsRedraw2();
                             try
                             {
-                                System.Windows.Forms.Application.DoEvents();
-                            }
-                            catch
-                            {
-                                // ignore
-                            }
-                            try
-                            {
-                                System.Threading.Thread.Sleep(50);
-                            }
-                            catch
-                            {
-                                // ignore
-                            }
+                                // Macro parity: rebuild + iso view + zoom fit + redraw before capture.
+                                model.ForceRebuild3(true);
+                                model.ShowNamedView2("Isometric", 7);
+                                model.ViewZoomtofit2();
 
-                            saveOk = model.Extension.SaveAs(path, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        }
-                        catch (Exception ex)
-                        {
-                            exceptionText = ex.Message ?? string.Empty;
-                        }
+                                if (view != null)
+                                {
+                                    view.EnableGraphicsUpdate = true;
+                                }
 
-                        long bytes = FileBytes(path);
-                        bool blankSuspect = bytes > 0 && bytes < MinPngBytes;
-                        bool ok = saveOk && bytes >= MinPngBytes;
+                                model.GraphicsRedraw2();
+                                try
+                                {
+                                    System.Windows.Forms.Application.DoEvents();
+                                }
+                                catch
+                                {
+                                    // ignore
+                                }
+                                try
+                                {
+                                    System.Threading.Thread.Sleep(50);
+                                }
+                                catch
+                                {
+                                    // ignore
+                                }
+
+                                errors = 0;
+                                warnings = 0;
+                                return model.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                            }
+                            catch (Exception ex)
+                            {
+                                exceptionText = ex.Message ?? string.Empty;
+                                return false;
+                            }
+                        });
+
+                        long bytes = exportResult.Bytes;
+                        bool blankSuspect = !exportResult.Success &&
+                            string.Equals(exportResult.Reason, "file too small", StringComparison.OrdinalIgnoreCase);
+                        bool ok = exportResult.Success && !exportResult.Skipped;
                         t.Stop();
 
                         SafeLog(errorLog, "MODEL PNG ms=" + t.ElapsedMilliseconds +
                                           " ok=" + ok +
-                                          " saveOk=" + saveOk +
+                                          " skipped=" + exportResult.Skipped +
+                                          " saveOk=" + exportResult.ExportCallOk +
+                                          " tempValidated=" + exportResult.TempValidated +
                                           " blankSuspect=" + blankSuspect +
                                           " activated=" + (activation != null && activation.Activated) +
                                           " actErr=" + (activation != null ? activation.ActivateErrors : 0) +
@@ -11227,14 +11604,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                                           " errors=" + errors +
                                           " warnings=" + warnings +
                                           " bytes=" + bytes +
+                                          " reason=" + (exportResult.Reason ?? string.Empty) +
+                                          " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
                                           (string.IsNullOrWhiteSpace(exceptionText) ? "" : (" ex=" + exceptionText)) +
                                           " path=" + path);
 
-                        if (!ok && blankSuspect)
+                        if (!ok && !exportResult.Skipped && blankSuspect)
                         {
                             LogExportFailure(log, errorLog, "PNG export suspect blank (size " + bytes + "): " + path);
                         }
-                        else if (!ok)
+                        else if (!ok && !exportResult.Skipped)
                         {
                             LogExportFailure(log, errorLog, "PNG export failed: " + path);
                         }
@@ -11246,7 +11625,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 summary.ModelOkPng++;
                             }
                         }
-                        else
+                        else if (!exportResult.Skipped)
                         {
                             if (summary != null)
                             {
@@ -11597,23 +11976,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                     }
                 }
 
-                long FileBytes(string path)
-                {
-                    if (string.IsNullOrWhiteSpace(path))
-                    {
-                        return 0;
-                    }
-
-                    try
-                    {
-                        return File.Exists(path) ? new FileInfo(path).Length : 0;
-                    }
-                    catch
-                    {
-                        return 0;
-                    }
-                }
-
                 int visibleDocsBeforeOpen = GetOpenVisibleDocumentIds().Count;
                 SafeLog(errorLog,
                     "DRAWING open: " + drawingPath +
@@ -11621,35 +11983,30 @@ namespace TinyMRP.SolidWorksAddin.Services
                     " | wasVisible=" + drawingWasVisibleBefore +
                     " | visibleDocsBefore=" + visibleDocsBeforeOpen);
 
-                DocumentSpecification spec = null;
                 ModelDoc2 drawDoc = null;
                 DrawingDoc drawing = null;
                 bool openedHere = false;
                 string drawTitle = string.Empty;
                 try
                 {
-                    spec = _swApp.GetOpenDocSpec(drawingPath) as DocumentSpecification;
-                    if (spec == null)
+                    if (drawingWasOpenBefore)
                     {
-                        SafeLog(errorLog, "DwgPublishFast: open spec failed: " + drawingPath);
-                        return;
+                        drawDoc = FindOpenDocument(drawingPath, null);
                     }
-                    spec.DocumentType = (int)swDocumentTypes_e.swDocDRAWING;
-                    spec.ReadOnly = true;
-                    spec.Silent = true;
 
-                    using (new ExternalReferenceBatchOpenScope(_swApp))
+                    int specErr = 0;
+                    int specWarn = 0;
+                    if (drawDoc == null)
                     {
-                        YieldAndCheckCancel();
-                        drawDoc = _swApp.OpenDoc7(spec) as ModelDoc2;
+                        drawDoc = OpenDocReadOnlySilent(drawingPath, (int)swDocumentTypes_e.swDocDRAWING, null, errorLog,
+                            "DwgPublishFast|" + drawingPath, out specErr, out specWarn);
+                        openedHere = drawDoc != null;
                     }
                     if (drawDoc == null)
                     {
                         SafeLog(errorLog, "DwgPublishFast: open failed: " + drawingPath);
                         return;
                     }
-
-                    openedHere = !drawingWasOpenBefore;
 
                     try
                     {
@@ -11664,6 +12021,12 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         openedDocs.Track(drawDoc, "drawing|" + drawingPath);
                     }
+
+                    SafeLog(errorLog,
+                        "DRAWING open result: openedHere=" + openedHere +
+                        " specErr=" + specErr +
+                        " specWarn=" + specWarn +
+                        " title=" + (drawTitle ?? string.Empty));
 
                     bool visibleAfterOpen = true;
                     try
@@ -11771,7 +12134,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                         warnings = 0;
                         string activeBefore = ActiveDocTitle();
 
-                        bool saveOk = false;
                         if (exportData != null)
                         {
                             try
@@ -11932,34 +12294,33 @@ namespace TinyMRP.SolidWorksAddin.Services
                                     SafeLog(errorLog,
                                         "DWG PDF skipped: failed to apply sheet filter; refusing to export PDF that would include DXF sheets. path=" + pdfPath);
                                 }
-                                else
-                                {
-                                    saveOk = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
-                                }
-
-                                long bytes = 0;
-                                bool blankSuspect = false;
-                                bool ok = false;
                                 if (!skippedPdf)
                                 {
-                                    bytes = FileBytes(pdfPath);
-                                    blankSuspect = bytes > 0 && bytes < MinPdfBytes;
-                                    ok = saveOk && bytes >= MinPdfBytes;
-                                }
-
-                                t.Stop();
-                                if (!skippedPdf)
-                                {
+                                    ExportOutputResult exportResult = ExportToTempAndPromote("pdf", pdfPath, overwriteFiles, errorLog, tempPath =>
+                                    {
+                                        errors = 0;
+                                        warnings = 0;
+                                        return drawDoc.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
+                                    });
+                                    long bytes = exportResult.Bytes;
+                                    bool blankSuspect = !exportResult.Success &&
+                                        string.Equals(exportResult.Reason, "file too small", StringComparison.OrdinalIgnoreCase);
+                                    bool ok = exportResult.Success && !exportResult.Skipped;
+                                    t.Stop();
                                     SafeLog(errorLog, "DWG PDF ms=" + t.ElapsedMilliseconds +
                                                       " ok=" + ok +
-                                                      " saveOk=" + saveOk +
+                                                      " skipped=" + exportResult.Skipped +
+                                                      " saveOk=" + exportResult.ExportCallOk +
+                                                      " tempValidated=" + exportResult.TempValidated +
                                                       " blankSuspect=" + blankSuspect +
                                                       " activeBefore=" + activeBefore +
                                                       " activeAfter=" + ActiveDocTitle() +
                                                       " errors=" + errors +
                                                       " warnings=" + warnings +
                                                       " bytes=" + bytes +
+                                                      " reason=" + (exportResult.Reason ?? string.Empty) +
+                                                      " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
                                                       " path=" + pdfPath);
 
                                     if (ok)
@@ -11969,7 +12330,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                             summary.DwgOkPdf++;
                                         }
                                     }
-                                    else
+                                    else if (!exportResult.Skipped)
                                     {
                                         if (summary != null)
                                         {
@@ -11984,6 +12345,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 }
                                 else
                                 {
+                                    t.Stop();
                                     SafeLog(errorLog,
                                         "DWG PDF skipped: elapsedMs=" + t.ElapsedMilliseconds + " path=" + pdfPath);
                                 }
@@ -12014,19 +12376,28 @@ namespace TinyMRP.SolidWorksAddin.Services
                         errors = 0;
                         warnings = 0;
                         string activeBefore = ActiveDocTitle();
-                        bool saveOk = drawDoc.Extension.SaveAs(edrPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        long bytes = FileBytes(edrPath);
-                        bool ok = saveOk && bytes >= MinEdrawingBytes;
+                        ExportOutputResult exportResult = ExportToTempAndPromote("edrw", edrPath, overwriteFiles, errorLog, tempPath =>
+                        {
+                            errors = 0;
+                            warnings = 0;
+                            return drawDoc.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        });
+                        long bytes = exportResult.Bytes;
+                        bool ok = exportResult.Success && !exportResult.Skipped;
                         t.Stop();
                         SafeLog(errorLog, "DWG EDRW ms=" + t.ElapsedMilliseconds +
                                           " ok=" + ok +
-                                          " saveOk=" + saveOk +
+                                          " skipped=" + exportResult.Skipped +
+                                          " saveOk=" + exportResult.ExportCallOk +
+                                          " tempValidated=" + exportResult.TempValidated +
                                           " activeBefore=" + activeBefore +
                                           " activeAfter=" + ActiveDocTitle() +
                                           " errors=" + errors +
                                           " warnings=" + warnings +
                                           " bytes=" + bytes +
+                                          " reason=" + (exportResult.Reason ?? string.Empty) +
+                                          " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
                                           " path=" + edrPath);
 
                         if (ok)
@@ -12036,7 +12407,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 summary.DwgOkEdraw++;
                             }
                         }
-                        else
+                        else if (!exportResult.Skipped)
                         {
                             if (summary != null)
                             {
@@ -12080,21 +12451,31 @@ namespace TinyMRP.SolidWorksAddin.Services
                         _swApp.SetUserPreferenceDoubleValue(
                             (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
 
-                        bool saveOk = drawDoc.Extension.SaveAs(pngPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        long bytes = FileBytes(pngPath);
-                        bool blankSuspect = bytes > 0 && bytes < MinPngBytes;
-                        bool ok = saveOk && bytes >= MinPngBytes;
+                        ExportOutputResult exportResult = ExportToTempAndPromote("png", pngPath, overwriteFiles, errorLog, tempPath =>
+                        {
+                            errors = 0;
+                            warnings = 0;
+                            return drawDoc.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                        });
+                        long bytes = exportResult.Bytes;
+                        bool blankSuspect = !exportResult.Success &&
+                            string.Equals(exportResult.Reason, "file too small", StringComparison.OrdinalIgnoreCase);
+                        bool ok = exportResult.Success && !exportResult.Skipped;
                         t.Stop();
                         SafeLog(errorLog, "DWG PNG ms=" + t.ElapsedMilliseconds +
                                           " ok=" + ok +
-                                          " saveOk=" + saveOk +
+                                          " skipped=" + exportResult.Skipped +
+                                          " saveOk=" + exportResult.ExportCallOk +
+                                          " tempValidated=" + exportResult.TempValidated +
                                           " blankSuspect=" + blankSuspect +
                                           " activeBefore=" + activeBefore +
                                           " activeAfter=" + ActiveDocTitle() +
                                           " errors=" + errors +
                                           " warnings=" + warnings +
                                           " bytes=" + bytes +
+                                          " reason=" + (exportResult.Reason ?? string.Empty) +
+                                          " quarantinedExisting=" + (exportResult.QuarantinedExistingPath ?? string.Empty) +
                                           " path=" + pngPath);
 
                         if (ok)
@@ -12104,7 +12485,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 summary.DwgOkPng++;
                             }
                         }
-                        else
+                        else if (!exportResult.Skipped)
                         {
                             if (summary != null)
                             {
@@ -12148,33 +12529,59 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                             YieldAndCheckCancel();
                             bool exported = false;
+                            bool skippedDxf = false;
+                            bool fallbackUsed = false;
+                            long finalBytes = 0;
+                            string dxfReason = string.Empty;
+                            string quarantinedExisting = string.Empty;
+                            string tempDxfPath = string.Empty;
 
-                            try
+                            string prepareReason;
+                            if (!TryPrepareExportOutput("dxf", dxfPath, overwriteFiles, errorLog, out tempDxfPath, out skippedDxf,
+                                out prepareReason, out quarantinedExisting))
                             {
-                                errors = 0;
-                                warnings = 0;
+                                dxfReason = prepareReason ?? string.Empty;
+                            }
+                            else if (skippedDxf)
+                            {
+                                exported = true;
+                                finalBytes = GetFileSizeQuietly(dxfPath);
+                            }
+                            else
+                            {
+                                bool directSaveOk = false;
                                 string activeBefore = ActiveDocTitle();
-                                drawing.ActivateSheet(dxfSheetName);
-                                bool saveOk = drawDoc.SaveAs4(dxfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref errors, ref warnings);
-                                long bytes = FileBytes(dxfPath);
-                                exported = saveOk && bytes > 0;
+                                try
+                                {
+                                    errors = 0;
+                                    warnings = 0;
+                                    drawing.ActivateSheet(dxfSheetName);
+                                    directSaveOk = drawDoc.SaveAs4(tempDxfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref errors, ref warnings);
+                                }
+                                catch
+                                {
+                                    directSaveOk = false;
+                                }
+
+                                ExportOutputResult dxfResult = TryFinalizeExportedTempFile("dxf", tempDxfPath, dxfPath, errorLog);
+                                dxfResult.ExportCallOk = directSaveOk;
+                                exported = dxfResult.Success;
+                                finalBytes = dxfResult.Bytes;
+                                dxfReason = dxfResult.Reason ?? string.Empty;
                                 SafeLog(errorLog, "DWG DXF direct ok=" + exported +
-                                                  " saveOk=" + saveOk +
+                                                  " saveOk=" + directSaveOk +
                                                   " activeBefore=" + activeBefore +
                                                   " activeAfter=" + ActiveDocTitle() +
                                                   " errors=" + errors +
                                                   " warnings=" + warnings +
-                                                  " bytes=" + bytes +
+                                                  " bytes=" + finalBytes +
+                                                  " reason=" + (dxfReason ?? string.Empty) +
                                                   " path=" + dxfPath);
-                            }
-                            catch
-                            {
-                                exported = false;
                             }
 
                             // Fallback: if direct export fails, try exporting the FLATPATTERN view.
-                            if (!exported)
+                            if (!exported && !skippedDxf)
                             {
                                 View flatView = drawing.GetFirstView() as View;
                                 View flatPatternView = null;
@@ -12202,15 +12609,31 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                                 if (flatPatternView != null)
                                 {
-                                    ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
-                                    exported = File.Exists(dxfPath);
+                                    fallbackUsed = true;
+                                    string tempFallbackDxfPath = BuildUniqueTempFilePath(
+                                        Path.GetDirectoryName(dxfPath),
+                                        Path.GetFileNameWithoutExtension(dxfPath),
+                                        Path.GetExtension(dxfPath));
+                                    ExportFlatPatternView(drawDoc, flatPatternView, tempFallbackDxfPath);
+                                    ExportOutputResult fallbackResult = TryFinalizeExportedTempFile("dxf", tempFallbackDxfPath, dxfPath, errorLog);
+                                    exported = fallbackResult.Success;
+                                    finalBytes = fallbackResult.Bytes;
+                                    dxfReason = fallbackResult.Reason ?? string.Empty;
                                 }
                             }
 
                             t.Stop();
-                            SafeLog(errorLog, "DWG DXF ms=" + t.ElapsedMilliseconds + " ok=" + exported + " path=" + dxfPath);
+                            SafeLog(errorLog,
+                                "DWG DXF ms=" + t.ElapsedMilliseconds +
+                                " ok=" + exported +
+                                " skipped=" + skippedDxf +
+                                " fallbackUsed=" + fallbackUsed +
+                                " bytes=" + finalBytes +
+                                " reason=" + (dxfReason ?? string.Empty) +
+                                " quarantinedExisting=" + (quarantinedExisting ?? string.Empty) +
+                                " path=" + dxfPath);
 
-                            if (!exported)
+                            if (!exported && !skippedDxf)
                             {
                                 if (summary != null)
                                 {
@@ -12218,7 +12641,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                                 }
                                 LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
                             }
-                            else
+                            else if (!skippedDxf)
                             {
                                 if (summary != null)
                                 {
@@ -12453,7 +12876,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                         ComInteropUtil.TryFinalReleaseComObject(drawing);
                         ComInteropUtil.TryFinalReleaseComObject(drawDoc);
-                        ComInteropUtil.TryFinalReleaseComObject(spec);
                     }
                 }
 
@@ -12464,513 +12886,36 @@ namespace TinyMRP.SolidWorksAddin.Services
         private void DwgPublish(ModelDoc2 model, string fileString, string deliverablesFolder,
             bool overwriteFiles, bool pdf, bool dxf, bool png, bool edr, Action<string> log, Action<string> errorLog, string partNumberOverride)
         {
-            using (new ExportDialogSuppressionScope(_swApp))
+            HashSet<string> baselineVisibleIds = null;
+            string rootDocId = string.Empty;
+            try
             {
-                Configuration conf = model.GetActiveConfiguration() as Configuration;
-                if (conf == null)
-                {
-                    return;
-                }
+                baselineVisibleIds = GetOpenVisibleDocumentIds();
+            }
+            catch
+            {
+                baselineVisibleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
 
-                string modelPath = model.GetPathName();
-                if (string.IsNullOrWhiteSpace(modelPath))
-                {
-                    return;
-                }
+            try
+            {
+                rootDocId = GetDocumentId(model);
+            }
+            catch
+            {
+                rootDocId = string.Empty;
+            }
 
-                string pn = !string.IsNullOrWhiteSpace(partNumberOverride)
-                    ? partNumberOverride
-                    : BomPartNumber(conf, model, errorLog);
-                string drawingPath = OnlyFolder(modelPath) + pn + ".SLDDRW";
-                if (!File.Exists(drawingPath))
-                {
-                    return;
-                }
-
-                string pdfPath = Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf");
-                string dxfPath = Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf");
-                string pngPath = Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png");
-                string edrPath = Path.Combine(deliverablesFolder, "edr", fileString + ".edrw");
-                bool dxfSelected = dxf;
-                bool dxfRequested = dxfSelected && ShouldExport(dxfPath, overwriteFiles);
-
-                HashSet<string> keep = SnapshotOpenDocIds();
-                AddDocToKeepSet(keep, model, null);
-                DocScope scope = new DocScope(this, keep, errorLog, "dwgpublish|" + drawingPath);
-
-                DocumentSpecification spec = null;
-                ModelDoc2 drawDoc = null;
+            using (var openedDocs = new OpenTracker(this, errorLog))
+            {
                 try
                 {
-                    spec = _swApp.GetOpenDocSpec(drawingPath) as DocumentSpecification;
-                    if (spec == null)
-                    {
-                        DebugExport(errorLog, "DwgPublish: open spec failed: " + drawingPath);
-                        return;
-                    }
-                    spec.DocumentType = (int)swDocumentTypes_e.swDocDRAWING;
-                    spec.ReadOnly = true;
-                    spec.Silent = true;
-
-                    using (new ExternalReferenceBatchOpenScope(_swApp))
-                    {
-                        ThrowIfCancelled();
-                        drawDoc = _swApp.OpenDoc7(spec) as ModelDoc2;
-                    }
-                    if (drawDoc == null)
-                    {
-                        DebugExport(errorLog, "DwgPublish: open failed: " + drawingPath);
-                        return;
-                    }
-
-                    string drawTitle = string.Empty;
-                    try
-                    {
-                        drawTitle = drawDoc.GetTitle();
-                    }
-                    catch
-                    {
-                        drawTitle = string.Empty;
-                    }
-
-                    string activateTitle = NormalizeDocTitleForClose(drawTitle);
-                    if (!string.IsNullOrWhiteSpace(activateTitle))
-                    {
-                        _swApp.ActivateDoc(activateTitle);
-                    }
-                    else if (!string.IsNullOrWhiteSpace(drawTitle))
-                    {
-                        _swApp.ActivateDoc(drawTitle);
-                    }
-                    ThrowIfCancelled();
-
-                    DrawingDoc drawing = drawDoc as DrawingDoc;
-                    if (drawing == null)
-                    {
-                        return;
-                    }
-
-                    object sheetNamesObj = drawing.GetSheetNames();
-                    string[] sheetNames = ToStringArray(sheetNamesObj);
-                    if (sheetNames == null || sheetNames.Length == 0)
-                    {
-                        return;
-                    }
-
-                    HashSet<string> dxfSheetTokens = null;
-                    if (pdf || dxfSelected)
-                    {
-                        dxfSheetTokens = BuildDxfSheetNameTokens();
-                    }
-
-                    string dxfSheetName = string.Empty;
-                    if (dxfRequested && dxfSheetTokens != null && dxfSheetTokens.Count > 0)
-                    {
-                        for (int i = 0; i < sheetNames.Length; i++)
-                        {
-                            ThrowIfCancelled();
-                            if (IsDxfSheetName(sheetNames[i], dxfSheetTokens))
-                            {
-                                dxfSheetName = sheetNames[i];
-                                break;
-                            }
-                        }
-                    }
-
-                    int errors = 0;
-                    int warnings = 0;
-                    ExportSummary summary = _currentExportSummary;
-
-                    if (pdf)
-                    {
-                        ThrowIfCancelled();
-                        ExportPdfData exportData = _swApp.GetExportFileData(
-                            (int)swExportDataFileType_e.swExportPdfData) as ExportPdfData;
-                        if (exportData != null)
-                        {
-                            try
-                            {
-                                exportData.ViewPdfAfterSaving = false;
-                            }
-                            catch
-                            {
-                                // ignore
-                            }
-
-                            var excludedSheets = new List<string>();
-                            var includedSheets = new List<string>();
-                            if (dxfSheetTokens != null && dxfSheetTokens.Count > 0)
-                            {
-                                for (int i = 0; i < sheetNames.Length; i++)
-                                {
-                                    string name = sheetNames[i];
-                                    if (IsDxfSheetName(name, dxfSheetTokens))
-                                    {
-                                        excludedSheets.Add(name);
-                                    }
-                                    else
-                                    {
-                                        includedSheets.Add(name);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                includedSheets.AddRange(sheetNames);
-                            }
-
-                            List<string> tokensSorted = null;
-                            try
-                            {
-                                if (dxfSheetTokens != null)
-                                {
-                                    tokensSorted = new List<string>();
-                                    foreach (string t in dxfSheetTokens)
-                                    {
-                                        if (!string.IsNullOrWhiteSpace(t))
-                                        {
-                                            tokensSorted.Add(t);
-                                        }
-                                    }
-                                    tokensSorted.Sort(StringComparer.OrdinalIgnoreCase);
-                                }
-                            }
-                            catch
-                            {
-                                tokensSorted = null;
-                            }
-
-                            string FormatList(IList<string> values)
-                            {
-                                if (values == null)
-                                {
-                                    return "<null>";
-                                }
-
-                                int max = 50;
-                                var sb = new StringBuilder();
-                                sb.Append("[");
-                                for (int i = 0; i < values.Count; i++)
-                                {
-                                    if (i > 0) sb.Append(", ");
-                                    if (i >= max)
-                                    {
-                                        sb.Append("... +").Append(values.Count - i);
-                                        break;
-                                    }
-                                    sb.Append(values[i] ?? string.Empty);
-                                }
-                                sb.Append("]");
-                                return sb.ToString();
-                            }
-
-                            bool hasExclusions = excludedSheets.Count > 0;
-                            if (hasExclusions)
-                            {
-                                SafeLog(errorLog,
-                                    "DWG PDF sheets: dxfSheetNamesRaw=" + (_config != null ? (_config.DxfSheetNames ?? string.Empty) : string.Empty) +
-                                    " tokens=" + FormatList(tokensSorted) +
-                                    " all=" + FormatList(new List<string>(sheetNames)) +
-                                    " excluded=" + FormatList(excludedSheets) +
-                                    " included=" + FormatList(includedSheets));
-                            }
-
-                            bool saveOk = false;
-                            bool skippedPdf = false;
-                            if (hasExclusions && includedSheets.Count == 0)
-                            {
-                                skippedPdf = true;
-                                SafeLog(errorLog,
-                                    "DWG PDF skipped: all sheets match DXF patterns; no non-DXF sheets available. path=" + pdfPath);
-                            }
-                            else
-                            {
-                                if (summary != null)
-                                {
-                                    summary.DwgAttemptPdf++;
-                                }
-
-                                string[] pdfSheetNames = (hasExclusions && includedSheets.Count > 0 && includedSheets.Count < sheetNames.Length)
-                                    ? includedSheets.ToArray()
-                                    : sheetNames;
-
-                                bool setOk = false;
-                                string setArgType = "<none>";
-                                try
-                                {
-                                    setOk = exportData.SetSheets(
-                                        (int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
-                                        pdfSheetNames);
-                                    setArgType = pdfSheetNames != null ? pdfSheetNames.GetType().FullName : "<null>";
-                                }
-                                catch (Exception ex)
-                                {
-                                    setOk = false;
-                                    SafeLog(errorLog, "DWG PDF SetSheets exception (string[]): " + ex.Message);
-                                }
-
-                                if (!setOk)
-                                {
-                                    try
-                                    {
-                                        var pdfVariant = new object[pdfSheetNames != null ? pdfSheetNames.Length : 0];
-                                        for (int i = 0; i < pdfVariant.Length; i++)
-                                        {
-                                            pdfVariant[i] = pdfSheetNames[i];
-                                        }
-
-                                        setOk = exportData.SetSheets(
-                                            (int)swExportDataSheetsToExport_e.swExportData_ExportSpecifiedSheets,
-                                            pdfVariant);
-                                        setArgType = pdfVariant.GetType().FullName;
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        setOk = false;
-                                        SafeLog(errorLog, "DWG PDF SetSheets exception (variant[]): " + ex.Message);
-                                    }
-                                }
-
-                                SafeLog(errorLog,
-                                    "DWG PDF SetSheets ok=" + setOk +
-                                    " argType=" + (setArgType ?? string.Empty) +
-                                    " count=" + (pdfSheetNames != null ? pdfSheetNames.Length : 0) +
-                                    " export=" + FormatList(new List<string>(pdfSheetNames ?? new string[0])) +
-                                    " path=" + pdfPath);
-
-                                if (!setOk && hasExclusions)
-                                {
-                                    skippedPdf = true;
-                                    SafeLog(errorLog,
-                                        "DWG PDF skipped: failed to apply sheet filter; refusing to export PDF that would include DXF sheets. path=" + pdfPath);
-                                }
-                                else
-                                {
-                                    saveOk = drawDoc.Extension.SaveAs(pdfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, exportData, ref errors, ref warnings);
-                                }
-                            }
-
-                            if (!skippedPdf)
-                            {
-                                bool ok = saveOk && File.Exists(pdfPath);
-                                if (ok)
-                                {
-                                    if (summary != null)
-                                    {
-                                        summary.DwgOkPdf++;
-                                    }
-                                }
-                                else
-                                {
-                                    if (summary != null)
-                                    {
-                                        summary.DwgFailPdf++;
-                                    }
-                                    LogExportFailure(log, errorLog, "PDF export failed: " + pdfPath);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            if (summary != null)
-                            {
-                                summary.DwgFailPdf++;
-                            }
-                            LogExportFailure(log, errorLog, "PDF export failed: export data unavailable.");
-                        }
-                    }
-
-                    if (edr)
-                    {
-                        if (summary != null)
-                        {
-                            summary.DwgAttemptEdraw++;
-                        }
-
-                        ThrowIfCancelled();
-                        _swApp.SetUserPreferenceIntegerValue(
-                            (int)swUserPreferenceIntegerValue_e.swEdrawingsSaveAsSelectionOption,
-                            (int)swEdrawingSaveAsOption_e.swEdrawingSaveAll);
-                        bool ok = drawDoc.Extension.SaveAs(edrPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        ok = ok && File.Exists(edrPath);
-                        if (ok)
-                        {
-                            if (summary != null)
-                            {
-                                summary.DwgOkEdraw++;
-                            }
-                        }
-                        else
-                        {
-                            if (summary != null)
-                            {
-                                summary.DwgFailEdraw++;
-                            }
-                            LogExportFailure(log, errorLog, "eDrawing export failed: " + edrPath);
-                        }
-                    }
-
-                    if (png)
-                    {
-                        if (summary != null)
-                        {
-                            summary.DwgAttemptPng++;
-                        }
-
-                        ThrowIfCancelled();
-                        drawing.ActivateSheet(sheetNames[0]);
-                        drawing.ViewFullPage();
-
-                        _swApp.SetUserPreferenceIntegerValue(
-                            (int)swUserPreferenceIntegerValue_e.swTiffScreenOrPrintCapture, 1);
-                        _swApp.SetUserPreferenceIntegerValue(
-                            (int)swUserPreferenceIntegerValue_e.swTiffPrintDPI, 150);
-                        _swApp.SetUserPreferenceIntegerValue(
-                            (int)swUserPreferenceIntegerValue_e.swTiffPrintPaperSize,
-                            (int)swDwgPaperSizes_e.swDwgPapersUserDefined);
-                        _swApp.SetUserPreferenceDoubleValue(
-                            (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperWidth, 0.297);
-                        _swApp.SetUserPreferenceDoubleValue(
-                            (int)swUserPreferenceDoubleValue_e.swTiffPrintDrawingPaperHeight, 0.21);
-
-                        bool ok = drawDoc.Extension.SaveAs(pngPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                            (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                        ok = ok && File.Exists(pngPath);
-                        if (ok)
-                        {
-                            if (summary != null)
-                            {
-                                summary.DwgOkPng++;
-                            }
-                        }
-                        else
-                        {
-                            if (summary != null)
-                            {
-                                summary.DwgFailPng++;
-                            }
-                            LogExportFailure(log, errorLog, "Drawing PNG export failed: " + pngPath);
-                        }
-                    }
-
-                    if (dxfRequested)
-                    {
-                        // DXF is only required when the drawing has a designated DXF/flatpattern sheet.
-                        // Do not treat "no drawing DXF page" as an export error.
-                        if (string.IsNullOrWhiteSpace(dxfSheetName))
-                        {
-                            SafeLog(errorLog, "DWG DXF skipped: no designated DXF sheet found (configure Advanced > Drawing export > DXF sheet names; current: " +
-                                              (_config != null ? (_config.DxfSheetNames ?? string.Empty) : string.Empty) + ").");
-                        }
-                        else
-                        {
-                            try
-                            {
-                                _swApp.SetUserPreferenceIntegerValue(
-                                    (int)swUserPreferenceIntegerValue_e.swDxfMultiSheetOption,
-                                    (int)swDxfMultisheet_e.swDxfActiveSheetOnly);
-                                _swApp.SetUserPreferenceIntegerValue(
-                                    (int)swUserPreferenceIntegerValue_e.swDxfOutputNoScale, 1);
-                            }
-                            catch
-                            {
-                                // ignore preference errors
-                            }
-
-                            if (summary != null)
-                            {
-                                summary.DwgAttemptDxf++;
-                            }
-
-                            ThrowIfCancelled();
-                            bool exported = false;
-
-                            // If the drawing has a dedicated DXF/flat pattern sheet, export it directly without
-                            // mutating the sheet format (mutations can dirty the doc and trigger save prompts).
-                            try
-                            {
-                                drawing.ActivateSheet(dxfSheetName);
-                                bool ok = drawDoc.SaveAs4(dxfPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, ref errors, ref warnings);
-                                exported = ok && File.Exists(dxfPath);
-                            }
-                            catch
-                            {
-                                exported = false;
-                            }
-
-                            // Fallback: if direct export fails, try exporting the FLATPATTERN view.
-                            if (!exported)
-                            {
-                                View flatView = drawing.GetFirstView() as View;
-                                View flatPatternView = null;
-                                while (flatView != null)
-                                {
-                                    ThrowIfCancelled();
-                                    string viewName = string.Empty;
-                                    try
-                                    {
-                                        viewName = flatView.GetName2() ?? string.Empty;
-                                    }
-                                    catch
-                                    {
-                                        viewName = string.Empty;
-                                    }
-
-                                    if (NormalizeSheetNameForMatch(viewName) == "flatpattern")
-                                    {
-                                        flatPatternView = flatView;
-                                        break;
-                                    }
-
-                                    flatView = flatView.GetNextView() as View;
-                                }
-
-                                if (flatPatternView != null)
-                                {
-                                    ExportFlatPatternView(drawDoc, flatPatternView, dxfPath);
-                                    exported = File.Exists(dxfPath);
-                                }
-                            }
-
-                            if (!exported)
-                            {
-                                if (summary != null)
-                                {
-                                    summary.DwgFailDxf++;
-                                }
-                                LogExportFailure(log, errorLog, "DXF export failed: " + dxfPath);
-                            }
-                            else
-                            {
-                                if (summary != null)
-                                {
-                                    summary.DwgOkDxf++;
-                                }
-                            }
-                        }
-                    }
+                    DwgPublishFast(model, fileString, deliverablesFolder, overwriteFiles, pdf, dxf, png, edr, log, errorLog,
+                        partNumberOverride, openedDocs, baselineVisibleIds, rootDocId);
                 }
                 finally
                 {
-                    if (drawDoc != null)
-                    {
-                        ForceCloseDocNoSave(drawDoc, errorLog, "DwgPublish close");
-                    }
-                    try
-                    {
-                        scope.CloseOpenedDocs();
-                    }
-                    catch
-                    {
-                        // ignore scope cleanup errors
-                    }
-
-                    CloseDocsNotInKeepSet(keep, errorLog, "post-close drawing publish");
-                    ComInteropUtil.TryFinalReleaseComObject(drawDoc);
-                    ComInteropUtil.TryFinalReleaseComObject(spec);
+                    openedDocs.CloseAll("DwgPublish wrapper");
                 }
             }
         }

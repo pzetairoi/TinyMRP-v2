@@ -80,7 +80,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             AuthToken = string.Empty;
             BomFolder = "Output";
             DeliverablesFolder = "Output";
-            DxfSheetNames = "flatpattern;flat_pattern;dxf;dxf sheet";
+            DxfSheetNames = "flatpattern;flat_pattern;dxf;dxf sheet;DXF Sheet";
             NumberingSchemeId = string.Empty;
             NumberingContextDefaults = "type=PART;family=;subfamily=;project=;site=";
             PartNumberProperty = "PartNumber";
