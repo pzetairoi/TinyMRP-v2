@@ -280,6 +280,101 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
+        public void TryPrepareExportOutput_ValidExistingFileAndNoOverwrite_SkipsExport()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string finalPath = Path.Combine(root, "valid.stl");
+
+            try
+            {
+                File.WriteAllText(finalPath, BuildAsciiStl() + new string(' ', 256), Encoding.ASCII);
+
+                object[] args = { "stl", finalPath, false, null, null, false, null, null };
+                bool ok = (bool)InvokePrivate(publisher, "TryPrepareExportOutput", args);
+
+                Assert.IsTrue(ok);
+                Assert.AreEqual(true, args[5]);
+                Assert.AreEqual("existing valid output", args[6]);
+                Assert.AreEqual(string.Empty, args[4] as string ?? string.Empty);
+                Assert.AreEqual(string.Empty, args[7] as string ?? string.Empty);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void TryPrepareExportOutput_InvalidExistingFile_IsQuarantinedAndExportPrepared()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string finalPath = Path.Combine(root, "invalid.stl");
+
+            try
+            {
+                File.WriteAllText(finalPath, "solid x\nendsolid x\n", Encoding.ASCII);
+
+                object[] args = { "stl", finalPath, false, null, null, false, null, null };
+                bool ok = (bool)InvokePrivate(publisher, "TryPrepareExportOutput", args);
+
+                Assert.IsTrue(ok);
+                Assert.AreEqual(false, args[5]);
+                Assert.AreEqual("file too small", args[6]);
+                Assert.IsFalse(string.IsNullOrWhiteSpace(args[4] as string));
+                Assert.AreEqual(finalPath + ".bad", args[7]);
+                Assert.IsFalse(File.Exists(finalPath));
+                Assert.IsTrue(File.Exists(finalPath + ".bad"));
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void TryFinalizeExportedTempFile_InvalidTemp_DoesNotReplaceValidFinal()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string finalPath = Path.Combine(root, "final.stl");
+            string tempPath = Path.Combine(root, "temp.stl");
+
+            try
+            {
+                string validContents = BuildAsciiStl() + new string(' ', 256);
+                File.WriteAllText(finalPath, validContents, Encoding.ASCII);
+                File.WriteAllText(tempPath, "solid x\nendsolid x\n", Encoding.ASCII);
+
+                object result = InvokePrivate(publisher, "TryFinalizeExportedTempFile", "stl", tempPath, finalPath, null);
+
+                Assert.AreEqual(false, GetField(result, "Success"));
+                Assert.AreEqual("file too small", GetField(result, "Reason"));
+                Assert.AreEqual(validContents, File.ReadAllText(finalPath, Encoding.ASCII));
+                Assert.IsFalse(File.Exists(tempPath));
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void BuildSaveBeforeExportPromptMessage_ExplainsUnsavedAndModifiedCases()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+
+            string unsaved = (string)InvokePrivate(publisher, "BuildSaveBeforeExportPromptMessage", "BOM export", "Part1.SLDPRT", "unsaved");
+            string modified = (string)InvokePrivate(publisher, "BuildSaveBeforeExportPromptMessage", "batch export", "Asm1.SLDASM", "modified");
+
+            StringAssert.Contains(unsaved, "\"Part1.SLDPRT\" must be saved before BOM export.");
+            StringAssert.Contains(unsaved, "not been saved yet");
+            StringAssert.Contains(modified, "\"Asm1.SLDASM\" must be saved before batch export.");
+            StringAssert.Contains(modified, "unsaved changes");
+        }
+
+        [TestMethod]
         public void ExportSessionSerialization_RoundTripsQueueOptionsAndOutputs()
         {
             var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
@@ -377,6 +472,41 @@ namespace TinyMRP.SolidWorksAddin.Tests
                 Assert.AreEqual("ply:header-only file", GetField(queue[1], "LastError"));
                 Assert.AreEqual("header-only file", GetField(queue[1], "PlyValidationReason"));
                 Assert.AreEqual("pending", GetField(queue[2], "Status"));
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
+        public void PrepareSessionForResume_ExpectedOutputsControlCompleteness_NotOnlyValidatedOutputs()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string validPlyPath = Path.Combine(root, "resume_valid.ply");
+            string missingStepPath = Path.Combine(root, "resume_missing.step");
+
+            try
+            {
+                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
+
+                object session = CreateExportSession("paused");
+                IList queue = (IList)GetField(session, "Queue");
+                object item = CreateExportSessionItem(@"C:\vault\partial.sldprt", "A", "done",
+                    CreateExportedOutput("ply", validPlyPath, 0, true, string.Empty));
+
+                IList expected = (IList)GetField(item, "ExpectedOutputs");
+                expected.Add(CreateExportedOutput("ply", validPlyPath, 0, true, string.Empty));
+                expected.Add(CreateExportedOutput("step", missingStepPath, 0, false, string.Empty));
+                queue.Add(item);
+
+                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
+                IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
+
+                Assert.AreEqual("pending", GetField(queue[0], "Status"));
+                Assert.AreEqual("step:missing file", GetField(queue[0], "LastError"));
+                Assert.AreEqual(1, pending.Count);
             }
             finally
             {
@@ -547,6 +677,35 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.IsFalse(siblingResult);
         }
 
+        [TestMethod]
+        public void TreeBomTempAssemblyBuilder_DoesNotSaveTempAssembly()
+        {
+            string source = File.ReadAllText(GetPublisherSourcePath(), Encoding.UTF8);
+            int start = source.IndexOf("private bool TryBuildBomWithUnsavedTempAssembly", StringComparison.Ordinal);
+            int end = source.IndexOf("private bool TryBuildTreeBom", StringComparison.Ordinal);
+
+            Assert.IsTrue(start >= 0);
+            Assert.IsTrue(end > start);
+
+            string methodBody = source.Substring(start, end - start);
+            StringAssert.Contains(methodBody, "SaveAsText");
+            StringAssert.Contains(methodBody, "CloseTempAssemblyNoSaveNoPrompt");
+            Assert.IsTrue(methodBody.IndexOf("TrySilentSaveAs", StringComparison.Ordinal) < 0);
+            Assert.IsTrue(methodBody.IndexOf("TrySilentSaveCurrent", StringComparison.Ordinal) < 0);
+            Assert.IsTrue(methodBody.IndexOf("Save3(", StringComparison.Ordinal) < 0);
+        }
+
+        [TestMethod]
+        public void DrawingDiscovery_RemainsPartNumberSlddrwConvention()
+        {
+            string source = File.ReadAllText(GetPublisherSourcePath(), Encoding.UTF8);
+
+            StringAssert.Contains(source, "string drawingPath = OnlyFolder(modelPath) + pn + \".SLDDRW\";");
+            StringAssert.Contains(source, "string drawingPath = OnlyFolder(modelPath) + partNumber + \".SLDDRW\";");
+            Assert.IsTrue(source.IndexOf("candidateDrawing", StringComparison.OrdinalIgnoreCase) < 0);
+            Assert.IsTrue(source.IndexOf("fallback drawing", StringComparison.OrdinalIgnoreCase) < 0);
+        }
+
         private static object InvokePrivate(object target, string methodName, params object[] args)
         {
             MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
@@ -653,6 +812,24 @@ namespace TinyMRP.SolidWorksAddin.Tests
             SetField(session, "BomFolder", @"C:\out\bom");
             SetField(session, "Options", new PublishOptions { ExportPly = true });
             return session;
+        }
+
+        private static string GetPublisherSourcePath()
+        {
+            string current = AppDomain.CurrentDomain.BaseDirectory;
+            for (int i = 0; i < 8; i++)
+            {
+                string candidate = Path.Combine(current, "TinyMRP.SolidWorksAddin", "Services", "TinyMrpPublisher.cs");
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+
+                current = Path.GetFullPath(Path.Combine(current, ".."));
+            }
+
+            Assert.Fail("Could not locate TinyMrpPublisher.cs from test output directory.");
+            return string.Empty;
         }
 
         private static string CreateTempRoot()
