@@ -517,6 +517,36 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.AreEqual(0, pending.Count);
         }
 
+        [TestMethod]
+        public void BuildBomTempAssemblyPath_UsesPrivateTempFolderAndSldasmName()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = (string)InvokePrivate(publisher, "GetBomTempRootDirectory");
+
+            object[] args = { "unit_test_token", null };
+            string tempAssemblyPath = (string)InvokePrivate(publisher, "BuildBomTempAssemblyPath", args);
+            string tempDirectory = args[1] as string;
+
+            Assert.IsFalse(string.IsNullOrWhiteSpace(root));
+            Assert.AreEqual(Path.Combine(root, "unit_test_token"), tempDirectory);
+            Assert.AreEqual(Path.Combine(tempDirectory, "tinymrp_treebom_unit_test_token.SLDASM"), tempAssemblyPath);
+        }
+
+        [TestMethod]
+        public void IsPathUnderDirectory_AcceptsNestedPathAndRejectsSibling()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = Path.Combine(Path.GetTempPath(), "TinyMRP", "bom-temp");
+            string nested = Path.Combine(root, "abc", "file.sldasm");
+            string sibling = Path.Combine(Path.GetTempPath(), "TinyMRP", "bom-temp-other", "file.sldasm");
+
+            bool nestedResult = (bool)InvokePrivate(publisher, "IsPathUnderDirectory", nested, root);
+            bool siblingResult = (bool)InvokePrivate(publisher, "IsPathUnderDirectory", sibling, root);
+
+            Assert.IsTrue(nestedResult);
+            Assert.IsFalse(siblingResult);
+        }
+
         private static object InvokePrivate(object target, string methodName, params object[] args)
         {
             MethodInfo method = target.GetType().GetMethod(methodName, BindingFlags.NonPublic | BindingFlags.Instance);
