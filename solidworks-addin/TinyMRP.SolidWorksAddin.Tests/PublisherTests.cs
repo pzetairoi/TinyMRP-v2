@@ -628,6 +628,211 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
+        public void AreCurrentDeliverableSelectionsCoveredByPrevious_RequiresSupersetFlags()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            var previous = new PublishOptions
+            {
+                ExportPngModel = true,
+                ExportStep = true,
+                ExportPdf = true,
+                ExportPly = true
+            };
+            var covered = new PublishOptions
+            {
+                ExportPngModel = true,
+                ExportPdf = true
+            };
+            var missing = new PublishOptions
+            {
+                ExportPngModel = true,
+                ExportPdf = true,
+                ExportEdrawing = true
+            };
+
+            bool coveredResult = (bool)InvokePrivate(
+                publisher,
+                "AreCurrentDeliverableSelectionsCoveredByPrevious",
+                previous,
+                covered);
+            bool missingResult = (bool)InvokePrivate(
+                publisher,
+                "AreCurrentDeliverableSelectionsCoveredByPrevious",
+                previous,
+                missing);
+
+            Assert.IsTrue(coveredResult);
+            Assert.IsFalse(missingResult);
+        }
+
+        [TestMethod]
+        public void IsExportSessionCompatibleForReuse_RequiresMatchingRootFolderAndNoOverwrite()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            object previous = CreateExportSession("completed");
+            SetField(previous, "RootModelPath", @"C:\vault\root.sldasm");
+            SetField(previous, "RootConfigurationName", "MAIN");
+            SetField(previous, "DeliverablesFolder", @"C:\out\deliverables");
+            SetField(previous, "Options", new PublishOptions
+            {
+                DeliverablesFolder = @"C:\out\deliverables",
+                ExportPngModel = true,
+                ExportPdf = true
+            });
+
+            bool compatible = (bool)InvokePrivate(
+                publisher,
+                "IsExportSessionCompatibleForReuse",
+                previous,
+                @"C:\vault\root.sldasm",
+                "MAIN",
+                new PublishOptions
+                {
+                    DeliverablesFolder = @"C:\out\deliverables",
+                    ExportPngModel = true,
+                    OverwriteFiles = false
+                });
+
+            bool wrongFolder = (bool)InvokePrivate(
+                publisher,
+                "IsExportSessionCompatibleForReuse",
+                previous,
+                @"C:\vault\root.sldasm",
+                "MAIN",
+                new PublishOptions
+                {
+                    DeliverablesFolder = @"C:\other",
+                    ExportPngModel = true,
+                    OverwriteFiles = false
+                });
+
+            bool overwrite = (bool)InvokePrivate(
+                publisher,
+                "IsExportSessionCompatibleForReuse",
+                previous,
+                @"C:\vault\root.sldasm",
+                "MAIN",
+                new PublishOptions
+                {
+                    DeliverablesFolder = @"C:\out\deliverables",
+                    ExportPngModel = true,
+                    OverwriteFiles = true
+                });
+
+            Assert.IsTrue(compatible);
+            Assert.IsFalse(wrongFolder);
+            Assert.IsFalse(overwrite);
+        }
+
+        [TestMethod]
+        public void SeedExportSessionFromPrevious_CopiesMatchingItemStateAndOutputs()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+
+            object current = CreateExportSession("planned");
+            IList currentQueue = (IList)GetField(current, "Queue");
+            currentQueue.Add(CreateExportSessionItem(@"C:\vault\part.sldprt", "A", "pending"));
+
+            object previous = CreateExportSession("completed");
+            IList previousQueue = (IList)GetField(previous, "Queue");
+            object previousItem = CreateExportSessionItem(@"C:\vault\part.sldprt", "A", "done",
+                CreateExportedOutput("ply", @"C:\out\deliverables\ply\part.ply", 1234, true, string.Empty));
+            SetField(previousItem, "LastError", string.Empty);
+            previousQueue.Add(previousItem);
+
+            int seeded = (int)InvokePrivate(publisher, "SeedExportSessionFromPrevious", current, previous);
+
+            Assert.AreEqual(1, seeded);
+            Assert.AreEqual("done", GetField(currentQueue[0], "Status"));
+            IList outputs = (IList)GetField(currentQueue[0], "Outputs");
+            Assert.AreEqual(1, outputs.Count);
+            Assert.AreEqual("ply", GetField(outputs[0], "Type"));
+        }
+
+        [TestMethod]
+        public void SeedExportSessionFromPrevious_SkipsItemsWhenCurrentSelectionNeedsNoRecordedOutputs()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+
+            object current = CreateExportSession("planned");
+            SetField(current, "Options", new PublishOptions
+            {
+                DeliverablesFolder = @"C:\out\deliverables",
+                ExportPdf = true
+            });
+            IList currentQueue = (IList)GetField(current, "Queue");
+            currentQueue.Add(CreateExportSessionItem(@"C:\vault\part.sldprt", "A", "pending"));
+
+            object previous = CreateExportSession("completed");
+            SetField(previous, "Options", new PublishOptions
+            {
+                DeliverablesFolder = @"C:\out\deliverables",
+                ExportPngModel = true,
+                ExportPdf = true
+            });
+            IList previousQueue = (IList)GetField(previous, "Queue");
+            previousQueue.Add(CreateExportSessionItem(
+                @"C:\vault\part.sldprt",
+                "A",
+                "done",
+                CreateExportedOutput("png", @"C:\out\deliverables\png\part.png", 1234, true, string.Empty)));
+
+            int seeded = (int)InvokePrivate(publisher, "SeedExportSessionFromPrevious", current, previous);
+
+            Assert.AreEqual(1, seeded);
+            Assert.AreEqual("skipped", GetField(currentQueue[0], "Status"));
+            Assert.AreEqual("no required outputs", GetField(currentQueue[0], "LastError"));
+            Assert.AreEqual(0, ((IList)GetField(currentQueue[0], "ExpectedOutputs")).Count);
+            Assert.AreEqual(0, ((IList)GetField(currentQueue[0], "Outputs")).Count);
+        }
+
+        [TestMethod]
+        public void IsReusableSessionCandidateBetter_PrefersPreparedSessionWithMoreCompletedItems()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string root = CreateTempRoot();
+            string validA = Path.Combine(root, "a.ply");
+            string validB = Path.Combine(root, "b.ply");
+
+            try
+            {
+                File.WriteAllText(validA, BuildValidAsciiPly(), Encoding.ASCII);
+                File.WriteAllText(validB, BuildValidAsciiPly(), Encoding.ASCII);
+
+                object newerPartial = CreateExportSession("running");
+                SetField(newerPartial, "UpdatedUtc", DateTime.UtcNow.AddMinutes(1).ToString("o"));
+                IList newerQueue = (IList)GetField(newerPartial, "Queue");
+                newerQueue.Add(CreateExportSessionItem(@"C:\vault\part_a.sldprt", "A", "done",
+                    CreateExportedOutput("ply", validA, 0, false, string.Empty)));
+                newerQueue.Add(CreateExportSessionItem(@"C:\vault\part_b.sldprt", "B", "pending",
+                    CreateExportedOutput("ply", validB, 0, false, string.Empty)));
+
+                object olderComplete = CreateExportSession("completed");
+                SetField(olderComplete, "UpdatedUtc", DateTime.UtcNow.AddMinutes(-10).ToString("o"));
+                IList olderQueue = (IList)GetField(olderComplete, "Queue");
+                olderQueue.Add(CreateExportSessionItem(@"C:\vault\part_a.sldprt", "A", "done",
+                    CreateExportedOutput("ply", validA, 0, false, string.Empty)));
+                olderQueue.Add(CreateExportSessionItem(@"C:\vault\part_b.sldprt", "B", "done",
+                    CreateExportedOutput("ply", validB, 0, false, string.Empty)));
+
+                InvokePrivate(publisher, "PrepareSessionForResume", newerPartial, null);
+                InvokePrivate(publisher, "PrepareSessionForResume", olderComplete, null);
+
+                bool olderWins = (bool)InvokePrivate(
+                    publisher,
+                    "IsReusableSessionCandidateBetter",
+                    olderComplete,
+                    newerPartial);
+
+                Assert.IsTrue(olderWins);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(root);
+            }
+        }
+
+        [TestMethod]
         public void PrepareSessionForResume_DurableSkippedItemRemainsSkippedAndCountsComplete()
         {
             var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
