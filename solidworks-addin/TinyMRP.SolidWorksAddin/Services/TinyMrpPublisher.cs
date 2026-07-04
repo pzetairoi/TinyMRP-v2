@@ -126,6 +126,13 @@ namespace TinyMRP.SolidWorksAddin.Services
             public string ConfigurationName;
             public string FileString;
             public string PartNumber;
+            public string Revision;
+            public string DrawingPath;
+            public ModelDoc2 SourceModel;
+            public int DocType;
+            public bool IsRoot;
+            public int MaxDepth;
+            public int SubtreeEstimate;
             public bool ExportPngModel;
             public bool ExportStep;
             public bool ExportEdrawing;
@@ -148,6 +155,29 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 return DrawingExists && (ExportPdf || ExportDxf || ExportPngDrawing || ExportEdrawingDrawing);
             }
+        }
+
+        private sealed class PhysicalExportQueueItem
+        {
+            public bool IsDrawing;
+            public string PhysicalPath;
+            public string SourceModelPath;
+            public string DisplayName;
+            public int DocType;
+            public bool IsRoot;
+            public int MaxDepth;
+            public int SubtreeEstimate;
+            public List<DeliverablePlan> Plans = new List<DeliverablePlan>();
+        }
+
+        private sealed class DeliverableFailureRecord
+        {
+            public string PartNumber;
+            public string Revision;
+            public string SourceModelPath;
+            public string DrawingPath;
+            public HashSet<string> FailedFormats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            public HashSet<string> Reasons = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
         private sealed class DeliverableGroup
@@ -271,6 +301,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             public int DwgFailDxf;
 
             public int FinalOpenDocs;
+            public bool StoppedAfterCurrentFile;
+            public List<DeliverableFailureRecord> FailureRecords = new List<DeliverableFailureRecord>();
         }
 
         private sealed class ExportedOutputState
@@ -1197,6 +1229,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         private readonly TinyMrpConfig _config;
         private volatile bool _cancelRequested;
         private volatile bool _pauseRequested;
+        private volatile bool _stopAfterCurrentItemRequested;
         private readonly HashSet<string> _closeWarningOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _debugOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly object _sessionLock = new object();
@@ -1997,8 +2030,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     ok = s.ModelOk3mf + s.ModelOkStl + s.ModelOkPly + s.ModelOkStep + s.ModelOkEdraw + s.ModelOkPng +
                          s.DwgOkPdf + s.DwgOkEdraw + s.DwgOkPng + s.DwgOkDxf;
-                    fail = s.ModelFail3mf + s.ModelFailStl + s.ModelFailPly + s.ModelFailStep + s.ModelFailEdraw + s.ModelFailPng +
-                           s.DwgFailPdf + s.DwgFailEdraw + s.DwgFailPng + s.DwgFailDxf;
+                    fail = GetDeliverableFailureFormatCount(s);
                 }
 
                 string message = (statusLabel ?? "Export") + ": " + ok + " files created, " + fail + " failed.";
@@ -2021,100 +2053,300 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 ResetCancel();
                 ResetPause();
+                ResetStopAfterCurrentItem();
                 _closeWarningOnce.Clear();
                 _debugOnce.Clear();
-                HashSet<string> uploadPackBases;
-                List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
-                string flatFile = TraverseModel(true, string.Empty, effective, log, null, progress, errorLog,
-                    out uploadPackBases, out uploadPackExtras);
 
-                ExportSessionState activeSession = GetActiveExportSession();
-                if (activeSession != null &&
-                    string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase))
+                HashSet<string> uploadPackBases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras =
+                    effective.CreateUploadPack && effective.UploadPackIncludeExtras
+                        ? new List<UploadPackBuilder.AssociatedFilesBundle>()
+                        : null;
+
+                ModelDoc2 startDoc = _swApp.ActiveDoc as ModelDoc2;
+                if (startDoc == null)
                 {
-                    Log(log, BuildCompletionMessage("Export paused"));
+                    Log(log, BuildRunLogMessage("Export aborted: no active document.", runLog));
                     return;
                 }
 
-                if (effective.CreateUploadPack)
-                {
-                    try
-                    {
-                        CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log, errorLog);
-                    }
-                    catch (Exception ex)
-                    {
-                        if (ex is OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        if (IsBaselineAbortException(ex))
-                        {
-                            throw;
-                        }
-                        Log(log, "Upload pack failed: " + ex.Message);
-                        LogExportFailure(log, errorLog, "Upload pack failed: " + ex.Message);
-                        if (ex is System.Runtime.InteropServices.COMException ||
-                            (ex.InnerException is System.Runtime.InteropServices.COMException))
-                        {
-                            LogExceptionDetails(errorLog, "UploadPack", ex);
-                        }
-                    }
-                }
-
-                activeSession = GetActiveExportSession();
-                if (activeSession != null && IsSessionResumable(activeSession.Status))
-                {
-                    activeSession.Status = ExportSessionStatusCompleted;
-                    SaveExportSessionAtomic(activeSession, errorLog);
-                    ArchiveCompletedExportSession(activeSession, errorLog);
-                    SetActiveExportSession(null);
-                }
-
-                string completedLabel = "Export completed";
+                string startTitle = string.Empty;
+                string startPathSnapshot = string.Empty;
                 try
                 {
-                    ExportSummary s = _currentExportSummary;
-                    if (s != null)
+                    startTitle = startDoc.GetTitle() ?? string.Empty;
+                }
+                catch
+                {
+                    startTitle = string.Empty;
+                }
+                try
+                {
+                    startPathSnapshot = startDoc.GetPathName() ?? string.Empty;
+                }
+                catch
+                {
+                    startPathSnapshot = string.Empty;
+                }
+
+                HashSet<string> initialVisibleDocs = GetOpenVisibleDocumentIds();
+                _currentExportSummary.BaselineVisibleDocIds = new HashSet<string>(initialVisibleDocs, StringComparer.OrdinalIgnoreCase);
+                _currentExportSummary.InitialVisibleDocs = initialVisibleDocs.Count;
+
+                ModelDoc2 swModel = startDoc;
+                Configuration swConf = swModel.GetActiveConfiguration() as Configuration;
+                int modelType = swModel.GetType();
+                if (modelType == (int)swDocumentTypes_e.swDocDRAWING)
+                {
+                    DrawingDoc swDraw = swModel as DrawingDoc;
+                    DrawingReference reference;
+                    if (TryGetDrawingReference(swDraw, out reference) && reference.Model != null && reference.Configuration != null)
                     {
-                        int fail = s.ModelFail3mf + s.ModelFailStl + s.ModelFailPly + s.ModelFailStep + s.ModelFailEdraw + s.ModelFailPng +
-                                   s.DwgFailPdf + s.DwgFailEdraw + s.DwgFailPng + s.DwgFailDxf;
-                        if (fail > 0)
-                        {
-                            completedLabel = "Export completed with warnings";
-                        }
+                        swModel = reference.Model;
+                        swConf = reference.Configuration;
+                        modelType = swModel.GetType();
+                    }
+                }
+
+                if (swConf == null)
+                {
+                    throw new InvalidOperationException("No active configuration.");
+                }
+
+                TryShowConfiguration(swModel, swConf.Name ?? string.Empty);
+
+                string deliverablesFolder = EnsureTrailingSlash(effective.DeliverablesFolder);
+                if (string.IsNullOrWhiteSpace(deliverablesFolder))
+                {
+                    throw new InvalidOperationException("Deliverables folder is empty.");
+                }
+
+                string bomRoot = EnsureTrailingSlash(effective.BomFolder);
+                if (string.IsNullOrWhiteSpace(bomRoot))
+                {
+                    throw new InvalidOperationException("BOM folder is empty.");
+                }
+
+                string bomFolder = Path.Combine(bomRoot, "bom");
+                Directory.CreateDirectory(bomFolder);
+                Directory.CreateDirectory(deliverablesFolder);
+                EnsureMediaFolders(deliverablesFolder);
+
+                ModelView view = swModel.ActiveView as ModelView;
+                bool prevGraphics = view != null && view.EnableGraphicsUpdate;
+                int prevBgAppearance = _swApp.GetUserPreferenceIntegerValue(
+                    (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance);
+                int prevColorScheme = _swApp.GetUserPreferenceIntegerValue(
+                    (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme);
+                int prevViewport = _swApp.GetUserPreferenceIntegerValue(
+                    (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground);
+
+                ModelDoc2 rootModel = swModel;
+                string rootTitle = string.Empty;
+                try
+                {
+                    rootTitle = swModel.GetTitle() ?? string.Empty;
+                }
+                catch
+                {
+                    rootTitle = string.Empty;
+                }
+
+                _activeBatchRootTitle = rootTitle ?? string.Empty;
+                _activeBatchRootDocType = modelType;
+
+                try
+                {
+                    if (view != null)
+                    {
+                        view.EnableGraphicsUpdate = false;
                     }
                 }
                 catch
                 {
-                    // ignore label errors
+                    // ignore
+                }
+
+                try
+                {
+                    if (swModel.FeatureManager != null)
+                    {
+                        swModel.FeatureManager.EnableFeatureTree = false;
+                    }
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                _swApp.SetUserPreferenceIntegerValue(
+                    (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance, 0);
+                _swApp.SetUserPreferenceIntegerValue(
+                    (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme,
+                    (int)swSystemColorsCurrentColorScheme_e.swSystemColorsCurrentColorSchemeBlueHighlight);
+                _swApp.SetUserPreferenceIntegerValue(
+                    (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, 16777215);
+
+                List<DeliverablePlan> fullManifest;
+                List<DeliverablePlan> prunedManifest;
+                List<PhysicalExportQueueItem> queue;
+                try
+                {
+                    SafeLog(errorLog, "PHASE MANIFEST start");
+                    fullManifest = BuildDeliverablesManifestFromActiveDocument(
+                        rootModel,
+                        swConf,
+                        modelType,
+                        effective,
+                        log,
+                        errorLog,
+                        uploadPackBases,
+                        uploadPackExtras);
+                    SafeLog(errorLog, "PHASE MANIFEST end items=" + fullManifest.Count);
+
+                    prunedManifest = PruneManifestAgainstExistingOutputs(fullManifest, effective, deliverablesFolder, errorLog);
+                    queue = BuildPhysicalExportQueue(prunedManifest, errorLog);
+                }
+                finally
+                {
+                    try
+                    {
+                        if (swModel != null && swModel.FeatureManager != null)
+                        {
+                            swModel.FeatureManager.EnableFeatureTree = true;
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    try
+                    {
+                        if (view != null)
+                        {
+                            view.EnableGraphicsUpdate = prevGraphics;
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance, prevBgAppearance);
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme, prevColorScheme);
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, prevViewport);
+                }
+
+                if (_currentExportSummary != null)
+                {
+                    _currentExportSummary.DeliverablePlansPlanned = fullManifest.Count;
+                    _currentExportSummary.DeliverablePlansSkipped = Math.Max(0, fullManifest.Count - prunedManifest.Count);
+                }
+
+                if (!AnyDeliverablesSelected(effective))
+                {
+                    UpdateProgress(progress, 0, 0);
+                }
+                else if (queue.Count == 0)
+                {
+                    Log(log, "No deliverables to export.");
+                    UpdateProgress(progress, 0, 0);
+                }
+                else
+                {
+                    RunPhysicalExportQueue(queue, rootModel, deliverablesFolder, effective, log, errorLog, progress);
+                }
+
+                if (effective.CreateUploadPack)
+                {
+                    if (_currentExportSummary != null && _currentExportSummary.StoppedAfterCurrentFile)
+                    {
+                        Log(log, "Upload pack skipped because export stopped early.");
+                    }
+                    else
+                    {
+                        string flatFile = BuildUploadPackFlatBomFromManifest(fullManifest, bomFolder, errorLog);
+                        try
+                        {
+                            if (rootModel != null)
+                            {
+                                _swApp.ActivateDoc(rootTitle);
+                                TryShowConfiguration(rootModel, swConf.Name ?? string.Empty);
+                            }
+                        }
+                        catch
+                        {
+                            // ignore activate errors
+                        }
+
+                        try
+                        {
+                            CreateUploadPack(flatFile, uploadPackBases, uploadPackExtras, effective, log, errorLog);
+                        }
+                        catch (Exception ex)
+                        {
+                            if (ex is OperationCanceledException)
+                            {
+                                throw;
+                            }
+                            if (IsBaselineAbortException(ex))
+                            {
+                                throw;
+                            }
+                            Log(log, "Upload pack failed: " + ex.Message);
+                            LogExportFailure(log, errorLog, "Upload pack failed: " + ex.Message);
+                            if (ex is System.Runtime.InteropServices.COMException ||
+                                (ex.InnerException is System.Runtime.InteropServices.COMException))
+                            {
+                                LogExceptionDetails(errorLog, "UploadPack", ex);
+                            }
+                        }
+                    }
+                }
+
+                string completedLabel = "Export completed";
+                ExportSummary finalSummary = _currentExportSummary;
+                if (finalSummary != null && finalSummary.StoppedAfterCurrentFile)
+                {
+                    completedLabel = "Export stopped after current file";
+                }
+                else if (finalSummary != null && GetDeliverableFailureFormatCount(finalSummary) > 0)
+                {
+                    completedLabel = "Export completed with warnings";
+                }
+
+                RestoreStartDocument(startTitle);
+                if (!IsDocOpenByIdOrTitle(startPathSnapshot, startTitle))
+                {
+                    SafeLog(errorLog,
+                        "WARN: start document not open after export. title=" + (startTitle ?? string.Empty) +
+                        " path=" + (startPathSnapshot ?? string.Empty));
+                }
+
+                try
+                {
+                    if (_currentExportSummary != null)
+                    {
+                        _currentExportSummary.FinalVisibleDocs = GetOpenVisibleDocumentIds().Count;
+                    }
+                }
+                catch
+                {
+                    // ignore
                 }
 
                 Log(log, BuildCompletionMessage(completedLabel));
             }
             catch (OperationCanceledException)
             {
-                ExportSessionState activeSession = GetActiveExportSession();
-                if (activeSession != null &&
-                    !string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(activeSession.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
-                {
-                    activeSession.Status = ExportSessionStatusCancelled;
-                    SaveExportSessionAtomic(activeSession, errorLog);
-                }
                 Log(log, BuildCompletionMessage("Export cancelled"));
             }
             catch (Exception ex)
             {
-                ExportSessionState activeSession = GetActiveExportSession();
-                if (activeSession != null &&
-                    !string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(activeSession.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
-                {
-                    activeSession.Status = ExportSessionStatusFailed;
-                    SaveExportSessionAtomic(activeSession, errorLog);
-                }
-
                 LogExportFailure(log, errorLog, "File creation failed: " + ex.Message);
                 if (ex is System.Runtime.InteropServices.COMException ||
                     (ex.InnerException is System.Runtime.InteropServices.COMException))
@@ -2130,6 +2362,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                     ExportSummary summary = _currentExportSummary;
                     if (summary != null)
                     {
+                        WriteDeliverablesFailureSummary(errorLog, summary);
+
                         HashSet<string> finalIds = null;
                         try
                         {
@@ -2168,12 +2402,15 @@ namespace TinyMRP.SolidWorksAddin.Services
                         // Reset cancel state so the UI button returns to its idle state.
                         ResetCancel();
                         ResetPause();
+                        ResetStopAfterCurrentItem();
                     }
                     catch
                     {
                         // ignore cancel-reset errors
                     }
 
+                    _activeBatchRootTitle = string.Empty;
+                    _activeBatchRootDocType = 0;
                     _currentExportSummary = null;
                 }
             }
@@ -7765,6 +8002,1185 @@ namespace TinyMRP.SolidWorksAddin.Services
                    options.ExportEdrawingDrawing;
         }
 
+        private bool HasRequestedModelExports(DeliverablePlan plan)
+        {
+            return plan != null &&
+                   (plan.ExportPngModel || plan.ExportStep || plan.ExportEdrawing || plan.Export3mf || plan.ExportPly || plan.ExportStl);
+        }
+
+        private bool HasRequestedDrawingExports(DeliverablePlan plan)
+        {
+            return plan != null &&
+                   (plan.ExportPdf || plan.ExportDxf || plan.ExportPngDrawing || plan.ExportEdrawingDrawing);
+        }
+
+        private string GetModelEdrawingPath(DeliverablePlan plan, string deliverablesFolder)
+        {
+            if (plan == null)
+            {
+                return string.Empty;
+            }
+
+            string ext = plan.DocType == (int)swDocumentTypes_e.swDocASSEMBLY ? ".easm" : ".eprt";
+            return Path.Combine(deliverablesFolder, "edr", (plan.FileString ?? string.Empty) + ext);
+        }
+
+        private string GetOutputPath(DeliverablePlan plan, string deliverablesFolder, string format)
+        {
+            if (plan == null || string.IsNullOrWhiteSpace(deliverablesFolder))
+            {
+                return string.Empty;
+            }
+
+            string fileString = plan.FileString ?? string.Empty;
+            switch ((format ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "png":
+                    return Path.Combine(deliverablesFolder, "png", fileString + ".png");
+                case "step":
+                    return Path.Combine(deliverablesFolder, "step", fileString + ".step");
+                case "edr":
+                    return GetModelEdrawingPath(plan, deliverablesFolder);
+                case "3mf":
+                    return Path.Combine(deliverablesFolder, "3mf", fileString + ".3mf");
+                case "ply":
+                    return Path.Combine(deliverablesFolder, "ply", fileString + ".ply");
+                case "stl":
+                    return Path.Combine(deliverablesFolder, "stl", fileString + ".stl");
+                case "pdf":
+                    return Path.Combine(deliverablesFolder, "pdf", fileString + ".pdf");
+                case "dxf":
+                    return Path.Combine(deliverablesFolder, "dxf", fileString + ".dxf");
+                case "png_dwg":
+                    return Path.Combine(deliverablesFolder, "png", fileString + "_DWG.png");
+                case "edrw":
+                    return Path.Combine(deliverablesFolder, "edr", fileString + ".edrw");
+                default:
+                    return string.Empty;
+            }
+        }
+
+        private DeliverablePlan BuildDeliverablesManifestItemFromModel(ModelDoc2 model, string confName, PlannedRef planned,
+            PublishOptions options, Action<string> errorLog)
+        {
+            if (model == null || options == null)
+            {
+                return null;
+            }
+
+            string modelPath = string.Empty;
+            string modelTitle = string.Empty;
+            int docType = 0;
+            try
+            {
+                modelPath = model.GetPathName() ?? string.Empty;
+            }
+            catch
+            {
+                modelPath = string.Empty;
+            }
+
+            try
+            {
+                modelTitle = model.GetTitle() ?? string.Empty;
+            }
+            catch
+            {
+                modelTitle = string.Empty;
+            }
+
+            try
+            {
+                docType = model.GetType();
+            }
+            catch
+            {
+                docType = planned != null && planned.IsAssembly
+                    ? (int)swDocumentTypes_e.swDocASSEMBLY
+                    : DocumentTypeFromPath(modelPath);
+            }
+
+            string effectiveConf = confName ?? string.Empty;
+            Configuration config = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(effectiveConf))
+                {
+                    config = model.GetConfigurationByName(effectiveConf) as Configuration;
+                }
+                if (config == null)
+                {
+                    config = model.GetActiveConfiguration() as Configuration;
+                    if (config != null && string.IsNullOrWhiteSpace(effectiveConf))
+                    {
+                        effectiveConf = config.Name ?? string.Empty;
+                    }
+                }
+            }
+            catch
+            {
+                config = null;
+            }
+
+            if (config == null)
+            {
+                SafeLog(errorLog,
+                    "MANIFEST skip: configuration not found path=" + (modelPath ?? string.Empty) +
+                    " title=" + (modelTitle ?? string.Empty) +
+                    " conf=" + (confName ?? string.Empty));
+                return null;
+            }
+
+            TryShowConfiguration(model, effectiveConf);
+
+            string partNumber = BomPartNumber(config, model, errorLog) ?? string.Empty;
+            string revision = (GetEvalProperty(model, effectiveConf, "revision") ?? string.Empty).Trim();
+            string fileString = BuildFileString(partNumber, revision);
+            if (string.IsNullOrWhiteSpace(partNumber) || string.IsNullOrWhiteSpace(fileString))
+            {
+                SafeLog(errorLog,
+                    "MANIFEST skip: file identity missing path=" + (modelPath ?? string.Empty) +
+                    " title=" + (modelTitle ?? string.Empty) +
+                    " conf=" + (effectiveConf ?? string.Empty));
+                return null;
+            }
+
+            string drawingPath = !string.IsNullOrWhiteSpace(modelPath) && !string.IsNullOrWhiteSpace(partNumber)
+                ? OnlyFolder(modelPath) + partNumber + ".SLDDRW"
+                : string.Empty;
+            bool drawingExists = !string.IsNullOrWhiteSpace(drawingPath) && File.Exists(drawingPath);
+            bool stepRequested = options.ExportStep ||
+                                 HasProcess(model, effectiveConf, "FOLDING") ||
+                                 HasProcess(model, effectiveConf, "MACHINE") ||
+                                 HasProcess(model, effectiveConf, "3D Laser");
+
+            return new DeliverablePlan
+            {
+                ModelPath = modelPath ?? string.Empty,
+                ModelTitle = modelTitle ?? string.Empty,
+                ConfigurationName = effectiveConf ?? string.Empty,
+                FileString = fileString,
+                PartNumber = partNumber ?? string.Empty,
+                Revision = revision ?? string.Empty,
+                DrawingPath = drawingPath ?? string.Empty,
+                SourceModel = model,
+                DocType = docType,
+                IsRoot = planned != null && planned.IsRoot,
+                MaxDepth = planned != null ? planned.MaxDepth : 0,
+                SubtreeEstimate = planned != null ? planned.SubtreeEstimate : 0,
+                DrawingExists = drawingExists,
+                ExportPngModel = options.ExportPngModel,
+                ExportStep = stepRequested,
+                ExportEdrawing = options.ExportEdrawing,
+                Export3mf = options.Export3mf,
+                ExportPly = options.ExportPly,
+                ExportStl = options.ExportStl,
+                ExportPdf = options.ExportPdf,
+                ExportDxfSelected = options.ExportDxf,
+                ExportDxf = options.ExportDxf,
+                ExportPngDrawing = options.ExportPngDrawing,
+                ExportEdrawingDrawing = options.ExportEdrawingDrawing
+            };
+        }
+
+        private void MergeDeliverablesManifestItem(DeliverablePlan target, DeliverablePlan source)
+        {
+            if (target == null || source == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(target.ModelPath) && !string.IsNullOrWhiteSpace(source.ModelPath))
+            {
+                target.ModelPath = source.ModelPath;
+            }
+            if (string.IsNullOrWhiteSpace(target.ModelTitle) && !string.IsNullOrWhiteSpace(source.ModelTitle))
+            {
+                target.ModelTitle = source.ModelTitle;
+            }
+            if (string.IsNullOrWhiteSpace(target.ConfigurationName) && !string.IsNullOrWhiteSpace(source.ConfigurationName))
+            {
+                target.ConfigurationName = source.ConfigurationName;
+            }
+            if (string.IsNullOrWhiteSpace(target.DrawingPath) && !string.IsNullOrWhiteSpace(source.DrawingPath))
+            {
+                target.DrawingPath = source.DrawingPath;
+            }
+            if (target.SourceModel == null && source.SourceModel != null)
+            {
+                target.SourceModel = source.SourceModel;
+            }
+
+            target.DrawingExists = target.DrawingExists || source.DrawingExists;
+            target.IsRoot = target.IsRoot || source.IsRoot;
+            target.MaxDepth = Math.Max(target.MaxDepth, source.MaxDepth);
+            target.SubtreeEstimate = Math.Max(target.SubtreeEstimate, source.SubtreeEstimate);
+            if (target.DocType == 0)
+            {
+                target.DocType = source.DocType;
+            }
+        }
+
+        private ModelDoc2 ResolveManifestSourceModel(PlannedRef planned, Dictionary<string, Component2> componentByKey)
+        {
+            if (planned == null)
+            {
+                return null;
+            }
+
+            if (!planned.IsRoot && componentByKey != null)
+            {
+                Component2 component;
+                if (componentByKey.TryGetValue(BuildPlannedRefKey(planned.ModelPath, planned.ConfigurationName), out component) &&
+                    component != null)
+                {
+                    try
+                    {
+                        return component.GetModelDoc2() as ModelDoc2;
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private List<DeliverablePlan> BuildDeliverablesManifestFromActiveDocument(ModelDoc2 rootModel, Configuration rootConfig,
+            int modelType, PublishOptions options, Action<string> log, Action<string> errorLog, HashSet<string> uploadPackBases,
+            List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras)
+        {
+            var manifestByIdentity = new Dictionary<string, DeliverablePlan>(StringComparer.OrdinalIgnoreCase);
+            if (rootModel == null || rootConfig == null || options == null)
+            {
+                return new List<DeliverablePlan>();
+            }
+
+            List<PlannedRef> plannedRefs;
+            string rootPath = string.Empty;
+            try
+            {
+                rootPath = rootModel.GetPathName() ?? string.Empty;
+            }
+            catch
+            {
+                rootPath = string.Empty;
+            }
+
+            if (options.TopLevelOnly || modelType != (int)swDocumentTypes_e.swDocASSEMBLY)
+            {
+                plannedRefs = new List<PlannedRef>
+                {
+                    new PlannedRef
+                    {
+                        ModelPath = rootPath,
+                        ConfigurationName = rootConfig.Name ?? string.Empty,
+                        IsAssembly = modelType == (int)swDocumentTypes_e.swDocASSEMBLY,
+                        MaxDepth = 0,
+                        SubtreeEstimate = 0,
+                        IsRoot = true
+                    }
+                };
+            }
+            else
+            {
+                plannedRefs = PlanRefsForDeliverables(rootModel, rootConfig, errorLog);
+            }
+
+            Dictionary<string, Component2> componentByKey = null;
+            if (modelType == (int)swDocumentTypes_e.swDocASSEMBLY && !options.TopLevelOnly)
+            {
+                AssemblyDoc assembly = rootModel as AssemblyDoc;
+                Component2 rootComponent = null;
+                try
+                {
+                    rootComponent = rootConfig.GetRootComponent() as Component2;
+                }
+                catch
+                {
+                    rootComponent = null;
+                }
+
+                if (assembly != null)
+                {
+                    try
+                    {
+                        assembly.ResolveAllLightWeightComponents(true);
+                    }
+                    catch
+                    {
+                        // ignore resolve errors
+                    }
+
+                    int skippedEmptyPaths = 0;
+                    componentByKey = PlanUniqueComponentRefsForFlatBom(assembly, rootComponent, errorLog, out skippedEmptyPaths);
+                }
+            }
+
+            if (_currentExportSummary != null)
+            {
+                _currentExportSummary.PlannedModelConfigPairs = plannedRefs != null ? plannedRefs.Count : 0;
+            }
+
+            var extrasByIdentity = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int unresolved = 0;
+            for (int i = 0; plannedRefs != null && i < plannedRefs.Count; i++)
+            {
+                PlannedRef planned = plannedRefs[i];
+                if (planned == null)
+                {
+                    continue;
+                }
+
+                if (i > 0 && i % 50 == 0)
+                {
+                    ThrowIfCancelled();
+                    System.Windows.Forms.Application.DoEvents();
+                }
+
+                ModelDoc2 sourceModel = planned.IsRoot ? rootModel : ResolveManifestSourceModel(planned, componentByKey);
+                if (sourceModel == null)
+                {
+                    unresolved++;
+                    SafeLog(errorLog,
+                        "MANIFEST unresolved component path=" + (planned.ModelPath ?? string.Empty) +
+                        " conf=" + (planned.ConfigurationName ?? string.Empty));
+                    continue;
+                }
+
+                DeliverablePlan item = BuildDeliverablesManifestItemFromModel(
+                    sourceModel,
+                    planned.ConfigurationName,
+                    planned,
+                    options,
+                    errorLog);
+                if (item == null)
+                {
+                    continue;
+                }
+
+                string identityKey = item.FileString ?? string.Empty;
+                DeliverablePlan existing;
+                if (manifestByIdentity.TryGetValue(identityKey, out existing))
+                {
+                    MergeDeliverablesManifestItem(existing, item);
+                    continue;
+                }
+
+                manifestByIdentity[identityKey] = item;
+                if (uploadPackBases != null && !string.IsNullOrWhiteSpace(identityKey))
+                {
+                    uploadPackBases.Add(identityKey);
+                }
+
+                if (uploadPackExtras != null && extrasByIdentity.Add(identityKey))
+                {
+                    AddAssociatedFiles(uploadPackExtras, sourceModel, item.ConfigurationName, log);
+                }
+            }
+
+            if (_currentExportSummary != null)
+            {
+                _currentExportSummary.FlatBomUnresolvedComponents = unresolved;
+            }
+
+            return new List<DeliverablePlan>(manifestByIdentity.Values);
+        }
+
+        private bool IsLeanExistingOutputValid(string type, string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return false;
+            }
+
+            long bytes = 0;
+            try
+            {
+                bytes = new FileInfo(path).Length;
+            }
+            catch
+            {
+                bytes = 0;
+            }
+
+            string normalizedType = NormalizeExportType(type, path);
+            switch (normalizedType)
+            {
+                case "pdf":
+                    return bytes >= MinPdfBytes;
+                case "png":
+                    return bytes >= MinPngBytes;
+                case "edr":
+                case "edrw":
+                case "easm":
+                case "eprt":
+                    return bytes >= MinEdrawingBytes;
+                case "stl":
+                case "dxf":
+                case "ply":
+                    return bytes >= MinGenericMeshBytes;
+                case "step":
+                case "3mf":
+                    return bytes >= MinGenericCadBytes;
+                default:
+                    return bytes > 0;
+            }
+        }
+
+        private bool ShouldExportLeanOutput(string type, string path, bool overwrite, Action<string> errorLog)
+        {
+            if (overwrite || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return true;
+            }
+
+            if (IsLeanExistingOutputValid(type, path))
+            {
+                SafeLog(errorLog, "OUTPUT skipped existing file: type=" + (type ?? string.Empty) + " path=" + path);
+                return false;
+            }
+
+            SafeLog(errorLog, "OUTPUT regenerating existing invalid file: type=" + (type ?? string.Empty) + " path=" + path);
+            return true;
+        }
+
+        private List<DeliverablePlan> PruneManifestAgainstExistingOutputs(List<DeliverablePlan> manifest, PublishOptions options,
+            string deliverablesFolder, Action<string> errorLog)
+        {
+            var pruned = new List<DeliverablePlan>();
+            if (manifest == null || manifest.Count == 0 || options == null)
+            {
+                return pruned;
+            }
+
+            foreach (DeliverablePlan item in manifest)
+            {
+                if (item == null)
+                {
+                    continue;
+                }
+
+                item.ExportPngModel = item.ExportPngModel &&
+                                      ShouldExportLeanOutput("png", GetOutputPath(item, deliverablesFolder, "png"),
+                                          options.OverwriteFiles, errorLog);
+                item.ExportStep = item.ExportStep &&
+                                  ShouldExportLeanOutput("step", GetOutputPath(item, deliverablesFolder, "step"),
+                                      options.OverwriteFiles, errorLog);
+                item.ExportEdrawing = item.ExportEdrawing &&
+                                      ShouldExportLeanOutput("edr", GetOutputPath(item, deliverablesFolder, "edr"),
+                                          options.OverwriteFiles, errorLog);
+                item.Export3mf = item.Export3mf &&
+                                 ShouldExportLeanOutput("3mf", GetOutputPath(item, deliverablesFolder, "3mf"),
+                                     options.OverwriteFiles, errorLog);
+                item.ExportPly = item.ExportPly &&
+                                 ShouldExportLeanOutput("ply", GetOutputPath(item, deliverablesFolder, "ply"),
+                                     options.OverwriteFiles, errorLog);
+                item.ExportStl = item.ExportStl &&
+                                 ShouldExportLeanOutput("stl", GetOutputPath(item, deliverablesFolder, "stl"),
+                                     options.OverwriteFiles, errorLog);
+                item.ExportPdf = item.ExportPdf &&
+                                 ShouldExportLeanOutput("pdf", GetOutputPath(item, deliverablesFolder, "pdf"),
+                                     options.OverwriteFiles, errorLog);
+                item.ExportDxf = item.ExportDxf &&
+                                 ShouldExportLeanOutput("dxf", GetOutputPath(item, deliverablesFolder, "dxf"),
+                                     options.OverwriteFiles, errorLog);
+                item.ExportDxfSelected = item.ExportDxf;
+                item.ExportPngDrawing = item.ExportPngDrawing &&
+                                        ShouldExportLeanOutput("png", GetOutputPath(item, deliverablesFolder, "png_dwg"),
+                                            options.OverwriteFiles, errorLog);
+                item.ExportEdrawingDrawing = item.ExportEdrawingDrawing &&
+                                             ShouldExportLeanOutput("edrw", GetOutputPath(item, deliverablesFolder, "edrw"),
+                                                 options.OverwriteFiles, errorLog);
+
+                if (HasRequestedModelExports(item) || HasRequestedDrawingExports(item))
+                {
+                    pruned.Add(item);
+                }
+            }
+
+            return pruned;
+        }
+
+        private List<string> GetRequestedModelFormats(DeliverablePlan plan)
+        {
+            var formats = new List<string>();
+            if (plan == null)
+            {
+                return formats;
+            }
+
+            if (plan.ExportPngModel) formats.Add("png");
+            if (plan.ExportStep) formats.Add("step");
+            if (plan.ExportEdrawing) formats.Add("edr");
+            if (plan.Export3mf) formats.Add("3mf");
+            if (plan.ExportPly) formats.Add("ply");
+            if (plan.ExportStl) formats.Add("stl");
+            return formats;
+        }
+
+        private List<string> GetRequestedDrawingFormats(DeliverablePlan plan)
+        {
+            var formats = new List<string>();
+            if (plan == null)
+            {
+                return formats;
+            }
+
+            if (plan.ExportPdf) formats.Add("pdf");
+            if (plan.ExportDxf) formats.Add("dxf");
+            if (plan.ExportPngDrawing) formats.Add("png_dwg");
+            if (plan.ExportEdrawingDrawing) formats.Add("edrw");
+            return formats;
+        }
+
+        private void RecordDeliverableFailure(ExportSummary summary, DeliverablePlan plan, IEnumerable<string> formats, string reason)
+        {
+            if (summary == null || plan == null)
+            {
+                return;
+            }
+
+            string partNumber = plan.PartNumber ?? string.Empty;
+            string revision = plan.Revision ?? string.Empty;
+            DeliverableFailureRecord record = null;
+            for (int i = 0; i < summary.FailureRecords.Count; i++)
+            {
+                DeliverableFailureRecord candidate = summary.FailureRecords[i];
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(candidate.PartNumber ?? string.Empty, partNumber, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(candidate.Revision ?? string.Empty, revision, StringComparison.OrdinalIgnoreCase))
+                {
+                    record = candidate;
+                    break;
+                }
+            }
+
+            if (record == null)
+            {
+                record = new DeliverableFailureRecord
+                {
+                    PartNumber = partNumber,
+                    Revision = revision,
+                    SourceModelPath = plan.ModelPath ?? string.Empty,
+                    DrawingPath = plan.DrawingPath ?? string.Empty
+                };
+                summary.FailureRecords.Add(record);
+            }
+
+            if (!string.IsNullOrWhiteSpace(reason))
+            {
+                record.Reasons.Add(reason);
+            }
+
+            if (formats == null)
+            {
+                return;
+            }
+
+            foreach (string format in formats)
+            {
+                if (!string.IsNullOrWhiteSpace(format))
+                {
+                    record.FailedFormats.Add(format);
+                }
+            }
+        }
+
+        private List<PhysicalExportQueueItem> BuildPhysicalExportQueue(List<DeliverablePlan> manifest, Action<string> errorLog)
+        {
+            var groups = new Dictionary<string, PhysicalExportQueueItem>(StringComparer.OrdinalIgnoreCase);
+            ExportSummary summary = _currentExportSummary;
+
+            foreach (DeliverablePlan item in manifest ?? new List<DeliverablePlan>())
+            {
+                if (item == null)
+                {
+                    continue;
+                }
+
+                if (HasRequestedModelExports(item))
+                {
+                    if (item.IsRoot || !string.IsNullOrWhiteSpace(item.ModelPath))
+                    {
+                        string modelKey = "model|" + (item.IsRoot && string.IsNullOrWhiteSpace(item.ModelPath)
+                            ? "<root>"
+                            : NormalizePathForComparison(item.ModelPath));
+                        PhysicalExportQueueItem group;
+                        if (!groups.TryGetValue(modelKey, out group))
+                        {
+                            group = new PhysicalExportQueueItem
+                            {
+                                IsDrawing = false,
+                                PhysicalPath = item.ModelPath ?? string.Empty,
+                                SourceModelPath = item.ModelPath ?? string.Empty,
+                                DisplayName = !string.IsNullOrWhiteSpace(item.ModelPath)
+                                    ? item.ModelPath
+                                    : (item.ModelTitle ?? item.FileString ?? string.Empty),
+                                DocType = item.DocType,
+                                IsRoot = item.IsRoot,
+                                MaxDepth = item.MaxDepth,
+                                SubtreeEstimate = item.SubtreeEstimate
+                            };
+                            groups[modelKey] = group;
+                        }
+
+                        group.Plans.Add(item);
+                        group.IsRoot = group.IsRoot || item.IsRoot;
+                        group.MaxDepth = Math.Max(group.MaxDepth, item.MaxDepth);
+                        group.SubtreeEstimate = Math.Max(group.SubtreeEstimate, item.SubtreeEstimate);
+                    }
+                    else
+                    {
+                        RecordDeliverableFailure(summary, item, GetRequestedModelFormats(item), "missing source");
+                    }
+                }
+
+                if (HasRequestedDrawingExports(item))
+                {
+                    if (!string.IsNullOrWhiteSpace(item.DrawingPath) && item.DrawingExists)
+                    {
+                        string drawingKey = "drawing|" + NormalizePathForComparison(item.DrawingPath);
+                        PhysicalExportQueueItem group;
+                        if (!groups.TryGetValue(drawingKey, out group))
+                        {
+                            group = new PhysicalExportQueueItem
+                            {
+                                IsDrawing = true,
+                                PhysicalPath = item.DrawingPath ?? string.Empty,
+                                SourceModelPath = item.ModelPath ?? string.Empty,
+                                DisplayName = item.DrawingPath ?? string.Empty,
+                                DocType = item.DocType,
+                                IsRoot = item.IsRoot,
+                                MaxDepth = item.MaxDepth,
+                                SubtreeEstimate = item.SubtreeEstimate
+                            };
+                            groups[drawingKey] = group;
+                        }
+
+                        group.Plans.Add(item);
+                        group.IsRoot = group.IsRoot || item.IsRoot;
+                        group.MaxDepth = Math.Max(group.MaxDepth, item.MaxDepth);
+                        group.SubtreeEstimate = Math.Max(group.SubtreeEstimate, item.SubtreeEstimate);
+                    }
+                    else
+                    {
+                        RecordDeliverableFailure(summary, item, GetRequestedDrawingFormats(item), "missing drawing");
+                    }
+                }
+            }
+
+            var queue = new List<PhysicalExportQueueItem>(groups.Values);
+            queue.Sort((a, b) =>
+            {
+                int rootCompare = (a != null && a.IsRoot ? 1 : 0).CompareTo(b != null && b.IsRoot ? 1 : 0);
+                if (rootCompare != 0) return rootCompare;
+
+                bool aAssembly = a != null && a.DocType == (int)swDocumentTypes_e.swDocASSEMBLY;
+                bool bAssembly = b != null && b.DocType == (int)swDocumentTypes_e.swDocASSEMBLY;
+                int typeCompare = (aAssembly ? 1 : 0).CompareTo(bAssembly ? 1 : 0);
+                if (typeCompare != 0) return typeCompare;
+
+                int depthCompare = (b != null ? b.MaxDepth : 0).CompareTo(a != null ? a.MaxDepth : 0);
+                if (depthCompare != 0) return depthCompare;
+
+                int subtreeCompare = (a != null ? a.SubtreeEstimate : 0).CompareTo(b != null ? b.SubtreeEstimate : 0);
+                if (subtreeCompare != 0) return subtreeCompare;
+
+                string aPath = a != null
+                    ? (!string.IsNullOrWhiteSpace(a.PhysicalPath) ? a.PhysicalPath : a.DisplayName ?? string.Empty)
+                    : string.Empty;
+                string bPath = b != null
+                    ? (!string.IsNullOrWhiteSpace(b.PhysicalPath) ? b.PhysicalPath : b.DisplayName ?? string.Empty)
+                    : string.Empty;
+                int pathCompare = string.Compare(aPath, bPath, StringComparison.OrdinalIgnoreCase);
+                if (pathCompare != 0) return pathCompare;
+
+                return (a != null && a.IsDrawing ? 1 : 0).CompareTo(b != null && b.IsDrawing ? 1 : 0);
+            });
+
+            foreach (PhysicalExportQueueItem group in queue)
+            {
+                if (group == null || group.Plans == null)
+                {
+                    continue;
+                }
+
+                group.Plans.Sort((a, b) =>
+                {
+                    int confCompare = string.Compare(a != null ? a.ConfigurationName : string.Empty,
+                        b != null ? b.ConfigurationName : string.Empty, StringComparison.OrdinalIgnoreCase);
+                    if (confCompare != 0) return confCompare;
+
+                    int pnCompare = string.Compare(a != null ? a.PartNumber : string.Empty,
+                        b != null ? b.PartNumber : string.Empty, StringComparison.OrdinalIgnoreCase);
+                    if (pnCompare != 0) return pnCompare;
+
+                    return string.Compare(a != null ? a.Revision : string.Empty,
+                        b != null ? b.Revision : string.Empty, StringComparison.OrdinalIgnoreCase);
+                });
+            }
+
+            return queue;
+        }
+
+        private bool ValidateRequestedOutputs(DeliverablePlan plan, string deliverablesFolder, IEnumerable<string> formats,
+            Action<string> errorLog, out string reason)
+        {
+            reason = string.Empty;
+            if (plan == null)
+            {
+                reason = "missing plan";
+                return false;
+            }
+
+            bool valid = true;
+            foreach (string format in formats ?? new string[0])
+            {
+                string path = GetOutputPath(plan, deliverablesFolder, format);
+                string itemReason;
+                if (ValidateExportedOutput(NormalizeExportType(format, path), path, errorLog, out itemReason))
+                {
+                    continue;
+                }
+
+                valid = false;
+                reason = !string.IsNullOrWhiteSpace(reason)
+                    ? (reason + "; " + format + "=" + (itemReason ?? string.Empty))
+                    : (format + "=" + (itemReason ?? string.Empty));
+            }
+
+            return valid;
+        }
+
+        private void RunPhysicalModelQueueItem(PhysicalExportQueueItem item, ModelDoc2 rootModel, string deliverablesFolder,
+            PublishOptions options, Action<string> log, Action<string> errorLog)
+        {
+            if (item == null || item.Plans == null || item.Plans.Count == 0)
+            {
+                return;
+            }
+
+            ModelDoc2 model = null;
+            bool openedHere = false;
+            int specErr = 0;
+            int specWarn = 0;
+            try
+            {
+                if (item.IsRoot)
+                {
+                    model = rootModel;
+                }
+
+                if (model == null)
+                {
+                    model = FindOpenDocument(item.PhysicalPath, null);
+                }
+
+                if (model == null && item.Plans[0] != null)
+                {
+                    model = item.Plans[0].SourceModel;
+                }
+
+                if (model == null && !string.IsNullOrWhiteSpace(item.PhysicalPath))
+                {
+                    model = OpenDocReadOnlySilent(
+                        item.PhysicalPath,
+                        item.DocType == 0 ? DocumentTypeFromPath(item.PhysicalPath) : item.DocType,
+                        item.Plans[0] != null ? item.Plans[0].ConfigurationName : string.Empty,
+                        errorLog,
+                        "physical-model|" + (item.PhysicalPath ?? string.Empty),
+                        out specErr,
+                        out specWarn);
+                    openedHere = model != null;
+                }
+
+                if (model == null)
+                {
+                    foreach (DeliverablePlan plan in item.Plans)
+                    {
+                        RecordDeliverableFailure(_currentExportSummary, plan, GetRequestedModelFormats(plan), "open failed");
+                    }
+                    SafeLog(errorLog,
+                        "MODEL queue open failed path=" + (item.PhysicalPath ?? string.Empty) +
+                        " specErr=" + specErr +
+                        " specWarn=" + specWarn);
+                    return;
+                }
+
+                SafeLog(errorLog,
+                    "MODEL queue start path=" + (item.PhysicalPath ?? string.Empty) +
+                    " plans=" + item.Plans.Count +
+                    " openedHere=" + openedHere);
+
+                foreach (DeliverablePlan plan in item.Plans)
+                {
+                    if (plan == null || !HasRequestedModelExports(plan))
+                    {
+                        continue;
+                    }
+
+                    TryShowConfiguration(model, plan.ConfigurationName);
+                    IEnumerable<string> formats = GetRequestedModelFormats(plan);
+                    try
+                    {
+                        ModelPublish(
+                            model,
+                            plan.ConfigurationName,
+                            plan.FileString,
+                            deliverablesFolder,
+                            options != null && options.OverwriteFiles,
+                            plan.ExportPngModel,
+                            plan.ExportStep,
+                            plan.ExportEdrawing,
+                            plan.Export3mf,
+                            plan.ExportPly,
+                            plan.ExportStl,
+                            log,
+                            errorLog);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (ex is OperationCanceledException)
+                        {
+                            throw;
+                        }
+
+                        RecordDeliverableFailure(_currentExportSummary, plan, formats, "export failed");
+                        LogExportFailure(log, errorLog,
+                            "Model export failed: " + (plan.FileString ?? string.Empty) + " (" + ex.Message + ")");
+                        continue;
+                    }
+
+                    string reason;
+                    if (!ValidateRequestedOutputs(plan, deliverablesFolder, formats, errorLog, out reason))
+                    {
+                        RecordDeliverableFailure(_currentExportSummary, plan, formats, "validation failed");
+                        SafeLog(errorLog,
+                            "MODEL queue validation failed file=" + (plan.FileString ?? string.Empty) +
+                            " reason=" + (reason ?? string.Empty));
+                    }
+                }
+            }
+            finally
+            {
+                if (openedHere && model != null)
+                {
+                    string closePath = item.PhysicalPath ?? string.Empty;
+                    ForceCloseDocNoSave(model, errorLog, "physical-model-close");
+                    if (!string.IsNullOrWhiteSpace(closePath) && IsDocOpenByIdOrTitle(closePath, null))
+                    {
+                        foreach (DeliverablePlan plan in item.Plans)
+                        {
+                            RecordDeliverableFailure(_currentExportSummary, plan, GetRequestedModelFormats(plan), "close failed");
+                        }
+                    }
+
+                    ComInteropUtil.TryFinalReleaseComObject(model);
+                }
+            }
+        }
+
+        private void RunPhysicalDrawingQueueItem(PhysicalExportQueueItem item, ModelDoc2 rootModel, string deliverablesFolder,
+            PublishOptions options, Action<string> log, Action<string> errorLog, HashSet<string> baselineVisibleIds, string rootDocId)
+        {
+            if (item == null || item.Plans == null || item.Plans.Count == 0)
+            {
+                return;
+            }
+
+            ModelDoc2 drawDoc = null;
+            bool openedHere = false;
+            int specErr = 0;
+            int specWarn = 0;
+            try
+            {
+                drawDoc = FindOpenDocument(item.PhysicalPath, null);
+                if (drawDoc == null)
+                {
+                    drawDoc = OpenDocReadOnlySilent(
+                        item.PhysicalPath,
+                        (int)swDocumentTypes_e.swDocDRAWING,
+                        null,
+                        errorLog,
+                        "physical-drawing|" + (item.PhysicalPath ?? string.Empty),
+                        out specErr,
+                        out specWarn);
+                    openedHere = drawDoc != null;
+                }
+
+                if (drawDoc == null)
+                {
+                    foreach (DeliverablePlan plan in item.Plans)
+                    {
+                        RecordDeliverableFailure(_currentExportSummary, plan, GetRequestedDrawingFormats(plan), "open failed");
+                    }
+                    SafeLog(errorLog,
+                        "DRAWING queue open failed path=" + (item.PhysicalPath ?? string.Empty) +
+                        " specErr=" + specErr +
+                        " specWarn=" + specWarn);
+                    return;
+                }
+
+                try
+                {
+                    drawDoc.Visible = false;
+                }
+                catch
+                {
+                    // ignore hide errors
+                }
+
+                using (var openedDocs = new OpenTracker(this, errorLog))
+                {
+                    foreach (DeliverablePlan plan in item.Plans)
+                    {
+                        if (plan == null || !HasRequestedDrawingExports(plan))
+                        {
+                            continue;
+                        }
+
+                        ModelDoc2 sourceModel = plan.SourceModel;
+                        if (sourceModel == null && plan.IsRoot)
+                        {
+                            sourceModel = rootModel;
+                        }
+                        if (sourceModel == null && !string.IsNullOrWhiteSpace(plan.ModelPath))
+                        {
+                            sourceModel = FindOpenDocument(plan.ModelPath, null);
+                        }
+
+                        if (sourceModel == null)
+                        {
+                            RecordDeliverableFailure(_currentExportSummary, plan, GetRequestedDrawingFormats(plan), "missing source");
+                            continue;
+                        }
+
+                        IEnumerable<string> formats = GetRequestedDrawingFormats(plan);
+                        try
+                        {
+                            DwgPublishFast(
+                                sourceModel,
+                                plan.FileString,
+                                deliverablesFolder,
+                                options != null && options.OverwriteFiles,
+                                plan.ExportPdf,
+                                plan.ExportDxf,
+                                plan.ExportPngDrawing,
+                                plan.ExportEdrawingDrawing,
+                                log,
+                                errorLog,
+                                plan.PartNumber,
+                                openedDocs,
+                                baselineVisibleIds,
+                                rootDocId);
+                        }
+                        catch (Exception ex)
+                        {
+                            if (ex is OperationCanceledException)
+                            {
+                                throw;
+                            }
+
+                            RecordDeliverableFailure(_currentExportSummary, plan, formats, "export failed");
+                            LogExportFailure(log, errorLog,
+                                "Drawing export failed: " + (plan.FileString ?? string.Empty) + " (" + ex.Message + ")");
+                            continue;
+                        }
+
+                        string reason;
+                        if (!ValidateRequestedOutputs(plan, deliverablesFolder, formats, errorLog, out reason))
+                        {
+                            RecordDeliverableFailure(_currentExportSummary, plan, formats, "validation failed");
+                            SafeLog(errorLog,
+                                "DRAWING queue validation failed file=" + (plan.FileString ?? string.Empty) +
+                                " reason=" + (reason ?? string.Empty));
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                if (openedHere && drawDoc != null)
+                {
+                    string closePath = item.PhysicalPath ?? string.Empty;
+                    ForceCloseDocNoSave(drawDoc, errorLog, "physical-drawing-close");
+                    if (!string.IsNullOrWhiteSpace(closePath) && IsDocOpenByIdOrTitle(closePath, null))
+                    {
+                        foreach (DeliverablePlan plan in item.Plans)
+                        {
+                            RecordDeliverableFailure(_currentExportSummary, plan, GetRequestedDrawingFormats(plan), "close failed");
+                        }
+                    }
+
+                    ComInteropUtil.TryFinalReleaseComObject(drawDoc);
+                }
+            }
+        }
+
+        private void RunPhysicalExportQueue(List<PhysicalExportQueueItem> queue, ModelDoc2 rootModel, string deliverablesFolder,
+            PublishOptions options, Action<string> log, Action<string> errorLog, Action<int, int> progress)
+        {
+            int total = queue != null ? queue.Count : 0;
+            UpdateProgress(progress, 0, total);
+            if (queue == null || queue.Count == 0)
+            {
+                return;
+            }
+
+            var baselineVisibleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                baselineVisibleIds = GetOpenVisibleDocumentIds();
+            }
+            catch
+            {
+                baselineVisibleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            string rootDocId = string.Empty;
+            try
+            {
+                rootDocId = GetDocumentId(rootModel);
+            }
+            catch
+            {
+                rootDocId = string.Empty;
+            }
+
+            int processed = 0;
+            if (_currentExportSummary != null)
+            {
+                _currentExportSummary.DeliverableGroupsPlanned = queue.Count;
+            }
+
+            foreach (PhysicalExportQueueItem item in queue)
+            {
+                ThrowIfCancelled();
+                System.Windows.Forms.Application.DoEvents();
+
+                if (item == null)
+                {
+                    continue;
+                }
+
+                if (item.IsDrawing)
+                {
+                    RunPhysicalDrawingQueueItem(item, rootModel, deliverablesFolder, options, log, errorLog, baselineVisibleIds, rootDocId);
+                }
+                else
+                {
+                    RunPhysicalModelQueueItem(item, rootModel, deliverablesFolder, options, log, errorLog);
+                }
+
+                processed++;
+                if (_currentExportSummary != null)
+                {
+                    _currentExportSummary.DeliverableGroupsProcessed = processed;
+                }
+                UpdateProgress(progress, processed, total);
+
+                if (_stopAfterCurrentItemRequested)
+                {
+                    if (_currentExportSummary != null)
+                    {
+                        _currentExportSummary.StoppedAfterCurrentFile = true;
+                    }
+                    SafeLog(errorLog, "STOP requested; finishing current file and stopping.");
+                    break;
+                }
+            }
+        }
+
+        private void WriteDeliverablesFailureSummary(Action<string> errorLog, ExportSummary summary)
+        {
+            if (errorLog == null || summary == null || summary.FailureRecords == null || summary.FailureRecords.Count == 0)
+            {
+                return;
+            }
+
+            errorLog("FAILED EXPORT SUMMARY");
+            foreach (DeliverableFailureRecord record in summary.FailureRecords)
+            {
+                if (record == null)
+                {
+                    continue;
+                }
+
+                string partNumber = record.PartNumber ?? string.Empty;
+                string revision = record.Revision ?? string.Empty;
+                string formats = string.Join(", ", new List<string>(record.FailedFormats).ToArray());
+                string reasons = string.Join("; ", new List<string>(record.Reasons).ToArray());
+                errorLog("Part " + partNumber + " REV " + revision);
+                errorLog("Source: " + (record.SourceModelPath ?? string.Empty));
+                if (!string.IsNullOrWhiteSpace(record.DrawingPath))
+                {
+                    errorLog("Drawing: " + record.DrawingPath);
+                }
+                errorLog("Failed formats: " + formats);
+                errorLog("Reason: " + reasons);
+            }
+        }
+
+        private int GetDeliverableFailureFormatCount(ExportSummary summary)
+        {
+            if (summary == null || summary.FailureRecords == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            foreach (DeliverableFailureRecord record in summary.FailureRecords)
+            {
+                if (record != null && record.FailedFormats != null)
+                {
+                    count += record.FailedFormats.Count;
+                }
+            }
+
+            return count;
+        }
+
+        private string BuildUploadPackFlatBomFromManifest(List<DeliverablePlan> manifest, string bomFolder, Action<string> errorLog)
+        {
+            if (manifest == null || manifest.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            string root = string.IsNullOrWhiteSpace(bomFolder) ? Path.GetTempPath() : bomFolder;
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, "deliverables_" + DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss") + "_FLATBOM.txt");
+            using (var writer = new StreamWriter(path, false, new UTF8Encoding(false)))
+            {
+                foreach (DeliverablePlan item in manifest)
+                {
+                    if (item == null)
+                    {
+                        continue;
+                    }
+
+                    writer.WriteLine(
+                        "{'partnumber':'" + SanitizeString(item.PartNumber ?? string.Empty) +
+                        "','sw_configuration':'" + SanitizeString(item.ConfigurationName ?? string.Empty) +
+                        "','revision':'" + SanitizeString(item.Revision ?? string.Empty) +
+                        "','path':'" + SanitizeString((item.ModelPath ?? string.Empty).Replace("\\", "/")) +
+                        "','file':'" + SanitizeString(OnlyFile(item.ModelPath)) +
+                        "','folder':'" + SanitizeString(OnlyFolder(item.ModelPath).Replace("\\", "/")) +
+                        "'}");
+                }
+            }
+
+            SafeLog(errorLog, "UPLOAD PACK manifest flat BOM: " + path);
+            return path;
+        }
+
         private List<FlatBomEntry> ReadFlatBomEntries(string flatBomPath, Action<string> log, Action<string> errorLog)
         {
             var entries = new List<FlatBomEntry>();
@@ -9238,8 +10654,34 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             ModelDoc2 opened = null;
+            string previousCurrentDirectory = string.Empty;
+            bool restoreCurrentDirectory = false;
             try
             {
+                try
+                {
+                    previousCurrentDirectory = Directory.GetCurrentDirectory();
+                    restoreCurrentDirectory = !string.IsNullOrWhiteSpace(previousCurrentDirectory);
+                }
+                catch
+                {
+                    previousCurrentDirectory = string.Empty;
+                    restoreCurrentDirectory = false;
+                }
+
+                try
+                {
+                    string fileFolder = Path.GetDirectoryName(path) ?? string.Empty;
+                    if (!string.IsNullOrWhiteSpace(fileFolder) && Directory.Exists(fileFolder))
+                    {
+                        Directory.SetCurrentDirectory(fileFolder);
+                    }
+                }
+                catch
+                {
+                    // ignore current-directory errors
+                }
+
                 using (new ExportDialogSuppressionScope(_swApp))
                 using (new ExternalReferenceBatchOpenScope(_swApp))
                 {
@@ -9249,6 +10691,17 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             finally
             {
+                if (restoreCurrentDirectory)
+                {
+                    try
+                    {
+                        Directory.SetCurrentDirectory(previousCurrentDirectory);
+                    }
+                    catch
+                    {
+                        // ignore restore errors
+                    }
+                }
                 ComInteropUtil.TryFinalReleaseComObject(spec);
             }
 
@@ -14832,6 +16285,11 @@ namespace TinyMRP.SolidWorksAddin.Services
             _pauseRequested = true;
         }
 
+        public void RequestStopAfterCurrentItem()
+        {
+            _stopAfterCurrentItemRequested = true;
+        }
+
         private void ResetCancel()
         {
             _cancelRequested = false;
@@ -14840,6 +16298,11 @@ namespace TinyMRP.SolidWorksAddin.Services
         private void ResetPause()
         {
             _pauseRequested = false;
+        }
+
+        private void ResetStopAfterCurrentItem()
+        {
+            _stopAfterCurrentItemRequested = false;
         }
 
         private void ThrowIfCancelled()

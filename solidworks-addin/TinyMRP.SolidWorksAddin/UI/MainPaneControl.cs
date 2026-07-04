@@ -50,8 +50,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Label _bomProgressLabel;
         private Label _actionStatusLabel;
         private Button _cancelButton;
-        private Button _pauseAfterItemButton;
-        private Button _resumeLastExportButton;
         private LinkLabel _openLogLink;
         private string _lastRunLogPath = string.Empty;
         private ProgressBar _toolsProgressBar;
@@ -389,12 +387,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddProgressRow(progressLayout, "Process BOM", _bomProgressBar, _bomProgressLabel);
 
             _actionStatusLabel = new Label { AutoSize = true, Text = "" };
-            _cancelButton = new Button { Text = "Cancel current task", AutoSize = true };
-            _cancelButton.Click += OnCancelCurrentTask;
-            _pauseAfterItemButton = new Button { Text = "Pause after current item", AutoSize = true };
-            _pauseAfterItemButton.Click += OnPauseAfterCurrentItem;
-            _resumeLastExportButton = new Button { Text = "Resume last export", AutoSize = true };
-            _resumeLastExportButton.Click += OnResumeLastExport;
+            _cancelButton = new Button { Text = "Stop process", AutoSize = true };
+            _cancelButton.Click += OnStopProcess;
             _openLogLink = new LinkLabel { AutoSize = true, Text = "Open last run log", Visible = false };
             _openLogLink.LinkClicked += (_, __) => TryOpenLastRunLog();
             var progressWrap = new FlowLayoutPanel
@@ -407,8 +401,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             progressWrap.Controls.Add(progressLayout);
             progressWrap.Controls.Add(_actionStatusLabel);
             progressWrap.Controls.Add(_cancelButton);
-            progressWrap.Controls.Add(_pauseAfterItemButton);
-            progressWrap.Controls.Add(_resumeLastExportButton);
             progressWrap.Controls.Add(_openLogLink);
             AddSection(panel, CreateGroupBox("Progress", progressWrap));
 
@@ -2281,6 +2273,18 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             publisher.RequestCancel();
             SetStatus("Cancel requested...");
+        }
+
+        private void OnStopProcess(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                return;
+            }
+
+            publisher.RequestStopAfterCurrentItem();
+            SetStatus("Stop requested; finishing current file...");
         }
 
         private void OnPauseAfterCurrentItem(object sender, EventArgs e)
