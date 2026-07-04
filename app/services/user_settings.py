@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Dict, Any
 
 from app.models.user_settings import UserSettings
 from app.services.field_config import sanitize_user_field_preferences
 from app.services.numbering_presets import get_recommended_scheme
 from app.services.user_profile import default_profile_settings, sanitize_profile
+from app.services.timezone_utils import utc_iso, utc_now
 
 
 DEFAULT_PROPERTY_MAP = {
@@ -27,7 +27,7 @@ def default_settings_dict() -> Dict[str, Any]:
         "profile": default_profile_settings(),
         "ui_preferences": {"show_advanced": False},
         "field_preferences": {},
-        "updated_at": datetime.utcnow(),
+        "updated_at": utc_now(),
     }
 
 
@@ -52,7 +52,7 @@ def settings_to_dict(settings: UserSettings) -> Dict[str, Any]:
         "profile": sanitize_profile(settings.profile or {}),
         "ui_preferences": settings.ui_preferences or {"show_advanced": False},
         "field_preferences": field_preferences,
-        "updated_at": settings.updated_at.isoformat() if settings.updated_at else None,
+        "updated_at": utc_iso(settings.updated_at),
     }
 
 
@@ -72,6 +72,6 @@ def apply_settings_payload(settings: UserSettings, payload: Dict[str, Any]) -> U
     if "field_preferences" in payload and isinstance(payload.get("field_preferences"), dict):
         settings.field_preferences = sanitize_user_field_preferences(payload.get("field_preferences") or {})
 
-    settings.updated_at = datetime.utcnow()
+    settings.updated_at = utc_now()
     settings.save()
     return settings

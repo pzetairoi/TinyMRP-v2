@@ -67,6 +67,8 @@ def test_admin_can_create_public_share_and_revoke_it(client, app, tmp_path):
     listed = list_resp.get_json()["shares"]
     assert len(listed) == 1
     assert listed[0]["access_count"] == 0
+    assert listed[0]["created_at_display"]
+    assert listed[0]["expires_at_display"]
     assert listed[0]["allow_children"] is False
     assert listed[0]["allow_docpacks"] is False
     assert listed[0]["allow_attributes"] is False
@@ -83,6 +85,8 @@ def test_admin_can_create_public_share_and_revoke_it(client, app, tmp_path):
     assert detail_payload["part"]["part_number"] == part.part_number
     assert detail_payload["can_parts_edit"] is False
     assert detail_payload["public_share"]["share_id"] == share_id
+    assert detail_payload["public_share"]["created_at_display"]
+    assert detail_payload["public_share"]["expires_at_display"]
     assert detail_payload["public_share"]["allow_children"] is False
     assert detail_payload["public_share"]["allow_docpacks"] is False
     assert detail_payload["public_share"]["allow_attributes"] is False

@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Deque, Dict, Optional
 
+from app.services.timezone_utils import format_display_ts, utc_now
+
 
 def _format_bytes(value: float) -> str:
     try:
@@ -265,7 +267,7 @@ class MetricsStore:
             disk_total = disk_used = disk_free = disk_used_pct = 0.0
 
         return {
-            "snapshot_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "snapshot_at": format_display_ts(utc_now(), fmt="%Y-%m-%d %H:%M:%S %Z"),
             "uptime": str(timedelta(seconds=int(uptime))),
             "requests": {
                 "total": int(total_requests),

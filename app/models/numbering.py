@@ -8,6 +8,7 @@ from mongoengine import (
     IntField,
     DateTimeField,
 )
+from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -40,7 +41,7 @@ class NumberingScheme(Document):
 class NumberingCounter(Document):
     counter_key = StringField(required=True, unique=True)
     next_value = IntField(default=1)
-    updated_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=utc_now)
 
     meta = {
         "collection": "numbering_counters",

@@ -10,6 +10,7 @@ from app.services.numbering import (
     validate_scheme_definition,
 )
 from app.services.numbering_presets import ensure_presets
+from app.services.timezone_utils import utc_now
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -36,7 +37,7 @@ def test_allocate_increments_sequence():
         seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     result1, errors1 = allocate_number(
@@ -100,7 +101,7 @@ def test_concurrent_allocate_unique():
         seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     def alloc():
@@ -171,7 +172,7 @@ def test_allocate_multi_sequence_only_increments_automatic_segment():
         seq={"padding": 2, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     result1, errors1 = allocate_number(
@@ -215,7 +216,7 @@ def test_allocate_multi_sequence_accepts_manual_sequence_override():
         seq={"padding": 2, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     result, errors = allocate_number(
@@ -247,7 +248,7 @@ def test_allocate_manual_sequence_change_starts_independent_auto_series():
         seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     first, first_errors = allocate_number(
@@ -303,7 +304,7 @@ def test_allocate_skips_existing_part_numbers_within_manual_series():
         seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
     Part(
         part_number="PART-021-001",
@@ -356,7 +357,7 @@ def test_ensure_presets_removes_legacy_seeded_presets():
         seq={"padding": 5, "base": 10, "start_at": 1, "reset_policy": "yearly"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
     NumberingScheme(
         name="Preset C: FAM-SUB-SEQ6",
@@ -372,7 +373,7 @@ def test_ensure_presets_removes_legacy_seeded_presets():
         seq={"padding": 6, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     ensure_presets()
@@ -396,7 +397,7 @@ def test_ensure_presets_does_not_add_duplicate_recommended_scheme():
         seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     ensure_presets()

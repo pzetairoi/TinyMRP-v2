@@ -20,6 +20,7 @@ from app.services.part_norm import clean_rev, clean_pn, clean_qty
 
 
 from flask import current_app
+from app.services.timezone_utils import utc_iso, utc_now
 try:
     from app.services.metrics import timed_span
 except Exception:
@@ -54,7 +55,7 @@ def _stage_end(report: Dict[str, Any], name: str, start: Tuple[float, float]) ->
 
 def _snapshot_resources() -> Dict[str, Any]:
     snap: Dict[str, Any] = {
-        "utc": datetime.utcnow().isoformat(),
+        "utc": utc_iso(utc_now()),
         "cpu_s": float(time.process_time()),
     }
     try:
@@ -186,7 +187,7 @@ def _apply_part_update(
 
 def _report_value(value: Any) -> Any:
     if isinstance(value, datetime):
-        return value.isoformat()
+        return utc_iso(value) or value.isoformat()
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, dict):
@@ -1187,7 +1188,7 @@ def import_bom_zip(
                                     existing.child_rev = child_rev
                                 if hasattr(existing, "occurrences"):
                                     existing.occurrences = occs
-                                existing.updated_at = datetime.utcnow()
+                                existing.updated_at = utc_now()
                                 existing.save()
                             else:
                                 kwargs = dict(parent_pn=parent_pn, child_pn=child_pn, qty=qty, uom="EA")

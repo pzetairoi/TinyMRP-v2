@@ -2,6 +2,7 @@ from datetime import datetime
 
 from mongoengine import Document, StringField, EmailField, BooleanField, DateTimeField, ListField, ReferenceField
 from flask_security import UserMixin, RoleMixin
+from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -19,11 +20,11 @@ class User(Document, UserMixin):
     confirmed_at = DateTimeField()
     fs_uniquifier = StringField(required=True, unique=True)
     roles = ListField(ReferenceField(Role), default=[])
-    created_at = DateTimeField(default=datetime.utcnow)
-    updated_at = DateTimeField(default=datetime.utcnow)
+    created_at = DateTimeField(default=utc_now)
+    updated_at = DateTimeField(default=utc_now)
     last_login_at = DateTimeField()
     last_login_ip = StringField()
     last_login_ua = StringField()
-    password_changed_at = DateTimeField(default=datetime.utcnow)
+    password_changed_at = DateTimeField(default=utc_now)
     meta = {"collection": "users",
         "db_alias": DB_ALIAS}

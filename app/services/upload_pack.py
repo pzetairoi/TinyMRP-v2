@@ -9,7 +9,7 @@ import shutil
 import time
 import zipfile
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import current_app
 
@@ -29,6 +29,7 @@ from app.services.extra_files import (
     hash_file,
     rev_from_token,
 )
+from app.services.timezone_utils import utc_iso, utc_now
 
 
 _DELIVERABLE_GROUPS = {
@@ -67,7 +68,7 @@ def _stage_end(timings: Dict[str, Any], name: str, start: Tuple[float, float]) -
 
 def _snapshot_resources() -> Dict[str, Any]:
     snap: Dict[str, Any] = {
-        "utc": datetime.utcnow().isoformat(),
+        "utc": utc_iso(utc_now()),
         "cpu_s": float(time.process_time()),
     }
     try:
@@ -424,7 +425,7 @@ def import_upload_pack(
                                         "ext": ext,
                                         "rel_path": dest_rel,
                                         "is_dwg": bool(is_dwg) if group == "png" else False,
-                                        "mtime_iso": datetime.utcnow(),
+                                        "mtime_iso": utc_now(),
                                         "size": float(os.path.getsize(dest_abs)),
                                     }
                                 )
@@ -515,7 +516,7 @@ def import_upload_pack(
                         if label:
                             existing.label = label
                         existing.uploaded_by = uploaded_by or existing.uploaded_by
-                        existing.uploaded_at = datetime.utcnow()
+                        existing.uploaded_at = utc_now()
                         existing.source = seed_tag
                         existing.save()
                     else:
@@ -529,7 +530,7 @@ def import_upload_pack(
                             sha256=sha,
                             label=label,
                             uploaded_by=uploaded_by,
-                            uploaded_at=datetime.utcnow(),
+                            uploaded_at=utc_now(),
                             source=seed_tag,
                         ).save()
                     extra_file_changes.append(

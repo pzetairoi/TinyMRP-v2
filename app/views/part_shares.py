@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import mimetypes
 import os
-from datetime import datetime
 from io import BytesIO
 
 from flask import Blueprint, abort, current_app, jsonify, make_response, render_template, request, send_file
@@ -29,6 +28,7 @@ from app.services.part_shares import (
     resolve_part_share,
     share_dict,
 )
+from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
 from app.services.thumbs import _dedup_urls
 from app.views.bom_tree import (
     _child_links,
@@ -321,8 +321,12 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
         "can_parts_note": False,
         "public_share": {
             "share_id": str(share.id),
-            "created_at": share.created_at.isoformat() if share.created_at else None,
-            "expires_at": share.expires_at.isoformat() if share.expires_at else None,
+            "created_at": utc_iso(share.created_at),
+            "created_at_display": format_display_ts(share.created_at, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
+            "created_at_local": local_input_value(share.created_at) or None,
+            "expires_at": utc_iso(share.expires_at),
+            "expires_at_display": format_display_ts(share.expires_at, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
+            "expires_at_local": local_input_value(share.expires_at) or None,
             "access_count": int(share.access_count or 0),
             "allow_children": _share_allows_children(share),
             "allow_docpacks": _share_allows_docpacks(share),
@@ -870,7 +874,7 @@ def revoke_part_share_api(pn: str, share_id: str):
         return jsonify({"ok": False, "error": "not_found"}), 404
     if str(share.part_number or "").strip().lower() != str(pn or "").strip().lower():
         return jsonify({"ok": False, "error": "not_found"}), 404
-    now = datetime.utcnow()
+    now = utc_now()
     share.update(
         set__revoked_at=now,
         set__revoked_by_user_id=str(getattr(current_user, "id", "") or ""),

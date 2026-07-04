@@ -130,6 +130,8 @@ type IdentityProfile = {
 
 type CommentRow = {
   ts: string;
+  ts_display?: string | null;
+  ts_local?: string | null;
   author: string;
   author_display?: string;
   author_profile?: IdentityProfile | null;
@@ -146,6 +148,8 @@ type ExtraFileRow = {
   mime?: string;
   uploaded_by?: string;
   uploaded_at?: string;
+  uploaded_at_display?: string;
+  uploaded_at_local?: string;
   url?: string;
   rel_path?: string;
 };
@@ -168,6 +172,8 @@ type FileOverviewRow = {
   source?: string;
   recorded_by?: string;
   recorded_at?: string;
+  recorded_at_display?: string;
+  recorded_at_local?: string;
   url?: string;
 };
 
@@ -185,7 +191,11 @@ type FileOverviewSection = {
 type PublicShareInfo = {
   share_id?: string;
   created_at?: string;
+  created_at_display?: string | null;
+  created_at_local?: string | null;
   expires_at?: string;
+  expires_at_display?: string | null;
+  expires_at_local?: string | null;
   access_count?: number;
   allow_children?: boolean;
   allow_docpacks?: boolean;
@@ -202,11 +212,19 @@ type PartShareRow = {
   allow_attributes?: boolean;
   status?: string;
   created_at?: string | null;
+  created_at_display?: string | null;
+  created_at_local?: string | null;
   created_by_email?: string;
   expires_at?: string | null;
+  expires_at_display?: string | null;
+  expires_at_local?: string | null;
   revoked_at?: string | null;
+  revoked_at_display?: string | null;
+  revoked_at_local?: string | null;
   revoked_by_email?: string;
   last_accessed_at?: string | null;
+  last_accessed_at_display?: string | null;
+  last_accessed_at_local?: string | null;
   access_count?: number;
 };
 
@@ -2235,7 +2253,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                     <td className="pd-files-path">{row.rel_path || "-"}</td>
                     <td>{formatBytes(row.size)}</td>
                     <td>
-                      <div>{row.recorded_at ? new Date(row.recorded_at).toLocaleString() : "-"}</div>
+                      <div>{row.recorded_at_display || row.recorded_at || "-"}</div>
                       {row.recorded_by ? <div className="text-muted small">{row.recorded_by}</div> : null}
                     </td>
                     <td>{row.source || "-"}</td>
@@ -2267,7 +2285,7 @@ function isExternalDatasheetUrl(url: string): boolean {
             {isSharedView ? (
               <div className="alert alert-info py-2 px-3 mt-2 mb-0 small">
                 Read-only shared view.
-                {publicShareInfo?.expires_at ? ` Expires ${new Date(publicShareInfo.expires_at).toLocaleString()}.` : ""}
+                {publicShareInfo?.expires_at ? ` Expires ${publicShareInfo.expires_at_display || publicShareInfo.expires_at}.` : ""}
                 {(sharedAllowsChildren || sharedAllowsDocpacks || sharedAllowsAttributes) ? (
                   <div className="mt-1">
                     Enabled:
@@ -3035,7 +3053,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                           {identityAvatar(c.author_profile, c.author_display || c.author || "User", "md")}
                           <div className="pd-comment-body">
                             <div className="small text-muted">
-                              {c.author_display || c.author || "User"} {c.ts ? `- ${new Date(c.ts).toLocaleString()}` : ""}
+                              {c.author_display || c.author || "User"} {c.ts ? `- ${c.ts_display || c.ts}` : ""}
                             </div>
                             <div className="small">{c.text}</div>
                           </div>
@@ -3275,9 +3293,9 @@ function isExternalDatasheetUrl(url: string): boolean {
                                     <td>{item.status || "-"}</td>
                                     <td>{item.allow_children ? "Yes" : "-"}</td>
                                     <td>{item.allow_docpacks || item.allow_attributes ? "Yes" : "-"}</td>
-                                    <td>{item.created_at ? new Date(item.created_at).toLocaleString() : "-"}</td>
-                                    <td>{item.expires_at ? new Date(item.expires_at).toLocaleString() : "-"}</td>
-                                    <td>{item.last_accessed_at ? new Date(item.last_accessed_at).toLocaleString() : "-"}</td>
+                                    <td>{item.created_at_display || item.created_at || "-"}</td>
+                                    <td>{item.expires_at_display || item.expires_at || "-"}</td>
+                                    <td>{item.last_accessed_at_display || item.last_accessed_at || "-"}</td>
                                     <td>{item.access_count ?? 0}</td>
                                     <td>
                                       {item.status === "active" ? (

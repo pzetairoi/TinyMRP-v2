@@ -1,5 +1,6 @@
 from datetime import datetime
 from mongoengine import FloatField, BooleanField, Document, StringField, DateTimeField, IntField, DictField
+from app.services.timezone_utils import utc_now
  
 
 
@@ -21,7 +22,7 @@ class PartFile(Document):
     content_type= StringField()
     source      = StringField(default="scan")
     meta_info   = DictField()
-    discovered_at = DateTimeField(default=datetime.utcnow)
+    discovered_at = DateTimeField(default=utc_now)
 
     # ✅ thumbnail bookkeeping (for image artifacts, e.g., ext_group == "png")
     thumb_rel_path = StringField()      # e.g., "thumbs/png/A-B_REV_1.png"

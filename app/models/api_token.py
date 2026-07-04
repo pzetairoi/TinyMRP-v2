@@ -1,6 +1,7 @@
 from datetime import datetime
 from mongoengine import Document, StringField, DateTimeField, ReferenceField
 from app.models.auth import User
+from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -9,7 +10,7 @@ class ApiToken(Document):
     user_id = ReferenceField(User, required=True)
     token_hash = StringField(required=True, unique=True)
     label = StringField(default="")
-    created_at = DateTimeField(default=datetime.utcnow)
+    created_at = DateTimeField(default=utc_now)
     last_used_at = DateTimeField()
     revoked_at = DateTimeField()
     expires_at = DateTimeField()

@@ -2,6 +2,7 @@
 from mongoengine import Document, StringField, FloatField, ListField, DateTimeField, BooleanField, DictField
 from datetime import datetime
 from app.models.part import Part  # <-- absolute import
+from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -19,7 +20,7 @@ class BOMLink(Document):
     effective_from = DateTimeField()
     effective_to   = DateTimeField()
     phantom     = BooleanField(default=False)
-    updated_at  = DateTimeField(default=datetime.utcnow)
+    updated_at  = DateTimeField(default=utc_now)
 
     meta = {
         "collection": "bom",

@@ -44,11 +44,11 @@
       <input class="form-control" type="text" name="resource_type" value="{{ resource_type or '' }}">
     </div>
     <div class="col-lg-2">
-      <label class="form-label small">Start (UTC)</label>
+      <label class="form-label small">Start ({{ selected_timezone }})</label>
       <input class="form-control" type="datetime-local" name="start" value="{{ start }}">
     </div>
     <div class="col-lg-2">
-      <label class="form-label small">End (UTC)</label>
+      <label class="form-label small">End ({{ selected_timezone }})</label>
       <input class="form-control" type="datetime-local" name="end" value="{{ end }}">
     </div>
     <div class="col-lg-1">
@@ -68,7 +68,7 @@
     <table class="table table-sm table-striped align-middle">
       <thead>
         <tr>
-          <th style="white-space:nowrap">Time (UTC)</th>
+          <th style="white-space:nowrap">Time ({{ selected_timezone }})</th>
           <th>Email</th>
           <th>Roles</th>
           <th>Action</th>
@@ -83,7 +83,7 @@
       <tbody>
         {% for e in logs %}
         <tr>
-          <td style="white-space:nowrap">{{ e.ts.strftime('%Y-%m-%d %H:%M:%S') if e.ts else '' }}</td>
+          <td style="white-space:nowrap">{{ display_ts(e.ts, '%Y-%m-%d %H:%M:%S %Z') if e.ts else '' }}</td>
           <td>{{ e.email }}</td>
           <td>{{ e.roles }}</td>
           <td>{{ e.action }}</td>

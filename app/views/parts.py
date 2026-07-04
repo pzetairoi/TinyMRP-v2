@@ -46,6 +46,7 @@ from app.services.acl import (
 )
 from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
+from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
 from app.services.field_config import (
     boolean_filter_value,
     context_field_ids,
@@ -250,13 +251,23 @@ def _comment_payload(comment: dict, resolved: dict[str, dict[str, object]] | Non
     item = dict(comment or {})
     author = str(item.get("author") or "").strip()
     profile = None
+    ts_text = str(item.get("ts") or "").strip()
+    ts_dt = None
+    if ts_text:
+        try:
+            normalized = ts_text[:-1] + "+00:00" if ts_text.endswith("Z") else ts_text
+            ts_dt = datetime.fromisoformat(normalized)
+        except Exception:
+            ts_dt = None
     if author:
         if resolved is not None:
             profile = resolved.get(author.lower()) or resolve_identity_profile(author)
         else:
             profile = resolve_identity_profile(author)
     return {
-        "ts": item.get("ts") or "",
+        "ts": utc_iso(ts_dt) or ts_text,
+        "ts_display": format_display_ts(ts_dt, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
+        "ts_local": local_input_value(ts_dt) or None,
         "author": author,
         "author_display": (profile or {}).get("label") or author or "User",
         "author_profile": profile or resolve_identity_profile(author),
@@ -302,7 +313,9 @@ def _part_file_overview_row(pf: PartFile) -> dict[str, Any]:
         "size": pf.size,
         "source": getattr(pf, "source", None) or "scan",
         "recorded_by": "",
-        "recorded_at": recorded_at.isoformat() if recorded_at else "",
+        "recorded_at": utc_iso(recorded_at) or "",
+        "recorded_at_display": format_display_ts(recorded_at, fmt="%Y-%m-%d %H:%M:%S %Z") or "",
+        "recorded_at_local": local_input_value(recorded_at) or "",
         "url": url,
     }
 
@@ -327,7 +340,9 @@ def _extra_file_overview_row(ef: PartExtraFile) -> dict[str, Any]:
         "size": ef.size,
         "source": ef.source or "upload",
         "recorded_by": ef.uploaded_by or "",
-        "recorded_at": ef.uploaded_at.isoformat() if ef.uploaded_at else "",
+        "recorded_at": utc_iso(ef.uploaded_at) or "",
+        "recorded_at_display": format_display_ts(ef.uploaded_at, fmt="%Y-%m-%d %H:%M:%S %Z") or "",
+        "recorded_at_local": local_input_value(ef.uploaded_at) or "",
         "url": extra_file_url_for(ef),
     }
 
@@ -1635,7 +1650,7 @@ def part_comments_add(pn):
         p,
         author=getattr(current_user, "email", "") or "",
         text=text,
-        ts=datetime.utcnow().isoformat(),
+        ts=utc_iso(utc_now()),
     )
     try:
         log_action(

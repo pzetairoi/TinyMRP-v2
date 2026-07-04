@@ -170,19 +170,19 @@
               <div class="account-kv">
                 <div>
                   <span>Account created</span>
-                  <strong>{{ security_summary.account_created_at.strftime("%Y-%m-%d %H:%M:%S") if security_summary.account_created_at else "Not recorded" }}</strong>
+                  <strong>{{ display_ts(security_summary.account_created_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.account_created_at else "Not recorded" }}</strong>
                 </div>
                 <div>
                   <span>Last profile update</span>
-                  <strong>{{ security_summary.account_updated_at.strftime("%Y-%m-%d %H:%M:%S") if security_summary.account_updated_at else "Not recorded" }}</strong>
+                  <strong>{{ display_ts(security_summary.account_updated_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.account_updated_at else "Not recorded" }}</strong>
                 </div>
                 <div>
                   <span>Last login</span>
-                  <strong>{{ security_summary.last_login_at.strftime("%Y-%m-%d %H:%M:%S") if security_summary.last_login_at else "Not recorded yet" }}</strong>
+                  <strong>{{ display_ts(security_summary.last_login_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.last_login_at else "Not recorded yet" }}</strong>
                 </div>
                 <div>
                   <span>Password changed</span>
-                  <strong>{{ security_summary.password_changed_at.strftime("%Y-%m-%d %H:%M:%S") if security_summary.password_changed_at else "Not recorded" }}</strong>
+                  <strong>{{ display_ts(security_summary.password_changed_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.password_changed_at else "Not recorded" }}</strong>
                 </div>
                 <div>
                   <span>Last login IP</span>

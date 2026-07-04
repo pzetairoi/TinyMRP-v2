@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
 from typing import List
 
 from flask import Blueprint, current_app, jsonify, request
@@ -27,9 +26,29 @@ from app.services.extra_files import (
 )
 from app.services.part_norm import clean_pn, clean_rev
 from app.services.upload_pack import import_upload_pack
+from app.services.timezone_utils import utc_now
+from app.views.api_helpers import add_datetime_fields
 
 
 bp = Blueprint("upload_pack_api", __name__, url_prefix="/api")
+
+
+def _extra_file_payload(ef: PartExtraFile) -> dict:
+    payload = {
+        "id": str(ef.id),
+        "pn": ef.part_number,
+        "rev": ef.revision or "",
+        "original_name": ef.original_name,
+        "rel_path": ef.rel_path,
+        "size": ef.size,
+        "mime": ef.mime,
+        "sha256": ef.sha256,
+        "label": ef.label or "",
+        "uploaded_by": ef.uploaded_by or "",
+        "url": extra_file_url_for(ef),
+    }
+    add_datetime_fields(payload, "uploaded_at", ef.uploaded_at)
+    return payload
 
 
 def _parse_bool(value: object) -> bool:
@@ -143,22 +162,7 @@ def list_extra_files(pn: str, rev: str):
             "uploaded_at",
         )
     ):
-        rows.append(
-            {
-                "id": str(ef.id),
-                "pn": ef.part_number,
-                "rev": ef.revision or "",
-                "original_name": ef.original_name,
-                "rel_path": ef.rel_path,
-                "size": ef.size,
-                "mime": ef.mime,
-                "sha256": ef.sha256,
-                "label": ef.label or "",
-                "uploaded_by": ef.uploaded_by or "",
-                "uploaded_at": ef.uploaded_at.isoformat() if ef.uploaded_at else "",
-                "url": extra_file_url_for(ef),
-            }
-        )
+        rows.append(_extra_file_payload(ef))
     return jsonify(rows)
 
 
@@ -217,7 +221,7 @@ def upload_extra_files(pn: str, rev: str):
                 existing.mime = mime
                 existing.sha256 = sha
                 existing.uploaded_by = uploaded_by or existing.uploaded_by
-                existing.uploaded_at = datetime.utcnow()
+                existing.uploaded_at = utc_now()
                 existing.source = "upload"
                 existing.save()
                 ef = existing
@@ -231,26 +235,11 @@ def upload_extra_files(pn: str, rev: str):
                     mime=mime,
                     sha256=sha,
                     uploaded_by=uploaded_by,
-                    uploaded_at=datetime.utcnow(),
+                    uploaded_at=utc_now(),
                     source="upload",
                 )
                 ef.save()
-            created.append(
-                {
-                    "id": str(ef.id),
-                    "pn": ef.part_number,
-                    "rev": ef.revision or "",
-                    "original_name": ef.original_name,
-                    "rel_path": ef.rel_path,
-                    "size": ef.size,
-                    "mime": ef.mime,
-                    "sha256": ef.sha256,
-                    "label": ef.label or "",
-                    "uploaded_by": ef.uploaded_by or "",
-                    "uploaded_at": ef.uploaded_at.isoformat() if ef.uploaded_at else "",
-                    "url": extra_file_url_for(ef),
-                }
-            )
+            created.append(_extra_file_payload(ef))
         except Exception:
             errors.append(f"failed to save: {filename}")
 

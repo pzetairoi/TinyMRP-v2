@@ -1,5 +1,6 @@
 from datetime import datetime
 from mongoengine import Document, StringField, DateTimeField, FloatField
+from app.services.timezone_utils import utc_now
 
 
 DB_ALIAS = "tinymrp-v2"
@@ -15,7 +16,7 @@ class PartExtraFile(Document):
     sha256 = StringField()
     label = StringField()
     uploaded_by = StringField()
-    uploaded_at = DateTimeField(default=datetime.utcnow)
+    uploaded_at = DateTimeField(default=utc_now)
     source = StringField(default="upload")
 
     meta = {

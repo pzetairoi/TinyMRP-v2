@@ -1,6 +1,7 @@
 from datetime import datetime
 from mongoengine import Document, DictField, StringField, DateTimeField, ReferenceField
 from app.models.auth import User
+from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -14,7 +15,7 @@ class UserSettings(Document):
     profile = DictField(default=dict)
     ui_preferences = DictField(default=dict)
     field_preferences = DictField(default=dict)
-    updated_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=utc_now)
 
     meta = {
         "collection": "user_settings",

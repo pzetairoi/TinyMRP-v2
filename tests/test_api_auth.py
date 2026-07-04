@@ -2,10 +2,12 @@ from datetime import datetime
 
 from flask import jsonify
 
+from app.models.app_settings import AppSettings
 from app.models.api_token import ApiToken
 from app.models.numbering import NumberingScheme
 from app.models.user_settings import UserSettings
 from app.services.api_tokens import create_token
+from app.services.timezone_utils import utc_now
 
 
 def _auth_headers(token):
@@ -13,6 +15,9 @@ def _auth_headers(token):
 
 
 def test_token_create_and_list(client, user):
+    with client.application.app_context():
+        AppSettings(timezone="Australia/Sydney").save()
+
     bootstrap_doc, bootstrap_token = create_token(user, "bootstrap")
     resp = client.post("/api/me/tokens", json={"label": "test"}, headers=_auth_headers(bootstrap_token))
     data = resp.get_json()
@@ -25,6 +30,8 @@ def test_token_create_and_list(client, user):
     assert list_data["ok"] is True
     assert "token" not in list_data
     assert all("token" not in entry for entry in list_data.get("tokens", []))
+    assert all(entry.get("created_at_display") for entry in list_data.get("tokens", []))
+    assert all("created_at_local" in entry for entry in list_data.get("tokens", []))
 
     # Ensure hashes only.
     created = ApiToken.objects(id=data["token_id"]).first()
@@ -39,7 +46,7 @@ def test_auth_check_and_revoke(client, user):
     assert ok_resp.status_code == 200
     assert ok_data["ok"] is True
 
-    token_doc.update(set__revoked_at=datetime.utcnow())
+    token_doc.update(set__revoked_at=utc_now())
     fail_resp = client.get("/api/auth/check", headers=_auth_headers(raw))
     assert fail_resp.status_code == 401
     assert fail_resp.get_json()["error"] == "invalid_token"
@@ -81,7 +88,7 @@ def test_settings_and_numbering_with_bearer(client, user):
         seq={"padding": 3, "base": 10, "start_at": 1, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     preview = client.post("/api/numbering/preview", headers=headers, json={
@@ -148,7 +155,7 @@ def test_delete_scheme_removes_document_and_clears_default_scheme(client, user, 
         seq={"padding": 3, "base": 10, "start_at": 7, "reset_policy": "never"},
         revision={"policy": "alpha", "start": "A"},
         validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": datetime.utcnow()},
+        audit={"created_at": utc_now()},
     ).save()
 
     client.put("/api/me/settings", headers=headers, json={

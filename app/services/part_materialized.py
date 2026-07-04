@@ -147,7 +147,16 @@ def sync_part_materialized_fields(
         return False
 
     config = config or get_field_config()
-    sync_part_canonical_fields(part, raw_attrs=getattr(part, "attrs", {}) or {})
+    raw_attrs = dict(getattr(part, "attrs", {}) or {})
+    process_override = None
+    try:
+        from app.services.import_zip import _is_hardware_by_folder, _is_hardware_by_process
+
+        if _is_hardware_by_folder(raw_attrs) or _is_hardware_by_process(raw_attrs):
+            process_override = ["hardware"]
+    except Exception:
+        process_override = None
+    sync_part_canonical_fields(part, raw_attrs=raw_attrs, process_override=process_override)
     attrs = harvest_part_attrs(part) if attrs is None else attrs
     groups = set(coverage) if coverage is not None else file_groups_for_part(part, attrs=attrs)
 

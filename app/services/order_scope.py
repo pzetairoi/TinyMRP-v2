@@ -20,6 +20,7 @@ from app.services.attrs import harvest_part_attrs
 from app.services.docpacks import _flatten_bom, _overlay_numbers_and_stamps
 from app.services.app_settings import resolve_brand_logo_path
 from app.services.part_norm import clean_rev
+from app.services.timezone_utils import format_display_ts
 
 def _clean_rev(value: object) -> str:
     return clean_rev(value)
@@ -216,7 +217,7 @@ def _order_cover_pdf(order: Order) -> Optional[bytes]:
     y -= 10 * mm
     c.setFont("Helvetica", 11)
     if order.order_date:
-        c.drawString(margin, y, f"Order date: {order.order_date.strftime('%Y-%m-%d')}")
+        c.drawString(margin, y, f"Order date: {format_display_ts(order.order_date, fmt='%Y-%m-%d')}")
         y -= 6 * mm
     if order.supplier:
         c.drawString(margin, y, f"Supplier: {order.supplier.name}")
@@ -374,7 +375,7 @@ def build_scope_pdf(order: Order) -> bytes:
         c.drawString(margin, y, f"Supplier: {order.supplier.name}")
         y -= 4 * mm
     if order.order_date:
-        c.drawString(margin, y, f"Order date: {order.order_date.strftime('%Y-%m-%d')}")
+        c.drawString(margin, y, f"Order date: {format_display_ts(order.order_date, fmt='%Y-%m-%d')}")
         y -= 4 * mm
     y -= 4 * mm
 

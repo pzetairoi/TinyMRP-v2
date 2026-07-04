@@ -1,5 +1,6 @@
 from datetime import datetime
 from mongoengine import Document, StringField, DateTimeField, ListField, IntField, DictField
+from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
 
@@ -16,7 +17,7 @@ class AppSettings(Document):
     file_sources = ListField(DictField(), default=list)
     field_config = DictField(default=dict)
     process_meta = DictField(default=dict)
-    updated_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=utc_now)
 
     meta = {
         "collection": "app_settings",

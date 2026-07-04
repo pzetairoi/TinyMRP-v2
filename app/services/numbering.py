@@ -11,6 +11,7 @@ from mongoengine.errors import NotUniqueError
 from app.models.numbering import NumberingCounter, NumberingScheme
 from app.models.part import Part
 from app.models.part_revision import PartRevisionHistory
+from app.services.timezone_utils import utc_now
 
 
 ALLOWED_SCOPE_MODES = {"global", "by_type", "by_project", "by_family", "custom_keys"}
@@ -101,7 +102,7 @@ def normalize_scheme_payload(
 
     pattern_segments = _normalize_segments(data.get("pattern_segments") or (existing.pattern_segments if existing else []), errors)
 
-    now = datetime.utcnow()
+    now = utc_now()
     audit = dict(existing.audit) if existing is not None and isinstance(existing.audit, dict) else {}
     if not audit.get("created_at"):
         audit["created_at"] = now
@@ -204,7 +205,7 @@ def validate_scheme_definition(scheme: Dict[str, Any], context: Dict[str, Any] |
     sequence_values = _resolve_sequence_values(scheme, None)
     if auto_seq_index >= 0 and auto_seq_index < len(sequence_values):
         sequence_values[auto_seq_index] = start_at
-    candidate, cand_errors, cand_warnings = build_candidate_number(scheme, example_context, sequence_values, datetime.utcnow())
+    candidate, cand_errors, cand_warnings = build_candidate_number(scheme, example_context, sequence_values, utc_now())
     errors.extend(cand_errors)
     warnings.extend(cand_warnings)
 
@@ -425,7 +426,7 @@ def preview_number(
     sequence_values: Any = None,
 ) -> Tuple[Dict[str, Any], List[str]]:
     errors: List[str] = []
-    now = datetime.utcnow()
+    now = utc_now()
     scheme_dict = scheme_to_dict(scheme)
     seq_segments = _sequence_segments(scheme_dict.get("pattern_segments") or [])
     auto_seq_errors: List[str] = []
@@ -498,7 +499,7 @@ def allocate_number(
     sequence_values: Any = None,
 ) -> Tuple[Dict[str, Any], List[str]]:
     errors: List[str] = []
-    now = datetime.utcnow()
+    now = utc_now()
     action = (requested_revision_action or "new_part").strip().lower()
     scheme_dict = scheme_to_dict(scheme)
     seq_segments = _sequence_segments(scheme_dict.get("pattern_segments") or [])
@@ -657,7 +658,7 @@ def peek_next_sequence(counter_key: str, start_at: int) -> int:
 
 def consume_sequence(counter_key: str, start_at: int) -> int:
     coll = NumberingCounter._get_collection()
-    now = datetime.utcnow()
+    now = utc_now()
     start_at = max(int(start_at), 1)
 
     try:

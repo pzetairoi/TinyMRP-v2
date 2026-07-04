@@ -9,6 +9,7 @@ from flask import current_app
 from app.models.artifact import PartFile
 from app.services.app_settings import resolve_file_sources
 from app.services.canonical_fields import canonical_attr_key
+from app.services.timezone_utils import utc_now
 
 _DATASHEET_ATTR_KEYS = {
     "datasheet",
@@ -400,7 +401,7 @@ def upsert_part_files_detailed(
 
         # Optional: stamp first discovery without touching on updates
         if "discovered_at" in allowed:
-            updates.setdefault("set_on_insert__discovered_at", datetime.utcnow())
+            updates.setdefault("set_on_insert__discovered_at", utc_now())
 
         # Safety: never send an empty update
         if not updates:

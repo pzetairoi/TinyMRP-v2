@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, jsonify
 from flask_login import current_user
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict, List, Tuple
 from app.services.acl import (
     permissions_required,
@@ -24,6 +24,7 @@ from app.services.attrs import harvest_part_attrs
 from app.services.thumbs import thumb_urls_for
 from app.services.biz_utils import generate_job_number
 from app.services.part_norm import clean_rev
+from app.services.timezone_utils import parse_user_datetime, utc_now
 
 bp = Blueprint("admin_jobs", __name__, url_prefix="/admin/jobs")
 
@@ -471,7 +472,7 @@ def jobs_list():
         if custs:
             q = q.filter(customer__in=list(custs))
     date_from = _parse_date(request.args.get("from"))
-    date_to = _parse_date(request.args.get("to"))
+    date_to = _parse_date(request.args.get("to"), end_of_day=True)
     if date_from:
         q = q.filter(scheduled_start__gte=date_from)
     if date_to:
@@ -525,7 +526,7 @@ def jobs_list():
                 "received_pct": min(100.0, max(0.0, received_pct)),
             }
         )
-    now = datetime.utcnow()
+    now = utc_now()
     base_q = apply_job_scope(Job.objects(is_deleted=False), current_user)
     active_count = base_q.filter(status__in=["released", "in_progress"]).count()
     overdue_count = base_q.filter(status__in=["released", "in_progress"], scheduled_end__lt=now).count()
@@ -593,10 +594,10 @@ def jobs_view(job_id):
 def jobs_delete(job_id):
     try:
         j = Job.objects.get(id=job_id, is_deleted=False)
-        Order.objects(job=j).update(job=None, updated_at=datetime.utcnow())
+        Order.objects(job=j).update(job=None, updated_at=utc_now())
         j.status = "cancelled"
         j.is_deleted = True
-        j.updated_at = datetime.utcnow()
+        j.updated_at = utc_now()
         j.save()
         flash("Job deleted.", "success")
     except Exception:
@@ -614,7 +615,7 @@ def jobs_purge_deleted():
         return redirect(url_for("admin_jobs.jobs_list"))
 
     try:
-        Order.objects(job__in=ids).update(job=None, updated_at=datetime.utcnow())
+        Order.objects(job__in=ids).update(job=None, updated_at=utc_now())
     except Exception:
         pass
 
@@ -670,13 +671,8 @@ def _canonical_pn(pn: str) -> str:
     return p.part_number if p else pn
 
 
-def _parse_date(value: str | None):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except Exception:
-        return None
+def _parse_date(value: str | None, *, end_of_day: bool = False):
+    return parse_user_datetime(value, end_of_day=end_of_day)
 
 
 
@@ -717,8 +713,8 @@ def jobs_new():
         # BOM lines from textarea
         bom_text = request.form.get("bom_text") or ""
         j.bom = _parse_bom_text(bom_text)
-        j.created_at = datetime.utcnow()
-        j.updated_at = datetime.utcnow()
+        j.created_at = utc_now()
+        j.updated_at = utc_now()
         j.save()
         flash("Job created.", "success")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=str(j.id)))
@@ -751,7 +747,7 @@ def jobs_edit(job_id):
         j.vendors = list(Supplier.objects(id__in=supp_ids)) if supp_ids else []
         bom_text = request.form.get("bom_text") or ""
         j.bom = _parse_bom_text(bom_text)
-        j.updated_at = datetime.utcnow()
+        j.updated_at = utc_now()
         j.save()
         flash("Job updated.", "success")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=str(j.id)))

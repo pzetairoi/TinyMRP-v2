@@ -7,6 +7,13 @@ from flask import jsonify, request
 
 from app.services.api_auth import get_request_user
 from app.services.acl import user_has_permission
+from app.services.timezone_utils import (
+    format_display_ts,
+    local_input_value,
+    parse_user_datetime,
+    resolve_timezone_name,
+    utc_iso,
+)
 
 
 def json_error(code: str, message: str, status: int = 400, details: list | None = None):
@@ -47,7 +54,35 @@ def parse_pagination(default_size: int = 20, max_size: int = 100) -> Tuple[int, 
 
 
 def iso(dt: datetime | None) -> str | None:
-    return dt.isoformat() if dt else None
+    return utc_iso(dt)
+
+
+def iso_display(dt: datetime | None, fmt: str = "%Y-%m-%d %H:%M:%S %Z") -> str | None:
+    if dt is None:
+        return None
+    text = format_display_ts(dt, fmt=fmt)
+    return text or None
+
+
+def local_input(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    text = local_input_value(dt)
+    return text or None
+
+
+def parse_datetime_param(value: str | None, end_of_day: bool = False) -> datetime | None:
+    return parse_user_datetime(value, end_of_day=end_of_day)
+
+
+def add_datetime_fields(payload: Dict[str, Any], field_name: str, dt: datetime | None) -> None:
+    payload[field_name] = iso(dt)
+    payload[f"{field_name}_display"] = iso_display(dt)
+    payload[f"{field_name}_local"] = local_input(dt)
+
+
+def app_timezone_payload() -> Dict[str, Any]:
+    return {"ok": True, "timezone": resolve_timezone_name()}
 
 
 def get_json() -> Dict[str, Any]:

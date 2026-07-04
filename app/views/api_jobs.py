@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List
 
 from flask import Blueprint, jsonify, request
@@ -15,7 +14,15 @@ from app.services.api_auth import api_auth_required
 from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW
 from app.services.acl import apply_job_scope
 from app.services.part_norm import clean_rev
-from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
+from app.services.timezone_utils import utc_now
+from app.views.api_helpers import (
+    add_datetime_fields,
+    ensure_permissions,
+    get_json,
+    json_error,
+    parse_datetime_param,
+    parse_pagination,
+)
 
 bp = Blueprint("jobs_api", __name__, url_prefix="/api/jobs")
 
@@ -51,15 +58,6 @@ def _filter_participant_users(user_ids):
     return out
 
 
-def _parse_date(value: str | None):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except Exception:
-        return None
-
-
 def _parse_float(value, default=0.0):
     try:
         return float(value)
@@ -79,6 +77,8 @@ def _parse_stages(items) -> List[JobStage]:
             status=raw.get("status") or "pending",
             assigned_to=raw.get("assigned_to") or "",
             department=raw.get("department") or "",
+            started_at=parse_datetime_param(raw.get("started_at")),
+            completed_at=parse_datetime_param(raw.get("completed_at")),
             estimated_hours=_parse_float(raw.get("estimated_hours"), None),
             actual_hours=_parse_float(raw.get("actual_hours"), None),
             note=raw.get("note") or "",
@@ -101,7 +101,7 @@ def _parse_bom(items) -> List[JobBOMLine]:
 
 
 def _job_to_dict(job: Job):
-    return {
+    payload = {
         "job_number": job.job_number,
         "title": job.title,
         "description": job.description,
@@ -112,18 +112,12 @@ def _job_to_dict(job: Job):
         "qty_scrapped": float(job.qty_scrapped or 0.0),
         "status": job.status,
         "priority": job.priority,
-        "scheduled_start": iso(job.scheduled_start),
-        "scheduled_end": iso(job.scheduled_end),
-        "actual_start": iso(job.actual_start),
-        "actual_end": iso(job.actual_end),
         "material_reserved": bool(job.material_reserved),
         "estimated_hours": job.estimated_hours,
         "actual_hours": job.actual_hours,
         "customer": getattr(job.customer, "name", None),
         "customer_id": str(job.customer.id) if job.customer else None,
         "order_number": job.order_number,
-        "created_at": iso(job.created_at),
-        "updated_at": iso(job.updated_at),
         "stages": [
             {
                 "stage_id": s.stage_id,
@@ -132,8 +126,6 @@ def _job_to_dict(job: Job):
                 "status": s.status,
                 "assigned_to": s.assigned_to,
                 "department": s.department,
-                "started_at": iso(s.started_at),
-                "completed_at": iso(s.completed_at),
                 "estimated_hours": s.estimated_hours,
                 "actual_hours": s.actual_hours,
                 "note": s.note,
@@ -142,6 +134,19 @@ def _job_to_dict(job: Job):
         ],
         "bom": [{"pn": l.pn, "rev": l.rev or "", "qty": float(l.qty or 0.0)} for l in (job.bom or [])],
     }
+    for field_name, value in (
+        ("scheduled_start", job.scheduled_start),
+        ("scheduled_end", job.scheduled_end),
+        ("actual_start", job.actual_start),
+        ("actual_end", job.actual_end),
+        ("created_at", job.created_at),
+        ("updated_at", job.updated_at),
+    ):
+        add_datetime_fields(payload, field_name, value)
+    for stage_payload, stage in zip(payload["stages"], job.stages or []):
+        add_datetime_fields(stage_payload, "started_at", stage.started_at)
+        add_datetime_fields(stage_payload, "completed_at", stage.completed_at)
+    return payload
 
 
 @bp.get("")
@@ -176,8 +181,8 @@ def list_jobs():
     if q_text:
         q = q.filter(Q(job_number__icontains=q_text) | Q(title__icontains=q_text) | Q(description__icontains=q_text))
 
-    date_from = _parse_date(request.args.get("from"))
-    date_to = _parse_date(request.args.get("to"))
+    date_from = parse_datetime_param(request.args.get("from"))
+    date_to = parse_datetime_param(request.args.get("to"), end_of_day=True)
     if date_from:
         q = q.filter(scheduled_start__gte=date_from)
     if date_to:
@@ -240,8 +245,10 @@ def create_job():
         qty_scrapped=_parse_float(data.get("qty_scrapped"), 0.0),
         status=status,
         priority=(data.get("priority") or "normal").strip(),
-        scheduled_start=_parse_date(data.get("scheduled_start")),
-        scheduled_end=_parse_date(data.get("scheduled_end")),
+        scheduled_start=parse_datetime_param(data.get("scheduled_start")),
+        scheduled_end=parse_datetime_param(data.get("scheduled_end")),
+        actual_start=parse_datetime_param(data.get("actual_start")),
+        actual_end=parse_datetime_param(data.get("actual_end")),
         material_reserved=bool(data.get("material_reserved")),
         estimated_hours=_parse_float(data.get("estimated_hours"), None),
         actual_hours=_parse_float(data.get("actual_hours"), None),
@@ -264,8 +271,8 @@ def create_job():
     if participant_ids:
         job.participants = _filter_participant_users(participant_ids)
 
-    job.created_at = datetime.utcnow()
-    job.updated_at = datetime.utcnow()
+    job.created_at = utc_now()
+    job.updated_at = utc_now()
     job.save()
     return jsonify({"ok": True, "job": _job_to_dict(job)})
 
@@ -313,9 +320,13 @@ def update_job(job_number):
     if "priority" in data:
         job.priority = (data.get("priority") or "normal").strip()
     if "scheduled_start" in data:
-        job.scheduled_start = _parse_date(data.get("scheduled_start"))
+        job.scheduled_start = parse_datetime_param(data.get("scheduled_start"))
     if "scheduled_end" in data:
-        job.scheduled_end = _parse_date(data.get("scheduled_end"))
+        job.scheduled_end = parse_datetime_param(data.get("scheduled_end"))
+    if "actual_start" in data:
+        job.actual_start = parse_datetime_param(data.get("actual_start"))
+    if "actual_end" in data:
+        job.actual_end = parse_datetime_param(data.get("actual_end"))
     if "material_reserved" in data:
         job.material_reserved = bool(data.get("material_reserved"))
     if "estimated_hours" in data:
@@ -339,7 +350,7 @@ def update_job(job_number):
     if "participant_ids" in data:
         job.participants = _filter_participant_users(data.get("participant_ids") or [])
 
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utc_now()
     job.save()
     return jsonify({"ok": True, "job": _job_to_dict(job)})
 
@@ -356,10 +367,10 @@ def delete_job(job_number):
     if job.status in ("in_progress", "completed"):
         return json_error("invalid_state", "Job cannot be deleted in this status.", 400)
     from app.models.order import Order
-    Order.objects(job=job).update(job=None, updated_at=datetime.utcnow())
+    Order.objects(job=job).update(job=None, updated_at=utc_now())
     job.status = "cancelled"
     job.is_deleted = True
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utc_now()
     job.save()
     return jsonify({"ok": True})
 
@@ -386,11 +397,11 @@ def job_status(job_number):
         allow = bool(data.get("allow_override"))
         if (job.qty_produced or 0.0) < (job.qty_ordered or 0.0) and not allow:
             return json_error("qty_incomplete", "Produced quantity is below ordered.", 400)
-        job.actual_end = datetime.utcnow()
+        job.actual_end = utc_now()
     if new_status == "in_progress" and not job.actual_start:
-        job.actual_start = datetime.utcnow()
+        job.actual_start = utc_now()
     job.status = new_status
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utc_now()
     job.save()
     return jsonify({"ok": True, "job": _job_to_dict(job)})
 
@@ -407,16 +418,16 @@ def job_stage_complete(job_number, stage_id):
     for stage in job.stages or []:
         if stage.stage_id == stage_id:
             stage.status = "complete"
-            stage.completed_at = datetime.utcnow()
+            stage.completed_at = utc_now()
             break
     else:
         return json_error("not_found", "Stage not found.", 404)
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utc_now()
     # Auto-complete job if all stages done
     if job.stages and all((s.status == "complete") for s in job.stages):
         job.status = "completed"
         if not job.actual_end:
-            job.actual_end = datetime.utcnow()
+            job.actual_end = utc_now()
     job.save()
     return jsonify({"ok": True, "job": _job_to_dict(job)})
 
@@ -431,7 +442,7 @@ def job_reserve_materials(job_number):
     if not job:
         return json_error("not_found", "Job not found.", 404)
     job.material_reserved = True
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utc_now()
     job.save()
     return jsonify({"ok": True, "job": _job_to_dict(job)})
 
@@ -446,7 +457,7 @@ def job_stats():
     return jsonify({
         "ok": True,
         "status_counts": {s: base.filter(status=s).count() for s in JOB_STATUS_FLOW.keys()},
-        "overdue": base.filter(status__in=["released", "in_progress"], scheduled_end__lt=datetime.utcnow()).count(),
+        "overdue": base.filter(status__in=["released", "in_progress"], scheduled_end__lt=utc_now()).count(),
         "active": base.filter(status__in=["released", "in_progress"]).count(),
     })
 

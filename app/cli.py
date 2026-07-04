@@ -21,6 +21,7 @@ from app.services.attrs import harvest_part_attrs, merge_save_part_attrs
 from app.services.part_annotations import bulk_sync_annotation_search_fields
 from app.services.part_materialized import rebuild_part_materialized_fields
 from app.services.password_policy import validate_admin_password
+from app.services.timezone_utils import utc_iso, utc_now
 
 
 
@@ -68,8 +69,8 @@ def create_user(email, password):
         email=email,
         password=hash_password(password),
         fs_uniquifier=secrets.token_hex(16),
-        password_changed_at=dt.datetime.utcnow(),
-        updated_at=dt.datetime.utcnow(),
+        password_changed_at=utc_now(),
+        updated_at=utc_now(),
     )
     u.save()
     click.echo("Created user")
@@ -115,8 +116,8 @@ def set_password(email, password):
             click.echo(error)
         raise SystemExit(1)
     u.password = hash_password(password)
-    u.password_changed_at = dt.datetime.utcnow()
-    u.updated_at = dt.datetime.utcnow()
+    u.password_changed_at = utc_now()
+    u.updated_at = utc_now()
     u.save()
     click.echo("Password updated")
 
@@ -207,8 +208,8 @@ def bootstrap_admin(email, password):
         raise SystemExit(1)
     u.password = hash_password(password)
     u.active = True
-    u.password_changed_at = dt.datetime.utcnow()
-    u.updated_at = dt.datetime.utcnow()
+    u.password_changed_at = utc_now()
+    u.updated_at = utc_now()
     r = Role.objects(name="admin").first() or Role(name="admin").save()
     if r not in (u.roles or []):
         u.roles.append(r)
@@ -240,7 +241,7 @@ def seed_user_combos(prefix, domain, password, max_combos, attach_biz):
     writer = None
     if password is None:
         os.makedirs(current_app.instance_path, exist_ok=True)
-        stamp = dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        stamp = utc_now().strftime("%Y%m%d_%H%M%S")
         out_path = os.path.join(current_app.instance_path, f"test_users_{stamp}.csv")
         out_file = open(out_path, "w", newline="", encoding="utf-8")
         writer = csv.writer(out_file)
@@ -285,7 +286,7 @@ def seed_user_combos(prefix, domain, password, max_combos, attach_biz):
     if writer:
         writer.writerow([])
         writer.writerow(["note", "Delete this file after use."])
-        writer.writerow(["generated_at", dt.datetime.utcnow().isoformat() + "Z"])
+        writer.writerow(["generated_at", utc_iso(utc_now()) or ""])
         writer.writerow(["total_users", len(seeded_users)])
         writer = None
         out_file.close()
@@ -379,7 +380,7 @@ from .models.part import Part
 from .models.bom import BOMLink
 
 def _now():
-    return dt.datetime.utcnow()
+    return utc_now()
 
 def _pn(prefix: str, n: int) -> str:
     return f"{prefix}-{n:04d}"
@@ -699,6 +700,7 @@ import click
 from flask.cli import with_appcontext
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.models.part import Part
+from app.services.timezone_utils import utc_now
 
 @click.group()
 def thumbs():

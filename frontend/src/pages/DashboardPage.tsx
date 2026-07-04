@@ -7,7 +7,7 @@ type Summary = {
   doc_coverage: { pdf: number; png: number; dxf: number; step: number; datasheet: number }
   data_health: { missing_material: number; missing_process: number; missing_description: number }
   top_processes: { process: string; count: number }[]
-  recent_parts: { part_number: string; revision: string; description: string; updated_at: string }[]
+  recent_parts: { part_number: string; revision: string; description: string; updated_at: string; updated_at_display?: string }[]
   top_hardware: { part_number: string; revision: string; description: string; where_used_count: number; total_qty: number }[]
 }
 
@@ -181,7 +181,7 @@ export default function DashboardPage() {
                       <td>{row.revision || '-'}</td>
                       <td className="text-truncate" style={{ maxWidth: 240 }}>{row.description || '-'}</td>
                       <td className="text-muted small">
-                        {row.updated_at ? new Date(row.updated_at).toLocaleString() : '-'}
+                        {row.updated_at_display || row.updated_at || '-'}
                       </td>
                     </tr>
                   ))}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from flask import Blueprint, request, jsonify
 from mongoengine.errors import ValidationError
 
@@ -11,6 +10,8 @@ from app.services.api_auth import api_auth_required, get_request_user
 from app.services.api_tokens import create_token
 from app.services.user_settings import get_or_create_settings, settings_to_dict, apply_settings_payload
 from app.services.acl import user_has_permission
+from app.services.timezone_utils import resolve_timezone_name, utc_now
+from app.views.api_helpers import add_datetime_fields, app_timezone_payload
 
 bp = Blueprint("me_api", __name__, url_prefix="/api")
 
@@ -32,14 +33,22 @@ def _is_admin(user) -> bool:
 
 
 def _token_dict(token: ApiToken) -> dict:
-    return {
+    payload = {
         "id": str(token.id),
         "label": token.label or "",
-        "created_at": token.created_at.isoformat() if token.created_at else None,
-        "last_used_at": token.last_used_at.isoformat() if token.last_used_at else None,
-        "revoked_at": token.revoked_at.isoformat() if token.revoked_at else None,
-        "expires_at": token.expires_at.isoformat() if token.expires_at else None,
     }
+    add_datetime_fields(payload, "created_at", token.created_at)
+    add_datetime_fields(payload, "last_used_at", token.last_used_at)
+    add_datetime_fields(payload, "revoked_at", token.revoked_at)
+    add_datetime_fields(payload, "expires_at", token.expires_at)
+    return payload
+
+
+@bp.get("/app/timezone")
+def app_timezone():
+    payload = app_timezone_payload()
+    payload["timezone_display"] = resolve_timezone_name()
+    return jsonify(payload)
 
 
 @bp.get("/me/tokens")
@@ -67,7 +76,7 @@ def revoke_token(token_id: str):
     token = ApiToken.objects(id=token_id, user_id=user).first()
     if not token:
         return jsonify({"ok": False, "error": {"code": "not_found", "message": "Token not found.", "details": []}}), 404
-    token.update(set__revoked_at=datetime.utcnow())
+    token.update(set__revoked_at=utc_now())
     return jsonify({"ok": True})
 
 
@@ -124,7 +133,7 @@ def admin_revoke_token(user_id: str, token_id: str):
     token = ApiToken.objects(id=token_id, user_id=user_id).first()
     if not token:
         return jsonify({"ok": False, "error": {"code": "not_found", "message": "Token not found.", "details": []}}), 404
-    token.update(set__revoked_at=datetime.utcnow())
+    token.update(set__revoked_at=utc_now())
     return jsonify({"ok": True})
 
 

@@ -7,6 +7,7 @@ from .job import Job
 from .supplier import Supplier
 from .customer import Customer
 from .common import Address
+from app.services.timezone_utils import utc_now
 
 
 class OrderLine(EmbeddedDocument):
@@ -35,7 +36,7 @@ class Order(Document):
     lines        = ListField(EmbeddedDocumentField(OrderLine), default=list)
     status       = StringField(default="draft")
     customer_po  = StringField()
-    order_date   = DateTimeField(default=datetime.utcnow)
+    order_date   = DateTimeField(default=utc_now)
     requested_delivery = DateTimeField()
     promised_delivery = DateTimeField()
     actual_delivery = DateTimeField()
@@ -52,8 +53,8 @@ class Order(Document):
     approved_by  = StringField()
     approved_at  = DateTimeField()
     rejection_reason = StringField()
-    created_at   = DateTimeField(default=datetime.utcnow)
-    updated_at   = DateTimeField(default=datetime.utcnow)
+    created_at   = DateTimeField(default=utc_now)
+    updated_at   = DateTimeField(default=utc_now)
 
     meta = {
         "collection": "orders",

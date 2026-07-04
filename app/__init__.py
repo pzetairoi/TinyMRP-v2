@@ -22,6 +22,13 @@ import re
 import secrets
 import json as _json
 from datetime import timedelta
+from app.services.timezone_utils import (
+    local_date_value,
+    local_input_value,
+    resolve_timezone_name,
+    format_display_ts,
+    utc_now,
+)
 
 
 
@@ -294,6 +301,8 @@ def create_app(config_object=None):
             if fp_tokens:
                 app.config["FLAT_PATTERN_PAGE_NAMES"] = fp_tokens
         if settings is not None:
+            app.config["APP_TIMEZONE"] = resolve_timezone_name()
+            app.config["DEFAULT_TIMEZONE"] = resolve_timezone_name()
             app.config["PROCESS_META"] = load_process_meta(overrides=getattr(settings, "process_meta", None) or None)
             app.config["ARENA_FILE_LINK_BASE_URL"] = (getattr(settings, "arena_file_link_base_url", "")
                                                       or app.config.get("ARENA_FILE_LINK_BASE_URL", "") or ""
@@ -321,7 +330,7 @@ def create_app(config_object=None):
             if user is None:
                 return
             try:
-                user.last_login_at = datetime.utcnow()
+                user.last_login_at = utc_now()
                 user.last_login_ip = (
                     request.headers.get("X-Forwarded-For")
                     or request.headers.get("X-Real-IP")
@@ -329,7 +338,7 @@ def create_app(config_object=None):
                     or ""
                 )
                 user.last_login_ua = request.headers.get("User-Agent") or ""
-                user.updated_at = datetime.utcnow()
+                user.updated_at = utc_now()
                 user.save()
             except Exception:
                 pass
@@ -706,12 +715,22 @@ def create_app(config_object=None):
             current_profile = None
             current_roles = []
             current_permissions = []
+        def display_ts(value, fmt="%Y-%m-%d %H:%M:%S %Z"):
+            return format_display_ts(value, fmt=fmt)
+        def local_date_input(value):
+            return local_date_value(value)
+        def local_dt_input(value):
+            return local_input_value(value)
         return dict(
             files_base=fb,
             has_perm=has_perm,
             current_user_profile=current_profile,
             current_user_roles=current_roles,
             current_user_permissions=current_permissions,
+            display_ts=display_ts,
+            local_date_input=local_date_input,
+            local_dt_input=local_dt_input,
+            app_timezone_name=resolve_timezone_name(),
         )
 
     from .cli import init_app as init_cli
