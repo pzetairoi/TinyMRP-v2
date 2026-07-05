@@ -5,6 +5,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Operations (Phase 4 — Caddy fleet, tier T3)
+- Backup system: `backup-instance.sh` (online mongodump + deliverables + config snapshot,
+  retention pruning, optional raw Mongo snapshot compatible with
+  `rollback-instance.sh --restore-mongo-from`, `--dry-run`), `backup-all.sh`, and
+  `install-backup-job.sh` (systemd timer, nightly + jitter, idle IO priority).
+- `restore-instance.sh` with a safe default `--verify` mode (restores the dump into a
+  throwaway network-less container and reports collection/document counts), plus
+  `--database` (auto-saves a pre-restore dump) and `--deliverables` restores with
+  post-restore health checks.
+- `update-all-instances.sh` gained `--canary <instance>` (canary first, abort rollout on
+  canary failure) and `--backup-first` (DB + config dump immediately before each update).
+- Caddy routes now emit security headers (HSTS for TLS modes, nosniff, referrer policy,
+  frame denial, Server header stripped) using `?` set-if-absent so app headers win;
+  `refresh-caddy-routes.sh` re-renders existing instances' routes with Caddy validation
+  and automatic rollback.
+- `doctor.sh` now also checks disk usage (tinymrp root + /var/lib/docker), per-domain TLS
+  certificate expiry, backup timer presence, and backup freshness per instance.
+
+### Security (Phase 3 — standalone Linux server, tier T2)
+- New hardened nginx TLS site template (`deploy/server/nginx-tinymrp-site.conf`):
+  HTTPS with modern TLS 1.2/1.3 ciphers, OCSP stapling, HTTP→HTTPS redirect with ACME
+  passthrough, edge rate-limit zones for `/login` and `/api`, security headers snippet
+  (correctly re-included per location), `client_max_body_size` aligned with upload caps,
+  gzip. Certbot, internal-CA, self-signed and http-only variants supported. Validated
+  with crossplane (nginx's official parser); compatible with distro nginx 1.18/1.24.
+- `deploy/tinymrp.service` fully sandboxed: `ProtectSystem=strict`, `NoNewPrivileges`,
+  `PrivateTmp/Devices`, kernel/namespace/personality restrictions, syscall filter
+  (`@system-service`), empty capability set, writable paths limited to deliverables and
+  `instance/`, resource guards, hardened gunicorn flags.
+- New `deploy/scripts/install-server.sh`: idempotent scripted install of the manual path
+  (packages incl. MongoDB 7.0 official repo, dedicated system user, venv, generated strong
+  secrets with strict mode by default, systemd unit, nginx configs, UFW, optional fail2ban,
+  journald cap, health self-check, one-time admin bootstrap via `flask bootstrap-admin`).
+- fail2ban filter + jail for login abuse (`deploy/server/fail2ban-*`), banning on
+  repeated 401/403/429 login responses in the nginx access log.
+- `deploy/server/README.md`: equivalent manual and scripted instructions plus
+  post-install verification checklist.
+
 ### Security (Phase 2 — containers)
 - App containers now run locked down: read-only root filesystem, `tmpfs /tmp`,
   `cap_drop: ALL`, `no-new-privileges`, health-gated startup ordering, healthchecks

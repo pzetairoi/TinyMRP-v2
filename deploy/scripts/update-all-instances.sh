@@ -11,6 +11,8 @@ CONTINUE_ON_ERROR=0
 TARGET_IMAGE=""
 TARGET_COMMIT=""
 HEALTH_TIMEOUT=""
+CANARY_INSTANCE=""
+BACKUP_FIRST=0
 
 UPDATED_COUNT=0
 SKIPPED_COUNT=0
@@ -33,10 +35,17 @@ fail() {
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./deploy/scripts/update-all-instances.sh [--image tinymrp-app:<tag>] [--git-commit <commit>] [--health-timeout 300] [--continue-on-error]
+  sudo ./deploy/scripts/update-all-instances.sh [--image tinymrp-app:<tag>] [--git-commit <commit>] [--health-timeout 300] [--continue-on-error] [--canary <instance>] [--backup-first]
+
+Options:
+  --canary <instance>   Update this instance FIRST; abort the rollout if it fails
+                        (regardless of --continue-on-error).
+  --backup-first        Run backup-instance.sh --no-deliverables (DB + config dump)
+                        for each instance immediately before updating it.
 
 Examples:
   sudo ./deploy/scripts/update-all-instances.sh
+  sudo ./deploy/scripts/update-all-instances.sh --canary staging --backup-first
   sudo ./deploy/scripts/update-all-instances.sh --image tinymrp-app:stable --git-commit 0123456789abcdef
   sudo ./deploy/scripts/update-all-instances.sh --continue-on-error
 EOF
@@ -58,6 +67,14 @@ while [ $# -gt 0 ]; do
       ;;
     --continue-on-error)
       CONTINUE_ON_ERROR=1
+      shift
+      ;;
+    --canary)
+      CANARY_INSTANCE="${2-}"
+      shift 2
+      ;;
+    --backup-first)
+      BACKUP_FIRST=1
       shift
       ;;
     -h|--help)
@@ -92,14 +109,44 @@ if [ -n "$HEALTH_TIMEOUT" ]; then
   UPDATE_ARGS+=(--health-timeout "$HEALTH_TIMEOUT")
 fi
 
+# Build the ordered instance list; the canary (when set) goes first.
+INSTANCE_NAMES=()
 for env_file in "$(instances_dir)"/*/.env; do
-  if [ ! -f "$env_file" ]; then
-    continue
-  fi
+  [ -f "$env_file" ] || continue
+  INSTANCE_NAMES+=("$(basename "$(dirname "$env_file")")")
+done
 
+if [ -n "$CANARY_INSTANCE" ]; then
+  if [ ! -f "$(instance_env_file "$CANARY_INSTANCE")" ]; then
+    die "Canary instance not found: ${CANARY_INSTANCE}"
+  fi
+  ORDERED=("$CANARY_INSTANCE")
+  for name in "${INSTANCE_NAMES[@]}"; do
+    [ "$name" = "$CANARY_INSTANCE" ] || ORDERED+=("$name")
+  done
+  INSTANCE_NAMES=("${ORDERED[@]}")
+fi
+
+for INSTANCE_NAME in "${INSTANCE_NAMES[@]}"; do
   INSTANCE_COUNT=$((INSTANCE_COUNT + 1))
-  INSTANCE_NAME="$(basename "$(dirname "$env_file")")"
   printf '\n==> Updating instance %s\n' "$INSTANCE_NAME"
+
+  if [ "$BACKUP_FIRST" -eq 1 ]; then
+    printf '    Pre-update backup (database + config)\n'
+    if ! "${SCRIPT_DIR}/backup-instance.sh" "$INSTANCE_NAME" --no-deliverables; then
+      fail "Pre-update backup failed for ${INSTANCE_NAME}; NOT updating this instance."
+      FAILED_COUNT=$((FAILED_COUNT + 1))
+      FAILED_INSTANCES+=("$INSTANCE_NAME")
+      if [ "$INSTANCE_COUNT" -eq 1 ] && [ -n "$CANARY_INSTANCE" ]; then
+        die "Canary ${CANARY_INSTANCE} failed at backup stage; aborting rollout."
+      fi
+      if [ "$CONTINUE_ON_ERROR" -ne 1 ]; then
+        fail "Stopping (use --continue-on-error to keep going)."
+        break
+      fi
+      continue
+    fi
+  fi
 
   if "${SCRIPT_DIR}/update-instance.sh" "$INSTANCE_NAME" "${UPDATE_ARGS[@]}"; then
     UPDATE_STATUS=0
@@ -144,6 +191,11 @@ for env_file in "$(instances_dir)"/*/.env; do
       fi
       ;;
   esac
+
+  if [ "$INSTANCE_COUNT" -eq 1 ] && [ -n "$CANARY_INSTANCE" ] && [ "$UPDATE_STATUS" -ne 0 ]; then
+    fail "Canary ${CANARY_INSTANCE} failed; aborting rollout for the remaining instances."
+    break
+  fi
 
   if [ "$UPDATE_STATUS" -ne 0 ] && [ "$CONTINUE_ON_ERROR" -ne 1 ]; then
     fail "Stopping because ${INSTANCE_NAME} failed to update."

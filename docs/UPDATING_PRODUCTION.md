@@ -1,4 +1,70 @@
-# Updating production instances safely (Phase 0/1/2 changes and onward)
+# Updating production instances safely (Phase 0/1/2/3/4 changes and onward)
+
+## Phase 4: fleet operations (Caddy hosts)
+
+New tooling — nothing changes automatically; adopt in this order:
+
+```bash
+# 1) First backup + verify the restore path actually works (touches nothing live)
+sudo ./deploy/scripts/backup-instance.sh <instance>
+sudo ./deploy/scripts/restore-instance.sh <instance> \
+  --from /srv/tinymrp/backups/<instance>/<stamp> --verify
+
+# 2) Nightly backups for all instances (02:30 UTC + jitter, 14-day retention)
+sudo ./deploy/scripts/install-backup-job.sh
+#    IMPORTANT: sync /srv/tinymrp/backups off-host (rsync/restic) — a backup on the
+#    same disk protects against mistakes, not against losing the host.
+
+# 3) Recommended rollout style from now on (canary first + pre-update DB dumps)
+sudo ./deploy/scripts/update-all-instances.sh --canary <low-risk-instance> --backup-first
+
+# 4) Pick up the new Caddy security headers on EXISTING instances
+#    (validated by Caddy before applying; auto-rollback on failure)
+sudo ./deploy/scripts/refresh-caddy-routes.sh
+
+# 5) doctor now also watches disk space, TLS cert expiry, and backup freshness
+sudo ./deploy/scripts/doctor.sh --all
+```
+
+Restore paths at a glance: logical DB restore = `restore-instance.sh --database`
+(auto-saves a pre-restore dump next to the backup); deliverables = `--deliverables`;
+raw Mongo files from a `--raw` backup = `rollback-instance.sh --restore-mongo-from
+<stamp-dir>/mongo-raw.tar.gz`. Run a `--verify` drill quarterly.
+
+
+## Phase 3 rollout notes (standalone Linux + nginx, tier T2)
+
+Phase 3 only ADDS deployment assets — nothing changes on Caddy fleet hosts or existing
+compose deployments. For standalone servers:
+
+- **New installs:** use `sudo ./deploy/scripts/install-server.sh --domain <fqdn> --certbot
+  --admin-email <email> --with-fail2ban --yes` (see `deploy/server/README.md` for variants).
+- **Existing standalone servers (e.g. installed per serverdeploymentguide.txt):** adopt the
+  hardening incrementally, each step reversible:
+
+```bash
+# 1) Hardened systemd unit (adjust ReadWritePaths if your deliverables dir differs)
+sudo cp deploy/tinymrp.service /etc/systemd/system/tinymrp.service
+sudo systemctl daemon-reload && sudo systemctl restart tinymrp
+curl -fsS http://127.0.0.1:8000/api/health   # rollback: restore previous unit file
+
+# 2) nginx TLS site (replace the __PLACEHOLDER__ values first)
+sudo cp deploy/server/nginx-http-context.conf /etc/nginx/conf.d/tinymrp-http.conf
+sudo cp deploy/server/snippets-security-headers.conf /etc/nginx/snippets/tinymrp-headers.conf
+sudo cp deploy/server/nginx-tinymrp-site.conf /etc/nginx/sites-available/tinymrp   # edit placeholders!
+sudo nginx -t && sudo systemctl reload nginx   # nginx -t failing = nothing applied
+
+# 3) Optional fail2ban
+sudo apt install fail2ban
+sudo cp deploy/server/fail2ban-filter-tinymrp-login.conf /etc/fail2ban/filter.d/tinymrp-login.conf
+sudo cp deploy/server/fail2ban-jail-tinymrp.local /etc/fail2ban/jail.d/tinymrp.local
+sudo systemctl restart fail2ban && sudo fail2ban-client status tinymrp-login
+```
+
+If the sandboxed unit refuses to start (`status=226/NAMESPACE` or permission errors in
+`journalctl -u tinymrp`), the usual cause is a custom path not listed in `ReadWritePaths=` —
+add your deliverables/instance paths there rather than removing the sandboxing.
+
 
 ## Phase 2 rollout notes (container hardening)
 

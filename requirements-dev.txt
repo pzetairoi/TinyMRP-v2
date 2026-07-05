@@ -1,5 +1,7 @@
 # TinyMRP v2 — development, test and CI tooling.
-# Install with: pip install -r requirements.txt -r requirements-dev.txt
+# Installing this file alone should produce a working dev/test environment,
+# including runtime dependencies such as Flask-Limiter used by security tests.
+-r requirements.txt
 
 # --- Tests ---
 pytest==8.2.2
