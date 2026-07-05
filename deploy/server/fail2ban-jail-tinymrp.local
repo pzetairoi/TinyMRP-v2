@@ -1,0 +1,17 @@
+# fail2ban jail — TinyMRP (tier T2 standalone server).
+# Install to: /etc/fail2ban/jail.d/tinymrp.local
+
+[tinymrp-login]
+enabled  = true
+port     = http,https
+filter   = tinymrp-login
+logpath  = /var/log/nginx/access.log
+# 5 throttled/denied login responses within 10 minutes => ban for 1 hour
+maxretry = 5
+findtime = 600
+bantime  = 3600
+
+[nginx-http-auth]
+enabled = true
+
+# Recommended: also keep the default sshd jail enabled (fail2ban default).

@@ -1,6 +1,12 @@
+# TinyMRP v2 — hardened systemd unit (tier T2, standalone server).
+# Install to: /etc/systemd/system/tinymrp.service
+# Paths assume install-server.sh defaults; adjust WorkingDirectory/ExecStart/
+# ReadWritePaths if you use different locations.
+
 [Unit]
 Description=TinyMRP v2 Gunicorn Service
-After=network.target
+After=network-online.target mongod.service
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -8,10 +14,47 @@ User=tinymrp
 Group=tinymrp
 WorkingDirectory=/opt/tinymrp_v2
 EnvironmentFile=/etc/tinymrp/.env
-ExecStart=/opt/tinymrp_venv/bin/gunicorn -k gthread --threads 4 -w 2 -b 127.0.0.1:8000 app.wsgi:app
+ExecStart=/opt/tinymrp_venv/bin/gunicorn -k gthread --threads 4 -w 2 \
+    -b 127.0.0.1:8000 \
+    --timeout 120 --graceful-timeout 30 --keep-alive 5 \
+    --max-requests 1000 --max-requests-jitter 100 \
+    --access-logfile - --error-logfile - \
+    app.wsgi:app
 Restart=on-failure
 RestartSec=5
 
+# --- Sandboxing ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# (MemoryDenyWriteExecute intentionally NOT set: cffi-based wheels such as
+#  argon2-cffi/cryptography may need writable+executable mappings.)
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Only these paths are writable (deliverables for thumbnails/extra files,
+# instance/ for compat-mode runtime secrets).
+ReadWritePaths=/srv/tinymrp/deliverables /opt/tinymrp_v2/instance
+UMask=0027
+
+# --- Resource guards ---
+LimitNOFILE=65536
+TasksMax=256
+
 [Install]
 WantedBy=multi-user.target
-
