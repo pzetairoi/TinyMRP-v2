@@ -14,7 +14,7 @@ mypy==1.11.2
 
 # --- Supply chain ---
 pip-audit==2.7.3
-cyclonedx-bom==4.6.1
+cyclonedx-bom==7.3.0
 
 # --- Git hooks ---
 pre-commit==3.8.0
