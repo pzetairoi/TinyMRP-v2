@@ -31,7 +31,7 @@ jobs:
       - name: Pytest (with coverage)
         run: pytest -q --cov=app --cov-report=term --cov-report=xml --cov-fail-under=55
       - name: Upload coverage report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage.xml
@@ -54,7 +54,7 @@ jobs:
       - name: SBOM (backend, CycloneDX)
         run: cyclonedx-py requirements requirements.txt --of JSON -o sbom-backend.cdx.json
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-backend
           path: sbom-backend.cdx.json
