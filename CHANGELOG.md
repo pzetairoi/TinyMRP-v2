@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Fixed
+- Uploads failed with "Permission denied: /data/deliverables/png" on instances built
+  from the Phase-2 image: `useradd --system` assigned appuser a UID below 1000 while
+  the deploy scripts chown the deliverables mount to 1000:1000. The image now pins
+  appuser to UID/GID 1000; `create-instance.sh` pre-creates the full artifact folder
+  set (3mf, bom, datasheet, dxf, edr, extra, pdf, pic, ply, png, reports, step, stl,
+  temp, thumbs); the entrypoint self-heals missing folders and reports a non-writable
+  deliverables root at startup; `doctor.sh` checks in-container writability.
+
 ### Operations (Phase 4 — Caddy fleet, tier T3)
 - Backup system: `backup-instance.sh` (online mongodump + deliverables + config snapshot,
   retention pruning, optional raw Mongo snapshot compatible with

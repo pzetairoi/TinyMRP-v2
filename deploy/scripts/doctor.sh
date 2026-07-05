@@ -311,6 +311,13 @@ check_instance() {
 
       if [ -n "$container_local_root" ]; then
         pass "Instance ${INSTANCE_NAME}: app container FILES_LOCAL_ROOT=${container_local_root}"
+        # Phase 4.x: the deliverables root must be writable by the container
+        # user (uid 1000) — uploads and thumbnails fail otherwise.
+        if docker exec "${APP_CONTAINER_NAME}" sh -c "touch '${container_local_root}/.doctor-write-test' && rm -f '${container_local_root}/.doctor-write-test'" >/dev/null 2>&1; then
+          pass "Instance ${INSTANCE_NAME}: deliverables root is writable by the app container"
+        else
+          fail "Instance ${INSTANCE_NAME}: deliverables root NOT writable by the app container — run: chown -R 1000:1000 ${DELIVERABLES_DIR:-<deliverables dir>}"
+        fi
       else
         fail "Instance ${INSTANCE_NAME}: app container does not expose FILES_LOCAL_ROOT"
       fi

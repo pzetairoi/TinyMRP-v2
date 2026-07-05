@@ -149,6 +149,11 @@ MONGO_DATA_DIR="${INSTANCE_ROOT}/mongo"
 ensure_dir "$INSTANCE_ROOT"
 ensure_dir "$DELIVERABLES_DIR"
 ensure_dir "$MONGO_DATA_DIR"
+# Pre-create the artifact folder structure the app expects (the container runs
+# as UID 1000 and must be able to write everywhere under the deliverables root).
+for deliverables_sub in 3mf bom datasheet dxf edr extra pdf pic ply png reports step stl temp thumbs; do
+  ensure_dir "${DELIVERABLES_DIR}/${deliverables_sub}"
+done
 chown -R 1000:1000 "$DELIVERABLES_DIR"
 chmod 0775 "$DELIVERABLES_DIR"
 chown -R 999:999 "$MONGO_DATA_DIR"
