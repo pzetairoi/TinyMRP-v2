@@ -15,7 +15,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---------- Python app ----------
-FROM python:3.11-slim-bookworm AS app
+FROM python:3.14-slim-bookworm AS app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
