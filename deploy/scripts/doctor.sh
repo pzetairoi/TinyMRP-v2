@@ -311,12 +311,25 @@ check_instance() {
 
       if [ -n "$container_local_root" ]; then
         pass "Instance ${INSTANCE_NAME}: app container FILES_LOCAL_ROOT=${container_local_root}"
-        # Phase 4.x: the deliverables root must be writable by the container
-        # user (uid 1000) — uploads and thumbnails fail otherwise.
-        if docker exec "${APP_CONTAINER_NAME}" sh -c "touch '${container_local_root}/.doctor-write-test' && rm -f '${container_local_root}/.doctor-write-test'" >/dev/null 2>&1; then
-          pass "Instance ${INSTANCE_NAME}: deliverables root is writable by the app container"
+        # Phase 4.x: the deliverables root AND every artifact subfolder must be
+        # writable by the container user (uid 1000) — uploads/thumbnails fail
+        # otherwise. Subfolders created outside create-instance.sh (e.g. by
+        # root) are the usual culprit.
+        unwritable_subs=""
+        if ! docker exec "${APP_CONTAINER_NAME}" sh -c "touch '${container_local_root}/.doctor-write-test' && rm -f '${container_local_root}/.doctor-write-test'" >/dev/null 2>&1; then
+          unwritable_subs="(root)"
+        fi
+        for deliverables_sub in 3mf bom datasheet dxf edr extra pdf pic ply png reports step stl temp thumbs; do
+          if docker exec "${APP_CONTAINER_NAME}" sh -c "[ -d '${container_local_root}/${deliverables_sub}' ]" >/dev/null 2>&1; then
+            if ! docker exec "${APP_CONTAINER_NAME}" sh -c "touch '${container_local_root}/${deliverables_sub}/.doctor-write-test' && rm -f '${container_local_root}/${deliverables_sub}/.doctor-write-test'" >/dev/null 2>&1; then
+              unwritable_subs="${unwritable_subs} ${deliverables_sub}"
+            fi
+          fi
+        done
+        if [ -z "$unwritable_subs" ]; then
+          pass "Instance ${INSTANCE_NAME}: deliverables root and all subfolders writable by the app container"
         else
-          fail "Instance ${INSTANCE_NAME}: deliverables root NOT writable by the app container — run: chown -R 1000:1000 ${DELIVERABLES_DIR:-<deliverables dir>}"
+          fail "Instance ${INSTANCE_NAME}: NOT writable by the app container:${unwritable_subs} — run: sudo ./deploy/scripts/fix-deliverables-permissions.sh ${INSTANCE_NAME}"
         fi
       else
         fail "Instance ${INSTANCE_NAME}: app container does not expose FILES_LOCAL_ROOT"

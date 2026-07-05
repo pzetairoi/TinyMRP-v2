@@ -11,10 +11,21 @@ FILES_ROOT="${FILES_LOCAL_ROOT:-${FILE_ROOT_LOCAL:-}}"
 if [ -n "$FILES_ROOT" ] && [ -d "$FILES_ROOT" ]; then
   if touch "${FILES_ROOT}/.tinymrp-write-test" 2>/dev/null; then
     rm -f "${FILES_ROOT}/.tinymrp-write-test"
+    BAD_SUBS=""
     for sub in 3mf bom datasheet dxf edr extra pdf pic ply png reports step stl temp thumbs; do
       mkdir -p "${FILES_ROOT}/${sub}" 2>/dev/null || true
+      if touch "${FILES_ROOT}/${sub}/.tinymrp-write-test" 2>/dev/null; then
+        rm -f "${FILES_ROOT}/${sub}/.tinymrp-write-test"
+      else
+        BAD_SUBS="${BAD_SUBS} ${sub}"
+      fi
     done
-    echo "[entrypoint] Deliverables root OK: ${FILES_ROOT}"
+    if [ -n "$BAD_SUBS" ]; then
+      echo "[entrypoint] ERROR: these deliverables subfolders are NOT writable by uid $(id -u):${BAD_SUBS}" >&2
+      echo "[entrypoint]        Fix on the host:  sudo ./deploy/scripts/fix-deliverables-permissions.sh <instance>" >&2
+    else
+      echo "[entrypoint] Deliverables root OK: ${FILES_ROOT} (all subfolders writable)"
+    fi
   else
     echo "[entrypoint] ERROR: deliverables root ${FILES_ROOT} is NOT writable by uid $(id -u)." >&2
     echo "[entrypoint]        Fix on the host:  chown -R 1000:1000 <deliverables dir>  (uploads/thumbnails will fail until then)" >&2
