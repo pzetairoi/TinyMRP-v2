@@ -1,11 +1,26 @@
-version: "3.9"
+# TinyMRP single-host compose (Phase 2 hardened).
+#
+# Mongo authentication (recommended; OPT-IN so existing volumes keep working):
+#   1. Fresh install: set MONGO_ROOT_USER / MONGO_ROOT_PASSWORD in .env BEFORE first
+#      start and point MONGO_URI at mongodb://<user>:<pass>@mongo:27017/<db>?authSource=admin
+#   2. Existing data volume: see docs/UPDATING_PRODUCTION.md ("Enabling Mongo auth
+#      on an existing instance") — users must be created before enabling auth.
+#
+# Admin seeding: no default credentials. With TINYMRP_SEED_ADMIN=true and an empty
+# database, a random one-time password is generated and printed in the app logs
+# unless TINYMRP_ADMIN_PASSWORD is provided explicitly.
 
 services:
   mongo:
     image: mongo:6.0
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     environment:
       MONGO_INITDB_DATABASE: ${MONGO_DB:-tinymrp-v2}
+      # Empty values leave authentication disabled (backward compatible).
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-}
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -19,8 +34,14 @@ services:
       context: .
       dockerfile: docker/app/Dockerfile
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
-      # These defaults are safe–your .env can override anything
       FLASK_ENV: production
       SECRET_KEY: ${SECRET_KEY}
       SECURITY_PASSWORD_SALT: ${SECURITY_PASSWORD_SALT}
@@ -32,27 +53,35 @@ services:
       FILES_LOCAL_ROOT: /data/deliverables
       FILES_URL_PREFIX: ${FILES_URL_PREFIX:-/deliverables}
       FILES_PUBLIC_URLS: ${FILES_PUBLIC_URLS:-false}
+      FILES_TOKEN_TTL_SECONDS: ${FILES_TOKEN_TTL_SECONDS:-86400}
+      FILES_ALLOW_LEGACY_TOKENS: ${FILES_ALLOW_LEGACY_TOKENS:-false}
       # Leave accel redirect empty unless you intentionally provision and test
       # an Nginx internal route that matches the chosen prefix.
       FILES_ACCEL_REDIRECT_PREFIX: "${FILES_ACCEL_REDIRECT_PREFIX:-}"
-      # Optional: enable HTTP proxy to an external file server
-      # FILES_UPSTREAM_BASE: ${FILES_UPSTREAM_BASE}
       FILES_UPSTREAM_ALLOWED_HOSTS: ${FILES_UPSTREAM_ALLOWED_HOSTS}
       FILES_PROXY_MAX_BYTES: ${FILES_PROXY_MAX_BYTES}
-      # Optional admin seeding (compat mode only)
+      # Rate limiting / logging (Phase 1)
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-}
+      RATE_LIMIT_API: ${RATE_LIMIT_API:-}
+      RATE_LIMIT_STORAGE_URI: ${RATE_LIMIT_STORAGE_URI:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      # Admin seeding — NO default credentials (see header note).
       TINYMRP_SEED_ADMIN: ${TINYMRP_SEED_ADMIN:-true}
-      TINYMRP_ADMIN_EMAIL: ${TINYMRP_ADMIN_EMAIL:-admin@example.com}
-      TINYMRP_ADMIN_PASSWORD: ${TINYMRP_ADMIN_PASSWORD:-ChangeMe123!}
+      TINYMRP_ADMIN_EMAIL: ${TINYMRP_ADMIN_EMAIL:-}
+      TINYMRP_ADMIN_PASSWORD: ${TINYMRP_ADMIN_PASSWORD:-}
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     volumes:
-      # Mount the host deliverables directory read-only inside the app at /data/deliverables
+      # Mounted read-write: the app generates thumbnails under <root>/thumbs
+      # and stores extra files under <root>/extra.
       - type: bind
         source: ${DELIVERABLES_DIR}
         target: /data/deliverables
-        # Must be writable so the app can generate thumbnails under /data/deliverables/thumbs
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -60,10 +89,13 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${HTTP_PORT:-5000}:80"
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     volumes:
       # NGINX config
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
