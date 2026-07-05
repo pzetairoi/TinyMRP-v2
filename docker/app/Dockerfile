@@ -45,7 +45,10 @@ COPY --from=fe /app/static/parts-ui/ app/static/parts-ui/
 
 # Non-root runtime user; writable dirs are external mounts (/data/deliverables)
 # and tmpfs (/tmp) — the app filesystem itself can be read-only.
-RUN useradd --system --create-home --shell /usr/sbin/nologin appuser \
+# UID/GID pinned to 1000: deploy scripts chown the deliverables bind mount to
+# 1000:1000, and existing instances already carry that ownership. Do not change.
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app
 USER appuser
 

@@ -3,6 +3,24 @@ set -e
 
 echo "[entrypoint] Booting TinyMRP v2 container"
 
+# Deliverables layout: ensure the artifact folder structure exists and is
+# writable. A non-writable root means host ownership does not match this
+# container's UID (expected 1000:1000) — fail loudly HERE instead of at the
+# first upload.
+FILES_ROOT="${FILES_LOCAL_ROOT:-${FILE_ROOT_LOCAL:-}}"
+if [ -n "$FILES_ROOT" ] && [ -d "$FILES_ROOT" ]; then
+  if touch "${FILES_ROOT}/.tinymrp-write-test" 2>/dev/null; then
+    rm -f "${FILES_ROOT}/.tinymrp-write-test"
+    for sub in 3mf bom datasheet dxf edr extra pdf pic ply png reports step stl temp thumbs; do
+      mkdir -p "${FILES_ROOT}/${sub}" 2>/dev/null || true
+    done
+    echo "[entrypoint] Deliverables root OK: ${FILES_ROOT}"
+  else
+    echo "[entrypoint] ERROR: deliverables root ${FILES_ROOT} is NOT writable by uid $(id -u)." >&2
+    echo "[entrypoint]        Fix on the host:  chown -R 1000:1000 <deliverables dir>  (uploads/thumbnails will fail until then)" >&2
+  fi
+fi
+
 # Best-effort: wait for Mongo to be reachable before seeding
 MAX_TRIES=${MONGO_WAIT_RETRIES:-30}
 SLEEP_SECS=${MONGO_WAIT_DELAY:-2}
