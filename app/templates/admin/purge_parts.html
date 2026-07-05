@@ -1,27 +1,26 @@
 {% extends "security/base.html" %}
-{% block title %}Purge Parts Data — Admin{% endblock %}
+{% from "ui/_components.html" import page_header, danger_block %}
+{% block title %}Purge Parts Data â€” Admin{% endblock %}
 {% block content %}
-<div class="card shadow-sm">
+{% call page_header("Purge Parts Data", "Irreversible maintenance action for parts, BOM links, and part files.", "Admin") %}{% endcall %}
+<div class="card shadow-sm tm-card">
   <div class="card-body">
-    <h1 class="h4">Purge Parts Data</h1>
-    <p class="text-danger mb-3">
-      This will irreversibly delete all documents from the following collections:
-      <strong>parts</strong>, <strong>bom</strong>, and <strong>part_files</strong>.
-      Users and roles are not affected.
-    </p>
+    {{ danger_block(
+      "This action permanently deletes data.",
+      "All documents in the parts, bom, and part_files collections will be removed. Users and roles are not affected.",
+      "Only proceed if you are intentionally clearing the engineering dataset."
+    ) }}
 
-    <form method="post" onsubmit="return confirm('This will delete ALL parts/BOM/files. Continue?');">
+    <form class="mt-4 d-flex flex-wrap gap-2" method="post" onsubmit="return confirm('This will delete ALL parts/BOM/files. Continue?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-danger">
         Delete all parts / BOM / files
       </button>
-      <a href="{{ url_for('admin.users_list') }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+      <a href="{{ url_for('admin.users_list') }}" class="btn btn-outline-secondary">Cancel</a>
     </form>
   </div>
   <div class="card-footer small text-muted">
     Tip: Re-seed demo data anytime via CLI (e.g., <code>flask --app run.py data seed-demo</code>).
   </div>
-  
 </div>
 {% endblock %}
-

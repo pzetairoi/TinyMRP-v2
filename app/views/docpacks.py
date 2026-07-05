@@ -1,5 +1,5 @@
 from __future__ import annotations
-from flask import Blueprint, request, send_file, jsonify
+from flask import Blueprint, current_app, request, send_file, jsonify
 from flask_login import login_required, current_user
 from io import BytesIO
 from typing import List

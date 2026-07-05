@@ -46,7 +46,9 @@ def _windows_timezone_names() -> tuple[str, ...]:
     win_dir = os.environ.get("WINDIR") or r"C:\Windows"
     path = Path(win_dir) / "Globalization" / "Time Zone" / "timezones.xml"
     try:
-        root = ET.parse(path).getroot()
+        from defusedxml import ElementTree as _SafeET
+
+        root = _SafeET.parse(str(path)).getroot()
     except Exception:
         return tuple()
     for zone in root.findall(".//Zone"):

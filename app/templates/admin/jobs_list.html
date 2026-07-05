@@ -1,12 +1,9 @@
-﻿{% extends "security/base.html" %}
+{% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header, empty_state, status_badge, action_bar %}
 {% block title %}Jobs - Admin{% endblock %}
 {% block content %}
-<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3">
-  <div>
-    <h1 class="h4 m-0">Jobs</h1>
-    <div class="text-muted small">Work orders and production tracking.</div>
-  </div>
-  <div class="d-flex gap-2 mt-2 mt-md-0">
+{% call page_header("Jobs", "Work orders and production tracking.", "Admin") %}
+  <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>
     {% if has_perm('jobs.manage') %}
     <form method="post" action="{{ url_for('admin_jobs.jobs_purge_deleted') }}" onsubmit="return confirm('Permanently delete all deleted jobs? This cannot be undone.');">
@@ -18,11 +15,11 @@
     {% endif %}
     <a class="btn btn-primary" href="{{ url_for('admin_jobs.jobs_new') }}">Create job</a>
   </div>
-</div>
+{% endcall %}
 
 <div class="row g-3 mb-3">
   <div class="col-md-4">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm tm-card">
       <div class="card-body">
         <div class="text-muted small">Active jobs</div>
         <div class="fs-4 fw-semibold">{{ active_count }}</div>
@@ -30,7 +27,7 @@
     </div>
   </div>
   <div class="col-md-4">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm tm-card">
       <div class="card-body">
         <div class="text-muted small">Overdue jobs</div>
         <div class="fs-4 fw-semibold text-danger">{{ overdue_count }}</div>
@@ -38,7 +35,7 @@
     </div>
   </div>
   <div class="col-md-4">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm tm-card">
       <div class="card-body">
         <div class="text-muted small">Completed (7 days)</div>
         <div class="fs-4 fw-semibold">{{ completed_week }}</div>
@@ -48,7 +45,7 @@
 </div>
 
 <form id="jobs-filter" method="get"></form>
-<div class="table-responsive bg-white border rounded-3 shadow-sm">
+<div class="table-responsive tm-table-shell">
   <table class="table align-middle mb-0">
     <thead>
       <tr>
@@ -126,8 +123,8 @@
             {% endif %}
           </td>
           <td>{{ j.title or j.description or '-' }}</td>
-          <td><span class="badge badge-status status-{{ j.status|default('draft') }}">{{ (j.status or 'draft').replace('_',' ') }}</span></td>
-          <td><span class="badge badge-priority priority-{{ j.priority|default('normal') }}">{{ (j.priority or 'normal') }}</span></td>
+          <td>{{ status_badge((j.status or 'draft').replace('_',' '), j.status|default('draft')) }}</td>
+          <td>{{ status_badge(j.priority or 'normal', j.priority|default('normal'), 'priority') }}</td>
           <td>
             <div class="small">{{ display_ts(j.scheduled_start, '%Y-%m-%d') if j.scheduled_start else '-' }}</div>
             <div class="small text-muted">{{ display_ts(j.scheduled_end, '%Y-%m-%d') if j.scheduled_end else '' }}</div>
@@ -180,7 +177,7 @@
         {% endfor %}
       {% else %}
         <tr>
-          <td colspan="8" class="text-center text-muted py-4">No jobs found. Create your first job to start tracking production.</td>
+          <td colspan="8" class="py-3">{{ empty_state("No jobs found", "Create your first job to start tracking production.") }}</td>
         </tr>
       {% endif %}
     </tbody>

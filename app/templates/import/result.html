@@ -1,34 +1,46 @@
 {% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header, card_header, error_state, empty_state, status_badge %}
 {% block title %}Import Result{% endblock %}
 {% block content %}
-<div class="container py-4">
-  <h4>Import Result</h4>
-  <dl class="row">
-    <dt class="col-sm-3">ZIP</dt><dd class="col-sm-9">{{ result.zip }}</dd>
-    <dt class="col-sm-3">Root</dt><dd class="col-sm-9">{{ result.root or '-' }}</dd>
-    <dt class="col-sm-3">Parts created</dt><dd class="col-sm-9">{{ result.parts_created }}</dd>
-    <dt class="col-sm-3">Parts updated</dt><dd class="col-sm-9">{{ result.parts_updated }}</dd>
-    <dt class="col-sm-3">Existing parts modified</dt><dd class="col-sm-9">{{ result.modified_parts_count or 0 }}</dd>
-    <dt class="col-sm-3">Parts seeded</dt><dd class="col-sm-9">{{ result.parts_seeded or 0 }}</dd>
-    <dt class="col-sm-3">Links created</dt><dd class="col-sm-9">{{ result.links_created }}</dd>
-    <dt class="col-sm-3">Links skipped</dt><dd class="col-sm-9">{{ result.links_skipped }}</dd>
-    <dt class="col-sm-3">Parts with properties</dt><dd class="col-sm-9">{{ result.parts_with_props }}</dd>
-    <dt class="col-sm-3">Artifacts added</dt><dd class="col-sm-9">{{ result.artifacts_added }}</dd>
-    <dt class="col-sm-3">Thumbnails generated</dt><dd class="col-sm-9">{{ result.thumbnails_generated or result.thumbnails_built or 0 }}</dd>
-  </dl>
+{% call page_header("Import Result", "Summary of the latest import run.", "Import") %}
+  {% if result.root %}
+    <a class="btn btn-outline-secondary" href="/ui/bom/{{ result.root|urlencode }}">Open BOM UI</a>
+  {% endif %}
+{% endcall %}
 
-  {% set err_count = result.errors|length if result.errors else 0 %}
-  {% set warn_count = result.warnings|length if result.warnings else 0 %}
-  {% if err_count or warn_count %}
-    <div class="alert {% if err_count %}alert-danger{% else %}alert-warning{% endif %} small">
-      <div class="fw-semibold">
-        Import completed with {{ err_count }} error{% if err_count != 1 %}s{% endif %}
-        and {{ warn_count }} warning{% if warn_count != 1 %}s{% endif %}.
-      </div>
-      <details class="mt-2">
+<div class="card shadow-sm tm-card mb-3">
+  <div class="card-body">
+    {{ card_header("Summary") }}
+    <dl class="row mb-0">
+      <dt class="col-sm-3">ZIP</dt><dd class="col-sm-9">{{ result.zip }}</dd>
+      <dt class="col-sm-3">Root</dt><dd class="col-sm-9">{{ result.root or '-' }}</dd>
+      <dt class="col-sm-3">Parts created</dt><dd class="col-sm-9">{{ result.parts_created }}</dd>
+      <dt class="col-sm-3">Parts updated</dt><dd class="col-sm-9">{{ result.parts_updated }}</dd>
+      <dt class="col-sm-3">Existing parts modified</dt><dd class="col-sm-9">{{ result.modified_parts_count or 0 }}</dd>
+      <dt class="col-sm-3">Parts seeded</dt><dd class="col-sm-9">{{ result.parts_seeded or 0 }}</dd>
+      <dt class="col-sm-3">Links created</dt><dd class="col-sm-9">{{ result.links_created }}</dd>
+      <dt class="col-sm-3">Links skipped</dt><dd class="col-sm-9">{{ result.links_skipped }}</dd>
+      <dt class="col-sm-3">Parts with properties</dt><dd class="col-sm-9">{{ result.parts_with_props }}</dd>
+      <dt class="col-sm-3">Artifacts added</dt><dd class="col-sm-9">{{ result.artifacts_added }}</dd>
+      <dt class="col-sm-3">Thumbnails generated</dt><dd class="col-sm-9">{{ result.thumbnails_generated or result.thumbnails_built or 0 }}</dd>
+    </dl>
+  </div>
+</div>
+
+{% set err_count = result.errors|length if result.errors else 0 %}
+{% set warn_count = result.warnings|length if result.warnings else 0 %}
+{% if err_count or warn_count %}
+  {{ error_state(
+    "Import completed with issues",
+    err_count|string ~ " error" ~ ("" if err_count == 1 else "s") ~ " and " ~ warn_count|string ~ " warning" ~ ("" if warn_count == 1 else "s") ~ " were recorded. Expand the details below to review the affected rows and files."
+  ) }}
+  <div class="card shadow-sm tm-card mt-3">
+    <div class="card-body">
+      {{ card_header("Warnings and Errors") }}
+      <details>
         <summary>Show details</summary>
         {% if result.errors %}
-          <div class="fw-semibold mt-2">Errors</div>
+          <div class="fw-semibold mt-3">Errors</div>
           <ul class="mb-0">
             {% for it in result.errors[:50] %}
               <li>
@@ -40,7 +52,7 @@
           </ul>
         {% endif %}
         {% if result.warnings %}
-          <div class="fw-semibold mt-2">Warnings</div>
+          <div class="fw-semibold mt-3">Warnings</div>
           <ul class="mb-0">
             {% for it in result.warnings[:50] %}
               <li>
@@ -53,90 +65,102 @@
         {% endif %}
       </details>
     </div>
-  {% endif %}
-  {% if result.parts_seeded_list %}
-  <div class="mt-2">
-    <div class="small text-muted">Seeded parts were created for PN/REV pairs that did not exist yet:</div>
+  </div>
+{% endif %}
+
+{% if result.parts_seeded_list %}
+<div class="card shadow-sm tm-card mt-3">
+  <div class="card-body">
+    {{ card_header("Seeded Parts", "Created for PN/REV pairs that did not exist yet.") }}
     <ul class="small mb-0">
       {% for item in result.parts_seeded_list %}
         <li>{{ item.part_number }}{% if item.revision %} REV {{ item.revision }}{% endif %}</li>
       {% endfor %}
     </ul>
   </div>
-  {% endif %}
-
-  {% if result.artifacts_found_by_type %}
-  <h5 class="mt-3">Files Found By Type</h5>
-  <table class="table table-sm w-auto">
-    <thead><tr><th>Type</th><th>Count</th></tr></thead>
-    <tbody>
-    {% for k, v in result.artifacts_found_by_type.items() %}
-      <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-  {% if result.modified_parts %}
-  <h5 class="mt-3">Modified Existing Parts</h5>
-  <div class="small text-muted mb-2">Field, BOM, and file changes detected during import.</div>
-  <div class="d-flex flex-column gap-2">
-    {% for item in result.modified_parts %}
-      <details class="border rounded p-2">
-        <summary class="fw-semibold">
-          {{ item.part_number }}{% if item.revision %} REV {{ item.revision }}{% endif %}
-        </summary>
-        {% if item.data_changes %}
-          <div class="mt-2">
-            <div class="fw-semibold small">Field changes</div>
-            <ul class="small mb-0">
-              {% for change in item.data_changes %}
-                <li>{{ change.scope }} {{ change.field }}: {{ change.before }} to {{ change.after }}</li>
-              {% endfor %}
-            </ul>
-          </div>
-        {% endif %}
-        {% if item.bom_changes %}
-          <div class="mt-2">
-            <div class="fw-semibold small">BOM changes</div>
-            {% if item.bom_changes.added %}
-              <div class="small">Added:
-                {% for child in item.bom_changes.added %}
-                  <span>{{ child.part_number }}{% if child.revision %} REV {{ child.revision }}{% endif %} x {{ child.qty }}</span>{% if not loop.last %}, {% endif %}
-                {% endfor %}
-              </div>
-            {% endif %}
-            {% if item.bom_changes.removed %}
-              <div class="small">Removed:
-                {% for child in item.bom_changes.removed %}
-                  <span>{{ child.part_number }}{% if child.revision %} REV {{ child.revision }}{% endif %} x {{ child.qty }}</span>{% if not loop.last %}, {% endif %}
-                {% endfor %}
-              </div>
-            {% endif %}
-            {% if item.bom_changes.qty_changed %}
-              <div class="small">Qty changed:
-                {% for child in item.bom_changes.qty_changed %}
-                  <span>{{ child.part_number }}{% if child.revision %} REV {{ child.revision }}{% endif %} {{ child.before_qty }} to {{ child.after_qty }}</span>{% if not loop.last %}, {% endif %}
-                {% endfor %}
-              </div>
-            {% endif %}
-          </div>
-        {% endif %}
-        {% if item.file_changes %}
-          <div class="mt-2">
-            <div class="fw-semibold small">File changes</div>
-            <ul class="small mb-0">
-              {% for change in item.file_changes %}
-                <li>{{ change.action|upper }} {{ change.kind }}: {{ change.name or change.rel_path or change.ext_group }}</li>
-              {% endfor %}
-            </ul>
-          </div>
-        {% endif %}
-      </details>
-    {% endfor %}
-  </div>
-  {% endif %}
-  {% if result.root %}
-    <a class="btn btn-outline-secondary" href="/ui/bom/{{ result.root|urlencode }}">Open BOM UI</a>
-  {% endif %}
 </div>
+{% endif %}
+
+{% if result.artifacts_found_by_type %}
+<div class="card shadow-sm tm-card mt-3">
+  <div class="card-body">
+    {{ card_header("Files Found By Type") }}
+    <div class="table-responsive tm-table-shell">
+      <table class="table table-sm w-auto mb-0">
+        <thead><tr><th>Type</th><th>Count</th></tr></thead>
+        <tbody>
+        {% for k, v in result.artifacts_found_by_type.items() %}
+          <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if result.modified_parts %}
+<div class="card shadow-sm tm-card mt-3">
+  <div class="card-body">
+    {{ card_header("Modified Existing Parts", "Field, BOM, and file changes detected during import.") }}
+    <div class="d-flex flex-column gap-2">
+      {% for item in result.modified_parts %}
+        <details class="border rounded p-3">
+          <summary class="fw-semibold">
+            {{ item.part_number }}{% if item.revision %} REV {{ item.revision }}{% endif %}
+          </summary>
+          {% if item.data_changes %}
+            <div class="mt-2">
+              <div class="fw-semibold small">Field changes</div>
+              <ul class="small mb-0">
+                {% for change in item.data_changes %}
+                  <li>{{ change.scope }} {{ change.field }}: {{ change.before }} to {{ change.after }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+          {% if item.bom_changes %}
+            <div class="mt-2">
+              <div class="fw-semibold small">BOM changes</div>
+              {% if item.bom_changes.added %}
+                <div class="small">Added:
+                  {% for child in item.bom_changes.added %}
+                    <span>{{ child.part_number }}{% if child.revision %} REV {{ child.revision }}{% endif %} x {{ child.qty }}</span>{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </div>
+              {% endif %}
+              {% if item.bom_changes.removed %}
+                <div class="small">Removed:
+                  {% for child in item.bom_changes.removed %}
+                    <span>{{ child.part_number }}{% if child.revision %} REV {{ child.revision }}{% endif %} x {{ child.qty }}</span>{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </div>
+              {% endif %}
+              {% if item.bom_changes.qty_changed %}
+                <div class="small">Qty changed:
+                  {% for child in item.bom_changes.qty_changed %}
+                    <span>{{ child.part_number }}{% if child.revision %} REV {{ child.revision }}{% endif %} {{ child.before_qty }} to {{ child.after_qty }}</span>{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+          {% endif %}
+          {% if item.file_changes %}
+            <div class="mt-2">
+              <div class="fw-semibold small">File changes</div>
+              <ul class="small mb-0">
+                {% for change in item.file_changes %}
+                  <li>{{ change.action|upper }} {{ change.kind }}: {{ change.name or change.rel_path or change.ext_group }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+        </details>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% elif not result.parts_seeded_list and not result.artifacts_found_by_type and not err_count and not warn_count %}
+  {{ empty_state("Nothing else to review", "This import completed without warnings, seeded parts, or detected modifications.") }}
+{% endif %}
 {% endblock %}

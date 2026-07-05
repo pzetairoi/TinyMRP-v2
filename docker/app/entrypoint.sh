@@ -110,5 +110,5 @@ if [ "$TRY" -ge "$MAX_TRIES" ]; then
   echo "[entrypoint] Gave up seeding after $MAX_TRIES attempts; continuing to start app"
 fi
 
-echo "[entrypoint] Launching: $@"
+echo "[entrypoint] Launching: $*"
 exec "$@"

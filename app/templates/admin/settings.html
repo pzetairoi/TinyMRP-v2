@@ -1,266 +1,242 @@
 {% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header, card_header, action_bar, empty_state %}
 {% block title %}Admin Settings{% endblock %}
 {% block content %}
-<div class="container my-4">
-  <h1 class="h4 mb-4">Admin Settings</h1>
-  <form method="post" enctype="multipart/form-data">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{% call page_header("Admin Settings", "Shared application settings for branding, timezone, imports, file sources, and process classification.", "Admin") %}
+  <div class="tm-helper-text">Changes apply across the Flask/Jinja UI and related exports.</div>
+{% endcall %}
+<form method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">Branding</h5>
-        <p class="text-muted small">Upload a PNG or SVG logo used across the app and doc packs.</p>
-        <div class="mb-2">
-          <img src="{{ url_for('branding.logo') }}" alt="Brand logo" style="max-height:64px;max-width:180px;">
-        </div>
-        <div class="mb-3">
-          <input class="form-control form-control-sm" type="file" name="brand_logo" accept="image/png,image/svg+xml">
-        </div>
-        <div class="form-check">
-          <input class="form-check-input" type="checkbox" id="removeLogo" name="remove_logo" value="on">
-          <label class="form-check-label" for="removeLogo">Remove custom logo (revert to default)</label>
-        </div>
+  <div class="card shadow-sm tm-card mb-3">
+    <div class="card-body">
+      {{ card_header("Branding", "Upload a PNG or SVG logo used across the app and doc packs.") }}
+      <div class="mb-2">
+        <img src="{{ url_for('branding.logo') }}" alt="Brand logo" style="max-height:64px;max-width:180px;">
+      </div>
+      <div class="mb-3">
+        <input class="form-control form-control-sm" type="file" name="brand_logo" accept="image/png,image/svg+xml">
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="removeLogo" name="remove_logo" value="on">
+        <label class="form-check-label" for="removeLogo">Remove custom logo and revert to the default asset</label>
       </div>
     </div>
-
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">Timezone</h5>
-        <p class="text-muted small">Stored in UTC; displayed in this timezone across the UI and reports.</p>
-        <select class="form-select form-select-sm" name="timezone">
-          {% for tz in timezone_choices %}
-          <option value="{{ tz }}" {% if tz == selected_timezone %}selected{% endif %}>{{ tz }}</option>
-          {% endfor %}
-        </select>
-        <div class="form-text">Current local app time: {{ timezone_display_now or "-" }}</div>
-      </div>
-    </div>
-
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">Hardware classification</h5>
-        <p class="text-muted small">
-          These folder keywords are used to auto-classify parts as hardware during ZIP imports.
-          One keyword per line (or comma-separated). Matching is case-insensitive.
-        </p>
-        <textarea
-          class="form-control form-control-sm"
-          name="hardware_folders"
-          rows="6"
-          placeholder="hardware&#10;fasteners&#10;toolbox"
-        >{{ hardware_folders_text or '' }}</textarea>
-      </div>
-    </div>
-
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">Flat pattern page filter</h5>
-        <p class="text-muted small">
-          Binder PDFs will drop pages whose sheet name matches these tokens.
-          One token per line (or comma-separated). Matching is case-insensitive and ignores separators.
-        </p>
-        <textarea
-          class="form-control form-control-sm"
-          name="flat_pattern_page_names"
-          rows="4"
-          placeholder="flatpattern"
-        >{{ flat_pattern_page_names_text or '' }}</textarea>
-      </div>
-    </div>
-
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">Upload Pack limits</h5>
-        <p class="text-muted small">Set size limits for ZIP uploads and individual files (MB).</p>
-        <div class="row g-2">
-          <div class="col-md-4">
-            <label class="form-label small">Max ZIP size (MB)</label>
-            <input
-              class="form-control form-control-sm"
-              type="number"
-              name="upload_pack_max_zip_mb"
-              min="0"
-              value="{{ settings.upload_pack_max_zip_mb or 1024 }}"
-            >
-          </div>
-          <div class="col-md-4">
-            <label class="form-label small">Max file size (MB)</label>
-            <input
-              class="form-control form-control-sm"
-              type="number"
-              name="upload_pack_max_file_mb"
-              min="0"
-              value="{{ settings.upload_pack_max_file_mb or 1024 }}"
-            >
-          </div>
-          <div class="col-md-4">
-            <label class="form-label small">Max files in ZIP</label>
-            <input
-              class="form-control form-control-sm"
-              type="number"
-              name="upload_pack_max_files"
-              min="0"
-              value="{{ settings.upload_pack_max_files or 5000 }}"
-            >
-          </div>
-        </div>
-        <div class="text-muted small mt-2">
-          Set to 0 to disable a limit. Defaults: 1024 MB ZIP, 1024 MB file, 5000 files.
-        </div>
-      </div>
-    </div>
-
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <h5 class="card-title">File sources</h5>
-        <p class="text-muted small">
-          Configure primary/secondary deliverable roots. Lower priority wins first.
-          Scope controls whether a source is preferred for approved parts, unapproved parts, or both.
-          Clear the local root to disable a row.
-        </p>
-        <div class="table-responsive">
-          <table class="table table-sm align-middle mb-0">
-            <thead>
-              <tr>
-                <th style="min-width: 120px;">Label</th>
-                <th style="min-width: 280px;">Local root</th>
-                <th style="min-width: 180px;">Public URL prefix</th>
-                <th style="width: 110px;">Priority</th>
-                <th style="width: 180px;">Scope</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for row in file_source_rows %}
-              {% set scope = 'both' %}
-              {% if row.get('use_for_approved') and not row.get('use_for_unapproved') %}
-                {% set scope = 'approved' %}
-              {% elif row.get('use_for_unapproved') and not row.get('use_for_approved') %}
-                {% set scope = 'unapproved' %}
-              {% endif %}
-              <tr>
-                <td>
-                  <input class="form-control form-control-sm" type="text" name="source_label" value="{{ row.get('label', '') }}">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm" type="text" name="source_local_root" value="{{ row.get('local_root', '') }}" placeholder="C:\Deliverables">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm" type="text" name="source_url_prefix" value="{{ row.get('url_prefix', '') }}" placeholder="/deliverables">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm" type="number" min="1" name="source_priority" value="{{ row.get('priority', loop.index) }}">
-                </td>
-                <td>
-                  <select class="form-select form-select-sm" name="source_scope">
-                    <option value="both" {% if scope == 'both' %}selected{% endif %}>Approved + WIP</option>
-                    <option value="approved" {% if scope == 'approved' %}selected{% endif %}>Approved only</option>
-                    <option value="unapproved" {% if scope == 'unapproved' %}selected{% endif %}>WIP only</option>
-                  </select>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-<div class="card shadow-sm mb-3">
-  <div class="card-body">
-    <h5 class="card-title">Arena export</h5>
-    <p class="text-muted small">
-      Default BASE used for Arena file-link CSV exports. Users can still override it in the part Actions tab.
-    </p>
-    <label class="form-label small fw-semibold" for="arenaFileLinkBaseUrl">
-      BASE for file links
-    </label>
-    <input
-      id="arenaFileLinkBaseUrl"
-      class="form-control form-control-sm font-monospace"
-      type="text"
-      name="arena_file_link_base_url"
-      value="{{ settings.arena_file_link_base_url or '' }}"
-      placeholder="https://your.web.chain/touse/aspattern/"
-    >
   </div>
-</div>
 
+  <div class="card shadow-sm tm-card mb-3">
+    <div class="card-body">
+      {{ card_header("Timezone", "Stored in UTC and displayed in this timezone across the UI and reports.") }}
+      <select class="form-select form-select-sm" name="timezone">
+        {% for tz in timezone_choices %}
+        <option value="{{ tz }}" {% if tz == selected_timezone %}selected{% endif %}>{{ tz }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Current local app time: {{ timezone_display_now or "-" }}</div>
+    </div>
+  </div>
 
-    <div class="card shadow-sm mb-3">
-      <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
-          <div>
-            <h5 class="card-title mb-0">Process library</h5>
-            <p class="text-muted small mt-2 mb-0">
-              Manage canonical process names, icons, colors, aliases, and required file groups. Add custom processes here so future imports classify them directly instead of falling back to <code>others</code>.
-            </p>
-          </div>
-          <div class="d-flex gap-2">
-            <button class="btn btn-sm btn-outline-primary" type="button" id="addProcessRow">
-              Add process
-            </button>
-            <button class="btn btn-sm btn-outline-secondary" type="submit" name="reset_process_library" value="1">
-              Restore defaults
-            </button>
-          </div>
+  <div class="card shadow-sm tm-card mb-3">
+    <div class="card-body">
+      {{ card_header("Hardware Classification", "Folder keywords used to auto-classify parts as hardware during ZIP imports.") }}
+      <p class="tm-helper-text">Enter one keyword per line or comma-separated values. Matching is case-insensitive.</p>
+      <textarea
+        class="form-control form-control-sm"
+        name="hardware_folders"
+        rows="6"
+        placeholder="hardware&#10;fasteners&#10;toolbox"
+      >{{ hardware_folders_text or '' }}</textarea>
+    </div>
+  </div>
+
+  <div class="card shadow-sm tm-card mb-3">
+    <div class="card-body">
+      {{ card_header("Flat Pattern Page Filter", "Binder PDFs drop pages whose sheet name matches these tokens.") }}
+      <p class="tm-helper-text">Enter one token per line or comma-separated values. Matching is case-insensitive and ignores separators.</p>
+      <textarea
+        class="form-control form-control-sm"
+        name="flat_pattern_page_names"
+        rows="4"
+        placeholder="flatpattern"
+      >{{ flat_pattern_page_names_text or '' }}</textarea>
+    </div>
+  </div>
+
+  <div class="card shadow-sm tm-card mb-3">
+    <div class="card-body">
+      {{ card_header("Upload Pack Limits", "Size limits for ZIP uploads and individual files in MB.") }}
+      <div class="row g-2">
+        <div class="col-md-4">
+          <label class="form-label small">Max ZIP size (MB)</label>
+          <input
+            class="form-control form-control-sm"
+            type="number"
+            name="upload_pack_max_zip_mb"
+            min="0"
+            value="{{ settings.upload_pack_max_zip_mb or 1024 }}"
+          >
         </div>
-        <p class="text-muted small mt-2">
-          After adding a new process or alias, use <strong>Save settings + recompute existing parts</strong> to reclassify existing parts that were previously stored as <code>others</code>.
-        </p>
-        <datalist id="processIconList">
-          {% for icon in process_icon_choices %}
-          <option value="{{ icon }}"></option>
-          {% endfor %}
-        </datalist>
-        {% if process_rows %}
-        <div class="table-responsive">
-          <table class="table table-sm align-middle mb-0">
-            <thead>
-              <tr>
-                <th>Process</th>
-                <th>Icon</th>
-                <th>Color</th>
-                <th>Aliases</th>
-                <th>Required files</th>
-              </tr>
-            </thead>
-            <tbody id="processRows">
-              {% for row in process_rows %}
-              <tr>
-                <td>
-                  <input class="form-control form-control-sm" type="text" name="process_name" value="{{ row.name }}" placeholder="welding">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm" type="text" name="process_icon" value="{{ row.icon }}" list="processIconList" placeholder="welding.svg">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm" type="text" name="process_color" value="{{ row.color }}" placeholder="255, 192, 0">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm" type="text" name="process_aliases" value="{{ row.aliases | join(', ') }}" placeholder="stud welding, fabrication">
-                </td>
-                <td>
-                  <input class="form-control form-control-sm" type="text" name="process_file_groups" value="{{ row.file_groups | join(', ') }}" placeholder="pdf, step, dxf">
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <div class="col-md-4">
+          <label class="form-label small">Max file size (MB)</label>
+          <input
+            class="form-control form-control-sm"
+            type="number"
+            name="upload_pack_max_file_mb"
+            min="0"
+            value="{{ settings.upload_pack_max_file_mb or 1024 }}"
+          >
         </div>
-        {% else %}
-          <div class="text-muted small">No process metadata loaded.</div>
-        {% endif %}
+        <div class="col-md-4">
+          <label class="form-label small">Max files in ZIP</label>
+          <input
+            class="form-control form-control-sm"
+            type="number"
+            name="upload_pack_max_files"
+            min="0"
+            value="{{ settings.upload_pack_max_files or 5000 }}"
+          >
+        </div>
+      </div>
+      <div class="tm-helper-text mt-2">Set a value to 0 to disable that limit. Defaults are 1024 MB ZIP, 1024 MB file, and 5000 files.</div>
+    </div>
+  </div>
+
+  <div class="card shadow-sm tm-card mb-3">
+    <div class="card-body">
+      {{ card_header("File Sources", "Primary and secondary deliverable roots used for local and public file resolution.") }}
+      <p class="tm-helper-text">Lower priority wins first. Scope decides whether a source is used for approved parts, WIP parts, or both. Clear the local root to disable a row.</p>
+      <div class="table-responsive tm-table-shell">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th style="min-width: 120px;">Label</th>
+              <th style="min-width: 280px;">Local root</th>
+              <th style="min-width: 180px;">Public URL prefix</th>
+              <th style="width: 110px;">Priority</th>
+              <th style="width: 180px;">Scope</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in file_source_rows %}
+            {% set scope = 'both' %}
+            {% if row.get('use_for_approved') and not row.get('use_for_unapproved') %}
+              {% set scope = 'approved' %}
+            {% elif row.get('use_for_unapproved') and not row.get('use_for_approved') %}
+              {% set scope = 'unapproved' %}
+            {% endif %}
+            <tr>
+              <td>
+                <input class="form-control form-control-sm" type="text" name="source_label" value="{{ row.get('label', '') }}">
+              </td>
+              <td>
+                <input class="form-control form-control-sm" type="text" name="source_local_root" value="{{ row.get('local_root', '') }}" placeholder="C:\Deliverables">
+              </td>
+              <td>
+                <input class="form-control form-control-sm" type="text" name="source_url_prefix" value="{{ row.get('url_prefix', '') }}" placeholder="/deliverables">
+              </td>
+              <td>
+                <input class="form-control form-control-sm" type="number" min="1" name="source_priority" value="{{ row.get('priority', loop.index) }}">
+              </td>
+              <td>
+                <select class="form-select form-select-sm" name="source_scope">
+                  <option value="both" {% if scope == 'both' %}selected{% endif %}>Approved + WIP</option>
+                  <option value="approved" {% if scope == 'approved' %}selected{% endif %}>Approved only</option>
+                  <option value="unapproved" {% if scope == 'unapproved' %}selected{% endif %}>WIP only</option>
+                </select>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
     </div>
+  </div>
 
-    <div class="d-flex gap-2 flex-wrap">
-      <button class="btn btn-primary" type="submit">Save settings</button>
-      <button class="btn btn-outline-primary" type="submit" name="recompute_process_library" value="1">
-        Save settings + recompute existing parts
-      </button>
+  <div class="card shadow-sm tm-card mb-3">
+    <div class="card-body">
+      {{ card_header("Arena Export", "Default BASE used for Arena file-link CSV exports.") }}
+      <p class="tm-helper-text">Users can still override this value in the part Actions tab.</p>
+      <label class="form-label small fw-semibold" for="arenaFileLinkBaseUrl">BASE for file links</label>
+      <input
+        id="arenaFileLinkBaseUrl"
+        class="form-control form-control-sm font-monospace"
+        type="text"
+        name="arena_file_link_base_url"
+        value="{{ settings.arena_file_link_base_url or '' }}"
+        placeholder="https://your.web.chain/touse/aspattern/"
+      >
     </div>
-  </form>
-</div>
+  </div>
+
+  <div class="card shadow-sm tm-card mb-3">
+    <div class="card-body">
+      {% call card_header("Process Library", "Canonical process names, icons, colors, aliases, and required file groups.") %}
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-primary" type="button" id="addProcessRow">
+            Add process
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" type="submit" name="reset_process_library" value="1">
+            Restore defaults
+          </button>
+        </div>
+      {% endcall %}
+      <p class="tm-helper-text">
+        Add custom processes here so future imports classify them directly instead of falling back to <code>others</code>.
+        After adding a process or alias, use <strong>Save settings + recompute existing parts</strong> to reclassify stored parts.
+      </p>
+      <datalist id="processIconList">
+        {% for icon in process_icon_choices %}
+        <option value="{{ icon }}"></option>
+        {% endfor %}
+      </datalist>
+      {% if process_rows %}
+      <div class="table-responsive tm-table-shell">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Process</th>
+              <th>Icon</th>
+              <th>Color</th>
+              <th>Aliases</th>
+              <th>Required files</th>
+            </tr>
+          </thead>
+          <tbody id="processRows">
+            {% for row in process_rows %}
+            <tr>
+              <td>
+                <input class="form-control form-control-sm" type="text" name="process_name" value="{{ row.name }}" placeholder="welding">
+              </td>
+              <td>
+                <input class="form-control form-control-sm" type="text" name="process_icon" value="{{ row.icon }}" list="processIconList" placeholder="welding.svg">
+              </td>
+              <td>
+                <input class="form-control form-control-sm" type="text" name="process_color" value="{{ row.color }}" placeholder="255, 192, 0">
+              </td>
+              <td>
+                <input class="form-control form-control-sm" type="text" name="process_aliases" value="{{ row.aliases | join(', ') }}" placeholder="stud welding, fabrication">
+              </td>
+              <td>
+                <input class="form-control form-control-sm" type="text" name="process_file_groups" value="{{ row.file_groups | join(', ') }}" placeholder="pdf, step, dxf">
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        {{ empty_state("No process metadata loaded", "The process library could not be loaded. Save defaults or review the process metadata source.") }}
+      {% endif %}
+    </div>
+  </div>
+
+  {% call action_bar("Saving updates the shared settings document used across the current instance.") %}
+    <button class="btn btn-primary" type="submit">Save settings</button>
+    <button class="btn btn-outline-primary" type="submit" name="recompute_process_library" value="1">
+      Save settings + recompute existing parts
+    </button>
+  {% endcall %}
+</form>
 
 <script>
 (function () {

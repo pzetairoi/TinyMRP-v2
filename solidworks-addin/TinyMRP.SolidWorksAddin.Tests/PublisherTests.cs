@@ -442,6 +442,98 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
+        public void DeliverablesExportSession_RoundTripsPhysicalQueueAndStatus()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            var options = new PublishOptions
+            {
+                DeliverablesFolder = @"C:\out\deliverables",
+                BomFolder = @"C:\out\bom",
+                ExportStep = true,
+                TopLevelOnly = false
+            };
+
+            Type queueItemType = GetNestedType("PhysicalExportQueueItem");
+            Type listType = typeof(List<>).MakeGenericType(queueItemType);
+            var queue = (IList)Activator.CreateInstance(listType);
+            queue.Add(CreatePhysicalExportQueueItem(queueItemType, @"C:\vault\root.sldasm", false, "root", 0, true));
+            queue.Add(CreatePhysicalExportQueueItem(queueItemType, @"C:\vault\root.slddrw", true, "root drawing", 0, true));
+
+            object session = InvokePrivate(
+                publisher,
+                "CreateDeliverablesExportSessionState",
+                queue,
+                options,
+                @"C:\vault\root.sldasm",
+                "MAIN",
+                string.Empty,
+                @"C:\logs\export.log");
+
+            Assert.AreEqual(2, GetField(session, "SchemaVersion"));
+
+            IList sessionQueue = (IList)GetField(session, "PhysicalQueue");
+            Assert.AreEqual(2, sessionQueue.Count);
+            Assert.AreEqual("pending", GetField(sessionQueue[0], "Status"));
+            SetField(sessionQueue[0], "Status", "done");
+            SetField(sessionQueue[0], "CompletedUtc", "2026-07-05T00:00:00");
+
+            string json = (string)InvokePrivate(publisher, "SerializeExportSession", session);
+            Assert.IsFalse(string.IsNullOrWhiteSpace(json));
+
+            object roundTrip = InvokePrivate(publisher, "DeserializeExportSession", json);
+            Assert.IsNotNull(roundTrip);
+            Assert.AreEqual(2, GetField(roundTrip, "SchemaVersion"));
+
+            IList roundTripQueue = (IList)GetField(roundTrip, "PhysicalQueue");
+            Assert.AreEqual(2, roundTripQueue.Count);
+            Assert.AreEqual("done", GetField(roundTripQueue[0], "Status"));
+            Assert.AreEqual("2026-07-05T00:00:00", GetField(roundTripQueue[0], "CompletedUtc"));
+            Assert.AreEqual("pending", GetField(roundTripQueue[1], "Status"));
+            Assert.AreEqual(true, GetField(roundTripQueue[1], "IsDrawing"));
+        }
+
+        [TestMethod]
+        public void HasIncompleteExportSession_RejectsLegacySchemaVersion()
+        {
+            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+            string activePath = (string)InvokePrivate(publisher, "GetActiveExportSessionPath");
+            string backupPath = activePath + ".test-backup";
+            string directory = Path.GetDirectoryName(activePath);
+            Directory.CreateDirectory(directory);
+
+            bool hadExisting = File.Exists(activePath);
+            if (hadExisting)
+            {
+                File.Copy(activePath, backupPath, true);
+            }
+
+            try
+            {
+                // A schema-version-1 (legacy PlannedRef-based) session with no PhysicalQueue must never
+                // be reported as resumable by the current (PhysicalExportQueueItem-based) pipeline.
+                object legacySession = Activator.CreateInstance(GetNestedType("ExportSessionState"), true);
+                SetField(legacySession, "SchemaVersion", 1);
+                SetField(legacySession, "Status", "running");
+                string legacyJson = (string)InvokePrivate(publisher, "SerializeExportSession", legacySession);
+                File.WriteAllText(activePath, legacyJson, new UTF8Encoding(false));
+
+                Assert.IsFalse(publisher.HasIncompleteExportSession());
+            }
+            finally
+            {
+                if (hadExisting)
+                {
+                    File.Copy(backupPath, activePath, true);
+                    File.Delete(backupPath);
+                }
+                else if (File.Exists(activePath))
+                {
+                    File.Delete(activePath);
+                }
+            }
+        }
+
+        [TestMethod]
         public void PrepareSessionForResume_RevalidatesRunningDoneAndFailedItems()
         {
             var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
@@ -989,6 +1081,18 @@ namespace TinyMRP.SolidWorksAddin.Tests
             SetField(entry, "IsAssembly", isAssembly);
             SetField(entry, "MaxDepth", maxDepth);
             SetField(entry, "SubtreeEstimate", subtreeEstimate);
+            SetField(entry, "IsRoot", isRoot);
+            return entry;
+        }
+
+        private static object CreatePhysicalExportQueueItem(Type queueItemType, string physicalPath, bool isDrawing,
+            string displayName, int docType, bool isRoot)
+        {
+            object entry = Activator.CreateInstance(queueItemType, true);
+            SetField(entry, "IsDrawing", isDrawing);
+            SetField(entry, "PhysicalPath", physicalPath);
+            SetField(entry, "DisplayName", displayName);
+            SetField(entry, "DocType", docType);
             SetField(entry, "IsRoot", isRoot);
             return entry;
         }

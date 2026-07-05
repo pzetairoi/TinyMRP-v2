@@ -1134,6 +1134,7 @@ def _visual_list_pdf(
         except Exception:
             qty_str = f"x{qty}"
         try:
+            from reportlab.pdfbase.pdfmetrics import stringWidth
             qty_w = stringWidth(qty_str, "Helvetica-Bold", 11.5)
         except Exception:
             qty_w = 0.0

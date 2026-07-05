@@ -1,7 +1,7 @@
 {% extends "security/base.html" %}
+{% from "ui/_components.html" import error_state, page_header %}
 {% block title %}CSRF Error{% endblock %}
 {% block content %}
-  <div class="alert alert-danger">
-    <strong>CSRF Error:</strong> {{ reason }}
-  </div>
+{% call page_header("Request Verification Error", "The request could not be verified securely.", "Security") %}{% endcall %}
+{{ error_state("CSRF check failed", (reason or "The request could not be verified.") ~ " Retry the action from the original form. If the problem persists, refresh the page and submit again.") }}
 {% endblock %}

@@ -330,9 +330,12 @@ namespace TinyMRP.SolidWorksAddin.UI
             btnDeselectAll.Click += (_, __) => SetDeliverableChecks(false);
             var btnCreate = new Button { Text = "Create files", AutoSize = true };
             btnCreate.Click += OnCreateFiles;
+            var btnResume = new Button { Text = "Resume last export", AutoSize = true };
+            btnResume.Click += OnResumeLastExport;
             publishActions.Controls.Add(btnSelectAll);
             publishActions.Controls.Add(btnDeselectAll);
             publishActions.Controls.Add(btnCreate);
+            publishActions.Controls.Add(btnResume);
             AddSection(panel, CreateGroupBox("Publish actions", publishActions));
 
             var uploadPackActions = new FlowLayoutPanel
@@ -2136,6 +2139,38 @@ namespace TinyMRP.SolidWorksAddin.UI
             publisher.ProcessFiles(options, Log, UpdatePublishProgress);
             UpdateRunLogLink(publisher.LastRunLogPath);
             // Keep the final status/progress from the publisher (includes per-run log path).
+        }
+
+        private void OnResumeLastExport(object sender, EventArgs e)
+        {
+            TinyMrpPublisher publisher = AddinContext.Publisher;
+            if (publisher == null)
+            {
+                MessageBox.Show("Publisher is not initialized.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!publisher.HasIncompleteExportSession())
+            {
+                MessageBox.Show("No incomplete export session was found.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
+            SetStatus("Resuming last export...");
+            UpdateRunLogLink(string.Empty);
+            try
+            {
+                publisher.ResumeLastCreateFilesExport(Log, UpdatePublishProgress);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Resume failed: " + ex.Message, "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            UpdateRunLogLink(publisher.LastRunLogPath);
         }
 
         private void OnCreateUploadPack(object sender, EventArgs e)
