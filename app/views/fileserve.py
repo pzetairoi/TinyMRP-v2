@@ -88,13 +88,17 @@ def _rel_from_abs(abs_path: str) -> str | None:
 
 
 def _path_for_pf(pf: PartFile, kind: str) -> tuple[str | None, str | None]:
+    if kind == "thumb" and getattr(pf, "thumb_rel_path", None):
+        rel_norm = _safe_rel_path(pf.thumb_rel_path)
+        if rel_norm:
+            abs_path = _abs_from_rel(rel_norm)
+            if abs_path and os.path.isfile(abs_path):
+                return abs_path, rel_norm
     if getattr(pf, "path", None) and os.path.isabs(pf.path):
         rel = _rel_from_abs(pf.path) or getattr(pf, "rel_path", None)
         return pf.path, rel
     rel = None
-    if kind == "thumb" and getattr(pf, "thumb_rel_path", None):
-        rel = pf.thumb_rel_path
-    if not rel and getattr(pf, "rel_path", None):
+    if getattr(pf, "rel_path", None):
         rel = pf.rel_path
     if rel:
         rel_norm = _safe_rel_path(rel)

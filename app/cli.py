@@ -671,7 +671,9 @@ def files():
 def scan_one(pn, rev):
     recs = discover_part_files(pn, rev)
     ins = upsert_part_files(recs)
-    click.echo({"found": len(recs), "inserted": ins})
+    from app.services.thumbs_gen import generate_thumbs_for_parts
+    n_thumbs = generate_thumbs_for_parts([(pn, rev)])
+    click.echo({"found": len(recs), "inserted": ins, "thumbnails_generated": n_thumbs})
 
 @files.command("backfill-rel")
 @with_appcontext
