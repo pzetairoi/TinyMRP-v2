@@ -13,7 +13,12 @@ exclude = '''
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = ["E9", "F63", "F7", "F82"]
+
+[tool.ruff.lint]
+# Phase 0: syntax errors + undefined names/locals are blocking.
+# Burn-down list (enable next): F401 unused imports (60), F811 redefinitions (13),
+# F841 unused variables (7); then widen to E/W/B/S per the professionalization plan.
+select = ["E9", "F63", "F7", "F82", "F821", "F823"]
 exclude = [
   ".git",
   ".venv",
@@ -34,6 +39,9 @@ exclude = [
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+# Scope errors to the files explicitly passed on the CLI (CI checks 2 modules);
+# widen coverage gradually per docs/PROFESSIONALIZATION_PLAN.md.
+follow_imports = "silent"
 check_untyped_defs = false
 warn_unused_ignores = true
 exclude = "(app/static|frontend/dist|frontend/node_modules|OLD|instance)"

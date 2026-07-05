@@ -1,109 +1,117 @@
 {% extends "security/base.html" %}
-{% block title %}Audit Log — Admin{% endblock %}
+{% from "ui/_components.html" import page_header, action_bar, empty_state %}
+{% block title %}Audit Log â€” Admin{% endblock %}
 {% block content %}
-<div class="container my-4">
-  <h1 class="h4 mb-3">Audit Log</h1>
-  <p class="text-muted">DB alias: {{ alias }} | URI: {{ uri }} | ping: {{ "ok" if ping_ok else "fail" }}</p>
-  <p class="text-muted">Total entries: {{ total }} | Filtered: {{ filtered_total }}</p>
-  <form method="get" class="row g-2 align-items-end mb-3">
-    <div class="col-lg-3">
-      <label class="form-label small">Search</label>
-      <input class="form-control" type="text" name="q" placeholder="Search email, action, resource, IP, endpoint" value="{{ q or '' }}">
-    </div>
-    <div class="col-lg-2">
-      <label class="form-label small">User (email)</label>
-      <input class="form-control" type="text" name="email" value="{{ email or '' }}">
-    </div>
-    <div class="col-lg-2">
-      <label class="form-label small">User ID</label>
-      <input class="form-control" type="text" name="user_id" value="{{ user_id or '' }}">
-    </div>
-    <div class="col-lg-2">
-      <label class="form-label small">IP</label>
-      <input class="form-control" type="text" name="ip" value="{{ ip or '' }}">
-    </div>
-    <div class="col-lg-2">
-      <label class="form-label small">Action</label>
-      <input class="form-control" type="text" name="action" value="{{ action or '' }}">
-    </div>
-    <div class="col-lg-1">
-      <label class="form-label small">Method</label>
-      <select class="form-select" name="method">
-        <option value="" {% if not method %}selected{% endif %}>Any</option>
-        {% for m in ["GET","POST","PUT","PATCH","DELETE"] %}
-          <option value="{{ m }}" {% if method == m %}selected{% endif %}>{{ m }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-lg-3">
-      <label class="form-label small">Endpoint</label>
-      <input class="form-control" type="text" name="endpoint" value="{{ endpoint or '' }}">
-    </div>
-    <div class="col-lg-2">
-      <label class="form-label small">Resource type</label>
-      <input class="form-control" type="text" name="resource_type" value="{{ resource_type or '' }}">
-    </div>
-    <div class="col-lg-2">
-      <label class="form-label small">Start ({{ selected_timezone }})</label>
-      <input class="form-control" type="datetime-local" name="start" value="{{ start }}">
-    </div>
-    <div class="col-lg-2">
-      <label class="form-label small">End ({{ selected_timezone }})</label>
-      <input class="form-control" type="datetime-local" name="end" value="{{ end }}">
-    </div>
-    <div class="col-lg-1">
-      <label class="form-label small">Limit</label>
-      <input class="form-control" type="number" name="limit" min="1" max="1000" value="{{ limit or 200 }}" title="Max rows">
-    </div>
-    <div class="col-lg-1">
-      <label class="form-label small">Offset</label>
-      <input class="form-control" type="number" name="offset" min="0" value="{{ offset or 0 }}" title="Skip rows">
-    </div>
-    <div class="col-auto">
-      <button class="btn btn-primary" type="submit">Filter</button>
-    </div>
-  </form>
-
-  <div class="table-responsive">
-    <table class="table table-sm table-striped align-middle">
-      <thead>
-        <tr>
-          <th style="white-space:nowrap">Time ({{ selected_timezone }})</th>
-          <th>Email</th>
-          <th>Roles</th>
-          <th>Action</th>
-          <th>Type</th>
-          <th>Method</th>
-          <th>Endpoint</th>
-          <th>Resource</th>
-          <th>IP</th>
-          <th>User-Agent</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for e in logs %}
-        <tr>
-          <td style="white-space:nowrap">{{ display_ts(e.ts, '%Y-%m-%d %H:%M:%S %Z') if e.ts else '' }}</td>
-          <td>{{ e.email }}</td>
-          <td>{{ e.roles }}</td>
-          <td>{{ e.action }}</td>
-          <td>{{ e.resource_type }}</td>
-          <td>{{ e.method }}</td>
-          <td style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.endpoint }}">{{ e.endpoint }}</td>
-          <td style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.resource }}">{{ e.resource }}</td>
-          <td>{{ e.ip }}</td>
-          <td style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.ua }}">{{ e.ua }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="10" class="text-center text-muted py-4">No entries.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+{% call page_header("Audit Log", "Review recorded access and operational events.", "Admin") %}
+  <div class="tm-helper-text">
+    <div>DB alias: {{ alias }} | URI: {{ uri }} | ping: {{ "ok" if ping_ok else "fail" }}</div>
+    <div>Total entries: {{ total }} | Filtered: {{ filtered_total }}</div>
   </div>
+{% endcall %}
+
+<form method="get" class="card shadow-sm tm-card mb-3">
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-lg-3">
+        <label class="form-label small">Search</label>
+        <input class="form-control" type="text" name="q" placeholder="Search email, action, resource, IP, endpoint" value="{{ q or '' }}">
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label small">User (email)</label>
+        <input class="form-control" type="text" name="email" value="{{ email or '' }}">
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label small">User ID</label>
+        <input class="form-control" type="text" name="user_id" value="{{ user_id or '' }}">
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label small">IP</label>
+        <input class="form-control" type="text" name="ip" value="{{ ip or '' }}">
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label small">Action</label>
+        <input class="form-control" type="text" name="action" value="{{ action or '' }}">
+      </div>
+      <div class="col-lg-1">
+        <label class="form-label small">Method</label>
+        <select class="form-select" name="method">
+          <option value="" {% if not method %}selected{% endif %}>Any</option>
+          {% for m in ["GET","POST","PUT","PATCH","DELETE"] %}
+            <option value="{{ m }}" {% if method == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-3">
+        <label class="form-label small">Endpoint</label>
+        <input class="form-control" type="text" name="endpoint" value="{{ endpoint or '' }}">
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label small">Resource type</label>
+        <input class="form-control" type="text" name="resource_type" value="{{ resource_type or '' }}">
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label small">Start ({{ selected_timezone }})</label>
+        <input class="form-control" type="datetime-local" name="start" value="{{ start }}">
+      </div>
+      <div class="col-lg-2">
+        <label class="form-label small">End ({{ selected_timezone }})</label>
+        <input class="form-control" type="datetime-local" name="end" value="{{ end }}">
+      </div>
+      <div class="col-lg-1">
+        <label class="form-label small">Limit</label>
+        <input class="form-control" type="number" name="limit" min="1" max="1000" value="{{ limit or 200 }}" title="Max rows">
+      </div>
+      <div class="col-lg-1">
+        <label class="form-label small">Offset</label>
+        <input class="form-control" type="number" name="offset" min="0" value="{{ offset or 0 }}" title="Skip rows">
+      </div>
+    </div>
+  </div>
+  {% call action_bar("Filters update the table below without changing audit semantics.") %}
+    <button class="btn btn-primary" type="submit">Filter</button>
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Clear</a>
+  {% endcall %}
+</form>
+
+<div class="table-responsive tm-table-shell">
+  <table class="table table-sm table-striped align-middle mb-0">
+    <thead>
+      <tr>
+        <th style="white-space:nowrap">Time ({{ selected_timezone }})</th>
+        <th>Email</th>
+        <th>Roles</th>
+        <th>Action</th>
+        <th>Type</th>
+        <th>Method</th>
+        <th>Endpoint</th>
+        <th>Resource</th>
+        <th>IP</th>
+        <th>User-Agent</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in logs %}
+      <tr>
+        <td style="white-space:nowrap">{{ display_ts(e.ts, '%Y-%m-%d %H:%M:%S %Z') if e.ts else '' }}</td>
+        <td>{{ e.email }}</td>
+        <td>{{ e.roles }}</td>
+        <td>{{ e.action }}</td>
+        <td>{{ e.resource_type }}</td>
+        <td>{{ e.method }}</td>
+        <td style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.endpoint }}">{{ e.endpoint }}</td>
+        <td style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.resource }}">{{ e.resource }}</td>
+        <td>{{ e.ip }}</td>
+        <td style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.ua }}">{{ e.ua }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="py-3">{{ empty_state("No audit entries found", "Try widening the filters or generate activity before refreshing this page.") }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
+
+<form method="post" action="{{ url_for('admin_audit.audit_test') }}" class="mt-3">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="btn btn-outline-secondary btn-sm" type="submit">Insert test audit entry</button>
+</form>
 {% endblock %}
-
-
-
-<form method='post' action='{{ url_for('admin_audit.audit_test') }}' class='mt-3'><input type='hidden' name='csrf_token' value='{{ csrf_token() }}'><button class='btn btn-outline-secondary btn-sm' type='submit'>Insert Test Audit Entry</button></form>
-

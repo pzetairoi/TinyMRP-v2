@@ -1,12 +1,13 @@
 {% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header, card_header, empty_state %}
 {% block title %}Tools{% endblock %}
 {% block content %}
+{% call page_header("Tools", "Utilities and downloads for the TinyMRP toolchain.", "Tools") %}{% endcall %}
 <div class="row">
   <div class="col-lg-6">
-    <div class="card shadow-sm mb-3">
+    <div class="card shadow-sm tm-card mb-3">
       <div class="card-body">
-        <h5 class="card-title">SolidWorks Setup</h5>
-        <p class="text-muted">Installer + SolidWorks property tabs.</p>
+        {{ card_header("SolidWorks Setup", "Installer downloads and SolidWorks property tabs.") }}
         <div class="mb-3">
           <div class="fw-semibold small mb-1">Add-in installer</div>
           {% if addin_files %}
@@ -22,7 +23,7 @@
             {% endfor %}
           </ul>
           {% else %}
-          <p class="text-muted small mb-0">Place installers in <code>solidworks-addin/Windows Installer latest</code> to list them here.</p>
+          {{ empty_state("No installers listed", "Place installers in the solidworks-addin/Windows Installer latest folder to show them here.") }}
           {% endif %}
         </div>
         <div>
@@ -34,12 +35,11 @@
         </div>
       </div>
     </div>
-    <div class="card shadow-sm mb-3">
+    <div class="card shadow-sm tm-card mb-3">
       <div class="card-body">
-        <h5 class="card-title">Excel Compile</h5>
-        <p class="text-muted">Upload a compile list and bundle documents.</p>
+        {{ card_header("Excel Compile", "Upload a compile list and bundle documents.") }}
         <div class="d-flex gap-2 flex-wrap">
-          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('tools.excel_compile') }}">Open Compiler</a>
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('tools.excel_compile') }}">Open compiler</a>
           <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('static', filename='misc/excelcompile.xlsx') }}">Template</a>
         </div>
       </div>

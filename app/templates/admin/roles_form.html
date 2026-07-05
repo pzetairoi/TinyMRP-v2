@@ -1,11 +1,13 @@
 {% extends "security/base.html" %}
-{% block title %}{{ 'Edit role' if role else 'New role' }} · Admin{% endblock %}
+{% from "ui/_components.html" import page_header, card_header, empty_state %}
+{% block title %}{{ 'Edit role' if role else 'New role' }} Â· Admin{% endblock %}
 {% block content %}
+{% call page_header('Edit Role' if role else 'Create Role', 'Define the role name, description, and granted permissions.', 'Admin') %}{% endcall %}
 <div class="row justify-content-center">
   <div class="col-md-8 col-lg-7">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm tm-card">
       <div class="card-body p-4">
-        <h1 class="h5 mb-3">{{ 'Edit role' if role else 'New role' }}</h1>
+        {{ card_header('Role Details', 'Permissions are granted exactly as selected below.') }}
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="mb-3">
@@ -21,18 +23,22 @@
 
           <div class="mb-3">
             <label class="form-label">Permissions</label>
-            <div class="row row-cols-2 row-cols-md-3 g-2">
-              {% for p in permissions %}
-              <div class="col">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox"
-                         id="perm-{{ loop.index }}" name="permissions" value="{{ p }}"
-                         {% if p in selected %}checked{% endif %}>
-                  <label class="form-check-label" for="perm-{{ loop.index }}">{{ p }}</label>
+            {% if permissions %}
+              <div class="row row-cols-2 row-cols-md-3 g-2">
+                {% for p in permissions %}
+                <div class="col">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox"
+                           id="perm-{{ loop.index }}" name="permissions" value="{{ p }}"
+                           {% if p in selected %}checked{% endif %}>
+                    <label class="form-check-label" for="perm-{{ loop.index }}">{{ p }}</label>
+                  </div>
                 </div>
+                {% endfor %}
               </div>
-              {% endfor %}
-            </div>
+            {% else %}
+              {{ empty_state("No permissions available", "Leave this page unchanged and review the permission catalogue in code before editing roles.") }}
+            {% endif %}
           </div>
 
           <button class="btn btn-primary w-100" type="submit">{{ 'Save' if role else 'Create' }}</button>

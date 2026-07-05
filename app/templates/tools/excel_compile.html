@@ -1,14 +1,16 @@
 {% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header, card_header, empty_state %}
 {% block title %}Excel Compile{% endblock %}
 {% block content %}
+{% call page_header("Excel Compile", "Upload a compile sheet and bundle matching documentation.", "Tools") %}
+  <a class="btn btn-outline-secondary" href="{{ url_for('tools.tools_index') }}">Back to tools</a>
+{% endcall %}
 <div class="row justify-content-center">
   <div class="col-md-8 col-lg-6">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm tm-card">
       <div class="card-body p-4">
-        <h1 class="h5 mb-3">Excel Compile</h1>
-
         {% if upload %}
-          <p class="text-success mb-3">Upload and compile successful.</p>
+          {{ card_header("Compile Complete", "The uploaded workbook was processed successfully.") }}
           <a class="btn btn-primary mb-3" href="{{ url_for('tools.excel_compile_download', filename=filepath) }}">
             Download compiled documentation
           </a>
@@ -22,10 +24,12 @@
                 {% endfor %}
               </ul>
             </div>
+          {% else %}
+            {{ empty_state("No missing parts", "Every part in the uploaded sheet was matched to the available documentation.") }}
           {% endif %}
 
         {% else %}
-          <p class="text-muted">Download the template and upload a completed sheet.</p>
+          {{ card_header("Upload Workbook", "Download the template, complete it, and upload the `.xlsx` file here.") }}
           <p class="mb-3">
             <a href="{{ url_for('static', filename='misc/excelcompile.xlsx') }}">Template download</a>
           </p>

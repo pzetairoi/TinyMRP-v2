@@ -64,6 +64,15 @@ def create_app(config_object=None):
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+    # Application version (surfaced via /api/health). Env/config overrides win.
+    if not (app.config.get("APP_VERSION") or os.getenv("APP_VERSION")):
+        try:
+            version_file = os.path.join(os.path.dirname(__file__), "..", "VERSION")
+            with open(version_file, "r", encoding="utf-8") as fh:
+                app.config["APP_VERSION"] = fh.read().strip()
+        except Exception:
+            pass
+
     
     if config_object:
         app.config.from_object(config_object)

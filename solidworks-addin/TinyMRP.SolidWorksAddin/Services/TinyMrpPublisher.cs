@@ -34,7 +34,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         private const long MinEdrawingBytes = 4 * 1024;
         private const long MinGenericMeshBytes = 128;
         private const long MinGenericCadBytes = 128;
-        private const int ExportSessionSchemaVersion = 1;
+        private const int ExportSessionSchemaVersion = 2;
         private const string ExportSessionStatusPlanned = "planned";
         private const string ExportSessionStatusRunning = "running";
         private const string ExportSessionStatusPauseRequested = "pause_requested";
@@ -166,6 +166,10 @@ namespace TinyMRP.SolidWorksAddin.Services
             public int MaxDepth;
             public int SubtreeEstimate;
             public List<DeliverablePlan> Plans = new List<DeliverablePlan>();
+
+            // Session/resume tracking (persisted). Not touched by planning/grouping code.
+            public string Status = ExportItemStatusPending;
+            public string CompletedUtc;
         }
 
         private sealed class DeliverableFailureRecord
@@ -360,6 +364,10 @@ namespace TinyMRP.SolidWorksAddin.Services
             public string PlanPath;
             public string LogPath;
             public List<ExportSessionItem> Queue = new List<ExportSessionItem>();
+
+            // Session/resume tracking for the live "Create files" pipeline (PhysicalExportQueueItem-based).
+            // The legacy Queue field above belongs to the older PlannedRef-based pipeline and is untouched.
+            public List<PhysicalExportQueueItem> PhysicalQueue = new List<PhysicalExportQueueItem>();
         }
 
         private sealed class ResumePreparationStats
@@ -1474,6 +1482,41 @@ namespace TinyMRP.SolidWorksAddin.Services
             return state;
         }
 
+        private ExportSessionState CreateDeliverablesExportSessionState(List<PhysicalExportQueueItem> queue, PublishOptions options,
+            string rootModelPath, string rootConfigName, string planPath, string logPath)
+        {
+            var state = new ExportSessionState
+            {
+                SchemaVersion = ExportSessionSchemaVersion,
+                SessionId = Guid.NewGuid().ToString("N"),
+                CreatedUtc = UtcNowString(),
+                UpdatedUtc = UtcNowString(),
+                Status = ExportSessionStatusPlanned,
+                RootModelPath = rootModelPath ?? string.Empty,
+                RootConfigurationName = rootConfigName ?? string.Empty,
+                DeliverablesFolder = options != null ? (options.DeliverablesFolder ?? string.Empty) : string.Empty,
+                BomFolder = options != null ? (options.BomFolder ?? string.Empty) : string.Empty,
+                Options = ClonePublishOptions(options),
+                PlanPath = planPath ?? string.Empty,
+                LogPath = logPath ?? string.Empty
+            };
+
+            if (queue != null)
+            {
+                foreach (PhysicalExportQueueItem item in queue)
+                {
+                    if (item != null)
+                    {
+                        item.Status = ExportItemStatusPending;
+                        item.CompletedUtc = string.Empty;
+                        state.PhysicalQueue.Add(item);
+                    }
+                }
+            }
+
+            return state;
+        }
+
         private void SetActiveExportSession(ExportSessionState state)
         {
             lock (_sessionLock)
@@ -1638,6 +1681,34 @@ namespace TinyMRP.SolidWorksAddin.Services
         {
             ExportSessionState state = LoadExportSession(GetActiveExportSessionPath(), errorLog);
             if (state == null)
+            {
+                return null;
+            }
+
+            if (!IsSessionResumable(state.Status))
+            {
+                return null;
+            }
+
+            return state;
+        }
+
+        private ExportSessionState LoadLatestIncompletePhysicalExportSession(Action<string> errorLog)
+        {
+            ExportSessionState state = LoadExportSession(GetActiveExportSessionPath(), errorLog);
+            if (state == null)
+            {
+                return null;
+            }
+
+            // Only sessions written by the current (PhysicalExportQueueItem-based) pipeline are resumable
+            // here; older schema versions belong to the legacy PlannedRef-based pipeline and are discarded.
+            if (state.SchemaVersion != ExportSessionSchemaVersion)
+            {
+                return null;
+            }
+
+            if (state.PhysicalQueue == null || state.PhysicalQueue.Count == 0)
             {
                 return null;
             }
@@ -2128,7 +2199,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
         public bool HasIncompleteExportSession()
         {
-            return LoadLatestIncompleteExportSession(null) != null;
+            return LoadLatestIncompletePhysicalExportSession(null) != null;
         }
 
         public void ProcessFiles(PublishOptions options, Action<string> log, Action<int, int> progress)
@@ -2416,7 +2487,31 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
                 else
                 {
-                    RunPhysicalExportQueue(queue, queueRootModel, deliverablesFolder, effective, log, errorLog, progress);
+                    ExportSessionState deliverablesSession = CreateDeliverablesExportSessionState(
+                        queue,
+                        effective,
+                        rootDocInfo != null ? (rootDocInfo.Path ?? string.Empty) : string.Empty,
+                        swConf != null ? (swConf.Name ?? string.Empty) : string.Empty,
+                        string.Empty,
+                        runLog != null ? (runLog.Path ?? string.Empty) : string.Empty);
+                    deliverablesSession.Status = ExportSessionStatusRunning;
+                    SetActiveExportSession(deliverablesSession);
+                    SaveExportSessionAtomic(deliverablesSession, errorLog);
+
+                    RunPhysicalExportQueue(queue, queueRootModel, deliverablesFolder, effective, log, errorLog, progress, deliverablesSession);
+
+                    if (_currentExportSummary != null && _currentExportSummary.StoppedAfterCurrentFile)
+                    {
+                        deliverablesSession.Status = ExportSessionStatusPaused;
+                        SaveExportSessionAtomic(deliverablesSession, errorLog);
+                    }
+                    else
+                    {
+                        deliverablesSession.Status = ExportSessionStatusCompleted;
+                        SaveExportSessionAtomic(deliverablesSession, errorLog);
+                        ArchiveCompletedExportSession(deliverablesSession, errorLog);
+                        SetActiveExportSession(null);
+                    }
                 }
 
                 if (effective.CreateUploadPack)
@@ -2816,6 +2911,212 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         ResetCancel();
                         ResetPause();
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    _currentExportSummary = null;
+                }
+            }
+        }
+
+        public void ResumeLastCreateFilesExport(Action<string> log, Action<int, int> progress)
+        {
+            ExportSessionState session = LoadLatestIncompletePhysicalExportSession(null);
+            if (session == null)
+            {
+                throw new InvalidOperationException("No incomplete export session available.");
+            }
+
+            ModelDoc2 rootModel = _swApp != null ? (_swApp.ActiveDoc as ModelDoc2) : null;
+            string rootPath = string.Empty;
+            try
+            {
+                rootPath = rootModel != null ? (rootModel.GetPathName() ?? string.Empty) : string.Empty;
+            }
+            catch
+            {
+                rootPath = string.Empty;
+            }
+
+            if (rootModel == null ||
+                !string.Equals(NormalizePathForComparison(rootPath), NormalizePathForComparison(session.RootModelPath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "Resume requires the original root document to be open and active in SolidWorks: " +
+                    (session.RootModelPath ?? string.Empty));
+            }
+
+            PublishOptions effective = NormalizeOptions(ClonePublishOptions(session.Options));
+            ExportRunLog runLog = OpenExportRunLog(session.LogPath);
+            Action<string> errorLog = runLog != null ? new Action<string>(runLog.Write) : null;
+            SetLastRunLogPath(runLog);
+            session.LogPath = runLog != null ? (runLog.Path ?? string.Empty) : (session.LogPath ?? string.Empty);
+            SetActiveExportSession(session);
+            errorLog?.Invoke("RESUME create-files export session=" + (session.SessionId ?? string.Empty) +
+                             " status=" + (session.Status ?? string.Empty));
+
+            _currentExportSummary = new ExportSummary();
+
+            string BuildCompletionMessage(string statusLabel)
+            {
+                ExportSummary s = _currentExportSummary;
+                int ok = 0;
+                int fail = 0;
+                if (s != null)
+                {
+                    ok = s.ModelOk3mf + s.ModelOkStl + s.ModelOkPly + s.ModelOkStep + s.ModelOkEdraw + s.ModelOkPng +
+                         s.DwgOkPdf + s.DwgOkEdraw + s.DwgOkPng + s.DwgOkDxf;
+                    fail = GetDeliverableFailureFormatCount(s);
+                }
+
+                return BuildRunLogMessage((statusLabel ?? "Export") + ": " + ok + " files created, " + fail + " failed.", runLog);
+            }
+
+            try
+            {
+                try
+                {
+                    HashSet<string> baselineIds = SnapshotOpenDocIds();
+                    _currentExportSummary.BaselineDocIds = baselineIds;
+                    _currentExportSummary.InitialOpenDocs = baselineIds.Count;
+                }
+                catch
+                {
+                    _currentExportSummary.BaselineDocIds = null;
+                    _currentExportSummary.InitialOpenDocs = 0;
+                }
+
+                ResetCancel();
+                ResetStopAfterCurrentItem();
+                _closeWarningOnce.Clear();
+                _debugOnce.Clear();
+
+                List<PhysicalExportQueueItem> pendingItems = new List<PhysicalExportQueueItem>();
+                int totalItems = session.PhysicalQueue != null ? session.PhysicalQueue.Count : 0;
+                if (session.PhysicalQueue != null)
+                {
+                    foreach (PhysicalExportQueueItem item in session.PhysicalQueue)
+                    {
+                        if (item != null && !string.Equals(item.Status, ExportItemStatusDone, StringComparison.OrdinalIgnoreCase))
+                        {
+                            pendingItems.Add(item);
+                        }
+                    }
+                }
+
+                int completeItems = totalItems - pendingItems.Count;
+                errorLog?.Invoke("RESUME plan: total=" + totalItems + " complete=" + completeItems + " pending=" + pendingItems.Count);
+                UpdateProgress(progress, completeItems, totalItems);
+
+                if (pendingItems.Count == 0)
+                {
+                    session.Status = ExportSessionStatusCompleted;
+                    SaveExportSessionAtomic(session, errorLog);
+                    ArchiveCompletedExportSession(session, errorLog);
+                    SetActiveExportSession(null);
+                    Log(log, BuildRunLogMessage("Nothing left to resume. Existing completed items were kept.", runLog));
+                    return;
+                }
+
+                Log(log, "Resuming export: " + completeItems + "/" + totalItems + " already complete, " + pendingItems.Count + " remaining.");
+                session.Status = ExportSessionStatusRunning;
+                SaveExportSessionAtomic(session, errorLog);
+
+                string deliverablesFolder = EnsureTrailingSlash(effective.DeliverablesFolder);
+                if (string.IsNullOrWhiteSpace(deliverablesFolder))
+                {
+                    throw new InvalidOperationException("Deliverables folder is empty.");
+                }
+
+                Directory.CreateDirectory(deliverablesFolder);
+                EnsureMediaFolders(deliverablesFolder);
+
+                RunPhysicalExportQueue(pendingItems, rootModel, deliverablesFolder, effective, log, errorLog, progress, session);
+
+                if (_currentExportSummary != null && _currentExportSummary.StoppedAfterCurrentFile)
+                {
+                    session.Status = ExportSessionStatusPaused;
+                    SaveExportSessionAtomic(session, errorLog);
+                    Log(log, BuildCompletionMessage("Export paused"));
+                    return;
+                }
+
+                session.Status = ExportSessionStatusCompleted;
+                SaveExportSessionAtomic(session, errorLog);
+                ArchiveCompletedExportSession(session, errorLog);
+                SetActiveExportSession(null);
+
+                Log(log, BuildCompletionMessage("Export resumed and completed"));
+            }
+            catch (OperationCanceledException)
+            {
+                Log(log, BuildCompletionMessage("Export cancelled"));
+            }
+            catch (Exception ex)
+            {
+                ExportSessionState activeSession = GetActiveExportSession();
+                if (activeSession != null &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(activeSession.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
+                {
+                    activeSession.Status = ExportSessionStatusFailed;
+                    SaveExportSessionAtomic(activeSession, errorLog);
+                }
+
+                LogExportFailure(log, errorLog, "Resume failed: " + ex.Message);
+                if (ex is System.Runtime.InteropServices.COMException ||
+                    (ex.InnerException is System.Runtime.InteropServices.COMException))
+                {
+                    LogExceptionDetails(errorLog, "ResumeLastCreateFilesExport", ex);
+                }
+                Log(log, BuildCompletionMessage("Export resume failed"));
+            }
+            finally
+            {
+                try
+                {
+                    ExportSummary summary = _currentExportSummary;
+                    if (summary != null)
+                    {
+                        HashSet<string> finalIds = null;
+                        try
+                        {
+                            finalIds = SnapshotOpenDocIds();
+                            summary.FinalOpenDocs = finalIds.Count;
+                        }
+                        catch
+                        {
+                            finalIds = null;
+                            summary.FinalOpenDocs = 0;
+                        }
+
+                        summary.FinalPrivateMemoryBytes = GetPrivateMemoryBytes();
+                        WriteExportSummary(errorLog, summary, finalIds);
+                    }
+                }
+                catch
+                {
+                    // ignore summary errors
+                }
+                finally
+                {
+                    try
+                    {
+                        UpdateProgress(progress, 1, 1);
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    try
+                    {
+                        ResetCancel();
+                        ResetStopAfterCurrentItem();
                     }
                     catch
                     {
@@ -9332,7 +9633,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         }
 
         private void RunPhysicalExportQueue(List<PhysicalExportQueueItem> queue, ModelDoc2 rootModel, string deliverablesFolder,
-            PublishOptions options, Action<string> log, Action<string> errorLog, Action<int, int> progress)
+            PublishOptions options, Action<string> log, Action<string> errorLog, Action<int, int> progress,
+            ExportSessionState sessionState)
         {
             int total = queue != null ? queue.Count : 0;
             UpdateProgress(progress, 0, total);
@@ -9384,6 +9686,13 @@ namespace TinyMRP.SolidWorksAddin.Services
                 else
                 {
                     RunPhysicalModelQueueItem(item, rootModel, deliverablesFolder, options, log, errorLog);
+                }
+
+                item.Status = ExportItemStatusDone;
+                item.CompletedUtc = UtcNowString();
+                if (sessionState != null)
+                {
+                    SaveExportSessionAtomic(sessionState, errorLog);
                 }
 
                 processed++;

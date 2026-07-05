@@ -1,0 +1,56 @@
+# Keep the Docker build context small and free of secrets.
+# NOTE (do not exclude): frontend/ (needed by the fe build stage),
+# solidworks-addin/Windows Installer latest/ (served by /downloads/addin),
+# app/static/misc/ (served by /downloads/macro), docs/help (help system).
+
+# VCS / editors / local tooling
+.git
+.github
+.gitignore
+.gitleaks.toml
+.vscode
+.continue
+.claude
+.pre-commit-config.yaml
+
+# Python local state
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Environment and secrets — never bake into images
+.env
+.env.*
+instance/
+
+# Node
+frontend/node_modules
+frontend/dist
+
+# Tests and dev-only assets
+tests/
+testfiles/
+scripts/
+tools/
+
+# Deployment assets (not needed inside the app image)
+deploy/
+docker-compose.yml
+docker-compose.onefolder.yml
+
+# SolidWorks add-in sources (keep only the built installer folder)
+solidworks-addin/TinyMRP.SolidWorksAddin
+solidworks-addin/InstallerAssets
+solidworks-addin/*.sln
+solidworks-addin/*.md
+
+# Logs / misc
+*.log
+handycommands.txt
+serverdeploymentguide.txt

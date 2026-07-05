@@ -758,7 +758,8 @@ def _hash_counter_series_key(series_key: str) -> str:
     value = (series_key or "").strip()
     if not value:
         return ""
-    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
+    # Non-cryptographic use: shortens a counter series key for storage/lookup.
+    return hashlib.sha1(value.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
 
 
 def build_display_code(part_number: str, revision: str) -> str:

@@ -1,48 +1,48 @@
 {% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header, card_header, error_state, empty_state %}
 
 {% block title %}Help - TinyMRP{% endblock %}
 
 {% block content %}
-<div class="d-flex align-items-center justify-content-between mb-3">
-  <div>
-    <h1 class="h3 mb-1">Help</h1>
-    <div class="text-muted small">Guides and reference for using TinyMRP</div>
-  </div>
+{% call page_header("Help", "Guides and reference for using TinyMRP.", "Help") %}
   {% if toc_meta.generated_at %}
-  <div class="text-muted small text-end">
+  <div class="tm-helper-text text-end">
     <div>Last generated: {{ toc_meta.generated_at }}</div>
     {% if toc_meta.commit %}<div>Commit: {{ toc_meta.commit }}</div>{% endif %}
   </div>
   {% endif %}
-</div>
+{% endcall %}
 
 {% if help_missing %}
-<div class="alert alert-warning">
-  Help content not generated yet. Run <code>flask help build</code> to create it.
-</div>
+  {{ error_state("Help content not generated yet", "Run flask help build and refresh this page to make the built documentation available.") }}
 {% endif %}
 
 <div class="row g-4">
   <div class="col-lg-3">
-    <div class="card p-3">
-      <div class="fw-semibold mb-2">On this page</div>
-      <input id="helpSearch" class="form-control form-control-sm" placeholder="Search headings..." type="search" />
-      <div id="helpSearchEmpty" class="text-muted small mt-2 d-none">No matches</div>
-      <div class="mt-3" style="max-height: 70vh; overflow-y: auto;">
-        <ul id="helpToc" class="list-unstyled small mb-0">
-          {% for item in toc_items %}
-          <li data-toc-item class="mb-1" style="margin-left: {{ (item.level - 2) * 12 }}px;">
-            <a href="#{{ item.id }}" class="link-secondary text-decoration-none">{{ item.title }}</a>
-          </li>
-          {% endfor %}
-        </ul>
+    <div class="card shadow-sm tm-card h-100">
+      <div class="card-body">
+        {{ card_header("On This Page", "Search headings in the generated documentation.") }}
+        <input id="helpSearch" class="form-control form-control-sm" placeholder="Search headings..." type="search" />
+        <div id="helpSearchEmpty" class="mt-2 d-none">{{ empty_state("No matches", "Try a broader term to find matching headings.") }}</div>
+        <div class="mt-3" style="max-height: 70vh; overflow-y: auto;">
+          <ul id="helpToc" class="list-unstyled small mb-0">
+            {% for item in toc_items %}
+            <li data-toc-item class="mb-1" style="margin-left: {{ (item.level - 2) * 12 }}px;">
+              <a href="#{{ item.id }}" class="link-secondary text-decoration-none">{{ item.title }}</a>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
       </div>
     </div>
   </div>
   <div class="col-lg-9">
-    <div class="card p-4">
-      <div id="helpContent" class="help-content">
-        {{ help_html|safe }}
+    <div class="card shadow-sm tm-card">
+      <div class="card-body">
+        {{ card_header("Documentation") }}
+        <div id="helpContent" class="help-content">
+          {{ help_html|safe }}
+        </div>
       </div>
     </div>
   </div>

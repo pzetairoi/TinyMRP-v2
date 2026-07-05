@@ -1,0 +1,118 @@
+{% macro page_header(title, subtitle=None, eyebrow=None) -%}
+{% set actions = caller()|trim if caller is defined else '' %}
+<header class="tm-page-header">
+  <div class="tm-page-header__body">
+    {% if eyebrow %}
+    <div class="tm-page-header__eyebrow">{{ eyebrow }}</div>
+    {% endif %}
+    <h1 class="tm-page-title">{{ title }}</h1>
+    {% if subtitle %}
+    <p class="tm-page-subtitle">{{ subtitle }}</p>
+    {% endif %}
+  </div>
+  {% if actions %}
+  <div class="tm-page-header__actions">
+    {{ actions }}
+  </div>
+  {% endif %}
+</header>
+{%- endmacro %}
+
+{% macro action_bar(helper=None, tone='default') -%}
+{% set actions = caller()|trim if caller is defined else '' %}
+<div class="tm-toolbar{% if tone != 'default' %} tm-toolbar--{{ tone }}{% endif %}">
+  {% if actions %}
+  <div class="tm-toolbar__actions">
+    {{ actions }}
+  </div>
+  {% endif %}
+  {% if helper %}
+  <div class="tm-toolbar__helper">{{ helper }}</div>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro section_header(title, subtitle=None) -%}
+{% set actions = caller()|trim if caller is defined else '' %}
+<div class="tm-section-header">
+  <div>
+    <h2 class="tm-section-title">{{ title }}</h2>
+    {% if subtitle %}
+    <p class="tm-section-subtitle">{{ subtitle }}</p>
+    {% endif %}
+  </div>
+  {% if actions %}
+  <div class="tm-section-header__actions">
+    {{ actions }}
+  </div>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro card_header(title, subtitle=None) -%}
+{% set actions = caller()|trim if caller is defined else '' %}
+<div class="tm-card-header">
+  <div>
+    <h2 class="tm-card-title">{{ title }}</h2>
+    {% if subtitle %}
+    <p class="tm-card-subtitle">{{ subtitle }}</p>
+    {% endif %}
+  </div>
+  {% if actions %}
+  <div class="tm-card-header__actions">
+    {{ actions }}
+  </div>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro empty_state(title, message, action_href=None, action_label=None, tone='neutral') -%}
+<div class="tm-state tm-state--empty tm-state--{{ tone }}">
+  <div class="tm-state__title">{{ title }}</div>
+  <p class="tm-state__text">{{ message }}</p>
+  {% if action_href and action_label %}
+  <a class="btn btn-sm btn-outline-secondary" href="{{ action_href }}">{{ action_label }}</a>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro loading_state(message='Loading...', detail=None) -%}
+<div class="tm-state tm-state--loading">
+  <div class="spinner-border spinner-border-sm text-primary" role="status" aria-hidden="true"></div>
+  <div>
+    <div class="tm-state__title">{{ message }}</div>
+    {% if detail %}
+    <p class="tm-state__text">{{ detail }}</p>
+    {% endif %}
+  </div>
+</div>
+{%- endmacro %}
+
+{% macro error_state(title, message, action_href=None, action_label=None) -%}
+<div class="tm-state tm-state--error" role="alert">
+  <div class="tm-state__title">{{ title }}</div>
+  <p class="tm-state__text">{{ message }}</p>
+  {% if action_href and action_label %}
+  <a class="btn btn-sm btn-outline-danger" href="{{ action_href }}">{{ action_label }}</a>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro status_badge(label, tone=None, kind='status') -%}
+{% set resolved = tone or (label|string|lower|replace(' ', '_')) %}
+{% if kind == 'priority' %}
+<span class="badge badge-priority priority-{{ resolved }}">{{ label }}</span>
+{% else %}
+<span class="badge badge-status status-{{ resolved }}">{{ label }}</span>
+{% endif %}
+{%- endmacro %}
+
+{% macro danger_block(title, message, hint=None) -%}
+<div class="tm-danger-block" role="alert">
+  <div class="tm-danger-block__title">{{ title }}</div>
+  <p class="tm-danger-block__text">{{ message }}</p>
+  {% if hint %}
+  <div class="tm-danger-block__hint">{{ hint }}</div>
+  {% endif %}
+</div>
+{%- endmacro %}

@@ -1,30 +1,35 @@
 {% extends "security/base.html" %}
-{% block title %}Edit user · Admin{% endblock %}
+{% from "ui/_components.html" import page_header, card_header, empty_state %}
+{% block title %}Edit user Â· Admin{% endblock %}
 {% block content %}
+{% call page_header("Edit User", "Update role access and optionally reset the password.", "Admin") %}{% endcall %}
 <div class="row justify-content-center">
   <div class="col-md-6 col-lg-5">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm tm-card">
       <div class="card-body p-4">
-        <h1 class="h5 mb-3">Edit user</h1>
+        {{ card_header("Access Settings", "Review assigned roles and change the password if needed.") }}
         <p class="text-muted mb-3">{{ user.email }}</p>
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="mb-3">
             <label class="form-label">Roles</label>
-            <div class="row row-cols-2 g-2">
-              {# build a list of role-id strings the user already has #}
-              {% set assigned_ids = user.roles | map(attribute='id') | map('string') | list %}
-              {% for r in roles %}
-              <div class="col">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="roles" id="role-{{ r.id }}"
-                    value="{{ r.id }}"
-                    {% if r.id|string in assigned_ids %}checked{% endif %}>
-                  <label class="form-check-label" for="role-{{ r.id }}">{{ r.name }}</label>
+            {% if roles %}
+              <div class="row row-cols-2 g-2">
+                {% set assigned_ids = user.roles | map(attribute='id') | map('string') | list %}
+                {% for r in roles %}
+                <div class="col">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="roles" id="role-{{ r.id }}"
+                      value="{{ r.id }}"
+                      {% if r.id|string in assigned_ids %}checked{% endif %}>
+                    <label class="form-check-label" for="role-{{ r.id }}">{{ r.name }}</label>
+                  </div>
                 </div>
+                {% endfor %}
               </div>
-              {% endfor %}
-            </div>
+            {% else %}
+              {{ empty_state("No roles available", "Create a role before changing access for this user.", url_for('admin_roles.roles_create'), "Create role") }}
+            {% endif %}
           </div>
           <div class="mb-3">
             <label class="form-label">Set new password (optional)</label>

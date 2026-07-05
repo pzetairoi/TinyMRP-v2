@@ -1,13 +1,15 @@
-﻿{% extends "security/base.html" %}
+{% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header, card_header, empty_state, status_badge %}
 {% set is_readonly = readonly if readonly is defined else false %}
 {% set hide_user_links = hide_user_links if hide_user_links is defined else false %}
 {% block title %}{{ 'View supplier' if is_readonly else ('Edit supplier' if supplier else 'New supplier') }} - Admin{% endblock %}
 {% block content %}
+{% call page_header('View Supplier' if is_readonly else ('Edit Supplier' if supplier else 'New Supplier'), 'Supplier contact details, linked users, and related orders.', 'Admin') %}{% endcall %}
 <div class="row justify-content-center">
   <div class="col-lg-10">
-    <div class="card shadow-sm">
+    <div class="card shadow-sm tm-card">
       <div class="card-body p-4">
-        <h1 class="h5 mb-3">{{ 'View supplier' if is_readonly else ('Edit supplier' if supplier else 'New supplier') }}</h1>
+        {{ card_header("Supplier Details", "All field names and save behaviour remain unchanged.") }}
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -37,7 +39,9 @@
             </div>
           </div>
 
-          <h2 class="h6 mt-4">Address</h2>
+          <div class="mt-4">
+            {{ card_header("Address") }}
+          </div>
           <div class="row g-3">
             <div class="col-md-4">
               <label class="form-label">Label</label>
@@ -74,8 +78,8 @@
           </div>
 
           {% if not hide_user_links %}
-          <div class="mt-3">
-            <label class="form-label">Linked users</label>
+          <div class="mt-4">
+            {{ card_header("Linked Users", "Users linked here can be scoped to supplier-related work.") }}
             {% set linked = (supplier.users | map(attribute='id') | map('string') | list) if supplier else [] %}
             <div class="border rounded p-2" style="max-height: 220px; overflow:auto;">
               {% for u in users %}
@@ -98,15 +102,15 @@
           {% endif %}
 
           {% if not is_readonly %}
-          <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
+          <button class="btn btn-primary w-100 mt-4" type="submit">Save</button>
           {% endif %}
         </form>
 
         {% if supplier and has_perm('orders.view') %}
         <div class="mt-4">
-          <h2 class="h6 fw-bold">Orders</h2>
-          <div class="table-responsive">
-            <table class="table table-sm table-striped align-middle">
+          {{ card_header("Orders", "Orders currently linked to this supplier.") }}
+          <div class="table-responsive tm-table-shell">
+            <table class="table table-sm table-striped align-middle mb-0">
               <thead>
                 <tr>
                   <th>Order #</th>
@@ -130,14 +134,14 @@
                       {% endif %}
                     </td>
                     <td>{{ o.kind }}</td>
-                    <td><span class="badge badge-status status-{{ o.status|default('draft') }}">{{ o.status or 'draft' }}</span></td>
+                    <td>{{ status_badge(o.status or 'draft', o.status|default('draft')) }}</td>
                     <td>{{ display_ts(o.order_date, '%Y-%m-%d') if o.order_date else '-' }}</td>
                     <td>{{ '%.2f' % o.total if o.total is not none else '-' }}</td>
                   </tr>
                   {% endfor %}
                 {% else %}
                   <tr>
-                    <td colspan="5" class="text-center text-muted py-3">No orders for this supplier.</td>
+                    <td colspan="5" class="py-3">{{ empty_state("No orders for this supplier", "Orders linked to this supplier will appear here once they exist.") }}</td>
                   </tr>
                 {% endif %}
               </tbody>
