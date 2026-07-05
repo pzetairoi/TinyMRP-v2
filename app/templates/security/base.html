@@ -26,6 +26,30 @@
     </style>
   </head>
   <body class="tm-body {{ body_class|default('') }}">
+    {% set request_path = request.path if request is defined else '' %}
+    {% set request_endpoint = request.endpoint if request is defined else '' %}
+    {% set parts_href = url_for('ui.parts_ui') %}
+    {% set import_href = url_for('ui.upload_pack_ui') %}
+    {% set tokens_href = url_for('ui.addin_tokens_ui') %}
+    {% set parts_active = request_path.startswith('/ui/parts') or request_path.startswith('/ui/part/') or request_path.startswith('/ui/bom/') %}
+    {% set jobs_view = has_perm('jobs.view') %}
+    {% set jobs_manage = has_perm('jobs.manage') %}
+    {% set jobs_active = request_path.startswith('/admin/jobs') %}
+    {% set orders_view = has_perm('orders.view') %}
+    {% set orders_manage = has_perm('orders.manage') %}
+    {% set orders_active = request_path.startswith('/admin/orders') %}
+    {% set customers_view = has_perm('customers.view') %}
+    {% set customers_manage = has_perm('customers.manage') %}
+    {% set suppliers_view = has_perm('suppliers.view') %}
+    {% set suppliers_manage = has_perm('suppliers.manage') %}
+    {% set companies_active = request_path.startswith('/admin/customers') or request_path.startswith('/admin/suppliers') %}
+    {% set tools_active = request_path.startswith('/tools') %}
+    {% set import_active = request_path.startswith('/ui/upload-pack') or request_path.startswith('/import') %}
+    {% set is_admin = current_user.is_authenticated and current_user.has_role('admin') %}
+    {% set admin_active = request_path == '/admin/' or request_path.startswith('/admin/settings') or request_path.startswith('/admin/users') or request_path.startswith('/admin/roles') or request_path.startswith('/admin/audit') or request_path.startswith('/admin/purge-parts') or request_path.startswith('/admin/metrics') or request_path.startswith('/ui/admin/') %}
+    {% set account_active = request_path.startswith('/app') %}
+    {% set tokens_active = request_path.startswith('/ui/addin/tokens') %}
+    {% set help_active = request_path.startswith('/help') %}
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
       <div class="container">
         <!-- Brand / logo -->
@@ -44,52 +68,67 @@
           <ul class="navbar-nav me-auto mb-2 mb-lg-0">
 
             {% if current_user.is_authenticated %}
-              <li class="nav-item"><a class="nav-link" href="/ui/parts">Inventory</a></li>
+              <li class="nav-item">
+                <a class="nav-link{% if parts_active %} active{% endif %}" href="{{ parts_href }}"{% if parts_active %} aria-current="page"{% endif %}>Parts</a>
+              </li>
+              {% if jobs_view or jobs_manage %}
+                {% if jobs_view and jobs_manage %}
+                <li class="nav-item dropdown">
+                  <a class="nav-link dropdown-toggle{% if jobs_active %} active{% endif %}" href="#" id="navJobs" role="button" data-bs-toggle="dropdown" aria-expanded="false">Jobs</a>
+                  <ul class="dropdown-menu" aria-labelledby="navJobs">
+                    <li><a class="dropdown-item{% if request_endpoint == 'admin_jobs.jobs_list' %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_list') }}">All Jobs</a></li>
+                    <li><a class="dropdown-item{% if request_endpoint == 'admin_jobs.jobs_new' %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_new') }}">New Job</a></li>
+                  </ul>
+                </li>
+                {% else %}
+                <li class="nav-item">
+                  <a class="nav-link{% if jobs_active %} active{% endif %}" href="{{ url_for('admin_jobs.jobs_list' if jobs_view else 'admin_jobs.jobs_new') }}"{% if jobs_active %} aria-current="page"{% endif %}>Jobs</a>
+                </li>
+                {% endif %}
+              {% endif %}
+
+              {% if orders_view or orders_manage %}
+                {% if orders_view and orders_manage %}
+                <li class="nav-item dropdown">
+                  <a class="nav-link dropdown-toggle{% if orders_active %} active{% endif %}" href="#" id="navOrders" role="button" data-bs-toggle="dropdown" aria-expanded="false">Orders</a>
+                  <ul class="dropdown-menu" aria-labelledby="navOrders">
+                    <li><a class="dropdown-item{% if request_endpoint == 'admin_orders.orders_list' %} active{% endif %}" href="{{ url_for('admin_orders.orders_list') }}">All Orders</a></li>
+                    <li><a class="dropdown-item{% if request_endpoint == 'admin_orders.orders_new' %} active{% endif %}" href="{{ url_for('admin_orders.orders_new') }}">New Order</a></li>
+                  </ul>
+                </li>
+                {% else %}
+                <li class="nav-item">
+                  <a class="nav-link{% if orders_active %} active{% endif %}" href="{{ url_for('admin_orders.orders_list' if orders_view else 'admin_orders.orders_new') }}"{% if orders_active %} aria-current="page"{% endif %}>Orders</a>
+                </li>
+                {% endif %}
+              {% endif %}
+
+              {% if customers_view or customers_manage or suppliers_view or suppliers_manage %}
+              <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle{% if companies_active %} active{% endif %}" href="#" id="navCompanies" role="button" data-bs-toggle="dropdown" aria-expanded="false">Companies</a>
+                <ul class="dropdown-menu tm-nav-menu" aria-labelledby="navCompanies">
+                  {% if customers_view or customers_manage %}
+                  <li><h6 class="dropdown-header tm-nav-section-title">Customers</h6></li>
+                  {% if customers_view %}<li><a class="dropdown-item{% if request_endpoint == 'admin_customers.customers_list' %} active{% endif %}" href="{{ url_for('admin_customers.customers_list') }}">All Customers</a></li>{% endif %}
+                  {% if customers_manage %}<li><a class="dropdown-item{% if request_endpoint == 'admin_customers.customers_new' %} active{% endif %}" href="{{ url_for('admin_customers.customers_new') }}">New Customer</a></li>{% endif %}
+                  {% endif %}
+                  {% if (customers_view or customers_manage) and (suppliers_view or suppliers_manage) %}
+                  <li><hr class="dropdown-divider"></li>
+                  {% endif %}
+                  {% if suppliers_view or suppliers_manage %}
+                  <li><h6 class="dropdown-header tm-nav-section-title">Suppliers</h6></li>
+                  {% if suppliers_view %}<li><a class="dropdown-item{% if request_endpoint == 'admin_suppliers.suppliers_list' %} active{% endif %}" href="{{ url_for('admin_suppliers.suppliers_list') }}">All Suppliers</a></li>{% endif %}
+                  {% if suppliers_manage %}<li><a class="dropdown-item{% if request_endpoint == 'admin_suppliers.suppliers_new' %} active{% endif %}" href="{{ url_for('admin_suppliers.suppliers_new') }}">New Supplier</a></li>{% endif %}
+                  {% endif %}
+                </ul>
+              </li>
+              {% endif %}
+
               {% if has_perm('tools.view') %}
-              <li class="nav-item"><a class="nav-link" href="{{ url_for('tools.tools_index') }}">Tools</a></li>
+              <li class="nav-item"><a class="nav-link{% if tools_active %} active{% endif %}" href="{{ url_for('tools.tools_index') }}"{% if tools_active %} aria-current="page"{% endif %}>Tools</a></li>
               {% endif %}
               {% if has_perm('import.bom') %}
-              <li class="nav-item"><a class="nav-link" href="/ui/upload-pack">Import</a></li>
-              {% endif %}
-
-              {% if has_perm('jobs.view') or has_perm('jobs.manage') %}
-              <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="navJobs" role="button" data-bs-toggle="dropdown" aria-expanded="false">Jobs</a>
-                <ul class="dropdown-menu" aria-labelledby="navJobs">
-                  {% if has_perm('jobs.view') %}<li><a class="dropdown-item" href="{{ url_for('admin_jobs.jobs_list') }}">All Jobs</a></li>{% endif %}
-                  {% if has_perm('jobs.manage') %}<li><a class="dropdown-item" href="{{ url_for('admin_jobs.jobs_new') }}">New Job</a></li>{% endif %}
-                </ul>
-              </li>
-              {% endif %}
-
-              {% if has_perm('orders.view') or has_perm('orders.manage') %}
-              <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="navOrders" role="button" data-bs-toggle="dropdown" aria-expanded="false">Orders</a>
-                <ul class="dropdown-menu" aria-labelledby="navOrders">
-                  {% if has_perm('orders.view') %}<li><a class="dropdown-item" href="{{ url_for('admin_orders.orders_list') }}">All Orders</a></li>{% endif %}
-                  {% if has_perm('orders.manage') %}<li><a class="dropdown-item" href="{{ url_for('admin_orders.orders_new') }}">New Order</a></li>{% endif %}
-                </ul>
-              </li>
-              {% endif %}
-
-              {% if has_perm('suppliers.view') or has_perm('suppliers.manage') %}
-              <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="navSupp" role="button" data-bs-toggle="dropdown" aria-expanded="false">Suppliers</a>
-                <ul class="dropdown-menu" aria-labelledby="navSupp">
-                  {% if has_perm('suppliers.view') %}<li><a class="dropdown-item" href="{{ url_for('admin_suppliers.suppliers_list') }}">All Suppliers</a></li>{% endif %}
-                  {% if has_perm('suppliers.manage') %}<li><a class="dropdown-item" href="{{ url_for('admin_suppliers.suppliers_new') }}">New Supplier</a></li>{% endif %}
-                </ul>
-              </li>
-              {% endif %}
-
-              {% if has_perm('customers.view') or has_perm('customers.manage') %}
-              <li class="nav-item dropdown">
-                <a class="nav-link dropdown-toggle" href="#" id="navCust" role="button" data-bs-toggle="dropdown" aria-expanded="false">Customers</a>
-                <ul class="dropdown-menu" aria-labelledby="navCust">
-                  {% if has_perm('customers.view') %}<li><a class="dropdown-item" href="{{ url_for('admin_customers.customers_list') }}">All Customers</a></li>{% endif %}
-                  {% if has_perm('customers.manage') %}<li><a class="dropdown-item" href="{{ url_for('admin_customers.customers_new') }}">New Customer</a></li>{% endif %}
-                </ul>
-              </li>
+              <li class="nav-item"><a class="nav-link{% if import_active %} active{% endif %}" href="{{ import_href }}"{% if import_active %} aria-current="page"{% endif %}>Import</a></li>
               {% endif %}
             {% endif %}
           </ul>
@@ -104,11 +143,27 @@
               'avatar_shape': 'circle'
             } %}
             <li class="nav-item me-2">
-              <form class="d-flex" role="search" action="/ui/parts" method="get">
-                <input class="form-control form-control-sm me-2" type="search" placeholder="Search parts..." aria-label="Search" name="q" style="min-width: 180px;">
+              <form class="d-flex tm-nav-search" role="search" action="{{ parts_href }}" method="get">
+                <input class="form-control form-control-sm me-2" type="search" placeholder="Search parts..." aria-label="Search" name="q">
                 <button class="btn btn-sm btn-outline-light" type="submit">Go</button>
               </form>
             </li>
+              {% if is_admin %}
+              <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle{% if admin_active %} active{% endif %}" href="#" id="navAdmin" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
+                <ul class="dropdown-menu dropdown-menu-end tm-nav-menu" aria-labelledby="navAdmin">
+                  <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_index' %} active{% endif %}" href="{{ url_for('admin.admin_index') }}">Admin Dashboard</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint == 'ui.admin_fields_ui' %} active{% endif %}" href="{{ url_for('ui.admin_fields_ui') }}">Field Configuration</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_settings' %} active{% endif %}" href="{{ url_for('admin.admin_settings') }}">App Settings</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint in ['admin.users_list', 'admin.user_new', 'admin.user_edit'] %} active{% endif %}" href="{{ url_for('admin.users_list') }}">Users</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint in ['admin_roles.roles_list', 'admin_roles.roles_new', 'admin_roles.roles_edit'] %} active{% endif %}" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint in ['admin_audit.audit_list', 'admin_audit.audit_seed'] %} active{% endif %}" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><h6 class="dropdown-header tm-nav-section-title tm-nav-section-title--danger">Danger Zone</h6></li>
+                  <li><a class="dropdown-item text-danger{% if request_endpoint == 'admin.purge_parts' %} active{% endif %}" href="{{ url_for('admin.purge_parts') }}">Purge Parts Data</a></li>
+                </ul>
+              </li>
+              {% endif %}
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle" href="#" id="navUser" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                   <span class="nav-account">
@@ -131,20 +186,9 @@
                     <div class="small text-muted">{{ current_user.email }}</div>
                   </li>
                   <li><hr class="dropdown-divider"></li>
-                  <li><a class="dropdown-item" href="/help">Help</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  {% if current_user.has_role('admin') %}
-                  <li><a class="dropdown-item" href="{{ url_for('admin.admin_index') }}">Admin Dashboard</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('ui.admin_fields_ui') }}">Field Configuration</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin.admin_settings') }}">App Settings</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a></li>
-                  <li><a class="dropdown-item text-danger" href="{{ url_for('admin.purge_parts') }}">Purge Parts Data</a></li>
-                  <li><hr class="dropdown-divider"></li>
-                  {% endif %}
-                  <li><a class="dropdown-item" href="{{ url_for('main.app_home') }}">My Account</a></li>
-                  <li><a class="dropdown-item" href="/ui/addin/tokens">Tokens</a></li>
+                  <li><a class="dropdown-item{% if account_active %} active{% endif %}" href="{{ url_for('main.app_home') }}">My Account</a></li>
+                  <li><a class="dropdown-item{% if tokens_active %} active{% endif %}" href="{{ tokens_href }}">Tokens</a></li>
+                  <li><a class="dropdown-item{% if help_active %} active{% endif %}" href="/help">Help</a></li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
                     <form class="px-3" method="post" action="{{ url_for_security('logout') }}">

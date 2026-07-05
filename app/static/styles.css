@@ -824,6 +824,32 @@ body.pick-mode .pick-row td {
   gap: 0.6rem;
 }
 
+.tm-nav-search .form-control {
+  min-width: 11rem;
+}
+
+.navbar .dropdown-menu {
+  border: 1px solid var(--tm-border);
+  border-radius: 0.9rem;
+  box-shadow: var(--tm-shadow-soft);
+}
+
+.tm-nav-menu {
+  min-width: 15rem;
+}
+
+.tm-nav-section-title {
+  color: var(--tm-text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tm-nav-section-title--danger {
+  color: var(--tm-danger);
+}
+
 .nav-account__text {
   display: inline-flex;
   flex-direction: column;
@@ -876,6 +902,20 @@ body.pick-mode .pick-row td {
 
   .tm-toolbar__actions {
     width: 100%;
+  }
+
+  .tm-nav-search {
+    margin: 0.5rem 0;
+    width: 100%;
+  }
+
+  .tm-nav-search .form-control {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .tm-nav-menu {
+    min-width: 0;
   }
 
   .account-stats {

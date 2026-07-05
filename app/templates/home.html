@@ -1,7 +1,10 @@
 {% extends "security/base.html" %}
-{% block title %}My Account · TinyMRP{% endblock %}
+{% from "ui/_components.html" import page_header, card_header, empty_state, status_badge %}
+{% block title %}Home · TinyMRP{% endblock %}
 {% block content %}
   <div class="account-shell">
+    {{ page_header("Home", dashboard.subtitle, "TinyMRP") }}
+
     <div class="row g-4">
       <div class="col-xl-4">
         <section class="account-panel account-panel--hero h-100">
@@ -14,11 +17,11 @@
               {{ profile.initials or "U" }}
             </span>
             <div>
-              <div class="account-eyebrow">My Account</div>
-              <h1 class="h3 mb-1">{{ profile.label or current_user.email }}</h1>
+              <div class="account-eyebrow">TinyMRP Home</div>
+              <h2 class="h3 mb-1">{{ profile.label or current_user.email }}</h2>
               <div class="text-muted">{{ current_user.email }}</div>
               <div class="small text-muted mt-2">
-                This profile is shown for uploads, part detail ownership, and comments when your email is recorded.
+                Recent activity and safe next steps are filtered by the roles currently assigned to this account.
               </div>
             </div>
           </div>
@@ -30,7 +33,7 @@
             </div>
             <div class="account-stat">
               <div class="account-stat__label">Permissions</div>
-              <div class="account-stat__value">{{ permissions|length }}</div>
+              <div class="account-stat__value">{{ dashboard.permissions_count }}</div>
             </div>
             <div class="account-stat">
               <div class="account-stat__label">Session</div>
@@ -51,169 +54,349 @@
             </div>
           </div>
         </section>
+
+        <section class="account-panel mt-4">
+          {{ card_header("Quick Actions", "Open the pages you use most without performing any writes.") }}
+          {% if dashboard.quick_actions %}
+            <div class="row g-3">
+              {% for action in dashboard.quick_actions %}
+                <div class="col-md-6 col-xl-12">
+                  <a class="account-link-card" href="{{ action.href }}">
+                    <div class="fw-semibold">{{ action.title }}</div>
+                    <div class="small text-muted mt-1">{{ action.description }}</div>
+                  </a>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            {{ empty_state("No quick actions yet", "This account does not currently expose any operational shortcuts on the home dashboard.") }}
+          {% endif %}
+        </section>
+
+        {% if dashboard.imports_panel.show %}
+          <section class="account-panel mt-4">
+            {% call card_header("Recent Imports & Uploads", "Import history is only shown when a reliable persisted source exists.") %}
+              {% if dashboard.imports_panel.action_href %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ dashboard.imports_panel.action_href }}">{{ dashboard.imports_panel.action_label }}</a>
+              {% endif %}
+            {% endcall %}
+            {{ empty_state("History not available yet", dashboard.imports_panel.message, dashboard.imports_panel.action_href, dashboard.imports_panel.action_label) }}
+          </section>
+        {% endif %}
       </div>
 
       <div class="col-xl-8">
-        <div class="row g-4">
-          <div class="col-12">
-            <section class="account-panel">
-              <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-                <div>
-                  <div class="account-section-title">Quick Access</div>
-                  <div class="text-muted small">Common areas available to this account.</div>
-                </div>
-              </div>
-              <div class="row g-3">
-                {% for link in quick_links %}
-                  <div class="col-md-6">
-                    <a class="account-link-card" href="{{ link.href }}">
-                      <div class="fw-semibold">{{ link.title }}</div>
-                      <div class="small text-muted mt-1">{{ link.description }}</div>
-                    </a>
+        <section class="account-panel">
+          {{ card_header("Items Needing Attention", "Only safe, existing signals are shown here. Empty results are expected on clean or small datasets.") }}
+          {% if dashboard.attention_items %}
+            <div class="list-group list-group-flush">
+              {% for item in dashboard.attention_items %}
+                <div class="list-group-item px-0 py-3 border-top-0 {% if not loop.last %}border-bottom{% else %}border-bottom-0{% endif %}">
+                  <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
+                    <div>
+                      <div class="fw-semibold">{{ item.title }}</div>
+                      <div class="small text-muted mt-1">{{ item.detail }}</div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                      <span class="badge text-bg-secondary">{{ item.count }}</span>
+                      {% if item.href %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ item.href }}">Open</a>
+                      {% endif %}
+                    </div>
                   </div>
-                {% endfor %}
-              </div>
-            </section>
-          </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            {{ empty_state("Nothing obvious needs attention", "The safe signals available to this dashboard do not currently show overdue jobs, open orders, or incomplete visible part metadata.") }}
+          {% endif %}
+        </section>
 
-          <div class="col-lg-6">
-            <section class="account-panel h-100">
-              <div class="account-section-title mb-2">Profile Options</div>
-              <div class="text-muted small mb-3">
-                Set the display name and avatar style used around the application.
+        {% if dashboard.show_parts %}
+          <section class="account-panel mt-4">
+            {% call card_header("Recent Parts", "Latest visible parts with their current status and approval signal.") %}
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('ui.parts_ui') }}">Open Parts</a>
+            {% endcall %}
+            {% if dashboard.recent_parts %}
+              <div class="tm-table-shell">
+                <div class="table-responsive">
+                  <table class="table table-sm align-middle mb-0">
+                    <thead class="table-light">
+                      <tr>
+                        <th>Part</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                        <th>Approval</th>
+                        <th>Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for part in dashboard.recent_parts %}
+                        <tr>
+                          <td>
+                            <a class="fw-semibold text-decoration-none" href="{{ part.href }}">{{ part.part_number }}</a>
+                            <div class="small text-muted">REV {{ part.revision or "-" }}</div>
+                          </td>
+                          <td>{{ part.description }}</td>
+                          <td>{{ status_badge(part.status) }}</td>
+                          <td>
+                            {% if part.approved %}
+                              <span class="small">Approved{% if part.approved_by %} by {{ part.approved_by }}{% endif %}</span>
+                            {% else %}
+                              <span class="text-muted small">No approval recorded</span>
+                            {% endif %}
+                          </td>
+                          <td>{{ part.updated_at_display or "Not recorded" }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <form method="post" action="{{ url_for('main.app_profile_update') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="mb-3">
-                  <label class="form-label" for="display_name">Display name</label>
-                  <input
-                    class="form-control"
-                    id="display_name"
-                    name="display_name"
-                    type="text"
-                    maxlength="60"
-                    value="{{ profile.display_name or '' }}"
-                    placeholder="Shown instead of the email address when available"
-                  >
-                </div>
-                <div class="mb-3">
-                  <label class="form-label" for="avatar_color">Avatar color</label>
-                  <select class="form-select" id="avatar_color" name="avatar_color">
-                    {% for option in profile_colors %}
-                      <option value="{{ option.value }}" {% if option.value == profile.avatar_color %}selected{% endif %}>
-                        {{ option.label }}
-                      </option>
-                    {% endfor %}
-                  </select>
-                </div>
-                <div class="mb-3">
-                  <label class="form-label" for="avatar_shape">Avatar shape</label>
-                  <select class="form-select" id="avatar_shape" name="avatar_shape">
-                    {% for option in profile_shapes %}
-                      <option value="{{ option.value }}" {% if option.value == profile.avatar_shape %}selected{% endif %}>
-                        {{ option.label }}
-                      </option>
-                    {% endfor %}
-                  </select>
-                </div>
-                <button class="btn btn-primary" type="submit">Save profile</button>
-              </form>
-            </section>
-          </div>
+            {% else %}
+              {{ empty_state("No recent parts yet", "No visible parts have been created or updated recently for this account.") }}
+            {% endif %}
+          </section>
+        {% endif %}
 
-          <div class="col-lg-6">
-            <section class="account-panel h-100">
-              <div class="account-section-title mb-2">Change Password</div>
-              <div class="text-muted small mb-3">
-                Use a passphrase with at least {{ security_summary.min_length }} characters. Password rotation is only needed after suspected compromise.
-              </div>
-              <form method="post" action="{{ url_for('main.app_password_change') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <div class="mb-3">
-                  <label class="form-label" for="current_password">Current password</label>
-                  <input class="form-control" id="current_password" name="current_password" type="password" autocomplete="current-password">
-                </div>
-                <div class="mb-3">
-                  <label class="form-label" for="new_password">New password</label>
-                  <input class="form-control" id="new_password" name="new_password" type="password" autocomplete="new-password">
-                </div>
-                <div class="mb-3">
-                  <label class="form-label" for="confirm_password">Confirm new password</label>
-                  <input class="form-control" id="confirm_password" name="confirm_password" type="password" autocomplete="new-password">
-                </div>
-                <button class="btn btn-outline-primary" type="submit">Update password</button>
-              </form>
-            </section>
-          </div>
-
-          <div class="col-lg-7">
-            <section class="account-panel h-100">
-              <div class="account-section-title mb-2">Permissions</div>
-              <div class="text-muted small mb-3">
-                Effective access from the roles currently assigned to this account.
-              </div>
-              <div class="account-chip-row">
-                {% if permissions %}
-                  {% for permission in permissions %}
-                    <span class="account-chip account-chip--accent">{{ permission }}</span>
-                  {% endfor %}
+        <div class="row g-4 mt-1">
+          {% if dashboard.show_jobs %}
+            <div class="col-lg-{% if dashboard.show_orders %}6{% else %}12{% endif %}">
+              <section class="account-panel h-100">
+                {% call card_header("Recent Jobs", "Latest visible jobs with customer and status context.") %}
+                  {% if has_perm('jobs.view') %}
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">All Jobs</a>
+                  {% endif %}
+                {% endcall %}
+                {% if dashboard.recent_jobs %}
+                  <div class="tm-table-shell">
+                    <div class="table-responsive">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                          <tr>
+                            <th>Job</th>
+                            <th>Customer</th>
+                            <th>Status</th>
+                            <th>Updated</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for job in dashboard.recent_jobs %}
+                            <tr>
+                              <td>
+                                {% if job.href %}
+                                  <a class="fw-semibold text-decoration-none" href="{{ job.href }}">{{ job.job_number }}</a>
+                                {% else %}
+                                  <span class="fw-semibold">{{ job.job_number }}</span>
+                                {% endif %}
+                                <div class="small text-muted">{{ job.title }}</div>
+                              </td>
+                              <td>{{ job.customer_name }}</td>
+                              <td>{{ status_badge(job.status) }}</td>
+                              <td>{{ job.updated_at_display or "Not recorded" }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 {% else %}
-                  <span class="text-muted small">No explicit permissions assigned.</span>
+                  {{ empty_state("No recent jobs yet", "No visible jobs have been created or updated recently for this account.") }}
                 {% endif %}
-              </div>
-            </section>
-          </div>
+              </section>
+            </div>
+          {% endif %}
 
-          <div class="col-lg-5">
-            <section class="account-panel h-100">
-              <div class="account-section-title mb-2">Security Summary</div>
-              <div class="account-kv">
-                <div>
-                  <span>Account created</span>
-                  <strong>{{ display_ts(security_summary.account_created_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.account_created_at else "Not recorded" }}</strong>
-                </div>
-                <div>
-                  <span>Last profile update</span>
-                  <strong>{{ display_ts(security_summary.account_updated_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.account_updated_at else "Not recorded" }}</strong>
-                </div>
-                <div>
-                  <span>Last login</span>
-                  <strong>{{ display_ts(security_summary.last_login_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.last_login_at else "Not recorded yet" }}</strong>
-                </div>
-                <div>
-                  <span>Password changed</span>
-                  <strong>{{ display_ts(security_summary.password_changed_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.password_changed_at else "Not recorded" }}</strong>
-                </div>
-                <div>
-                  <span>Last login IP</span>
-                  <strong>{{ security_summary.last_login_ip or "Not recorded" }}</strong>
-                </div>
-                <div>
-                  <span>Session timeout</span>
-                  <strong>{{ security_summary.session_timeout_minutes }} minutes</strong>
-                </div>
-                <div>
-                  <span>Password length</span>
-                  <strong>{{ security_summary.min_length }} to {{ security_summary.max_length }} characters</strong>
-                </div>
-              </div>
-              <div class="account-flag-row mt-3">
-                <span class="account-flag {% if security_summary.generic_auth_responses %}is-on{% endif %}">
-                  Generic auth responses: {{ "On" if security_summary.generic_auth_responses else "Off" }}
-                </span>
-                <span class="account-flag {% if security_summary.secure_cookie %}is-on{% endif %}">
-                  Secure session cookie: {{ "On" if security_summary.secure_cookie else "Off" }}
-                </span>
-                <span class="account-flag {% if security_summary.remember_cookie_secure %}is-on{% endif %}">
-                  Secure remember cookie: {{ "On" if security_summary.remember_cookie_secure else "Off" }}
-                </span>
-              </div>
-              {% if security_summary.last_login_ua %}
-                <div class="small text-muted mt-3">{{ security_summary.last_login_ua }}</div>
-              {% endif %}
-            </section>
-          </div>
+          {% if dashboard.show_orders %}
+            <div class="col-lg-{% if dashboard.show_jobs %}6{% else %}12{% endif %}">
+              <section class="account-panel h-100">
+                {% call card_header("Recent Orders", "Latest visible orders with company and status context.") %}
+                  {% if has_perm('orders.view') %}
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_list') }}">All Orders</a>
+                  {% endif %}
+                {% endcall %}
+                {% if dashboard.recent_orders %}
+                  <div class="tm-table-shell">
+                    <div class="table-responsive">
+                      <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                          <tr>
+                            <th>Order</th>
+                            <th>Company</th>
+                            <th>Status</th>
+                            <th>Updated</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% for order in dashboard.recent_orders %}
+                            <tr>
+                              <td>
+                                {% if order.href %}
+                                  <a class="fw-semibold text-decoration-none" href="{{ order.href }}">{{ order.order_number }}</a>
+                                {% else %}
+                                  <span class="fw-semibold">{{ order.order_number }}</span>
+                                {% endif %}
+                                <div class="small text-muted">{{ order.description }}</div>
+                              </td>
+                              <td>
+                                {{ order.company_name }}
+                                <div class="small text-muted text-capitalize">{{ order.kind }}</div>
+                              </td>
+                              <td>{{ status_badge(order.status) }}</td>
+                              <td>{{ order.updated_at_display or "Not recorded" }}</td>
+                            </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                {% else %}
+                  {{ empty_state("No recent orders yet", "No visible orders have been created or updated recently for this account.") }}
+                {% endif %}
+              </section>
+            </div>
+          {% endif %}
         </div>
+      </div>
+    </div>
+
+    <div class="row g-4 mt-1" id="account-settings">
+      <div class="col-lg-6">
+        <section class="account-panel h-100">
+          <div class="account-section-title mb-2">My Account</div>
+          <div class="text-muted small mb-3">
+            Set the display name and avatar style used around the application.
+          </div>
+          <form method="post" action="{{ url_for('main.app_profile_update') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+              <label class="form-label" for="display_name">Display name</label>
+              <input
+                class="form-control"
+                id="display_name"
+                name="display_name"
+                type="text"
+                maxlength="60"
+                value="{{ profile.display_name or '' }}"
+                placeholder="Shown instead of the email address when available"
+              >
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="avatar_color">Avatar color</label>
+              <select class="form-select" id="avatar_color" name="avatar_color">
+                {% for option in profile_colors %}
+                  <option value="{{ option.value }}" {% if option.value == profile.avatar_color %}selected{% endif %}>
+                    {{ option.label }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="avatar_shape">Avatar shape</label>
+              <select class="form-select" id="avatar_shape" name="avatar_shape">
+                {% for option in profile_shapes %}
+                  <option value="{{ option.value }}" {% if option.value == profile.avatar_shape %}selected{% endif %}>
+                    {{ option.label }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <button class="btn btn-primary" type="submit">Save profile</button>
+          </form>
+        </section>
+      </div>
+
+      <div class="col-lg-6">
+        <section class="account-panel h-100">
+          <div class="account-section-title mb-2">Change Password</div>
+          <div class="text-muted small mb-3">
+            Use a passphrase with at least {{ security_summary.min_length }} characters. Password rotation is only needed after suspected compromise.
+          </div>
+          <form method="post" action="{{ url_for('main.app_password_change') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+              <label class="form-label" for="current_password">Current password</label>
+              <input class="form-control" id="current_password" name="current_password" type="password" autocomplete="current-password">
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="new_password">New password</label>
+              <input class="form-control" id="new_password" name="new_password" type="password" autocomplete="new-password">
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="confirm_password">Confirm new password</label>
+              <input class="form-control" id="confirm_password" name="confirm_password" type="password" autocomplete="new-password">
+            </div>
+            <button class="btn btn-outline-primary" type="submit">Update password</button>
+          </form>
+        </section>
+      </div>
+
+      <div class="col-lg-7">
+        <section class="account-panel h-100">
+          <div class="account-section-title mb-2">Permissions</div>
+          <div class="text-muted small mb-3">
+            Effective access from the roles currently assigned to this account.
+          </div>
+          <div class="account-chip-row">
+            {% if permissions %}
+              {% for permission in permissions %}
+                <span class="account-chip account-chip--accent">{{ permission }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted small">No explicit permissions assigned.</span>
+            {% endif %}
+          </div>
+        </section>
+      </div>
+
+      <div class="col-lg-5">
+        <section class="account-panel h-100">
+          <div class="account-section-title mb-2">Security Summary</div>
+          <div class="account-kv">
+            <div>
+              <span>Account created</span>
+              <strong>{{ display_ts(security_summary.account_created_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.account_created_at else "Not recorded" }}</strong>
+            </div>
+            <div>
+              <span>Last profile update</span>
+              <strong>{{ display_ts(security_summary.account_updated_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.account_updated_at else "Not recorded" }}</strong>
+            </div>
+            <div>
+              <span>Last login</span>
+              <strong>{{ display_ts(security_summary.last_login_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.last_login_at else "Not recorded yet" }}</strong>
+            </div>
+            <div>
+              <span>Password changed</span>
+              <strong>{{ display_ts(security_summary.password_changed_at, "%Y-%m-%d %H:%M:%S %Z") if security_summary.password_changed_at else "Not recorded" }}</strong>
+            </div>
+            <div>
+              <span>Last login IP</span>
+              <strong>{{ security_summary.last_login_ip or "Not recorded" }}</strong>
+            </div>
+            <div>
+              <span>Session timeout</span>
+              <strong>{{ security_summary.session_timeout_minutes }} minutes</strong>
+            </div>
+            <div>
+              <span>Password length</span>
+              <strong>{{ security_summary.min_length }} to {{ security_summary.max_length }} characters</strong>
+            </div>
+          </div>
+          <div class="account-flag-row mt-3">
+            <span class="account-flag {% if security_summary.generic_auth_responses %}is-on{% endif %}">
+              Generic auth responses: {{ "On" if security_summary.generic_auth_responses else "Off" }}
+            </span>
+            <span class="account-flag {% if security_summary.secure_cookie %}is-on{% endif %}">
+              Secure session cookie: {{ "On" if security_summary.secure_cookie else "Off" }}
+            </span>
+            <span class="account-flag {% if security_summary.remember_cookie_secure %}is-on{% endif %}">
+              Secure remember cookie: {{ "On" if security_summary.remember_cookie_secure else "Off" }}
+            </span>
+          </div>
+          {% if security_summary.last_login_ua %}
+            <div class="small text-muted mt-3">{{ security_summary.last_login_ua }}</div>
+          {% endif %}
+        </section>
       </div>
     </div>
   </div>

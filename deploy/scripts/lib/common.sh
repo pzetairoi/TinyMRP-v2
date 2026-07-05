@@ -861,6 +861,17 @@ render_caddy_route() {
   if [ "$tls_mode" = "internal-tls" ]; then
     printf '    tls internal\n'
   fi
+  # Security headers (Phase 4). '?' = set only when the app did not already set
+  # the header, so application-provided values always win.
+  printf '    header {\n'
+  if [ "$tls_mode" != "http" ]; then
+    printf '        ?Strict-Transport-Security "max-age=31536000; includeSubDomains"\n'
+  fi
+  printf '        ?X-Content-Type-Options "nosniff"\n'
+  printf '        ?Referrer-Policy "strict-origin-when-cross-origin"\n'
+  printf '        ?X-Frame-Options "DENY"\n'
+  printf '        -Server\n'
+  printf '    }\n'
   printf '    reverse_proxy %s:%s\n' "$upstream_host" "$upstream_port"
   printf '}\n'
 

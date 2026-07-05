@@ -754,6 +754,75 @@ if [ "$SKIP_HOST_CHECKS" -eq 0 ]; then
   else
     note "PUBLIC_IPV6 is not configured on this host"
   fi
+
+  # --- Disk space (Phase 4) ---
+  for disk_path in "$(tinymrp_root)" /var/lib/docker; do
+    [ -d "$disk_path" ] || continue
+    usage_pct="$(df --output=pcent "$disk_path" 2>/dev/null | tail -1 | tr -dc '0-9')"
+    avail_h="$(df -h --output=avail "$disk_path" 2>/dev/null | tail -1 | tr -d ' ')"
+    if [ -z "$usage_pct" ]; then
+      note "Could not determine disk usage for ${disk_path}"
+    elif [ "$usage_pct" -ge 90 ]; then
+      fail "Disk holding ${disk_path} is ${usage_pct}% full (${avail_h} free)"
+    elif [ "$usage_pct" -ge 80 ]; then
+      note "Disk holding ${disk_path} is ${usage_pct}% full (${avail_h} free)"
+    else
+      pass "Disk holding ${disk_path}: ${usage_pct}% used (${avail_h} free)"
+    fi
+  done
+
+  # --- TLS certificate expiry per instance domain (Phase 4) ---
+  if command -v openssl >/dev/null 2>&1 && port_listening 443; then
+    for cert_env in "$(instances_dir)"/*/.env; do
+      [ -f "$cert_env" ] || continue
+      cert_domain="$(sed -n 's/^INSTANCE_DOMAIN=//p' "$cert_env" | tr -d '"' | head -1)"
+      cert_tls_mode="$(sed -n 's/^TLS_MODE=//p' "$cert_env" | tr -d '"' | head -1)"
+      [ -n "$cert_domain" ] || continue
+      [ "$cert_tls_mode" = "http" ] && continue
+      not_after="$(echo | timeout 10 openssl s_client -servername "$cert_domain" \
+        -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || true)"
+      if [ -z "$not_after" ]; then
+        note "Could not read TLS certificate for ${cert_domain}"
+        continue
+      fi
+      expiry_epoch="$(date -d "$not_after" +%s 2>/dev/null || echo 0)"
+      days_left=$(( (expiry_epoch - $(date +%s)) / 86400 ))
+      if [ "$days_left" -le 7 ]; then
+        fail "TLS certificate for ${cert_domain} expires in ${days_left} day(s) (${not_after})"
+      elif [ "$days_left" -le 21 ]; then
+        note "TLS certificate for ${cert_domain} expires in ${days_left} day(s)"
+      else
+        pass "TLS certificate for ${cert_domain} valid for ${days_left} more day(s)"
+      fi
+    done
+  fi
+
+  # --- Backup freshness (Phase 4) ---
+  backups_root="$(tinymrp_root)/backups"
+  if systemctl is-enabled tinymrp-backup.timer >/dev/null 2>&1; then
+    pass "Nightly backup timer is enabled"
+  else
+    note "No tinymrp-backup.timer installed (see deploy/scripts/install-backup-job.sh)"
+  fi
+  if [ -d "$backups_root" ]; then
+    for backup_env in "$(instances_dir)"/*/.env; do
+      [ -f "$backup_env" ] || continue
+      b_name="$(basename "$(dirname "$backup_env")")"
+      latest_backup="$(find "${backups_root}/${b_name}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -1)"
+      if [ -z "$latest_backup" ]; then
+        note "No backups found for instance ${b_name}"
+        continue
+      fi
+      age_hours=$(( ( $(date +%s) - $(stat -c %Y "$latest_backup") ) / 3600 ))
+      if [ "$age_hours" -gt 48 ]; then
+        fail "Latest backup for ${b_name} is ${age_hours}h old (${latest_backup})"
+      else
+        pass "Latest backup for ${b_name} is ${age_hours}h old"
+      fi
+    done
+  else
+    note "Backup directory ${backups_root} does not exist yet"
+  fi
 fi
 
 INSTANCE_COUNT=0
