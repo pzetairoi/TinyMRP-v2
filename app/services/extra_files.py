@@ -7,7 +7,7 @@ import re
 from typing import Optional, Tuple
 
 from flask import current_app, url_for
-from itsdangerous import BadSignature, URLSafeSerializer
+from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 
 from app.models.extra_file import PartExtraFile
 
@@ -17,9 +17,17 @@ REV_EMPTY_TOKEN = "__no_rev__"
 _SEGMENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
-def _serializer() -> URLSafeSerializer:
-    secret = current_app.config.get("SECRET_KEY") or current_app.config.get("SECURITY_PASSWORD_SALT") or ""
-    return URLSafeSerializer(secret, salt=_TOKEN_SALT)
+def _secret() -> str:
+    return current_app.config.get("SECRET_KEY") or current_app.config.get("SECURITY_PASSWORD_SALT") or ""
+
+
+def _serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(_secret(), salt=_TOKEN_SALT)
+
+
+def _legacy_serializer() -> URLSafeSerializer:
+    # Pre-TTL tokens (no timestamp). Only honored while FILES_ALLOW_LEGACY_TOKENS is enabled.
+    return URLSafeSerializer(_secret(), salt=_TOKEN_SALT)
 
 
 def rev_to_token(rev: str | None) -> str:
@@ -107,9 +115,26 @@ def extra_file_token_for(ef: PartExtraFile, kind: str = "file") -> str:
 
 
 def resolve_extra_file_token(token: str) -> Optional[Tuple[PartExtraFile, str]]:
+    from app.services.files_access import token_ttl_seconds
+
+    ttl = token_ttl_seconds()
+    data = None
     try:
-        data = _serializer().loads(token)
+        if ttl > 0:
+            data = _serializer().loads(token, max_age=ttl)
+        else:
+            data = _serializer().loads(token)
+    except SignatureExpired:
+        return None
     except BadSignature:
+        if bool(current_app.config.get("FILES_ALLOW_LEGACY_TOKENS")):
+            try:
+                data = _legacy_serializer().loads(token)
+            except BadSignature:
+                return None
+        else:
+            return None
+    if not isinstance(data, dict):
         return None
     file_id = data.get("id")
     if not file_id:

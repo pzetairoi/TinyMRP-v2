@@ -43,6 +43,26 @@ TINYMRP_SECURITY_MODE=compat|strict
 - Cookies are Secure + SameSite=Strict.
 - Startup fails if secrets are missing/weak.
 
+## Phase 1 Controls (rate limits, token expiry, 2FA, logging)
+
+- **Rate limiting** — on by default. Login and password endpoints: `RATE_LIMIT_LOGIN`
+  (default `10 per minute;100 per hour`). Optional global API budget: `RATE_LIMIT_API`.
+  With more than one gunicorn worker or multiple instances, set
+  `RATE_LIMIT_STORAGE_URI=redis://...` so all workers share one budget (with the default
+  in-memory storage each worker counts separately). Throttled requests are audit-logged
+  as `security.rate_limited`.
+- **File link expiry** — tokenized file URLs expire after `FILES_TOKEN_TTL_SECONDS`
+  (default 24 h). The UI generates fresh tokens on every page load, so normal use is
+  unaffected; only saved/bookmarked raw links expire. For a migration window you may set
+  `FILES_ALLOW_LEGACY_TOKENS=true` to keep accepting pre-expiry tokens — turn it off after.
+- **Two-factor (TOTP)** — enable with `SECURITY_TWO_FACTOR_ENABLED=true` plus
+  `SECURITY_TOTP_SECRETS` (a stable random secret; generate with
+  `python -c "from passlib import totp; print(totp.generate_secret())"`).
+  `SECURITY_TWO_FACTOR_REQUIRED=true` enforces it for all users. In strict mode, enabling
+  2FA without a TOTP secret refuses to start.
+- **Logging** — `LOG_FORMAT=json` emits JSON lines with request IDs for aggregation.
+  Every response carries `X-Request-ID` (inbound proxy header honored).
+
 ## Incident Response Notes
 
 If you suspect compromise:

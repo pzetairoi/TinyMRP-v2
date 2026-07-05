@@ -4,17 +4,39 @@ from typing import Optional, Tuple
 import os
 
 from flask import current_app, url_for
-from itsdangerous import BadSignature, URLSafeSerializer
+from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 
 from app.models.artifact import PartFile
 
 
 _TOKEN_SALT = "tinymrp.files.v1"
 
+DEFAULT_TOKEN_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 
-def _serializer() -> URLSafeSerializer:
-    secret = current_app.config.get("SECRET_KEY") or current_app.config.get("SECURITY_PASSWORD_SALT") or ""
-    return URLSafeSerializer(secret, salt=_TOKEN_SALT)
+
+def _secret() -> str:
+    return current_app.config.get("SECRET_KEY") or current_app.config.get("SECURITY_PASSWORD_SALT") or ""
+
+
+def _serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(_secret(), salt=_TOKEN_SALT)
+
+
+def _legacy_serializer() -> URLSafeSerializer:
+    # Pre-TTL tokens (no timestamp). Only honored while FILES_ALLOW_LEGACY_TOKENS is enabled.
+    return URLSafeSerializer(_secret(), salt=_TOKEN_SALT)
+
+
+def token_ttl_seconds() -> int:
+    try:
+        value = int(current_app.config.get("FILES_TOKEN_TTL_SECONDS", DEFAULT_TOKEN_TTL_SECONDS))
+    except Exception:
+        return DEFAULT_TOKEN_TTL_SECONDS
+    return value
+
+
+def _legacy_tokens_allowed() -> bool:
+    return bool(current_app.config.get("FILES_ALLOW_LEGACY_TOKENS"))
 
 
 def public_file_urls_enabled() -> bool:
@@ -38,10 +60,27 @@ def file_token_for(pf: PartFile, kind: str = "file") -> str:
     return _serializer().dumps(payload)
 
 
-def resolve_file_token(token: str) -> Optional[Tuple[PartFile, str]]:
+def _load_token_payload(token: str) -> Optional[dict]:
+    ttl = token_ttl_seconds()
     try:
-        data = _serializer().loads(token)
+        if ttl > 0:
+            return _serializer().loads(token, max_age=ttl)
+        return _serializer().loads(token)
+    except SignatureExpired:
+        return None
     except BadSignature:
+        pass
+    if _legacy_tokens_allowed():
+        try:
+            return _legacy_serializer().loads(token)
+        except BadSignature:
+            return None
+    return None
+
+
+def resolve_file_token(token: str) -> Optional[Tuple[PartFile, str]]:
+    data = _load_token_payload(token)
+    if not isinstance(data, dict):
         return None
     file_id = data.get("id")
     if not file_id:

@@ -14,6 +14,9 @@ click==8.2.1
 colorama==0.4.6
 
 # --- Auth / security ---
+Flask-Limiter==3.8.0
+limits==5.8.0
+cryptography==43.0.1
 Flask-Login==0.6.3
 Flask-Principal==0.4.0
 Flask-Security-Too==5.6.2

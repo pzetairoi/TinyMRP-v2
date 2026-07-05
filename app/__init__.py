@@ -60,7 +60,13 @@ def _load_vite_manifest(app):
 
 def create_app(config_object=None):
     app = Flask(__name__)
-    
+
+    # Structured logging + request IDs (Phase 1) — first, so startup messages use it.
+    from app.services.logging_setup import init_logging
+    init_logging(app)
+    import logging as _logging
+    logger = _logging.getLogger("tinymrp.startup")
+
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
@@ -84,15 +90,17 @@ def create_app(config_object=None):
         if env_file and os.path.exists(env_file):
             # When an explicit ENV_FILE is provided, let it override existing env vars
             load_dotenv(env_file, override=True)
-            print("Loaded env file:", env_file)
+            logger.info("Loaded env file: %s", env_file)
         else:
             load_dotenv()
-            print("Loaded default .env (if present)")
-        print(f"Env check: SECRET_KEY set? {bool(os.getenv('SECRET_KEY'))}; "
-              f"MONGO_URI present? {bool(os.getenv('MONGO_URI'))}")
+            logger.info("Loaded default .env (if present)")
+        logger.info(
+            "Env check: SECRET_KEY set? %s; MONGO_URI present? %s",
+            bool(os.getenv("SECRET_KEY")),
+            bool(os.getenv("MONGO_URI")),
+        )
     except Exception:
-        print("did not work loading env file(s), continuing without them")
-        pass
+        logger.warning("Could not load env file(s), continuing without them")
 
     # Security mode (compat by default)
     from app.services.security_mode import security_mode as _security_mode
@@ -167,6 +175,13 @@ def create_app(config_object=None):
     app.config.setdefault("REMEMBER_COOKIE_SECURE", False)
     app.config.setdefault("PERMANENT_SESSION_LIFETIME", timedelta(minutes=30))
     app.config.setdefault("SESSION_REFRESH_EACH_REQUEST", True)
+    # Cap "remember me" cookies (default Flask-Login is 365 days — far too long).
+    try:
+        app.config.setdefault(
+            "REMEMBER_COOKIE_DURATION", timedelta(days=int(os.getenv("REMEMBER_COOKIE_DAYS") or "7"))
+        )
+    except Exception:
+        app.config.setdefault("REMEMBER_COOKIE_DURATION", timedelta(days=7))
     app.config.setdefault("EXCEL_COMPILE_MAX_BYTES", int(os.getenv("EXCEL_COMPILE_MAX_BYTES") or "10485760"))
     app.config.setdefault("SECURITY_HEADERS_ENABLED", True)
     app.config.setdefault("FORCE_HTTPS", False)
@@ -239,6 +254,14 @@ def create_app(config_object=None):
     app.config["FILES_PUBLIC_URLS"] = files_public in ("1", "true", "yes", "on")
     app.config["FILES_ACCEL_REDIRECT_PREFIX"] = accel_prefix
     app.config["FILES_ALLOW_LEGACY_TOKENS"] = allow_legacy in ("1", "true", "yes", "on")
+
+    # Tokenized file URLs expire after this many seconds (0 disables expiry).
+    try:
+        app.config.setdefault(
+            "FILES_TOKEN_TTL_SECONDS", int(os.getenv("FILES_TOKEN_TTL_SECONDS") or str(24 * 60 * 60))
+        )
+    except Exception:
+        app.config.setdefault("FILES_TOKEN_TTL_SECONDS", 24 * 60 * 60)
 
     # Backward-compatible aliases used elsewhere in the codebase
     # (prefer the canonical FILES_* keys in new code)
@@ -326,10 +349,49 @@ def create_app(config_object=None):
     except Exception:
         pass
 
+    # Optional TOTP two-factor authentication (Phase 1; default OFF).
+    # Enable with SECURITY_TWO_FACTOR_ENABLED=true and provide SECURITY_TOTP_SECRETS
+    # (a stable random string used to encrypt per-user TOTP keys at rest).
+    two_factor_enabled = str(os.getenv("SECURITY_TWO_FACTOR_ENABLED") or "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    if two_factor_enabled:
+        totp_secret = (os.getenv("SECURITY_TOTP_SECRETS") or "").strip()
+        if not totp_secret:
+            if security_mode == "strict":
+                raise RuntimeError(
+                    "SECURITY_TWO_FACTOR_ENABLED is set but SECURITY_TOTP_SECRETS is missing. "
+                    "Generate one with: python -c \"from passlib import totp; print(totp.generate_secret())\""
+                )
+            logger.warning("Two-factor requested but SECURITY_TOTP_SECRETS missing; 2FA stays OFF")
+        else:
+            app.config["SECURITY_TWO_FACTOR"] = True
+            app.config.setdefault("SECURITY_TWO_FACTOR_ENABLED_METHODS", ["authenticator"])
+            app.config.setdefault(
+                "SECURITY_TWO_FACTOR_REQUIRED",
+                str(os.getenv("SECURITY_TWO_FACTOR_REQUIRED") or "").strip().lower()
+                in ("1", "true", "yes", "on"),
+            )
+            app.config.setdefault("SECURITY_TOTP_SECRETS", {"1": totp_secret})
+            app.config.setdefault("SECURITY_TOTP_ISSUER", "TinyMRP")
+            app.config.setdefault("SECURITY_TWO_FACTOR_RESCUE_MAIL", "")
+            app.config.setdefault("SECURITY_TWO_FACTOR_ALWAYS_VALIDATE", False)
+            logger.info(
+                "Two-factor authentication enabled (required=%s)",
+                app.config.get("SECURITY_TWO_FACTOR_REQUIRED"),
+            )
+
     # IMPORTANT: pass (db_connection, User, Role)
     datastore = MongoEngineUserDatastore(db_conn, User, Role)
     global security
     security = Security(app, datastore)
+
+    # Rate limiting (Phase 1) — after Security so auth endpoints exist to decorate.
+    try:
+        from app.services.rate_limit import init_rate_limiting
+        init_rate_limiting(app)
+    except Exception:
+        logger.exception("Rate limiting initialization failed; continuing WITHOUT rate limits")
 
     try:
         from flask_login import user_logged_in, user_logged_out
@@ -356,6 +418,7 @@ def create_app(config_object=None):
                 log_action("auth.login", resource_type="user", resource=str(getattr(user, "email", "") or ""))
             except Exception:
                 pass
+            logger.info("auth.login user=%s", str(getattr(user, "email", "") or ""))
 
         @user_logged_out.connect_via(app)
         def _audit_logout(_sender, user=None, **_extra):
@@ -366,6 +429,7 @@ def create_app(config_object=None):
                 log_action("auth.logout", resource_type="user", resource=str(getattr(user, "email", "") or ""))
             except Exception:
                 pass
+            logger.info("auth.logout user=%s", str(getattr(user, "email", "") or ""))
     except Exception:
         pass
     
@@ -396,8 +460,9 @@ def create_app(config_object=None):
         @app.after_request
         def _security_headers(resp):
             resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-            resp.headers.setdefault("Referrer-Policy", "no-referrer-when-downgrade")
-            resp.headers.setdefault("X-XSS-Protection", "1; mode=block")
+            resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+            # Explicitly disable the legacy XSS auditor (modern guidance; CSP is the control).
+            resp.headers.setdefault("X-XSS-Protection", "0")
             resp.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
             if request.is_secure:
                 resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
@@ -412,8 +477,15 @@ def create_app(config_object=None):
             if files_prefix:
                 img_src.append(files_prefix)
                 connect_src.append(files_prefix)
-            script_src = ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"]
-            style_src = ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"]
+            # 'unsafe-inline' is still required by the legacy Jinja admin pages.
+            # Once those inline scripts move to static files, set
+            # TINYMRP_CSP_ALLOW_INLINE=false to drop it (burn-down: plan Phase 1.5).
+            allow_inline = str(os.getenv("TINYMRP_CSP_ALLOW_INLINE") or "true").strip().lower() in (
+                "1", "true", "yes", "on",
+            )
+            inline_token = ["'unsafe-inline'"] if allow_inline else []
+            script_src = ["'self'", *inline_token, "https://cdn.jsdelivr.net"]
+            style_src = ["'self'", *inline_token, "https://cdn.jsdelivr.net"]
             if not allow_frame_embedding:
                 csp = " ".join([
                     "default-src 'self';",
