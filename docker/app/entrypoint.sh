@@ -59,6 +59,12 @@ with app.app_context():
     email = (os.getenv("TINYMRP_ADMIN_EMAIL") or os.getenv("DEFAULT_ADMIN_EMAIL") or "").strip().lower()
     password = (os.getenv("TINYMRP_ADMIN_PASSWORD") or os.getenv("DEFAULT_ADMIN_PASSWORD") or "").strip()
 
+    # Phase 2: never accept the historical example password from old docs/compose files.
+    if password == "ChangeMe123!":
+        print("[seed] REFUSING to seed with the well-known example password 'ChangeMe123!'.")
+        print("[seed] Unset TINYMRP_ADMIN_PASSWORD to get a generated one-time password, or set a strong value.")
+        sys.exit(0)
+
     if not seed_admin:
         print("[seed] Admin seeding disabled (set TINYMRP_SEED_ADMIN=true to enable).")
         sys.exit(0)

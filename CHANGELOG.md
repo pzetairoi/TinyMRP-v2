@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Security (Phase 2 — containers)
+- App containers now run locked down: read-only root filesystem, `tmpfs /tmp`,
+  `cap_drop: ALL`, `no-new-privileges`, health-gated startup ordering, healthchecks
+  against `/api/health`. Applied to the single-host compose files AND the fleet
+  instance template (`deploy/scripts/lib/common.sh`).
+- Dockerfile hardened: dependency-first layer caching, no compiler toolchain in the
+  final image, container HEALTHCHECK, gunicorn timeouts + worker recycling
+  (`--max-requests` with jitter), access/error logs to stdout.
+- No default admin credentials anywhere; the entrypoint refuses the historical
+  example password and generates a one-time password when none is provided.
+- Optional MongoDB authentication in the single-host compose (`MONGO_ROOT_USER`/
+  `MONGO_ROOT_PASSWORD`; migration steps for existing volumes in
+  docs/UPDATING_PRODUCTION.md).
+- New `release-image` workflow: version tags build the image, gate on a trivy scan
+  (HIGH/CRITICAL block), attach a CycloneDX SBOM, and publish to GHCR so hosts can
+  deploy pre-built images via `update-instance.sh --image`.
+- hadolint added to CI for the Dockerfile.
+
 ### Security (Phase 1)
 - Rate limiting via Flask-Limiter: login/password endpoints throttled by default
   (`RATE_LIMIT_LOGIN`, default 10/min); optional global `/api` budget (`RATE_LIMIT_API`);

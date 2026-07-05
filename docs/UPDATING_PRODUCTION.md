@@ -1,4 +1,40 @@
-# Updating production instances safely (Phase 0/1 changes and onward)
+# Updating production instances safely (Phase 0/1/2 changes and onward)
+
+## Phase 2 rollout notes (container hardening)
+
+Applied on the next rebuild via the same canary procedure. What changes:
+
+| Change | Operator impact |
+|--------|-----------------|
+| Instance compose template hardened (`read_only` rootfs, `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`, health-gated startup, healthcheck moved to `/api/health`) | `update-instance.sh` regenerates the compose file and recreates containers as usual. If any custom workflow writes inside the container filesystem (outside `/data/deliverables` and `/tmp`), it will now fail — report it and temporarily remove `read_only: true` from that instance's compose while we fix the write path. |
+| Dockerfile rebuilt for caching + smaller surface (no compiler toolchain, gunicorn timeouts and worker recycling, container HEALTHCHECK) | First rebuild takes the usual time; later rebuilds are much faster. |
+| No default admin credentials; entrypoint refuses `ChangeMe123!` | Existing instances have users, so seeding is skipped entirely — no impact. Fresh instances print a generated one-time admin password in `docker logs <app>` when `TINYMRP_ADMIN_PASSWORD` is unset. |
+| Release images published to GHCR on version tags (trivy-gated) | Optional: deploy pre-built images with `update-instance.sh <name> --image ghcr.io/<owner>/tinymrp-app:vX.Y.Z` instead of building on-host. |
+| Mongo authentication available (opt-in) in the single-host compose | Nothing changes unless you set `MONGO_ROOT_USER`/`MONGO_ROOT_PASSWORD`. Fleet instances keep their per-instance internal-network isolation; scripted per-instance Mongo auth arrives with the Phase 4 fleet work. |
+
+### Enabling Mongo auth on an EXISTING single-host compose deployment
+
+Auth must be configured before Mongo enforces it — do this in one maintenance window:
+
+```bash
+# 1) Create the root user while auth is still off
+docker compose exec mongo mongosh --eval '
+  db.getSiblingDB("admin").createUser({
+    user: "root", pwd: "<STRONG-PASSWORD>", roles: [ { role: "root", db: "admin" } ]
+  })'
+
+# 2) Add to .env:
+#    MONGO_ROOT_USER=root
+#    MONGO_ROOT_PASSWORD=<STRONG-PASSWORD>
+#    MONGO_URI=mongodb://root:<STRONG-PASSWORD>@mongo:27017/tinymrp-v2?authSource=admin
+
+# 3) Recreate with auth enforced
+docker compose up -d --force-recreate mongo app
+curl -fsS http://localhost:${HTTP_PORT:-5000}/api/health
+```
+
+To roll back: remove the three `.env` entries and `docker compose up -d --force-recreate`.
+
 
 ## Phase 1 rollout notes (application security hardening)
 

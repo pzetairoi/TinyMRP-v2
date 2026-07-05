@@ -656,6 +656,8 @@ services:
     image: mongo:6.0
     container_name: ${mongo_container_name}
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     environment:
       MONGO_INITDB_DATABASE: ${mongo_db}
     volumes:
@@ -677,16 +679,24 @@ services:
       dockerfile: docker/app/Dockerfile
     container_name: ${app_container_name}
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     env_file:
       - ${env_file}
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     volumes:
       - type: bind
         source: ${deliverables_dir}
         target: /data/deliverables
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
       interval: 15s
       timeout: 5s
       retries: 20
