@@ -26,5 +26,10 @@ class User(Document, UserMixin):
     last_login_ip = StringField()
     last_login_ua = StringField()
     password_changed_at = DateTimeField(default=utc_now)
+    # Two-factor authentication (Flask-Security TOTP; only used when
+    # SECURITY_TWO_FACTOR_ENABLED=true — see app/__init__.py).
+    tf_totp_secret = StringField()
+    tf_primary_method = StringField()
+    tf_phone_number = StringField()
     meta = {"collection": "users",
         "db_alias": DB_ALIAS}

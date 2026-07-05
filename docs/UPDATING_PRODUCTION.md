@@ -1,4 +1,22 @@
-# Updating production instances safely (Phase 0 changes and onward)
+# Updating production instances safely (Phase 0/1 changes and onward)
+
+## Phase 1 rollout notes (application security hardening)
+
+Phase 1 activates at the NEXT rebuild of each instance. Same canary procedure as below, plus:
+
+| Change | Operator impact |
+|--------|-----------------|
+| Rate limiting ON by default (login 10/min per client IP) | Shared-NAT offices doing bulk logins may hit it; raise via `RATE_LIMIT_LOGIN` or disable with `RATE_LIMIT_ENABLED=false`. Running >1 gunicorn worker? Budgets are per-worker with memory storage — set `RATE_LIMIT_STORAGE_URI=redis://...` for exact shared limits (approximate limits without it are fine for most). |
+| File links now expire after 24 h | Normal UI use unaffected (fresh tokens per page load). Users who bookmarked raw `/files/<token>` links must re-open from the UI. Migration window: set `FILES_ALLOW_LEGACY_TOKENS=true` for a week or two, then remove it. |
+| TOTP 2FA available | OFF by default — nothing changes until you set `SECURITY_TWO_FACTOR_ENABLED=true` + `SECURITY_TOTP_SECRETS` per instance. |
+| Structured logs + X-Request-ID | Additive. Set `LOG_FORMAT=json` per instance when you want machine-readable logs. |
+| Referrer-Policy / X-XSS-Protection header changes | No functional impact on the app. |
+| New Python deps (Flask-Limiter, limits, cryptography) | Installed automatically on image rebuild / `pip install -r requirements.txt`. |
+
+Post-update spot checks per instance: log in normally (should NOT be throttled), fail login
+11× rapidly from one machine (should get "Too many attempts"), open a part file from the UI
+(fresh token works), check response headers contain `X-Request-ID`.
+
 
 This guide gives the exact commands to keep existing Caddy multi-instance hosts alive when pulling
 new versions of this repository, and what changed in Phase 0 that operators should know.
