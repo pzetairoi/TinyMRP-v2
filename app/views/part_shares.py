@@ -42,7 +42,6 @@ from app.views.bom_tree import (
 )
 from app.views.parts import (
     _attr_identity,
-    _comment_payload,
     _context_field_values,
     _extra_file_overview_row,
     _find_part_doc,

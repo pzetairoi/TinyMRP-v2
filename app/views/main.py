@@ -181,7 +181,6 @@ def download_macro():
     if env_root.strip():
         roots.append(os.path.abspath(env_root))
     roots.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "misc")))
-    roots.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "OLD", "SourceCode", "app", "static", "misc")))
     path = _latest_file_any(roots, [".swp"])
     if not path or not os.path.isfile(path):
         abort(404)

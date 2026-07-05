@@ -14,7 +14,7 @@ from app.models.job import Job
 from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
-from app.services.thumbs import drawing_urls_for, thumb_urls_for, thumb_urls_map
+from app.services.thumbs import thumb_urls_for, thumb_urls_map
 from app.services.attrs import approval_field_values, approval_filter_raw, approved_value, harvest_part_attrs
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
