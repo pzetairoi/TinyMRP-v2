@@ -371,7 +371,7 @@ def seed_bom():
 
 ##########################seed generation commands##########################
 # app/cli.py (append at bottom, below existing imports / groups)
-import random, string, math, datetime as dt
+import random, string, datetime as dt
 from mongoengine.errors import NotUniqueError
 from flask.cli import with_appcontext
 import click

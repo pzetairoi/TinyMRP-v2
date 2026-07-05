@@ -583,7 +583,6 @@ def _excel_bom_bytes(
         from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
         from openpyxl.styles import Alignment, Font, PatternFill
         import json as _json
-        import datetime as _dt
     except Exception:
         # Fallback: CSV in memory
         import csv
