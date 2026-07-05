@@ -1,4 +1,4 @@
-# app/services/filescan.py
+# app/services/filescan.py — discovery + PartFile registry sync (upsert & stale removal)
 import os, re
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -449,3 +449,120 @@ def upsert_part_files(
     rev: Optional[str] = None,
 ) -> int:
     return int(upsert_part_files_detailed(recs, pn=pn, rev=rev).get("count") or 0)
+
+
+def _part_file_on_disk(doc: PartFile, roots: List[Path]) -> bool:
+    """
+    Return True when the physical file backing a PartFile record still exists.
+    Checks the stored absolute path first, then rel_path against every
+    configured source root (case-insensitive, matching discovery behaviour).
+    """
+    abs_path = str(getattr(doc, "path", "") or "").strip()
+    if abs_path and os.path.isabs(abs_path):
+        try:
+            if os.path.isfile(abs_path):
+                return True
+        except Exception:
+            pass
+    rel = str(getattr(doc, "rel_path", "") or "").strip().replace("\\", "/").lstrip("/")
+    if rel:
+        for root in roots:
+            try:
+                if _find_case_insensitive(root, rel):
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+def _remove_thumb_file(doc: PartFile) -> None:
+    """Best-effort removal of the generated thumbnail for a PartFile record."""
+    try:
+        thumb_rel = str(getattr(doc, "thumb_rel_path", "") or "").strip()
+        if not thumb_rel:
+            return
+        root = (
+            current_app.config.get("FILE_ROOT_LOCAL")
+            or current_app.config.get("FILES_LOCAL_ROOT")
+            or ""
+        ).rstrip("/\\")
+        if not root:
+            return
+        base = os.path.abspath(root)
+        abs_thumb = os.path.abspath(os.path.join(base, thumb_rel.replace("/", os.sep)))
+        if os.path.commonpath([os.path.normcase(abs_thumb), os.path.normcase(base)]) != os.path.normcase(base):
+            return
+        if os.path.isfile(abs_thumb):
+            os.remove(abs_thumb)
+    except Exception:
+        pass
+
+
+def remove_stale_part_files(
+    pn: str,
+    rev: str,
+    found: Optional[Dict[Tuple[str, bool], Dict]] = None,
+) -> Dict[str, Any]:
+    """
+    Remove PartFile DB entries for (pn, rev) whose backing file no longer
+    exists on disk.
+
+    - found: optional result of discover_part_files(); any (ext_group, is_dwg)
+      key present there was just (re)discovered and is always kept.
+    - Records whose physical file still exists are kept even when not
+      re-discovered (e.g. uploaded artifacts that don't match scan naming).
+    - Safety: when no configured source root directory is reachable (storage
+      offline / not mounted), nothing is removed.
+    """
+    pn_clean = (pn or "").strip()
+    rev_clean = str(rev or "")
+    if not pn_clean:
+        return {"count": 0, "removed": []}
+
+    roots: List[Path] = []
+    for src in _sources(None):
+        try:
+            root = Path(str(src.get("local_root") or "").strip())
+            if str(root) and root.is_dir():
+                roots.append(root)
+        except Exception:
+            continue
+    if not roots:
+        # Storage unreachable -> do not treat files as deleted.
+        return {"count": 0, "removed": [], "skipped": "no_reachable_source_roots"}
+
+    found_keys = {
+        (str(group or "").lower(), bool(is_dwg))
+        for (group, is_dwg) in (found or {}).keys()
+    }
+
+    removed: List[Dict[str, Any]] = []
+    for doc in PartFile.objects(part_number__iexact=pn_clean, revision__iexact=rev_clean):
+        key = ((doc.ext_group or "").lower(), bool(doc.is_dwg))
+        if key in found_keys:
+            continue
+        if _part_file_on_disk(doc, roots):
+            continue
+        _remove_thumb_file(doc)
+        removed.append(
+            {
+                "part_number": str(doc.part_number or ""),
+                "revision": str(doc.revision or ""),
+                "ext_group": str(doc.ext_group or ""),
+                "ext": str(doc.ext or ""),
+                "is_dwg": bool(doc.is_dwg),
+                "rel_path": str(doc.rel_path or ""),
+                "action": "removed",
+            }
+        )
+        doc.delete()
+
+    if removed:
+        try:
+            from app.services.part_materialized import sync_materialized_fields_for_pairs
+
+            sync_materialized_fields_for_pairs({(pn_clean, rev_clean)})
+        except Exception:
+            pass
+
+    return {"count": len(removed), "removed": removed}

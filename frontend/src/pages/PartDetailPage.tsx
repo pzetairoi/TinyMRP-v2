@@ -573,6 +573,7 @@ export default function PartDetailPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteChildren, setDeleteChildren] = useState(false);
+  const [deleteFilesToo, setDeleteFilesToo] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
@@ -2080,18 +2081,20 @@ function isExternalDatasheetUrl(url: string): boolean {
       }
       const found = j?.files_found ?? 0
       const upserts = j?.artifacts_upserted ?? 0
+      const removed = j?.artifacts_removed ?? 0
       const thumbs = j?.thumbnails_generated ?? 0
       const partsRefreshed = j?.parts_refreshed ?? 1
+      const removedNote = removed > 0 ? ` Removed ${removed} entr${removed === 1 ? "y" : "ies"} for deleted file(s).` : ""
       if (found <= 0) {
         setRefreshMsg(
-          refreshIncludeChildren
+          (refreshIncludeChildren
             ? `No matching files found. Parts refreshed: ${partsRefreshed}.`
-            : "No matching files found for this part."
+            : "No matching files found for this part.") + removedNote
         )
-      } else if (upserts <= 0) {
+      } else if (upserts <= 0 && removed <= 0) {
         setRefreshMsg(`No new files found. ${found} file(s) already registered. Parts refreshed: ${partsRefreshed}.`)
       } else {
-        setRefreshMsg(`Found ${found} file(s). Updated ${upserts}. Thumbs ${thumbs}. Parts refreshed: ${partsRefreshed}.`)
+        setRefreshMsg(`Found ${found} file(s). Updated ${upserts}. Thumbs ${thumbs}. Parts refreshed: ${partsRefreshed}.${removedNote}`)
       }
       setRefreshTick((t) => t + 1)
     } catch (err: any) {
@@ -2104,9 +2107,12 @@ function isExternalDatasheetUrl(url: string): boolean {
   async function handleDeletePart() {
     if (!canPartsDelete || !part) return;
     const label = `${part.part_number}${part.revision ? "-" + part.revision : ""}`;
-    const extra = deleteChildren
+    let extra = deleteChildren
       ? "\n\nThis will also delete BOM children that are not used in any other assembly."
       : "";
+    if (deleteFilesToo) {
+      extra += "\n\nRelated files (PDF, STEP, images, extra files, thumbnails) will be PERMANENTLY deleted from the server storage.";
+    }
     const ok = window.confirm(`Delete part ${label}? This cannot be undone.${extra}`);
     if (!ok) return;
     setDeleteBusy(true);
@@ -2119,6 +2125,7 @@ function isExternalDatasheetUrl(url: string): boolean {
           pn: part.part_number,
           rev: part.revision || "",
           delete_children: deleteChildren,
+          delete_files: deleteFilesToo,
         }),
       });
       if (!resp.ok) {
@@ -3372,6 +3379,19 @@ function isExternalDatasheetUrl(url: string): boolean {
                         />
                         <label className="form-check-label small" htmlFor="deleteChildrenCheck">
                           Also delete BOM children (only if not used in other assemblies)
+                        </label>
+                      </div>
+                      <div className="form-check">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          id="deleteFilesCheck"
+                          checked={deleteFilesToo}
+                          disabled={deleteBusy}
+                          onChange={(e) => setDeleteFilesToo(e.target.checked)}
+                        />
+                        <label className="form-check-label small" htmlFor="deleteFilesCheck">
+                          Also delete related files from the server storage (permanent)
                         </label>
                       </div>
                       {deleteError ? <div className="text-danger small mt-1">{deleteError}</div> : null}

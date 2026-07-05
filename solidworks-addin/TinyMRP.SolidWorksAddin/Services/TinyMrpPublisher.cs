@@ -128,7 +128,6 @@ namespace TinyMRP.SolidWorksAddin.Services
             public string PartNumber;
             public string Revision;
             public string DrawingPath;
-            public ModelDoc2 SourceModel;
             public int DocType;
             public bool IsRoot;
             public int MaxDepth;
@@ -161,7 +160,6 @@ namespace TinyMRP.SolidWorksAddin.Services
         {
             public bool IsDrawing;
             public string PhysicalPath;
-            public string SourceModelPath;
             public string DisplayName;
             public int DocType;
             public bool IsRoot;
@@ -597,6 +595,112 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
+        private sealed class SolidWorksWhiteViewportBackgroundScope : IDisposable
+        {
+            private readonly ISldWorks _swApp;
+            private readonly int _backgroundAppearance;
+            private readonly int _colorScheme;
+            private readonly int _viewportBackground;
+            private readonly bool _restore;
+
+            public SolidWorksWhiteViewportBackgroundScope(ISldWorks swApp)
+            {
+                _swApp = swApp;
+                if (_swApp == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    _backgroundAppearance = _swApp.GetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance);
+                    _colorScheme = _swApp.GetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme);
+                    _viewportBackground = _swApp.GetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground);
+                    _restore = true;
+                }
+                catch
+                {
+                    _restore = false;
+                    return;
+                }
+
+                try
+                {
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance, 0);
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme,
+                        (int)swSystemColorsCurrentColorScheme_e.swSystemColorsCurrentColorSchemeBlueHighlight);
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, 16777215);
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            public void Dispose()
+            {
+                if (!_restore || _swApp == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance,
+                        _backgroundAppearance);
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+
+                try
+                {
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme,
+                        _colorScheme);
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+
+                try
+                {
+                    _swApp.SetUserPreferenceIntegerValue(
+                        (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground,
+                        _viewportBackground);
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+            }
+        }
+
         private sealed class ExportActivationScope : IDisposable
         {
             private readonly ISldWorks _swApp;
@@ -1018,14 +1122,36 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     if (!string.IsNullOrWhiteSpace(closeTitle))
                     {
+                        bool prevUserControl = true;
+                        bool prevUserControlBackground = true;
                         try
                         {
+                            prevUserControl = _swApp.UserControl;
+                            prevUserControlBackground = _swApp.UserControlBackground;
+                        }
+                        catch
+                        {
+                            // ignore state read errors
+                        }
+
+                        try
+                        {
+                            // Suppress the "save changes?" dialog: the target may have been dirtied
+                            // (e.g. ForceRebuild3 during PNG/PLY capture) since it was activated.
+                            try { _swApp.UserControl = false; } catch { /* ignore */ }
+                            try { _swApp.UserControlBackground = true; } catch { /* ignore */ }
+
                             closeFallback = true;
                             _swApp.CloseDoc(closeTitle);
                         }
                         catch
                         {
                             // ignore close errors
+                        }
+                        finally
+                        {
+                            try { _swApp.UserControl = prevUserControl; } catch { /* ignore */ }
+                            try { _swApp.UserControlBackground = prevUserControlBackground; } catch { /* ignore */ }
                         }
 
                         afterVisible = IsTargetVisible();
@@ -2020,6 +2146,11 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             _currentExportSummary = new ExportSummary();
             SetActiveExportSession(null);
+            ReopenDocInfo startDocInfo = null;
+            ReopenDocInfo rootDocInfo = null;
+            bool rootClosedForExport = false;
+            string startTitle = string.Empty;
+            string startPathSnapshot = string.Empty;
 
             string BuildCompletionMessage(string statusLabel)
             {
@@ -2070,8 +2201,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                     return;
                 }
 
-                string startTitle = string.Empty;
-                string startPathSnapshot = string.Empty;
+                startDocInfo = CaptureDocumentReopenInfo(startDoc);
                 try
                 {
                     startTitle = startDoc.GetTitle() ?? string.Empty;
@@ -2134,12 +2264,6 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 ModelView view = swModel.ActiveView as ModelView;
                 bool prevGraphics = view != null && view.EnableGraphicsUpdate;
-                int prevBgAppearance = _swApp.GetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance);
-                int prevColorScheme = _swApp.GetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme);
-                int prevViewport = _swApp.GetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground);
 
                 ModelDoc2 rootModel = swModel;
                 string rootTitle = string.Empty;
@@ -2151,6 +2275,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     rootTitle = string.Empty;
                 }
+                rootDocInfo = CaptureDocumentReopenInfo(rootModel);
 
                 _activeBatchRootTitle = rootTitle ?? string.Empty;
                 _activeBatchRootDocType = modelType;
@@ -2178,14 +2303,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     // ignore
                 }
-
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance, 0);
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme,
-                    (int)swSystemColorsCurrentColorScheme_e.swSystemColorsCurrentColorSchemeBlueHighlight);
-                _swApp.SetUserPreferenceIntegerValue(
-                    (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, 16777215);
 
                 List<DeliverablePlan> fullManifest;
                 List<DeliverablePlan> prunedManifest;
@@ -2232,19 +2349,60 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         // ignore
                     }
-
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swColorsBackgroundAppearance, prevBgAppearance);
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swSystemColorsCurrentColorScheme, prevColorScheme);
-                    _swApp.SetUserPreferenceIntegerValue(
-                        (int)swUserPreferenceIntegerValue_e.swSystemColorsViewportBackground, prevViewport);
                 }
 
                 if (_currentExportSummary != null)
                 {
                     _currentExportSummary.DeliverablePlansPlanned = fullManifest.Count;
                     _currentExportSummary.DeliverablePlansSkipped = Math.Max(0, fullManifest.Count - prunedManifest.Count);
+                }
+
+                ModelDoc2 queueRootModel = rootModel;
+                if (effective.TopLevelOnly)
+                {
+                    // Active document is exported directly; no root close/reopen involved.
+                }
+                else if (effective.CreateUploadPack)
+                {
+                    SafeLog(errorLog, "ROOT close optimization skipped: upload pack needs root context");
+                }
+                else if (queue.Count > 0)
+                {
+                    string rootClosePath = rootDocInfo != null ? (rootDocInfo.Path ?? string.Empty) : string.Empty;
+                    string rootCloseTitle = rootDocInfo != null ? (rootDocInfo.Title ?? string.Empty) : string.Empty;
+                    string rootDirtyReason;
+                    if (string.IsNullOrWhiteSpace(rootClosePath))
+                    {
+                        SafeLog(errorLog, "ROOT close optimization skipped: root has no saved path.");
+                    }
+                    else if (!File.Exists(rootClosePath))
+                    {
+                        SafeLog(errorLog, "ROOT close optimization skipped: root path not found. path=" + rootClosePath);
+                    }
+                    else if (rootModel == null)
+                    {
+                        SafeLog(errorLog, "ROOT close optimization skipped: root model unavailable. path=" + rootClosePath);
+                    }
+                    else if (IsDocDirtyOrUnsaved(rootModel, out rootDirtyReason))
+                    {
+                        SafeLog(errorLog, "ROOT close optimization skipped: root is dirty/unsaved (" + rootDirtyReason + ").");
+                    }
+                    else
+                    {
+                        ForceCloseDocNoSave(rootModel, errorLog, "deliverables-root-close");
+                        if (IsDocOpenByIdOrTitle(rootClosePath, rootCloseTitle))
+                        {
+                            SafeLog(errorLog,
+                                "WARN: root close optimization failed; continuing with live root. path=" + rootClosePath);
+                        }
+                        else
+                        {
+                            rootClosedForExport = true;
+                            queueRootModel = null;
+                            rootModel = null;
+                            SafeLog(errorLog, "ROOT close optimization active. path=" + rootClosePath);
+                        }
+                    }
                 }
 
                 if (!AnyDeliverablesSelected(effective))
@@ -2258,7 +2416,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
                 else
                 {
-                    RunPhysicalExportQueue(queue, rootModel, deliverablesFolder, effective, log, errorLog, progress);
+                    RunPhysicalExportQueue(queue, queueRootModel, deliverablesFolder, effective, log, errorLog, progress);
                 }
 
                 if (effective.CreateUploadPack)
@@ -2272,11 +2430,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                         string flatFile = BuildUploadPackFlatBomFromManifest(fullManifest, bomFolder, errorLog);
                         try
                         {
-                            if (rootModel != null)
-                            {
-                                _swApp.ActivateDoc(rootTitle);
-                                TryShowConfiguration(rootModel, swConf.Name ?? string.Empty);
-                            }
+                            rootModel = RestoreDocumentFromSnapshot(
+                                rootDocInfo,
+                                errorLog,
+                                rootClosedForExport ? "deliverables-root-reopen-upload-pack" : "deliverables-root-activate-upload-pack",
+                                true);
                         }
                         catch
                         {
@@ -2319,14 +2477,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                     completedLabel = "Export completed with warnings";
                 }
 
-                RestoreStartDocument(startTitle);
-                if (!IsDocOpenByIdOrTitle(startPathSnapshot, startTitle))
-                {
-                    SafeLog(errorLog,
-                        "WARN: start document not open after export. title=" + (startTitle ?? string.Empty) +
-                        " path=" + (startPathSnapshot ?? string.Empty));
-                }
-
                 try
                 {
                     if (_currentExportSummary != null)
@@ -2357,6 +2507,31 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             finally
             {
+                try
+                {
+                    if (rootClosedForExport)
+                    {
+                        RestoreDocumentFromSnapshot(rootDocInfo, errorLog, "deliverables-root-reopen-final", false);
+                    }
+
+                    RestoreDocumentFromSnapshot(startDocInfo, errorLog, "deliverables-start-restore-final", true);
+                    if (!IsDocOpenByIdOrTitle(startPathSnapshot, startTitle))
+                    {
+                        SafeLog(errorLog,
+                            "WARN: start document not open after export. title=" + (startTitle ?? string.Empty) +
+                            " path=" + (startPathSnapshot ?? string.Empty));
+                    }
+
+                    if (_currentExportSummary != null)
+                    {
+                        _currentExportSummary.FinalVisibleDocs = GetOpenVisibleDocumentIds().Count;
+                    }
+                }
+                catch
+                {
+                    // ignore restore errors
+                }
+
                 try
                 {
                     ExportSummary summary = _currentExportSummary;
@@ -4013,34 +4188,16 @@ namespace TinyMRP.SolidWorksAddin.Services
                             sessionState.Status = ExportSessionStatusPlanned;
                             SetActiveExportSession(sessionState);
                             SaveExportSessionAtomic(sessionState, errorLog);
-                            List<ReopenDocInfo> cleanRoomReopen = null;
-                            try
-                            {
-                                 EnsureRootDocSafeToCloseNoSave(rootModel, log, errorLog);
-                                 cleanRoomReopen = CleanRoomCloseOtherVisibleDocuments(rootModel, log, errorLog);
-
-                                 ProcessDeliverablesIsolated(
-                                     pendingRefs,
-                                     deliverablesFolder,
-                                     options,
-                                    log,
-                                    errorLog,
-                                    deliverablesProgress,
-                                    rootPathSnapshot,
-                                    rootConfigName,
-                                    sessionState);
-                            }
-                            finally
-                            {
-                                try
-                                {
-                                    ReopenDocumentsSilent(cleanRoomReopen, errorLog);
-                                }
-                                catch
-                                {
-                                    // ignore reopen errors
-                                }
-                            }
+                            ProcessDeliverablesIsolated(
+                                pendingRefs,
+                                deliverablesFolder,
+                                options,
+                                log,
+                                errorLog,
+                                deliverablesProgress,
+                                rootPathSnapshot,
+                                rootConfigName,
+                                sessionState);
                         }
                     }
                 }
@@ -4369,6 +4526,106 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 return string.Empty;
             }
+        }
+
+        private ReopenDocInfo CaptureDocumentReopenInfo(ModelDoc2 doc)
+        {
+            if (doc == null)
+            {
+                return null;
+            }
+
+            var info = new ReopenDocInfo();
+            try
+            {
+                info.Path = doc.GetPathName() ?? string.Empty;
+            }
+            catch
+            {
+                info.Path = string.Empty;
+            }
+
+            try
+            {
+                info.Title = doc.GetTitle() ?? string.Empty;
+            }
+            catch
+            {
+                info.Title = string.Empty;
+            }
+
+            try
+            {
+                info.DocType = doc.GetType();
+            }
+            catch
+            {
+                info.DocType = DocumentTypeFromPath(info.Path);
+            }
+
+            if (info.DocType != (int)swDocumentTypes_e.swDocDRAWING)
+            {
+                try
+                {
+                    Configuration config = doc.GetActiveConfiguration() as Configuration;
+                    info.ConfigurationName = config != null ? (config.Name ?? string.Empty) : string.Empty;
+                }
+                catch
+                {
+                    info.ConfigurationName = string.Empty;
+                }
+            }
+
+            return info;
+        }
+
+        private ModelDoc2 RestoreDocumentFromSnapshot(ReopenDocInfo info, Action<string> errorLog, string context, bool activate)
+        {
+            if (info == null)
+            {
+                return null;
+            }
+
+            ModelDoc2 doc = FindOpenDocument(info.Path, info.Title);
+            if (doc == null)
+            {
+                int specErr = 0;
+                int specWarn = 0;
+                doc = OpenDocSilent(
+                    info.Path,
+                    info.DocType == 0 ? DocumentTypeFromPath(info.Path) : info.DocType,
+                    info.ConfigurationName,
+                    false,
+                    true,
+                    errorLog,
+                    context,
+                    out specErr,
+                    out specWarn);
+                if (doc == null)
+                {
+                    SafeLog(errorLog,
+                        "WARN: document restore failed context=" + (context ?? string.Empty) +
+                        " title=" + (info.Title ?? string.Empty) +
+                        " path=" + (info.Path ?? string.Empty) +
+                        " specErr=" + specErr +
+                        " specWarn=" + specWarn);
+                    return null;
+                }
+            }
+
+            TrySetDocumentVisible(doc, true);
+            if (!string.IsNullOrWhiteSpace(info.ConfigurationName) &&
+                info.DocType != (int)swDocumentTypes_e.swDocDRAWING)
+            {
+                TryShowConfiguration(doc, info.ConfigurationName);
+            }
+
+            if (activate)
+            {
+                TryActivateDocument(doc, errorLog, context);
+            }
+
+            return doc;
         }
 
         private void TryRestoreActiveDocument(string activeTitle, Action<string> errorLog, string context)
@@ -4921,42 +5178,67 @@ namespace TinyMRP.SolidWorksAddin.Services
     // Full path is not normally what CloseDoc wants, but keep it as a last named fallback.
     AddCloseName(path);
 
-    if (TryCloseActiveDocOnlyIfItIsTempAssembly())
+    // Suppress the "save changes?" dialog: the temp assembly is always dirty (it was built
+    // in-memory and never saved), and CloseDoc alone does not guarantee a silent discard.
+    bool prevUserControl = true;
+    bool prevUserControlBackground = true;
+    try
     {
-        SafeLog(errorLog,
-            "TEMP BOM ASM close ok=true method=CloseDocActiveEmptyName" +
-            " context=" + contextText +
-            " title=" + (title ?? string.Empty) +
-            " path=" + (path ?? string.Empty));
-
-        return true;
+        prevUserControl = _swApp.UserControl;
+        prevUserControlBackground = _swApp.UserControlBackground;
+    }
+    catch
+    {
+        // ignore state read errors
     }
 
-    foreach (string closeName in closeNames)
+    try
     {
-        if (TryCloseDocByName(closeName, "named-close"))
+        try { _swApp.UserControl = false; } catch { /* ignore */ }
+        try { _swApp.UserControlBackground = true; } catch { /* ignore */ }
+
+        if (TryCloseActiveDocOnlyIfItIsTempAssembly())
         {
             SafeLog(errorLog,
-                "TEMP BOM ASM close ok=true method=CloseDoc" +
+                "TEMP BOM ASM close ok=true method=CloseDocActiveEmptyName" +
                 " context=" + contextText +
-                " closeName=" + closeName +
                 " title=" + (title ?? string.Empty) +
                 " path=" + (path ?? string.Empty));
 
             return true;
         }
+
+        foreach (string closeName in closeNames)
+        {
+            if (TryCloseDocByName(closeName, "named-close"))
+            {
+                SafeLog(errorLog,
+                    "TEMP BOM ASM close ok=true method=CloseDoc" +
+                    " context=" + contextText +
+                    " closeName=" + closeName +
+                    " title=" + (title ?? string.Empty) +
+                    " path=" + (path ?? string.Empty));
+
+                return true;
+            }
+        }
+
+        SafeLog(errorLog,
+            "TEMP BOM ASM close ok=false" +
+            " context=" + contextText +
+            " title=" + (title ?? string.Empty) +
+            " normalizedTitle=" + (normalizedTitle ?? string.Empty) +
+            " fileName=" + (fileName ?? string.Empty) +
+            " path=" + (path ?? string.Empty) +
+            " dirtyBeforeClose=" + dirtyBeforeClose);
+
+        return false;
     }
-
-    SafeLog(errorLog,
-        "TEMP BOM ASM close ok=false" +
-        " context=" + contextText +
-        " title=" + (title ?? string.Empty) +
-        " normalizedTitle=" + (normalizedTitle ?? string.Empty) +
-        " fileName=" + (fileName ?? string.Empty) +
-        " path=" + (path ?? string.Empty) +
-        " dirtyBeforeClose=" + dirtyBeforeClose);
-
-    return false;
+    finally
+    {
+        try { _swApp.UserControl = prevUserControl; } catch { /* ignore */ }
+        try { _swApp.UserControlBackground = prevUserControlBackground; } catch { /* ignore */ }
+    }
 }
 
         private bool TryDeleteTempBomDirectory(string tempDirectory, Action<string> errorLog, string context)
@@ -8163,7 +8445,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                 PartNumber = partNumber ?? string.Empty,
                 Revision = revision ?? string.Empty,
                 DrawingPath = drawingPath ?? string.Empty,
-                SourceModel = model,
                 DocType = docType,
                 IsRoot = planned != null && planned.IsRoot,
                 MaxDepth = planned != null ? planned.MaxDepth : 0,
@@ -8205,10 +8486,6 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (string.IsNullOrWhiteSpace(target.DrawingPath) && !string.IsNullOrWhiteSpace(source.DrawingPath))
             {
                 target.DrawingPath = source.DrawingPath;
-            }
-            if (target.SourceModel == null && source.SourceModel != null)
-            {
-                target.SourceModel = source.SourceModel;
             }
 
             target.DrawingExists = target.DrawingExists || source.DrawingExists;
@@ -8619,7 +8896,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                             {
                                 IsDrawing = false,
                                 PhysicalPath = item.ModelPath ?? string.Empty,
-                                SourceModelPath = item.ModelPath ?? string.Empty,
                                 DisplayName = !string.IsNullOrWhiteSpace(item.ModelPath)
                                     ? item.ModelPath
                                     : (item.ModelTitle ?? item.FileString ?? string.Empty),
@@ -8654,7 +8930,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                             {
                                 IsDrawing = true,
                                 PhysicalPath = item.DrawingPath ?? string.Empty,
-                                SourceModelPath = item.ModelPath ?? string.Empty,
                                 DisplayName = item.DrawingPath ?? string.Empty,
                                 DocType = item.DocType,
                                 IsRoot = item.IsRoot,
@@ -8781,11 +9056,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                 if (model == null)
                 {
                     model = FindOpenDocument(item.PhysicalPath, null);
-                }
-
-                if (model == null && item.Plans[0] != null)
-                {
-                    model = item.Plans[0].SourceModel;
                 }
 
                 if (model == null && !string.IsNullOrWhiteSpace(item.PhysicalPath))
@@ -8946,14 +9216,36 @@ namespace TinyMRP.SolidWorksAddin.Services
                             continue;
                         }
 
-                        ModelDoc2 sourceModel = plan.SourceModel;
-                        if (sourceModel == null && plan.IsRoot)
+                        ModelDoc2 sourceModel = null;
+                        bool closeSourceModel = false;
+                        if (plan.IsRoot && rootModel != null)
                         {
                             sourceModel = rootModel;
                         }
                         if (sourceModel == null && !string.IsNullOrWhiteSpace(plan.ModelPath))
                         {
                             sourceModel = FindOpenDocument(plan.ModelPath, null);
+                        }
+                        if (sourceModel == null && !string.IsNullOrWhiteSpace(plan.ModelPath))
+                        {
+                            int sourceErr = 0;
+                            int sourceWarn = 0;
+                            sourceModel = OpenDocReadOnlySilent(
+                                plan.ModelPath,
+                                plan.DocType == 0 ? DocumentTypeFromPath(plan.ModelPath) : plan.DocType,
+                                plan.ConfigurationName,
+                                errorLog,
+                                "physical-drawing-source|" + (plan.ModelPath ?? string.Empty),
+                                out sourceErr,
+                                out sourceWarn);
+                            closeSourceModel = sourceModel != null;
+                            if (sourceModel == null)
+                            {
+                                SafeLog(errorLog,
+                                    "DRAWING queue source open failed path=" + (plan.ModelPath ?? string.Empty) +
+                                    " specErr=" + sourceErr +
+                                    " specWarn=" + sourceWarn);
+                            }
                         }
 
                         if (sourceModel == null)
@@ -8965,6 +9257,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                         IEnumerable<string> formats = GetRequestedDrawingFormats(plan);
                         try
                         {
+                            TryShowConfiguration(sourceModel, plan.ConfigurationName);
                             DwgPublishFast(
                                 sourceModel,
                                 plan.FileString,
@@ -8992,6 +9285,20 @@ namespace TinyMRP.SolidWorksAddin.Services
                             LogExportFailure(log, errorLog,
                                 "Drawing export failed: " + (plan.FileString ?? string.Empty) + " (" + ex.Message + ")");
                             continue;
+                        }
+                        finally
+                        {
+                            if (closeSourceModel && sourceModel != null)
+                            {
+                                string sourceClosePath = plan.ModelPath ?? string.Empty;
+                                ForceCloseDocNoSave(sourceModel, errorLog, "physical-drawing-source-close");
+                                if (!string.IsNullOrWhiteSpace(sourceClosePath) && IsDocOpenByIdOrTitle(sourceClosePath, null))
+                                {
+                                    RecordDeliverableFailure(_currentExportSummary, plan, GetRequestedDrawingFormats(plan), "close failed");
+                                }
+
+                                ComInteropUtil.TryFinalReleaseComObject(sourceModel);
+                            }
                         }
 
                         string reason;
@@ -10590,8 +10897,8 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
         }
 
-        private ModelDoc2 OpenDocReadOnlySilent(string path, int docType, string configurationName, Action<string> errorLog,
-            string context, out int specErr, out int specWarn)
+        private ModelDoc2 OpenDocSilent(string path, int docType, string configurationName, bool readOnly, bool documentVisible,
+            Action<string> errorLog, string context, out int specErr, out int specWarn)
         {
             specErr = 0;
             specWarn = 0;
@@ -10619,7 +10926,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             spec.DocumentType = docType;
-            spec.ReadOnly = true;
+            spec.ReadOnly = readOnly;
             spec.Silent = true;
             if (!string.IsNullOrWhiteSpace(configurationName))
             {
@@ -10633,8 +10940,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 }
             }
 
-            // If available in this API version, request an invisible open (avoid UI/tab churn).
-            TrySetComProperty(spec, "DocumentVisible", false);
+            TrySetComProperty(spec, "DocumentVisible", documentVisible);
 
             try
             {
@@ -10709,15 +11015,21 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 try
                 {
-                    opened.Visible = false;
+                    opened.Visible = documentVisible;
                 }
                 catch
                 {
-                    // ignore hide errors
+                    // ignore visibility errors
                 }
             }
 
             return opened;
+        }
+
+        private ModelDoc2 OpenDocReadOnlySilent(string path, int docType, string configurationName, Action<string> errorLog,
+            string context, out int specErr, out int specWarn)
+        {
+            return OpenDocSilent(path, docType, configurationName, true, false, errorLog, context, out specErr, out specWarn);
         }
 
         private void LogAndCloseAllNonEssentialDocs(HashSet<string> keep, Action<string> errorLog, string context)
@@ -13759,49 +14071,53 @@ namespace TinyMRP.SolidWorksAddin.Services
                         string path = Path.Combine(deliverablesFolder, "png", fileString + ".png");
 
                         string exceptionText = string.Empty;
-                        ExportOutputResult exportResult = ExportToTempAndPromote("png", path, overwriteFiles, errorLog, tempPath =>
+                        ExportOutputResult exportResult;
+                        using (new SolidWorksWhiteViewportBackgroundScope(_swApp))
                         {
-                            try
+                            exportResult = ExportToTempAndPromote("png", path, overwriteFiles, errorLog, tempPath =>
                             {
-                                // Macro parity: rebuild + iso view + zoom fit + redraw before capture.
-                                model.ForceRebuild3(true);
-                                model.ShowNamedView2("Isometric", 7);
-                                model.ViewZoomtofit2();
-
-                                if (view != null)
-                                {
-                                    view.EnableGraphicsUpdate = true;
-                                }
-
-                                model.GraphicsRedraw2();
                                 try
                                 {
-                                    System.Windows.Forms.Application.DoEvents();
-                                }
-                                catch
-                                {
-                                    // ignore
-                                }
-                                try
-                                {
-                                    System.Threading.Thread.Sleep(50);
-                                }
-                                catch
-                                {
-                                    // ignore
-                                }
+                                    // Macro parity: rebuild + iso view + zoom fit + redraw before capture.
+                                    model.ForceRebuild3(true);
+                                    model.ShowNamedView2("Isometric", 7);
+                                    model.ViewZoomtofit2();
 
-                                errors = 0;
-                                warnings = 0;
-                                return model.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
-                                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
-                            }
-                            catch (Exception ex)
-                            {
-                                exceptionText = ex.Message ?? string.Empty;
-                                return false;
-                            }
-                        });
+                                    if (view != null)
+                                    {
+                                        view.EnableGraphicsUpdate = true;
+                                    }
+
+                                    model.GraphicsRedraw2();
+                                    try
+                                    {
+                                        System.Windows.Forms.Application.DoEvents();
+                                    }
+                                    catch
+                                    {
+                                        // ignore
+                                    }
+                                    try
+                                    {
+                                        System.Threading.Thread.Sleep(50);
+                                    }
+                                    catch
+                                    {
+                                        // ignore
+                                    }
+
+                                    errors = 0;
+                                    warnings = 0;
+                                    return model.Extension.SaveAs(tempPath, (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                                        (int)swSaveAsOptions_e.swSaveAsOptions_Silent, null, ref errors, ref warnings);
+                                }
+                                catch (Exception ex)
+                                {
+                                    exceptionText = ex.Message ?? string.Empty;
+                                    return false;
+                                }
+                            });
+                        }
 
                         long bytes = exportResult.Bytes;
                         bool blankSuspect = !exportResult.Success &&

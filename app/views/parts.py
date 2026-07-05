@@ -31,6 +31,7 @@ from app.services.filescan import (
     datasheet_attr_present,
     datasheet_url_from_attrs,
     discover_part_files,
+    remove_stale_part_files,
     upsert_part_files,
 )
 from app.services.thumbs_gen import generate_thumbs_for_parts
@@ -1714,6 +1715,7 @@ def part_refresh_files(pn):
 
     files_found_total = 0
     upserts_total = 0
+    removed_total = 0
     refreshed: list[dict] = []
     for pn_i, rev_i in pairs:
         part_doc = (
@@ -1738,7 +1740,13 @@ def part_refresh_files(pn):
             recs.append(rec)
         files_found_total += len(recs)
         upserts_total += upsert_part_files(recs, pn_i, rev_i)
-        refreshed.append({"pn": pn_i, "rev": rev_i, "files_found": len(recs)})
+        try:
+            removed_report = remove_stale_part_files(pn_i, rev_i, found)
+        except Exception:
+            removed_report = {"count": 0}
+        removed_count = int(removed_report.get("count") or 0)
+        removed_total += removed_count
+        refreshed.append({"pn": pn_i, "rev": rev_i, "files_found": len(recs), "files_removed": removed_count})
 
     thumbs = generate_thumbs_for_parts(pairs)
     try:
@@ -1746,7 +1754,7 @@ def part_refresh_files(pn):
             "part.files.refresh",
             resource_type="part",
             resource=f"{p.part_number}:{target_rev}",
-            meta={"recursive": recursive, "parts": len(pairs), "found": files_found_total, "upserts": upserts_total, "thumbs": thumbs},
+            meta={"recursive": recursive, "parts": len(pairs), "found": files_found_total, "upserts": upserts_total, "removed": removed_total, "thumbs": thumbs},
         )
     except Exception:
         pass
@@ -1759,6 +1767,7 @@ def part_refresh_files(pn):
             "parts_refreshed": len(pairs),
             "files_found": files_found_total,
             "artifacts_upserted": upserts_total,
+            "artifacts_removed": removed_total,
             "thumbnails_generated": thumbs,
             "refreshed": refreshed[:200],
         }
@@ -1790,13 +1799,14 @@ def part_delete():
         return jsonify({"ok": False, "error": "not found"}), 404
 
     delete_children = _parse_bool(body.get("delete_children") or request.form.get("delete_children"))
-    result = delete_part_and_refs_cascade(pn, rev, delete_children=delete_children)
+    delete_files = _parse_bool(body.get("delete_files") or request.form.get("delete_files"))
+    result = delete_part_and_refs_cascade(pn, rev, delete_children=delete_children, delete_files=delete_files)
     try:
         log_action(
             "part.delete",
             resource_type="part",
             resource=f"{pn}:{rev}",
-            meta={"delete_children": bool(delete_children)},
+            meta={"delete_children": bool(delete_children), "delete_files": bool(delete_files)},
         )
     except Exception:
         pass
