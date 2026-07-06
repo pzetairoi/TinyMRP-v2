@@ -212,44 +212,189 @@
         </form>
         {% if order %}
         <div class="mt-4">
-          <h2 class="h6 mb-2 fw-bold">Docpack export</h2>
-          <form method="post" action="{{ url_for('docpacks_api.build_order') }}">
+          <h2 class="h6 mb-3 fw-bold">Docpack export</h2>
+          <form method="post" action="{{ url_for('docpacks_api.build_order') }}" class="docpack-export-form" data-prefix="order">
             <input type="hidden" name="order_id" value="{{ order.id }}">
-            <div class="row g-2">
-              <div class="col-md-3">
-                <label class="form-label small">Depth</label>
-                <select class="form-select form-select-sm" name="depth">
-                  <option value="full" selected>Full BOM</option>
-                  <option value="top">Top level only</option>
-                </select>
+
+            <div class="pd-card p-3 mb-3">
+              <div class="account-section-title mb-2">Scope</div>
+              <div class="row g-2">
+                <div class="col-md-3">
+                  <label class="form-label small">Depth</label>
+                  <select class="form-select form-select-sm" name="depth">
+                    <option value="full" selected>Full BOM</option>
+                    <option value="top">Top level only</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Classified parts</label>
+                  <select class="form-select form-select-sm" name="classified">
+                    <option value="show" selected>Show</option>
+                    <option value="hide">Hide</option>
+                    <option value="only">Only</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Process mode</label>
+                  <select class="form-select form-select-sm" name="process_mode">
+                    <option value="all" selected>All</option>
+                    <option value="selected">Selected</option>
+                  </select>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small">Output name</label>
+                  <input class="form-control form-control-sm" type="text" name="output_name" placeholder="{{ order.order_number }}_docpack">
+                </div>
               </div>
-              <div class="col-md-3">
-                <label class="form-label small">Classified parts</label>
-                <select class="form-select form-select-sm" name="classified">
-                  <option value="show" selected>Show</option>
-                  <option value="hide">Hide</option>
-                  <option value="only">Only</option>
-                </select>
-              </div>
-              <div class="col-md-3">
-                <label class="form-label small">Process mode</label>
-                <select class="form-select form-select-sm" name="process_mode">
-                  <option value="all" selected>All</option>
-                  <option value="selected">Selected</option>
-                </select>
-              </div>
-              <div class="col-md-3">
-                <label class="form-label small">Output name</label>
-                <input class="form-control form-control-sm" type="text" name="output_name" placeholder="{{ order.order_number }}_docpack">
+              <div class="row g-2 mt-1">
+                <div class="col-md-6">
+                  <label class="form-label small">Processes (comma-separated, used when process mode is "Selected")</label>
+                  <input class="form-control form-control-sm" type="text" name="processes" placeholder="welding, machine, purchase">
+                </div>
+                <div class="col-md-6">
+                  <div class="form-label small">File types</div>
+                  <div class="border rounded p-2">
+                    <div class="row row-cols-2 row-cols-md-4 g-1">
+                      {% for ft, label in [
+                        ('pdf','PDF'),
+                        ('datasheet','Datasheet'),
+                        ('png','PNG'),
+                        ('step','STEP'),
+                        ('dxf','DXF'),
+                        ('edr','eDrawings'),
+                        ('3mf','3MF')
+                      ] %}
+                      <div class="col">
+                        <div class="form-check">
+                          <input class="form-check-input order-ft-cb" type="checkbox" id="order_ft_{{ ft }}" name="file_types" value="{{ ft }}">
+                          <label class="form-check-label small" for="order_ft_{{ ft }}">{{ label }}</label>
+                        </div>
+                      </div>
+                      {% endfor %}
+                    </div>
+                    <div class="mt-2">
+                      <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="document.querySelectorAll('.order-ft-cb').forEach(function(c){c.checked=true;})">Select all</button>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.querySelectorAll('.order-ft-cb').forEach(function(c){c.checked=false;})">Select none</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="row g-2 mt-2">
+
+            <div class="pd-card p-3 mb-3">
+              <div class="account-section-title mb-2">Outputs to generate</div>
+              <div class="row g-2">
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_selected_files" name="selected_files" checked>
+                  <label class="form-check-label" for="order_selected_files">Selected files</label>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_excel_bom" name="excel_bom">
+                  <label class="form-check-label" for="order_excel_bom">Excel BOM</label>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input order-binder-toggle" type="checkbox" id="order_pdf_binder" name="pdf_binder">
+                  <label class="form-check-label" for="order_pdf_binder">PDF binder</label>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_index_pdf" name="index_pdf">
+                  <label class="form-check-label" for="order_index_pdf">Index (PDF, standalone)</label>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_visual_list" name="visual_list">
+                  <label class="form-check-label" for="order_visual_list">Visual summary (PDF)</label>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_hardware_summary" name="hardware_summary">
+                  <label class="form-check-label" for="order_hardware_summary">Hardware summary (standalone)</label>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_cover_page" name="cover_page">
+                  <label class="form-check-label" for="order_cover_page">Cover page (standalone)</label>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_whereused" name="whereused_report">
+                  <label class="form-check-label" for="order_whereused">Where-used report (standalone)</label>
+                </div></div>
+                <div class="col-md-6 col-lg-4"><div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_fab_pack" name="fabrication_pack">
+                  <label class="form-check-label" for="order_fab_pack">Fabrication pack (preset)</label>
+                </div></div>
+              </div>
+
+              <div class="border rounded p-2 mt-3">
+                <div class="form-check mb-1">
+                  <input class="form-check-input" type="checkbox" id="order_excel_all" name="excel_all_fields">
+                  <label class="form-check-label small" for="order_excel_all">Include all part attributes in Excel BOM</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="order_include_consumed" name="include_consumed">
+                  <label class="form-check-label small" for="order_include_consumed">Include consumed parts</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="row g-3 mb-3 d-none order-binder-options">
               <div class="col-md-6">
-                <label class="form-label small">Processes (comma-separated)</label>
-                <input class="form-control form-control-sm" type="text" name="processes" placeholder="welding, machine, purchase">
+                <div class="pd-card p-3 h-100">
+                  <div class="account-section-title mb-2">Binder contents</div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_cover" name="binder_add_cover" checked><label class="form-check-label" for="order_binder_cover">Cover page</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_index" name="binder_add_index" checked><label class="form-check-label" for="order_binder_index">Index</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_visual" name="binder_add_visual_list" checked><label class="form-check-label" for="order_binder_visual">Visual index section</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_where" name="binder_add_whereused"><label class="form-check-label" for="order_binder_where">Where-used report section</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_hw" name="binder_add_hardware_summary" checked><label class="form-check-label" for="order_binder_hw">Hardware summary</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_datasheets" name="binder_add_datasheets"><label class="form-check-label" for="order_binder_datasheets">Datasheets</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_flat" name="binder_include_flat_patterns"><label class="form-check-label" for="order_binder_flat">Flat pattern PDFs</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_pages" name="binder_page_numbers" checked><label class="form-check-label" for="order_binder_pages">Page numbers</label></div>
+                </div>
               </div>
               <div class="col-md-6">
-                <div class="form-label small">File types</div>
+                <div class="pd-card p-3 h-100">
+                  <div class="account-section-title mb-2">Stamps</div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_stamp_quote" name="stamp_quote"><label class="form-check-label" for="order_stamp_quote">For quotation</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_stamp_conf" name="stamp_confidential"><label class="form-check-label" for="order_stamp_conf">Confidential</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_stamp_app" name="stamp_approved"><label class="form-check-label" for="order_stamp_app">Approved</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_stamp_wip" name="stamp_wip"><label class="form-check-label" for="order_stamp_wip">WIP</label></div>
+                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_stamp_inprog" name="stamp_inprogress"><label class="form-check-label" for="order_stamp_inprog">In progress / Not approved</label></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pd-card p-3">
+              <button class="btn btn-primary btn-sm" type="submit">Download docpack</button>
+              <div class="mt-2 d-none docpack-progress-wrap" aria-live="polite">
+                <div class="progress" style="height: 8px; max-width: 360px;">
+                  <div class="progress-bar progress-bar-striped progress-bar-animated docpack-progress-bar" role="progressbar" style="width: 5%;" aria-valuemin="0" aria-valuemax="100" aria-valuenow="5"></div>
+                </div>
+                <div class="small text-muted mt-1 docpack-progress-label">Building docpack...</div>
+              </div>
+            </div>
+          </form>
+        </div>
+        {% endif %}
+        {% if order and show_scope_download %}
+        <div class="mt-4">
+          <h2 class="h6 mb-3 fw-bold">Scope of supply</h2>
+          <form method="post" action="{{ url_for('admin_orders.order_scope_pdf', order_id=order.id) }}" class="docpack-export-form" data-prefix="scope">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="pd-card p-3 mb-3">
+              <div class="text-muted small mb-2">
+                The scope-of-supply PDF (part list, quantities, descriptions) is always included. The options below add optional attachments to a ZIP alongside it.
+              </div>
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="attach_docs" name="attach_docs">
+                <label class="form-check-label" for="attach_docs">Attach all available documentation and files (ZIP)</label>
+              </div>
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="include_children" name="include_children">
+                <label class="form-check-label" for="include_children">Include children documentation (BOM)</label>
+              </div>
+              <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="include_binder" name="include_binder">
+                <label class="form-check-label" for="include_binder">Include combined binder PDF</label>
+              </div>
+              <div class="small text-muted mb-1">File types (leave empty to include all)</div>
+              <div class="border rounded p-2">
                 <div class="row row-cols-2 row-cols-md-4 g-1">
                   {% for ft, label in [
                     ('pdf','PDF'),
@@ -262,172 +407,27 @@
                   ] %}
                   <div class="col">
                     <div class="form-check">
-                      <input class="form-check-input" type="checkbox" id="order_ft_{{ ft }}" name="file_types" value="{{ ft }}">
-                      <label class="form-check-label small" for="order_ft_{{ ft }}">{{ label }}</label>
+                      <input class="form-check-input scope-ft-cb" type="checkbox" id="scope_ft_{{ ft }}" name="file_types" value="{{ ft }}">
+                      <label class="form-check-label" for="scope_ft_{{ ft }}">{{ label }}</label>
                     </div>
                   </div>
                   {% endfor %}
                 </div>
-              </div>
-            </div>
-            <div class="row g-2 mt-2">
-              <div class="col-md-4">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_selected_files" name="selected_files" checked>
-                  <label class="form-check-label small" for="order_selected_files">Include selected file types</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_excel_bom" name="excel_bom">
-                  <label class="form-check-label small" for="order_excel_bom">Excel BOM</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_pdf_binder" name="pdf_binder">
-                  <label class="form-check-label small" for="order_pdf_binder">PDF binder</label>
-                </div>
-              </div>
-              <div class="col-md-4">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_visual_list" name="visual_list">
-                  <label class="form-check-label small" for="order_visual_list">Visual list</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_index_pdf" name="index_pdf">
-                  <label class="form-check-label small" for="order_index_pdf">Index PDF</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_whereused" name="whereused_report">
-                  <label class="form-check-label small" for="order_whereused">Where-used report</label>
-                </div>
-              </div>
-              <div class="col-md-4">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_hardware_summary" name="hardware_summary">
-                  <label class="form-check-label small" for="order_hardware_summary">Hardware summary</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_cover_page" name="cover_page">
-                  <label class="form-check-label small" for="order_cover_page">Cover page</label>
-                </div>
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="order_fab_pack" name="fabrication_pack">
-                  <label class="form-check-label small" for="order_fab_pack">Fabrication pack</label>
+                <div class="mt-2">
+                  <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="document.querySelectorAll('.scope-ft-cb').forEach(function(c){c.checked=true;})">Select all</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.querySelectorAll('.scope-ft-cb').forEach(function(c){c.checked=false;})">Select none</button>
                 </div>
               </div>
             </div>
-            <details class="mt-2">
-              <summary class="small fw-semibold">Advanced options</summary>
-              <div class="row g-2 mt-2">
-                <div class="col-md-4">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_excel_all" name="excel_all_fields">
-                    <label class="form-check-label small" for="order_excel_all">Excel all fields</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_include_consumed" name="include_consumed">
-                    <label class="form-check-label small" for="order_include_consumed">Include consumed parts</label>
-                  </div>
+            <div class="pd-card p-3">
+              <button class="btn btn-primary btn-sm" type="submit">Download scope</button>
+              <div class="mt-2 d-none docpack-progress-wrap" aria-live="polite">
+                <div class="progress" style="height: 8px; max-width: 360px;">
+                  <div class="progress-bar progress-bar-striped progress-bar-animated docpack-progress-bar" role="progressbar" style="width: 5%;" aria-valuemin="0" aria-valuemax="100" aria-valuenow="5"></div>
                 </div>
-                <div class="col-md-4">
-                  <div class="small fw-semibold mb-1">Binder options</div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_binder_cover" name="binder_add_cover" checked>
-                    <label class="form-check-label small" for="order_binder_cover">Add cover page</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_binder_index" name="binder_add_index" checked>
-                    <label class="form-check-label small" for="order_binder_index">Add index</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_binder_visual" name="binder_add_visual_list" checked>
-                    <label class="form-check-label small" for="order_binder_visual">Visual list section</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_binder_where" name="binder_add_whereused">
-                    <label class="form-check-label small" for="order_binder_where">Where-used section</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_binder_datasheets" name="binder_add_datasheets">
-                    <label class="form-check-label small" for="order_binder_datasheets">Add datasheets</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_binder_hw" name="binder_add_hardware_summary" checked>
-                    <label class="form-check-label small" for="order_binder_hw">Hardware summary</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_binder_pages" name="binder_page_numbers" checked>
-                    <label class="form-check-label small" for="order_binder_pages">Page numbers</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_binder_flat" name="binder_include_flat_patterns">
-                    <label class="form-check-label small" for="order_binder_flat">Include flat patterns</label>
-                  </div>
-                </div>
-                <div class="col-md-4">
-                  <div class="small fw-semibold mb-1">Stamps</div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_stamp_quote" name="stamp_quote">
-                    <label class="form-check-label small" for="order_stamp_quote">Quote</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_stamp_conf" name="stamp_confidential">
-                    <label class="form-check-label small" for="order_stamp_conf">Confidential</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_stamp_app" name="stamp_approved">
-                    <label class="form-check-label small" for="order_stamp_app">Approved</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_stamp_wip" name="stamp_wip">
-                    <label class="form-check-label small" for="order_stamp_wip">WIP</label>
-                  </div>
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="order_stamp_inprog" name="stamp_inprogress">
-                    <label class="form-check-label small" for="order_stamp_inprog">In progress</label>
-                  </div>
-                </div>
+                <div class="small text-muted mt-1 docpack-progress-label">Building scope of supply...</div>
               </div>
-            </details>
-            <button class="btn btn-outline-primary btn-sm mt-2" type="submit">Download docpack</button>
-          </form>
-        </div>
-        {% endif %}
-        {% if order and show_scope_download %}
-        <div class="mt-3">
-          <div class="fw-bold mb-2">Scope of supply</div>
-          <form method="post" action="{{ url_for('admin_orders.order_scope_pdf', order_id=order.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <div class="form-check mb-2">
-              <input class="form-check-input" type="checkbox" id="attach_docs" name="attach_docs">
-              <label class="form-check-label" for="attach_docs">Attach all available documentation and files (ZIP)</label>
             </div>
-            <div class="form-check mb-2">
-              <input class="form-check-input" type="checkbox" id="include_children" name="include_children">
-              <label class="form-check-label" for="include_children">Include children documentation (BOM)</label>
-            </div>
-            <div class="form-check mb-2">
-              <input class="form-check-input" type="checkbox" id="include_binder" name="include_binder">
-              <label class="form-check-label" for="include_binder">Include combined binder PDF</label>
-            </div>
-            <div class="small text-muted mb-1">File types (leave empty to include all)</div>
-            <div class="row row-cols-2 row-cols-md-4 g-1 mb-2">
-              {% for ft, label in [
-                ('pdf','PDF'),
-                ('datasheet','Datasheet'),
-                ('png','PNG'),
-                ('step','STEP'),
-                ('dxf','DXF'),
-                ('edr','eDrawings'),
-                ('3mf','3MF')
-              ] %}
-              <div class="col">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="ft_{{ ft }}" name="file_types" value="{{ ft }}">
-                  <label class="form-check-label" for="ft_{{ ft }}">{{ label }}</label>
-                </div>
-              </div>
-              {% endfor %}
-            </div>
-            <button class="btn btn-outline-primary btn-sm" type="submit">Download scope</button>
           </form>
         </div>
         {% endif %}
@@ -758,6 +758,48 @@
       thumbCache[key] = null;
     }
   }
+</script>
+<script>
+(function () {
+  document.querySelectorAll('.docpack-export-form').forEach(function (form) {
+    var binderToggle = form.querySelector('input[name="pdf_binder"]');
+    var binderOptions = form.querySelector('[class*="binder-options"]');
+    if (binderToggle && binderOptions) {
+      var sync = function () { binderOptions.classList.toggle('d-none', !binderToggle.checked); };
+      binderToggle.addEventListener('change', sync);
+      sync();
+    }
+
+    var submitBtn = form.querySelector('button[type="submit"]');
+    var wrap = form.querySelector('.docpack-progress-wrap');
+    var bar = form.querySelector('.docpack-progress-bar');
+    var label = form.querySelector('.docpack-progress-label');
+    if (!submitBtn || !wrap || !bar || !label) return;
+    var originalText = submitBtn.textContent;
+    form.addEventListener('submit', function () {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Building...';
+      wrap.classList.remove('d-none');
+      var progress = 5;
+      var timer = window.setInterval(function () {
+        progress = Math.min(92, progress + Math.max(1, Math.round((92 - progress) * 0.08)));
+        bar.style.width = progress + '%';
+        bar.setAttribute('aria-valuenow', String(progress));
+        label.textContent = 'Building... ' + progress + '%';
+      }, 700);
+      // This is a plain form POST (file download via Content-Disposition), so
+      // the page never navigates away on success -- reset the button after a
+      // best-effort delay instead of waiting for a completion event.
+      window.setTimeout(function () {
+        window.clearInterval(timer);
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+        wrap.classList.add('d-none');
+        bar.style.width = '5%';
+      }, 15000);
+    });
+  });
+})();
 </script>
 {% if is_readonly %}
 <script>
