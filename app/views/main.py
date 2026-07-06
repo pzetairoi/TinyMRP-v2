@@ -1,11 +1,14 @@
 import os
 from datetime import datetime
 
+from bson import ObjectId
+from bson.errors import InvalidId
 from flask import Blueprint, render_template, send_file, abort, request, redirect, url_for, flash, current_app
 from flask_security import auth_required, current_user
 from flask_security.utils import hash_password
 from mongoengine.queryset.visitor import Q
 
+from app.models.audit import AuditLog
 from app.models.job import Job
 from app.models.order import Order
 from app.models.part import Part
@@ -117,17 +120,55 @@ def _order_href(user, order_id: str) -> str | None:
     return None
 
 
+def _recently_visited_resources(user, action: str, limit: int, scan_cap: int = 200) -> list[str]:
+    """Distinct resource identifiers this user actually opened, most-recent
+    first, sourced from the audit log rather than "recently updated by
+    anyone" -- the latter isn't personal and isn't what "recently visited"
+    means to the person looking at their own home page.
+    """
+    uid = str(getattr(user, "id", "") or "")
+    if not uid:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    try:
+        entries = (
+            AuditLog.objects(user_id=uid, action=action)
+            .order_by("-ts")
+            .only("resource")
+            .limit(scan_cap)
+        )
+        for entry in entries:
+            resource = (entry.resource or "").strip()
+            if not resource or resource in seen:
+                continue
+            seen.add(resource)
+            out.append(resource)
+            if len(out) >= limit:
+                break
+    except Exception:
+        pass
+    return out
+
+
 def _recent_parts(user, limit: int = 5) -> list[dict[str, object]]:
     base = _parts_base_query(user)
     if base is None:
         return []
 
     rows: list[dict[str, object]] = []
-    for part in (
-        base.order_by("-updated_at")
-        .only("part_number", "revision", "description", "status", "attrs", "updated_at")
-        .limit(limit)
-    ):
+    for resource in _recently_visited_resources(user, "part.view", limit):
+        pn, _, rev = resource.partition(":")
+        pn = pn.strip()
+        if not pn:
+            continue
+        part = (
+            base.filter(part_number__iexact=pn, revision__iexact=rev.strip())
+            .only("part_number", "revision", "description", "status", "attrs", "updated_at")
+            .first()
+        )
+        if not part:
+            continue
         attrs = harvest_part_attrs(part)
         approval = approval_field_values(attrs)
         revision = (attrs.get("revision") or part.revision or "").strip()
@@ -150,13 +191,18 @@ def _recent_jobs(user, limit: int = 5) -> list[dict[str, object]]:
         return []
 
     rows: list[dict[str, object]] = []
-    jobs = (
-        apply_job_scope(Job.objects(is_deleted=False), user)
-        .order_by("-updated_at")
-        .only("job_number", "title", "description", "status", "customer", "updated_at", "created_at")
-        .limit(limit)
-    )
-    for job in jobs:
+    for resource in _recently_visited_resources(user, "job.view", limit):
+        try:
+            job_oid = ObjectId(resource)
+        except (InvalidId, TypeError):
+            continue
+        job = (
+            apply_job_scope(Job.objects(id=job_oid, is_deleted=False), user)
+            .only("job_number", "title", "description", "status", "customer", "updated_at", "created_at")
+            .first()
+        )
+        if not job:
+            continue
         try:
             customer_name = job.customer.name if job.customer else ""
         except Exception:
@@ -178,13 +224,18 @@ def _recent_orders(user, limit: int = 5) -> list[dict[str, object]]:
         return []
 
     rows: list[dict[str, object]] = []
-    orders = (
-        apply_order_scope(Order.objects(), user)
-        .order_by("-updated_at")
-        .only("order_number", "description", "kind", "status", "customer", "supplier", "updated_at", "order_date")
-        .limit(limit)
-    )
-    for order in orders:
+    for resource in _recently_visited_resources(user, "order.view", limit):
+        try:
+            order_oid = ObjectId(resource)
+        except (InvalidId, TypeError):
+            continue
+        order = (
+            apply_order_scope(Order.objects(id=order_oid), user)
+            .only("order_number", "description", "kind", "status", "customer", "supplier", "updated_at", "order_date")
+            .first()
+        )
+        if not order:
+            continue
         try:
             supplier_name = order.supplier.name if order.supplier else ""
         except Exception:
@@ -207,179 +258,40 @@ def _recent_orders(user, limit: int = 5) -> list[dict[str, object]]:
     return rows
 
 
-def _attention_items(user) -> list[dict[str, object]]:
-    items: list[dict[str, object]] = []
-    parts_q = _parts_base_query(user)
-    if parts_q is not None:
-        missing_description = parts_q.filter(
-            __raw__={
-                "$and": [
-                    {"$or": [{"description": {"$exists": False}}, {"description": ""}, {"description": None}]},
-                    {"$or": [{"attrs.description": {"$exists": False}}, {"attrs.description": ""}, {"attrs.description": None}]},
-                ]
-            }
-        ).count()
-        missing_process = parts_q.filter(
-            __raw__={"$or": [{"processes": {"$exists": False}}, {"processes": {"$size": 0}}]}
-        ).count()
-        missing_material = parts_q.filter(
-            __raw__={
-                "$or": [
-                    {"canonical.material": {"$exists": False}},
-                    {"canonical.material": ""},
-                    {"canonical.material": None},
-                ]
-            }
-        ).count()
-        if missing_description:
-            items.append(
-                {
-                    "title": "Parts missing descriptions",
-                    "count": missing_description,
-                    "detail": "Visible parts still need a usable description.",
-                    "href": url_for("ui.parts_ui"),
-                }
-            )
-        if missing_process:
-            items.append(
-                {
-                    "title": "Parts missing process metadata",
-                    "count": missing_process,
-                    "detail": "Visible parts do not yet have process assignments.",
-                    "href": url_for("ui.parts_ui"),
-                }
-            )
-        if missing_material:
-            items.append(
-                {
-                    "title": "Parts missing material",
-                    "count": missing_material,
-                    "detail": "Material is still blank on visible parts.",
-                    "href": url_for("ui.parts_ui"),
-                }
-            )
-
-    if _has_any_permission(user, "jobs.view", "jobs.manage"):
-        jobs_q = apply_job_scope(Job.objects(is_deleted=False), user)
-        overdue_jobs = jobs_q.filter(status__in=["released", "in_progress"], scheduled_end__lt=utc_now()).count()
-        active_jobs = jobs_q.filter(status__in=["released", "in_progress", "on_hold"]).count()
-        if overdue_jobs:
-            items.append(
-                {
-                    "title": "Jobs past scheduled end",
-                    "count": overdue_jobs,
-                    "detail": "Released or in-progress jobs are already past their planned end date.",
-                    "href": url_for("admin_jobs.jobs_list") if _can_access(user, "jobs.view") else None,
-                }
-            )
-        elif active_jobs:
-            items.append(
-                {
-                    "title": "Active jobs in progress",
-                    "count": active_jobs,
-                    "detail": "Open jobs are visible and may need scheduling or purchasing follow-up.",
-                    "href": url_for("admin_jobs.jobs_list") if _can_access(user, "jobs.view") else None,
-                }
-            )
-
-    if _has_any_permission(user, "orders.view", "orders.manage"):
-        orders_q = apply_order_scope(Order.objects(), user)
-        open_orders = orders_q.filter(status__nin=["delivered", "cancelled"]).count()
-        if open_orders:
-            items.append(
-                {
-                    "title": "Open orders",
-                    "count": open_orders,
-                    "detail": "Draft and in-flight orders remain visible to this account.",
-                    "href": url_for("admin_orders.orders_list") if _can_access(user, "orders.view") else None,
-                }
-            )
-    return items
+HOME_ITEMS_LIMIT_CHOICES = (3, 5, 10)
+_DEFAULT_HOME_PREFS = {"show_parts": True, "show_jobs": True, "show_orders": True, "items_limit": 5}
 
 
-def _quick_actions_for_home(user) -> list[dict[str, str]]:
-    actions: list[dict[str, str]] = []
-    if user_can_view_items(user):
-        actions.append(
-            {
-                "title": "Find Parts",
-                "href": url_for("ui.parts_ui"),
-                "description": "Browse part detail, BOM, and deliverables.",
-            }
-        )
-    if _can_access(user, "import.bom"):
-        actions.append(
-            {
-                "title": "Upload Pack",
-                "href": url_for("ui.upload_pack_ui"),
-                "description": "Import a BOM ZIP and associated files.",
-            }
-        )
-    if _can_access(user, "jobs.manage"):
-        actions.append(
-            {
-                "title": "New Job",
-                "href": url_for("admin_jobs.jobs_new"),
-                "description": "Create a new manufacturing or work-order job.",
-            }
-        )
-    elif _can_access(user, "jobs.view"):
-        actions.append(
-            {
-                "title": "Jobs",
-                "href": url_for("admin_jobs.jobs_list"),
-                "description": "Review active and recent jobs.",
-            }
-        )
-    if _can_access(user, "orders.manage"):
-        actions.append(
-            {
-                "title": "New Order",
-                "href": url_for("admin_orders.orders_new"),
-                "description": "Open a new purchase or sales order.",
-            }
-        )
-    elif _can_access(user, "orders.view"):
-        actions.append(
-            {
-                "title": "Orders",
-                "href": url_for("admin_orders.orders_list"),
-                "description": "Review visible purchase and sales orders.",
-            }
-        )
-    if _has_any_permission(user, "customers.view", "customers.manage"):
-        actions.append(
-            {
-                "title": "Customers",
-                "href": url_for("admin_customers.customers_list"),
-                "description": "Open customer records and linked work.",
-            }
-        )
-    if _has_any_permission(user, "suppliers.view", "suppliers.manage"):
-        actions.append(
-            {
-                "title": "Suppliers",
-                "href": url_for("admin_suppliers.suppliers_list"),
-                "description": "Open supplier records and linked orders.",
-            }
-        )
-    if _can_access(user, "tools.view"):
-        actions.append(
-            {
-                "title": "Tools",
-                "href": url_for("tools.tools_index"),
-                "description": "Open installers and utility workflows.",
-            }
-        )
-    return actions
+def _home_prefs_for_user(settings) -> dict[str, object]:
+    raw = {}
+    try:
+        raw = (settings.ui_preferences or {}).get("home") or {}
+    except Exception:
+        raw = {}
+    prefs = dict(_DEFAULT_HOME_PREFS)
+    for key in ("show_parts", "show_jobs", "show_orders"):
+        if key in raw:
+            prefs[key] = bool(raw.get(key))
+    try:
+        limit = int(raw.get("items_limit", prefs["items_limit"]))
+    except (TypeError, ValueError):
+        limit = prefs["items_limit"]
+    prefs["items_limit"] = limit if limit in HOME_ITEMS_LIMIT_CHOICES else _DEFAULT_HOME_PREFS["items_limit"]
+    return prefs
 
 
-def _home_dashboard_context(user, permissions: list[str]) -> dict[str, object]:
-    recent_parts = _recent_parts(user)
-    recent_jobs = _recent_jobs(user)
-    recent_orders = _recent_orders(user)
-    attention_items = _attention_items(user)
-    attention_total = sum(int(item.get("count", 0) or 0) for item in attention_items)
+def _home_dashboard_context(user, permissions: list[str], home_prefs: dict[str, object]) -> dict[str, object]:
+    limit = int(home_prefs.get("items_limit") or _DEFAULT_HOME_PREFS["items_limit"])
+    can_view_parts = user_can_view_items(user)
+    can_view_jobs = _has_any_permission(user, "jobs.view", "jobs.manage")
+    can_view_orders = _has_any_permission(user, "orders.view", "orders.manage")
+    show_parts = can_view_parts and bool(home_prefs.get("show_parts", True))
+    show_jobs = can_view_jobs and bool(home_prefs.get("show_jobs", True))
+    show_orders = can_view_orders and bool(home_prefs.get("show_orders", True))
+
+    recent_parts = _recent_parts(user, limit=limit) if show_parts else []
+    recent_jobs = _recent_jobs(user, limit=limit) if show_jobs else []
+    recent_orders = _recent_orders(user, limit=limit) if show_orders else []
 
     summary_bits: list[str] = []
     if recent_parts:
@@ -388,9 +300,7 @@ def _home_dashboard_context(user, permissions: list[str]) -> dict[str, object]:
         summary_bits.append(f"{len(recent_jobs)} recent jobs")
     if recent_orders:
         summary_bits.append(f"{len(recent_orders)} recent orders")
-    if attention_total:
-        summary_bits.append(f"{attention_total} attention items")
-    subtitle = "See recent activity, pending attention items, and safe next actions for your current access."
+    subtitle = "See what you've recently visited and customize what shows up here."
     if summary_bits:
         subtitle = "Currently showing " + ", ".join(summary_bits[:-1] + ([f"and {summary_bits[-1]}"] if len(summary_bits) > 1 else [summary_bits[-1]])) + "."
 
@@ -399,12 +309,15 @@ def _home_dashboard_context(user, permissions: list[str]) -> dict[str, object]:
         "recent_parts": recent_parts,
         "recent_jobs": recent_jobs,
         "recent_orders": recent_orders,
-        "attention_items": attention_items,
-        "quick_actions": _quick_actions_for_home(user),
-        "show_parts": user_can_view_items(user),
-        "show_jobs": _has_any_permission(user, "jobs.view", "jobs.manage"),
-        "show_orders": _has_any_permission(user, "orders.view", "orders.manage"),
+        "show_parts": show_parts,
+        "show_jobs": show_jobs,
+        "show_orders": show_orders,
+        "can_view_parts": can_view_parts,
+        "can_view_jobs": can_view_jobs,
+        "can_view_orders": can_view_orders,
         "permissions_count": len(permissions),
+        "home_prefs": home_prefs,
+        "home_items_limit_choices": HOME_ITEMS_LIMIT_CHOICES,
     }
 
 def _latest_file(root: str, patterns: list[str]) -> str | None:
@@ -465,7 +378,8 @@ def app_home():
             "session_timeout_minutes": int(current_app.config.get("PERMANENT_SESSION_LIFETIME").total_seconds() // 60),
         }
     )
-    dashboard = _home_dashboard_context(current_user, permissions)
+    home_prefs = _home_prefs_for_user(settings)
+    dashboard = _home_dashboard_context(current_user, permissions, home_prefs)
     return render_template(
         "home.html",
         user=current_user,
@@ -478,6 +392,29 @@ def app_home():
         security_summary=security_summary,
         dashboard=dashboard,
     )
+
+
+@bp.post("/app/home-prefs")
+@auth_required()
+def app_home_prefs_update():
+    settings = get_or_create_settings(current_user)
+    prefs = dict(_DEFAULT_HOME_PREFS)
+    prefs["show_parts"] = "show_parts" in request.form
+    prefs["show_jobs"] = "show_jobs" in request.form
+    prefs["show_orders"] = "show_orders" in request.form
+    try:
+        limit = int(request.form.get("items_limit", _DEFAULT_HOME_PREFS["items_limit"]))
+    except (TypeError, ValueError):
+        limit = _DEFAULT_HOME_PREFS["items_limit"]
+    prefs["items_limit"] = limit if limit in HOME_ITEMS_LIMIT_CHOICES else _DEFAULT_HOME_PREFS["items_limit"]
+
+    ui_prefs = dict(settings.ui_preferences or {})
+    ui_prefs["home"] = prefs
+    settings.ui_preferences = ui_prefs
+    settings.updated_at = utc_now()
+    settings.save()
+    flash("Dashboard preferences saved.", "success")
+    return redirect(url_for("main.app_home") + "#recent-activity")
 
 
 @bp.post("/app/profile")

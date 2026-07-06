@@ -85,7 +85,7 @@ def test_base_layout_authenticated_render_shows_account_nav_without_admin_clutte
     assert 'action="/logout"' in user_menu
     assert 'csrf_token' in user_menu
     assert "Home" in body
-    assert "Quick Actions" in body
+    assert "Customize" in body
 
 
 def test_shared_macros_render_without_empty_action_wrappers(app):
