@@ -63,6 +63,10 @@ class DocPackOptions:
     # Fallback description shown on cover/index/binder when root_pn isn't a real
     # part (i.e. there's no Part record to pull a description from).
     root_desc_override: Optional[str] = None
+    # Absolute path to an image file used as the cover/visual-list picture for
+    # the root when there's no real Part record to pull a thumbnail from
+    # (e.g. an uploaded compile sheet's synthetic root).
+    root_thumb_override: Optional[str] = None
 
 
 def _norm_rev(rev: Optional[str]) -> str:
@@ -1058,6 +1062,7 @@ def _visual_list_pdf(
     hardware_rows: Optional[List[Dict[str, object]]] = None,
     hardware_pdf_bytes: Optional[bytes] = None,
     root_desc: Optional[str] = None,
+    root_thumb_override: Optional[str] = None,
 ) -> Optional[bytes]:
     try:
         from reportlab.pdfgen import canvas
@@ -1146,7 +1151,8 @@ def _visual_list_pdf(
     # Root entry first if provided
     root_entry: Optional[Tuple[str,str,float,Optional[str]]] = None
     if root_pn:
-        root_entry = (root_pn, root_rev_clean, 1.0, _img_for(root_pn, root_rev_clean))
+        root_img = root_thumb_override if (root_thumb_override and os.path.isfile(root_thumb_override)) else _img_for(root_pn, root_rev_clean)
+        root_entry = (root_pn, root_rev_clean, 1.0, root_img)
 
     # Child rows
     for pn, rev, qty in items:
@@ -1978,7 +1984,13 @@ def _whereused_report_pdf(
     return buf.getvalue()
 
 
-def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[datetime] = None, desc_override: Optional[str] = None) -> Optional[bytes]:
+def _cover_page_pdf(
+    root_pn: str,
+    root_rev: Optional[str],
+    build_ts: Optional[datetime] = None,
+    desc_override: Optional[str] = None,
+    thumb_override: Optional[str] = None,
+) -> Optional[bytes]:
     """Generate a minimal cover page with PN/REV, description, logo, and footer fields."""
     try:
         from reportlab.pdfgen import canvas
@@ -2114,7 +2126,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[da
 
     # Center image between header and footer
     try:
-        img_path = _preview_png_path(root_pn, root_rev_clean)
+        img_path = thumb_override if (thumb_override and os.path.isfile(thumb_override)) else _preview_png_path(root_pn, root_rev_clean)
         if img_path:
             img_reader = ImageReader(img_path)
             iw, ih = img_reader.getSize()
@@ -2869,6 +2881,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             hardware_rows=visual_hw_rows,
             hardware_pdf_bytes=visual_hw_pdf,
             root_desc=root_desc,
+            root_thumb_override=opts.root_thumb_override,
         )
         if not vis_pdf:
             raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
@@ -2882,7 +2895,13 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
     cover_pdf = None
     if opts.want_cover_page or (opts.want_pdf_binder and opts.binder_add_cover):
-        cover_pdf = _cover_page_pdf(opts.root_pn, opts.root_rev, build_ts=build_ts, desc_override=opts.root_desc_override)
+        cover_pdf = _cover_page_pdf(
+            opts.root_pn,
+            opts.root_rev,
+            build_ts=build_ts,
+            desc_override=opts.root_desc_override,
+            thumb_override=opts.root_thumb_override,
+        )
         if not cover_pdf:
             raise RuntimeError("Failed to build binder cover page. Ensure reportlab is installed.")
     if opts.want_cover_page and cover_pdf:
@@ -2957,6 +2976,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 hardware_rows=visual_hw_rows,
                 hardware_pdf_bytes=visual_hw_pdf,
                 root_desc=root_desc,
+                root_thumb_override=opts.root_thumb_override,
             )
             if not vis_pdf:
                 raise RuntimeError("Failed to build Visual List PDF. Ensure reportlab and qrcode are installed.")
@@ -3194,6 +3214,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     hardware_rows=visual_hw_rows,
                     hardware_pdf_bytes=visual_hw_pdf,
                     root_desc=root_desc,
+                    root_thumb_override=opts.root_thumb_override,
                 )
                 # Replace existing VisualList in preface_bytes
                 for i, (nm, _) in enumerate(preface_bytes):

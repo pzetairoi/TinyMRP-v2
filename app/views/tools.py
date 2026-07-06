@@ -158,11 +158,31 @@ def excel_compile():
 
         # Save a temporary copy for parsing (tmpfs-backed, writable under the hardened container)
         temp_root = _excel_compile_root()
-        temp_input = os.path.join(temp_root, "upload_" + utc_now().strftime("%Y%m%d_%H%M%S_%f") + ".xlsx")
+        stamp = utc_now().strftime("%Y%m%d_%H%M%S_%f")
+        temp_input = os.path.join(temp_root, f"upload_{stamp}.xlsx")
         with open(temp_input, "wb") as f:
             f.write(raw)
 
+        temp_thumb = None
+        thumb_up = request.files.get("thumbnail")
+        if thumb_up and thumb_up.filename:
+            thumb_ext = os.path.splitext(thumb_up.filename)[1].lower()
+            if thumb_ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+                flash("Top-level image must be PNG, JPEG, GIF, or WEBP.")
+                return render_template("tools/excel_compile.html", upload=False, filepath=None, missing=[], excel_fields=excel_fields, processes=processes, default_title=default_title, file_types=file_types_available)
+            thumb_raw = thumb_up.read()
+            if thumb_raw:
+                temp_thumb = os.path.join(temp_root, f"thumb_{stamp}{thumb_ext}")
+                with open(temp_thumb, "wb") as f:
+                    f.write(thumb_raw)
+
         def _fbool(name: str, default: bool = False) -> bool:
+            # A browser omits an unchecked checkbox from the POST body entirely,
+            # so "absent" always means "unchecked" for form-submitted checkboxes
+            # -- never fall back to True here, or unchecking a pre-checked box
+            # (e.g. "Expand sub-assemblies") silently has no effect. Boxes that
+            # should start checked get that from the template's `checked`
+            # attribute, not from this default.
             if name not in request.form:
                 return default
             return request.form.get(name) in ("on", "1", "true", "True")
@@ -172,8 +192,8 @@ def excel_compile():
             process_mode="selected" if request.form.get("process_mode") == "selected" else "all",
             processes=request.form.getlist("processes") or None,
             classified_filter=request.form.get("classified_filter") or "show",
-            expand_subassemblies=_fbool("expand_subassemblies", True),
-            want_excel_bom=_fbool("want_excel_bom", True),
+            expand_subassemblies=_fbool("expand_subassemblies", False),
+            want_excel_bom=_fbool("want_excel_bom", False),
             excel_all_fields=_fbool("excel_all_fields", False),
             excel_field_ids=request.form.getlist("excel_field_ids") or None,
             want_pdf_binder=_fbool("want_pdf_binder", False),
@@ -181,14 +201,12 @@ def excel_compile():
             want_visual_list=_fbool("want_visual_list", False),
             want_hardware_summary=_fbool("want_hardware_summary", False),
             want_cover_page=_fbool("want_cover_page", False),
-            want_whereused_report=_fbool("want_whereused_report", False),
-            binder_add_cover=_fbool("binder_add_cover", True),
-            binder_add_index=_fbool("binder_add_index", True),
-            binder_add_visual_list=_fbool("binder_add_visual_list", True),
-            binder_add_whereused=_fbool("binder_add_whereused", False),
-            binder_add_hardware_summary=_fbool("binder_add_hardware_summary", True),
+            binder_add_cover=_fbool("binder_add_cover", False),
+            binder_add_index=_fbool("binder_add_index", False),
+            binder_add_visual_list=_fbool("binder_add_visual_list", False),
+            binder_add_hardware_summary=_fbool("binder_add_hardware_summary", False),
             binder_add_datasheets=_fbool("binder_add_datasheets", False),
-            binder_page_numbers=_fbool("binder_page_numbers", True),
+            binder_page_numbers=_fbool("binder_page_numbers", False),
             binder_include_flat_patterns=_fbool("binder_include_flat_patterns", False),
             stamp_quote=_fbool("stamp_quote", False),
             stamp_confidential=_fbool("stamp_confidential", False),
@@ -196,6 +214,8 @@ def excel_compile():
             stamp_wip=_fbool("stamp_wip", False),
             stamp_inprogress=_fbool("stamp_inprogress", False),
             title=(request.form.get("title") or "").strip() or default_title,
+            description=(request.form.get("description") or "").strip(),
+            thumbnail_path=temp_thumb,
         )
 
         from app.services.excel_compile import parse_compile_excel, build_excel_compile_zip
@@ -229,6 +249,11 @@ def excel_compile():
                 os.remove(temp_input)
             except Exception:
                 pass
+            if temp_thumb:
+                try:
+                    os.remove(temp_thumb)
+                except Exception:
+                    pass
 
         return render_template("tools/excel_compile.html", upload=True, filepath=out_name, missing=missing, excel_fields=excel_fields, processes=processes, default_title=default_title, file_types=file_types_available)
 

@@ -123,11 +123,9 @@ def build_excel_compile_zip(
     want_visual_list: bool = False,
     want_hardware_summary: bool = False,
     want_cover_page: bool = False,
-    want_whereused_report: bool = False,
     binder_add_cover: bool = True,
     binder_add_index: bool = True,
     binder_add_visual_list: bool = True,
-    binder_add_whereused: bool = False,
     binder_add_hardware_summary: bool = True,
     binder_add_datasheets: bool = False,
     binder_page_numbers: bool = True,
@@ -138,6 +136,8 @@ def build_excel_compile_zip(
     stamp_wip: bool = False,
     stamp_inprogress: bool = False,
     title: Optional[str] = None,
+    description: Optional[str] = None,
+    thumbnail_path: Optional[str] = None,
 ) -> Tuple[bytes, List[CompileRow]]:
     from app.services.docpacks import _part_by
 
@@ -186,7 +186,8 @@ def build_excel_compile_zip(
         opts = DocPackOptions(
             root_pn=title,
             root_rev=None,
-            root_desc_override="",
+            root_desc_override=(description or "").strip(),
+            root_thumb_override=thumbnail_path,
             build_ts=build_ts,
             flat_override=parts,
             processes=processes,
@@ -202,11 +203,9 @@ def build_excel_compile_zip(
             want_visual_list=want_visual_list,
             want_hardware_summary=want_hardware_summary,
             want_cover_page=want_cover_page,
-            want_whereused_report=want_whereused_report,
             binder_add_cover=binder_add_cover,
             binder_add_index=binder_add_index,
             binder_add_visual_list=binder_add_visual_list,
-            binder_add_whereused=binder_add_whereused,
             binder_add_hardware_summary=binder_add_hardware_summary,
             binder_add_datasheets=binder_add_datasheets,
             binder_page_numbers=binder_page_numbers,
