@@ -2621,198 +2621,69 @@ function isExternalDatasheetUrl(url: string): boolean {
             {(!isSharedView || sharedAllowsDocpacks) && <TabPanel header="Doc Packs">
 
               <div className="pd-card p-3 mt-3">
-                <h6 className="mb-3">BOM and output options</h6>
-
-                <div className="row g-3">
-                  <div className="col-md-6">
-                    <div className="mb-3">
-                      <div className="fw-semibold small">Depth of compilation</div>
-                      <div className="form-check">
-                        <input className="form-check-input" type="radio" name="depth" id="depthTop" checked={depth==='top'} onChange={()=>setDepth('top')} />
-                        <label className="form-check-label" htmlFor="depthTop">Top Level only</label>
-                      </div>
-                      <div className="form-check">
-                        <input className="form-check-input" type="radio" name="depth" id="depthFull" checked={depth==='full'} onChange={()=>setDepth('full')} />
-                        <label className="form-check-label" htmlFor="depthFull">Full BOM</label>
-                      </div>
+                <h6 className="mb-3">Scope</h6>
+                <div className="row g-4">
+                  <div className="col-md-4">
+                    <div className="fw-semibold small">Depth of compilation</div>
+                    <div className="form-check">
+                      <input className="form-check-input" type="radio" name="depth" id="depthTop" checked={depth==='top'} onChange={()=>setDepth('top')} />
+                      <label className="form-check-label" htmlFor="depthTop">Top Level only</label>
                     </div>
-
-                    <div className="mb-3">
-                      <div className="fw-semibold small">Consumed components</div>
-                      <div className="form-check">
-                        <input className="form-check-input" type="radio" name="consumed" id="cHide" checked={!includeConsumed} onChange={() => setIncludeConsumed(false)} />
-                        <label className="form-check-label" htmlFor="cHide">Hide consumed</label>
-                      </div>
-                      <div className="form-check">
-                        <input className="form-check-input" type="radio" name="consumed" id="cShow" checked={includeConsumed} onChange={() => setIncludeConsumed(true)} />
-                        <label className="form-check-label" htmlFor="cShow">Show consumed</label>
-                      </div>
-                    </div>
-
-                    <div className="mb-3">
-                      <div className="fw-semibold small">Classified components</div>
-                      <div className="form-check">
-                        <input className="form-check-input" type="radio" name="classified" id="clsHide" checked={classified==='hide'} onChange={()=>setClassified('hide')} />
-                        <label className="form-check-label" htmlFor="clsHide">Hide classified</label>
-                      </div>
-                      <div className="form-check">
-                        <input className="form-check-input" type="radio" name="classified" id="clsShow" checked={classified==='show'} onChange={()=>setClassified('show')} />
-                        <label className="form-check-label" htmlFor="clsShow">Show classified</label>
-                      </div>
-                      <div className="form-check">
-                        <input className="form-check-input" type="radio" name="classified" id="clsOnly" checked={classified==='only'} onChange={()=>setClassified('only')} />
-                        <label className="form-check-label" htmlFor="clsOnly">Only Classified</label>
-                      </div>
+                    <div className="form-check">
+                      <input className="form-check-input" type="radio" name="depth" id="depthFull" checked={depth==='full'} onChange={()=>setDepth('full')} />
+                      <label className="form-check-label" htmlFor="depthFull">Full BOM</label>
                     </div>
                   </div>
 
+                  <div className="col-md-4">
+                    <div className="fw-semibold small">Consumed components</div>
+                    <div className="form-check">
+                      <input className="form-check-input" type="radio" name="consumed" id="cHide" checked={!includeConsumed} onChange={() => setIncludeConsumed(false)} />
+                      <label className="form-check-label" htmlFor="cHide">Hide consumed</label>
+                    </div>
+                    <div className="form-check">
+                      <input className="form-check-input" type="radio" name="consumed" id="cShow" checked={includeConsumed} onChange={() => setIncludeConsumed(true)} />
+                      <label className="form-check-label" htmlFor="cShow">Show consumed</label>
+                    </div>
+                  </div>
+
+                  <div className="col-md-4">
+                    <div className="fw-semibold small">Classified components</div>
+                    <div className="form-check">
+                      <input className="form-check-input" type="radio" name="classified" id="clsHide" checked={classified==='hide'} onChange={()=>setClassified('hide')} />
+                      <label className="form-check-label" htmlFor="clsHide">Hide classified</label>
+                    </div>
+                    <div className="form-check">
+                      <input className="form-check-input" type="radio" name="classified" id="clsShow" checked={classified==='show'} onChange={()=>setClassified('show')} />
+                      <label className="form-check-label" htmlFor="clsShow">Show classified</label>
+                    </div>
+                    <div className="form-check">
+                      <input className="form-check-input" type="radio" name="classified" id="clsOnly" checked={classified==='only'} onChange={()=>setClassified('only')} />
+                      <label className="form-check-label" htmlFor="clsOnly">Only Classified</label>
+                    </div>
+                  </div>
+                </div>
+
+                <hr className="my-3" />
+
+                <div className="row g-4">
                   <div className="col-md-6">
-                    <div className="mb-3">
-                      <div className="fw-semibold small">Filter Process</div>
+                    <div className="fw-semibold small mb-1">Process filter</div>
+                    <div className="d-flex gap-3 mb-2">
+                      <div className="form-check">
+                        <input className="form-check-input" type="radio" name="procMode" id="procAll" checked={processMode==='all'} onChange={()=>setProcessMode('all')} />
+                        <label className="form-check-label" htmlFor="procAll">All processes</label>
+                      </div>
                       <div className="form-check">
                         <input className="form-check-input" type="radio" name="procMode" id="procSel" checked={processMode==='selected'} onChange={()=>setProcessMode('selected')} />
                         <label className="form-check-label" htmlFor="procSel">Only selected</label>
                       </div>
-                      <div className="form-check">
-                        <input className="form-check-input" type="radio" name="procMode" id="procAll" checked={processMode==='all'} onChange={()=>setProcessMode('all')} />
-                        <label className="form-check-label" htmlFor="procAll">All</label>
-                      </div>
                     </div>
-
-                    <div className="mb-3">
-                      <label className="fw-semibold small form-label" htmlFor="docOutName">Output name (optional)</label>
-                      <input
-                        id="docOutName"
-                        className="form-control form-control-sm"
-                        value={outputName}
-                        onChange={(e)=>setOutputName(e.target.value)}
-                        placeholder={`${pn}${rev ? `_${rev}` : ''}_docpack`}
-                      />
-                    </div>
-
-                    <div className="mb-3">
-                      <div className="fw-semibold small">Doc Packs</div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docExcel" checked={wantExcel} onChange={(e)=>setWantExcel(e.target.checked)} /><label className="form-check-label" htmlFor="docExcel">Excel BOM</label></div>
-                      {wantExcel && excelFields.length > 0 && (
-                        <div className="border rounded p-2 mt-2">
-                          <div className="fw-semibold small mb-2">Excel fields</div>
-                          <div className="form-check">
-                            <input
-                              className="form-check-input"
-                              type="radio"
-                              name="excelMode"
-                              id="excelModeDefault"
-                              checked={excelUseDefault}
-                              onChange={() => persistFieldMode("excel_bom", true)}
-                            />
-                            <label className="form-check-label small" htmlFor="excelModeDefault">Use admin default preset</label>
-                          </div>
-                          <div className="form-check mb-2">
-                            <input
-                              className="form-check-input"
-                              type="radio"
-                              name="excelMode"
-                              id="excelModeCustom"
-                              checked={!excelUseDefault}
-                              onChange={() => persistFieldMode("excel_bom", false)}
-                            />
-                            <label className="form-check-label small" htmlFor="excelModeCustom">Use my selected fields</label>
-                          </div>
-                          {!excelUseDefault && (
-                            <FieldSelector
-                              inline
-                              title="Excel BOM fields"
-                              availableFields={excelFields}
-                              selectedIds={selectedExcelIds}
-                              requiredIds={requiredExcelIds}
-                              onChange={(fieldIds) => {
-                                persistFieldSelectionAndMode("excel_bom", fieldIds, false)
-                              }}
-                              onReset={() => {
-                                persistFieldSelectionAndMode("excel_bom", defaultExcelIds, true)
-                              }}
-                            />
-                          )}
-                        </div>
-                      )}
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docIndex" checked={wantIndex} onChange={(e)=>setWantIndex(e.target.checked)} /><label className="form-check-label" htmlFor="docIndex">Index (PDF)</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual summary (PDF)</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docHardware" checked={wantHardwareSummary} onChange={(e)=>setWantHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="docHardware">Hardware summary (standalone)</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docCover" checked={wantCoverPage} onChange={(e)=>setWantCoverPage(e.target.checked)} /><label className="form-check-label" htmlFor="docCover">Cover page (standalone)</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docWhere" checked={wantWhereusedReport} onChange={(e)=>setWantWhereusedReport(e.target.checked)} /><label className="form-check-label" htmlFor="docWhere">Where-used report (standalone)</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="docFab" checked={fabricationPack} onChange={(e)=>{
-                        const on=e.target.checked; setFabricationPack(on);
-                        if(on){
-                          setProcessMode('selected');
-                          setSelProcesses(new Set(['welding','lasercut','profile cut','folding','rolling','cutting','machine','3d laser','casting']));
-                          setSelTypes(new Set(['dxf','step','pdf']));
-                          setWantSelectedFiles(true);
-                          setWantExcel(true);
-                          setWantBinder(true);
-                          setIncludeConsumed(false);
-                        }
-                      }} /><label className="form-check-label" htmlFor="docFab">Fabrication Pack</label></div>
-                    </div>
-
-                    {wantBinder && (
-                      <div className="mb-3">
-                        <div className="fw-semibold small">PDF binder options</div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bCover" checked={binderAddCover} onChange={(e)=>setBinderAddCover(e.target.checked)} /><label className="form-check-label" htmlFor="bCover">Add cover page</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bIdx" checked={binderAddIndex} onChange={(e)=>setBinderAddIndex(e.target.checked)} /><label className="form-check-label" htmlFor="bIdx">Add index</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bVis" checked={binderAddVisualList} onChange={(e)=>setBinderAddVisualList(e.target.checked)} /><label className="form-check-label" htmlFor="bVis">Visual index section</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bWhere" checked={binderAddWhereused} onChange={(e)=>setBinderAddWhereused(e.target.checked)} /><label className="form-check-label" htmlFor="bWhere">Where-used report section</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bHard" checked={binderAddHardwareSummary} onChange={(e)=>setBinderAddHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="bHard">Hardware summary</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bData" checked={binderAddDatasheets} onChange={(e)=>setBinderAddDatasheets(e.target.checked)} /><label className="form-check-label" htmlFor="bData">Add datasheets</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bFlat" checked={binderIncludeFlatPatterns} onChange={(e)=>setBinderIncludeFlatPatterns(e.target.checked)} /><label className="form-check-label" htmlFor="bFlat">Include flat pattern PDFs</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="bNums" checked={binderPageNumbers} onChange={(e)=>setBinderPageNumbers(e.target.checked)} /><label className="form-check-label" htmlFor="bNums">Add page numbers</label></div>
-                        <div className="form-check mt-2"><input className="form-check-input" type="checkbox" id="sQuote" checked={stampQuote} onChange={(e)=>setStampQuote(e.target.checked)} /><label className="form-check-label" htmlFor="sQuote">For quotation stamp</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="sConf" checked={stampConfidential} onChange={(e)=>setStampConfidential(e.target.checked)} /><label className="form-check-label" htmlFor="sConf">Confidential stamp</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="sAppr" checked={stampApproved} onChange={(e)=>setStampApproved(e.target.checked)} /><label className="form-check-label" htmlFor="sAppr">Approval stamp</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="sWip" checked={stampWip} onChange={(e)=>setStampWip(e.target.checked)} /><label className="form-check-label" htmlFor="sWip">In WIP stamp</label></div>
-                        <div className="form-check"><input className="form-check-input" type="checkbox" id="sProg" checked={stampInprog} onChange={(e)=>setStampInprog(e.target.checked)} /><label className="form-check-label" htmlFor="sProg">In progress/Not approved</label></div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="accordion my-3" id="docpacksAcc">
-                  <div className="accordion-item">
-                    <h2 className="accordion-header" id="headingFiles">
-                      <button className="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFiles">File filter</button>
-                    </h2>
-                    <div id="collapseFiles" className="accordion-collapse collapse">
-                      <div className="accordion-body">
-                        <div className="row g-2">
-                          {docOpts.file_types.map((t) => (
-                            <div key={t} className="col-6 col-md-3">
-                              <div className="form-check">
-                                <input className="form-check-input" type="checkbox" id={`ft_${t}`} checked={selTypes.has(t)} onChange={(e)=>{
-                                  const next = new Set(selTypes); if(e.target.checked) next.add(t); else next.delete(t); setSelTypes(next);
-                                }} />
-                                <label className="form-check-label" htmlFor={`ft_${t}`}>{t}</label>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="mt-2">
-                          <button className="btn btn-sm btn-outline-secondary me-2" onClick={()=>setSelTypes(new Set(docOpts.file_types))}>Select all</button>
-                          <button className="btn btn-sm btn-outline-secondary" onClick={()=>setSelTypes(new Set())}>Select none</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="accordion-item mt-2">
-                    <h2 className="accordion-header" id="headingProc">
-                      <button className="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseProc">Process filter (only selected will be output)</button>
-                    </h2>
-                    <div id="collapseProc" className="accordion-collapse collapse">
-                      <div className="accordion-body">
+                    {processMode === 'selected' && (
+                      <div className="border rounded p-2">
                         <div className="row g-2">
                           {docOpts.processes.map((p) => (
-                            <div key={p} className="col-6 col-md-3">
+                            <div key={p} className="col-6 col-md-4">
                               <div className="form-check">
                                 <input className="form-check-input" type="checkbox" id={`pr_${p}`} checked={selProcesses.has(p)} onChange={(e)=>{
                                   const next = new Set(selProcesses); if(e.target.checked) next.add(p); else next.delete(p); setSelProcesses(next);
@@ -2827,10 +2698,144 @@ function isExternalDatasheetUrl(url: string): boolean {
                           <button className="btn btn-sm btn-outline-secondary" onClick={()=>setSelProcesses(new Set())}>Select none</button>
                         </div>
                       </div>
+                    )}
+                  </div>
+
+                  <div className="col-md-6">
+                    <div className="fw-semibold small mb-1">File type filter</div>
+                    <div className="border rounded p-2">
+                      <div className="row g-2">
+                        {docOpts.file_types.map((t) => (
+                          <div key={t} className="col-6 col-md-4">
+                            <div className="form-check">
+                              <input className="form-check-input" type="checkbox" id={`ft_${t}`} checked={selTypes.has(t)} onChange={(e)=>{
+                                const next = new Set(selTypes); if(e.target.checked) next.add(t); else next.delete(t); setSelTypes(next);
+                              }} />
+                              <label className="form-check-label" htmlFor={`ft_${t}`}>{t}</label>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-2">
+                        <button className="btn btn-sm btn-outline-secondary me-2" onClick={()=>setSelTypes(new Set(docOpts.file_types))}>Select all</button>
+                        <button className="btn btn-sm btn-outline-secondary" onClick={()=>setSelTypes(new Set())}>Select none</button>
+                      </div>
                     </div>
                   </div>
                 </div>
+              </div>
 
+              <div className="pd-card p-3 mt-3">
+                <h6 className="mb-3">Outputs to generate</h6>
+                <div className="row g-2">
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docExcel" checked={wantExcel} onChange={(e)=>setWantExcel(e.target.checked)} /><label className="form-check-label" htmlFor="docExcel">Excel BOM</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docIndex" checked={wantIndex} onChange={(e)=>setWantIndex(e.target.checked)} /><label className="form-check-label" htmlFor="docIndex">Index (PDF, standalone)</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docVisual" checked={wantVisual} onChange={(e)=>setWantVisual(e.target.checked)} /><label className="form-check-label" htmlFor="docVisual">Visual summary (PDF)</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docHardware" checked={wantHardwareSummary} onChange={(e)=>setWantHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="docHardware">Hardware summary (standalone)</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docCover" checked={wantCoverPage} onChange={(e)=>setWantCoverPage(e.target.checked)} /><label className="form-check-label" htmlFor="docCover">Cover page (standalone)</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docWhere" checked={wantWhereusedReport} onChange={(e)=>setWantWhereusedReport(e.target.checked)} /><label className="form-check-label" htmlFor="docWhere">Where-used report (standalone)</label></div></div>
+                  <div className="col-md-6 col-lg-4">
+                    <div className="form-check"><input className="form-check-input" type="checkbox" id="docFab" checked={fabricationPack} onChange={(e)=>{
+                      const on=e.target.checked; setFabricationPack(on);
+                      if(on){
+                        setProcessMode('selected');
+                        setSelProcesses(new Set(['welding','lasercut','profile cut','folding','rolling','cutting','machine','3d laser','casting']));
+                        setSelTypes(new Set(['dxf','step','pdf']));
+                        setWantSelectedFiles(true);
+                        setWantExcel(true);
+                        setWantBinder(true);
+                        setIncludeConsumed(false);
+                      }
+                    }} /><label className="form-check-label" htmlFor="docFab">Fabrication Pack (preset)</label></div>
+                  </div>
+                </div>
+
+                {wantExcel && excelFields.length > 0 && (
+                  <div className="border rounded p-2 mt-3">
+                    <div className="fw-semibold small mb-2">Excel BOM fields</div>
+                    <div className="form-check">
+                      <input
+                        className="form-check-input"
+                        type="radio"
+                        name="excelMode"
+                        id="excelModeDefault"
+                        checked={excelUseDefault}
+                        onChange={() => persistFieldMode("excel_bom", true)}
+                      />
+                      <label className="form-check-label small" htmlFor="excelModeDefault">Use admin default preset</label>
+                    </div>
+                    <div className="form-check mb-2">
+                      <input
+                        className="form-check-input"
+                        type="radio"
+                        name="excelMode"
+                        id="excelModeCustom"
+                        checked={!excelUseDefault}
+                        onChange={() => persistFieldMode("excel_bom", false)}
+                      />
+                      <label className="form-check-label small" htmlFor="excelModeCustom">Use my selected fields</label>
+                    </div>
+                    {!excelUseDefault && (
+                      <FieldSelector
+                        inline
+                        title="Excel BOM fields"
+                        availableFields={excelFields}
+                        selectedIds={selectedExcelIds}
+                        requiredIds={requiredExcelIds}
+                        onChange={(fieldIds) => {
+                          persistFieldSelectionAndMode("excel_bom", fieldIds, false)
+                        }}
+                        onReset={() => {
+                          persistFieldSelectionAndMode("excel_bom", defaultExcelIds, true)
+                        }}
+                      />
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-3" style={{maxWidth: 360}}>
+                  <label className="fw-semibold small form-label" htmlFor="docOutName">Output name (optional)</label>
+                  <input
+                    id="docOutName"
+                    className="form-control form-control-sm"
+                    value={outputName}
+                    onChange={(e)=>setOutputName(e.target.value)}
+                    placeholder={`${pn}${rev ? `_${rev}` : ''}_docpack`}
+                  />
+                </div>
+              </div>
+
+              {wantBinder && (
+                <div className="row g-3 mt-0">
+                  <div className="col-md-6">
+                    <div className="pd-card p-3 h-100">
+                      <h6 className="mb-3">Binder contents</h6>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bCover" checked={binderAddCover} onChange={(e)=>setBinderAddCover(e.target.checked)} /><label className="form-check-label" htmlFor="bCover">Cover page</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bIdx" checked={binderAddIndex} onChange={(e)=>setBinderAddIndex(e.target.checked)} /><label className="form-check-label" htmlFor="bIdx">Index</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bVis" checked={binderAddVisualList} onChange={(e)=>setBinderAddVisualList(e.target.checked)} /><label className="form-check-label" htmlFor="bVis">Visual index section</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bWhere" checked={binderAddWhereused} onChange={(e)=>setBinderAddWhereused(e.target.checked)} /><label className="form-check-label" htmlFor="bWhere">Where-used report section</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bHard" checked={binderAddHardwareSummary} onChange={(e)=>setBinderAddHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="bHard">Hardware summary</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bData" checked={binderAddDatasheets} onChange={(e)=>setBinderAddDatasheets(e.target.checked)} /><label className="form-check-label" htmlFor="bData">Datasheets</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bFlat" checked={binderIncludeFlatPatterns} onChange={(e)=>setBinderIncludeFlatPatterns(e.target.checked)} /><label className="form-check-label" htmlFor="bFlat">Flat pattern PDFs</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bNums" checked={binderPageNumbers} onChange={(e)=>setBinderPageNumbers(e.target.checked)} /><label className="form-check-label" htmlFor="bNums">Page numbers</label></div>
+                    </div>
+                  </div>
+                  <div className="col-md-6">
+                    <div className="pd-card p-3 h-100">
+                      <h6 className="mb-3">Stamps</h6>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="sQuote" checked={stampQuote} onChange={(e)=>setStampQuote(e.target.checked)} /><label className="form-check-label" htmlFor="sQuote">For quotation</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="sConf" checked={stampConfidential} onChange={(e)=>setStampConfidential(e.target.checked)} /><label className="form-check-label" htmlFor="sConf">Confidential</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="sAppr" checked={stampApproved} onChange={(e)=>setStampApproved(e.target.checked)} /><label className="form-check-label" htmlFor="sAppr">Approved</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="sWip" checked={stampWip} onChange={(e)=>setStampWip(e.target.checked)} /><label className="form-check-label" htmlFor="sWip">WIP</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="sProg" checked={stampInprog} onChange={(e)=>setStampInprog(e.target.checked)} /><label className="form-check-label" htmlFor="sProg">In progress / Not approved</label></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="pd-card p-3 mt-3">
                 <div>
                   <button className="btn btn-primary" disabled={docLoading} onClick={async ()=>{
                     setDocLoading(true);
