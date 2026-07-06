@@ -401,12 +401,6 @@ def _home_dashboard_context(user, permissions: list[str]) -> dict[str, object]:
         "recent_orders": recent_orders,
         "attention_items": attention_items,
         "quick_actions": _quick_actions_for_home(user),
-        "imports_panel": {
-            "show": _can_access(user, "import.bom"),
-            "action_href": url_for("ui.upload_pack_ui") if _can_access(user, "import.bom") else None,
-            "action_label": "Open Import" if _can_access(user, "import.bom") else None,
-            "message": "Import history is not stored in a dedicated model yet. Open Import to review the next upload report when you need it.",
-        },
         "show_parts": user_can_view_items(user),
         "show_jobs": _has_any_permission(user, "jobs.view", "jobs.manage"),
         "show_orders": _has_any_permission(user, "orders.view", "orders.manage"),
@@ -465,14 +459,10 @@ def app_home():
         {
             "last_login_at": current_user.last_login_at,
             "last_login_ip": current_user.last_login_ip,
-            "last_login_ua": current_user.last_login_ua,
             "password_changed_at": current_user.password_changed_at,
             "account_created_at": current_user.created_at,
             "account_updated_at": current_user.updated_at,
             "session_timeout_minutes": int(current_app.config.get("PERMANENT_SESSION_LIFETIME").total_seconds() // 60),
-            "generic_auth_responses": bool(current_app.config.get("SECURITY_RETURN_GENERIC_RESPONSES")),
-            "secure_cookie": bool(current_app.config.get("SESSION_COOKIE_SECURE")),
-            "remember_cookie_secure": bool(current_app.config.get("REMEMBER_COOKIE_SECURE")),
         }
     )
     dashboard = _home_dashboard_context(current_user, permissions)

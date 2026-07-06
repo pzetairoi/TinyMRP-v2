@@ -100,7 +100,6 @@ def test_account_home_shows_dashboard_empty_states(client, app):
     assert "No recent parts yet" in body
     assert "No recent jobs yet" in body
     assert "No recent orders yet" in body
-    assert "History not available yet" in body
     assert "Nothing obvious needs attention" in body
 
 
@@ -131,7 +130,6 @@ def test_account_home_respects_dashboard_permissions_and_links(client, app):
     assert "Recent Parts" in body
     assert "Recent Jobs" in body
     assert "Recent Orders" in body
-    assert "Open Import" in body
 
 
 def test_account_home_hides_dashboard_sections_without_permissions(client, app):

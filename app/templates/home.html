@@ -73,16 +73,6 @@
           {% endif %}
         </section>
 
-        {% if dashboard.imports_panel.show %}
-          <section class="account-panel mt-4">
-            {% call card_header("Recent Imports & Uploads", "Import history is only shown when a reliable persisted source exists.") %}
-              {% if dashboard.imports_panel.action_href %}
-                <a class="btn btn-sm btn-outline-secondary" href="{{ dashboard.imports_panel.action_href }}">{{ dashboard.imports_panel.action_label }}</a>
-              {% endif %}
-            {% endcall %}
-            {{ empty_state("History not available yet", dashboard.imports_panel.message, dashboard.imports_panel.action_href, dashboard.imports_panel.action_label) }}
-          </section>
-        {% endif %}
       </div>
 
       <div class="col-xl-8">
@@ -382,20 +372,6 @@
               <strong>{{ security_summary.min_length }} to {{ security_summary.max_length }} characters</strong>
             </div>
           </div>
-          <div class="account-flag-row mt-3">
-            <span class="account-flag {% if security_summary.generic_auth_responses %}is-on{% endif %}">
-              Generic auth responses: {{ "On" if security_summary.generic_auth_responses else "Off" }}
-            </span>
-            <span class="account-flag {% if security_summary.secure_cookie %}is-on{% endif %}">
-              Secure session cookie: {{ "On" if security_summary.secure_cookie else "Off" }}
-            </span>
-            <span class="account-flag {% if security_summary.remember_cookie_secure %}is-on{% endif %}">
-              Secure remember cookie: {{ "On" if security_summary.remember_cookie_secure else "Off" }}
-            </span>
-          </div>
-          {% if security_summary.last_login_ua %}
-            <div class="small text-muted mt-3">{{ security_summary.last_login_ua }}</div>
-          {% endif %}
         </section>
       </div>
     </div>

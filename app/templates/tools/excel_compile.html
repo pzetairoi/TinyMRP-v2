@@ -47,11 +47,21 @@
           <div class="mb-3">
             <input class="form-control" type="file" name="file" accept=".xlsx" required>
           </div>
-          <div>
+          <div class="mb-3">
             <label class="form-label fw-semibold" for="compileTitle">Title (optional)</label>
             <input class="form-control" type="text" name="title" id="compileTitle" maxlength="120"
                    value="{{ default_title }}" placeholder="e.g. Quote 12345 - Customer Widget Assembly">
             <div class="form-text">Used as the fake assembly's part number on the cover page, index, and binder headers, and as the output file name. The generation date/time is already shown on each page, so no separate description is added.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="compileDescription">Description (optional)</label>
+            <textarea class="form-control" name="description" id="compileDescription" rows="2" maxlength="400"
+                      placeholder="Shown under the title on the cover page and visual summary."></textarea>
+          </div>
+          <div>
+            <label class="form-label fw-semibold" for="compileThumbnail">Top-level image (optional)</label>
+            <input class="form-control" type="file" name="thumbnail" id="compileThumbnail" accept="image/png,image/jpeg,image/gif,image/webp">
+            <div class="form-text">Shown as the picture for this compile on the cover page and its card in the visual summary, since there's no real assembly to pull a thumbnail from.</div>
           </div>
         </div>
       </div>
@@ -171,10 +181,6 @@
             <input class="form-check-input" type="checkbox" name="want_cover_page" id="wantCover">
             <label class="form-check-label" for="wantCover">Cover page (standalone)</label>
           </div></div>
-          <div class="col-md-6 col-lg-4"><div class="form-check">
-            <input class="form-check-input" type="checkbox" name="want_whereused_report" id="wantWhere">
-            <label class="form-check-label" for="wantWhere">Where-used report (standalone)</label>
-          </div></div>
         </div>
 
         {% if excel_fields %}
@@ -207,7 +213,6 @@
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_cover" id="binderCover" checked><label class="form-check-label" for="binderCover">Cover page</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_index" id="binderIndex" checked><label class="form-check-label" for="binderIndex">Index</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_visual_list" id="binderVisual" checked><label class="form-check-label" for="binderVisual">Visual index section</label></div>
-            <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_whereused" id="binderWhere"><label class="form-check-label" for="binderWhere">Where-used report section</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_hardware_summary" id="binderHardware" checked><label class="form-check-label" for="binderHardware">Hardware summary</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_datasheets" id="binderDatasheets"><label class="form-check-label" for="binderDatasheets">Datasheets</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_include_flat_patterns" id="binderFlat"><label class="form-check-label" for="binderFlat">Flat pattern PDFs</label></div>
