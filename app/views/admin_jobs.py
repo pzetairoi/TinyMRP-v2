@@ -25,6 +25,7 @@ from app.services.thumbs import thumb_urls_for
 from app.services.biz_utils import generate_job_number
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import parse_user_datetime, utc_now
+from app.services.audit import log_action
 
 bp = Blueprint("admin_jobs", __name__, url_prefix="/admin/jobs")
 
@@ -558,6 +559,10 @@ def jobs_view(job_id):
     j = apply_job_scope(Job.objects(id=job_id), current_user).first()
     if not j:
         abort(404)
+    try:
+        log_action("job.view", resource_type="job", resource=str(j.id))
+    except Exception:
+        pass
     is_external = is_external_scoped_user(current_user)
     cust_ids = customer_scope_ids(current_user)
     supp_ids = supplier_scope_ids(current_user)
@@ -731,6 +736,10 @@ def jobs_edit(job_id):
         j = Job.objects.get(id=job_id)
     except (DoesNotExist, ValidationError):
         abort(404)
+    try:
+        log_action("job.view", resource_type="job", resource=str(j.id))
+    except Exception:
+        pass
     if request.method == "POST":
         j.job_number = (request.form.get("job_number") or j.job_number).strip()
         j.title = (request.form.get("title") or "").strip()

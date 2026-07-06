@@ -658,14 +658,6 @@ body.pick-mode .pick-row td {
     linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 }
 
-.account-eyebrow {
-  color: #2563eb;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .account-section-title {
   font-size: 0.92rem;
   font-weight: 700;
@@ -714,33 +706,6 @@ body.pick-mode .pick-row td {
   width: 4.5rem;
 }
 
-.account-stats {
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.account-stat {
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 0.85rem;
-  padding: 0.85rem;
-}
-
-.account-stat__label {
-  color: #64748b;
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.account-stat__value {
-  color: #0f172a;
-  font-size: 1.35rem;
-  font-weight: 700;
-  margin-top: 0.15rem;
-}
-
 .account-chip-row,
 .account-flag-row {
   display: flex;
@@ -763,27 +728,16 @@ body.pick-mode .pick-row td {
   color: #1d4ed8;
 }
 
-.account-link-card {
-  background: #f8fafc;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 0.9rem;
-  color: inherit;
-  display: block;
-  height: 100%;
-  padding: 1rem;
-  text-decoration: none;
-  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.account-link-card:hover {
-  border-color: rgba(37, 99, 235, 0.35);
-  box-shadow: 0 0.65rem 1.5rem rgba(37, 99, 235, 0.08);
-  transform: translateY(-1px);
-}
-
 .account-kv {
   display: grid;
   gap: 0.75rem;
+}
+
+@media (min-width: 768px) {
+  .account-kv {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 2rem;
+  }
 }
 
 .account-kv > div {
@@ -925,10 +879,6 @@ body.pick-mode .pick-row td {
   .tm-nav-menu {
     min-width: 0;
   }
-
-  .account-stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 767.98px) {
@@ -939,10 +889,6 @@ body.pick-mode .pick-row td {
 
   .tm-state {
     padding: 1rem;
-  }
-
-  .account-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .account-kv > div {

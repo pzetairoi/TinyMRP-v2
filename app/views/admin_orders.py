@@ -25,6 +25,7 @@ from app.services.biz_utils import generate_order_number, calculate_order_totals
 from app.services.order_scope import build_scope_pdf, build_scope_zip
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import parse_user_datetime, utc_now
+from app.services.audit import log_action
 
 bp = Blueprint("admin_orders", __name__, url_prefix="/admin/orders")
 
@@ -170,6 +171,10 @@ def orders_view(order_id):
     o = apply_order_scope(Order.objects(id=order_id), current_user).first()
     if not o:
         abort(404)
+    try:
+        log_action("order.view", resource_type="order", resource=str(o.id))
+    except Exception:
+        pass
     is_external = is_external_scoped_user(current_user)
     cust_ids = customer_scope_ids(current_user)
     supp_ids = supplier_scope_ids(current_user)
@@ -373,6 +378,10 @@ def orders_edit(order_id):
         o = Order.objects.get(id=order_id)
     except (DoesNotExist, ValidationError):
         abort(404)
+    try:
+        log_action("order.view", resource_type="order", resource=str(o.id))
+    except Exception:
+        pass
     # Guard broken references to avoid deref crashes
     for attr in ("job", "supplier", "customer"):
         try:

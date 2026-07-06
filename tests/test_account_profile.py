@@ -55,6 +55,16 @@ def test_account_home_shows_permissions_and_security_summary(client, app):
         order_href = url_for("admin_orders.orders_view", order_id=str(order.id))
 
     _login(client, user)
+
+    # "Recently visited" is sourced from the audit log. The part-detail page
+    # is a JS shell that logs the visit via its own data API call, not the
+    # page route itself -- so hit that API, the same way the browser's JS
+    # would right after the page loads. Jobs/orders log directly on their
+    # (server-rendered) view route.
+    assert client.get(f"/api/part_detail?pn={part.part_number}&rev={part.revision}").status_code == 200
+    assert client.get(job_href).status_code == 200
+    assert client.get(order_href).status_code == 200
+
     resp = client.get("/app")
     assert resp.status_code == 200
 
@@ -62,11 +72,9 @@ def test_account_home_shows_permissions_and_security_summary(client, app):
     assert "Home" in body
     assert "My Account" in body
     assert "Account Owner" in body
-    assert "Quick Actions" in body
-    assert "Recent Parts" in body
-    assert "Recent Jobs" in body
-    assert "Recent Orders" in body
-    assert "Items Needing Attention" in body
+    assert "Recently Visited Parts" in body
+    assert "Recently Visited Jobs" in body
+    assert "Recently Visited Orders" in body
     assert "ACC-100" in body
     assert "JOB-ACC-1" in body
     assert "ORD-ACC-1" in body
@@ -97,10 +105,9 @@ def test_account_home_shows_dashboard_empty_states(client, app):
     resp = client.get("/app")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "No recent parts yet" in body
-    assert "No recent jobs yet" in body
-    assert "No recent orders yet" in body
-    assert "Nothing obvious needs attention" in body
+    assert "No recently visited parts" in body
+    assert "No recently visited jobs" in body
+    assert "No recently visited orders" in body
 
 
 def test_account_home_respects_dashboard_permissions_and_links(client, app):
@@ -114,8 +121,6 @@ def test_account_home_respects_dashboard_permissions_and_links(client, app):
         expected_hrefs = {
             url_for("ui.parts_ui"),
             url_for("ui.upload_pack_ui"),
-            url_for("admin_jobs.jobs_new"),
-            url_for("admin_orders.orders_new"),
             url_for("admin_customers.customers_list"),
             url_for("admin_suppliers.suppliers_list"),
             url_for("tools.tools_index"),
@@ -127,24 +132,31 @@ def test_account_home_respects_dashboard_permissions_and_links(client, app):
     body = resp.get_data(as_text=True)
     for href in expected_hrefs:
         assert f'href="{href}"' in body
-    assert "Recent Parts" in body
-    assert "Recent Jobs" in body
-    assert "Recent Orders" in body
+    # The dashboard no longer duplicates navbar shortcuts (jobs/orders
+    # navigation already lives in the navbar); it only shows personalized
+    # recently-visited sections, gated on the same jobs/orders permissions.
+    assert "Recently Visited Parts" in body
+    assert "Recently Visited Jobs" in body
+    assert "Recently Visited Orders" in body
 
 
 def test_account_home_hides_dashboard_sections_without_permissions(client, app):
     role = Role(name="account_jobs_only", permissions=["jobs.view"]).save()
     user = _make_user(app, "jobs-only@example.com", "current-password-123", [role])
-    Job(job_number="JOB-ONLY-1", title="Visible job").save()
+    job = Job(job_number="JOB-ONLY-1", title="Visible job").save()
 
     _login(client, user)
+    with app.app_context(), app.test_request_context():
+        job_href = url_for("admin_jobs.jobs_view", job_id=str(job.id))
+    assert client.get(job_href).status_code == 200
+
     resp = client.get("/app")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert "Recent Jobs" in body
+    assert "Recently Visited Jobs" in body
     assert "JOB-ONLY-1" in body
-    assert "Recent Parts" not in body
-    assert "Recent Orders" not in body
+    assert "Recently Visited Parts" not in body
+    assert "Recently Visited Orders" not in body
     assert "Find Parts" not in body
     assert "Upload Pack" not in body
     assert "Tools" not in body
@@ -153,10 +165,16 @@ def test_account_home_hides_dashboard_sections_without_permissions(client, app):
 def test_account_home_handles_optional_fields_missing(client, app):
     role = Role(name="account_optional_viewer", permissions=["jobs.view", "orders.view"]).save()
     user = _make_user(app, "optional@example.com", "current-password-123", [role])
-    Job(job_number="JOB-OPT-1").save()
-    Order(order_number="ORD-OPT-1").save()
+    job = Job(job_number="JOB-OPT-1").save()
+    order = Order(order_number="ORD-OPT-1").save()
 
     _login(client, user)
+    with app.app_context(), app.test_request_context():
+        job_href = url_for("admin_jobs.jobs_view", job_id=str(job.id))
+        order_href = url_for("admin_orders.orders_view", order_id=str(order.id))
+    assert client.get(job_href).status_code == 200
+    assert client.get(order_href).status_code == 200
+
     resp = client.get("/app")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
@@ -249,3 +267,57 @@ def test_part_detail_exposes_resolved_identity_profiles(client, app):
     assert payload["uploader_profile"]["avatar_shape"] == "rounded"
     assert payload["comments"][0]["author_display"] == "Drawing Owner"
     assert payload["comments"][0]["author_profile"]["avatar_color"] == "#166534"
+
+
+def test_recently_visited_counts_manage_edit_route_too(client, app):
+    """Creating a job/order redirects to its *edit* page (jobs.manage /
+    orders.manage), not the read-only jobs_view/orders_view -- that's the
+    page most managers actually land on and look at, so it must count as a
+    visit too, or "recently visited" would stay empty for anyone who only
+    ever creates/edits jobs and orders.
+    """
+    role = Role(name="manager_role", permissions=["jobs.manage", "orders.manage"]).save()
+    user = _make_user(app, "manager@example.com", "current-password-123", [role])
+    job = Job(job_number="JOB-EDIT-1", title="Edited job").save()
+    order = Order(order_number="ORD-EDIT-1", description="Edited order").save()
+
+    _login(client, user)
+    with app.app_context(), app.test_request_context():
+        job_edit_href = url_for("admin_jobs.jobs_edit", job_id=str(job.id))
+        order_edit_href = url_for("admin_orders.orders_edit", order_id=str(order.id))
+    assert client.get(job_edit_href).status_code == 200
+    assert client.get(order_edit_href).status_code == 200
+
+    resp = client.get("/app")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "JOB-EDIT-1" in body
+    assert "ORD-EDIT-1" in body
+
+
+def test_home_prefs_hide_and_resize_recent_lists(client, app):
+    role = Role(name="prefs_role", permissions=["items.view", "jobs.view", "orders.view"]).save()
+    user = _make_user(app, "prefs@example.com", "current-password-123", [role])
+    job = Job(job_number="JOB-PREF-1").save()
+
+    _login(client, user)
+    with app.app_context(), app.test_request_context():
+        job_href = url_for("admin_jobs.jobs_view", job_id=str(job.id))
+    assert client.get(job_href).status_code == 200
+
+    resp = client.post(
+        "/app/home-prefs",
+        data={"show_jobs": "on", "items_limit": "10"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "Recently Visited Jobs" in body
+    assert "Recently Visited Parts" not in body
+    assert "Recently Visited Orders" not in body
+
+    settings = UserSettings.objects(user_id=user).first()
+    assert settings.ui_preferences["home"]["show_parts"] is False
+    assert settings.ui_preferences["home"]["show_jobs"] is True
+    assert settings.ui_preferences["home"]["show_orders"] is False
+    assert settings.ui_preferences["home"]["items_limit"] == 10
