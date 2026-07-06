@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import csv
 import io
-import os
 import zipfile
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from app.models.part import Part
-from app.models.artifact import PartFile
 from app.services.part_norm import clean_rev
+from app.services.timezone_utils import format_display_ts, utc_now
 
 
 @dataclass
@@ -76,6 +75,35 @@ def parse_compile_excel(path: str) -> List[CompileRow]:
     return out
 
 
+def _expand_with_children(
+    resolved: List[Tuple[Part, float]],
+    *,
+    expand_subassemblies: bool = True,
+) -> List[Tuple[str, str, float]]:
+    """Turn the uploaded rows into the same fully-expanded flat BOM a real Doc
+    Pack would walk to. Each row stands in for a top-level BOM line: if it is
+    itself an assembly with its own children in the system, those children
+    (and their own files) get pulled in too, scaled by the row's quantity -
+    exactly like exporting a real assembly at full depth.
+    """
+    from app.services.docpacks import _flatten_bom, _norm_rev
+
+    agg: dict = {}
+
+    def add(pn: str, rev: str, qty: float) -> None:
+        key = (pn, _norm_rev(rev))
+        agg[key] = agg.get(key, 0.0) + float(qty or 0.0)
+
+    for part, qty in resolved:
+        pn, rev = part.part_number, part.revision or ""
+        add(pn, rev, qty)
+        if expand_subassemblies:
+            for cpn, crev, cqty in _flatten_bom(pn, rev, full=True):
+                add(cpn, crev, cqty * qty)
+
+    return [(pn, rev, q) for (pn, rev), q in agg.items()]
+
+
 def build_excel_compile_zip(
     rows: List[CompileRow],
     *,
@@ -83,18 +111,52 @@ def build_excel_compile_zip(
     input_bytes: bytes,
     file_root: str,
     file_groups: Optional[List[str]] = None,
+    processes: Optional[List[str]] = None,
+    process_mode: str = "all",
+    classified_filter: str = "show",
+    expand_subassemblies: bool = True,
+    want_excel_bom: bool = True,
+    excel_all_fields: bool = False,
+    excel_field_ids: Optional[List[str]] = None,
+    want_pdf_binder: bool = False,
+    want_index_pdf: bool = False,
+    want_visual_list: bool = False,
+    want_hardware_summary: bool = False,
+    want_cover_page: bool = False,
+    want_whereused_report: bool = False,
+    binder_add_cover: bool = True,
+    binder_add_index: bool = True,
+    binder_add_visual_list: bool = True,
+    binder_add_whereused: bool = False,
+    binder_add_hardware_summary: bool = True,
+    binder_add_datasheets: bool = False,
+    binder_page_numbers: bool = True,
+    binder_include_flat_patterns: bool = False,
+    stamp_quote: bool = False,
+    stamp_confidential: bool = False,
+    stamp_approved: bool = False,
+    stamp_wip: bool = False,
+    stamp_inprogress: bool = False,
+    title: Optional[str] = None,
 ) -> Tuple[bytes, List[CompileRow]]:
-    file_groups = file_groups or ["pdf", "dxf", "step", "datasheet"]
+    from app.services.docpacks import _part_by
+
     missing: List[CompileRow] = []
-    parts: List[Tuple[str, str, float]] = []
+    resolved: List[Tuple[Part, float]] = []
 
     for r in rows:
-        part = Part.objects(part_number=r.part_number, revision=r.revision).first()
+        # Same tolerant match used by the doc pack pipeline itself (case,
+        # whitespace, ".0"-suffix): an uploaded sheet's PartNumber/Revision
+        # text routinely differs slightly in formatting from the canonical
+        # DB record, and a strict exact match would wrongly flag it missing.
+        part = _part_by(r.part_number, r.revision)
         if not part:
             r.status = "missing"
             missing.append(r)
             continue
-        parts.append((part.part_number, part.revision or "", r.qty))
+        resolved.append((part, r.qty))
+
+    parts = _expand_with_children(resolved, expand_subassemblies=expand_subassemblies)
 
     buf = io.BytesIO()
     z = zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED)
@@ -112,38 +174,61 @@ def build_excel_compile_zip(
         msg = "\n".join(f"{r.part_number}\t{r.revision}" for r in missing)
         z.writestr("missing_parts.txt", msg)
 
-    # Visual list (optional; skips on failures)
-    try:
-        from app.services.docpacks import _visual_list_pdf
-        vis = _visual_list_pdf(parts, None, None)
-        if vis:
-            z.writestr("VisualList.pdf", vis)
-    except Exception:
-        pass
-
-    # Collect files
-    file_root = (file_root or "").rstrip("/\\")
-    seen: Dict[str, int] = {}
-    for pn, rev, _ in parts:
-        qs = PartFile.objects(part_number__iexact=pn)
-        if rev is not None:
-            qs = qs.filter(revision__iexact=(rev or ""))
-        qs = qs.filter(ext_group__in=file_groups)
-        for f in qs:
-            rel = f.rel_path.replace("\\", "/") if f.rel_path else ""
-            abs_path = f.path if os.path.isabs(f.path) else os.path.join(file_root, rel.replace("/", os.sep))
-            if not os.path.isfile(abs_path):
-                continue
-            base = os.path.basename(rel or abs_path)
-            arc_folder = (f.ext_group or "files").lower()
-            arcname = f"{arc_folder}/{base}"
-            if arcname in seen:
-                seen[arcname] += 1
-                stem, ext = os.path.splitext(base)
-                arcname = f"{arc_folder}/{stem}_{seen[arcname]}{ext}"
+    # Delegate everything else (BOM sheet, selected files, PDF binder, index,
+    # visual list, hardware summary, cover page, stamps...) to the same
+    # Doc Pack pipeline used for real assemblies. The uploaded compile sheet
+    # stands in for a BOM tree via flat_override, so it goes through the exact
+    # same, already-tested build as any other doc pack.
+    if parts:
+        from app.services.docpacks import DocPackOptions, build_docpack
+        build_ts = utc_now()
+        title = (title or "").strip() or f"BOM {format_display_ts(build_ts, fmt='%Y-%m-%d')}"
+        opts = DocPackOptions(
+            root_pn=title,
+            root_rev=None,
+            root_desc_override="",
+            build_ts=build_ts,
+            flat_override=parts,
+            processes=processes,
+            process_mode=process_mode,
+            classified_filter=classified_filter,
+            file_types=file_groups or ["pdf", "dxf", "step", "datasheet"],
+            want_selected_files=True,
+            want_excel_bom=want_excel_bom,
+            excel_all_fields=excel_all_fields,
+            excel_field_ids=excel_field_ids,
+            want_pdf_binder=want_pdf_binder,
+            want_index_pdf=want_index_pdf,
+            want_visual_list=want_visual_list,
+            want_hardware_summary=want_hardware_summary,
+            want_cover_page=want_cover_page,
+            want_whereused_report=want_whereused_report,
+            binder_add_cover=binder_add_cover,
+            binder_add_index=binder_add_index,
+            binder_add_visual_list=binder_add_visual_list,
+            binder_add_whereused=binder_add_whereused,
+            binder_add_hardware_summary=binder_add_hardware_summary,
+            binder_add_datasheets=binder_add_datasheets,
+            binder_page_numbers=binder_page_numbers,
+            binder_include_flat_patterns=binder_include_flat_patterns,
+            stamp_quote=stamp_quote,
+            stamp_confidential=stamp_confidential,
+            stamp_approved=stamp_approved,
+            stamp_wip=stamp_wip,
+            stamp_inprogress=stamp_inprogress,
+            output_name=title,
+        )
+        try:
+            _, data, mime = build_docpack(opts)
+            if mime == "application/zip":
+                inner = zipfile.ZipFile(io.BytesIO(data))
+                for name in inner.namelist():
+                    z.writestr(name, inner.read(name))
             else:
-                seen[arcname] = 0
-            z.write(abs_path, arcname)
+                ext = "pdf" if "pdf" in mime else "xlsx"
+                z.writestr(f"DocPack.{ext}", data)
+        except RuntimeError as exc:
+            z.writestr("docpack_error.txt", str(exc))
 
     z.close()
     return buf.getvalue(), missing

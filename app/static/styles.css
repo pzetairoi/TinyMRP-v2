@@ -58,6 +58,14 @@ body.tm-body {
   padding: 1.25rem;
 }
 
+/* Matches the .pd-card look used by the Part Detail "Doc Packs" tab, so
+   server-rendered tools (Excel Compile) feel like the same builder. */
+.pd-card {
+  border: 1px solid var(--tm-border);
+  border-radius: var(--tm-radius-sm);
+  background: var(--tm-surface);
+}
+
 .tm-page-header {
   align-items: flex-start;
   display: flex;

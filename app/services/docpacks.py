@@ -56,6 +56,13 @@ class DocPackOptions:
     stamp_inprogress: bool = False
     output_name: Optional[str] = None
     build_ts: Optional[datetime] = None
+    # When set, used in place of a real BOM tree walk (root_pn/root_rev become a
+    # display label only). Lets an ad-hoc parts list (e.g. an uploaded compile
+    # sheet) go through the exact same doc pack pipeline as a real assembly.
+    flat_override: Optional[List[Tuple[str, str, float]]] = None
+    # Fallback description shown on cover/index/binder when root_pn isn't a real
+    # part (i.e. there's no Part record to pull a description from).
+    root_desc_override: Optional[str] = None
 
 
 def _norm_rev(rev: Optional[str]) -> str:
@@ -64,8 +71,16 @@ def _norm_rev(rev: Optional[str]) -> str:
 
 def _part_by(pn: str, rev: Optional[str]) -> Optional[Part]:
     if rev is None:
-        return Part.objects(part_number=pn).order_by("-updated_at").first()
-    return Part.objects(part_number=pn, revision=_clean_rev(rev)).first()
+        return Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+    # Compare on cleaned values in Python rather than a DB-level exact/iexact
+    # match: real-world revision strings routinely carry stray whitespace or
+    # formatting differences (e.g. "1 " vs "1") between BOMLink.child_rev and
+    # the part's own canonical revision, which a DB-level match would miss.
+    target = _clean_rev(rev).lower()
+    for p in Part.objects(part_number__iexact=pn):
+        if _clean_rev(getattr(p, "revision", "")).lower() == target:
+            return p
+    return None
 
 
 def _part_description(part: Optional[Part], attrs: Optional[Dict] = None) -> str:
@@ -184,6 +199,105 @@ def _collect_files(pn_rev_qty: Iterable[Tuple[str,str,float]], file_types: Optio
             q = q.filter(ext_group__in=list(groups))
         out.extend(list(q))
     return out
+
+
+def _file_coverage_report(flat: Iterable[Tuple[str, str, float]], file_root: str) -> str:
+    """Per-part diagnostic written into every doc pack zip: does a PDF record
+    exist for this part, and does the file it points to actually exist on
+    disk? Makes gaps in the binder/selected-files bundle visible immediately
+    instead of requiring guesswork against a live database.
+    """
+    file_root = (file_root or "").rstrip("/\\")
+
+    def _status(pf: Optional[PartFile]) -> str:
+        if not pf:
+            return "no record"
+        rel = pf.rel_path.replace("\\", "/") if pf.rel_path else ""
+        abs_path = pf.path if os.path.isabs(pf.path) else os.path.join(file_root, rel.replace("/", os.sep))
+        return "OK" if os.path.isfile(abs_path) else f"record exists but file missing on disk ({abs_path})"
+
+    lines = ["part_number\trevision\tpdf\tany_file"]
+    for pn, rev, _qty in sorted(flat, key=lambda t: (t[0] or "", t[1] or "")):
+        qs = PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev))
+        lines.append(f"{pn}\t{rev}\t{_status(qs.filter(ext__iexact='pdf').first())}\t{_status(qs.first())}")
+    return "\n".join(lines)
+
+
+def _missing_pdf_rows(pairs: Iterable[Tuple[str, str]], file_root: str) -> List[Dict[str, object]]:
+    """Parts whose PDF *record* exists but whose file is absent on disk.
+
+    Unlike a missing record (normal for hardware/no-drawing parts), this means
+    a page that should be in the binder body silently isn't -- e.g. an upload
+    that failed to land on the deliverables volume (permission/ownership
+    mismatch) while the DB row was still created. Surfaced so the gap is
+    visible in the binder itself instead of only in the zip-only coverage txt.
+    """
+    file_root = (file_root or "").rstrip("/\\")
+    rows: List[Dict[str, object]] = []
+    seen: Set[Tuple[str, str]] = set()
+    for pn, rev in pairs:
+        key = (pn, _norm_rev(rev))
+        if key in seen:
+            continue
+        seen.add(key)
+        for pf in PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev), ext__iexact="pdf"):
+            rel = pf.rel_path.replace("\\", "/") if pf.rel_path else ""
+            abs_path = pf.path if os.path.isabs(pf.path) else os.path.join(file_root, rel.replace("/", os.sep))
+            if not os.path.isfile(abs_path):
+                pdoc = _part_by(pn, rev)
+                rows.append({
+                    "partnumber": pn,
+                    "revision": _norm_rev(rev),
+                    "description": _part_description(pdoc) if pdoc else "",
+                })
+                break
+    return rows
+
+
+def _missing_files_pdf(rows: List[Dict[str, object]]) -> Optional[bytes]:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet
+    except Exception:
+        return None
+    if not rows:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18*mm, rightMargin=18*mm, topMargin=20*mm, bottomMargin=20*mm)
+    styles = getSampleStyleSheet()
+    flowables = [
+        Paragraph("Missing Source Documents", styles["Heading2"]),
+        Spacer(0, 3*mm),
+        Paragraph(
+            "The parts below have a PDF on record but the file could not be found on the "
+            "deliverables volume. Their drawings are NOT included in this binder. Re-export/"
+            "re-upload these parts and rebuild the docpack.",
+            styles["Normal"],
+        ),
+        Spacer(0, 4*mm),
+    ]
+    table_data = [["Part Number", "Revision", "Description"]]
+    for r in rows:
+        table_data.append([str(r.get("partnumber") or ""), str(r.get("revision") or ""), str(r.get("description") or "")])
+    table = Table(table_data, colWidths=[40*mm, 20*mm, 100*mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#b30000")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("GRID", (0, 0), (-1, -1), 0.8, colors.black),
+    ]))
+    flowables.append(table)
+    doc.build(flowables)
+    return buf.getvalue()
 
 
 _FLAT_PATTERN_RE = re.compile(r"(?:^|[^a-z0-9])(flatpattern|flat[-_ ]pattern|fp)(?:[^a-z0-9]|$)", re.IGNORECASE)
@@ -1864,7 +1978,7 @@ def _whereused_report_pdf(
     return buf.getvalue()
 
 
-def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[datetime] = None) -> Optional[bytes]:
+def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[datetime] = None, desc_override: Optional[str] = None) -> Optional[bytes]:
     """Generate a minimal cover page with PN/REV, description, logo, and footer fields."""
     try:
         from reportlab.pdfgen import canvas
@@ -1878,7 +1992,7 @@ def _cover_page_pdf(root_pn: str, root_rev: Optional[str], build_ts: Optional[da
     pdoc = _part_by(root_pn, root_rev)
     root_rev_clean = _clean_rev(root_rev) if root_rev is not None else _clean_rev(getattr(pdoc, "revision", "") if pdoc else "")
     attrs = harvest_part_attrs(pdoc) if pdoc else {}
-    desc = _part_description(pdoc, attrs) if pdoc else ""
+    desc = _part_description(pdoc, attrs) if pdoc else (desc_override or "")
 
     proc_text = ", ".join([p for p in _part_processes(pdoc) if p])
 
@@ -2452,10 +2566,15 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     else:
         base_stub = os.path.splitext(base_stub)[0]
 
+    def _flat_or_override(*args, **kwargs):
+        if opts.flat_override is not None:
+            return list(opts.flat_override)
+        return _flatten_bom(*args, **kwargs)
+
     # 1) Build BOM
     # define terminal processes for "consumed" logic
     consumed_terminals = ["welding", "purchase", "machine"]
-    flat = _flatten_bom(
+    flat = _flat_or_override(
         opts.root_pn,
         opts.root_rev,
         full=(opts.depth != "top"),
@@ -2545,6 +2664,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         root_desc = _part_description(pdoc)
     except Exception:
         pass
+    if not root_desc and opts.root_desc_override:
+        root_desc = opts.root_desc_override
     chosen_files = _collect_files(filtered_flat + [(opts.root_pn, root_rev_resolved, 1.0)], opts.file_types)
     output_count = 0
     if opts.want_selected_files:
@@ -2572,6 +2693,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     pairs: List[Tuple[str, str]] = []
     pdf_items: List[Dict[str, object]] = []
     pdf_paths: List[str] = []
+    missing_pdf_rows: List[Dict[str, object]] = []
     if opts.want_pdf_binder or opts.want_index_pdf:
         uniq_children: Dict[Tuple[str, str], None] = {}
         for pn, rev, _ in filtered_flat:
@@ -2589,7 +2711,18 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 include_flat_patterns=bool(getattr(opts, "binder_include_flat_patterns", False)),
             )
         except Exception:
-            pass
+            current_app.logger.exception(
+                "docpack: failed to collect body PDFs for %s:%s; binder body will be empty",
+                opts.root_pn, opts.root_rev or "",
+            )
+        if opts.want_pdf_binder:
+            try:
+                missing_pdf_rows = _missing_pdf_rows(pairs, current_app.config.get("FILE_ROOT_LOCAL") or "")
+            except Exception:
+                current_app.logger.exception(
+                    "docpack: failed to compute missing-file diagnostics for %s:%s",
+                    opts.root_pn, opts.root_rev or "",
+                )
     # 4) Build payloads (ZIP container)
     zip_buf = io.BytesIO()
     z: Optional[zipfile.ZipFile] = None
@@ -2598,11 +2731,11 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
     # Excel BOM
     if opts.want_excel_bom:
-        occ_map = _bom_occurrences(opts.root_pn, opts.root_rev, include_consumed=bool(opts.include_consumed), terminal_processes=["welding","purchase","machine"])
+        occ_map = {} if opts.flat_override is not None else _bom_occurrences(opts.root_pn, opts.root_rev, include_consumed=bool(opts.include_consumed), terminal_processes=["welding","purchase","machine"])
         root_key = (opts.root_pn, _norm_rev(root_rev_resolved))
-        if root_key not in occ_map:
+        if root_key not in occ_map and opts.flat_override is None:
             occ_map[root_key] = [("+", 1.0)]
-        full_flat = _flatten_bom(
+        full_flat = _flat_or_override(
             opts.root_pn,
             opts.root_rev,
             full=True,
@@ -2612,7 +2745,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         full_qty_map = { (pn, _norm_rev(rev)): qty for pn, rev, qty in full_flat }
         excel_flat = list(filtered_flat)
         root_key_norm = (opts.root_pn or "").strip().lower(), _norm_rev(root_rev_resolved)
-        if not any(((pn or "").strip().lower(), _norm_rev(rev)) == root_key_norm for pn, rev, _ in excel_flat):
+        if opts.flat_override is None and not any(((pn or "").strip().lower(), _norm_rev(rev)) == root_key_norm for pn, rev, _ in excel_flat):
             excel_flat.insert(0, (opts.root_pn, root_rev_resolved, 1.0))
         xlsx = _excel_bom_bytes(
             opts.root_pn,
@@ -2638,6 +2771,12 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             except Exception:
                 continue
 
+    if want_zip:
+        z.writestr(
+            "_file_coverage.txt",
+            _file_coverage_report(filtered_flat, current_app.config.get("FILE_ROOT_LOCAL") or ""),
+        )
+
     # Precompute visual list rows when needed (standalone or binder sections)
     vis_filtered_all: List[Tuple[str, str, float]] = []
     vis_filtered_visual: List[Tuple[str, str, float]] = []
@@ -2648,7 +2787,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         if fab_all is not None:
             vis_source = fab_all
         else:
-            vis_source = _flatten_bom(
+            vis_source = _flat_or_override(
                 opts.root_pn,
                 opts.root_rev,
                 full=True,
@@ -2743,7 +2882,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
 
     cover_pdf = None
     if opts.want_cover_page or (opts.want_pdf_binder and opts.binder_add_cover):
-        cover_pdf = _cover_page_pdf(opts.root_pn, opts.root_rev, build_ts=build_ts)
+        cover_pdf = _cover_page_pdf(opts.root_pn, opts.root_rev, build_ts=build_ts, desc_override=opts.root_desc_override)
         if not cover_pdf:
             raise RuntimeError("Failed to build binder cover page. Ensure reportlab is installed.")
     if opts.want_cover_page and cover_pdf:
@@ -2834,6 +2973,11 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             if hardware_pdf and hardware_rows:
                 preface_bytes.append(("HardwareSummary.pdf", hardware_pdf))
 
+        if missing_pdf_rows:
+            missing_files_pdf = _missing_files_pdf(missing_pdf_rows)
+            if missing_files_pdf:
+                preface_bytes.append(("MissingFiles.pdf", missing_files_pdf))
+
         # Merge body first to measure page counts (optionally filter flat pattern pages)
         binder_pdf_items = list(pdf_items)
         binder_pdf_paths = list(pdf_paths)
@@ -2878,6 +3022,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             vis_pages = 0
             where_pages = 0
             hardware_pages = 0
+            missing_pages = 0
             for name, b in preface_bytes:
                 lc = name.lower()
                 if lc.startswith("cover"):
@@ -2888,6 +3033,8 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     where_pages += len(PdfReader(io.BytesIO(b)).pages)
                 elif lc.startswith("hardware"):
                     hardware_pages += len(PdfReader(io.BytesIO(b)).pages)
+                elif lc.startswith("missingfiles"):
+                    missing_pages += len(PdfReader(io.BytesIO(b)).pages)
 
             # Helper to build the index PDF with an assumed index page count
             def _build_index(assumed_idx_pages: int) -> bytes:
@@ -2957,8 +3104,11 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 if hardware_pages:
                     hw_start = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + where_pages + 1
                     _entry("Hardware Summary", hw_start)
+                if missing_pages:
+                    missing_start = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + where_pages + hardware_pages + 1
+                    _entry("Missing Source Documents", missing_start)
                 # Body entries: PN + Description
-                pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + where_pages + hardware_pages
+                pre_body_offset = cover_pages + assumed_idx_pages + (vis_pages if vis_pdf else 0) + where_pages + hardware_pages + missing_pages
                 for item, start in zip(binder_pdf_items, body_starts):
                     label = _index_label_for_item(item, desc_cache, multi_by_pn, seq_by_pn)
                     _entry(label, pre_body_offset + start)
@@ -2986,6 +3136,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 index_pages = 0
                 where_pages = 0
                 hardware_pages = 0
+                missing_pages = 0
                 for name, b in preface_bytes:
                     lc = name.lower()
                     if lc.startswith('cover'):
@@ -2998,7 +3149,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                         where_pages += len(PdfReader(io.BytesIO(b)).pages)
                     elif lc.startswith('hardware'):
                         hardware_pages += len(PdfReader(io.BytesIO(b)).pages)
-                pre_body_offset = cover_pages + index_pages + vis_pages + where_pages + hardware_pages
+                    elif lc.startswith('missingfiles'):
+                        missing_pages += len(PdfReader(io.BytesIO(b)).pages)
+                pre_body_offset = cover_pages + index_pages + vis_pages + where_pages + hardware_pages + missing_pages
                 # Map absolute path -> start page
                 start_by_path = {p: s for p, s in zip(binder_pdf_paths, body_starts)}
                 # For each part, pick earliest starting page among its PDFs
@@ -3013,7 +3166,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     if key not in first_page or val < first_page[key]:
                         first_page[key] = val
                 # Rebuild visual list with page numbers (ensure full-BOM aggregated quantities)
-                vis_full2 = _flatten_bom(
+                vis_full2 = _flat_or_override(
                     opts.root_pn,
                     opts.root_rev,
                     full=True,
