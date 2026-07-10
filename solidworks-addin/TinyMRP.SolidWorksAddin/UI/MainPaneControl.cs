@@ -2828,16 +2828,17 @@ namespace TinyMRP.SolidWorksAddin.UI
             ApplySequenceOverrideStateFromResponse(GetQuickSchemeSelection(), response, true);
             string partNumber = NumberingJson.GetString(response.Data, "part_number");
             string revision = NumberingJson.GetString(response.Data, "revision");
-            string display = NumberingJson.GetString(response.Data, "display_code");
-            if (string.IsNullOrWhiteSpace(display))
-            {
-                display = BuildDisplayCode(partNumber, revision);
-            }
-
             if (string.IsNullOrWhiteSpace(partNumber))
             {
                 SetNumberingStatus("Allocation returned no part number.", Color.Maroon);
                 return;
+            }
+
+            revision = ResolveRevisionForApply(info, revision);
+            string display = NumberingJson.GetString(response.Data, "display_code");
+            if (string.IsNullOrWhiteSpace(display) || string.IsNullOrWhiteSpace(revision))
+            {
+                display = BuildDisplayCode(partNumber, revision);
             }
 
             UpdateQuickPreviewFields(partNumber, revision, display);
@@ -2899,16 +2900,17 @@ namespace TinyMRP.SolidWorksAddin.UI
             ApplySequenceOverrideStateFromResponse(GetQuickSchemeSelection(), response, true);
             string partNumber = NumberingJson.GetString(response.Data, "part_number");
             string revision = NumberingJson.GetString(response.Data, "revision");
-            string display = NumberingJson.GetString(response.Data, "display_code");
-            if (string.IsNullOrWhiteSpace(display))
-            {
-                display = BuildDisplayCode(partNumber, revision);
-            }
-
             if (string.IsNullOrWhiteSpace(partNumber))
             {
                 SetNumberingStatus("Allocation returned no part number.", Color.Maroon);
                 return;
+            }
+
+            revision = ResolveRevisionForApply(info, revision);
+            string display = NumberingJson.GetString(response.Data, "display_code");
+            if (string.IsNullOrWhiteSpace(display) || string.IsNullOrWhiteSpace(revision))
+            {
+                display = BuildDisplayCode(partNumber, revision);
             }
 
             UpdateQuickPreviewFields(partNumber, revision, display);
@@ -3285,16 +3287,17 @@ namespace TinyMRP.SolidWorksAddin.UI
             ApplySequenceOverrideStateFromResponse(GetQuickSchemeSelection(), response, true);
             string partNumber = NumberingJson.GetString(response.Data, "part_number");
             string revision = NumberingJson.GetString(response.Data, "revision");
-            string display = NumberingJson.GetString(response.Data, "display_code");
-            if (string.IsNullOrWhiteSpace(display))
-            {
-                display = BuildDisplayCode(partNumber, revision);
-            }
-
             if (string.IsNullOrWhiteSpace(partNumber))
             {
                 SetNumberingStatus("Auto-assign returned no part number.", Color.Maroon);
                 return;
+            }
+
+            revision = ResolveRevisionForApply(info, revision);
+            string display = NumberingJson.GetString(response.Data, "display_code");
+            if (string.IsNullOrWhiteSpace(display) || string.IsNullOrWhiteSpace(revision))
+            {
+                display = BuildDisplayCode(partNumber, revision);
             }
 
             UpdateQuickPreviewFields(partNumber, revision, display);
@@ -4428,17 +4431,25 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             string partNumber = NumberingJson.GetString(response.Data, "part_number");
             string revision = NumberingJson.GetString(response.Data, "revision");
-            string display = NumberingJson.GetString(response.Data, "display_code");
-            if (string.IsNullOrWhiteSpace(display))
-            {
-                display = BuildDisplayCode(partNumber, revision);
-            }
-
             if (string.IsNullOrWhiteSpace(partNumber))
             {
                 MessageBox.Show("Allocation did not return a part number.", "TinyMRP",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
+            }
+
+            // Explicit revision actions (revise/keep existing) apply the returned revision as-is;
+            // plain new-part allocations must not stamp a default revision onto revision-less models.
+            if (string.Equals(action, "new_part", StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(action))
+            {
+                revision = ResolveRevisionForApply(info, revision);
+            }
+
+            string display = NumberingJson.GetString(response.Data, "display_code");
+            if (string.IsNullOrWhiteSpace(display) || string.IsNullOrWhiteSpace(revision))
+            {
+                display = BuildDisplayCode(partNumber, revision);
             }
 
             if (!ApplyNumberingToModel(info, partNumber, revision, display, schemeId))
@@ -5223,6 +5234,38 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return resolved;
             }
             return valOut ?? string.Empty;
+        }
+
+        // Models that do not already track a revision stay revision-less: a new-part allocation must
+        // not stamp the scheme's default start revision (e.g. "A") onto them. The allocated revision
+        // is only applied when the model (config or document level) already carries a revision value.
+        private string ResolveRevisionForApply(ActiveModelInfo info, string allocatedRevision)
+        {
+            if (string.IsNullOrWhiteSpace(allocatedRevision) || info == null || info.Model == null)
+            {
+                return string.Empty;
+            }
+
+            string revProp = AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision";
+            if (string.IsNullOrWhiteSpace(revProp))
+            {
+                revProp = "Revision";
+            }
+
+            string existing = GetCustomProperty(info.Model, info.ActiveConfiguration, revProp);
+            if (string.IsNullOrWhiteSpace(existing))
+            {
+                existing = GetCustomProperty(info.Model, string.Empty, revProp);
+            }
+
+            if (string.IsNullOrWhiteSpace(existing))
+            {
+                AddinLogger.Write("Allocation revision \"" + allocatedRevision +
+                    "\" not applied: model has no existing revision, keeping it revision-less.");
+                return string.Empty;
+            }
+
+            return allocatedRevision;
         }
 
         private Dictionary<string, object> BuildCadRef(ActiveModelInfo info)

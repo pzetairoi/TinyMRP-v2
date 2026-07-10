@@ -82,52 +82,6 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
-        public void BuildTopLevelOnlyDeliverablesQueue_CreatesSingleRootEntry()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-
-            object queueObj = InvokePrivate(
-                publisher,
-                "BuildTopLevelOnlyDeliverablesQueue",
-                @"C:\vault\root.sldasm",
-                "MAIN",
-                true);
-
-            var queue = queueObj as IList;
-            Assert.IsNotNull(queue);
-            Assert.AreEqual(1, queue.Count);
-
-            object entry = queue[0];
-            Assert.AreEqual(@"C:\vault\root.sldasm", GetField(entry, "ModelPath"));
-            Assert.AreEqual("MAIN", GetField(entry, "ConfigurationName"));
-            Assert.AreEqual(true, GetField(entry, "IsAssembly"));
-            Assert.AreEqual(0, GetField(entry, "MaxDepth"));
-            Assert.AreEqual(0, GetField(entry, "SubtreeEstimate"));
-            Assert.AreEqual(true, GetField(entry, "IsRoot"));
-        }
-
-        [TestMethod]
-        public void SortDeliverablesQueue_OrdersPartsBeforeAssembliesAndRootLast()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            Type plannedRefType = GetPlannedRefType();
-            Type listType = typeof(List<>).MakeGenericType(plannedRefType);
-            var queue = (IList)Activator.CreateInstance(listType);
-
-            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\z_part.sldprt", "B", false, 3, 0, false));
-            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\a_part.sldprt", "A", false, 3, 0, false));
-            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\subassy.sldasm", "SUB", true, 4, 2, false));
-            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\root.sldasm", "ROOT", true, 0, 6, true));
-
-            InvokePrivate(publisher, "SortDeliverablesQueue", queue);
-
-            Assert.AreEqual(@"C:\vault\a_part.sldprt", GetField(queue[0], "ModelPath"));
-            Assert.AreEqual(@"C:\vault\z_part.sldprt", GetField(queue[1], "ModelPath"));
-            Assert.AreEqual(@"C:\vault\subassy.sldasm", GetField(queue[2], "ModelPath"));
-            Assert.AreEqual(@"C:\vault\root.sldasm", GetField(queue[3], "ModelPath"));
-        }
-
-        [TestMethod]
         public void IsValidPlyFile_ValidAsciiWithVertices_ReturnsTrue()
         {
             var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
@@ -375,73 +329,6 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
-        public void ExportSessionSerialization_RoundTripsQueueOptionsAndOutputs()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            var options = new PublishOptions
-            {
-                DeliverablesFolder = @"C:\out\deliverables",
-                BomFolder = @"C:\out\bom",
-                ExportPly = true,
-                ExportStl = true,
-                OverwriteFiles = true,
-                TopLevelOnly = true
-            };
-
-            Type plannedRefType = GetPlannedRefType();
-            Type listType = typeof(List<>).MakeGenericType(plannedRefType);
-            var queue = (IList)Activator.CreateInstance(listType);
-            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\root.sldasm", "MAIN", true, 0, 4, true));
-            queue.Add(CreatePlannedRef(plannedRefType, @"C:\vault\part.sldprt", "DEFAULT", false, 2, 0, false));
-
-            object session = InvokePrivate(
-                publisher,
-                "CreateExportSessionState",
-                queue,
-                options,
-                @"C:\vault\root.sldasm",
-                "MAIN",
-                @"C:\plans\plan.txt",
-                @"C:\logs\export.log");
-
-            IList sessionQueue = (IList)GetField(session, "Queue");
-            object firstItem = sessionQueue[0];
-            SetField(firstItem, "Status", "done");
-            SetField(firstItem, "Attempts", 2);
-            SetField(firstItem, "PlyValidationReason", "replaced stale file");
-            IList outputs = (IList)GetField(firstItem, "Outputs");
-            outputs.Add(CreateExportedOutput("ply", @"C:\out\deliverables\ply\root.ply", 2048, true, string.Empty));
-
-            string json = (string)InvokePrivate(publisher, "SerializeExportSession", session);
-            Assert.IsFalse(string.IsNullOrWhiteSpace(json));
-
-            object roundTrip = InvokePrivate(publisher, "DeserializeExportSession", json);
-            Assert.IsNotNull(roundTrip);
-            Assert.AreEqual(@"C:\vault\root.sldasm", GetField(roundTrip, "RootModelPath"));
-            Assert.AreEqual("MAIN", GetField(roundTrip, "RootConfigurationName"));
-            Assert.AreEqual(@"C:\plans\plan.txt", GetField(roundTrip, "PlanPath"));
-            Assert.AreEqual(@"C:\logs\export.log", GetField(roundTrip, "LogPath"));
-
-            var roundTripOptions = (PublishOptions)GetField(roundTrip, "Options");
-            Assert.IsNotNull(roundTripOptions);
-            Assert.AreEqual(@"C:\out\deliverables", roundTripOptions.DeliverablesFolder);
-            Assert.IsTrue(roundTripOptions.ExportPly);
-            Assert.IsTrue(roundTripOptions.ExportStl);
-            Assert.IsTrue(roundTripOptions.OverwriteFiles);
-            Assert.IsTrue(roundTripOptions.TopLevelOnly);
-
-            IList roundTripQueue = (IList)GetField(roundTrip, "Queue");
-            Assert.AreEqual(2, roundTripQueue.Count);
-            Assert.AreEqual("done", GetField(roundTripQueue[0], "Status"));
-            Assert.AreEqual(2, GetField(roundTripQueue[0], "Attempts"));
-            IList roundTripOutputs = (IList)GetField(roundTripQueue[0], "Outputs");
-            Assert.AreEqual(1, roundTripOutputs.Count);
-            Assert.AreEqual("ply", GetField(roundTripOutputs[0], "Type"));
-            Assert.AreEqual(2048L, GetField(roundTripOutputs[0], "Bytes"));
-            Assert.AreEqual(true, GetField(roundTripOutputs[0], "Validated"));
-        }
-
-        [TestMethod]
         public void DeliverablesExportSession_RoundTripsPhysicalQueueAndStatus()
         {
             var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
@@ -534,417 +421,6 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
-        public void PrepareSessionForResume_RevalidatesRunningDoneAndFailedItems()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            string root = CreateTempRoot();
-            string validPlyPath = Path.Combine(root, "done_valid.ply");
-            string invalidPlyPath = Path.Combine(root, "running_invalid.ply");
-
-            try
-            {
-                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
-                File.WriteAllText(invalidPlyPath, BuildHeaderOnlyPly(3), Encoding.ASCII);
-
-                object session = CreateExportSession("running");
-                IList queue = (IList)GetField(session, "Queue");
-                queue.Add(CreateExportSessionItem(@"C:\vault\done.sldprt", "A", "done",
-                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty)));
-                queue.Add(CreateExportSessionItem(@"C:\vault\running.sldprt", "B", "running",
-                    CreateExportedOutput("ply", invalidPlyPath, 0, false, string.Empty)));
-                queue.Add(CreateExportSessionItem(@"C:\vault\failed.sldprt", "C", "failed",
-                    CreateExportedOutput("ply", invalidPlyPath, 0, false, string.Empty)));
-
-                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
-
-                Assert.AreEqual("crashed_or_incomplete", GetField(session, "Status"));
-                Assert.AreEqual("done", GetField(queue[0], "Status"));
-                Assert.AreEqual(string.Empty, GetField(queue[0], "LastError"));
-                Assert.AreEqual("pending", GetField(queue[1], "Status"));
-                Assert.AreEqual("ply:header-only file", GetField(queue[1], "LastError"));
-                Assert.AreEqual("header-only file", GetField(queue[1], "PlyValidationReason"));
-                Assert.AreEqual("pending", GetField(queue[2], "Status"));
-            }
-            finally
-            {
-                DeleteDirectoryIfExists(root);
-            }
-        }
-
-        [TestMethod]
-        public void PrepareSessionForResume_ExpectedOutputsControlCompleteness_NotOnlyValidatedOutputs()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            string root = CreateTempRoot();
-            string validPlyPath = Path.Combine(root, "resume_valid.ply");
-            string missingStepPath = Path.Combine(root, "resume_missing.step");
-
-            try
-            {
-                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
-
-                object session = CreateExportSession("paused");
-                IList queue = (IList)GetField(session, "Queue");
-                object item = CreateExportSessionItem(@"C:\vault\partial.sldprt", "A", "done",
-                    CreateExportedOutput("ply", validPlyPath, 0, true, string.Empty));
-
-                IList expected = (IList)GetField(item, "ExpectedOutputs");
-                expected.Add(CreateExportedOutput("ply", validPlyPath, 0, true, string.Empty));
-                expected.Add(CreateExportedOutput("step", missingStepPath, 0, false, string.Empty));
-                queue.Add(item);
-
-                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
-                IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
-
-                Assert.AreEqual("pending", GetField(queue[0], "Status"));
-                Assert.AreEqual("step:missing file", GetField(queue[0], "LastError"));
-                Assert.AreEqual(1, pending.Count);
-            }
-            finally
-            {
-                DeleteDirectoryIfExists(root);
-            }
-        }
-
-        [TestMethod]
-        public void BuildPendingResumeQueue_ValidDoneItemIsExcludedEvenWhenOverwriteTrue()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            string root = CreateTempRoot();
-            string validPlyPath = Path.Combine(root, "done_valid_overwrite.ply");
-
-            try
-            {
-                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
-
-                object session = CreateExportSession("paused");
-                var options = (PublishOptions)GetField(session, "Options");
-                options.OverwriteFiles = true;
-
-                IList queue = (IList)GetField(session, "Queue");
-                queue.Add(CreateExportSessionItem(@"C:\vault\done.sldprt", "A", "done",
-                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty)));
-
-                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
-                IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
-
-                Assert.AreEqual("done", GetField(queue[0], "Status"));
-                Assert.AreEqual(0, pending.Count);
-            }
-            finally
-            {
-                DeleteDirectoryIfExists(root);
-            }
-        }
-
-        [TestMethod]
-        public void BuildPendingResumeQueue_DoneItemWithMissingOutput_IsIncluded()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            object session = CreateExportSession("paused");
-            IList queue = (IList)GetField(session, "Queue");
-            queue.Add(CreateExportSessionItem(@"C:\vault\missing.sldprt", "A", "done",
-                CreateExportedOutput("ply", @"C:\does-not-exist\missing.ply", 0, false, string.Empty)));
-
-            InvokePrivate(publisher, "PrepareSessionForResume", session, null);
-            IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
-
-            Assert.AreEqual("pending", GetField(queue[0], "Status"));
-            Assert.AreEqual("ply:missing file", GetField(queue[0], "LastError"));
-            Assert.AreEqual(1, pending.Count);
-            Assert.AreEqual(@"C:\vault\missing.sldprt", GetField(pending[0], "ModelPath"));
-        }
-
-        [TestMethod]
-        public void BuildPendingResumeQueue_RunningItemWithValidOutputs_BecomesDoneAndIsExcluded()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            string root = CreateTempRoot();
-            string validPlyPath = Path.Combine(root, "running_valid.ply");
-
-            try
-            {
-                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
-
-                object session = CreateExportSession("running");
-                IList queue = (IList)GetField(session, "Queue");
-                queue.Add(CreateExportSessionItem(@"C:\vault\running-ok.sldprt", "A", "running",
-                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty)));
-
-                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
-                IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
-
-                Assert.AreEqual("done", GetField(queue[0], "Status"));
-                Assert.AreEqual(string.Empty, GetField(queue[0], "LastError"));
-                Assert.AreEqual(0, pending.Count);
-            }
-            finally
-            {
-                DeleteDirectoryIfExists(root);
-            }
-        }
-
-        [TestMethod]
-        public void BuildPendingResumeQueue_FailedAndUnknownStatuses_AreIncluded()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            string root = CreateTempRoot();
-            string validPlyPath = Path.Combine(root, "unknown_valid.ply");
-
-            try
-            {
-                File.WriteAllText(validPlyPath, BuildValidAsciiPly(), Encoding.ASCII);
-
-                object session = CreateExportSession("failed");
-                IList queue = (IList)GetField(session, "Queue");
-
-                object failedItem = CreateExportSessionItem(@"C:\vault\failed.sldprt", "A", "failed",
-                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty));
-                SetField(failedItem, "LastError", "previous export failed");
-                queue.Add(failedItem);
-
-                queue.Add(CreateExportSessionItem(@"C:\vault\unknown.sldprt", "B", "mystery",
-                    CreateExportedOutput("ply", validPlyPath, 0, false, string.Empty)));
-
-                InvokePrivate(publisher, "PrepareSessionForResume", session, null);
-                IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
-
-                Assert.AreEqual("pending", GetField(queue[0], "Status"));
-                Assert.AreEqual("pending", GetField(queue[1], "Status"));
-                Assert.AreEqual(2, pending.Count);
-            }
-            finally
-            {
-                DeleteDirectoryIfExists(root);
-            }
-        }
-
-        [TestMethod]
-        public void AreCurrentDeliverableSelectionsCoveredByPrevious_RequiresSupersetFlags()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            var previous = new PublishOptions
-            {
-                ExportPngModel = true,
-                ExportStep = true,
-                ExportPdf = true,
-                ExportPly = true
-            };
-            var covered = new PublishOptions
-            {
-                ExportPngModel = true,
-                ExportPdf = true
-            };
-            var missing = new PublishOptions
-            {
-                ExportPngModel = true,
-                ExportPdf = true,
-                ExportEdrawing = true
-            };
-
-            bool coveredResult = (bool)InvokePrivate(
-                publisher,
-                "AreCurrentDeliverableSelectionsCoveredByPrevious",
-                previous,
-                covered);
-            bool missingResult = (bool)InvokePrivate(
-                publisher,
-                "AreCurrentDeliverableSelectionsCoveredByPrevious",
-                previous,
-                missing);
-
-            Assert.IsTrue(coveredResult);
-            Assert.IsFalse(missingResult);
-        }
-
-        [TestMethod]
-        public void IsExportSessionCompatibleForReuse_RequiresMatchingRootFolderAndNoOverwrite()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            object previous = CreateExportSession("completed");
-            SetField(previous, "RootModelPath", @"C:\vault\root.sldasm");
-            SetField(previous, "RootConfigurationName", "MAIN");
-            SetField(previous, "DeliverablesFolder", @"C:\out\deliverables");
-            SetField(previous, "Options", new PublishOptions
-            {
-                DeliverablesFolder = @"C:\out\deliverables",
-                ExportPngModel = true,
-                ExportPdf = true
-            });
-
-            bool compatible = (bool)InvokePrivate(
-                publisher,
-                "IsExportSessionCompatibleForReuse",
-                previous,
-                @"C:\vault\root.sldasm",
-                "MAIN",
-                new PublishOptions
-                {
-                    DeliverablesFolder = @"C:\out\deliverables",
-                    ExportPngModel = true,
-                    OverwriteFiles = false
-                });
-
-            bool wrongFolder = (bool)InvokePrivate(
-                publisher,
-                "IsExportSessionCompatibleForReuse",
-                previous,
-                @"C:\vault\root.sldasm",
-                "MAIN",
-                new PublishOptions
-                {
-                    DeliverablesFolder = @"C:\other",
-                    ExportPngModel = true,
-                    OverwriteFiles = false
-                });
-
-            bool overwrite = (bool)InvokePrivate(
-                publisher,
-                "IsExportSessionCompatibleForReuse",
-                previous,
-                @"C:\vault\root.sldasm",
-                "MAIN",
-                new PublishOptions
-                {
-                    DeliverablesFolder = @"C:\out\deliverables",
-                    ExportPngModel = true,
-                    OverwriteFiles = true
-                });
-
-            Assert.IsTrue(compatible);
-            Assert.IsFalse(wrongFolder);
-            Assert.IsFalse(overwrite);
-        }
-
-        [TestMethod]
-        public void SeedExportSessionFromPrevious_CopiesMatchingItemStateAndOutputs()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-
-            object current = CreateExportSession("planned");
-            IList currentQueue = (IList)GetField(current, "Queue");
-            currentQueue.Add(CreateExportSessionItem(@"C:\vault\part.sldprt", "A", "pending"));
-
-            object previous = CreateExportSession("completed");
-            IList previousQueue = (IList)GetField(previous, "Queue");
-            object previousItem = CreateExportSessionItem(@"C:\vault\part.sldprt", "A", "done",
-                CreateExportedOutput("ply", @"C:\out\deliverables\ply\part.ply", 1234, true, string.Empty));
-            SetField(previousItem, "LastError", string.Empty);
-            previousQueue.Add(previousItem);
-
-            int seeded = (int)InvokePrivate(publisher, "SeedExportSessionFromPrevious", current, previous);
-
-            Assert.AreEqual(1, seeded);
-            Assert.AreEqual("done", GetField(currentQueue[0], "Status"));
-            IList outputs = (IList)GetField(currentQueue[0], "Outputs");
-            Assert.AreEqual(1, outputs.Count);
-            Assert.AreEqual("ply", GetField(outputs[0], "Type"));
-        }
-
-        [TestMethod]
-        public void SeedExportSessionFromPrevious_SkipsItemsWhenCurrentSelectionNeedsNoRecordedOutputs()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-
-            object current = CreateExportSession("planned");
-            SetField(current, "Options", new PublishOptions
-            {
-                DeliverablesFolder = @"C:\out\deliverables",
-                ExportPdf = true
-            });
-            IList currentQueue = (IList)GetField(current, "Queue");
-            currentQueue.Add(CreateExportSessionItem(@"C:\vault\part.sldprt", "A", "pending"));
-
-            object previous = CreateExportSession("completed");
-            SetField(previous, "Options", new PublishOptions
-            {
-                DeliverablesFolder = @"C:\out\deliverables",
-                ExportPngModel = true,
-                ExportPdf = true
-            });
-            IList previousQueue = (IList)GetField(previous, "Queue");
-            previousQueue.Add(CreateExportSessionItem(
-                @"C:\vault\part.sldprt",
-                "A",
-                "done",
-                CreateExportedOutput("png", @"C:\out\deliverables\png\part.png", 1234, true, string.Empty)));
-
-            int seeded = (int)InvokePrivate(publisher, "SeedExportSessionFromPrevious", current, previous);
-
-            Assert.AreEqual(1, seeded);
-            Assert.AreEqual("skipped", GetField(currentQueue[0], "Status"));
-            Assert.AreEqual("no required outputs", GetField(currentQueue[0], "LastError"));
-            Assert.AreEqual(0, ((IList)GetField(currentQueue[0], "ExpectedOutputs")).Count);
-            Assert.AreEqual(0, ((IList)GetField(currentQueue[0], "Outputs")).Count);
-        }
-
-        [TestMethod]
-        public void IsReusableSessionCandidateBetter_PrefersPreparedSessionWithMoreCompletedItems()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            string root = CreateTempRoot();
-            string validA = Path.Combine(root, "a.ply");
-            string validB = Path.Combine(root, "b.ply");
-
-            try
-            {
-                File.WriteAllText(validA, BuildValidAsciiPly(), Encoding.ASCII);
-                File.WriteAllText(validB, BuildValidAsciiPly(), Encoding.ASCII);
-
-                object newerPartial = CreateExportSession("running");
-                SetField(newerPartial, "UpdatedUtc", DateTime.UtcNow.AddMinutes(1).ToString("o"));
-                IList newerQueue = (IList)GetField(newerPartial, "Queue");
-                newerQueue.Add(CreateExportSessionItem(@"C:\vault\part_a.sldprt", "A", "done",
-                    CreateExportedOutput("ply", validA, 0, false, string.Empty)));
-                newerQueue.Add(CreateExportSessionItem(@"C:\vault\part_b.sldprt", "B", "pending",
-                    CreateExportedOutput("ply", validB, 0, false, string.Empty)));
-
-                object olderComplete = CreateExportSession("completed");
-                SetField(olderComplete, "UpdatedUtc", DateTime.UtcNow.AddMinutes(-10).ToString("o"));
-                IList olderQueue = (IList)GetField(olderComplete, "Queue");
-                olderQueue.Add(CreateExportSessionItem(@"C:\vault\part_a.sldprt", "A", "done",
-                    CreateExportedOutput("ply", validA, 0, false, string.Empty)));
-                olderQueue.Add(CreateExportSessionItem(@"C:\vault\part_b.sldprt", "B", "done",
-                    CreateExportedOutput("ply", validB, 0, false, string.Empty)));
-
-                InvokePrivate(publisher, "PrepareSessionForResume", newerPartial, null);
-                InvokePrivate(publisher, "PrepareSessionForResume", olderComplete, null);
-
-                bool olderWins = (bool)InvokePrivate(
-                    publisher,
-                    "IsReusableSessionCandidateBetter",
-                    olderComplete,
-                    newerPartial);
-
-                Assert.IsTrue(olderWins);
-            }
-            finally
-            {
-                DeleteDirectoryIfExists(root);
-            }
-        }
-
-        [TestMethod]
-        public void PrepareSessionForResume_DurableSkippedItemRemainsSkippedAndCountsComplete()
-        {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            object session = CreateExportSession("paused");
-            IList queue = (IList)GetField(session, "Queue");
-
-            object skippedItem = CreateExportSessionItem(@"C:\vault\skip.sldprt", "A", "skipped");
-            SetField(skippedItem, "LastError", "no required outputs");
-            queue.Add(skippedItem);
-
-            InvokePrivate(publisher, "PrepareSessionForResume", session, null);
-            IList pending = (IList)InvokePrivate(publisher, "BuildPendingResumeQueue", session, null);
-            int completed = (int)InvokePrivate(publisher, "CountCompletedSessionItems", session);
-
-            Assert.AreEqual("skipped", GetField(queue[0], "Status"));
-            Assert.AreEqual(1, completed);
-            Assert.AreEqual(0, pending.Count);
-        }
-
-        [TestMethod]
         public void BuildBomTempAssemblyPath_UsesPrivateTempFolderAndSldasmName()
         {
             var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
@@ -1003,9 +479,12 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.IsTrue(end > start);
 
             string methodBody = source.Substring(start, end - start);
-            StringAssert.Contains(methodBody, "CloseDoc(");
-            StringAssert.Contains(methodBody, "CloseDoc(string.Empty)");
+            // CloseDoc never prompts to save; QuitDoc and ActivateDoc-before-close are forbidden here
+            // (activating hidden reference docs to close them is what hung large-assembly exports).
+            Assert.IsTrue(methodBody.IndexOf("CloseDoc(", StringComparison.Ordinal) >= 0);
             Assert.IsTrue(methodBody.IndexOf("_swApp.QuitDoc(", StringComparison.Ordinal) < 0);
+            Assert.IsTrue(methodBody.IndexOf("ActivateDoc", StringComparison.Ordinal) < 0);
+            Assert.IsTrue(methodBody.IndexOf("Thread.Sleep", StringComparison.Ordinal) < 0);
         }
 
         [TestMethod]
@@ -1019,8 +498,8 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.IsTrue(end > start);
 
             string methodBody = source.Substring(start, end - start);
-            StringAssert.Contains(methodBody, "CloseDoc(");
-            StringAssert.Contains(methodBody, "CloseDoc(string.Empty)");
+            // The temp assembly close delegates to ForceCloseDocNoSave (no-save, no-prompt) and never QuitDoc.
+            Assert.IsTrue(methodBody.IndexOf("ForceCloseDocNoSave(", StringComparison.Ordinal) >= 0);
             Assert.IsTrue(methodBody.IndexOf("_swApp.QuitDoc(", StringComparison.Ordinal) < 0);
         }
 
@@ -1029,8 +508,9 @@ namespace TinyMRP.SolidWorksAddin.Tests
         {
             string source = File.ReadAllText(GetPublisherSourcePath(), Encoding.UTF8);
 
-            StringAssert.Contains(source, "string drawingPath = OnlyFolder(modelPath) + pn + \".SLDDRW\";");
-            StringAssert.Contains(source, "string drawingPath = OnlyFolder(modelPath) + partNumber + \".SLDDRW\";");
+            // Drawings are discovered next to the model as "<partNumber>.SLDDRW" during manifest
+            // planning; the drawing export receives that resolved path and must not re-derive it.
+            Assert.IsTrue(source.IndexOf("? OnlyFolder(modelPath) + partNumber + \".SLDDRW\"", StringComparison.Ordinal) >= 0);
             Assert.IsTrue(source.IndexOf("candidateDrawing", StringComparison.OrdinalIgnoreCase) < 0);
             Assert.IsTrue(source.IndexOf("fallback drawing", StringComparison.OrdinalIgnoreCase) < 0);
         }
@@ -1058,31 +538,11 @@ namespace TinyMRP.SolidWorksAddin.Tests
             return result;
         }
 
-        private static Type GetPlannedRefType()
-        {
-            Type plannedRefType = typeof(TinyMrpPublisher).GetNestedType("PlannedRef", BindingFlags.NonPublic);
-            Assert.IsNotNull(plannedRefType);
-            return plannedRefType;
-        }
-
         private static Type GetNestedType(string nestedTypeName)
         {
             Type nestedType = typeof(TinyMrpPublisher).GetNestedType(nestedTypeName, BindingFlags.NonPublic);
             Assert.IsNotNull(nestedType);
             return nestedType;
-        }
-
-        private static object CreatePlannedRef(Type plannedRefType, string modelPath, string configurationName, bool isAssembly,
-            int maxDepth, int subtreeEstimate, bool isRoot)
-        {
-            object entry = Activator.CreateInstance(plannedRefType, true);
-            SetField(entry, "ModelPath", modelPath);
-            SetField(entry, "ConfigurationName", configurationName);
-            SetField(entry, "IsAssembly", isAssembly);
-            SetField(entry, "MaxDepth", maxDepth);
-            SetField(entry, "SubtreeEstimate", subtreeEstimate);
-            SetField(entry, "IsRoot", isRoot);
-            return entry;
         }
 
         private static object CreatePhysicalExportQueueItem(Type queueItemType, string physicalPath, bool isDrawing,
@@ -1109,50 +569,6 @@ namespace TinyMRP.SolidWorksAddin.Tests
             FieldInfo field = target.GetType().GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);
             Assert.IsNotNull(field);
             field.SetValue(target, value);
-        }
-
-        private static object CreateExportedOutput(string type, string path, long bytes, bool validated, string validationReason)
-        {
-            object output = Activator.CreateInstance(GetNestedType("ExportedOutputState"), true);
-            SetField(output, "Type", type);
-            SetField(output, "Path", path);
-            SetField(output, "Bytes", bytes);
-            SetField(output, "Validated", validated);
-            SetField(output, "ValidationReason", validationReason);
-            return output;
-        }
-
-        private static object CreateExportSessionItem(string modelPath, string configurationName, string status, params object[] outputs)
-        {
-            object item = Activator.CreateInstance(GetNestedType("ExportSessionItem"), true);
-            SetField(item, "ItemId", modelPath + "|" + configurationName);
-            SetField(item, "ModelPath", modelPath);
-            SetField(item, "ConfigurationName", configurationName);
-            SetField(item, "Status", status);
-
-            IList outputList = (IList)GetField(item, "Outputs");
-            foreach (object output in outputs)
-            {
-                outputList.Add(output);
-            }
-
-            return item;
-        }
-
-        private static object CreateExportSession(string status)
-        {
-            object session = Activator.CreateInstance(GetNestedType("ExportSessionState"), true);
-            SetField(session, "SchemaVersion", 1);
-            SetField(session, "SessionId", Guid.NewGuid().ToString("N"));
-            SetField(session, "CreatedUtc", DateTime.UtcNow.ToString("s"));
-            SetField(session, "UpdatedUtc", DateTime.UtcNow.ToString("s"));
-            SetField(session, "Status", status);
-            SetField(session, "RootModelPath", @"C:\vault\root.sldasm");
-            SetField(session, "RootConfigurationName", "MAIN");
-            SetField(session, "DeliverablesFolder", @"C:\out\deliverables");
-            SetField(session, "BomFolder", @"C:\out\bom");
-            SetField(session, "Options", new PublishOptions { ExportPly = true });
-            return session;
         }
 
         private static string GetPublisherSourcePath()

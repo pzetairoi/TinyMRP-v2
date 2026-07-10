@@ -2223,16 +2223,18 @@ def _overlay_numbers_and_stamps(
                     c.saveState()
                     c.translate(W/2, H/2)
                     c.rotate(0)
-                    c.setFillAlpha(0.08)
+                    c.setFillAlpha(0.2)
                     if key == "inprogress":
                         try:
-                            from reportlab.pdfbase.pdfmetrics import stringWidth
-                            label = "IN PROGRESS"
                             size = max(24.0, min(W, H) * 0.12)
+                            line_spacing = size * 1.15
+
                             c.setFont("Helvetica-Bold", size)
                             c.setFillColorRGB(0.8, 0.0, 0.0)
-                            tw = stringWidth(label, "Helvetica-Bold", size)
-                            c.drawString(-tw/2.0, -size/2.5, label)
+
+                            # Coordinates are centred around the current transformed origin.
+                            c.drawCentredString(0, line_spacing / 2, "IN PROGRESS")
+                            c.drawCentredString(0, -line_spacing / 2, "NOT APPROVED")
                         except Exception:
                             pass
                     else:
