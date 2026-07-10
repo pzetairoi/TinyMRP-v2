@@ -4,6 +4,7 @@ from datetime import datetime
 from bson import ObjectId
 from bson.errors import InvalidId
 from flask import Blueprint, render_template, send_file, abort, request, redirect, url_for, flash, current_app
+from flask_login import login_required
 from flask_security import auth_required, current_user
 from flask_security.utils import hash_password
 from mongoengine.queryset.visitor import Q
@@ -17,6 +18,7 @@ from app.services.acl import (
     allowed_parts_for,
     apply_job_scope,
     apply_order_scope,
+    permissions_required,
     user_can_view_items,
     user_has_permission,
 )
@@ -472,6 +474,8 @@ def app_password_change():
 
 
 @bp.get("/downloads/macro")
+@login_required
+@permissions_required("tools.view")
 def download_macro():
     roots = []
     env_root = os.getenv("MACRO_FILES_ROOT") or ""
@@ -482,20 +486,22 @@ def download_macro():
     if not path or not os.path.isfile(path):
         abort(404)
     try:
-        log_action("download.macro", resource_type="download", resource=os.path.basename(path), meta={"source": "landing"})
+        log_action("download.macro", resource_type="download", resource=os.path.basename(path), meta={"source": "tools"})
     except Exception:
         pass
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
 @bp.get("/downloads/addin")
+@login_required
+@permissions_required("tools.view")
 def download_addin():
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "solidworks-addin", "Windows Installer latest"))
     path = _latest_file(root, [".exe", ".msi"])
     if not path or not os.path.isfile(path):
         abort(404)
     try:
-        log_action("download.addin", resource_type="download", resource=os.path.basename(path), meta={"source": "landing"})
+        log_action("download.addin", resource_type="download", resource=os.path.basename(path), meta={"source": "tools"})
     except Exception:
         pass
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
