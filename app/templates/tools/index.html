@@ -26,6 +26,10 @@
           {{ empty_state("No installers listed", "Place installers in the solidworks-addin/Windows Installer latest folder to show them here.") }}
           {% endif %}
         </div>
+        <div class="mb-3">
+          <div class="fw-semibold small mb-1">Macro</div>
+          <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_macro') }}">Download Macro</a>
+        </div>
         <div>
           <div class="fw-semibold small mb-1">Custom tab properties</div>
           <ul class="list-unstyled small mb-0">
