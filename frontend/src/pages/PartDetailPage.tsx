@@ -10,6 +10,13 @@ import ImageStrip from "../components/ImageStrip";
 import ThumbImg from "../components/ThumbImg";
 import "./partdetail.css";
 import FieldSelector from "../components/FieldSelector";
+import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
+import type {
+  DrawingImageRow,
+  MarkupDraft,
+  MarkupLayer,
+  MarkupThread,
+} from "../components/markups/types";
 import {
   contextFields,
   defaultFieldIds,
@@ -615,6 +622,15 @@ export default function PartDetailPage() {
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
   const [images, setImages] = useState<string[]>([]);
+
+  // Drawing markup layer (vector overlay + review threads)
+  const [drawingSource, setDrawingSource] = useState<DrawingImageRow | null>(null);
+  const [markupLayer, setMarkupLayer] = useState<MarkupLayer | null>(null);
+  const [markupLoading, setMarkupLoading] = useState(false);
+  const [markupError, setMarkupError] = useState<string | null>(null);
+  const [markupSummaryError, setMarkupSummaryError] = useState<string | null>(null);
+  const [markupFocusThreadId, setMarkupFocusThreadId] = useState<string | null>(null);
+  const markupDraftRef = useRef<MarkupDraft | null>(null);
   const [selectedPreviewKey, setSelectedPreviewKey] = useState<string>("");
   const [selectedDatasheetKey, setSelectedDatasheetKey] = useState<string>("");
 
@@ -1171,6 +1187,89 @@ function isExternalDatasheetUrl(url: string): boolean {
   useEffect(() => {
     loadFilesOverview();
   }, [isSharedView, pn, rev, refreshTick, shareApiBase]);
+
+  // ---- Load drawing source metadata + markup layer (never on public shares) ----
+  useEffect(() => {
+    if (isSharedView || !pn) {
+      setDrawingSource(null);
+      setMarkupLayer(null);
+      setMarkupError(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setMarkupLoading(true);
+      setMarkupError(null);
+      try {
+        const qs = new URLSearchParams({ pn, mode: "drawing", rev: effectiveRev || "" });
+        const r = await fetch(`/api/part_images?${qs.toString()}`);
+        const rows = (r.ok ? await r.json() : []) as DrawingImageRow[];
+        const source = Array.isArray(rows) ? rows.find((row) => row.source_file_id) || null : null;
+        if (cancelled) return;
+        setDrawingSource(source);
+        if (!source?.source_file_id) {
+          setMarkupLayer(null);
+          return;
+        }
+        const mq = new URLSearchParams({ rev: effectiveRev || "", source_file_id: source.source_file_id });
+        const mr = await fetch(`/api/parts/${encodeURIComponent(pn)}/drawing-markups?${mq.toString()}`);
+        const mj = await mr.json().catch(() => null);
+        if (cancelled) return;
+        if (!mr.ok || !mj?.ok) {
+          setMarkupLayer(null);
+          setMarkupError(
+            mj?.message ||
+              (mr.status === 403 ? "Not authorized to view drawing markups." : `Failed to load drawing markups (HTTP ${mr.status})`),
+          );
+          return;
+        }
+        setMarkupLayer(mj as MarkupLayer);
+      } catch (e: any) {
+        if (!cancelled) {
+          setMarkupLayer(null);
+          setMarkupError(e?.message || "Failed to load drawing markups");
+        }
+      } finally {
+        if (!cancelled) setMarkupLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSharedView, pn, effectiveRev, refreshTick]);
+
+  const markupThreads = useMemo<MarkupThread[]>(() => markupLayer?.threads || [], [markupLayer]);
+  const openMarkupThreadCount = useMemo(
+    () => markupThreads.filter((t) => t.status === "open").length,
+    [markupThreads],
+  );
+
+  // Resolve/reopen from the Notes & Comments summary (Drawing tab may be unmounted).
+  async function patchMarkupThreadFromSummary(threadId: string, action: "resolve" | "reopen") {
+    if (!drawingSource?.source_file_id || !markupLayer) return;
+    setMarkupSummaryError(null);
+    try {
+      const resp = await fetch(
+        `/api/parts/${encodeURIComponent(pn)}/drawing-markups/threads/${encodeURIComponent(threadId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rev: effectiveRev || "",
+            source_file_id: drawingSource.source_file_id,
+            source_fingerprint: markupLayer.source?.fingerprint || "",
+            page_number: 1,
+            action,
+          }),
+        },
+      );
+      const j = await resp.json().catch(() => null);
+      if (!resp.ok || !j?.ok) throw new Error(j?.message || `HTTP ${resp.status}`);
+      setMarkupLayer(j as MarkupLayer);
+    } catch (e: any) {
+      setMarkupSummaryError(e?.message || "Failed to update review thread");
+    }
+  }
 
   // Load DocPack options when pn/rev/depth changes
   useEffect(() => {
@@ -1957,6 +2056,25 @@ function isExternalDatasheetUrl(url: string): boolean {
     )
   }, [comments, notesSearchLower])
 
+  const filteredMarkupThreads = useMemo(() => {
+    if (!notesSearchLower) return markupThreads
+    return markupThreads.filter((thread) => {
+      const haystack: string[] = [
+        thread.title || "",
+        thread.status || "",
+        thread.priority || "",
+        thread.created_by || "",
+        thread.created_by_display || "",
+        thread.created_at_display || "",
+        thread.created_at || "",
+      ]
+      for (const msg of thread.messages || []) {
+        haystack.push(msg.text || "", msg.author || "", msg.author_display || "", msg.ts_display || "", msg.ts || "")
+      }
+      return haystack.some((value) => String(value).toLowerCase().includes(notesSearchLower))
+    })
+  }, [markupThreads, notesSearchLower])
+
   const uploaderIdentity = useMemo(() => {
     const a = part?.attrs || {}
     return (
@@ -2048,6 +2166,8 @@ function isExternalDatasheetUrl(url: string): boolean {
   // default to All attributes.
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
   const hasNotesOrComments = notes.trim().length > 0 || comments.length > 0
+  const drawingTabAttention = openMarkupThreadCount > 0
+  const notesTabAttention = hasNotesOrComments || openMarkupThreadCount > 0
   const notesDirty = notes !== savedNotes
 
   function tabHeader(label: string, icon: string, attention = false) {
@@ -2536,9 +2656,14 @@ function isExternalDatasheetUrl(url: string): boolean {
             
 
             {hasDrawing && (
-            <TabPanel header={tabHeader("Drawing", "pi-file-pdf")}>
-              {pdfHref ? (
-                <>
+            <TabPanel
+              header={tabHeader("Drawing", "pi-file-pdf", drawingTabAttention)}
+              headerClassName={drawingTabAttention ? "pd-tab-attention" : undefined}
+            >
+              {isSharedView ? (
+                // Public shares keep the original read-only drawing/PDF behaviour
+                // and never request markup APIs.
+                pdfHref ? (
                   <a
                     href={pdfHref}
                     target="_blank"
@@ -2548,11 +2673,27 @@ function isExternalDatasheetUrl(url: string): boolean {
                   >
                     <ImageStrip pn={pn} rev={rev || ""} mode="drawing" endpointBase={partImagesEndpoint} limit={1} fit cacheBust={refreshTick} />
                   </a>
-                </>
+                ) : (
+                  <div className="pd-drawing-link">
+                    <ImageStrip pn={pn} rev={rev || ""} mode="drawing" endpointBase={partImagesEndpoint} limit={1} fit cacheBust={refreshTick} />
+                  </div>
+                )
               ) : (
-                <div className="pd-drawing-link">
-                  <ImageStrip pn={pn} rev={rev || ""} mode="drawing" endpointBase={partImagesEndpoint} limit={1} fit cacheBust={refreshTick} />
-                </div>
+                <DrawingMarkupWorkspace
+                  key={`${pn}::${revToken}::${drawingSource?.source_file_id || "none"}`}
+                  pn={pn}
+                  rev={effectiveRev || ""}
+                  pdfHref={pdfHref}
+                  drawingSource={drawingSource}
+                  layer={markupLayer}
+                  layerLoading={markupLoading}
+                  layerError={markupError}
+                  canEdit={canPartsNote}
+                  onLayerChange={setMarkupLayer}
+                  draftRef={markupDraftRef}
+                  focusThreadId={markupFocusThreadId}
+                  onFocusHandled={() => setMarkupFocusThreadId(null)}
+                />
               )}
             </TabPanel>
             )}
@@ -3190,8 +3331,8 @@ function isExternalDatasheetUrl(url: string): boolean {
 
             
           {!isSharedView && <TabPanel
-            header={tabHeader("Notes & Comments", "pi-comments", hasNotesOrComments)}
-            headerClassName={hasNotesOrComments ? "pd-tab-attention" : undefined}
+            header={tabHeader("Notes & Comments", "pi-comments", notesTabAttention)}
+            headerClassName={notesTabAttention ? "pd-tab-attention" : undefined}
           >
             <div className="pd-card p-3 mt-3">
               <div className="d-flex align-items-center justify-content-between gap-2">
@@ -3308,6 +3449,126 @@ function isExternalDatasheetUrl(url: string): boolean {
                   </>
                 )}
                 {commentError ? <div className="text-danger small mt-1">{commentError}</div> : null}
+              </div>
+
+              {/* Drawing review threads live in their own collection; this is a
+                  read/summary view — threads are created on the Drawing tab. */}
+              <div className="mt-4 pd-markup-summary">
+                <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
+                  <h6 className="mb-0 d-flex align-items-center gap-2">
+                    Drawing review threads
+                    <span className="badge rounded-pill text-bg-secondary">{markupThreads.length}</span>
+                    {openMarkupThreadCount > 0 ? (
+                      <span className="badge rounded-pill text-bg-warning">{openMarkupThreadCount} open</span>
+                    ) : null}
+                  </h6>
+                  {notesSearch.trim() && markupThreads.length ? (
+                    <div className="small text-muted">
+                      Showing {filteredMarkupThreads.length} of {markupThreads.length} threads.
+                    </div>
+                  ) : null}
+                </div>
+                {markupSummaryError ? <div className="text-danger small mb-2">{markupSummaryError}</div> : null}
+                {markupLoading && !markupLayer ? (
+                  <div className="text-muted small">Loading drawing review threads...</div>
+                ) : !drawingSource ? (
+                  <div className="text-muted small">
+                    No drawing PNG is available for this part, so there are no drawing review threads.
+                  </div>
+                ) : filteredMarkupThreads.length ? (
+                  <div className="d-flex flex-column gap-2">
+                    {filteredMarkupThreads.map((thread) => {
+                      const firstMsg = thread.messages[0]
+                      return (
+                        <div key={thread.id} className="border rounded p-2 pd-markup-summary-row">
+                          <div className="pd-markup-summary-head">
+                            <div className="pd-markup-summary-title">
+                              <span className={`badge ${thread.priority === "high" ? "text-bg-danger" : thread.priority === "low" ? "text-bg-secondary" : "text-bg-info"}`}>
+                                {thread.priority}
+                              </span>
+                              <span className={`badge ${thread.status === "open" ? "text-bg-warning" : "text-bg-success"}`}>
+                                {thread.status}
+                              </span>
+                              <span className="fw-semibold small">
+                                {thread.title || firstMsg?.text?.slice(0, 80) || "Review thread"}
+                              </span>
+                              {thread.reply_count > 0 ? (
+                                <span className="badge rounded-pill text-bg-light border" title="Replies">
+                                  <i className="pi pi-reply me-1" aria-hidden="true" />
+                                  {thread.reply_count}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="pd-markup-summary-actions">
+                              {hasDrawing && thread.linked ? (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-secondary"
+                                  title="View on drawing"
+                                  onClick={() => {
+                                    setMarkupFocusThreadId(thread.id)
+                                    // Drawing is demonstrably the first rendered tab whenever hasDrawing is true.
+                                    setTabIndex(0)
+                                  }}
+                                >
+                                  <i className="pi pi-eye me-1" aria-hidden="true" />
+                                  View on drawing
+                                </button>
+                              ) : (
+                                <span className="badge text-bg-light border" title="The linked markup object was removed">
+                                  Markup no longer present
+                                </span>
+                              )}
+                              {canPartsNote && markupLayer?.can_edit ? (
+                                thread.status === "open" ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-success"
+                                    onClick={() => patchMarkupThreadFromSummary(thread.id, "resolve")}
+                                  >
+                                    Resolve
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-warning"
+                                    onClick={() => patchMarkupThreadFromSummary(thread.id, "reopen")}
+                                  >
+                                    Reopen
+                                  </button>
+                                )
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="pd-comment-row mt-1">
+                            {identityAvatar(firstMsg?.author_profile, firstMsg?.author_display || firstMsg?.author || thread.created_by || "User")}
+                            <div className="pd-comment-body">
+                              <div className="small text-muted">
+                                <span className="fw-semibold">
+                                  {firstMsg?.author_display || firstMsg?.author || thread.created_by_display || thread.created_by || "User"}
+                                </span>
+                                {firstMsg?.ts ? (
+                                  <span title={firstMsg.ts_local || firstMsg.ts}> - {firstMsg.ts_display || firstMsg.ts}</span>
+                                ) : thread.created_at ? (
+                                  <span title={thread.created_at_local || thread.created_at}> - {thread.created_at_display || thread.created_at}</span>
+                                ) : null}
+                              </div>
+                              {thread.title && firstMsg?.text ? (
+                                <div className="small pd-comment-text">{firstMsg.text}</div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-muted small">
+                    {notesSearch.trim()
+                      ? "No matching drawing review threads."
+                      : "No drawing review threads yet. Select a markup on the Drawing tab and add a review comment."}
+                  </div>
+                )}
               </div>
             </div>
           </TabPanel>}

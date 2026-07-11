@@ -488,3 +488,264 @@
 .pd-files-other + .pd-files-other {
   margin-top: .75rem;
 }
+
+
+/* ---- Drawing markup workspace ---- */
+
+.pd-markup-root {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.pd-markup-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem .75rem;
+  align-items: center;
+  padding: .4rem .5rem;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.pd-markup-toolbar-group {
+  display: inline-flex;
+  gap: .25rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pd-markup-toolbar-group--end {
+  margin-left: auto;
+}
+
+.pd-markup-toolbar .btn .pi {
+  font-size: .9rem;
+}
+
+.pd-markup-color input[type="color"] {
+  width: 2.1rem;
+  height: calc(1.5em + .5rem + 4px);
+  padding: 2px;
+  border: 1px solid #ced4da;
+  border-radius: .25rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.pd-markup-width {
+  width: auto;
+  min-width: 4.5rem;
+}
+
+.pd-markup-status {
+  font-size: .8rem;
+  white-space: nowrap;
+}
+.pd-markup-status--dirty { color: #997404; }
+.pd-markup-status--saving { color: #6c757d; }
+.pd-markup-status--saved { color: #198754; }
+.pd-markup-status--conflict { color: #dc3545; font-weight: 600; }
+
+/* Desktop: workspace | review panel. Stacked below the lg breakpoint. */
+.pd-markup-body {
+  display: flex;
+  gap: .75rem;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.pd-markup-stage {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 520px; /* match the previous drawing preview height */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 8px;
+  background: #fafafa;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Wrapper sized to the fitted image rectangle so the overlay always aligns
+   with the rendered drawing (no letterbox offset). */
+.pd-markup-canvas-wrap {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+}
+
+.pd-markup-image {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  user-select: none;
+  pointer-events: none;
+  max-width: none;
+  z-index: 1;
+}
+
+.pd-markup-canvas-wrap .canvas-container {
+  position: absolute !important;
+  left: 0;
+  top: 0;
+  z-index: 2;
+}
+
+.pd-markup-loading {
+  position: absolute;
+  bottom: .5rem;
+  left: .75rem;
+  background: rgba(255,255,255,.85);
+  padding: .1rem .6rem;
+  border-radius: 999px;
+  z-index: 3;
+}
+
+.pd-markup-missing {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  align-items: center;
+  text-align: center;
+  padding: 2rem 1rem;
+  max-width: 460px;
+}
+
+.pd-markup-missing .pi {
+  font-size: 2rem;
+  color: #adb5bd;
+}
+
+.pd-markup-panel {
+  flex: 0 0 320px;
+  width: 320px;
+  max-height: 520px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  padding: .65rem;
+}
+
+.pd-markup-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: .5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pd-markup-newthread .btn {
+  white-space: normal;
+}
+
+.pd-markup-threadlist {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+
+.pd-markup-thread--resolved {
+  opacity: .78;
+  background: #f8f9fa;
+}
+
+.pd-markup-thread-head {
+  display: flex;
+  justify-content: space-between;
+  gap: .5rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.pd-markup-thread-title {
+  display: flex;
+  gap: .35rem;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: .85rem;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.pd-markup-thread-actions {
+  display: flex;
+  gap: .25rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.pd-markup-priority {
+  text-transform: capitalize;
+}
+
+.pd-markup-messages {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  margin-top: .35rem;
+}
+
+.pd-markup-message {
+  display: flex;
+  gap: .5rem;
+  align-items: flex-start;
+}
+
+.pd-markup-message-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.pd-markup-message-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pd-markup-empty {
+  padding: .75rem 0;
+}
+
+/* Notes & Comments summary rows */
+.pd-markup-summary-head {
+  display: flex;
+  justify-content: space-between;
+  gap: .5rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.pd-markup-summary-title {
+  display: flex;
+  gap: .35rem;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.pd-markup-summary-actions {
+  display: flex;
+  gap: .25rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+@media (max-width: 991.98px) {
+  .pd-markup-body {
+    flex-direction: column;
+  }
+  .pd-markup-panel {
+    flex: 1 1 auto;
+    width: 100%;
+    max-height: 420px;
+  }
+  .pd-markup-stage {
+    height: min(72vw, 520px);
+  }
+}

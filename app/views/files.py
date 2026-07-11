@@ -4,6 +4,8 @@ from flask_login import login_required, current_user
 from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed
 from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
+from app.services.part_drawing_markups import source_fingerprint_for
+from app.services.timezone_utils import utc_iso
 from app.models.part import Part
 from app.models.artifact import PartFile
 
@@ -84,7 +86,23 @@ def part_images():
                 seen.add(u)
                 dedup.append(u)
 
-        rows.append({"urls": dedup, "revision": d.revision})
+        row = {"urls": dedup, "revision": d.revision}
+        # Drawing rows also carry safe source metadata so the markup editor
+        # can identify the exact drawing file. No filesystem paths, no tokens.
+        if bool(getattr(d, "is_dwg", False)):
+            mtime = getattr(d, "mtime_iso", None) or getattr(d, "mtime", None)
+            row.update(
+                {
+                    "id": str(d.id),
+                    "source_file_id": str(d.id),
+                    "rel_path": d.rel_path or "",
+                    "sha256": getattr(d, "sha256", "") or "",
+                    "size": d.size,
+                    "mtime": utc_iso(mtime),
+                    "source_fingerprint": source_fingerprint_for(d),
+                }
+            )
+        rows.append(row)
     try:
         log_action("file.list", resource_type="file", resource=f"{pn}:{rev}")
     except Exception:

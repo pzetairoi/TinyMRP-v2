@@ -675,6 +675,14 @@ def create_app(config_object=None):
     from app.views.files import bp as files_api_bp
     app.register_blueprint(files_api_bp)
 
+    # Drawing markup layers + review threads (SPA JSON API)
+    from app.views.part_drawing_markups import bp as part_drawing_markups_bp
+    app.register_blueprint(part_drawing_markups_bp)
+    try:
+        csrf.exempt(part_drawing_markups_bp)
+    except Exception:
+        pass
+
     from app.views.fileserve import bp as fileserve_bp
     app.register_blueprint(fileserve_bp)
 
