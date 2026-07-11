@@ -11,6 +11,37 @@ from app.services.part_norm import clean_rev
 MISSING = object()
 
 
+def filter_constraints(
+    filters: dict[str, Any],
+    key: str,
+    *,
+    default_match_mode: str = "contains",
+) -> tuple[str, list[dict[str, Any]]]:
+    """Return PrimeReact constraints without discarding operator or match mode."""
+    raw = filters.get(key)
+    if not isinstance(raw, dict):
+        return "and", []
+    operator = str(raw.get("operator") or "and").strip().lower()
+    if operator not in {"and", "or"}:
+        operator = "and"
+    source = raw.get("constraints") if isinstance(raw.get("constraints"), list) else [raw]
+    constraints: list[dict[str, Any]] = []
+    for item in source:
+        if not isinstance(item, dict):
+            continue
+        value = item.get("value", MISSING)
+        match_mode = str(item.get("matchMode") or default_match_mode).strip() or default_match_mode
+        if value is MISSING:
+            continue
+        if match_mode not in {"isEmpty", "isNotEmpty"}:
+            if value is None or (isinstance(value, str) and not value.strip()):
+                continue
+            if isinstance(value, (list, tuple)) and not any(v not in (None, "") for v in value):
+                continue
+        constraints.append({"value": value, "match_mode": match_mode})
+    return operator, constraints
+
+
 def terms(value: Any) -> list[str]:
     return [token for token in re.split(r"\s+", str(value or "").strip().lower()) if token]
 

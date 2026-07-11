@@ -44,3 +44,26 @@ body.pick-mode .pick-row td {
 body.pick-mode .pick-qty {
   white-space: nowrap;
 }
+
+body.wide-page main.container {
+  max-width: 100%;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+}
+
+.parts-columns-trigger {
+  color: #374151;
+  font-weight: 700;
+  font-size: 0.8125rem;
+  border-radius: 6px;
+}
+
+.parts-columns-trigger:hover,
+.parts-columns-trigger:focus {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.parts-columns-trigger .pi {
+  font-size: 0.85rem;
+}

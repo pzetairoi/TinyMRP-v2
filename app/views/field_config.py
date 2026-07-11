@@ -5,7 +5,13 @@ from flask import Blueprint, jsonify, request
 from app.services.api_auth import api_auth_required, get_request_user
 from app.services.acl import user_has_permission
 from app.services.canonical_fields import rebuild_all_part_canonical_fields
-from app.services.field_config import discover_part_attr_fields, get_field_config, reset_field_config, save_field_config
+from app.services.field_config import (
+    discover_part_attr_fields,
+    ensure_active_part_field_indexes,
+    get_field_config,
+    reset_field_config,
+    save_field_config,
+)
 from app.services.part_materialized import rebuild_part_materialized_fields
 from app.services.user_settings import get_or_create_settings, settings_to_dict
 
@@ -53,7 +59,8 @@ def field_config_save():
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     payload = request.get_json(force=True, silent=True) or {}
     config = save_field_config(payload)
-    return jsonify({"ok": True, "config": config})
+    indexes = ensure_active_part_field_indexes(config)
+    return jsonify({"ok": True, "config": config, "indexes": indexes})
 
 
 @bp.get("/admin/field-config/candidates")
@@ -72,7 +79,8 @@ def field_config_reset():
     if not _is_admin(user):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     config = reset_field_config()
-    return jsonify({"ok": True, "config": config})
+    indexes = ensure_active_part_field_indexes(config)
+    return jsonify({"ok": True, "config": config, "indexes": indexes})
 
 
 @bp.post("/admin/field-config/rebuild-canonical-fields")
@@ -92,4 +100,6 @@ def field_config_rebuild_search_fields():
     if not _is_admin(user):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     report = rebuild_part_materialized_fields()
-    return jsonify({"ok": True, "report": report, "config": get_field_config()})
+    config = get_field_config()
+    indexes = ensure_active_part_field_indexes(config)
+    return jsonify({"ok": True, "report": report, "config": config, "indexes": indexes})

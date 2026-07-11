@@ -55,7 +55,9 @@ const FALLBACK_PART_FIELDS: FieldDefinition[] = [
 ]
 
 function defaultColumnMatchMode(field: FieldDefinition) {
-  return field.data_type === 'boolean' ? FilterMatchMode.EQUALS : FilterMatchMode.CONTAINS
+  if (field.data_type === 'boolean' || field.data_type === 'number') return FilterMatchMode.EQUALS
+  if (field.data_type === 'date') return FilterMatchMode.DATE_IS
+  return FilterMatchMode.CONTAINS
 }
 
 function defaultColumnFilterMeta(field: FieldDefinition) {
@@ -72,11 +74,21 @@ function ensureColumnFilters(filters: DataTableFilterMeta, fields: FieldDefiniti
   for (const field of fields) {
     if (field.filterable === false) continue
     const current = (next as any)?.[field.id]
+    // Unwrap leftover menu-style metas ({operator, constraints}) into flat {value, matchMode}.
+    const flat = current && typeof current === 'object' && Array.isArray(current.constraints)
+      ? current.constraints[0]
+      : current
     const normalized = {
       ...defaultColumnFilterMeta(field),
-      ...(current && typeof current === 'object' ? current : {}),
+      ...(flat && typeof flat === 'object' && 'value' in flat
+        ? { value: flat.value ?? defaultColumnFilterMeta(field).value }
+        : {}),
     }
-    if (current?.value === normalized.value && current?.matchMode === normalized.matchMode) continue
+    if (
+      current === flat &&
+      current?.value === normalized.value &&
+      current?.matchMode === normalized.matchMode
+    ) continue
     ;(next as any)[field.id] = normalized
     changed = true
   }
@@ -131,6 +143,14 @@ export default function PartsPage() {
       if (nav) {
         nav.style.display = prevDisplay
       }
+    }
+  }, [pickMode])
+
+  useEffect(() => {
+    if (pickMode) return
+    document.body.classList.add('wide-page')
+    return () => {
+      document.body.classList.remove('wide-page')
     }
   }, [pickMode])
 
@@ -220,6 +240,10 @@ export default function PartsPage() {
     () => ensureColumnFilters(lazy.filters, selectedPartsFields),
     [lazy.filters, selectedPartsFields],
   )
+  const columnSelectorFieldId = useMemo(
+    () => (selectedPartsFields.some((f) => f.id === 'thumbnail') ? 'thumbnail' : selectedPartsFields[0]?.id),
+    [selectedPartsFields],
+  )
 
   useEffect(() => {
     setLazy((s) => {
@@ -247,13 +271,6 @@ export default function PartsPage() {
         [key]: { ...(s.filters as any)[key], value },
       } as DataTableFilterMeta,
     }))
-  }
-
-  function setBooleanColumnFilter(key: string, value: string) {
-    let nextValue: boolean | null = null
-    if (value === 'true') nextValue = true
-    if (value === 'false') nextValue = false
-    setFilterValue(key, nextValue)
   }
 
   function onAddSelected() {
@@ -303,24 +320,55 @@ export default function PartsPage() {
   }
 
   function renderColumnFilter(field: FieldDefinition) {
-    if (field.data_type !== 'boolean') return undefined
     const rawValue = (tableFilters as any)?.[field.id]?.value
-    const value = rawValue === true ? 'true' : rawValue === false ? 'false' : ''
+    if (field.data_type === 'boolean') {
+      const value = rawValue === true ? 'true' : rawValue === false ? 'false' : ''
+      return (
+        <select
+          className="form-select form-select-sm"
+          value={value}
+          onChange={(e) => setFilterValue(field.id, e.target.value === '' ? null : e.target.value === 'true')}
+        >
+          <option value="">Any</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      )
+    }
+    if (field.data_type === 'number') {
+      return (
+        <input
+          className="form-control form-control-sm"
+          type="number"
+          value={rawValue == null ? '' : String(rawValue)}
+          placeholder={field.label}
+          onChange={(e) => setFilterValue(field.id, e.target.value === '' ? null : Number(e.target.value))}
+        />
+      )
+    }
+    if (field.data_type === 'date') {
+      return (
+        <input
+          className="form-control form-control-sm"
+          type="date"
+          value={typeof rawValue === 'string' ? rawValue.slice(0, 10) : ''}
+          onChange={(e) => setFilterValue(field.id, e.target.value || null)}
+        />
+      )
+    }
     return (
-      <select
-        className="form-select form-select-sm"
-        value={value}
-        onChange={(e) => setBooleanColumnFilter(field.id, e.target.value)}
-      >
-        <option value="">Any</option>
-        <option value="true">Yes</option>
-        <option value="false">No</option>
-      </select>
+      <input
+        className="form-control form-control-sm"
+        type="search"
+        value={typeof rawValue === 'string' ? rawValue : ''}
+        placeholder={fieldFilterPlaceholder(field)}
+        onChange={(e) => setFilterValue(field.id, e.target.value)}
+      />
     )
   }
 
   function fieldStyle(fieldId: string) {
-    if (fieldId === 'thumbnail') return { width: 60 }
+    if (fieldId === 'thumbnail') return { width: 110 }
     if (fieldId === 'part_number') return { minWidth: '12ch', width: '12ch' }
     if (fieldId === 'revision') return { width: 90 }
     if (fieldId === 'description') return { minWidth: '32ch', width: '40%' }
@@ -328,7 +376,7 @@ export default function PartsPage() {
   }
 
   const header = useMemo(() => (
-    <div className={`d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 p-2 ${pickMode ? 'pick-header' : ''}`}>
+    <div className={`d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 px-2 py-1 ${pickMode ? 'pick-header' : ''}`}>
       {pickMode ? (
         <div className="d-flex flex-wrap align-items-center gap-2 flex-grow-1">
           <div>Select parts</div>
@@ -348,26 +396,15 @@ export default function PartsPage() {
           )}
         </div>
       ) : (
-        <div className="d-flex flex-wrap align-items-center gap-2 flex-grow-1">
+        <div className="d-flex align-items-center gap-2">
           <input
-            className="form-control form-control-sm flex-grow-1"
-            style={{ minWidth: 240 }}
+            className="form-control form-control-sm"
+            style={{ width: 260, maxWidth: '100%' }}
             type="search"
-            placeholder="Search part number or description"
+            placeholder="Search part number, description, notes or comments"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          {partsFields.length > 0 && (
-            <FieldSelector
-              title="Parts fields"
-              buttonLabel="Columns"
-              availableFields={partsFields}
-              selectedIds={selectedPartsFieldIds}
-              requiredIds={requiredPartsFieldIds}
-              onChange={persistPartsFieldSelection}
-              onReset={() => persistPartsFieldSelection(defaultPartsFieldIds)}
-            />
-          )}
         </div>
       )}
       {pickMode && (
@@ -382,10 +419,7 @@ export default function PartsPage() {
     selectedByKey,
     search,
     jobOnly,
-    partsFields,
-    selectedPartsFieldIds,
-    requiredPartsFieldIds,
-    defaultPartsFieldIds,
+    jobId,
   ])
 
   if (pickMode) {
@@ -555,21 +589,43 @@ export default function PartsPage() {
         onFilter={(e) => setLazy(s => ({...s, first: 0, filters: { ...s.filters, ...e.filters }}))}
         filterDisplay="row" removableSort rowsPerPageOptions={[10,25,50,100]}
         stripedRows responsiveLayout="scroll"
+        resizableColumns
+        tableStyle={{ tableLayout: 'fixed' }}
         rowClassName={pickMode ? () => 'pick-row' : undefined}
       >
         {selectedPartsFields.map((field) => {
+          const isThumbnail = field.id === 'thumbnail'
+          const showColumnSelector = field.id === columnSelectorFieldId && partsFields.length > 0
           return (
             <Column
               key={field.id}
               field={field.id}
               filterField={field.id}
-              header={field.id === 'thumbnail' ? '' : field.label}
+              header={
+                showColumnSelector ? (
+                  <div className="d-flex align-items-center gap-2">
+                    {!isThumbnail && <span>{field.label}</span>}
+                    <FieldSelector
+                      title="Parts fields"
+                      buttonLabel="Columns"
+                      buttonIcon="pi pi-table"
+                      buttonClassName="btn btn-sm d-inline-flex align-items-center gap-1 parts-columns-trigger"
+                      menuAlign="start"
+                      availableFields={partsFields}
+                      selectedIds={selectedPartsFieldIds}
+                      requiredIds={requiredPartsFieldIds}
+                      onChange={persistPartsFieldSelection}
+                      onReset={() => persistPartsFieldSelection(defaultPartsFieldIds)}
+                    />
+                  </div>
+                ) : (
+                  isThumbnail ? '' : field.label
+                )
+              }
               sortable={field.sortable !== false}
               filter={field.filterable !== false}
               showFilterMenu={false}
               filterMatchMode={defaultColumnMatchMode(field)}
-              filterMatchModeOptions={[defaultColumnMatchMode(field)]}
-              filterPlaceholder={field.data_type === 'boolean' ? undefined : fieldFilterPlaceholder(field)}
               filterElement={renderColumnFilter(field)}
               body={(row) => renderFieldCell(field, row as Part)}
               style={fieldStyle(field.id)}
