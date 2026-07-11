@@ -1336,7 +1336,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       const r = await fetch(url);
       if (r.status === 403) { setForbidden(true); return; }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      let kids: TreeNode[] = asArr(await r.json());
+      const kids: TreeNode[] = asArr(await r.json());
 
       setBomNodes((prev) => {
         const parentDepth = findNodeDepth(prev, key) ?? 0;
@@ -1362,7 +1362,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       if (seen.has(key)) continue;
       seen.add(key);
 
-      let node = findNode(nextTree, key);
+      const node = findNode(nextTree, key);
       if (!node) continue;
 
       // If we don't have children yet, try to fetch them
@@ -1774,7 +1774,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       }
       const blob = await resp.blob()
       const disp = resp.headers.get("Content-Disposition") || ""
-      const match = disp.match(/filename=\"?([^\";]+)\"?/i)
+      const match = disp.match(/filename="?([^";]+)"?/i)
       const filename = (match ? match[1] : fallbackName).replace(/\s+/g, "_")
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
@@ -2611,21 +2611,6 @@ function isExternalDatasheetUrl(url: string): boolean {
 
             
 
-            {/* NEW: 3D Preview tab using available 3D formats */}
-            {/* 3D moved to end */} {false && (<TabPanel header="3D Preview">
-              {previewUrl ? (
-                <Suspense fallback={<div className="p-3">Loading 3D viewer...</div>}>
-                  <ThreeMFViewer
-                    url={previewUrl}
-                    format={previewFormat || "ply"}
-                    height={520}
-                  />
-                </Suspense>
-              ) : (
-                <div className="p-3 text-muted">No 3D preview available.</div>
-              )}
-            </TabPanel>)}
-
             {(!isSharedView || sharedAllowsAttributes) && <TabPanel header={tabHeader("All attributes", "pi-list")}>
               {attrs.length === 0 ? (
                 <div className="text-muted small">No attributes.</div>
@@ -3079,7 +3064,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                       if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
                       const blob = await resp.blob();
                       const disp = resp.headers.get('Content-Disposition') || '';
-                      const m = disp.match(/filename=\"?([^\";]+)\"?/i);
+                      const m = disp.match(/filename="?([^";]+)"?/i);
                       const filename = (m? m[1] : `${pn}_docpack.zip`).replace(/\s+/g,'_');
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);

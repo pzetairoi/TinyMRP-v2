@@ -47,6 +47,9 @@
     {% set import_active = request_path.startswith('/ui/upload-pack') or request_path.startswith('/import') %}
     {% set is_admin = current_user.is_authenticated and current_user.has_role('admin') %}
     {% set admin_active = request_path == '/admin/' or request_path.startswith('/admin/settings') or request_path.startswith('/admin/users') or request_path.startswith('/admin/roles') or request_path.startswith('/admin/audit') or request_path.startswith('/admin/purge-parts') or request_path.startswith('/admin/metrics') or request_path.startswith('/ui/admin/') %}
+    {% set admin_access_active = request_path.startswith('/admin/users') or request_path.startswith('/admin/roles') %}
+    {% set admin_config_active = request_path.startswith('/admin/settings') or request_path.startswith('/ui/admin/fields') or request_path.startswith('/ui/admin/addin') %}
+    {% set admin_system_active = request_path.startswith('/admin/audit') or request_path.startswith('/admin/metrics') or request_path.startswith('/admin/purge-parts') %}
     {% set account_active = request_path.startswith('/app') %}
     {% set tokens_active = request_path.startswith('/ui/addin/tokens') %}
     {% set help_active = request_path.startswith('/help') %}
@@ -151,16 +154,22 @@
               {% if is_admin %}
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle{% if admin_active %} active{% endif %}" href="#" id="navAdmin" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
-                <ul class="dropdown-menu dropdown-menu-end tm-nav-menu" aria-labelledby="navAdmin">
-                  <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_index' %} active{% endif %}" href="{{ url_for('admin.admin_index') }}">Admin Dashboard</a></li>
-                  <li><a class="dropdown-item{% if request_endpoint == 'ui.admin_fields_ui' %} active{% endif %}" href="{{ url_for('ui.admin_fields_ui') }}">Field Configuration</a></li>
-                  <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_settings' %} active{% endif %}" href="{{ url_for('admin.admin_settings') }}">App Settings</a></li>
-                  <li><a class="dropdown-item{% if request_endpoint in ['admin.users_list', 'admin.user_new', 'admin.user_edit'] %} active{% endif %}" href="{{ url_for('admin.users_list') }}">Users</a></li>
-                  <li><a class="dropdown-item{% if request_endpoint in ['admin_roles.roles_list', 'admin_roles.roles_new', 'admin_roles.roles_edit'] %} active{% endif %}" href="{{ url_for('admin_roles.roles_list') }}">Roles</a></li>
-                  <li><a class="dropdown-item{% if request_endpoint in ['admin_audit.audit_list', 'admin_audit.audit_seed'] %} active{% endif %}" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a></li>
+                <ul class="dropdown-menu dropdown-menu-end tm-nav-menu tm-admin-launcher" aria-labelledby="navAdmin">
+                  <li><a class="dropdown-item tm-admin-launcher__overview{% if request_endpoint == 'admin.admin_index' %} active{% endif %}" href="{{ url_for('admin.admin_index') }}">
+                    <span class="tm-admin-launcher__mark" aria-hidden="true">A</span>
+                    <span><strong>Admin overview</strong><small>All administration tools</small></span>
+                  </a></li>
                   <li><hr class="dropdown-divider"></li>
-                  <li><h6 class="dropdown-header tm-nav-section-title tm-nav-section-title--danger">Danger Zone</h6></li>
-                  <li><a class="dropdown-item text-danger{% if request_endpoint == 'admin.purge_parts' %} active{% endif %}" href="{{ url_for('admin.purge_parts') }}">Purge Parts Data</a></li>
+                  <li><h6 class="dropdown-header tm-nav-section-title">People &amp; access</h6></li>
+                  <li><a class="dropdown-item{% if request_endpoint in ['admin.users_list', 'admin.users_create', 'admin.users_edit'] %} active{% endif %}" href="{{ url_for('admin.users_list') }}">Users</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint in ['admin_roles.roles_list', 'admin_roles.roles_create', 'admin_roles.roles_edit'] %} active{% endif %}" href="{{ url_for('admin_roles.roles_list') }}">Roles &amp; permissions</a></li>
+                  <li><h6 class="dropdown-header tm-nav-section-title">Configuration</h6></li>
+                  <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_settings' %} active{% endif %}" href="{{ url_for('admin.admin_settings') }}">Application settings</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint == 'ui.admin_fields_ui' %} active{% endif %}" href="{{ url_for('ui.admin_fields_ui') }}">Fields &amp; exports</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint == 'ui.admin_addin_ui' %} active{% endif %}" href="{{ url_for('ui.admin_addin_ui') }}">SolidWorks add-in</a></li>
+                  <li><h6 class="dropdown-header tm-nav-section-title">System</h6></li>
+                  <li><a class="dropdown-item{% if request_endpoint in ['admin_audit.audit_list', 'admin_audit.audit_test'] %} active{% endif %}" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_metrics' %} active{% endif %}" href="{{ url_for('admin.admin_metrics') }}">System metrics</a></li>
                 </ul>
               </li>
               {% endif %}
@@ -205,6 +214,44 @@
         </div>
       </div>
     </nav>
+
+    {% if is_admin and admin_active %}
+    <nav class="tm-admin-bar" aria-label="Administration sections">
+      <div class="container tm-admin-bar__inner">
+        <a class="tm-admin-bar__brand" href="{{ url_for('admin.admin_index') }}">
+          <span class="tm-admin-bar__brand-mark" aria-hidden="true">A</span>
+          <span>Admin workspace</span>
+        </a>
+        <div class="tm-admin-bar__nav">
+          <a class="tm-admin-bar__link{% if request_endpoint == 'admin.admin_index' %} active{% endif %}" href="{{ url_for('admin.admin_index') }}">Overview</a>
+          <div class="dropdown">
+            <button class="tm-admin-bar__link dropdown-toggle{% if admin_access_active %} active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">Access</button>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles &amp; permissions</a></li>
+            </ul>
+          </div>
+          <div class="dropdown">
+            <button class="tm-admin-bar__link dropdown-toggle{% if admin_config_active %} active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">Configuration</button>
+            <ul class="dropdown-menu">
+              <li><a class="dropdown-item" href="{{ url_for('admin.admin_settings') }}">Application settings</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('ui.admin_fields_ui') }}">Fields &amp; exports</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('ui.admin_addin_ui') }}">SolidWorks add-in</a></li>
+            </ul>
+          </div>
+          <div class="dropdown">
+            <button class="tm-admin-bar__link dropdown-toggle{% if admin_system_active %} active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">System</button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><a class="dropdown-item" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin.admin_metrics') }}">System metrics</a></li>
+              <li><hr class="dropdown-divider"></li>
+              <li><a class="dropdown-item text-danger" href="{{ url_for('admin.purge_parts') }}">Purge parts data</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </nav>
+    {% endif %}
 
     <main class="container my-4 tm-main">
       {% include "security/_messages.html" %}

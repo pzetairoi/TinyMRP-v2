@@ -69,3 +69,25 @@ def test_admin_settings_timezone_select_round_trip_and_invalid_fallback(client):
     settings = AppSettings.objects().order_by("-updated_at").first()
     assert settings is not None
     assert settings.timezone == "UTC"
+
+
+def test_admin_settings_hides_legacy_file_source_editor_without_erasing_sources(client):
+    admin = _admin_user()
+    _login(client, admin)
+    settings = AppSettings(
+        timezone="UTC",
+        file_sources=[{"label": "Legacy", "local_root": "C:/parts", "priority": 1}],
+    ).save()
+
+    page = client.get("/admin/settings")
+    body = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert 'name="source_local_root"' not in body
+    assert 'name="process_icon_upload"' in body
+    assert 'type="color"' in body
+    assert body.index("Process Library") < body.index("Arena Export")
+
+    response = client.post("/admin/settings", data={"timezone": "UTC"})
+    assert response.status_code == 302
+    settings.reload()
+    assert settings.file_sources == [{"label": "Legacy", "local_root": "C:/parts", "priority": 1}]

@@ -236,29 +236,6 @@ export default function BomPage() {
     }
   }, [pn, rev, lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters)])
 
-function ImageThumb({ urls }: { urls?: string[] }) {
-  if (!urls || !urls.length) return <div style={{ width: 64, height: 40, background: '#f2f2f2', borderRadius: 8 }} />
-  // simple fallback: if first fails try the next
-  const [i, setI] = useState(0)
-  if (!pn) {
-    return (
-      <div className="p-3">
-        <h5 className="mb-2">BOM</h5>
-        <div className="text-muted">Select a part from the Parts list to view its BOM.</div>
-      </div>
-    )
-  }
-
-  return (
-    <img
-      src={urls[i]}
-      onError={() => i < (urls?.length || 0) - 1 && setI(i + 1)}
-      alt=""
-      style={{ maxHeight: 40, maxWidth: 64, objectFit: 'contain', border: '1px solid #eee', borderRadius: 8, padding: 4, background: '#fff' }}
-    />
-  )
-}
-
   function renderBomCell(field: FieldDefinition, node: any) {
     const value = node?.data?.[field.id]
     if (field.id === 'thumbnail') {

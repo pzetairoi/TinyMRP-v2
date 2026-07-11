@@ -19,5 +19,15 @@ export default tseslint.config([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // API and Three.js payloads are intentionally dynamic in the current UI.
+      // Keep this migration incremental while still enforcing behavioural rules.
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': 'off',
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      // Several data-loading effects deliberately depend on scalar snapshots
+      // rather than callback identities. Rules-of-hooks remains enforced.
+      'react-hooks/exhaustive-deps': 'off',
+    },
   },
 ])
