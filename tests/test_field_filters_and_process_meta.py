@@ -73,8 +73,16 @@ def test_parts_lazy_filters_custom_boolean_number_and_file_fields(client):
     assert any(row["part_number"] == "FLT-200" for row in rows_false)
     assert all(row["part_number"] != "FLT-100" for row in rows_false)
 
+    Part.objects(id=cold.id).update(unset__has_stl=1)
+    missing_flag_resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"has_stl": {"value": False}}},
+    )
+    assert missing_flag_resp.status_code == 200
+    assert any(row["part_number"] == "FLT-200" for row in missing_flag_resp.get_json()["data"])
 
-def test_parts_lazy_filters_approved_from_checkbox_and_string_false(client):
+
+def test_parts_lazy_filters_approved_column_true_false_and_any(client):
     admin = _admin_user()
     _login(client, admin)
 
@@ -90,7 +98,7 @@ def test_parts_lazy_filters_approved_from_checkbox_and_string_false(client):
 
     approved_resp = client.post(
         "/api/parts_lazy",
-        json={"first": 0, "rows": 25, "filters": {"approved_only": {"value": True}}},
+        json={"first": 0, "rows": 25, "filters": {"approved": {"value": True}}},
     )
     assert approved_resp.status_code == 200
     approved_rows = approved_resp.get_json()["data"]
@@ -103,6 +111,18 @@ def test_parts_lazy_filters_approved_from_checkbox_and_string_false(client):
     assert unapproved_resp.status_code == 200
     unapproved_rows = unapproved_resp.get_json()["data"]
     assert [row["part_number"] for row in unapproved_rows] == ["APR-200", "APR-250", "APR-300"]
+
+    any_resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {}},
+    )
+    assert any_resp.status_code == 200
+    assert [row["part_number"] for row in any_resp.get_json()["data"]] == [
+        "APR-100",
+        "APR-200",
+        "APR-250",
+        "APR-300",
+    ]
 
 
 def test_parts_lazy_supports_constraint_style_filter_payloads(client):
@@ -145,13 +165,77 @@ def test_parts_lazy_global_search_matches_part_number_and_description_with_other
             "rows": 25,
             "filters": {
                 "global": {"value": "inv fixture"},
-                "approved_only": {"value": True},
+                "approved": {"value": True},
             },
         },
     )
     assert resp.status_code == 200
     rows = resp.get_json()["data"]
     assert [row["part_number"] for row in rows] == ["INV-100"]
+
+
+def test_parts_lazy_combines_approved_file_and_material_column_filters(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    matching = Part(
+        part_number="MULTI-100",
+        revision="A",
+        description="Matching part",
+        attrs={"approvedby": "QA", "material": "Aluminium 6061"},
+    ).save()
+    Part(
+        part_number="MULTI-200",
+        revision="A",
+        description="Wrong material",
+        attrs={"approvedby": "QA", "material": "Mild steel"},
+    ).save()
+    Part(
+        part_number="MULTI-300",
+        revision="A",
+        description="Not approved",
+        attrs={"material": "Aluminium 6061"},
+    ).save()
+    _part_file(matching.part_number, matching.revision, "pdf", "pdf")
+
+    response = client.post(
+        "/api/parts_lazy",
+        json={
+            "first": 0,
+            "rows": 25,
+            "filters": {
+                "approved": {"value": True},
+                "has_pdf": {"value": True},
+                "material": {"value": "aluminium"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert [row["part_number"] for row in response.get_json()["data"]] == ["MULTI-100"]
+
+
+def test_parts_lazy_clamps_and_validates_pagination(client):
+    admin = _admin_user()
+    _login(client, admin)
+    Part.objects.insert(
+        [Part(part_number=f"PAGE-{index:03d}", revision="A") for index in range(105)],
+        load_bulk=False,
+    )
+
+    malformed = client.post("/api/parts_lazy", json={"first": "bad", "rows": "bad", "filters": {}})
+    assert malformed.status_code == 200
+    assert len(malformed.get_json()["data"]) == 25
+    assert malformed.get_json()["data"][0]["part_number"] == "PAGE-000"
+
+    non_positive = client.post("/api/parts_lazy", json={"first": -20, "rows": 0, "filters": {}})
+    assert non_positive.status_code == 200
+    assert len(non_positive.get_json()["data"]) == 25
+    assert non_positive.get_json()["data"][0]["part_number"] == "PAGE-000"
+
+    oversized = client.post("/api/parts_lazy", json={"first": 0, "rows": 500, "filters": {}})
+    assert oversized.status_code == 200
+    assert len(oversized.get_json()["data"]) == 100
 
 
 def test_bom_tree_and_whereused_include_extended_file_availability(client):

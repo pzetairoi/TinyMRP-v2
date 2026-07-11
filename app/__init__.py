@@ -698,13 +698,6 @@ def create_app(config_object=None):
     except Exception:
         pass
 
-    from app.views.legacy_addin_api import bp as legacy_addin_api_bp
-    app.register_blueprint(legacy_addin_api_bp)
-    try:
-        csrf.exempt(legacy_addin_api_bp)
-    except Exception:
-        pass
-
     from app.views.me import bp as me_bp
     app.register_blueprint(me_bp)
     try:

@@ -112,11 +112,6 @@ export default function PartsPage() {
       material:    { value: '', matchMode: FilterMatchMode.CONTAINS },
       finish:      { value: '', matchMode: FilterMatchMode.CONTAINS },
       process:     { value: '', matchMode: FilterMatchMode.CONTAINS },
-      approved_only: { value: null, matchMode: FilterMatchMode.EQUALS },
-      full_files:    { value: null, matchMode: FilterMatchMode.EQUALS },
-      used_in_job:   { value: null, matchMode: FilterMatchMode.EQUALS },
-      job_number:  { value: '', matchMode: FilterMatchMode.CONTAINS },
-      min_props:   { value: null, matchMode: FilterMatchMode.EQUALS },
     } as DataTableFilterMeta
   })
   const fallbackLogo = "/branding/logo"
@@ -209,11 +204,6 @@ export default function PartsPage() {
     }
   }, [lazy.first, lazy.rows, lazy.sortField, lazy.sortOrder, JSON.stringify(lazy.filters), jobId, jobOnly])
 
-  const filterApproved = Boolean((lazy.filters as any)?.approved_only?.value)
-  const filterFullFiles = Boolean((lazy.filters as any)?.full_files?.value)
-  const filterUsedInJob = Boolean((lazy.filters as any)?.used_in_job?.value)
-  const filterJobNumber = String((lazy.filters as any)?.job_number?.value || '')
-  const filterMinProps = Boolean((lazy.filters as any)?.min_props?.value)
   const partsFields = fieldConfig ? contextFields(fieldConfig, 'parts_list') : FALLBACK_PART_FIELDS
   const defaultPartsFieldIds = fieldConfig ? defaultFieldIds(fieldConfig, 'parts_list') : ['thumbnail', 'part_number', 'revision', 'description', 'material', 'finish', 'process']
   const requiredPartsFieldIds = fieldConfig ? requiredFieldIds(fieldConfig, 'parts_list') : ['part_number']
@@ -339,99 +329,47 @@ export default function PartsPage() {
 
   const header = useMemo(() => (
     <div className={`d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 p-2 ${pickMode ? 'pick-header' : ''}`}>
-      <div className="d-flex align-items-center gap-2">
-        <div>{pickMode ? 'Select parts' : 'Parts'}</div>
-        <input
-          className="form-control form-control-sm"
-          style={{ minWidth: 220 }}
-          type="search"
-          placeholder={pickMode ? "Search PN or description" : "Search parts, notes, comments"}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {pickMode && jobId && (
-          <div className="form-check ms-2">
-            <input className="form-check-input" type="checkbox" id="jobOnly" checked={jobOnly} onChange={(e) => setJobOnly(e.target.checked)} />
-            <label className="form-check-label" htmlFor="jobOnly">Job parts only</label>
-          </div>
-        )}
-        {!pickMode && (
-          <div className="d-flex flex-wrap align-items-center gap-2 ms-2">
-            <div className="form-check form-check-inline m-0">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="filterApproved"
-                checked={filterApproved}
-                onChange={(e) => setFilterValue('approved_only', e.target.checked ? true : null)}
-              />
-              <label className="form-check-label small" htmlFor="filterApproved">Approved</label>
+      {pickMode ? (
+        <div className="d-flex flex-wrap align-items-center gap-2 flex-grow-1">
+          <div>Select parts</div>
+          <input
+            className="form-control form-control-sm flex-grow-1"
+            style={{ minWidth: 240 }}
+            type="search"
+            placeholder="Search PN or description"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {jobId && (
+            <div className="form-check ms-md-2">
+              <input className="form-check-input" type="checkbox" id="jobOnly" checked={jobOnly} onChange={(e) => setJobOnly(e.target.checked)} />
+              <label className="form-check-label" htmlFor="jobOnly">Job parts only</label>
             </div>
-            <div className="form-check form-check-inline m-0">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="filterFullFiles"
-                checked={filterFullFiles}
-                onChange={(e) => setFilterValue('full_files', e.target.checked ? true : null)}
-              />
-              <label className="form-check-label small" htmlFor="filterFullFiles">Full files</label>
-            </div>
-            <div className="form-check form-check-inline m-0">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="filterMinProps"
-                checked={filterMinProps}
-                onChange={(e) => setFilterValue('min_props', e.target.checked ? true : null)}
-              />
-              <label className="form-check-label small" htmlFor="filterMinProps">Minimum properties</label>
-            </div>
-            <div className="form-check form-check-inline m-0">
-              <input
-                className="form-check-input"
-                type="checkbox"
-                id="filterUsedInJob"
-                checked={filterUsedInJob}
-                onChange={(e) => {
-                  const on = e.target.checked
-                  setLazy((s) => ({
-                    ...s,
-                    first: 0,
-                    filters: {
-                      ...s.filters,
-                      used_in_job: { ...(s.filters as any).used_in_job, value: on ? true : null },
-                      job_number: { ...(s.filters as any).job_number, value: on ? (s.filters as any).job_number?.value || '' : '' },
-                    } as DataTableFilterMeta,
-                  }))
-                }}
-              />
-              <label className="form-check-label small" htmlFor="filterUsedInJob">Used in job</label>
-            </div>
-            {filterUsedInJob && (
-              <input
-                className="form-control form-control-sm"
-                style={{ width: 180 }}
-                type="search"
-                placeholder="Job number contains"
-                value={filterJobNumber}
-                onChange={(e) => setFilterValue('job_number', e.target.value)}
-              />
-            )}
-            {partsFields.length > 0 && (
-              <FieldSelector
-                title="Parts fields"
-                buttonLabel="Columns"
-                availableFields={partsFields}
-                selectedIds={selectedPartsFieldIds}
-                requiredIds={requiredPartsFieldIds}
-                onChange={persistPartsFieldSelection}
-                onReset={() => persistPartsFieldSelection(defaultPartsFieldIds)}
-              />
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      ) : (
+        <div className="d-flex flex-wrap align-items-center gap-2 flex-grow-1">
+          <input
+            className="form-control form-control-sm flex-grow-1"
+            style={{ minWidth: 240 }}
+            type="search"
+            placeholder="Search part number or description"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {partsFields.length > 0 && (
+            <FieldSelector
+              title="Parts fields"
+              buttonLabel="Columns"
+              availableFields={partsFields}
+              selectedIds={selectedPartsFieldIds}
+              requiredIds={requiredPartsFieldIds}
+              onChange={persistPartsFieldSelection}
+              onReset={() => persistPartsFieldSelection(defaultPartsFieldIds)}
+            />
+          )}
+        </div>
+      )}
       {pickMode && (
         <div className="d-flex gap-2">
           <button className="btn btn-sm btn-primary" onClick={onAddSelected} disabled={!Object.keys(selectedByKey).length}>Add Selected</button>
@@ -444,11 +382,6 @@ export default function PartsPage() {
     selectedByKey,
     search,
     jobOnly,
-    filterApproved,
-    filterFullFiles,
-    filterMinProps,
-    filterUsedInJob,
-    filterJobNumber,
     partsFields,
     selectedPartsFieldIds,
     requiredPartsFieldIds,

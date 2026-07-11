@@ -37,10 +37,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                 StartAt = 1,
                 ResetPolicy = "never"
             };
+            // New parts stay revision-less unless the user explicitly opts into revisions.
             scheme.Revision = new RevisionSettings
             {
-                Policy = "alpha",
-                Start = "A"
+                Policy = "none",
+                Start = string.Empty
             };
             scheme.ValidationRules = new ValidationRules
             {

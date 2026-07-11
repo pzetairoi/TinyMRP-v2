@@ -28,7 +28,6 @@ type Scheme = {
   is_active?: boolean
   is_preset?: boolean
   is_recommended?: boolean
-  visibility?: string
   separator?: string
   scope_mode?: string
   scope_keys?: string[]
@@ -64,7 +63,21 @@ type Segment = {
   fmt?: string
 }
 
-const SIMPLE_SEGMENT_KINDS = new Set(['literal', 'seq'])
+type SegmentKind = 'literal' | 'seq' | 'field' | 'date'
+
+const KIND_LABELS: Record<SegmentKind, string> = {
+  literal: 'Fixed text',
+  seq: 'Auto counter',
+  field: 'Value from CAD form',
+  date: 'Date stamp',
+}
+
+const DATE_FORMATS: { value: string; label: string }[] = [
+  { value: 'YYYY', label: 'Year (2026)' },
+  { value: 'YY', label: 'Short year (26)' },
+  { value: 'MM', label: 'Month (07)' },
+  { value: 'YYYYMM', label: 'Year + month (202607)' },
+]
 
 const EMPTY_SCHEME: Scheme = {
   name: '',
@@ -74,7 +87,7 @@ const EMPTY_SCHEME: Scheme = {
   scope_mode: 'global',
   scope_keys: [],
   seq: { padding: 6, base: 10, start_at: 1, reset_policy: 'never' },
-  revision: { policy: 'alpha', start: 'A' },
+  revision: { policy: 'none', start: '' },
   validation_rules: { max_length: 32, allowed_charset: 'A-Z0-9-', require_seq_segment: true },
   pattern_segments: [],
 }
@@ -84,22 +97,21 @@ const DEFAULT_NEW_SEGMENTS: Segment[] = [
   { kind: 'seq', padding: 6, base: 10, start_at: 1, auto_counter: true },
 ]
 
-function createEmptySegment(kind: 'literal' | 'seq' = 'literal'): Segment {
-  if (kind === 'seq') {
-    return { kind: 'seq', padding: 6, base: 10, start_at: 1, auto_counter: false }
-  }
+function getSegmentKind(segment?: Segment): SegmentKind {
+  const kind = (segment?.kind || '').trim().toLowerCase()
+  if (kind === 'seq' || kind === 'field' || kind === 'date') return kind
+  return 'literal'
+}
+
+function createEmptySegment(kind: SegmentKind = 'literal'): Segment {
+  if (kind === 'seq') return { kind: 'seq', padding: 6, base: 10, start_at: 1, auto_counter: false }
+  if (kind === 'field') return { kind: 'field', field: '', casing: 'upper' }
+  if (kind === 'date') return { kind: 'date', fmt: 'YYYY' }
   return { kind: 'literal', value: '' }
 }
 
 function cloneSegment(segment?: Segment): Segment {
-  const kind = getSegmentKind(segment)
-  if (kind === 'seq') {
-    return { ...createEmptySegment('seq'), ...segment }
-  }
-  if (kind === 'literal') {
-    return { ...createEmptySegment('literal'), ...segment }
-  }
-  return { ...(segment || {}) }
+  return { ...createEmptySegment(getSegmentKind(segment)), ...(segment || {}) }
 }
 
 function cloneScheme(scheme?: Partial<Scheme>): Scheme {
@@ -114,34 +126,8 @@ function cloneScheme(scheme?: Partial<Scheme>): Scheme {
   }
 }
 
-function getSegmentKind(segment?: Segment) {
-  return (segment?.kind || '').trim().toLowerCase()
-}
-
-function getUnsupportedSegmentKinds(items: Segment[]) {
-  const kinds = new Set<string>()
-  for (const segment of items) {
-    const kind = getSegmentKind(segment)
-    if (kind && !SIMPLE_SEGMENT_KINDS.has(kind)) {
-      kinds.add(kind)
-    }
-  }
-  return Array.from(kinds)
-}
-
-function segmentLabel(segment: Segment, index: number) {
-  const kind = getSegmentKind(segment)
-  if (!kind) return `Segment ${index + 1}`
-  if (kind === 'literal') return `Literal: ${segment.value || ''}`
-  if (kind === 'seq') {
-    const mode = segment.auto_counter ? 'auto' : 'manual'
-    return `Sequence ${index + 1}: ${mode}, start ${segment.start_at ?? 1}, pad ${segment.padding ?? 6}, base ${segment.base ?? 10}`
-  }
-  if (kind === 'field') return `Legacy field: ${segment.field || ''}`
-  if (kind === 'date') return `Legacy date: ${segment.fmt || ''}`
-  return `Legacy ${kind}`
-}
-
+// Exactly one counter is assigned by the server. If the user marks several, keep the first;
+// if none, promote the first counter.
 function normalizeSequenceSegments(items: Segment[]) {
   const next = items.map(cloneSegment)
   const sequenceIndexes = next
@@ -171,6 +157,62 @@ function normalizeSequenceSegments(items: Segment[]) {
   return next
 }
 
+function padCounter(value: number, width: number, base: number) {
+  const safe = Math.max(1, Math.floor(value) || 1)
+  const text = base === 36 ? safe.toString(36).toUpperCase() : String(safe)
+  return text.padStart(Math.max(width, 1), '0')
+}
+
+function formatDateSample(fmt?: string) {
+  const now = new Date()
+  const yyyy = String(now.getFullYear())
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  if (fmt === 'YY') return yyyy.slice(-2)
+  if (fmt === 'MM') return mm
+  if (fmt === 'YYYYMM') return `${yyyy}${mm}`
+  return yyyy
+}
+
+function segmentSample(segment: Segment): string {
+  const kind = getSegmentKind(segment)
+  if (kind === 'literal') return (segment.value || '').trim()
+  if (kind === 'seq') return padCounter(segment.start_at ?? 1, segment.padding ?? 6, segment.base ?? 10)
+  if (kind === 'date') return formatDateSample(segment.fmt)
+  const name = (segment.field || 'value').trim() || 'value'
+  const casing = (segment.casing || 'upper').toLowerCase()
+  if (casing === 'lower') return name.toLowerCase()
+  if (casing === 'none') return name
+  return name.toUpperCase()
+}
+
+function buildSampleNumber(segments: Segment[], separator: string) {
+  const pieces = segments.map(segmentSample).filter(Boolean)
+  return pieces.join(separator || '')
+}
+
+function segmentLabel(segment: Segment) {
+  const kind = getSegmentKind(segment)
+  if (kind === 'literal') return `Fixed text: "${segment.value || ''}"`
+  if (kind === 'seq') {
+    const digits = segment.padding ?? 6
+    const style = (segment.base ?? 10) === 36 ? 'letters+numbers' : 'numbers'
+    const auto = segment.auto_counter ? 'assigned by server' : `starts at ${segment.start_at ?? 1}`
+    return `Auto counter: ${digits} digits, ${style}, ${auto}`
+  }
+  if (kind === 'date') {
+    const fmt = DATE_FORMATS.find((f) => f.value === segment.fmt)
+    return `Date stamp: ${fmt ? fmt.label : segment.fmt || 'YYYY'}`
+  }
+  return `CAD form value: "${segment.field || ''}"`
+}
+
+function revisionSample(policy?: string, start?: string) {
+  const p = (policy || 'none').toLowerCase()
+  if (p === 'alpha') return (start || 'A').toUpperCase()
+  if (p === 'numeric') return start && start.trim() ? start.trim() : '01'
+  return ''
+}
+
 function formatApiError(err: unknown, fallback: string) {
   const apiError = err as ApiError
   if (apiError?.details?.length) {
@@ -179,16 +221,22 @@ function formatApiError(err: unknown, fallback: string) {
   return apiError?.message || fallback
 }
 
-function createNewSchemeState() {
-  const scheme = cloneScheme({
-    seq: { ...EMPTY_SCHEME.seq, start_at: 1 },
-    pattern_segments: DEFAULT_NEW_SEGMENTS,
-  })
-  const segments = DEFAULT_NEW_SEGMENTS.map(cloneSegment)
+function createBuilderState(source?: Scheme) {
+  if (!source) {
+    return {
+      scheme: cloneScheme({ pattern_segments: DEFAULT_NEW_SEGMENTS }),
+      segments: normalizeSequenceSegments(DEFAULT_NEW_SEGMENTS),
+    }
+  }
+  const scheme = cloneScheme(source)
+  scheme.id = undefined
+  scheme.name = source.name ? `${source.name} copy` : ''
+  scheme.is_active = true
+  scheme.is_preset = false
+  scheme.is_recommended = false
   return {
     scheme,
-    segments,
-    draft: cloneSegment(DEFAULT_NEW_SEGMENTS[0]),
+    segments: normalizeSequenceSegments(scheme.pattern_segments || []),
   }
 }
 
@@ -198,12 +246,13 @@ export default function AdminAddinPage() {
   const [tokens, setTokens] = useState<Token[]>([])
   const [schemes, setSchemes] = useState<Scheme[]>([])
   const [enabledDrafts, setEnabledDrafts] = useState<Record<string, boolean>>({})
-  const [selectedSchemeId, setSelectedSchemeId] = useState('')
-  const [editingScheme, setEditingScheme] = useState<Scheme>(cloneScheme())
-  const [segments, setSegments] = useState<Segment[]>([])
-  const [selectedSegmentIndex, setSelectedSegmentIndex] = useState(-1)
+  const [copyFromId, setCopyFromId] = useState('')
+  const [editingScheme, setEditingScheme] = useState<Scheme>(createBuilderState().scheme)
+  const [segments, setSegments] = useState<Segment[]>(createBuilderState().segments)
+  const [editorIndex, setEditorIndex] = useState(-1) // -1 = adding a new piece
   const [segmentDraft, setSegmentDraft] = useState<Segment>(createEmptySegment())
   const [savingEnabledChanges, setSavingEnabledChanges] = useState(false)
+  const [serverExample, setServerExample] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -212,34 +261,14 @@ export default function AdminAddinPage() {
     void loadSchemes()
   }, [])
 
-  useEffect(() => {
-    if (!selectedSchemeId) {
-      const next = createNewSchemeState()
-      setEditingScheme(next.scheme)
-      setSegments(normalizeSequenceSegments(next.segments))
-      setSelectedSegmentIndex(-1)
-      setSegmentDraft(next.draft)
-      return
-    }
-
-    const found = schemes.find((scheme) => scheme.id === selectedSchemeId)
-    if (!found) {
-      return
-    }
-
-    const nextScheme = cloneScheme(found)
-    setEditingScheme(nextScheme)
-    setSegments(normalizeSequenceSegments(nextScheme.pattern_segments || []))
-    setSelectedSegmentIndex(-1)
-    setSegmentDraft(createEmptySegment())
-  }, [selectedSchemeId, schemes])
-
-  const legacySegmentKinds = getUnsupportedSegmentKinds(segments)
-  const hasLegacySegments = legacySegmentKinds.length > 0
   const changedEnabledCount = schemes.filter((scheme) => {
     if (!scheme.id) return false
     return (enabledDrafts[scheme.id] ?? !!scheme.is_active) !== !!scheme.is_active
   }).length
+
+  const sampleNumber = buildSampleNumber(segments, editingScheme.separator || '-')
+  const sampleRevision = revisionSample(editingScheme.revision?.policy, editingScheme.revision?.start)
+  const revisionPolicy = (editingScheme.revision?.policy || 'none').toLowerCase()
 
   async function loadUsers() {
     setError(null)
@@ -304,7 +333,7 @@ export default function AdminAddinPage() {
     })
 
     if (!changedSchemes.length) {
-      setMessage('No enabled changes to save.')
+      setMessage('Nothing to save: no scheme was enabled or disabled.')
       return
     }
 
@@ -322,73 +351,84 @@ export default function AdminAddinPage() {
       await loadSchemes()
       setMessage(`${changedSchemes.length} scheme${changedSchemes.length === 1 ? '' : 's'} updated.`)
     } catch (err) {
-      setError(formatApiError(err, 'Failed to save enabled changes.'))
+      setError(formatApiError(err, 'Failed to save changes.'))
     } finally {
       setSavingEnabledChanges(false)
     }
   }
 
+  async function deleteScheme(scheme: Scheme) {
+    setError(null)
+    setMessage(null)
+    if (!scheme.id) return
+    if (!window.confirm(`Delete the scheme "${scheme.name}"? Parts already numbered with it are not affected, but this cannot be undone.`)) {
+      return
+    }
+    try {
+      await apiFetch(`/api/numbering/schemes/${scheme.id}`, { method: 'DELETE' })
+      setMessage(`Scheme "${scheme.name}" deleted.`)
+      if (copyFromId === scheme.id) {
+        setCopyFromId('')
+      }
+      await loadSchemes()
+    } catch (err) {
+      setError(formatApiError(err, 'Failed to delete scheme.'))
+    }
+  }
+
+  function startBuilderFrom(sourceId: string) {
+    setCopyFromId(sourceId)
+    setServerExample(null)
+    setError(null)
+    setMessage(null)
+    const source = sourceId ? schemes.find((scheme) => scheme.id === sourceId) : undefined
+    const next = createBuilderState(source)
+    setEditingScheme(next.scheme)
+    setSegments(next.segments)
+    setEditorIndex(-1)
+    setSegmentDraft(createEmptySegment())
+  }
+
   function updateEditingScheme(patch: Partial<Scheme>) {
+    setServerExample(null)
     setEditingScheme((prev) => ({ ...prev, ...patch }))
   }
 
   function getLocalSchemeErrors(requireName: boolean) {
     const errors: string[] = []
     if (requireName && !(editingScheme.name || '').trim()) {
-      errors.push('Scheme name is required.')
+      errors.push('Give the scheme a name.')
     }
 
     if (!segments.length) {
-      errors.push('Add at least one segment.')
+      errors.push('Add at least one piece to the number pattern.')
       return errors
     }
 
-    const startAt = Number(editingScheme.seq?.start_at ?? 1)
-    if (!Number.isFinite(startAt) || startAt < 1) {
-      errors.push('Start at must be 1 or greater.')
-    }
-
     let hasSequence = false
-    let automaticSequenceCount = 0
     segments.forEach((segment, index) => {
       const kind = getSegmentKind(segment)
-      if (kind === 'literal') {
-        if (!(segment.value || '').trim()) {
-          errors.push(`Segment ${index + 1}: literal value is required.`)
-        }
-        return
+      if (kind === 'literal' && !(segment.value || '').trim()) {
+        errors.push(`Piece ${index + 1}: the fixed text is empty.`)
       }
-
+      if (kind === 'field' && !(segment.field || '').trim()) {
+        errors.push(`Piece ${index + 1}: enter the CAD form field name (e.g. project).`)
+      }
       if (kind === 'seq') {
         hasSequence = true
-        if (segment.auto_counter) {
-          automaticSequenceCount += 1
+        const digits = Number(segment.padding ?? 6)
+        if (!Number.isFinite(digits) || digits < 1) {
+          errors.push(`Piece ${index + 1}: the counter needs at least 1 digit.`)
         }
-        const padding = Number(segment.padding ?? 6)
-        const base = Number(segment.base ?? 10)
-        const segmentStart = Number(segment.start_at ?? editingScheme.seq?.start_at ?? 1)
-        if (!Number.isFinite(padding) || padding < 1) {
-          errors.push(`Segment ${index + 1}: sequence padding must be 1 or greater.`)
+        const start = Number(segment.start_at ?? 1)
+        if (!Number.isFinite(start) || start < 1) {
+          errors.push(`Piece ${index + 1}: the counter must start at 1 or higher.`)
         }
-        if (base !== 10 && base !== 36) {
-          errors.push(`Segment ${index + 1}: sequence base must be 10 or 36.`)
-        }
-        if (!Number.isFinite(segmentStart) || segmentStart < 1) {
-          errors.push(`Segment ${index + 1}: sequence start must be 1 or greater.`)
-        }
-        return
       }
-
-      errors.push(`Segment ${index + 1}: only literal and sequence segments are supported here.`)
     })
 
     if (!hasSequence) {
-      errors.push('Add at least one sequence segment.')
-    }
-
-    const sequenceCount = segments.filter((segment) => getSegmentKind(segment) === 'seq').length
-    if (sequenceCount > 1 && automaticSequenceCount !== 1) {
-      errors.push('Exactly one sequence segment must be marked automatic when a scheme has multiple sequence segments.')
+      errors.push('Add an auto counter piece: it is what makes each number unique.')
     }
 
     return errors
@@ -398,8 +438,10 @@ export default function AdminAddinPage() {
     const normalizedSegments = normalizeSequenceSegments(segments)
     const autoSeqSegment = normalizedSegments.find((segment) => getSegmentKind(segment) === 'seq' && segment.auto_counter)
     const firstSeqSegment = normalizedSegments.find((segment) => getSegmentKind(segment) === 'seq')
-    const nextSeqPadding = Number(autoSeqSegment?.padding ?? firstSeqSegment?.padding ?? editingScheme.seq?.padding ?? 6)
-    const nextSeqBase = Number(autoSeqSegment?.base ?? firstSeqSegment?.base ?? editingScheme.seq?.base ?? 10)
+    const seqSource = autoSeqSegment || firstSeqSegment
+
+    const policy = (editingScheme.revision?.policy || 'none').toLowerCase()
+    const revisionStart = policy === 'none' ? '' : (editingScheme.revision?.start || '').trim()
 
     return {
       name: (editingScheme.name || '').trim(),
@@ -408,14 +450,14 @@ export default function AdminAddinPage() {
       scope_mode: editingScheme.scope_mode || 'global',
       scope_keys: [...(editingScheme.scope_keys || [])],
       seq: {
-        padding: nextSeqPadding,
-        base: nextSeqBase,
-        start_at: Number(editingScheme.seq?.start_at ?? 1),
+        padding: Number(seqSource?.padding ?? 6),
+        base: Number(seqSource?.base ?? 10),
+        start_at: Number(seqSource?.start_at ?? 1),
         reset_policy: editingScheme.seq?.reset_policy || 'never',
       },
       revision: {
-        policy: editingScheme.revision?.policy || 'alpha',
-        start: editingScheme.revision?.start || 'A',
+        policy,
+        start: revisionStart,
       },
       validation_rules: {
         max_length: Number(editingScheme.validation_rules?.max_length ?? 32),
@@ -430,32 +472,28 @@ export default function AdminAddinPage() {
         if (kind === 'seq') {
           return {
             kind,
-            padding: Number(segment.padding ?? nextSeqPadding),
-            base: Number(segment.base ?? nextSeqBase),
-            start_at: Number(segment.start_at ?? editingScheme.seq?.start_at ?? 1),
+            padding: Number(segment.padding ?? 6),
+            base: Number(segment.base ?? 10),
+            start_at: Number(segment.start_at ?? 1),
             auto_counter: !!segment.auto_counter,
           }
         }
-        if (kind === 'field') {
-          return {
-            kind,
-            field: segment.field || '',
-            casing: segment.casing || 'upper',
-            pad_left: segment.pad_left,
-            pad_char: segment.pad_char || '',
-          }
-        }
         if (kind === 'date') {
-          return { kind, fmt: segment.fmt || '' }
+          return { kind, fmt: segment.fmt || 'YYYY' }
         }
-        return { ...segment, kind }
+        return {
+          kind: 'field',
+          field: (segment.field || '').trim(),
+          casing: segment.casing || 'upper',
+        }
       }),
     }
   }
 
-  async function validateEditingScheme() {
+  async function checkSchemeWithServer() {
     setError(null)
     setMessage(null)
+    setServerExample(null)
     const localErrors = getLocalSchemeErrors(false)
     if (localErrors.length) {
       setError(localErrors.join(' '))
@@ -471,27 +509,20 @@ export default function AdminAddinPage() {
         },
       )
       const example = resp.example || {}
-      const sample = [example.part_number_example, example.revision_example ? `rev ${example.revision_example}` : '']
-        .filter(Boolean)
-        .join(' ')
-      setMessage(sample ? `Valid. Example: ${sample}` : 'Valid.')
+      const pieces = [example.part_number_example || '']
+      if (example.revision_example) {
+        pieces.push(`revision ${example.revision_example}`)
+      }
+      setServerExample(pieces.filter(Boolean).join(' — '))
+      setMessage('The scheme is valid.')
     } catch (err) {
-      setError(formatApiError(err, 'Validation failed.'))
+      setError(formatApiError(err, 'The scheme is not valid yet.'))
     }
   }
 
-  async function saveEditingScheme() {
+  async function createScheme() {
     setError(null)
     setMessage(null)
-
-    if (hasLegacySegments) {
-      setError(
-        `This scheme uses legacy segment types: ${legacySegmentKinds.join(
-          ', ',
-        )}. It can still be used for allocation, but it cannot be saved from the simplified builder.`,
-      )
-      return
-    }
 
     const localErrors = getLocalSchemeErrors(true)
     if (localErrors.length) {
@@ -499,160 +530,83 @@ export default function AdminAddinPage() {
       return
     }
 
-    const payload = buildSchemePayload()
     try {
-      let nextSelectedSchemeId = selectedSchemeId
-      if (selectedSchemeId) {
-        await apiFetch(`/api/numbering/schemes/${selectedSchemeId}`, {
-          method: 'PUT',
-          body: JSON.stringify(payload),
-        })
-        setMessage('Scheme saved.')
-      } else {
-        const resp = await apiFetch<{ scheme: Scheme }>('/api/numbering/schemes', {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        })
-        setMessage('Scheme created.')
-        nextSelectedSchemeId = resp.scheme?.id || ''
-      }
+      const payload = buildSchemePayload()
+      await apiFetch<{ scheme: Scheme }>('/api/numbering/schemes', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      setMessage(`Scheme "${payload.name}" created.`)
       await loadSchemes()
-      if (nextSelectedSchemeId) {
-        setSelectedSchemeId(nextSelectedSchemeId)
-      }
+      startBuilderFrom('')
     } catch (err) {
-      setError(formatApiError(err, 'Failed to save scheme.'))
+      setError(formatApiError(err, 'Failed to create the scheme.'))
     }
   }
 
-  async function deleteEditingScheme() {
-    setError(null)
-    setMessage(null)
-    if (!selectedSchemeId) {
-      setError('Select a scheme first.')
-      return
-    }
-
-    if (!window.confirm('Delete this numbering scheme? This cannot be undone.')) {
-      return
-    }
-
-    try {
-      await apiFetch(`/api/numbering/schemes/${selectedSchemeId}`, { method: 'DELETE' })
-      setMessage('Scheme deleted.')
-      setSelectedSchemeId('')
-      await loadSchemes()
-    } catch (err) {
-      setError(formatApiError(err, 'Failed to delete scheme.'))
-    }
-  }
-
-  function setDraftKind(kind: 'literal' | 'seq') {
-    setSegmentDraft((prev) => {
-      if (kind === 'seq') {
-        return {
-          kind: 'seq',
-          padding: Number(prev.padding ?? editingScheme.seq?.padding ?? 6),
-          base: Number(prev.base ?? editingScheme.seq?.base ?? 10),
-          start_at: Math.max(1, Number(prev.start_at ?? editingScheme.seq?.start_at ?? 1) || 1),
-          auto_counter: !!prev.auto_counter,
-        }
-      }
-      return {
-        kind: 'literal',
-        value: prev.value || '',
-      }
-    })
-  }
-
-  function addSegment(kindOverride?: 'literal' | 'seq') {
-    if (hasLegacySegments) return
-    const kind = kindOverride || (getSegmentKind(segmentDraft) === 'seq' ? 'seq' : 'literal')
+  function applyDraft() {
+    const kind = getSegmentKind(segmentDraft)
     if (kind === 'literal' && !(segmentDraft.value || '').trim()) {
-      setError('Enter a literal value before adding a literal segment.')
+      setError('Enter the fixed text first.')
+      return
+    }
+    if (kind === 'field' && !(segmentDraft.field || '').trim()) {
+      setError('Enter the CAD form field name first (e.g. project).')
       return
     }
 
     setError(null)
-    const nextSegment =
-      kind === 'seq'
-        ? {
-            kind: 'seq',
-            padding: Number(segmentDraft.padding ?? editingScheme.seq?.padding ?? 6),
-            base: Number(segmentDraft.base ?? editingScheme.seq?.base ?? 10),
-            start_at: Math.max(1, Number(segmentDraft.start_at ?? editingScheme.seq?.start_at ?? 1) || 1),
-            auto_counter: !!segmentDraft.auto_counter,
-          }
-        : {
-            kind: 'literal',
-            value: segmentDraft.value || '',
-          }
-
-    const nextSegments = normalizeSequenceSegments([...segments, nextSegment])
-    setSegments(nextSegments)
-    setSelectedSegmentIndex(nextSegments.length - 1)
-    setSegmentDraft(cloneSegment(nextSegments[nextSegments.length - 1]))
-  }
-
-  function updateSegment() {
-    if (hasLegacySegments || selectedSegmentIndex < 0) return
-    const kind = getSegmentKind(segmentDraft) === 'seq' ? 'seq' : 'literal'
-    if (kind === 'literal' && !(segmentDraft.value || '').trim()) {
-      setError('Literal value is required.')
-      return
+    setServerExample(null)
+    const nextSegment = cloneSegment(segmentDraft)
+    if (editorIndex >= 0) {
+      setSegments((prev) => normalizeSequenceSegments(prev.map((segment, index) => (index === editorIndex ? nextSegment : segment))))
+    } else {
+      setSegments((prev) => normalizeSequenceSegments([...prev, nextSegment]))
     }
-
-    setError(null)
-    const nextSegment =
-      kind === 'seq'
-        ? {
-            kind: 'seq',
-            padding: Number(segmentDraft.padding ?? editingScheme.seq?.padding ?? 6),
-            base: Number(segmentDraft.base ?? editingScheme.seq?.base ?? 10),
-            start_at: Math.max(1, Number(segmentDraft.start_at ?? editingScheme.seq?.start_at ?? 1) || 1),
-            auto_counter: !!segmentDraft.auto_counter,
-          }
-        : {
-            kind: 'literal',
-            value: segmentDraft.value || '',
-          }
-
-    const updatedSegments = normalizeSequenceSegments(
-      segments.map((segment, index) => (index === selectedSegmentIndex ? nextSegment : segment)),
-    )
-    setSegments(updatedSegments)
-    setSegmentDraft(cloneSegment(updatedSegments[selectedSegmentIndex]))
-  }
-
-  function removeSegment() {
-    if (hasLegacySegments || selectedSegmentIndex < 0) return
-    setSegments((prev) => normalizeSequenceSegments(prev.filter((_, index) => index !== selectedSegmentIndex)))
-    setSelectedSegmentIndex(-1)
+    setEditorIndex(-1)
     setSegmentDraft(createEmptySegment())
   }
 
-  function moveSegment(delta: number) {
-    if (hasLegacySegments || selectedSegmentIndex < 0) return
-    const target = selectedSegmentIndex + delta
-    if (target < 0 || target >= segments.length) return
-    const next = [...segments]
-    const [item] = next.splice(selectedSegmentIndex, 1)
-    next.splice(target, 0, item)
-    setSegments(normalizeSequenceSegments(next))
-    setSelectedSegmentIndex(target)
+  function editSegment(index: number) {
+    setEditorIndex(index)
+    setSegmentDraft(cloneSegment(segments[index]))
   }
 
-  function selectSegment(index: number) {
-    setSelectedSegmentIndex(index)
-    const selectedSegment = segments[index]
-    if (selectedSegment && SIMPLE_SEGMENT_KINDS.has(getSegmentKind(selectedSegment))) {
-      setSegmentDraft(cloneSegment(selectedSegment))
+  function cancelEdit() {
+    setEditorIndex(-1)
+    setSegmentDraft(createEmptySegment())
+  }
+
+  function removeSegment(index: number) {
+    setServerExample(null)
+    setSegments((prev) => normalizeSequenceSegments(prev.filter((_, i) => i !== index)))
+    if (editorIndex === index) {
+      cancelEdit()
     }
+  }
+
+  function moveSegment(index: number, delta: number) {
+    const target = index + delta
+    if (target < 0 || target >= segments.length) return
+    setServerExample(null)
+    const next = [...segments]
+    const [item] = next.splice(index, 1)
+    next.splice(target, 0, item)
+    setSegments(normalizeSequenceSegments(next))
+    if (editorIndex === index) {
+      setEditorIndex(target)
+    }
+  }
+
+  function setDraftKind(kind: SegmentKind) {
+    setSegmentDraft((prev) => (getSegmentKind(prev) === kind ? prev : createEmptySegment(kind)))
   }
 
   function renderTokenDate(display?: string, fallback?: string) {
     return display || fallback || '-'
   }
+
+  const draftKind = getSegmentKind(segmentDraft)
 
   return (
     <div className="p-3">
@@ -742,30 +696,37 @@ export default function AdminAddinPage() {
       </div>
 
       <div className="card p-3">
-        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-          <h5 className="mb-0">Numbering schemes</h5>
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <h5 className="mb-0">Part numbering schemes</h5>
           <button
             className="btn btn-sm btn-primary"
             onClick={() => void saveEnabledChanges()}
-            disabled={savingEnabledChanges}
+            disabled={savingEnabledChanges || changedEnabledCount === 0}
           >
-            Save enabled changes
+            Save changes{changedEnabledCount > 0 ? ` (${changedEnabledCount})` : ''}
           </button>
         </div>
-        {changedEnabledCount > 0 && <div className="text-muted small mb-2">{changedEnabledCount} pending change(s).</div>}
+        <p className="text-muted small mb-2">
+          A scheme cannot be modified once created, because numbers already issued depend on it. To change one, create
+          a new scheme below (you can start from a copy), then disable or delete the old one.
+        </p>
         <div className="table-responsive">
-          <table className="table table-sm">
+          <table className="table table-sm align-middle">
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Example</th>
                 <th>Enabled</th>
-                <th>Edit</th>
+                <th />
               </tr>
             </thead>
             <tbody>
               {schemes.map((scheme) => (
                 <tr key={scheme.id}>
                   <td>{scheme.name}</td>
+                  <td className="text-muted">
+                    <code>{buildSampleNumber(scheme.pattern_segments || [], scheme.separator || '-') || '-'}</code>
+                  </td>
                   <td>
                     <input
                       type="checkbox"
@@ -776,20 +737,16 @@ export default function AdminAddinPage() {
                       }}
                     />
                   </td>
-                  <td>
-                    <button
-                      className="btn btn-sm btn-outline-primary"
-                      onClick={() => setSelectedSchemeId(scheme.id || '')}
-                      disabled={!scheme.id}
-                    >
-                      Edit
+                  <td className="text-end">
+                    <button className="btn btn-sm btn-outline-danger" onClick={() => void deleteScheme(scheme)} disabled={!scheme.id}>
+                      Delete
                     </button>
                   </td>
                 </tr>
               ))}
               {!schemes.length && (
                 <tr>
-                  <td colSpan={3} className="text-muted text-center">
+                  <td colSpan={4} className="text-muted text-center">
                     No schemes.
                   </td>
                 </tr>
@@ -800,29 +757,34 @@ export default function AdminAddinPage() {
       </div>
 
       <div className="card p-3 mt-4">
-        <h5>Scheme builder</h5>
-        <div className="mb-3">
-          <label className="form-label">Select scheme</label>
-          <select className="form-select" value={selectedSchemeId} onChange={(e) => setSelectedSchemeId(e.target.value)}>
-            <option value="">New scheme</option>
-            {schemes.map((scheme) => (
-              <option key={scheme.id} value={scheme.id}>
-                {scheme.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <h5>Create a new scheme</h5>
+        <p className="text-muted small">
+          A part number is built from pieces joined by the separator. Example: fixed text <code>PART</code> + a
+          6-digit auto counter with separator <code>-</code> gives <code>PART-000001</code>.
+        </p>
 
         <div className="row g-2 mb-3">
           <div className="col-md-4">
-            <label className="form-label small">Name</label>
+            <label className="form-label small">Start from</label>
+            <select className="form-select" value={copyFromId} onChange={(e) => startBuilderFrom(e.target.value)}>
+              <option value="">Blank</option>
+              {schemes.map((scheme) => (
+                <option key={scheme.id} value={scheme.id}>
+                  Copy of: {scheme.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="col-md-4">
+            <label className="form-label small">Scheme name</label>
             <input
               className="form-control"
+              placeholder="e.g. Machined parts"
               value={editingScheme.name || ''}
               onChange={(e) => updateEditingScheme({ name: e.target.value })}
             />
           </div>
-          <div className="col-md-3">
+          <div className="col-md-2">
             <label className="form-label small">Separator</label>
             <input
               className="form-control"
@@ -831,23 +793,6 @@ export default function AdminAddinPage() {
             />
           </div>
           <div className="col-md-2">
-            <label className="form-label small">Auto start</label>
-            <input
-              className="form-control"
-              type="number"
-              min={1}
-              value={editingScheme.seq?.start_at ?? 1}
-              onChange={(e) =>
-                updateEditingScheme({
-                  seq: {
-                    ...editingScheme.seq,
-                    start_at: Math.max(1, Number(e.target.value) || 1),
-                  },
-                })
-              }
-            />
-          </div>
-          <div className="col-md-3">
             <label className="form-label small d-block">Enabled</label>
             <div className="form-check pt-2">
               <input
@@ -858,203 +803,255 @@ export default function AdminAddinPage() {
                 id="schemeActiveCheck"
               />
               <label className="form-check-label" htmlFor="schemeActiveCheck">
-                Enabled
+                Ready to use
               </label>
             </div>
           </div>
         </div>
 
-        {hasLegacySegments && (
-          <div className="alert alert-warning small">
-            This scheme uses legacy segment types: {legacySegmentKinds.join(', ')}. It can still be used for allocation,
-            but it must be converted before saving in the simplified builder.
-          </div>
-        )}
-
         <div className="mb-3">
-          <h6>Segments</h6>
+          <h6>Number pattern</h6>
           <div className="row g-3">
             <div className="col-md-6">
               <ul className="list-group">
                 {segments.map((segment, index) => (
                   <li
                     key={`${segment.kind || 'segment'}-${index}`}
-                    className={`list-group-item ${index === selectedSegmentIndex ? 'active' : ''}`}
-                    onClick={() => selectSegment(index)}
-                    style={{ cursor: 'pointer' }}
+                    className={`list-group-item d-flex justify-content-between align-items-center ${
+                      index === editorIndex ? 'active' : ''
+                    }`}
                   >
-                    {segmentLabel(segment, index)}
+                    <span onClick={() => editSegment(index)} style={{ cursor: 'pointer', flexGrow: 1 }}>
+                      {segmentLabel(segment)}
+                    </span>
+                    <span className="d-flex gap-1">
+                      <button
+                        className="btn btn-sm btn-outline-secondary py-0"
+                        title="Move up"
+                        onClick={() => moveSegment(index, -1)}
+                        disabled={index === 0}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-secondary py-0"
+                        title="Move down"
+                        onClick={() => moveSegment(index, 1)}
+                        disabled={index === segments.length - 1}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-danger py-0"
+                        title="Remove"
+                        onClick={() => removeSegment(index)}
+                      >
+                        ✕
+                      </button>
+                    </span>
                   </li>
                 ))}
-                {!segments.length && <li className="list-group-item text-muted">No segments yet.</li>}
+                {!segments.length && <li className="list-group-item text-muted">No pieces yet - add one on the right.</li>}
               </ul>
-              <div className="mt-2 d-flex gap-2 flex-wrap">
-                <button className="btn btn-sm btn-outline-secondary" onClick={() => moveSegment(-1)} disabled={hasLegacySegments}>
-                  Up
-                </button>
-                <button className="btn btn-sm btn-outline-secondary" onClick={() => moveSegment(1)} disabled={hasLegacySegments}>
-                  Down
-                </button>
-                <button className="btn btn-sm btn-outline-danger" onClick={removeSegment} disabled={hasLegacySegments}>
-                  Remove
-                </button>
-              </div>
+              <div className="mt-2 small text-muted">Click a piece to edit it. Use the arrows to reorder.</div>
             </div>
 
             <div className="col-md-6">
-              {hasLegacySegments ? (
-                <div className="alert alert-light border small mb-0">
-                  Legacy segment definitions are read-only here. You can still enable or disable the scheme from the
-                  table above.
-                </div>
-              ) : (
+              <label className="form-label small">{editorIndex >= 0 ? `Editing piece ${editorIndex + 1}` : 'Add a piece'}</label>
+              <select
+                className="form-select mb-2"
+                value={draftKind}
+                onChange={(e) => setDraftKind(e.target.value as SegmentKind)}
+              >
+                {(Object.keys(KIND_LABELS) as SegmentKind[]).map((kind) => (
+                  <option key={kind} value={kind}>
+                    {KIND_LABELS[kind]}
+                  </option>
+                ))}
+              </select>
+
+              {draftKind === 'literal' && (
                 <>
-                  <label className="form-label small">Kind</label>
-                  <select
-                    className="form-select mb-2"
-                    value={getSegmentKind(segmentDraft) === 'seq' ? 'seq' : 'literal'}
-                    onChange={(e) => setDraftKind(e.target.value === 'seq' ? 'seq' : 'literal')}
-                  >
-                    <option value="literal">literal</option>
-                    <option value="seq">seq</option>
-                  </select>
-
-                  {getSegmentKind(segmentDraft) === 'seq' ? (
-                    <div className="row g-2">
-                      <div className="col-md-6">
-                        <label className="form-label small">Padding</label>
-                        <input
-                          className="form-control mb-2"
-                          type="number"
-                          min={1}
-                          value={segmentDraft.padding ?? 6}
-                          onChange={(e) =>
-                            setSegmentDraft({
-                              kind: 'seq',
-                              padding: Number(e.target.value) || 6,
-                              base: Number(segmentDraft.base ?? 10),
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="col-md-6">
-                        <label className="form-label small">Base</label>
-                        <select
-                          className="form-select mb-2"
-                          value={segmentDraft.base ?? 10}
-                          onChange={(e) =>
-                            setSegmentDraft({
-                              kind: 'seq',
-                              padding: Number(segmentDraft.padding ?? 6),
-                              base: Number(e.target.value),
-                            })
-                          }
-                        >
-                          <option value={10}>10</option>
-                          <option value={36}>36</option>
-                        </select>
-                      </div>
-                      <div className="col-md-6">
-                        <label className="form-label small">Static start</label>
-                        <input
-                          className="form-control mb-2"
-                          type="number"
-                          min={1}
-                          value={segmentDraft.start_at ?? 1}
-                          disabled={!!segmentDraft.auto_counter}
-                          onChange={(e) =>
-                            setSegmentDraft({
-                              kind: 'seq',
-                              padding: Number(segmentDraft.padding ?? 6),
-                              base: Number(segmentDraft.base ?? 10),
-                              start_at: Math.max(1, Number(e.target.value) || 1),
-                              auto_counter: !!segmentDraft.auto_counter,
-                            })
-                          }
-                        />
-                      </div>
-                      <div className="col-md-6">
-                        <label className="form-label small d-block">Mode</label>
-                        <div className="form-check pt-2">
-                          <input
-                            className="form-check-input"
-                            id="segmentAutoCounter"
-                            type="checkbox"
-                            checked={!!segmentDraft.auto_counter}
-                            onChange={(e) =>
-                              setSegmentDraft({
-                                kind: 'seq',
-                                padding: Number(segmentDraft.padding ?? 6),
-                                base: Number(segmentDraft.base ?? 10),
-                                start_at: Math.max(1, Number(segmentDraft.start_at ?? 1) || 1),
-                                auto_counter: e.target.checked,
-                              })
-                            }
-                          />
-                          <label className="form-check-label" htmlFor="segmentAutoCounter">
-                            Automatic counter
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <label className="form-label small">Literal value</label>
-                      <input
-                        className="form-control mb-2"
-                        value={segmentDraft.value || ''}
-                        onChange={(e) => setSegmentDraft({ kind: 'literal', value: e.target.value })}
-                      />
-                    </>
-                  )}
-
-                  <div className="d-flex gap-2 flex-wrap">
-                    <button
-                      className="btn btn-sm btn-outline-primary"
-                      onClick={() => {
-                        setDraftKind('literal')
-                        addSegment('literal')
-                      }}
-                    >
-                      Add literal segment
-                    </button>
-                    <button
-                      className="btn btn-sm btn-outline-primary"
-                      onClick={() => {
-                        setDraftKind('seq')
-                        addSegment('seq')
-                      }}
-                    >
-                      Add sequence segment
-                    </button>
-                    <button className="btn btn-sm btn-outline-secondary" onClick={updateSegment}>
-                      Update selected
-                    </button>
-                    <button
-                      className="btn btn-sm btn-outline-secondary"
-                      onClick={() => {
-                        setSelectedSegmentIndex(-1)
-                        setSegmentDraft(createEmptySegment())
-                      }}
-                    >
-                      Clear
-                    </button>
-                  </div>
+                  <label className="form-label small">Text</label>
+                  <input
+                    className="form-control mb-2"
+                    placeholder="e.g. PART"
+                    value={segmentDraft.value || ''}
+                    onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: 'literal', value: e.target.value })}
+                  />
                 </>
               )}
+
+              {draftKind === 'seq' && (
+                <div className="row g-2">
+                  <div className="col-md-6">
+                    <label className="form-label small">Digits</label>
+                    <input
+                      className="form-control mb-2"
+                      type="number"
+                      min={1}
+                      value={segmentDraft.padding ?? 6}
+                      onChange={(e) =>
+                        setSegmentDraft({ ...segmentDraft, kind: 'seq', padding: Math.max(1, Number(e.target.value) || 1) })
+                      }
+                    />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label small">Counting style</label>
+                    <select
+                      className="form-select mb-2"
+                      value={segmentDraft.base ?? 10}
+                      onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: 'seq', base: Number(e.target.value) })}
+                    >
+                      <option value={10}>Numbers (0-9)</option>
+                      <option value={36}>Letters + numbers (0-9, A-Z)</option>
+                    </select>
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label small">Starts at</label>
+                    <input
+                      className="form-control mb-2"
+                      type="number"
+                      min={1}
+                      value={segmentDraft.start_at ?? 1}
+                      onChange={(e) =>
+                        setSegmentDraft({ ...segmentDraft, kind: 'seq', start_at: Math.max(1, Number(e.target.value) || 1) })
+                      }
+                    />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label small d-block">Numbering</label>
+                    <div className="form-check pt-2">
+                      <input
+                        className="form-check-input"
+                        id="segmentAutoCounter"
+                        type="checkbox"
+                        checked={!!segmentDraft.auto_counter}
+                        onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: 'seq', auto_counter: e.target.checked })}
+                      />
+                      <label className="form-check-label small" htmlFor="segmentAutoCounter">
+                        Server assigns the next free number
+                      </label>
+                    </div>
+                  </div>
+                  <div className="col-12">
+                    <div className="small text-muted mb-2">One counter per scheme is assigned by the server; it is what makes numbers unique.</div>
+                  </div>
+                </div>
+              )}
+
+              {draftKind === 'field' && (
+                <div className="row g-2">
+                  <div className="col-md-6">
+                    <label className="form-label small">CAD form field</label>
+                    <input
+                      className="form-control mb-2"
+                      placeholder="e.g. project, type, family"
+                      value={segmentDraft.field || ''}
+                      onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: 'field', field: e.target.value })}
+                    />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label small">Letter case</label>
+                    <select
+                      className="form-select mb-2"
+                      value={segmentDraft.casing || 'upper'}
+                      onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: 'field', casing: e.target.value })}
+                    >
+                      <option value="upper">UPPERCASE</option>
+                      <option value="lower">lowercase</option>
+                      <option value="none">As typed</option>
+                    </select>
+                  </div>
+                  <div className="col-12">
+                    <div className="small text-muted mb-2">
+                      The value is typed in the SolidWorks add-in when a number is requested (e.g. project = MECS).
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {draftKind === 'date' && (
+                <>
+                  <label className="form-label small">Format</label>
+                  <select
+                    className="form-select mb-2"
+                    value={segmentDraft.fmt || 'YYYY'}
+                    onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: 'date', fmt: e.target.value })}
+                  >
+                    {DATE_FORMATS.map((fmt) => (
+                      <option key={fmt.value} value={fmt.value}>
+                        {fmt.label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              <div className="d-flex gap-2 flex-wrap">
+                <button className="btn btn-sm btn-primary" onClick={applyDraft}>
+                  {editorIndex >= 0 ? 'Update piece' : 'Add piece'}
+                </button>
+                {editorIndex >= 0 && (
+                  <button className="btn btn-sm btn-outline-secondary" onClick={cancelEdit}>
+                    Cancel edit
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="row g-2 mb-3">
+          <div className="col-md-4">
+            <label className="form-label small">Revision for new parts</label>
+            <select
+              className="form-select"
+              value={revisionPolicy}
+              onChange={(e) =>
+                updateEditingScheme({
+                  revision: {
+                    policy: e.target.value,
+                    start: e.target.value === 'alpha' ? 'A' : e.target.value === 'numeric' ? '01' : '',
+                  },
+                })
+              }
+            >
+              <option value="none">No revision (recommended)</option>
+              <option value="alpha">Letters: A, B, C...</option>
+              <option value="numeric">Numbers: 01, 02, 03...</option>
+            </select>
+          </div>
+          {revisionPolicy !== 'none' && (
+            <div className="col-md-2">
+              <label className="form-label small">First revision</label>
+              <input
+                className="form-control"
+                value={editingScheme.revision?.start || ''}
+                onChange={(e) =>
+                  updateEditingScheme({ revision: { policy: revisionPolicy, start: e.target.value } })
+                }
+              />
+            </div>
+          )}
+          <div className="col-md-6">
+            <label className="form-label small d-block">Preview</label>
+            <div className="pt-1">
+              <code>{sampleNumber || '-'}</code>
+              {sampleRevision && (
+                <span className="text-muted small"> (first revision: {sampleRevision})</span>
+              )}
+              {serverExample && <div className="small text-success">Server check: {serverExample}</div>}
             </div>
           </div>
         </div>
 
         <div className="d-flex gap-2 flex-wrap">
-          <button className="btn btn-outline-secondary" onClick={() => void validateEditingScheme()}>
-            Validate / preview
+          <button className="btn btn-outline-secondary" onClick={() => void checkSchemeWithServer()}>
+            Check &amp; preview
           </button>
-          <button className="btn btn-primary" onClick={() => void saveEditingScheme()} disabled={hasLegacySegments}>
-            Save scheme
-          </button>
-          <button className="btn btn-outline-danger" onClick={() => void deleteEditingScheme()} disabled={!selectedSchemeId}>
-            Delete scheme
+          <button className="btn btn-primary" onClick={() => void createScheme()}>
+            Create scheme
           </button>
         </div>
       </div>

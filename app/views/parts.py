@@ -68,9 +68,7 @@ from app.services.part_materialized import batch_file_groups_for_parts
 from app.services.part_query import (
     MISSING as FILTER_MISSING,
     add_contains_filter,
-    exclude_pairs_query,
     filter_value,
-    flag_enabled,
     or_contains,
     pairs_query,
     terms,
@@ -504,94 +502,21 @@ def _context_field_values(
     return config, attrs, values
 
 
-_EMPTY_VALUES = {"", "n/a", "na", "none", "null", "0", "false"}
-
-def _is_blankish(value: object, *, allow_na: bool = False) -> bool:
-    if value is None:
-        return True
-    text = str(value).strip().lower()
-    if allow_na and text in ("n/a", "na"):
-        return False
-    return text in _EMPTY_VALUES
-
-_REQUIRED_ALWAYS = {"pdf"}
-_REQUIRED_BY_PROCESS = {
-    "machine": {"step"},
-    "3d print": {"step", "3mf"},
-    "3d laser": {"step"},
-    "folding": {"dxf", "png", "step"},
-    "rolling": {"dxf", "png", "step"},
-    "lasercut": {"dxf", "png"},
-    "profile cut": {"dxf", "png"},
-    "cutting": {"dxf", "png"},
-    "waterjet": {"dxf", "png"},
-    "plasma": {"dxf", "png"},
-}
-
-def _norm_file_group(value: object) -> str:
-    text = str(value or "").strip().lower()
-    if text in ("stp", "step"):
-        return "step"
-    if text in ("jpg", "jpeg"):
-        return "png"
-    return text
-
-def _required_files_for_processes(proc_list: list[str], meta: dict) -> set[str]:
-    required: set[str] = set(_REQUIRED_ALWAYS)
-    for p in proc_list or []:
-        entry = meta.get(p) or {}
-        explicit_for_process = False
-        if isinstance(entry, dict):
-            for key in ("required_files", "files_required", "files", "file_groups", "file_groups_required"):
-                vals = entry.get(key)
-                if not vals:
-                    continue
-                explicit_for_process = True
-                if isinstance(vals, (str, bytes)):
-                    vals = [vals]
-                for v in vals:
-                    g = _norm_file_group(v)
-                    if g:
-                        required.add(g)
-        if not explicit_for_process:
-            required.update(_REQUIRED_BY_PROCESS.get(p, set()))
-    return {g for g in required if g}
-
-def _full_files_ok(proc_list: list[str], groups: set[str], meta: dict) -> bool:
-    if not proc_list:
-        return False
-    required = _required_files_for_processes(proc_list, meta)
-    if not required:
-        return False
-    return required.issubset(groups or set())
-
-def _min_props_ok(part: Part, attrs: dict, proc_list: list[str]) -> bool:
-    if not (part.part_number or "").strip():
-        return False
-    desc = part.description or attrs.get("description") or ""
-    if _is_blankish(desc):
-        return False
-    rev = _clean_rev_value(attrs.get("revision") or part.revision or "")
-    if not rev:
-        return False
-    material = attrs.get("material") or attrs.get("Material") or ""
-    if _is_blankish(material, allow_na=True):
-        return False
-    finish = attrs.get("finish") or attrs.get("Finish") or ""
-    if _is_blankish(finish, allow_na=True):
-        return False
-    if not proc_list:
-        return False
-    return True
-
 @login_required
 @require_items_view
 @bp.route("/parts_lazy", methods=["GET", "POST"])
 @csrf.exempt
 def parts_lazy():
     body = request.get_json(force=True, silent=True) or {}
-    first = int(body.get("first", 0))
-    rows = int(body.get("rows", 25))
+    try:
+        first = max(0, int(body.get("first", 0)))
+    except (TypeError, ValueError):
+        first = 0
+    try:
+        requested_rows = int(body.get("rows", 25))
+    except (TypeError, ValueError):
+        requested_rows = 25
+    rows = min(requested_rows, 100) if requested_rows > 0 else 25
     sort_field = body.get("sortField") or "part_number"
     sort_order = int(body.get("sortOrder", 1))
     filters = body.get("filters", {}) or {}
@@ -655,33 +580,9 @@ def parts_lazy():
             return Q()
         return Q(__raw__={field: {"$regex": re.escape(term), "$options": "i"}})
 
-    def _file_pairs_for_group(group: str) -> set[tuple[str, str]]:
-        pairs: set[tuple[str, str]] = set()
-        group_norm = _norm_file_group(group)
-        if not group_norm:
-            return pairs
-        for row in PartFile.objects(ext_group=group_norm).only("part_number", "revision"):
-            pn_clean = str(getattr(row, "part_number", None) or "").strip()
-            if not pn_clean:
-                continue
-            pairs.add((pn_clean, _clean_rev_value(getattr(row, "revision", "") or "")))
-        if group_norm == "datasheet":
-            for part in Part.objects().only("part_number", "revision", "attrs", "canonical", "description", "category", "uom"):
-                pn_clean = str(getattr(part, "part_number", None) or "").strip()
-                if not pn_clean:
-                    continue
-                attrs = harvest_part_attrs(part)
-                if datasheet_attr_present(attrs):
-                    pairs.add((pn_clean, _normalized_revision(part, attrs)))
-        return pairs
-
     def _file_filter_q(field_id: str, expected: bool) -> Q:
         path = primary_query_path(field_id, field_config) or field_id
-        base_q = Q(**{path: True}) if expected else _field_false_or_missing_q(path)
-        pairs = _file_pairs_for_group(file_field_group(field_id) or "")
-        if expected:
-            return base_q | pairs_query(pairs) if pairs else base_q
-        return (base_q & exclude_pairs_query(pairs)) if pairs else base_q
+        return Q(**{path: True}) if expected else _field_false_or_missing_q(path)
 
     def _approval_q(expected: bool) -> Q:
         raw = approval_filter_raw(approved=expected)
@@ -859,23 +760,6 @@ def parts_lazy():
                 q = q & pairs_query(pairs)
                 fallback_base_q = fallback_base_q & pairs_query(pairs)
 
-    used_in_job = flag_enabled(filters, "used_in_job")
-    job_number_filter = str(filter_value(filters, "job_number", "") or "").strip()
-    if used_in_job:
-        job_qs = Job.objects(is_deleted=False)
-        if job_number_filter:
-            job_qs = job_qs.filter(job_number__icontains=job_number_filter)
-        pairs: set[tuple[str, str]] = set()
-        for job in job_qs.only("bom"):
-            for line in (job.bom or []):
-                pn_line = str(line.pn or "").strip()
-                if pn_line:
-                    pairs.add((pn_line, _clean_rev_value(line.rev)))
-        if not pairs:
-            return jsonify({"data": [], "totalRecords": 0})
-        q = q & pairs_query(pairs)
-        fallback_base_q = fallback_base_q & pairs_query(pairs)
-
     allowed_scope = allowed_parts_for(current_user)
     if isinstance(allowed_scope, set):
         if not allowed_scope:
@@ -916,14 +800,6 @@ def parts_lazy():
             }
         )
 
-    full_files_filter = flag_enabled(filters, "full_files")
-    approved_only_filter = flag_enabled(filters, "approved_only")
-    min_props_filter = flag_enabled(filters, "min_props")
-
-    if approved_only_filter:
-        qs = qs.filter(_approval_q(True))
-        fallback_qs = fallback_qs.filter(_approval_q(True))
-
     def _missing_materialized_q(field_ids: set[str]) -> Q:
         out = Q()
         for field_id in field_ids:
@@ -950,8 +826,6 @@ def parts_lazy():
 
     needs_scan = any(
         [
-            full_files_filter,
-            min_props_filter,
             bool(typed_filter_specs),
             bool(runtime_filter_specs),
             runtime_sort,
@@ -962,18 +836,13 @@ def parts_lazy():
         scan_order_by = order_by if not runtime_sort else "part_number"
         all_docs = list(qs.order_by(scan_order_by).only("part_number", "revision", "description", "category", "attrs", "processes"))
         scan_requires_values = bool(runtime_sort or typed_filter_specs or runtime_filter_specs)
-        coverage = _coverage_map(all_docs) if full_files_filter or scan_requires_values else {}
+        coverage = _coverage_map(all_docs) if scan_requires_values else {}
         filtered_docs: list[Part] = []
         resolved_cache: dict[tuple[str, str], dict[str, Any]] = {}
         for part in all_docs:
             attrs = harvest_part_attrs(part)
             rev = _normalized_revision(part, attrs)
             groups = coverage.get((part.part_number, rev)) or set()
-            proc_list = normalize_process_list(attrs, list(part.processes or []), meta)
-            if min_props_filter and not _min_props_ok(part, attrs, proc_list):
-                continue
-            if full_files_filter and not _full_files_ok(proc_list, groups, meta):
-                continue
             values: dict[str, Any] = {}
             if scan_requires_values:
                 values = resolve_part_field_values(
@@ -1015,11 +884,15 @@ def parts_lazy():
         filtered = qs.count()
         docs = list(
             qs.order_by(order_by)
-            .only("part_number", "revision", "description", "category", "attrs", "processes", "file_groups", "field_values")
+            .only(
+                "part_number", "revision", "description", "category", "attrs", "processes",
+                "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
+                "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
+            )
             .skip(first)
             .limit(rows)
         )
-        coverage = _coverage_map(docs)
+        coverage = {}
         resolved_cache = {}
 
         fallback_limit = max(first + rows, rows)
@@ -1027,7 +900,11 @@ def parts_lazy():
             stale_filter_ids = {field_id for field_id, _data_type, _raw_value in materialized_filter_specs}
             stale_candidates_qs = fallback_qs.filter(_missing_materialized_q(stale_filter_ids))
             stale_candidates = list(
-                stale_candidates_qs.only("part_number", "revision", "description", "category", "attrs", "processes", "file_groups", "field_values")
+                stale_candidates_qs.only(
+                    "part_number", "revision", "description", "category", "attrs", "processes",
+                    "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
+                    "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
+                )
             )
             fallback_docs: list[Part] = []
             fallback_values_cache: dict[tuple[str, str], dict[str, Any]] = {}
@@ -1055,7 +932,11 @@ def parts_lazy():
             if fallback_docs:
                 db_prefix = list(
                     qs.order_by(order_by)
-                    .only("part_number", "revision", "description", "category", "attrs", "processes", "file_groups", "field_values")
+                    .only(
+                        "part_number", "revision", "description", "category", "attrs", "processes",
+                        "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
+                        "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
+                    )
                     .limit(fallback_limit)
                 )
                 combined = db_prefix + fallback_docs
@@ -1094,7 +975,7 @@ def parts_lazy():
                 )
                 filtered += len(fallback_docs)
                 docs = combined[first:first + rows]
-                coverage = _coverage_map(docs)
+                coverage = {}
 
     thumb_map = thumb_urls_map([(part.part_number, _normalized_revision(part, harvest_part_attrs(part))) for part in docs])
 
@@ -1133,15 +1014,15 @@ def parts_lazy():
                 "process": values.get("process", ""),
                 "processes": process_list,
                 "thumb_urls": thumb_list,
-                "has_pdf": bool(values.get("has_pdf", "pdf" in groups)),
-                "has_png": bool(values.get("has_png", "png" in groups)),
-                "has_dxf": bool(values.get("has_dxf", "dxf" in groups)),
-                "has_step": bool(values.get("has_step", "step" in groups)),
-                "has_edr": bool(values.get("has_edr", "edr" in groups)),
-                "has_3mf": bool(values.get("has_3mf", "3mf" in groups)),
-                "has_ply": bool(values.get("has_ply", "ply" in groups)),
-                "has_stl": bool(values.get("has_stl", "stl" in groups)),
-                "has_datasheet": bool(values.get("has_datasheet", "datasheet" in groups)),
+                "has_pdf": bool(values.get("has_pdf", getattr(part, "has_pdf", False))),
+                "has_png": bool(values.get("has_png", getattr(part, "has_png", False))),
+                "has_dxf": bool(values.get("has_dxf", getattr(part, "has_dxf", False))),
+                "has_step": bool(values.get("has_step", getattr(part, "has_step", False))),
+                "has_edr": bool(values.get("has_edr", getattr(part, "has_edr", False))),
+                "has_3mf": bool(values.get("has_3mf", getattr(part, "has_3mf", False))),
+                "has_ply": bool(values.get("has_ply", getattr(part, "has_ply", False))),
+                "has_stl": bool(values.get("has_stl", getattr(part, "has_stl", False))),
+                "has_datasheet": bool(values.get("has_datasheet", getattr(part, "has_datasheet", False))),
                 **values,
             }
         )

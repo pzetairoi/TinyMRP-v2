@@ -28,9 +28,11 @@ DEFAULT_SEQ = {
     "reset_policy": "never",
 }
 
+# New parts stay revision-less unless the scheme explicitly opts into a revision policy:
+# a part with no revision is simply a part with no revision, never an implicit "A".
 DEFAULT_REVISION = {
-    "policy": "alpha",
-    "start": "A",
+    "policy": "none",
+    "start": "",
 }
 
 DEFAULT_VALIDATION = {

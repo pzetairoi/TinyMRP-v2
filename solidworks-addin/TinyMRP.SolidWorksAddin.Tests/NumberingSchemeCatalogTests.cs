@@ -58,8 +58,9 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.AreEqual(10, scheme.Seq.Base);
             Assert.AreEqual(1, scheme.Seq.StartAt);
             Assert.AreEqual("never", scheme.Seq.ResetPolicy);
-            Assert.AreEqual("alpha", scheme.Revision.Policy);
-            Assert.AreEqual("A", scheme.Revision.Start);
+            // New parts stay revision-less by default; "A" is only used when alpha is chosen explicitly.
+            Assert.AreEqual("none", scheme.Revision.Policy);
+            Assert.AreEqual(string.Empty, scheme.Revision.Start);
             Assert.AreEqual(32, scheme.ValidationRules.MaxLength);
             Assert.AreEqual("A-Z0-9-", scheme.ValidationRules.AllowedCharset);
             Assert.IsTrue(scheme.ValidationRules.RequireSeqSegment);
