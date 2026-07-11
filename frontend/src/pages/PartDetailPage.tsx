@@ -594,6 +594,7 @@ export default function PartDetailPage() {
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
   const [notesSearch, setNotesSearch] = useState("");
+  const [attributeSearch, setAttributeSearch] = useState("");
   const [shareLinks, setShareLinks] = useState<PartShareRow[]>([]);
   const [shareLoading, setShareLoading] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
@@ -1577,6 +1578,14 @@ function isExternalDatasheetUrl(url: string): boolean {
     return [...picked, ...rest];
   }, [part]);
 
+  const filteredAttrs = useMemo(() => {
+    const query = attributeSearch.trim().toLowerCase();
+    if (!query) return attrs;
+    return attrs.filter(([key, value]) =>
+      `${key} ${String(value)}`.toLowerCase().includes(query)
+    );
+  }, [attributeSearch, attrs]);
+
   // Processes: normalize and deduplicate
   const processes: string[] = useMemo(() => {
     const direct = Array.isArray(part?.processes) ? part.processes : []
@@ -2005,6 +2014,16 @@ function isExternalDatasheetUrl(url: string): boolean {
   // consider that we have a drawing. Otherwise, hide the Drawing tab and
   // default to All attributes.
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
+  const hasNotesOrComments = notes.trim().length > 0 || comments.length > 0
+
+  function tabHeader(label: string, icon: string, attention = false) {
+    return (
+      <span className={`pd-tab-label${attention ? " pd-tab-label--attention" : ""}`}>
+        <i className={`pi ${attention ? "pi-exclamation-triangle" : icon}`} aria-hidden="true" />
+        <span>{label}</span>
+      </span>
+    )
+  }
 
   useEffect(() => {
     if (!hasDrawing && hasDatasheetPreview) {
@@ -2471,11 +2490,16 @@ function isExternalDatasheetUrl(url: string): boolean {
         {/* RIGHT */}
         <div className="col-lg-8 pd-right-wrap">
           <div className="pd-right-top">
-          <TabView activeIndex={tabIndex} onTabChange={(e: any) => setTabIndex(e.index)}>
+          <TabView
+            className="pd-tabs"
+            scrollable
+            activeIndex={tabIndex}
+            onTabChange={(e: any) => setTabIndex(e.index)}
+          >
             
 
             {hasDrawing && (
-            <TabPanel header="Drawing">
+            <TabPanel header={tabHeader("Drawing", "pi-file-pdf")}>
               {pdfHref ? (
                 <>
                   <a
@@ -2496,7 +2520,7 @@ function isExternalDatasheetUrl(url: string): boolean {
             </TabPanel>
             )}
             {hasDatasheetPreview && (
-              <TabPanel header="Datasheet">
+              <TabPanel header={tabHeader("Datasheet", "pi-book")}>
                 <div className="pd-datasheet-viewer p-3">
                   <div className="pd-datasheet-toolbar">
                     {datasheetOptions.length > 1 && (
@@ -2565,18 +2589,42 @@ function isExternalDatasheetUrl(url: string): boolean {
               )}
             </TabPanel>)}
 
-            {(!isSharedView || sharedAllowsAttributes) && <TabPanel header="All attributes">
+            {(!isSharedView || sharedAllowsAttributes) && <TabPanel header={tabHeader("All attributes", "pi-list")}>
               {attrs.length === 0 ? (
                 <div className="text-muted small">No attributes.</div>
               ) : (
                 <div className="pd-attrs-wrap">
                   <div className="pd-attrs-list">
-                    {attrs.map(([k, v]) => (
+                    <div className="pd-attrs-search">
+                      <i className="pi pi-search" aria-hidden="true" />
+                      <input
+                        type="search"
+                        className="form-control form-control-sm"
+                        value={attributeSearch}
+                        onChange={(event) => setAttributeSearch(event.target.value)}
+                        placeholder="Search fields and values..."
+                        aria-label="Search attributes by field or value"
+                      />
+                      {attributeSearch && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-link"
+                          onClick={() => setAttributeSearch("")}
+                          aria-label="Clear attribute search"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    {filteredAttrs.map(([k, v]) => (
                       <div key={k} className="pd-attr">
                         <div className="pd-attr-k">{k}</div>
                         <div className="pd-attr-v">{String(v)}</div>
                       </div>
                     ))}
+                    {filteredAttrs.length === 0 && (
+                      <div className="pd-attrs-empty">No attributes match “{attributeSearch.trim()}”.</div>
+                    )}
                   </div>
                 </div>
               )}
@@ -2584,7 +2632,7 @@ function isExternalDatasheetUrl(url: string): boolean {
 
             {/* 3D Preview tab at the end */}
             {threeDOptions.length > 0 && (
-              <TabPanel header="3D Preview">
+              <TabPanel header={tabHeader("3D Preview", "pi-box")}>
                 {threeDOptions.length > 1 && (
                   <div className="p-3 pb-0">
                     <label className="form-label small" htmlFor="previewSelect">
@@ -2618,7 +2666,112 @@ function isExternalDatasheetUrl(url: string): boolean {
               </TabPanel>
             )}
 
-            {(!isSharedView || sharedAllowsDocpacks) && <TabPanel header="Doc Packs">
+            <TabPanel header={tabHeader("Files", "pi-paperclip")}>
+              <div className="d-flex flex-column gap-3">
+                <div className="pd-card p-3">
+                  <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                    <div>
+                      <h6 className="mb-0">File visibility by revision</h6>
+                      <div className="text-muted small mt-1">
+                        Files are shown by the database revision key for this part number. Other revisions stay isolated below.
+                      </div>
+                    </div>
+                    {canPartsEdit ? (
+                      <div className="d-flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={handleRefreshFiles}
+                          disabled={refreshBusy}
+                        >
+                          <i className={`pi ${refreshBusy ? "pi-spin pi-spinner" : "pi-refresh"} me-1`} aria-hidden="true" />
+                          {refreshBusy ? "Updating..." : "Update related files"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => extraFileInputRef.current?.click()}
+                          disabled={extraUploadBusy}
+                        >
+                          <i className="pi pi-upload me-1" aria-hidden="true" />
+                          {extraUploadBusy ? "Uploading..." : "Upload files..."}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  {canPartsEdit && (
+                    <div className="form-check mt-2">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        id="refreshChildrenCheck"
+                        checked={refreshIncludeChildren}
+                        disabled={refreshBusy}
+                        onChange={(e) => setRefreshIncludeChildren(e.target.checked)}
+                      />
+                      <label className="form-check-label small" htmlFor="refreshChildrenCheck">
+                        Include children recursively (assemblies)
+                      </label>
+                    </div>
+                  )}
+                  <input
+                    ref={extraFileInputRef}
+                    type="file"
+                    multiple
+                    className="d-none"
+                    onChange={(e) => handleExtraUpload(e.target.files)}
+                  />
+                  {extraUploadError ? <div className="text-danger small mt-2">{extraUploadError}</div> : null}
+                  {extraError ? <div className="text-danger small mt-2">{extraError}</div> : null}
+                  {filesOverviewError ? <div className="text-danger small mt-2">{filesOverviewError}</div> : null}
+                  {refreshMsg ? <div className="text-success small mt-2">{refreshMsg}</div> : null}
+                  {refreshError ? <div className="text-danger small mt-2">{refreshError}</div> : null}
+                  <div className="text-muted small mt-2">
+                    Current revision rows: {currentFileRows.length}. Other revision rows: {otherRevisionFileCount}.
+                  </div>
+                </div>
+
+                {filesOverviewLoading ? (
+                  <div className="text-muted small">Loading file visibility...</div>
+                ) : (
+                  <>
+                    {renderFilesSection(
+                      filesOverviewCurrent,
+                      `Current revision (${filesOverviewCurrent?.display_revision || (effectiveRev || "(no revision)")})`,
+                      true,
+                      "This section matches the exact part number and revision shown in the page header."
+                    )}
+
+                    <div className="pd-card p-3">
+                      <div className="d-flex align-items-center justify-content-between mb-2">
+                        <h6 className="mb-0">Other revisions</h6>
+                        <div className="text-muted small">
+                          {filesOverviewOther.length
+                            ? `${filesOverviewOther.length} revision section${filesOverviewOther.length === 1 ? "" : "s"}`
+                            : "No files found for other revisions."}
+                        </div>
+                      </div>
+                      {filesOverviewOther.length ? (
+                        <div className="d-flex flex-column gap-3">
+                          {filesOverviewOther.map((section) => (
+                            <div key={`files-other-${section.revision || "none"}`} className="pd-files-other">
+                              {renderFilesSection(
+                                section,
+                                `Revision ${section.display_revision || section.revision || "(no revision)"}`,
+                                false,
+                                "These rows belong to another revision of the same part number."
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+              </div>
+            </TabPanel>
+
+            {(!isSharedView || sharedAllowsDocpacks) && <TabPanel header={tabHeader("Doc Packs", "pi-folder")}>
 
               <div className="pd-card p-3 mt-3">
                 <h6 className="mb-3">Scope</h6>
@@ -2931,7 +3084,7 @@ function isExternalDatasheetUrl(url: string): boolean {
             </TabPanel>}
 
           {!isSharedView && versions.length > 1 && (
-            <TabPanel header="Other versions">
+            <TabPanel header={tabHeader("Other versions", "pi-history")}>
               <DataTable value={versions} dataKey="id" responsiveLayout="scroll" stripedRows>
                 <Column header="" body={(r: VersionRow) => <ThumbImg urls={r.thumb_urls || []} maxH={32} maxW={48} />} style={{width:60}} />
                 <Column field="part_number" header="Part Number" body={(r: VersionRow) => <a href={`/ui/part/${encodeURIComponent(r.part_number)}?rev=${encodeURIComponent(r.revision||"")}`}>{r.part_number}</a>} sortable />
@@ -2941,7 +3094,7 @@ function isExternalDatasheetUrl(url: string): boolean {
             </TabPanel>
           )}
 
-          {!isSharedView && <TabPanel header="Jobs & Orders">
+          {!isSharedView && jobsOrders.length > 0 && <TabPanel header={tabHeader("Jobs & Orders", "pi-briefcase")}>
             {jobsOrders.length ? (
               <DataTable value={jobsOrders} dataKey="row_key" responsiveLayout="scroll" stripedRows>
                 <Column
@@ -3014,7 +3167,10 @@ function isExternalDatasheetUrl(url: string): boolean {
 
 
             
-          {!isSharedView && <TabPanel header="Internal Notes & Comments">
+          {!isSharedView && <TabPanel
+            header={tabHeader("Notes & Comments", "pi-comments", hasNotesOrComments)}
+            headerClassName={hasNotesOrComments ? "pd-tab-attention" : undefined}
+          >
             <div className="pd-card p-3 mt-3">
               <div className="d-flex align-items-center justify-content-between">
                 <h6 className="mb-0">Notes</h6>
@@ -3104,9 +3260,9 @@ function isExternalDatasheetUrl(url: string): boolean {
           </TabPanel>}
 
 
-          {!isSharedView && <TabPanel header="Actions">
-            <div className="pd-card p-3">
-              <div className="border rounded p-3 mb-3">
+          {!isSharedView && <TabPanel header={tabHeader("Actions", "pi-cog")}>
+            <div className="pd-card p-3 pd-actions-layout">
+              <div className="border rounded p-3 pd-action-arena">
                 <div>
                   <h6 className="mb-0">Export to Arena</h6>
                   <div className="text-muted small mt-1">
@@ -3193,7 +3349,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                 {arenaError ? <div className="text-danger small mt-2">{arenaError}</div> : null}
               </div>
               {hasManagementActions ? (
-                <div className="d-flex flex-column gap-3">
+                <div className="d-flex flex-column gap-3 pd-action-management">
                   {canAdmin && (
                     <div className="border rounded p-3">
                       <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
@@ -3335,34 +3491,6 @@ function isExternalDatasheetUrl(url: string): boolean {
                       </div>
                     </div>
                   )}
-                  {canPartsEdit && (
-                    <div>
-                      <button
-                        type="button"
-                        className="btn btn-outline-secondary btn-sm"
-                        onClick={handleRefreshFiles}
-                        disabled={refreshBusy}
-                      >
-                        {refreshBusy ? "Refreshing..." : "Update files"}
-                      </button>
-                      <div className="form-check mt-2">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          id="refreshChildrenCheck"
-                          checked={refreshIncludeChildren}
-                          disabled={refreshBusy}
-                          onChange={(e) => setRefreshIncludeChildren(e.target.checked)}
-                        />
-                        <label className="form-check-label small" htmlFor="refreshChildrenCheck">
-                          Include children recursively (assemblies)
-                        </label>
-                      </div>
-                      {refreshMsg ? <div className="text-muted small mt-1">{refreshMsg}</div> : null}
-                      {refreshError ? <div className="text-danger small mt-1">{refreshError}</div> : null}
-                      <div className="text-muted small mt-1">Scans storage for files matching this PN and revision.</div>
-                    </div>
-                  )}
                   {canPartsDelete && (
                     <div>
                       <button
@@ -3408,82 +3536,6 @@ function isExternalDatasheetUrl(url: string): boolean {
               )}
             </div>
           </TabPanel>}
-
-          <TabPanel header="Files">
-            <div className="d-flex flex-column gap-3">
-              <div className="pd-card p-3">
-                <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
-                  <div>
-                    <h6 className="mb-0">File visibility by revision</h6>
-                    <div className="text-muted small mt-1">
-                      Files are shown by the database revision key for this part number. Other revisions stay isolated below.
-                    </div>
-                  </div>
-                  {canPartsEdit ? (
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-primary"
-                      onClick={() => extraFileInputRef.current?.click()}
-                      disabled={extraUploadBusy}
-                    >
-                      {extraUploadBusy ? "Uploading..." : "Upload files..."}
-                    </button>
-                  ) : null}
-                </div>
-                <input
-                  ref={extraFileInputRef}
-                  type="file"
-                  multiple
-                  className="d-none"
-                  onChange={(e) => handleExtraUpload(e.target.files)}
-                />
-                {extraUploadError ? <div className="text-danger small mt-2">{extraUploadError}</div> : null}
-                {extraError ? <div className="text-danger small mt-2">{extraError}</div> : null}
-                {filesOverviewError ? <div className="text-danger small mt-2">{filesOverviewError}</div> : null}
-                <div className="text-muted small mt-2">
-                  Current revision rows: {currentFileRows.length}. Other revision rows: {otherRevisionFileCount}.
-                </div>
-              </div>
-
-              {filesOverviewLoading ? (
-                <div className="text-muted small">Loading file visibility...</div>
-              ) : (
-                <>
-                  {renderFilesSection(
-                    filesOverviewCurrent,
-                    `Current revision (${filesOverviewCurrent?.display_revision || (effectiveRev || "(no revision)")})`,
-                    true,
-                    "This section matches the exact part number and revision shown in the page header."
-                  )}
-
-                  <div className="pd-card p-3">
-                    <div className="d-flex align-items-center justify-content-between mb-2">
-                      <h6 className="mb-0">Other revisions</h6>
-                      <div className="text-muted small">
-                        {filesOverviewOther.length
-                          ? `${filesOverviewOther.length} revision section${filesOverviewOther.length === 1 ? "" : "s"}`
-                          : "No files found for other revisions."}
-                      </div>
-                    </div>
-                    {filesOverviewOther.length ? (
-                      <div className="d-flex flex-column gap-3">
-                        {filesOverviewOther.map((section) => (
-                          <div key={`files-other-${section.revision || "none"}`} className="pd-files-other">
-                            {renderFilesSection(
-                              section,
-                              `Revision ${section.display_revision || section.revision || "(no revision)"}`,
-                              false,
-                              "These rows belong to another revision of the same part number."
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </>
-              )}
-            </div>
-          </TabPanel>
 
             </TabView>
             </div>

@@ -1645,6 +1645,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             ReopenDocInfo startDocInfo = null;
             ReopenDocInfo rootDocInfo = null;
             bool rootClosedForExport = false;
+            bool rootGroupingToggled = false;
             string startTitle = string.Empty;
             string startPathSnapshot = string.Empty;
 
@@ -1738,7 +1739,19 @@ namespace TinyMRP.SolidWorksAddin.Services
                     throw new InvalidOperationException("No active configuration.");
                 }
 
-                TryShowConfiguration(swModel, swConf.Name ?? string.Empty);
+                // Snapshot everything needed from root COM objects NOW: once the root close
+                // optimization kicks in, swConf/swModel are disconnected (RPC_E_DISCONNECTED).
+                string rootConfigName = string.Empty;
+                try
+                {
+                    rootConfigName = swConf.Name ?? string.Empty;
+                }
+                catch
+                {
+                    rootConfigName = string.Empty;
+                }
+
+                TryShowConfiguration(swModel, rootConfigName);
 
                 string deliverablesFolder = EnsureTrailingSlash(effective.DeliverablesFolder);
                 if (string.IsNullOrWhiteSpace(deliverablesFolder))
@@ -1774,6 +1787,20 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                 _activeBatchRootTitle = rootTitle ?? string.Empty;
                 _activeBatchRootDocType = modelType;
+
+                // Root dirty state BEFORE the grouping toggle below: the close-without-save decision
+                // must not be polluted by our own in-memory toggle (which marks the doc modified).
+                string rootDirtyReasonBefore;
+                bool rootDirtyBeforeGroupingToggle = IsDocDirtyOrUnsaved(rootModel, out rootDirtyReasonBefore);
+
+                // "Group Component Instances" collapses repeated components into grouped tree nodes and
+                // has been observed to disconnect component/configuration COM objects during batch
+                // traversal. Disable it for the run; restored in the finally block.
+                if (modelType == (int)swDocumentTypes_e.swDocASSEMBLY && TryGetGroupComponentInstances(rootModel))
+                {
+                    rootGroupingToggled = TrySetGroupComponentInstances(rootModel, false, errorLog, "deliverables-pre-manifest");
+                    SafeLog(errorLog, "GROUPING: component instance grouping was ON; disabled for export ok=" + rootGroupingToggled);
+                }
 
                 try
                 {
@@ -1865,7 +1892,6 @@ namespace TinyMRP.SolidWorksAddin.Services
                 {
                     string rootClosePath = rootDocInfo != null ? (rootDocInfo.Path ?? string.Empty) : string.Empty;
                     string rootCloseTitle = rootDocInfo != null ? (rootDocInfo.Title ?? string.Empty) : string.Empty;
-                    string rootDirtyReason;
                     if (string.IsNullOrWhiteSpace(rootClosePath))
                     {
                         SafeLog(errorLog, "ROOT close optimization skipped: root has no saved path.");
@@ -1878,9 +1904,11 @@ namespace TinyMRP.SolidWorksAddin.Services
                     {
                         SafeLog(errorLog, "ROOT close optimization skipped: root model unavailable. path=" + rootClosePath);
                     }
-                    else if (IsDocDirtyOrUnsaved(rootModel, out rootDirtyReason))
+                    else if (rootDirtyBeforeGroupingToggle)
                     {
-                        SafeLog(errorLog, "ROOT close optimization skipped: root is dirty/unsaved (" + rootDirtyReason + ").");
+                        // Dirty from the user's own edits: closing would discard their work, keep it open.
+                        // (Dirtiness caused only by our grouping toggle is ignored - the file on disk is intact.)
+                        SafeLog(errorLog, "ROOT close optimization skipped: root is dirty/unsaved (" + rootDirtyReasonBefore + ").");
                     }
                     else
                     {
@@ -1915,7 +1943,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                         queue,
                         effective,
                         rootDocInfo != null ? (rootDocInfo.Path ?? string.Empty) : string.Empty,
-                        swConf != null ? (swConf.Name ?? string.Empty) : string.Empty,
+                        rootConfigName,
                         string.Empty,
                         runLog != null ? (runLog.Path ?? string.Empty) : string.Empty);
                     deliverablesSession.Status = ExportSessionStatusRunning;
@@ -2012,10 +2040,13 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             catch (OperationCanceledException)
             {
+                MarkActiveSessionInterrupted(ExportSessionStatusCancelled, errorLog);
                 Log(log, BuildCompletionMessage("Export cancelled"));
             }
             catch (Exception ex)
             {
+                // Keep the session resumable after a crash: the completed items stay recorded on disk.
+                MarkActiveSessionInterrupted(ExportSessionStatusCrashedOrIncomplete, errorLog);
                 LogExportFailure(log, errorLog, "File creation failed: " + ex.Message);
                 if (ex is System.Runtime.InteropServices.COMException ||
                     (ex.InnerException is System.Runtime.InteropServices.COMException))
@@ -2049,6 +2080,24 @@ namespace TinyMRP.SolidWorksAddin.Services
                 catch
                 {
                     // ignore restore errors
+                }
+
+                try
+                {
+                    // A root reopened from disk already carries the user's saved grouping; only a root
+                    // that stayed open the whole run still has our in-memory toggle to undo.
+                    if (rootGroupingToggled && !rootClosedForExport && rootDocInfo != null)
+                    {
+                        ModelDoc2 rootDocNow = FindOpenDocument(rootDocInfo.Path, rootDocInfo.Title);
+                        if (rootDocNow != null)
+                        {
+                            TrySetGroupComponentInstances(rootDocNow, true, errorLog, "deliverables-restore-grouping");
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore grouping restore errors
                 }
 
                 try
@@ -2102,10 +2151,99 @@ namespace TinyMRP.SolidWorksAddin.Services
                         // ignore cancel-reset errors
                     }
 
+                    // Clear ALL per-run state. The session FILE stays on disk for resume; only the
+                    // in-memory reference is dropped so the queue/plan graphs can be collected.
                     _activeBatchRootTitle = string.Empty;
                     _activeBatchRootDocType = 0;
                     _currentExportSummary = null;
+                    SetActiveExportSession(null);
+                    CollectComGarbage(errorLog, "deliverables-end");
                 }
+            }
+        }
+
+        // Marks the in-memory session (if any) with an interrupted status and persists it, so a crash
+        // or cancel still leaves a resumable session file behind.
+        private void MarkActiveSessionInterrupted(string status, Action<string> errorLog)
+        {
+            try
+            {
+                ExportSessionState session = GetActiveExportSession();
+                if (session == null)
+                {
+                    return;
+                }
+
+                if (string.Equals(session.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(session.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                session.Status = status;
+                SaveExportSessionAtomic(session, errorLog);
+            }
+            catch
+            {
+                // ignore session bookkeeping errors
+            }
+        }
+
+        // Releases orphaned COM runtime-callable wrappers so SolidWorks can actually unload the
+        // documents touched during a batch run; without this the memory "sticks" until a later GC.
+        private void CollectComGarbage(Action<string> errorLog, string context)
+        {
+            try
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                DebugExport(errorLog, "GC done context=" + (context ?? string.Empty) +
+                    " mem=" + GetPrivateMemoryBytes() +
+                    " openDocs=" + SnapshotOpenDocIds().Count);
+            }
+            catch
+            {
+                // ignore GC errors
+            }
+        }
+
+        // "Group Component Instances" (FeatureManager tree option, SW2024+) collapses repeated
+        // components into grouped nodes; with it active, component/configuration COM objects have
+        // been observed to disconnect (RPC_E_DISCONNECTED) during batch traversal. Exports disable
+        // it for the run and restore it afterwards.
+        private bool TryGetGroupComponentInstances(ModelDoc2 model)
+        {
+            try
+            {
+                FeatureManager featureManager = model != null ? model.FeatureManager : null;
+                return featureManager != null && featureManager.GroupComponentInstances;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TrySetGroupComponentInstances(ModelDoc2 model, bool value, Action<string> errorLog, string context)
+        {
+            try
+            {
+                FeatureManager featureManager = model != null ? model.FeatureManager : null;
+                if (featureManager == null)
+                {
+                    return false;
+                }
+
+                featureManager.GroupComponentInstances = value;
+                SafeLog(errorLog, "GROUPING GroupComponentInstances=" + value + " context=" + (context ?? string.Empty));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                SafeLog(errorLog, "GROUPING set failed value=" + value + " context=" + (context ?? string.Empty) +
+                    " error=" + ex.Message);
+                return false;
             }
         }
 
@@ -2251,19 +2389,12 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             catch (OperationCanceledException)
             {
+                MarkActiveSessionInterrupted(ExportSessionStatusCancelled, errorLog);
                 Log(log, BuildCompletionMessage("Export cancelled"));
             }
             catch (Exception ex)
             {
-                ExportSessionState activeSession = GetActiveExportSession();
-                if (activeSession != null &&
-                    !string.Equals(activeSession.Status, ExportSessionStatusPaused, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(activeSession.Status, ExportSessionStatusCompleted, StringComparison.OrdinalIgnoreCase))
-                {
-                    activeSession.Status = ExportSessionStatusFailed;
-                    SaveExportSessionAtomic(activeSession, errorLog);
-                }
-
+                MarkActiveSessionInterrupted(ExportSessionStatusFailed, errorLog);
                 LogExportFailure(log, errorLog, "Resume failed: " + ex.Message);
                 if (ex is System.Runtime.InteropServices.COMException ||
                     (ex.InnerException is System.Runtime.InteropServices.COMException))
@@ -2320,7 +2451,10 @@ namespace TinyMRP.SolidWorksAddin.Services
                         // ignore
                     }
 
+                    // Clear per-run state; the session file on disk keeps resume working.
                     _currentExportSummary = null;
+                    SetActiveExportSession(null);
+                    CollectComGarbage(errorLog, "resume-end");
                 }
             }
         }
@@ -2390,12 +2524,21 @@ namespace TinyMRP.SolidWorksAddin.Services
 
             ResetCancel();
             var bomTimer = System.Diagnostics.Stopwatch.StartNew();
+            bool bomGroupingToggled = false;
             try
             {
                 errorLog?.Invoke("BOM start: title=" + (rootTitle ?? string.Empty) +
                                  " path=" + (rootModel != null ? (rootModel.GetPathName() ?? string.Empty) : string.Empty) +
                                  " config=" + (swConf.Name ?? string.Empty) +
                                  " topLevelOnly=" + effective.TopLevelOnly);
+
+                // Grouped component instances can disconnect component COM objects during traversal;
+                // switch grouping off for the run and restore it in the finally block.
+                if (modelType == (int)swDocumentTypes_e.swDocASSEMBLY && TryGetGroupComponentInstances(rootModel))
+                {
+                    bomGroupingToggled = TrySetGroupComponentInstances(rootModel, false, errorLog, "bom-pre-traverse");
+                    errorLog?.Invoke("GROUPING: component instance grouping was ON; disabled for BOM export ok=" + bomGroupingToggled);
+                }
 
                 string modelPath = swModel.GetPathName();
                 if (string.IsNullOrWhiteSpace(modelPath))
@@ -2474,11 +2617,28 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
             finally
             {
+                try
+                {
+                    if (bomGroupingToggled)
+                    {
+                        TrySetGroupComponentInstances(rootModel, true, errorLog, "bom-restore-grouping");
+                    }
+                }
+                catch
+                {
+                    // ignore grouping restore errors
+                }
+
                 // Close only documents that BECAME VISIBLE during the run; hidden in-memory references
                 // are left to SolidWorks (closing them one-by-one hung BOM export on large assemblies).
                 CloseNonRootDocs(initialDocs, rootModel, rootTitle);
                 CloseModelIfNotInitiallyOpen(initialDocs, rootModel, startTitle);
                 RestoreStartDocument(startTitle);
+
+                // Clear per-run state so nothing lingers after the BOM run.
+                _activeBatchRootTitle = string.Empty;
+                _activeBatchRootDocType = 0;
+                CollectComGarbage(errorLog, "bom-end");
                 errorLog?.Invoke("BOM cleanup done. visibleDocs=" + GetOpenVisibleDocumentIds().Count);
             }
         }
@@ -2496,9 +2656,20 @@ namespace TinyMRP.SolidWorksAddin.Services
             SetLastRunLogPath(runLog);
             errorLog?.Invoke("START upload pack");
 
+            ModelDoc2 activeRoot = _swApp != null ? (_swApp.ActiveDoc as ModelDoc2) : null;
+            bool groupingToggled = false;
             try
             {
                 ResetCancel();
+
+                if (activeRoot != null &&
+                    activeRoot.GetType() == (int)swDocumentTypes_e.swDocASSEMBLY &&
+                    TryGetGroupComponentInstances(activeRoot))
+                {
+                    groupingToggled = TrySetGroupComponentInstances(activeRoot, false, errorLog, "upload-pack-pre-traverse");
+                    errorLog?.Invoke("GROUPING: component instance grouping was ON; disabled for upload pack ok=" + groupingToggled);
+                }
+
                 HashSet<string> uploadPackBases;
                 List<UploadPackBuilder.AssociatedFilesBundle> uploadPackExtras;
                 string flatFile = TraverseModel(string.Empty, effective, log, null, errorLog,
@@ -2514,6 +2685,22 @@ namespace TinyMRP.SolidWorksAddin.Services
             {
                 errorLog?.Invoke("Upload pack failed: " + ex);
                 Log(log, BuildRunLogMessage("Upload pack failed: " + ex.Message, runLog));
+            }
+            finally
+            {
+                try
+                {
+                    if (groupingToggled)
+                    {
+                        TrySetGroupComponentInstances(activeRoot, true, errorLog, "upload-pack-restore-grouping");
+                    }
+                }
+                catch
+                {
+                    // ignore grouping restore errors
+                }
+
+                CollectComGarbage(errorLog, "upload-pack-end");
             }
         }
 
@@ -3908,7 +4095,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 ok = false;
             }
 
-            SafeLog(errorLog, "TEMP BOM ASM activate ok=" + ok + " errors=" + errors +
+            SafeLog(errorLog, "ACTIVATE doc ok=" + ok + " errors=" + errors +
                 " title=" + activateTitle + " context=" + (context ?? string.Empty));
         }
 
