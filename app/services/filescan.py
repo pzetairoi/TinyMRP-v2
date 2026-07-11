@@ -557,12 +557,4 @@ def remove_stale_part_files(
         )
         doc.delete()
 
-    if removed:
-        try:
-            from app.services.part_materialized import sync_materialized_fields_for_pairs
-
-            sync_materialized_fields_for_pairs({(pn_clean, rev_clean)})
-        except Exception:
-            pass
-
     return {"count": len(removed), "removed": removed}

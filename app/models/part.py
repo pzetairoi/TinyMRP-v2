@@ -56,6 +56,13 @@ class Part(Document):
             { "fields": ["canonical.approved_by"], "name": "parts_canonical_approved_by_idx" },
             { "fields": ["file_groups"], "name": "parts_file_groups_idx" },
             { "fields": ["has_pdf"], "name": "parts_has_pdf_idx" },
+            { "fields": ["has_png"], "name": "parts_has_png_idx" },
+            { "fields": ["has_dxf"], "name": "parts_has_dxf_idx" },
+            { "fields": ["has_step"], "name": "parts_has_step_idx" },
+            { "fields": ["has_edr"], "name": "parts_has_edr_idx" },
+            { "fields": ["has_3mf"], "name": "parts_has_3mf_idx" },
+            { "fields": ["has_ply"], "name": "parts_has_ply_idx" },
+            { "fields": ["has_stl"], "name": "parts_has_stl_idx" },
             { "fields": ["has_datasheet"], "name": "parts_has_datasheet_idx" },
         ],
         "db_alias": DB_ALIAS

@@ -1,84 +1,52 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Optional
 
 from app.models.numbering import NumberingScheme
 from app.services.timezone_utils import utc_now
 
 
-PRESETS = [
-    {
-        "name": "Default: PART-SEQ6",
-        "pattern_segments": [
-            {"kind": "literal", "value": "PART"},
-            {"kind": "seq", "padding": 6, "base": 10, "start_at": 1, "auto_counter": True},
-        ],
-        "separator": "-",
-        "scope_mode": "global",
-        "seq": {"padding": 6, "base": 10, "start_at": 1, "reset_policy": "never"},
-        "revision": {"policy": "alpha", "start": "A"},
-        "validation_rules": {"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        "is_preset": True,
-        "is_recommended": True,
-        "visibility": "quickstart",
-        "description": "Recommended: PART-SEQ6",
-    },
-]
-
-LEGACY_PRESET_NAMES = {
-    "Preset B: TYPE-YYYY-SEQ5",
-    "Preset C: FAM-SUB-SEQ6",
+# The single built-in scheme. New parts get no revision by default; users who want
+# revision letters or numbers can opt in from the scheme builder.
+DEFAULT_PRESET = {
+    "name": "Default: PART-SEQ6",
+    "pattern_segments": [
+        {"kind": "literal", "value": "PART"},
+        {"kind": "seq", "padding": 6, "base": 10, "start_at": 1, "auto_counter": True},
+    ],
+    "separator": "-",
+    "scope_mode": "global",
+    "seq": {"padding": 6, "base": 10, "start_at": 1, "reset_policy": "never"},
+    "revision": {"policy": "none", "start": ""},
+    "validation_rules": {"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+    "is_preset": True,
+    "is_recommended": True,
+    "visibility": "quickstart",
+    "description": "Recommended: PART-000001, no revision",
 }
 
 
 def ensure_presets() -> None:
-    _remove_legacy_presets()
-
-    preset = PRESETS[0]
-    if NumberingScheme.objects().count() == 0:
-        NumberingScheme(**preset, is_active=True, audit={"created_at": utc_now()}).save()
-        return
-
+    """Seed the built-in scheme when missing. Existing schemes are never force-reset:
+    boot-time resets silently reverted user changes and re-enabled disabled schemes."""
+    preset = DEFAULT_PRESET
     existing = NumberingScheme.objects(name=preset["name"]).first()
-    if not existing:
+    if existing is None:
         preset_data = dict(preset)
         has_recommended = NumberingScheme.objects(is_recommended=True, is_active=True).first() is not None
-        preset_data["is_recommended"] = not has_recommended
+        preset_data["is_recommended"] = bool(preset_data.get("is_recommended")) and not has_recommended
         NumberingScheme(**preset_data, is_active=True, audit={"created_at": utc_now()}).save()
         return
 
-    has_other_recommended = NumberingScheme.objects(
-        is_recommended=True,
-        is_active=True,
-        id__ne=existing.id,
-    ).first() is not None
-    updates = {
-        "name": preset["name"],
-        "pattern_segments": preset["pattern_segments"],
-        "separator": preset["separator"],
-        "scope_mode": preset["scope_mode"],
-        "scope_keys": preset.get("scope_keys", []),
-        "seq": preset["seq"],
-        "revision": preset["revision"],
-        "validation_rules": preset["validation_rules"],
-        "is_active": True,
-        "is_preset": preset["is_preset"],
-        "visibility": preset["visibility"],
-        "description": preset["description"],
-        "is_recommended": not has_other_recommended,
-    }
-    existing.update(**{f"set__{k}": v for k, v in updates.items()})
-
-
-def _remove_legacy_presets() -> None:
-    if not LEGACY_PRESET_NAMES:
-        return
-
-    NumberingScheme.objects(
-        is_preset=True,
-        name__in=list(LEGACY_PRESET_NAMES),
-    ).delete()
+    # One-time migration: earlier seeds forced revision "A" onto every new part. If the
+    # preset still carries that seeded default, switch it to "no revision". Any other
+    # policy/start combination is a deliberate choice and is left alone.
+    revision = existing.revision or {}
+    if (
+        str(revision.get("policy") or "").strip().lower() == "alpha"
+        and str(revision.get("start") or "").strip().upper() == "A"
+    ):
+        existing.update(set__revision=dict(preset["revision"]))
 
 
 def get_recommended_scheme() -> Optional[NumberingScheme]:

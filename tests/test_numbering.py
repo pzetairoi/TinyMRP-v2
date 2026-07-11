@@ -66,6 +66,41 @@ def test_allocate_increments_sequence():
     assert result2["part_number"].endswith("002")
 
 
+def test_allocate_without_revision_config_yields_empty_revision():
+    # A scheme that never configured a revision policy must not invent "A":
+    # new parts stay revision-less and the display code is just the part number.
+    scheme = NumberingScheme(
+        name="NoRevisionConfigured",
+        pattern_segments=[
+            {"kind": "literal", "value": "PART"},
+            {"kind": "seq", "padding": 6, "base": 10, "auto_counter": True},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": 6, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": utc_now()},
+    ).save()
+
+    result, errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=True,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email="user@example.com",
+        cad_ref=None,
+    )
+
+    assert not errors
+    assert result["revision"] == ""
+    assert result["display_code"] == result["part_number"]
+    part = Part.objects(part_number=result["part_number"]).first()
+    assert part is not None
+    assert (part.revision or "") == ""
+
+
 def test_revision_increment_policies():
     assert revision_for_existing("A", "alpha", "A") == "B"
     assert revision_for_existing("Z", "alpha", "A") == "AA"
@@ -342,45 +377,38 @@ def test_ensure_presets_seeds_simple_recommended_scheme():
     assert scheme.pattern_segments[1].get("auto_counter") is True
 
 
-def test_ensure_presets_removes_legacy_seeded_presets():
-    NumberingScheme(
-        name="Preset B: TYPE-YYYY-SEQ5",
-        is_active=True,
-        is_preset=True,
-        pattern_segments=[
-            {"kind": "field", "field": "type", "casing": "upper"},
-            {"kind": "date", "fmt": "YYYY"},
-            {"kind": "seq", "padding": 5, "base": 10},
-        ],
-        separator="-",
-        scope_mode="global",
-        seq={"padding": 5, "base": 10, "start_at": 1, "reset_policy": "yearly"},
-        revision={"policy": "alpha", "start": "A"},
-        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": utc_now()},
-    ).save()
-    NumberingScheme(
-        name="Preset C: FAM-SUB-SEQ6",
-        is_active=True,
-        is_preset=True,
-        pattern_segments=[
-            {"kind": "field", "field": "family", "casing": "upper"},
-            {"kind": "field", "field": "subfamily", "casing": "upper"},
-            {"kind": "seq", "padding": 6, "base": 10},
-        ],
-        separator="-",
-        scope_mode="global",
-        seq={"padding": 6, "base": 10, "start_at": 1, "reset_policy": "never"},
-        revision={"policy": "alpha", "start": "A"},
-        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
-        audit={"created_at": utc_now()},
-    ).save()
+def test_ensure_presets_seeds_no_revision_default():
+    ensure_presets()
+
+    scheme = NumberingScheme.objects(name="Default: PART-SEQ6").first()
+    assert scheme is not None
+    assert (scheme.revision or {}).get("policy") == "none"
+    assert (scheme.revision or {}).get("start") == ""
+
+
+def test_ensure_presets_migrates_seeded_alpha_revision_to_none():
+    ensure_presets()
+    scheme = NumberingScheme.objects(name="Default: PART-SEQ6").first()
+    scheme.update(set__revision={"policy": "alpha", "start": "A"})
 
     ensure_presets()
 
-    assert NumberingScheme.objects(name="Preset B: TYPE-YYYY-SEQ5").first() is None
-    assert NumberingScheme.objects(name="Preset C: FAM-SUB-SEQ6").first() is None
-    assert NumberingScheme.objects(name="Default: PART-SEQ6").first() is not None
+    scheme.reload()
+    assert (scheme.revision or {}).get("policy") == "none"
+    assert (scheme.revision or {}).get("start") == ""
+
+
+def test_ensure_presets_keeps_user_edits_to_default_scheme():
+    ensure_presets()
+    scheme = NumberingScheme.objects(name="Default: PART-SEQ6").first()
+    # A deliberate (non-seeded) revision choice and a disable must survive restarts.
+    scheme.update(set__revision={"policy": "numeric", "start": "01"}, set__is_active=False)
+
+    ensure_presets()
+
+    scheme.reload()
+    assert (scheme.revision or {}).get("policy") == "numeric"
+    assert scheme.is_active is False
 
 
 def test_ensure_presets_does_not_add_duplicate_recommended_scheme():

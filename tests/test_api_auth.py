@@ -1,7 +1,5 @@
 from datetime import datetime
 
-from flask import jsonify
-
 from app.models.app_settings import AppSettings
 from app.models.api_token import ApiToken
 from app.models.numbering import NumberingScheme
@@ -177,29 +175,8 @@ def test_delete_scheme_removes_document_and_clears_default_scheme(client, user, 
     assert settings.default_scheme_id == ""
 
 
-def test_legacy_aliases_require_auth(client):
-    assert client.get("/api/schemes").status_code == 401
-    assert client.get("/api/settings").status_code == 401
-    assert client.post("/api/preview", json={"scheme_id": "x"}).status_code == 401
-
-
-def test_legacy_aliases_forward_to_current_handlers(client, user, monkeypatch):
-    _, raw = create_token(user, "legacy-aliases")
-    headers = _auth_headers(raw)
-
-    import app.views.legacy_addin_api as legacy_addin_api
-
-    monkeypatch.setattr(legacy_addin_api, "list_schemes", lambda: jsonify({"ok": True, "alias": "schemes"}))
-    resp = client.get("/api/schemes", headers=headers)
-    assert resp.status_code == 200
-    assert resp.get_json()["alias"] == "schemes"
-
-    monkeypatch.setattr(legacy_addin_api, "get_settings", lambda: jsonify({"ok": True, "alias": "settings"}))
-    resp = client.get("/api/settings", headers=headers)
-    assert resp.status_code == 200
-    assert resp.get_json()["alias"] == "settings"
-
-    monkeypatch.setattr(legacy_addin_api, "preview", lambda: jsonify({"ok": True, "alias": "preview"}))
-    resp = client.post("/api/preview", headers=headers, json={"scheme_id": "x"})
-    assert resp.status_code == 200
-    assert resp.get_json()["alias"] == "preview"
+def test_legacy_alias_routes_are_gone(client):
+    # The pre-/api/numbering addin shim was removed; current addins use /api/numbering/*.
+    assert client.get("/api/schemes").status_code == 404
+    assert client.get("/api/settings").status_code == 404
+    assert client.post("/api/preview", json={"scheme_id": "x"}).status_code == 404

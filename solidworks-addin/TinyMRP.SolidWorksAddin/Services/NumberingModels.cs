@@ -233,15 +233,17 @@ namespace TinyMRP.SolidWorksAddin.Services
 
     internal sealed class RevisionSettings
     {
-        public string Policy { get; set; } = "alpha";
-        public string Start { get; set; } = "A";
+        // Default: no revision. Parts without a revision stay revision-less; "A" is only
+        // ever applied when a scheme explicitly selects the alpha policy.
+        public string Policy { get; set; } = "none";
+        public string Start { get; set; } = string.Empty;
 
         public Dictionary<string, object> ToPayload()
         {
             return new Dictionary<string, object>
             {
-                ["policy"] = Policy ?? "alpha",
-                ["start"] = Start ?? "A"
+                ["policy"] = Policy ?? "none",
+                ["start"] = Start ?? string.Empty
             };
         }
 
@@ -249,8 +251,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         {
             return new RevisionSettings
             {
-                Policy = NumberingJson.GetString(data, "policy") ?? "alpha",
-                Start = NumberingJson.GetString(data, "start") ?? "A",
+                Policy = NumberingJson.GetString(data, "policy") ?? "none",
+                Start = NumberingJson.GetString(data, "start") ?? string.Empty,
             };
         }
     }

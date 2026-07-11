@@ -4741,10 +4741,10 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
             SelectComboItem(_seqResetCombo, scheme.Seq != null ? scheme.Seq.ResetPolicy : string.Empty);
 
-            SelectComboItem(_revPolicyCombo, scheme.Revision != null ? scheme.Revision.Policy : string.Empty);
+            SelectComboItem(_revPolicyCombo, scheme.Revision != null ? scheme.Revision.Policy : "none");
             if (_revStartText != null)
             {
-                _revStartText.Text = scheme.Revision != null ? scheme.Revision.Start : "A";
+                _revStartText.Text = scheme.Revision != null ? (scheme.Revision.Start ?? string.Empty) : string.Empty;
             }
 
             if (_maxLengthUpDown != null)
@@ -4788,7 +4788,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             scheme.Revision = new RevisionSettings
             {
                 Policy = GetComboText(_revPolicyCombo),
-                Start = _revStartText != null ? _revStartText.Text.Trim() : "A"
+                Start = _revStartText != null ? _revStartText.Text.Trim() : string.Empty
             };
 
             scheme.ValidationRules = new ValidationRules

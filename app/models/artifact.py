@@ -1,5 +1,5 @@
 from datetime import datetime
-from mongoengine import FloatField, BooleanField, Document, StringField, DateTimeField, IntField, DictField
+from mongoengine import FloatField, BooleanField, Document, StringField, DateTimeField, IntField, DictField, signals
 from app.services.timezone_utils import utc_now
  
 
@@ -37,3 +37,21 @@ class PartFile(Document):
         {"fields": ["ext_group", "part_number", "revision"], "name": "part_files_ext_group_part_rev_idx"},
     ]
 }
+
+
+def _sync_part_file_flags(sender, document, **kwargs):
+    """Keep the owning Part's materialized file flags in sync."""
+    pn = str(getattr(document, "part_number", "") or "").strip()
+    rev = str(getattr(document, "revision", "") or "")
+    if not pn:
+        return
+    from app.services.part_materialized import sync_materialized_fields_for_pairs
+
+    sync_materialized_fields_for_pairs({(pn, rev)})
+
+
+# Atomic upserts in filescan.py explicitly call the same materialization service
+# because QuerySet.modify() does not emit document save signals. These hooks cover
+# direct Document.save()/delete() calls and make QuerySet.delete() signal-aware.
+signals.post_save.connect(_sync_part_file_flags, sender=PartFile, weak=False)
+signals.post_delete.connect(_sync_part_file_flags, sender=PartFile, weak=False)
