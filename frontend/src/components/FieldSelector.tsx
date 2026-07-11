@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import type { CSSProperties } from 'react'
 import type { FieldDefinition } from '../lib/fieldConfig'
 
 type Props = {
@@ -10,6 +12,10 @@ type Props = {
   onReset: () => void
   inline?: boolean
   buttonLabel?: string
+  buttonIcon?: string
+  buttonClassName?: string
+  buttonStyle?: CSSProperties
+  menuAlign?: 'start' | 'end'
 }
 
 function SelectorBody({
@@ -76,26 +82,88 @@ function SelectorBody({
 }
 
 export default function FieldSelector(props: Props) {
-  const { inline = false, buttonLabel = 'Fields' } = props
+  const {
+    inline = false,
+    buttonLabel = 'Fields',
+    buttonIcon,
+    buttonClassName = 'btn btn-sm btn-outline-secondary',
+    buttonStyle,
+    menuAlign = 'end',
+  } = props
   const [open, setOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ top: number; left?: number; right?: number } | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  function updateMenuPosition() {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    if (menuAlign === 'start') {
+      setMenuPos({ top: rect.bottom + 4, left: Math.max(8, rect.left) })
+    } else {
+      setMenuPos({ top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) })
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setOpen(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', updateMenuPosition)
+    window.addEventListener('scroll', updateMenuPosition, true)
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', updateMenuPosition)
+      window.removeEventListener('scroll', updateMenuPosition, true)
+    }
+  }, [open, menuAlign])
 
   if (inline) {
     return <SelectorBody {...props} />
   }
 
   return (
-    <div className="position-relative">
-      <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setOpen((v) => !v)}>
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={buttonClassName}
+        style={buttonStyle}
+        onClick={() => {
+          if (!open) updateMenuPosition()
+          setOpen((v) => !v)
+        }}
+      >
+        {buttonIcon && <i className={buttonIcon} aria-hidden="true" />}
         {buttonLabel}
       </button>
-      {open && (
+      {open && menuPos && createPortal(
         <div
-          className="position-absolute end-0 mt-2"
-          style={{ zIndex: 20, minWidth: 320, maxWidth: 520 }}
+          ref={menuRef}
+          style={{
+            position: 'fixed',
+            top: menuPos.top,
+            left: menuPos.left,
+            right: menuPos.right,
+            zIndex: 2000,
+            minWidth: 320,
+            maxWidth: 520,
+          }}
         >
           <SelectorBody {...props} />
-        </div>
+        </div>,
+        document.body,
       )}
-    </div>
+    </>
   )
 }

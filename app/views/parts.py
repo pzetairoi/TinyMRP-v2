@@ -1,7 +1,7 @@
 # app/views/parts.py
 from flask import Blueprint, request, jsonify, current_app, send_file
 from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
 from io import BytesIO
@@ -51,23 +51,25 @@ from app.services.timezone_utils import format_display_ts, local_input_value, ut
 from app.services.field_config import (
     boolean_filter_value,
     context_field_ids,
+    date_filter_value,
     effective_source_paths,
+    ensure_active_part_field_indexes,
     field_requires_runtime_scan,
     file_field_group,
     field_uses_materialized_value,
     field_index as field_config_index,
     get_field_config,
     mongo_field_from_source,
-    matches_field_filter_value,
+    matches_field_filter_constraints,
     number_filter_value,
     primary_query_path,
     query_paths_for_field,
     resolve_part_field_values,
+    serialize_field_values,
 )
 from app.services.part_materialized import batch_file_groups_for_parts
 from app.services.part_query import (
-    MISSING as FILTER_MISSING,
-    add_contains_filter,
+    filter_constraints,
     filter_value,
     or_contains,
     pairs_query,
@@ -522,6 +524,7 @@ def parts_lazy():
     filters = body.get("filters", {}) or {}
 
     field_config = get_field_config()
+    ensure_active_part_field_indexes(field_config)
     parts_context_ids = context_field_ids("parts_list", field_config)
     field_meta = field_config_index(field_config)
     runtime_filter_ids = {field_id for field_id in parts_context_ids if field_requires_runtime_scan(field_id, field_config)}
@@ -537,6 +540,11 @@ def parts_lazy():
         sort_field = "part_number"
         mapped_sort = primary_query_path(sort_field, field_config) or "part_number"
     order_by = f"-{mapped_sort}" if mapped_sort and sort_order == -1 else (mapped_sort or "part_number")
+    order_fields = [order_by]
+    if mapped_sort != "part_number":
+        order_fields.append("part_number")
+    if mapped_sort != "revision":
+        order_fields.append("revision")
 
     def _mongo_path(path: str) -> str:
         return str(path or "").replace("__", ".")
@@ -544,41 +552,188 @@ def parts_lazy():
     def _field_false_or_missing_q(path: str) -> Q:
         return Q(**{path: False}) | Q(__raw__={_mongo_path(path): {"$exists": False}})
 
-    def _apply_typed_db_filter(q: Q, key: str, data_type: str, raw_value: Any):
-        paths = query_paths_for_field(key, field_config)
-        if not paths:
-            return None
+    def _default_match_mode(data_type: str) -> str:
         if data_type == "boolean":
-            expected = boolean_filter_value(raw_value)
-            if expected is None:
-                return None
-            or_q = Q()
-            for path in paths:
-                or_q = or_q | Q(**{path: expected})
-            return q & or_q
+            return "equals"
         if data_type == "number":
-            parsed = number_filter_value(raw_value)
-            path = primary_query_path(key, field_config)
-            if parsed is None or not path:
-                return add_contains_filter(q, paths, raw_value)
+            return "equals"
+        if data_type == "date":
+            return "dateIs"
+        return "contains"
+
+    def _combine_q(items: list[Q], operator: str) -> Q:
+        if not items:
+            return Q()
+        combined = items[0]
+        for item in items[1:]:
+            combined = (combined | item) if operator == "or" else (combined & item)
+        return combined
+
+    def _path_empty_q(path: str) -> Q:
+        mongo_path = _mongo_path(path)
+        return Q(__raw__={"$or": [{mongo_path: {"$exists": False}}, {mongo_path: None}, {mongo_path: ""}]})
+
+    def _path_not_empty_q(path: str) -> Q:
+        mongo_path = _mongo_path(path)
+        return Q(__raw__={mongo_path: {"$exists": True, "$nin": [None, ""]}})
+
+    def _text_constraint_q(paths: list[str], match_mode: str, value: Any) -> Q:
+        text = str(value or "").strip()
+        if match_mode == "contains":
+            term_queries = [
+                _combine_q([Q(**{f"{path}__icontains": term}) for path in paths], "or")
+                for term in terms(text)
+            ]
+            return _combine_q(term_queries, "and")
+        lookups = {
+            "startsWith": "istartswith",
+            "endsWith": "iendswith",
+            "equals": "iexact",
+        }
+        if match_mode in lookups:
+            lookup = lookups[match_mode]
+            return _combine_q([Q(**{f"{path}__{lookup}": text}) for path in paths], "or")
+        if match_mode == "notContains":
+            return _combine_q([~Q(**{f"{path}__icontains": text}) for path in paths], "and")
+        if match_mode == "notEquals":
+            return _combine_q([~Q(**{f"{path}__iexact": text}) for path in paths], "and")
+        return _text_constraint_q(paths, "contains", text)
+
+    def _typed_constraint_q(paths: list[str], data_type: str, constraint: dict[str, Any]) -> Q:
+        match_mode = str(constraint.get("match_mode") or _default_match_mode(data_type))
+        value = constraint.get("value")
+        if match_mode == "isEmpty":
+            return _combine_q([_path_empty_q(path) for path in paths], "and")
+        if match_mode == "isNotEmpty":
+            return _combine_q([_path_not_empty_q(path) for path in paths], "or")
+        if data_type in {"text", "link"}:
+            return _text_constraint_q(paths, match_mode, value)
+        if data_type == "boolean":
+            expected = boolean_filter_value(value)
+            if expected is None:
+                return Q()
+            if match_mode == "notEquals":
+                expected = not expected
+            return _combine_q([Q(**{path: expected}) for path in paths], "or")
+        if data_type == "number":
+            parsed = number_filter_value(value)
+            if match_mode == "between" and isinstance(value, (list, tuple)) and len(value) >= 2:
+                left = number_filter_value(value[0])
+                right = number_filter_value(value[1])
+                if left and right:
+                    low = min(left[1], right[1])
+                    high = max(left[1], right[1])
+                    return _combine_q([Q(**{f"{path}__gte": low, f"{path}__lte": high}) for path in paths], "or")
+            if parsed is None:
+                return Q()
+            if match_mode == "equals" and parsed[0] != "=":
+                op, start, end = parsed
+                if op == "range":
+                    return _combine_q([Q(**{f"{path}__gte": start, f"{path}__lte": end}) for path in paths], "or")
+                suffix = {">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}.get(op, "")
+                return _combine_q([Q(**{f"{path}__{suffix}" if suffix else path: start}) for path in paths], "or")
+            mode_ops = {"equals": "", "notEquals": "ne", "lt": "lt", "lte": "lte", "gt": "gt", "gte": "gte"}
+            if match_mode in mode_ops:
+                suffix = mode_ops[match_mode]
+                return _combine_q([Q(**{f"{path}__{suffix}" if suffix else path: parsed[1]}) for path in paths], "or")
             op, start, end = parsed
             if op == "range":
-                return q & Q(**{f"{path}__gte": start}) & Q(**{f"{path}__lte": end})
-            if op == ">":
-                return q & Q(**{f"{path}__gt": start})
-            if op == ">=":
-                return q & Q(**{f"{path}__gte": start})
-            if op == "<":
-                return q & Q(**{f"{path}__lt": start})
-            if op == "<=":
-                return q & Q(**{f"{path}__lte": start})
-            return q & Q(**{path: start})
-        return add_contains_filter(q, paths, raw_value)
+                return _combine_q([Q(**{f"{path}__gte": start, f"{path}__lte": end}) for path in paths], "or")
+            suffix = {">": "gt", ">=": "gte", "<": "lt", "<=": "lte"}.get(op, "")
+            return _combine_q([Q(**{f"{path}__{suffix}" if suffix else path: start}) for path in paths], "or")
+        if data_type == "date":
+            target = date_filter_value(value)
+            if target is None:
+                return Q()
+            start = target.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = start + timedelta(days=1)
+            if match_mode == "dateBefore":
+                return _combine_q([Q(**{f"{path}__lt": start}) for path in paths], "or")
+            if match_mode == "dateAfter":
+                return _combine_q([Q(**{f"{path}__gte": end}) for path in paths], "or")
+            day_queries = [Q(**{f"{path}__gte": start, f"{path}__lt": end}) for path in paths]
+            matched = _combine_q(day_queries, "or")
+            return ~matched if match_mode == "dateIsNot" else matched
+        return Q()
+
+    def _field_constraints_q(field_id: str, data_type: str, operator: str, constraints: list[dict[str, Any]]) -> Q | None:
+        if field_id == "approved":
+            queries = []
+            for constraint in constraints:
+                mode = str(constraint.get("match_mode") or "equals")
+                expected = boolean_filter_value(constraint.get("value"))
+                if mode == "isEmpty":
+                    expected = False
+                elif mode == "isNotEmpty":
+                    expected = True
+                elif mode == "notEquals" and expected is not None:
+                    expected = not expected
+                if expected is not None:
+                    queries.append(_approval_q(expected))
+            return _combine_q(queries, operator) if queries else None
+        if file_field_group(field_id):
+            queries = []
+            for constraint in constraints:
+                mode = str(constraint.get("match_mode") or "equals")
+                expected = boolean_filter_value(constraint.get("value"))
+                if mode == "isEmpty":
+                    expected = False
+                elif mode == "isNotEmpty":
+                    expected = True
+                elif mode == "notEquals" and expected is not None:
+                    expected = not expected
+                if expected is not None:
+                    queries.append(_file_filter_q(field_id, expected))
+            return _combine_q(queries, operator) if queries else None
+        paths = query_paths_for_field(field_id, field_config)
+        if field_id == "process":
+            queries = []
+            for constraint in constraints:
+                mode = str(constraint.get("match_mode") or "contains")
+                if mode == "contains":
+                    queries.append(_process_filter_q(str(constraint.get("value") or "")))
+                else:
+                    process_paths = ["processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes", "canonical__processes"]
+                    queries.append(_typed_constraint_q(process_paths, data_type, constraint))
+            return _combine_q(queries, operator)
+        if not paths:
+            return None
+        return _combine_q([_typed_constraint_q(paths, data_type, item) for item in constraints], operator)
 
     def _or_array_regex(field: str, term: str) -> Q:
         if not term:
             return Q()
         return Q(__raw__={field: {"$regex": re.escape(term), "$options": "i"}})
+
+    process_meta = current_app.config.get("PROCESS_META", {}) or {}
+
+    def _process_filter_q(text: str) -> Q:
+        raw_text = str(text or "").strip()
+        if not raw_text:
+            return Q()
+        normalized = normalize_processes({"processes": [raw_text]}, process_meta)
+        raw_terms = terms(raw_text)
+        if raw_text.lower() not in raw_terms:
+            raw_terms.insert(0, raw_text.lower())
+        out = Q(processes__in=normalized) if normalized else Q()
+        for term in raw_terms:
+            out = (
+                out
+                | _or_array_regex("processes", term)
+                | Q(attrs__process__icontains=term)
+                | Q(attrs__process2__icontains=term)
+                | Q(attrs__process3__icontains=term)
+                | Q(attrs__processes__icontains=term)
+                | Q(canonical__processes__icontains=term)
+            )
+        category_paths = query_paths_for_field("category", field_config) or ["attrs__category", "category"]
+        material_paths = query_paths_for_field("material", field_config) or ["attrs__material"]
+        normalized_text = raw_text.lower()
+        if normalized_text in {"hardware", "fastener", "fasteners"}:
+            out = out | or_contains(category_paths, "hardware")
+        elif normalized_text in {"sheet metal", "sheetmetal", "sheet"}:
+            out = out | or_contains(category_paths, "sheet") | or_contains(material_paths, "sheet")
+        return out
 
     def _file_filter_q(field_id: str, expected: bool) -> Q:
         path = primary_query_path(field_id, field_config) or field_id
@@ -590,139 +745,35 @@ def parts_lazy():
 
     q = Q()
     fallback_base_q = Q()
-    generic_filter_ids: list[str] = []
-    typed_filter_specs: list[tuple[str, str, Any]] = []
-    runtime_filter_specs: list[tuple[str, str, Any]] = []
-    materialized_filter_specs: list[tuple[str, str, Any]] = []
+    typed_filter_specs: list[tuple[str, str, str, list[dict[str, Any]]]] = []
+    runtime_filter_specs: list[tuple[str, str, str, list[dict[str, Any]]]] = []
+    materialized_filter_specs: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for field_id in filterable_ids:
-        if field_id in {"material", "process"}:
-            continue
         data_type = str(field_meta.get(field_id, {}).get("data_type") or "text")
-        uses_materialized_value = field_id in materialized_filter_ids
-        raw_value = filter_value(filters, field_id, FILTER_MISSING)
         if data_type == "image":
             continue
-        if uses_materialized_value:
-            if raw_value is FILTER_MISSING or raw_value in (None, ""):
-                continue
-            if data_type in {"boolean", "number"}:
-                next_q = _apply_typed_db_filter(q, field_id, data_type, raw_value)
-                if next_q is not None:
-                    q = next_q
-            else:
-                paths = query_paths_for_field(field_id, field_config)
-                if paths:
-                    q = add_contains_filter(q, paths, raw_value)
-            materialized_filter_specs.append((field_id, data_type, raw_value))
+        operator, constraints = filter_constraints(
+            filters,
+            field_id,
+            default_match_mode=_default_match_mode(data_type),
+        )
+        if not constraints:
             continue
-        if data_type in {"boolean", "number"}:
-            if raw_value is not FILTER_MISSING and raw_value not in (None, ""):
-                if data_type == "boolean" and field_id == "approved":
-                    expected = boolean_filter_value(raw_value)
-                    if expected is not None:
-                        q = q & _approval_q(expected)
-                        fallback_base_q = fallback_base_q & _approval_q(expected)
-                        continue
-                if data_type == "boolean" and file_field_group(field_id):
-                    expected = boolean_filter_value(raw_value)
-                    if expected is not None:
-                        q = q & _file_filter_q(field_id, expected)
-                        fallback_base_q = fallback_base_q & _file_filter_q(field_id, expected)
-                        continue
-                if field_id in runtime_filter_ids:
-                    typed_filter_specs.append((field_id, data_type, raw_value))
-                else:
-                    next_q = _apply_typed_db_filter(q, field_id, data_type, raw_value)
-                    next_fallback_q = _apply_typed_db_filter(fallback_base_q, field_id, data_type, raw_value)
-                    if next_q is None:
-                        typed_filter_specs.append((field_id, data_type, raw_value))
-                    else:
-                        q = next_q
-                        if next_fallback_q is not None:
-                            fallback_base_q = next_fallback_q
-            continue
+        spec = (field_id, data_type, operator, constraints)
         if field_id in runtime_filter_ids:
-            if raw_value is not FILTER_MISSING and raw_value not in (None, ""):
-                runtime_filter_specs.append((field_id, data_type, raw_value))
+            runtime_filter_specs.append(spec)
             continue
-        generic_filter_ids.append(field_id)
-
-    for field_id in generic_filter_ids:
-        paths = query_paths_for_field(field_id, field_config)
-        if paths:
-            raw_value = filter_value(filters, field_id, "")
-            q = add_contains_filter(q, paths, raw_value)
-            fallback_base_q = add_contains_filter(fallback_base_q, paths, raw_value)
-
-    material_val = filter_value(filters, "material", "")
-    material_val_norm = str(material_val or "").strip().lower()
-    if material_val_norm not in {"__missing__", "missing", "(missing)"}:
-        if "material" in materialized_filter_ids and material_val not in (None, ""):
-            paths = query_paths_for_field("material", field_config)
-            if paths:
-                q = add_contains_filter(q, paths, material_val)
-            materialized_filter_specs.append(("material", str(field_meta.get("material", {}).get("data_type") or "text"), material_val))
-        elif "material" in runtime_filter_ids and material_val not in (None, ""):
-            runtime_filter_specs.append(("material", str(field_meta.get("material", {}).get("data_type") or "text"), material_val))
+        field_q = _field_constraints_q(field_id, data_type, operator, constraints)
+        if field_q is None:
+            typed_filter_specs.append(spec)
+            continue
+        q = q & field_q
+        if field_id in materialized_filter_ids:
+            # Keep the unfiltered base query for old rows that have not yet had
+            # this materialized field rebuilt.
+            materialized_filter_specs.append(spec)
         else:
-            paths = query_paths_for_field("material", field_config)
-            if paths:
-                q = add_contains_filter(q, paths, material_val)
-                fallback_base_q = add_contains_filter(fallback_base_q, paths, material_val)
-
-    finish_val = filter_value(filters, "finish", "")
-    if "finish" in materialized_filter_ids and finish_val not in (None, ""):
-        paths = query_paths_for_field("finish", field_config)
-        if paths:
-            q = add_contains_filter(q, paths, finish_val)
-        materialized_filter_specs.append(("finish", str(field_meta.get("finish", {}).get("data_type") or "text"), finish_val))
-    elif "finish" in runtime_filter_ids and finish_val not in (None, ""):
-        runtime_filter_specs.append(("finish", str(field_meta.get("finish", {}).get("data_type") or "text"), finish_val))
-    else:
-        paths = query_paths_for_field("finish", field_config)
-        if paths:
-            q = add_contains_filter(q, paths, finish_val)
-            fallback_base_q = add_contains_filter(fallback_base_q, paths, finish_val)
-
-    meta = current_app.config.get("PROCESS_META", {}) or {}
-
-    def _process_filter_q(text: str) -> Q:
-        raw_text = str(text or "").strip()
-        if not raw_text:
-            return Q()
-        normalized_terms = normalize_processes({"processes": [raw_text]}, meta)
-        raw_terms = terms(raw_text)
-        if raw_text.lower() not in raw_terms:
-            raw_terms.insert(0, raw_text.lower())
-        or_q = Q()
-        if normalized_terms:
-            or_q = or_q | Q(processes__in=normalized_terms)
-        for term in raw_terms:
-            or_q = (
-                or_q
-                | _or_array_regex("processes", term)
-                | Q(attrs__process__icontains=term)
-                | Q(attrs__process2__icontains=term)
-                | Q(attrs__process3__icontains=term)
-                | Q(attrs__processes__icontains=term)
-                | Q(canonical__processes__icontains=term)
-            )
-        return or_q
-
-    category_paths = query_paths_for_field("category", field_config) or ["attrs__category", "category"]
-    material_paths = query_paths_for_field("material", field_config) or ["attrs__material"]
-    proc_key = "process" if "process" in filters else "processes"
-    proc_val = filter_value(filters, proc_key, "")
-    proc_val_norm = str(proc_val or "").strip().lower()
-    if proc_val_norm in {"hardware", "fastener", "fasteners"}:
-        q = q & (_process_filter_q("hardware") | or_contains(category_paths, "hardware"))
-        fallback_base_q = fallback_base_q & (_process_filter_q("hardware") | or_contains(category_paths, "hardware"))
-    elif proc_val_norm in {"sheet metal", "sheetmetal", "sheet"}:
-        q = q & (_process_filter_q(proc_val_norm) | or_contains(category_paths, "sheet") | or_contains(material_paths, "sheet"))
-        fallback_base_q = fallback_base_q & (_process_filter_q(proc_val_norm) | or_contains(category_paths, "sheet") | or_contains(material_paths, "sheet"))
-    elif proc_val_norm:
-        q = q & _process_filter_q(proc_val_norm)
-        fallback_base_q = fallback_base_q & _process_filter_q(proc_val_norm)
+            fallback_base_q = fallback_base_q & field_q
 
     global_value = filter_value(filters, "global", "")
     if global_value:
@@ -732,7 +783,12 @@ def parts_lazy():
             if path and path not in global_paths:
                 global_paths.append(path)
 
-        for field_id, fallback_path in (("part_number", "part_number"), ("description", "description")):
+        for field_id, fallback_path in (
+            ("part_number", "part_number"),
+            ("description", "description"),
+            ("notes", "notes_search"),
+            ("comments", "comments_search"),
+        ):
             for path in query_paths_for_field(field_id, field_config):
                 _append_search_path(path)
             for source_path in effective_source_paths(field_id, field_config):
@@ -779,27 +835,6 @@ def parts_lazy():
     qs = Part.objects(q)
     fallback_qs = Part.objects(fallback_base_q)
 
-    if material_val_norm in {"__missing__", "missing", "(missing)"}:
-        material_query = _mongo_path(primary_query_path("material", field_config) or "attrs__material")
-        qs = qs.filter(
-            __raw__={
-                "$or": [
-                    {material_query: {"$exists": False}},
-                    {material_query: ""},
-                    {material_query: None},
-                ]
-            }
-        )
-        fallback_qs = fallback_qs.filter(
-            __raw__={
-                "$or": [
-                    {material_query: {"$exists": False}},
-                    {material_query: ""},
-                    {material_query: None},
-                ]
-            }
-        )
-
     def _missing_materialized_q(field_ids: set[str]) -> Q:
         out = Q()
         for field_id in field_ids:
@@ -834,7 +869,7 @@ def parts_lazy():
 
     if needs_scan:
         scan_order_by = order_by if not runtime_sort else "part_number"
-        all_docs = list(qs.order_by(scan_order_by).only("part_number", "revision", "description", "category", "attrs", "processes"))
+        all_docs = list(qs.order_by(scan_order_by, "part_number", "revision").only("part_number", "revision", "description", "category", "attrs", "processes"))
         scan_requires_values = bool(runtime_sort or typed_filter_specs or runtime_filter_specs)
         coverage = _coverage_map(all_docs) if scan_requires_values else {}
         filtered_docs: list[Part] = []
@@ -853,9 +888,15 @@ def parts_lazy():
                     extra={"part_number": part.part_number, "revision": rev},
                     coverage=groups,
                 )
-            if any(not matches_field_filter_value(values.get(field_id), raw_value, data_type) for field_id, data_type, raw_value in typed_filter_specs):
+            if any(
+                not matches_field_filter_constraints(values.get(field_id), constraints, operator, data_type)
+                for field_id, data_type, operator, constraints in typed_filter_specs
+            ):
                 continue
-            if any(not matches_field_filter_value(values.get(field_id), raw_value, data_type) for field_id, data_type, raw_value in runtime_filter_specs):
+            if any(
+                not matches_field_filter_constraints(values.get(field_id), constraints, operator, data_type)
+                for field_id, data_type, operator, constraints in runtime_filter_specs
+            ):
                 continue
             if values:
                 resolved_cache[(part.part_number, rev)] = values
@@ -883,7 +924,7 @@ def parts_lazy():
     else:
         filtered = qs.count()
         docs = list(
-            qs.order_by(order_by)
+            qs.order_by(*order_fields)
             .only(
                 "part_number", "revision", "description", "category", "attrs", "processes",
                 "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
@@ -897,7 +938,7 @@ def parts_lazy():
 
         fallback_limit = max(first + rows, rows)
         if materialized_filter_specs and filtered < fallback_limit:
-            stale_filter_ids = {field_id for field_id, _data_type, _raw_value in materialized_filter_specs}
+            stale_filter_ids = {field_id for field_id, _data_type, _operator, _constraints in materialized_filter_specs}
             stale_candidates_qs = fallback_qs.filter(_missing_materialized_q(stale_filter_ids))
             stale_candidates = list(
                 stale_candidates_qs.only(
@@ -909,7 +950,7 @@ def parts_lazy():
             fallback_docs: list[Part] = []
             fallback_values_cache: dict[tuple[str, str], dict[str, Any]] = {}
             fallback_sort_type = str((field_meta.get(sort_field) or {}).get("data_type") or "text")
-            fallback_field_ids = {field_id for field_id, _data_type, _raw_value in materialized_filter_specs}
+            fallback_field_ids = {field_id for field_id, _data_type, _operator, _constraints in materialized_filter_specs}
             if sort_field:
                 fallback_field_ids.add(sort_field)
             fallback_field_ids.update({"part_number", "revision"})
@@ -924,14 +965,17 @@ def parts_lazy():
                     config=field_config,
                     extra={"part_number": part.part_number, "revision": rev},
                 )
-                if any(not matches_field_filter_value(values.get(field_id), raw_value, data_type) for field_id, data_type, raw_value in materialized_filter_specs):
+                if any(
+                    not matches_field_filter_constraints(values.get(field_id), constraints, operator, data_type)
+                    for field_id, data_type, operator, constraints in materialized_filter_specs
+                ):
                     continue
                 fallback_values_cache[(part.part_number, rev)] = values
                 fallback_docs.append(part)
 
             if fallback_docs:
                 db_prefix = list(
-                    qs.order_by(order_by)
+                    qs.order_by(*order_fields)
                     .only(
                         "part_number", "revision", "description", "category", "attrs", "processes",
                         "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
@@ -1000,6 +1044,7 @@ def parts_lazy():
         elif thumb_list:
             values["thumbnail"] = thumb_list[0]
         values["display_code"] = f"{pn}-{rev}" if rev else pn
+        values = serialize_field_values(values, field_config)
         out.append(
             {
                 "id": f"{pn}::{rev}",
@@ -1113,6 +1158,7 @@ def part_detail():
         extra={"part_number": p.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
     )
     summary_field_values.update(approval_field_values(attrs))
+    summary_field_values = serialize_field_values(summary_field_values)
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
     approver_identity = str(approved_value(attrs) or "").strip()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from datetime import date, datetime, time, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from flask import current_app, has_app_context
@@ -284,7 +285,7 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "id": "approved_date",
         "label": "Approved Date",
         "kind": "builtin",
-        "data_type": "text",
+        "data_type": "date",
         "source_path": "part.canonical.approved_date",
         "fallback_paths": ["part.canonical.approved_date", "attrs.approved_date"],
         "source_locked": False,
@@ -306,7 +307,7 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "id": "drawn_date",
         "label": "Drawn Date",
         "kind": "builtin",
-        "data_type": "text",
+        "data_type": "date",
         "source_path": "part.canonical.drawn_date",
         "fallback_paths": ["part.canonical.drawn_date", "attrs.drawndate"],
         "source_locked": False,
@@ -328,7 +329,7 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "id": "checked_date",
         "label": "Checked Date",
         "kind": "builtin",
-        "data_type": "text",
+        "data_type": "date",
         "source_path": "part.canonical.checked_date",
         "fallback_paths": ["part.canonical.checked_date", "attrs.checkeddate"],
         "source_locked": False,
@@ -730,7 +731,7 @@ def _is_valid_source_path(path: Any) -> bool:
 
 def _coerce_custom_data_type(value: Any) -> str:
     data_type = _normalize_text(value).lower()
-    if data_type in {"text", "number", "boolean", "link"}:
+    if data_type in {"text", "number", "boolean", "date", "link"}:
         return data_type
     return "text"
 
@@ -800,18 +801,76 @@ def text_terms_match(value: Any, filter_value: Any) -> bool:
     return all(term in hay for term in terms)
 
 
-def matches_field_filter_value(value: Any, filter_value: Any, data_type: str = "text") -> bool:
+def date_filter_value(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, time.min)
+    text = _normalize_text(value)
+    if not text:
+        return None
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    except ValueError:
+        pass
+    for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _is_empty_filter_value(value: Any) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def matches_field_filter_value(
+    value: Any,
+    filter_value: Any,
+    data_type: str = "text",
+    match_mode: str = "contains",
+) -> bool:
+    if match_mode == "isEmpty":
+        return _is_empty_filter_value(value)
+    if match_mode == "isNotEmpty":
+        return not _is_empty_filter_value(value)
     text = _normalize_text(filter_value)
     if not text:
         return True
     if data_type == "boolean":
         expected = boolean_filter_value(text)
         if expected is not None:
-            return _is_truthy(value) == expected
+            matched = _is_truthy(value) == expected
+            return not matched if match_mode == "notEquals" else matched
         normalized = "true yes" if _is_truthy(value) else "false no"
         return text_terms_match(normalized, text)
     if data_type == "number":
-        parsed = _number_filter(text)
+        mode_to_op = {"equals": "=", "notEquals": "!=", "lt": "<", "lte": "<=", "gt": ">", "gte": ">="}
+        parsed = None
+        if match_mode == "between" and isinstance(filter_value, (list, tuple)) and len(filter_value) >= 2:
+            left = _value_as_number(filter_value[0])
+            right = _value_as_number(filter_value[1])
+            if left is not None and right is not None:
+                parsed = ("range", min(left, right), max(left, right))
+        elif match_mode in mode_to_op:
+            # Preserve the compact legacy grammar (">10", "4..8") when a
+            # client omits matchMode and the type's default is equals.
+            inline = _number_filter(text) if match_mode == "equals" else None
+            if inline is not None and inline[0] != "=":
+                parsed = inline
+            else:
+                target = _value_as_number(filter_value)
+                if target is not None:
+                    parsed = (mode_to_op[match_mode], target, None)
+        else:
+            parsed = _number_filter(text)
         if parsed is None:
             return text_terms_match(value, text)
         actual = _value_as_number(value)
@@ -828,8 +887,52 @@ def matches_field_filter_value(value: Any, filter_value: Any, data_type: str = "
             return actual < start
         if op == "<=":
             return actual <= start
+        if op == "!=":
+            return actual != start
         return actual == start
+    if data_type == "date":
+        actual = date_filter_value(value)
+        target = date_filter_value(filter_value)
+        if actual is None or target is None:
+            return False
+        actual_day = actual.date()
+        target_day = target.date()
+        if match_mode == "dateIsNot":
+            return actual_day != target_day
+        if match_mode == "dateBefore":
+            return actual_day < target_day
+        if match_mode == "dateAfter":
+            return actual_day > target_day
+        return actual_day == target_day
+
+    hay = _normalize_text(value).lower()
+    needle = text.lower()
+    if match_mode == "equals":
+        return hay == needle
+    if match_mode == "notEquals":
+        return hay != needle
+    if match_mode == "startsWith":
+        return hay.startswith(needle)
+    if match_mode == "endsWith":
+        return hay.endswith(needle)
+    if match_mode == "notContains":
+        return needle not in hay
     return text_terms_match(value, text)
+
+
+def matches_field_filter_constraints(
+    value: Any,
+    constraints: Iterable[Dict[str, Any]],
+    operator: str,
+    data_type: str = "text",
+) -> bool:
+    results = [
+        matches_field_filter_value(value, item.get("value"), data_type, str(item.get("match_mode") or "contains"))
+        for item in constraints
+    ]
+    if not results:
+        return True
+    return any(results) if str(operator).lower() == "or" else all(results)
 
 
 def default_field_config() -> Dict[str, Any]:
@@ -1298,10 +1401,12 @@ def _get_nested(source: Any, path: List[str]) -> Any:
 
 def _coerce_value(value: Any, data_type: str) -> Any:
     if value is None:
-        return ""
+        return None if data_type in {"boolean", "number", "date"} else ""
     if data_type == "boolean":
         if isinstance(value, bool):
             return value
+        if not _normalize_text(value):
+            return None
         return _is_truthy(value)
     if data_type == "number":
         if isinstance(value, (int, float)):
@@ -1312,8 +1417,10 @@ def _coerce_value(value: Any, data_type: str) -> Any:
         try:
             num = float(text)
         except Exception:
-            return text
+            return None
         return int(num) if num.is_integer() else num
+    if data_type == "date":
+        return date_filter_value(value)
     if data_type == "link":
         return _normalize_text(value)
     if isinstance(value, (list, tuple, set)):
@@ -1378,6 +1485,8 @@ def field_uses_materialized_value(field_id: str, config: Optional[Dict[str, Any]
         return False
     if str(field.get("kind") or "") == "custom":
         return True
+    if str(field.get("data_type") or "") == "date":
+        return True
     default_field = _default_builtin_map().get(field_id)
     if not default_field or field.get("source_locked"):
         return False
@@ -1389,6 +1498,53 @@ def field_uses_materialized_value(field_id: str, config: Optional[Dict[str, Any]
 def materialized_field_ids(config: Optional[Dict[str, Any]] = None) -> List[str]:
     config = config or get_field_config()
     return [field["id"] for field in config.get("fields", []) if field_uses_materialized_value(field["id"], config)]
+
+
+_PART_FIELD_INDEX_SIGNATURES: set[tuple[str, ...]] = set()
+
+
+def ensure_active_part_field_indexes(config: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Create idempotent indexes for materialized Parts-list fields in active use."""
+    config = config or get_field_config()
+    active_ids: List[str] = []
+    fields = field_index(config)
+    for field_id in context_field_ids("parts_list", config):
+        field = fields.get(field_id) or {}
+        if not field_id or not field_uses_materialized_value(field_id, config):
+            continue
+        if field.get("filterable") or field.get("sortable"):
+            active_ids.append(field_id)
+    signature = tuple(sorted(set(active_ids)))
+    collection = Part._get_collection()
+    expected_names = [
+        f"parts_field_values_{(re.sub(r'[^a-zA-Z0-9_]+', '_', field_id).strip('_') or 'field')}_idx"[:120]
+        for field_id in signature
+    ]
+    if signature in _PART_FIELD_INDEX_SIGNATURES and all(name in collection.index_information() for name in expected_names):
+        return expected_names
+    names: List[str] = []
+    for field_id in signature:
+        safe_id = re.sub(r"[^a-zA-Z0-9_]+", "_", field_id).strip("_") or "field"
+        name = f"parts_field_values_{safe_id}_idx"[:120]
+        collection.create_index([(f"field_values.{field_id}", 1)], name=name)
+        names.append(name)
+    _PART_FIELD_INDEX_SIGNATURES.add(signature)
+    return names
+
+
+def serialize_field_values(
+    values: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Convert typed values to the stable JSON representation used by the UI."""
+    fields = field_index(config or get_field_config())
+    out = dict(values or {})
+    for field_id, value in list(out.items()):
+        if str((fields.get(field_id) or {}).get("data_type") or "") != "date" or value is None:
+            continue
+        parsed = date_filter_value(value)
+        out[field_id] = parsed.date().isoformat() if parsed is not None else ""
+    return out
 
 
 def resolve_part_field_value(

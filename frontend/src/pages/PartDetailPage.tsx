@@ -585,6 +585,8 @@ export default function PartDetailPage() {
   const [fieldPreferences, setFieldPreferences] = useState<FieldPreferences | null>(null);
   const insightsLoading = false;
   const [notes, setNotes] = useState("");
+  const [savedNotes, setSavedNotes] = useState("");
+  const [notesSavedOnce, setNotesSavedOnce] = useState(false);
   const [comments, setComments] = useState<CommentRow[]>([]);
   const [uploaderProfile, setUploaderProfile] = useState<IdentityProfile | null>(null);
   const [approverProfile, setApproverProfile] = useState<IdentityProfile | null>(null);
@@ -981,6 +983,13 @@ function isExternalDatasheetUrl(url: string): boolean {
     })();
   }, [isSharedView, shareApiBase]);
 
+  useEffect(() => {
+    document.body.classList.add('wide-page');
+    return () => {
+      document.body.classList.remove('wide-page');
+    };
+  }, []);
+
   // ---- Load Part Detail ----
   useEffect(() => {
     let canceled = false;
@@ -1017,6 +1026,8 @@ function isExternalDatasheetUrl(url: string): boolean {
             : null
         );
         setNotes(partNotes);
+        setSavedNotes(partNotes);
+        setNotesSavedOnce(false);
         setComments(Array.isArray(j.comments) ? j.comments : []);
         setUploaderProfile(j.uploader_profile || null);
         setApproverProfile(j.approver_profile || null);
@@ -1075,6 +1086,8 @@ function isExternalDatasheetUrl(url: string): boolean {
             setImages([]);
             setJobsOrders([]);
             setNotes("");
+            setSavedNotes("");
+            setNotesSavedOnce(false);
             setComments([]);
             setUploaderProfile(null);
             setApproverProfile(null);
@@ -1627,6 +1640,26 @@ function isExternalDatasheetUrl(url: string): boolean {
   const selectedWhereUsedIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "where_used") : defaultWhereUsedIds
   const selectedExcelIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "excel_bom") : defaultExcelIds
   const selectedArenaIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "arena_bom") : defaultArenaIds
+  const whereUsedSelectorFieldId = selectedWhereUsedIds.includes("thumbnail") ? "thumbnail" : selectedWhereUsedIds[0]
+  const bomSelectorFieldId = selectedBomIds.includes("thumbnail") ? "thumbnail" : selectedBomIds[0]
+
+  function renderBomColumnsSelector() {
+    if (isSharedView || !bomFields.length) return null
+    return (
+      <FieldSelector
+        title="BOM fields"
+        buttonLabel="Columns"
+        buttonIcon="pi pi-table"
+        buttonClassName="btn btn-sm d-inline-flex align-items-center gap-1 parts-columns-trigger"
+        menuAlign="start"
+        availableFields={bomFields}
+        selectedIds={selectedBomIds}
+        requiredIds={requiredBomIds}
+        onChange={(fieldIds) => persistFieldSelection("bom_tree", fieldIds)}
+        onReset={() => persistFieldSelection("bom_tree", defaultBomIds)}
+      />
+    )
+  }
   const excelUseDefault = fieldPreferences?.contexts?.excel_bom?.use_default ?? true
   const arenaUseDefault = fieldPreferences?.contexts?.arena_bom?.use_default ?? true
   const arenaAvailableFields = useMemo(
@@ -2015,6 +2048,7 @@ function isExternalDatasheetUrl(url: string): boolean {
   // default to All attributes.
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
   const hasNotesOrComments = notes.trim().length > 0 || comments.length > 0
+  const notesDirty = notes !== savedNotes
 
   function tabHeader(label: string, icon: string, attention = false) {
     return (
@@ -2045,7 +2079,10 @@ function isExternalDatasheetUrl(url: string): boolean {
         throw new Error(await resp.text())
       }
       const j = await resp.json()
-      setNotes(String(j.notes || ""))
+      const persisted = String(j.notes || "")
+      setNotes(persisted)
+      setSavedNotes(persisted)
+      setNotesSavedOnce(true)
     } catch (e: any) {
       setNotesError(e?.message || "Failed to save notes")
     } finally {
@@ -2297,7 +2334,7 @@ function isExternalDatasheetUrl(url: string): boolean {
   }
 
   return (
-    <div className="container-xxl py-3">
+    <div className="container-fluid py-3">
       {/* Title */}
       <div className="pb-2 border-bottom mb-3">
         <div className="d-flex align-items-start justify-content-between gap-3">
@@ -3172,17 +3209,24 @@ function isExternalDatasheetUrl(url: string): boolean {
             headerClassName={hasNotesOrComments ? "pd-tab-attention" : undefined}
           >
             <div className="pd-card p-3 mt-3">
-              <div className="d-flex align-items-center justify-content-between">
+              <div className="d-flex align-items-center justify-content-between gap-2">
                 <h6 className="mb-0">Notes</h6>
                 {canPartsNote ? (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-primary"
-                    onClick={saveNotes}
-                    disabled={notesSaving}
-                  >
-                    {notesSaving ? "Saving..." : "Save"}
-                  </button>
+                  <div className="d-flex align-items-center gap-2">
+                    {notesDirty ? (
+                      <span className="small text-warning-emphasis">Unsaved changes</span>
+                    ) : notesSavedOnce ? (
+                      <span className="small text-success"><i className="pi pi-check me-1" aria-hidden="true" />Saved</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={saveNotes}
+                      disabled={notesSaving || !notesDirty}
+                    >
+                      {notesSaving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
                 ) : null}
               </div>
               <textarea
@@ -3190,15 +3234,26 @@ function isExternalDatasheetUrl(url: string): boolean {
                 rows={4}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && canPartsNote && notesDirty && !notesSaving) {
+                    e.preventDefault()
+                    saveNotes()
+                  }
+                }}
                 placeholder="Add notes for this part..."
                 disabled={!canPartsNote}
               />
               {notesError ? <div className="text-danger small mt-1">{notesError}</div> : null}
-              {!canPartsNote && <div className="text-muted small mt-1">Read-only</div>}
+              {canPartsNote
+                ? <div className="text-muted small mt-1">Ctrl+Enter to save</div>
+                : <div className="text-muted small mt-1">Read-only</div>}
 
               <div className="mt-3">
                 <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
-                  <h6 className="mb-0">Comments</h6>
+                  <h6 className="mb-0 d-flex align-items-center gap-2">
+                    Comments
+                    <span className="badge rounded-pill text-bg-secondary">{comments.length}</span>
+                  </h6>
                   <input
                     type="search"
                     className="form-control form-control-sm"
@@ -3210,7 +3265,8 @@ function isExternalDatasheetUrl(url: string): boolean {
                 </div>
                 {notesSearch.trim() ? (
                   <div className="small text-muted mb-2">
-                    Notes: {notesMatchesSearch ? "match found" : "no match"}
+                    Showing {filteredComments.length} of {comments.length} comments.
+                    {" "}Notes: {notesMatchesSearch ? "match found" : "no match"}.
                   </div>
                 ) : null}
                 {filteredComments.length ? (
@@ -3221,9 +3277,12 @@ function isExternalDatasheetUrl(url: string): boolean {
                           {identityAvatar(c.author_profile, c.author_display || c.author || "User", "md")}
                           <div className="pd-comment-body">
                             <div className="small text-muted">
-                              {c.author_display || c.author || "User"} {c.ts ? `- ${c.ts_display || c.ts}` : ""}
+                              <span className="fw-semibold">{c.author_display || c.author || "User"}</span>
+                              {c.ts ? (
+                                <span title={c.ts_local || c.ts}> - {c.ts_display || c.ts}</span>
+                              ) : null}
                             </div>
-                            <div className="small">{c.text}</div>
+                            <div className="small pd-comment-text">{c.text}</div>
                           </div>
                         </div>
                       </div>
@@ -3231,28 +3290,37 @@ function isExternalDatasheetUrl(url: string): boolean {
                   </div>
                 ) : (
                   <div className="text-muted small">
-                    {notesSearch.trim() ? "No matching comments." : "No comments yet."}
+                    {notesSearch.trim() ? "No matching comments." : "No comments yet. Start the discussion below."}
                   </div>
                 )}
                 {canPartsNote && (
-                  <div className="input-group input-group-sm mt-2">
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      placeholder="Add a comment..."
-                      disabled={commentSaving}
-                    />
-                    <button
-                      className="btn btn-outline-primary"
-                      type="button"
-                      onClick={addComment}
-                      disabled={commentSaving || !commentText.trim()}
-                    >
-                      {commentSaving ? "Adding..." : "Add"}
-                    </button>
-                  </div>
+                  <>
+                    <div className="input-group input-group-sm mt-2">
+                      <textarea
+                        className="form-control"
+                        rows={2}
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && commentText.trim() && !commentSaving) {
+                            e.preventDefault()
+                            addComment()
+                          }
+                        }}
+                        placeholder="Add a comment..."
+                        disabled={commentSaving}
+                      />
+                      <button
+                        className="btn btn-outline-primary"
+                        type="button"
+                        onClick={addComment}
+                        disabled={commentSaving || !commentText.trim()}
+                      >
+                        {commentSaving ? "Posting..." : "Post"}
+                      </button>
+                    </div>
+                    <div className="text-muted small mt-1">Ctrl+Enter to post</div>
+                  </>
                 )}
                 {commentError ? <div className="text-danger small mt-1">{commentError}</div> : null}
               </div>
@@ -3544,33 +3612,44 @@ function isExternalDatasheetUrl(url: string): boolean {
             {!isSharedView && <div className="pd-usedin pd-card">
             <div className="d-flex align-items-center justify-content-between mb-2">
               <h6 className="mb-0">Used in</h6>
-              {whereUsedFields.length > 0 && (
-                <FieldSelector
-                  title="Where-used fields"
-                  buttonLabel="Fields"
-                  availableFields={whereUsedFields}
-                  selectedIds={selectedWhereUsedIds}
-                  requiredIds={requiredWhereUsedIds}
-                  onChange={(fieldIds) => persistFieldSelection("where_used", fieldIds)}
-                  onReset={() => persistFieldSelection("where_used", defaultWhereUsedIds)}
-                />
-              )}
             </div>
             <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll" filterDisplay="row">
               {selectedWhereUsedIds.map((fieldId) => {
                 const field = whereUsedFields.find((item) => item.id === fieldId)
                 if (!field) return null
+                const isThumbnail = field.id === "thumbnail"
+                const showColumnSelector = field.id === whereUsedSelectorFieldId && whereUsedFields.length > 0
                 return (
                   <Column
                     key={field.id}
                     field={field.id}
-                    header={field.id === "thumbnail" ? "" : field.label}
+                    header={
+                      showColumnSelector ? (
+                        <div className="d-flex align-items-center gap-2">
+                          {!isThumbnail && <span>{field.label}</span>}
+                          <FieldSelector
+                            title="Where-used fields"
+                            buttonLabel="Columns"
+                            buttonIcon="pi pi-table"
+                            buttonClassName="btn btn-sm d-inline-flex align-items-center gap-1 parts-columns-trigger"
+                            menuAlign="start"
+                            availableFields={whereUsedFields}
+                            selectedIds={selectedWhereUsedIds}
+                            requiredIds={requiredWhereUsedIds}
+                            onChange={(fieldIds) => persistFieldSelection("where_used", fieldIds)}
+                            onReset={() => persistFieldSelection("where_used", defaultWhereUsedIds)}
+                          />
+                        </div>
+                      ) : (
+                        isThumbnail ? "" : field.label
+                      )
+                    }
                     sortable={field.sortable !== false}
                     filter={field.filterable !== false}
                     showFilterMenu={false}
                     filterPlaceholder={fieldFilterPlaceholder(field)}
                     body={(row: WURow) => renderWhereUsedCell(field, row)}
-                    style={field.id === "thumbnail" ? { width: 56 } : field.id === "revision" ? { width: 100 } : field.id === "qty" ? { width: 100 } : undefined}
+                    style={isThumbnail ? { width: 110 } : field.id === "revision" ? { width: 100 } : field.id === "qty" ? { width: 100 } : undefined}
                   />
                 )
               })}
@@ -3601,17 +3680,6 @@ function isExternalDatasheetUrl(url: string): boolean {
                 Flat
               </button>
             </div>
-            {!isSharedView && bomFields.length > 0 && (
-              <FieldSelector
-                title="BOM fields"
-                buttonLabel="Fields"
-                availableFields={bomFields}
-                selectedIds={selectedBomIds}
-                requiredIds={requiredBomIds}
-                onChange={(fieldIds) => persistFieldSelection("bom_tree", fieldIds)}
-                onReset={() => persistFieldSelection("bom_tree", defaultBomIds)}
-              />
-            )}
             {bomMode === "tree" ? (
               <>
                 <button type="button" className="btn btn-sm btn-outline-secondary" onClick={expandAll}>
@@ -3671,9 +3739,11 @@ function isExternalDatasheetUrl(url: string): boolean {
             {selectedBomIds.map((fieldId) => {
               const field = bomFields.find((item) => item.id === fieldId)
               if (!field) return null
+              const isThumbnail = field.id === "thumbnail"
+              const showColumnSelector = !isSharedView && field.id === bomSelectorFieldId && bomFields.length > 0
               const style =
-                field.id === "thumbnail"
-                  ? { width: 64 }
+                isThumbnail
+                  ? { width: 110 }
                   : field.id === "part_number"
                   ? { width: 240, textAlign: "left" as const }
                   : field.id === "revision"
@@ -3686,7 +3756,16 @@ function isExternalDatasheetUrl(url: string): boolean {
                   key={field.id}
                   field={field.id}
                   filterField={field.id}
-                  header={field.id === "thumbnail" ? "" : field.label}
+                  header={
+                    showColumnSelector ? (
+                      <div className="d-flex align-items-center gap-2">
+                        {!isThumbnail && <span>{field.label}</span>}
+                        {renderBomColumnsSelector()}
+                      </div>
+                    ) : (
+                      isThumbnail ? "" : field.label
+                    )
+                  }
                   sortable={field.sortable !== false}
                   filter={field.filterable !== false}
                   filterMatchMode="custom"
@@ -3719,9 +3798,11 @@ function isExternalDatasheetUrl(url: string): boolean {
             {selectedBomIds.map((fieldId) => {
               const field = bomFields.find((item) => item.id === fieldId)
               if (!field) return null
+              const isThumbnail = field.id === "thumbnail"
+              const showColumnSelector = !isSharedView && field.id === bomSelectorFieldId && bomFields.length > 0
               const style =
-                field.id === "thumbnail"
-                  ? { width: 64 }
+                isThumbnail
+                  ? { width: 110 }
                   : field.id === "part_number"
                   ? { width: 240 }
                   : field.id === "revision"
@@ -3729,13 +3810,22 @@ function isExternalDatasheetUrl(url: string): boolean {
                   : field.id === "qty"
                   ? { width: 110 }
                   : undefined
-              const header = field.id === "thumbnail" ? "" : field.id === "qty" ? "Total Qty" : field.label
+              const label = isThumbnail ? "" : field.id === "qty" ? "Total Qty" : field.label
               return (
                 <Column
                   key={field.id}
                   field={field.id}
                   filterField={field.id}
-                  header={header}
+                  header={
+                    showColumnSelector ? (
+                      <div className="d-flex align-items-center gap-2">
+                        {!isThumbnail && <span>{label}</span>}
+                        {renderBomColumnsSelector()}
+                      </div>
+                    ) : (
+                      label
+                    )
+                  }
                   sortable={field.sortable !== false}
                   filter={field.filterable !== false}
                   filterMatchMode="custom"

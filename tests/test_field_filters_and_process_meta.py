@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.models.artifact import PartFile
 from app.models.app_settings import AppSettings
 from app.models.auth import Role, User
@@ -150,6 +152,109 @@ def test_parts_lazy_supports_constraint_style_filter_payloads(client):
     assert [row["part_number"] for row in rows] == ["CST-200"]
 
 
+def test_parts_lazy_honors_match_modes_and_multiple_constraints(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    Part(part_number="MODE-100", revision="A", description="Alpha fixture plate").save()
+    Part(part_number="MODE-200", revision="A", description="Beta fixture bracket").save()
+    Part(part_number="MODE-300", revision="A", description="Alpha cover").save()
+
+    and_resp = client.post(
+        "/api/parts_lazy",
+        json={
+            "first": 0,
+            "rows": 25,
+            "filters": {
+                "description": {
+                    "operator": "and",
+                    "constraints": [
+                        {"value": "fixture", "matchMode": "contains"},
+                        {"value": "Alpha", "matchMode": "startsWith"},
+                    ],
+                }
+            },
+        },
+    )
+    assert [row["part_number"] for row in and_resp.get_json()["data"]] == ["MODE-100"]
+
+    or_resp = client.post(
+        "/api/parts_lazy",
+        json={
+            "first": 0,
+            "rows": 25,
+            "filters": {
+                "description": {
+                    "operator": "or",
+                    "constraints": [
+                        {"value": "bracket", "matchMode": "endsWith"},
+                        {"value": "Alpha cover", "matchMode": "equals"},
+                    ],
+                }
+            },
+        },
+    )
+    assert [row["part_number"] for row in or_resp.get_json()["data"]] == ["MODE-200", "MODE-300"]
+
+
+def test_parts_lazy_filters_typed_custom_dates_and_creates_active_index(client):
+    admin = _admin_user()
+    _login(client, admin)
+    save_field_config(
+        {
+            "custom_fields": [
+                {"id": "eta_date", "label": "ETA Date", "source_path": "attrs.eta_date", "data_type": "date"},
+            ],
+            "contexts": {
+                "parts_list": {
+                    "allowed_field_ids": ["part_number", "eta_date"],
+                    "default_field_ids": ["part_number", "eta_date"],
+                }
+            },
+        }
+    )
+    Part(part_number="DATE-100", revision="A", attrs={"eta_date": "2026-07-01"}).save()
+    Part(part_number="DATE-200", revision="A", attrs={"eta_date": "2026-07-15"}).save()
+    Part(part_number="DATE-300", revision="A", attrs={}).save()
+
+    stored = Part.objects(part_number="DATE-100").first()
+    assert isinstance(stored.field_values["eta_date"], datetime)
+
+    response = client.post(
+        "/api/parts_lazy",
+        json={
+            "first": 0,
+            "rows": 25,
+            "sortField": "eta_date",
+            "filters": {
+                "eta_date": {
+                    "operator": "and",
+                    "constraints": [{"value": "2026-07-01", "matchMode": "dateAfter"}],
+                }
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert [row["part_number"] for row in response.get_json()["data"]] == ["DATE-200"]
+    assert response.get_json()["data"][0]["eta_date"] == "2026-07-15"
+    assert "parts_field_values_eta_date_idx" in Part._get_collection().index_information()
+
+    empty_response = client.post(
+        "/api/parts_lazy",
+        json={
+            "first": 0,
+            "rows": 25,
+            "filters": {
+                "eta_date": {
+                    "operator": "and",
+                    "constraints": [{"value": None, "matchMode": "isEmpty"}],
+                }
+            },
+        },
+    )
+    assert [row["part_number"] for row in empty_response.get_json()["data"]] == ["DATE-300"]
+
+
 def test_parts_lazy_global_search_matches_part_number_and_description_with_other_filters(client):
     admin = _admin_user()
     _login(client, admin)
@@ -172,6 +277,27 @@ def test_parts_lazy_global_search_matches_part_number_and_description_with_other
     assert resp.status_code == 200
     rows = resp.get_json()["data"]
     assert [row["part_number"] for row in rows] == ["INV-100"]
+
+
+def test_parts_lazy_global_search_matches_materialized_notes_and_comments(client):
+    admin = _admin_user()
+    _login(client, admin)
+    Part(part_number="ANNOT-100", revision="A", description="Plain part").save()
+    Part(part_number="ANNOT-200", revision="A", description="Plain part").save()
+    Part.objects(part_number="ANNOT-100").update(set__notes_search="Inspect the sealing face")
+    Part.objects(part_number="ANNOT-200").update(set__comments_search="Replace the mounting bracket")
+
+    notes_resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"global": {"value": "sealing face"}}},
+    )
+    assert [row["part_number"] for row in notes_resp.get_json()["data"]] == ["ANNOT-100"]
+
+    comments_resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"global": {"value": "mounting bracket"}}},
+    )
+    assert [row["part_number"] for row in comments_resp.get_json()["data"]] == ["ANNOT-200"]
 
 
 def test_parts_lazy_combines_approved_file_and_material_column_filters(client):

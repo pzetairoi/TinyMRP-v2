@@ -111,4 +111,4 @@ def test_notes_and_comments_preserve_attrs_and_keep_search_indexes(client, user)
     )
     assert list_resp.status_code == 200
     rows = list_resp.get_json()["data"]
-    assert all(row["part_number"] != "PN-901" for row in rows)
+    assert [row["part_number"] for row in rows] == ["PN-901"]
