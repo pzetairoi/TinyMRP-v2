@@ -52,10 +52,6 @@ type Scheme = {
 type Segment = {
   kind?: string
   value?: string
-  field?: string
-  casing?: string
-  pad_left?: number
-  pad_char?: string
   padding?: number
   base?: number
   start_at?: number
@@ -63,12 +59,11 @@ type Segment = {
   fmt?: string
 }
 
-type SegmentKind = 'literal' | 'seq' | 'field' | 'date'
+type SegmentKind = 'literal' | 'seq' | 'date'
 
 const KIND_LABELS: Record<SegmentKind, string> = {
   literal: 'Fixed text',
   seq: 'Auto counter',
-  field: 'Value from CAD form',
   date: 'Date stamp',
 }
 
@@ -99,19 +94,19 @@ const DEFAULT_NEW_SEGMENTS: Segment[] = [
 
 function getSegmentKind(segment?: Segment): SegmentKind {
   const kind = (segment?.kind || '').trim().toLowerCase()
-  if (kind === 'seq' || kind === 'field' || kind === 'date') return kind
+  if (kind === 'seq' || kind === 'date') return kind
   return 'literal'
 }
 
 function createEmptySegment(kind: SegmentKind = 'literal'): Segment {
   if (kind === 'seq') return { kind: 'seq', padding: 6, base: 10, start_at: 1, auto_counter: false }
-  if (kind === 'field') return { kind: 'field', field: '', casing: 'upper' }
   if (kind === 'date') return { kind: 'date', fmt: 'YYYY' }
   return { kind: 'literal', value: '' }
 }
 
 function cloneSegment(segment?: Segment): Segment {
-  return { ...createEmptySegment(getSegmentKind(segment)), ...(segment || {}) }
+  const kind = getSegmentKind(segment)
+  return { ...createEmptySegment(kind), ...(segment || {}), kind }
 }
 
 function cloneScheme(scheme?: Partial<Scheme>): Scheme {
@@ -175,14 +170,9 @@ function formatDateSample(fmt?: string) {
 
 function segmentSample(segment: Segment): string {
   const kind = getSegmentKind(segment)
-  if (kind === 'literal') return (segment.value || '').trim()
   if (kind === 'seq') return padCounter(segment.start_at ?? 1, segment.padding ?? 6, segment.base ?? 10)
   if (kind === 'date') return formatDateSample(segment.fmt)
-  const name = (segment.field || 'value').trim() || 'value'
-  const casing = (segment.casing || 'upper').toLowerCase()
-  if (casing === 'lower') return name.toLowerCase()
-  if (casing === 'none') return name
-  return name.toUpperCase()
+  return (segment.value || '').trim()
 }
 
 function buildSampleNumber(segments: Segment[], separator: string) {
@@ -199,11 +189,7 @@ function segmentLabel(segment: Segment) {
     const auto = segment.auto_counter ? 'assigned by server' : `starts at ${segment.start_at ?? 1}`
     return `Auto counter: ${digits} digits, ${style}, ${auto}`
   }
-  if (kind === 'date') {
-    const fmt = DATE_FORMATS.find((f) => f.value === segment.fmt)
-    return `Date stamp: ${fmt ? fmt.label : segment.fmt || 'YYYY'}`
-  }
-  return `CAD form value: "${segment.field || ''}"`
+  return `Date stamp: ${DATE_FORMATS.find((f) => f.value === segment.fmt)?.label || segment.fmt || 'YYYY'}`
 }
 
 function revisionSample(policy?: string, start?: string) {
@@ -411,9 +397,6 @@ export default function AdminAddinPage() {
       if (kind === 'literal' && !(segment.value || '').trim()) {
         errors.push(`Piece ${index + 1}: the fixed text is empty.`)
       }
-      if (kind === 'field' && !(segment.field || '').trim()) {
-        errors.push(`Piece ${index + 1}: enter the CAD form field name (e.g. project).`)
-      }
       if (kind === 'seq') {
         hasSequence = true
         const digits = Number(segment.padding ?? 6)
@@ -466,9 +449,6 @@ export default function AdminAddinPage() {
       },
       pattern_segments: normalizedSegments.map((segment) => {
         const kind = getSegmentKind(segment)
-        if (kind === 'literal') {
-          return { kind, value: segment.value || '' }
-        }
         if (kind === 'seq') {
           return {
             kind,
@@ -481,11 +461,7 @@ export default function AdminAddinPage() {
         if (kind === 'date') {
           return { kind, fmt: segment.fmt || 'YYYY' }
         }
-        return {
-          kind: 'field',
-          field: (segment.field || '').trim(),
-          casing: segment.casing || 'upper',
-        }
+        return { kind: 'literal', value: segment.value || '' }
       }),
     }
   }
@@ -548,10 +524,6 @@ export default function AdminAddinPage() {
     const kind = getSegmentKind(segmentDraft)
     if (kind === 'literal' && !(segmentDraft.value || '').trim()) {
       setError('Enter the fixed text first.')
-      return
-    }
-    if (kind === 'field' && !(segmentDraft.field || '').trim()) {
-      setError('Enter the CAD form field name first (e.g. project).')
       return
     }
 
@@ -936,37 +908,6 @@ export default function AdminAddinPage() {
                   </div>
                   <div className="col-12">
                     <div className="small text-muted mb-2">One counter per scheme is assigned by the server; it is what makes numbers unique.</div>
-                  </div>
-                </div>
-              )}
-
-              {draftKind === 'field' && (
-                <div className="row g-2">
-                  <div className="col-md-6">
-                    <label className="form-label small">CAD form field</label>
-                    <input
-                      className="form-control mb-2"
-                      placeholder="e.g. project, type, family"
-                      value={segmentDraft.field || ''}
-                      onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: 'field', field: e.target.value })}
-                    />
-                  </div>
-                  <div className="col-md-6">
-                    <label className="form-label small">Letter case</label>
-                    <select
-                      className="form-select mb-2"
-                      value={segmentDraft.casing || 'upper'}
-                      onChange={(e) => setSegmentDraft({ ...segmentDraft, kind: 'field', casing: e.target.value })}
-                    >
-                      <option value="upper">UPPERCASE</option>
-                      <option value="lower">lowercase</option>
-                      <option value="none">As typed</option>
-                    </select>
-                  </div>
-                  <div className="col-12">
-                    <div className="small text-muted mb-2">
-                      The value is typed in the SolidWorks add-in when a number is requested (e.g. project = MECS).
-                    </div>
                   </div>
                 </div>
               )}

@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Tuple
 import hashlib
 import re
 
-from pymongo import ReturnDocument
 from mongoengine.errors import NotUniqueError
 
 from app.models.numbering import NumberingCounter, NumberingScheme
@@ -18,7 +17,10 @@ ALLOWED_SCOPE_MODES = {"global", "by_type", "by_project", "by_family", "custom_k
 ALLOWED_RESET_POLICIES = {"never", "yearly", "monthly", "by_project"}
 ALLOWED_REV_POLICIES = {"alpha", "numeric", "none"}
 ALLOWED_DATE_FORMATS = {"YYYY", "YY", "MM", "YYYYMM"}
-ALLOWED_FIELD_CASING = {"upper", "lower", "none"}
+
+# Part numbers are built from fixed text, counters, and date stamps only. The old
+# "field" segment kind (values typed into the CAD form) was removed.
+ALLOWED_SEGMENT_KINDS = {"literal", "seq", "date"}
 
 
 DEFAULT_SEQ = {
@@ -134,7 +136,7 @@ def normalize_scheme_payload(
     return scheme, errors
 
 
-def validate_scheme_definition(scheme: Dict[str, Any], context: Dict[str, Any] | None = None) -> Tuple[List[str], List[str], Dict[str, str]]:
+def validate_scheme_definition(scheme: Dict[str, Any]) -> Tuple[List[str], List[str], Dict[str, str]]:
     errors: List[str] = []
     warnings: List[str] = []
 
@@ -174,17 +176,11 @@ def validate_scheme_definition(scheme: Dict[str, Any], context: Dict[str, Any] |
             errors.append(f"segment[{idx}] must be an object.")
             continue
         kind = str(seg.get("kind") or "").lower().strip()
-        if kind not in ("literal", "field", "seq", "date"):
-            errors.append(f"segment[{idx}].kind must be literal, field, seq, or date.")
+        if kind not in ALLOWED_SEGMENT_KINDS:
+            errors.append(f"segment[{idx}].kind must be literal, seq, or date.")
             continue
         if kind == "literal" and not str(seg.get("value") or "").strip():
             errors.append(f"segment[{idx}] literal requires value.")
-        if kind == "field":
-            if not str(seg.get("field") or "").strip():
-                errors.append(f"segment[{idx}] field requires field name.")
-            casing = str(seg.get("casing") or "upper").lower()
-            if casing not in ALLOWED_FIELD_CASING:
-                errors.append(f"segment[{idx}] field casing must be upper, lower, or none.")
         if kind == "seq":
             padding = _coerce_int(seg.get("padding"), _coerce_int(seq.get("padding"), DEFAULT_SEQ["padding"]))
             base = _coerce_int(seg.get("base"), _coerce_int(seq.get("base"), DEFAULT_SEQ["base"]))
@@ -203,11 +199,10 @@ def validate_scheme_definition(scheme: Dict[str, Any], context: Dict[str, Any] |
     if errors:
         return errors, warnings, {}
 
-    example_context = context or _example_context_from_scheme(segments)
     sequence_values = _resolve_sequence_values(scheme, None)
     if auto_seq_index >= 0 and auto_seq_index < len(sequence_values):
         sequence_values[auto_seq_index] = start_at
-    candidate, cand_errors, cand_warnings = build_candidate_number(scheme, example_context, sequence_values, utc_now())
+    candidate, cand_errors, cand_warnings = build_candidate_number(scheme, sequence_values, utc_now())
     errors.extend(cand_errors)
     warnings.extend(cand_warnings)
 
@@ -221,14 +216,12 @@ def validate_scheme_definition(scheme: Dict[str, Any], context: Dict[str, Any] |
 
 def build_candidate_number(
     scheme: Dict[str, Any],
-    context: Dict[str, Any],
     sequence_values: List[int] | None,
     now: datetime,
 ) -> Tuple[str, List[str], List[str]]:
     errors: List[str] = []
     warnings: List[str] = []
 
-    ctx = _normalize_context(context)
     separator = str(scheme.get("separator") or "-")
     seq_defaults = scheme.get("seq") or {}
     segments = scheme.get("pattern_segments") or []
@@ -243,22 +236,6 @@ def build_candidate_number(
         kind = str(seg.get("kind") or "").lower().strip()
         if kind == "literal":
             parts.append(str(seg.get("value") or "").strip())
-        elif kind == "field":
-            field = str(seg.get("field") or "").strip().lower()
-            if not field:
-                errors.append("field segment missing field name.")
-                continue
-            value = ctx.get(field, "")
-            if not value:
-                errors.append(f"context missing field '{field}'.")
-                continue
-            casing = str(seg.get("casing") or "upper").lower()
-            value = _apply_casing(value, casing)
-            pad_left = seg.get("pad_left")
-            pad_char = str(seg.get("pad_char") or "0")[:1]
-            if pad_left is not None:
-                value = value.rjust(_coerce_int(pad_left, 0), pad_char)
-            parts.append(value)
         elif kind == "seq":
             padding = _coerce_int(seg.get("padding"), _coerce_int(seq_defaults.get("padding"), DEFAULT_SEQ["padding"]))
             base = _coerce_int(seg.get("base"), _coerce_int(seq_defaults.get("base"), DEFAULT_SEQ["base"]))
@@ -275,6 +252,8 @@ def build_candidate_number(
                 errors.append("date fmt must be one of YYYY, YY, MM, YYYYMM.")
                 continue
             parts.append(_format_date(now, fmt))
+        elif kind == "field":
+            errors.append("field segments are no longer supported; rebuild this scheme with fixed text, counter, or date pieces.")
         else:
             errors.append(f"Unknown segment kind '{kind}'.")
 
@@ -297,14 +276,12 @@ def build_candidate_number(
 
 def build_counter_series_key(
     scheme: Dict[str, Any],
-    context: Dict[str, Any],
     sequence_values: List[int] | None,
     auto_seq_index: int,
     now: datetime,
 ) -> Tuple[str, List[str]]:
     errors: List[str] = []
 
-    ctx = _normalize_context(context)
     separator = str(scheme.get("separator") or "-")
     seq_defaults = scheme.get("seq") or {}
     segments = scheme.get("pattern_segments") or []
@@ -319,22 +296,6 @@ def build_counter_series_key(
         kind = str(seg.get("kind") or "").lower().strip()
         if kind == "literal":
             parts.append(str(seg.get("value") or "").strip())
-        elif kind == "field":
-            field = str(seg.get("field") or "").strip().lower()
-            if not field:
-                errors.append("field segment missing field name.")
-                continue
-            value = ctx.get(field, "")
-            if not value:
-                errors.append(f"context missing field '{field}'.")
-                continue
-            casing = str(seg.get("casing") or "upper").lower()
-            value = _apply_casing(value, casing)
-            pad_left = seg.get("pad_left")
-            pad_char = str(seg.get("pad_char") or "0")[:1]
-            if pad_left is not None:
-                value = value.rjust(_coerce_int(pad_left, 0), pad_char)
-            parts.append(value)
         elif kind == "seq":
             if sequence_index == auto_seq_index:
                 parts.append("{AUTO}")
@@ -450,7 +411,7 @@ def preview_number(
     resolved_sequence_values = _resolve_sequence_values(scheme_dict, sequence_values)
     counter_key = ""
     if auto_seq_index >= 0:
-        series_key, series_errors = build_counter_series_key(scheme_dict, context, resolved_sequence_values, auto_seq_index, now)
+        series_key, series_errors = build_counter_series_key(scheme_dict, resolved_sequence_values, auto_seq_index, now)
         errors.extend(series_errors)
         if errors:
             return {}, errors
@@ -458,7 +419,6 @@ def preview_number(
         auto_start = resolved_sequence_values[auto_seq_index] if auto_seq_index < len(resolved_sequence_values) else _coerce_int(seq_defaults.get("start_at"), DEFAULT_SEQ["start_at"])
         next_value, candidate, next_errors = _preview_next_available_sequence(
             scheme_dict,
-            context,
             resolved_sequence_values,
             auto_seq_index,
             counter_key,
@@ -471,7 +431,7 @@ def preview_number(
         if auto_seq_index < len(resolved_sequence_values):
             resolved_sequence_values[auto_seq_index] = next_value
     else:
-        candidate, cand_errors, _ = build_candidate_number(scheme_dict, context, resolved_sequence_values, now)
+        candidate, cand_errors, _ = build_candidate_number(scheme_dict, resolved_sequence_values, now)
         errors.extend(cand_errors)
     if errors:
         return {}, errors
@@ -550,7 +510,7 @@ def allocate_number(
     counter_key = ""
     seq_value = None
     if auto_seq_index >= 0:
-        series_key, series_errors = build_counter_series_key(scheme_dict, context, resolved_sequence_values, auto_seq_index, now)
+        series_key, series_errors = build_counter_series_key(scheme_dict, resolved_sequence_values, auto_seq_index, now)
         errors.extend(series_errors)
         if errors:
             return {}, errors
@@ -558,7 +518,6 @@ def allocate_number(
         auto_start = resolved_sequence_values[auto_seq_index] if auto_seq_index < len(resolved_sequence_values) else _coerce_int(seq_defaults.get("start_at"), DEFAULT_SEQ["start_at"])
         seq_value, candidate, next_errors = _consume_next_available_sequence(
             scheme_dict,
-            context,
             resolved_sequence_values,
             auto_seq_index,
             counter_key,
@@ -571,7 +530,7 @@ def allocate_number(
         if auto_seq_index < len(resolved_sequence_values):
             resolved_sequence_values[auto_seq_index] = seq_value
     else:
-        candidate, cand_errors, _ = build_candidate_number(scheme_dict, context, resolved_sequence_values, now)
+        candidate, cand_errors, _ = build_candidate_number(scheme_dict, resolved_sequence_values, now)
         errors.extend(cand_errors)
     if errors:
         return {}, errors
@@ -651,93 +610,105 @@ def scheme_to_dict(scheme: NumberingScheme) -> Dict[str, Any]:
     }
 
 
-def peek_next_sequence(counter_key: str, start_at: int) -> int:
-    counter = NumberingCounter.objects(counter_key=counter_key).first()
-    if counter and counter.next_value:
-        return max(int(counter.next_value), int(start_at))
-    return max(int(start_at), 1)
+# --- automatic counter -----------------------------------------------------------------
+# The automatic counter fills gaps: it issues the LOWEST free value >= the requested start.
+# Allocating 1, 2 and then jumping to 9 leaves 3-8 available for the next allocations.
+# Uniqueness is guaranteed by permanent per-value "claims" (unique-indexed counter docs):
+# once a value has been issued for a series it is never issued again, even if the part is
+# later deleted, and concurrent allocations can never obtain the same value.
 
 
-def consume_sequence(counter_key: str, start_at: int) -> int:
-    coll = NumberingCounter._get_collection()
-    now = utc_now()
-    start_at = max(int(start_at), 1)
+def _claim_key(counter_key: str, value: int) -> str:
+    return f"{counter_key}|value:{int(value)}"
 
+
+def _claimed_sequence_values(counter_key: str) -> set:
+    prefix = f"{counter_key}|value:"
+    claimed: set = set()
+    for key in NumberingCounter.objects(counter_key__startswith=prefix).scalar("counter_key"):
+        try:
+            claimed.add(int(str(key)[len(prefix):]))
+        except Exception:
+            continue
+    return claimed
+
+
+def _try_claim_sequence_value(counter_key: str, value: int) -> bool:
     try:
-        NumberingCounter(counter_key=counter_key, next_value=start_at + 1, updated_at=now).save()
-        return start_at
+        NumberingCounter(
+            counter_key=_claim_key(counter_key, value),
+            next_value=int(value),
+            updated_at=utc_now(),
+        ).save()
+        return True
     except NotUniqueError:
-        pass
+        return False
 
-    doc = coll.find_one_and_update(
-        {"counter_key": counter_key},
-        {"$inc": {"next_value": 1}, "$set": {"updated_at": now}},
-        return_document=ReturnDocument.AFTER,
-    )
-    if not doc or "next_value" not in doc:
-        return start_at
-    stored_next = int(doc["next_value"])
-    allocated = stored_next - 1
-    if allocated < start_at:
-        coll.update_one(
-            {"counter_key": counter_key},
-            {"$set": {"next_value": start_at + 1, "updated_at": now}},
-        )
-        return start_at
-    return allocated
+
+def _next_available_sequence(
+    scheme: Dict[str, Any],
+    sequence_values: List[int],
+    auto_seq_index: int,
+    counter_key: str,
+    start_at: int,
+    now: datetime,
+    claim: bool,
+) -> Tuple[int, str, List[str]]:
+    start = max(int(start_at), 1)
+    max_value = _max_sequence_value(scheme, auto_seq_index)
+    claimed = _claimed_sequence_values(counter_key)
+
+    value = start
+    while value <= max_value:
+        if value in claimed:
+            value += 1
+            continue
+
+        candidate_values = list(sequence_values)
+        candidate_values[auto_seq_index] = value
+        candidate, errors, _ = build_candidate_number(scheme, candidate_values, now)
+        if errors:
+            return 0, "", errors
+
+        if _part_number_exists(candidate):
+            # Allocated before per-value claims existed: record a claim so future scans
+            # skip this value using the single bulk query above.
+            _try_claim_sequence_value(counter_key, value)
+            value += 1
+            continue
+
+        if not claim:
+            return value, candidate, []
+
+        if _try_claim_sequence_value(counter_key, value):
+            return value, candidate, []
+
+        # Another allocation claimed this value concurrently; keep scanning upward.
+        value += 1
+
+    return 0, "", ["No available automatic sequence values remain for this series."]
 
 
 def _preview_next_available_sequence(
     scheme: Dict[str, Any],
-    context: Dict[str, Any],
     sequence_values: List[int],
     auto_seq_index: int,
     counter_key: str,
     start_at: int,
     now: datetime,
 ) -> Tuple[int, str, List[str]]:
-    next_value = peek_next_sequence(counter_key, start_at)
-    max_value = _max_sequence_value(scheme, auto_seq_index)
-
-    while next_value <= max_value:
-        candidate_values = list(sequence_values)
-        candidate_values[auto_seq_index] = next_value
-        candidate, errors, _ = build_candidate_number(scheme, context, candidate_values, now)
-        if errors:
-            return 0, "", errors
-        if not _part_number_exists(candidate):
-            return next_value, candidate, []
-        next_value += 1
-
-    return 0, "", ["No available automatic sequence values remain for this series."]
+    return _next_available_sequence(scheme, sequence_values, auto_seq_index, counter_key, start_at, now, claim=False)
 
 
 def _consume_next_available_sequence(
     scheme: Dict[str, Any],
-    context: Dict[str, Any],
     sequence_values: List[int],
     auto_seq_index: int,
     counter_key: str,
     start_at: int,
     now: datetime,
 ) -> Tuple[int, str, List[str]]:
-    next_start = max(int(start_at), 1)
-    max_value = _max_sequence_value(scheme, auto_seq_index)
-
-    while next_start <= max_value:
-        seq_value = consume_sequence(counter_key, next_start)
-        if seq_value > max_value:
-            break
-        candidate_values = list(sequence_values)
-        candidate_values[auto_seq_index] = seq_value
-        candidate, errors, _ = build_candidate_number(scheme, context, candidate_values, now)
-        if errors:
-            return 0, "", errors
-        if not _part_number_exists(candidate):
-            return seq_value, candidate, []
-        next_start = seq_value + 1
-
-    return 0, "", ["No available automatic sequence values remain for this series."]
+    return _next_available_sequence(scheme, sequence_values, auto_seq_index, counter_key, start_at, now, claim=True)
 
 
 def _part_number_exists(part_number: str) -> bool:
@@ -783,13 +754,6 @@ def _normalize_segments(raw_segments: Any, errors: List[str]) -> List[Dict[str, 
         entry: Dict[str, Any] = {"kind": kind}
         if kind == "literal":
             entry["value"] = str(seg.get("value") or "").strip()
-        elif kind == "field":
-            entry["field"] = str(seg.get("field") or "").strip()
-            entry["casing"] = str(seg.get("casing") or "upper").strip().lower()
-            if seg.get("pad_left") is not None:
-                entry["pad_left"] = _coerce_int(seg.get("pad_left"), 0)
-            if seg.get("pad_char") is not None:
-                entry["pad_char"] = str(seg.get("pad_char") or "0")[:1]
         elif kind == "seq":
             if seg.get("padding") is not None:
                 entry["padding"] = _coerce_int(seg.get("padding"), DEFAULT_SEQ["padding"])
@@ -852,24 +816,6 @@ def _resolve_sequence_values(scheme: Dict[str, Any], raw_values: Any) -> List[in
                 break
             values[index] = max(1, _coerce_int(value, values[index]))
     return values
-
-
-def _example_context_from_scheme(segments: List[Dict[str, Any]]) -> Dict[str, Any]:
-    defaults = {
-        "type": "TYPE",
-        "family": "FAM",
-        "subfamily": "SUB",
-        "project": "PROJ",
-        "site": "SITE",
-    }
-    for seg in segments:
-        if not isinstance(seg, dict):
-            continue
-        if str(seg.get("kind") or "").lower() == "field":
-            key = str(seg.get("field") or "").strip().lower()
-            if key and key not in defaults:
-                defaults[key] = key.upper()
-    return defaults
 
 
 def _normalize_context(context: Dict[str, Any] | None) -> Dict[str, str]:
