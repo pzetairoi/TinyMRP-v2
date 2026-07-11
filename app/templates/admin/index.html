@@ -1,89 +1,47 @@
 {% extends "security/base.html" %}
-{% from "ui/_components.html" import page_header, card_header %}
+{% from "ui/_components.html" import page_header, section_header, admin_link %}
 {% block title %}Admin Dashboard{% endblock %}
 {% block content %}
-{% call page_header("Admin Dashboard", "Central access to administration, settings, and operational tools.", "Admin") %}
-  <a class="btn btn-outline-secondary" href="{{ url_for('admin.admin_settings') }}">App settings</a>
-  <a class="btn btn-primary" href="{{ url_for('admin.users_list') }}">Users</a>
+{% call page_header("Administration", "Manage access, application configuration, business records, and system health from one workspace.", "Admin workspace") %}
+  <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Review activity</a>
+  <a class="btn btn-primary" href="{{ url_for('admin.users_create') }}">Add user</a>
 {% endcall %}
 
-<div class="row g-3">
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("Users", "Manage users and their assigned roles.") }}
-        <a class="btn btn-primary" href="{{ url_for('admin.users_list') }}">Open users</a>
-      </div>
+<div class="tm-admin-hub">
+  <section class="tm-admin-hub__section">
+    {% call section_header("People & access", "Control who can sign in and what they are allowed to do.") %}{% endcall %}
+    <div class="tm-admin-link-grid">
+      {{ admin_link("Users", "Create accounts, assign roles, and reset access.", url_for('admin.users_list'), "U") }}
+      {{ admin_link("Roles & permissions", "Define reusable permission sets for your teams.", url_for('admin_roles.roles_list'), "R") }}
+      {{ admin_link("Audit log", "Review sign-ins, changes, and operational events.", url_for('admin_audit.audit_list'), "A") }}
     </div>
-  </div>
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("Roles", "Create roles and control permission bundles.") }}
-        <a class="btn btn-primary" href="{{ url_for('admin_roles.roles_list') }}">Open roles</a>
-      </div>
+  </section>
+
+  <section class="tm-admin-hub__section">
+    {% call section_header("Configuration", "Set instance-wide defaults and engineering conventions.") %}{% endcall %}
+    <div class="tm-admin-link-grid">
+      {{ admin_link("Application settings", "Branding, timezone, imports, file sources, and processes.", url_for('admin.admin_settings'), "S") }}
+      {{ admin_link("Fields & exports", "Configure field mappings and defaults for tables and exports.", url_for('ui.admin_fields_ui'), "F") }}
+      {{ admin_link("SolidWorks add-in", "Manage add-in tokens and part-numbering schemes.", url_for('ui.admin_addin_ui'), "SW") }}
     </div>
-  </div>
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("Audit Log", "Review access and operational events.") }}
-        <a class="btn btn-primary" href="{{ url_for('admin_audit.audit_list') }}">Open audit log</a>
-      </div>
+  </section>
+
+  <section class="tm-admin-hub__section">
+    {% call section_header("Business records", "Open the operational registers used by purchasing and production.") %}{% endcall %}
+    <div class="tm-admin-link-grid tm-admin-link-grid--compact">
+      {{ admin_link("Jobs", "Projects, BOM assignments, and job activity.", url_for('admin_jobs.jobs_list'), "J") }}
+      {{ admin_link("Orders", "Sales and purchase order records.", url_for('admin_orders.orders_list'), "O") }}
+      {{ admin_link("Customers", "Customer organisations and linked users.", url_for('admin_customers.customers_list'), "C") }}
+      {{ admin_link("Suppliers", "Supplier organisations and linked users.", url_for('admin_suppliers.suppliers_list'), "S") }}
     </div>
-  </div>
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("System Metrics", "Inspect resource usage and slow areas.") }}
-        <a class="btn btn-primary" href="{{ url_for('admin.admin_metrics') }}">Open metrics</a>
-      </div>
+  </section>
+
+  <section class="tm-admin-hub__section">
+    {% call section_header("System & danger zone", "Monitor the instance and access controlled maintenance actions.") %}{% endcall %}
+    <div class="tm-admin-link-grid">
+      {{ admin_link("System metrics", "Inspect request performance, storage, and resource use.", url_for('admin.admin_metrics'), "M") }}
+      {{ admin_link("Purge parts data", "Permanently clear parts, BOM links, and part files.", url_for('admin.purge_parts'), "!", "danger") }}
     </div>
-  </div>
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("Field Configuration", "Control custom fields and Excel/BOM visibility.") }}
-        <a class="btn btn-primary" href="{{ url_for('ui.admin_fields_ui') }}">Open field configuration</a>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("App Settings", "Branding, timezone, imports, and file sources.") }}
-        <a class="btn btn-primary" href="{{ url_for('admin.admin_settings') }}">Open settings</a>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("Add-in Admin", "SolidWorks add-in settings and token management.") }}
-        <a class="btn btn-primary" href="/ui/admin/addin">Open add-in admin</a>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("Jobs, Suppliers, Customers", "Jump into operational master data and linked orders.") }}
-        <div class="d-flex flex-wrap gap-2">
-          <a class="btn btn-primary" href="/admin/jobs/">Jobs</a>
-          <a class="btn btn-outline-secondary" href="/admin/suppliers/">Suppliers</a>
-          <a class="btn btn-outline-secondary" href="/admin/customers/">Customers</a>
-          <a class="btn btn-outline-secondary" href="/admin/orders/">Orders</a>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-6 col-xl-4">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("Maintenance", "High-risk operations that should be used sparingly.") }}
-        <a class="btn btn-outline-danger" href="{{ url_for('admin.purge_parts') }}">Purge parts data</a>
-      </div>
-    </div>
-  </div>
+  </section>
 </div>
 {% endblock %}

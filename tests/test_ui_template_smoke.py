@@ -80,6 +80,7 @@ def test_base_layout_authenticated_render_shows_account_nav_without_admin_clutte
     assert "My Account" in user_menu
     assert "Tokens" in user_menu
     assert "Help" in user_menu
+
     assert "Admin Dashboard" not in user_menu
     assert "Purge Parts Data" not in user_menu
     assert 'action="/logout"' in user_menu
@@ -150,7 +151,7 @@ def test_stage1_empty_states_and_warning_pages_render(client, app, tmp_path):
         "/admin/orders/": "No orders found",
         "/admin/suppliers/": "No suppliers found",
         "/admin/customers/": "No customers found",
-        "/admin/audit/": "No audit entries found",
+        "/admin/audit/": "No activity found",
         "/admin/purge-parts": "This action permanently deletes data.",
         "/help": "Help content not generated yet",
     }
@@ -180,13 +181,13 @@ def test_stage1_server_rendered_pages_and_shell_routes_render(client, app, tmp_p
 
     server_pages = {
         "/admin/": "Admin Dashboard",
-        "/admin/settings": "Admin Settings",
+        "/admin/settings": "Application Settings",
         "/admin/users": "Users",
         "/admin/users/new": "Create User",
         "/admin/purge-parts": "Delete all parts / BOM / files",
         "/admin/roles/": "Roles",
         "/admin/roles/new": "Create Role",
-        "/admin/audit/": "Audit Log",
+        "/admin/audit/": "Activity &amp; Audit",
         "/admin/metrics": "Admin Metrics",
         "/admin/jobs/": "Jobs",
         "/admin/jobs/new": "Job number",
@@ -309,7 +310,6 @@ def test_admin_navigation_moves_operational_links_out_of_account_menu(client, ap
         users_href = url_for("admin.users_list")
         roles_href = url_for("admin_roles.roles_list")
         audit_href = url_for("admin_audit.audit_list")
-        purge_href = url_for("admin.purge_parts")
 
     resp = client.get("/admin/settings")
     assert resp.status_code == 200
@@ -323,9 +323,13 @@ def test_admin_navigation_moves_operational_links_out_of_account_menu(client, ap
     assert f'href="{users_href}"' in admin_menu
     assert f'href="{roles_href}"' in admin_menu
     assert f'href="{audit_href}"' in admin_menu
-    assert f'href="{purge_href}"' in admin_menu
-    assert "Danger Zone" in admin_menu
-    assert "Purge Parts Data" in admin_menu
+    assert "People &amp; access" in admin_menu
+    assert "Configuration" in admin_menu
+    assert "System" in admin_menu
+    assert "Danger Zone" not in admin_menu
+    assert "Purge Parts Data" not in admin_menu
+    assert 'aria-label="Administration sections"' in body
+    assert "Admin workspace" in body
     assert "Admin Dashboard" not in user_menu
     assert "Field Configuration" not in user_menu
     assert "App Settings" not in user_menu
@@ -336,3 +340,15 @@ def test_admin_navigation_moves_operational_links_out_of_account_menu(client, ap
     assert "My Account" in user_menu
     assert "Tokens" in user_menu
     assert "Help" in user_menu
+
+    users_page = client.get("/admin/users")
+    assert users_page.status_code == 200
+    assert "Activity" in users_page.get_data(as_text=True)
+
+    resp = client.get("/admin/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert "People &amp; access" in body
+    assert "Business records" in body
+    assert "Fields &amp; exports" in body
+    assert "System metrics" in body

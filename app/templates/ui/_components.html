@@ -116,3 +116,14 @@
   {% endif %}
 </div>
 {%- endmacro %}
+
+{% macro admin_link(title, description, href, marker, tone='default') -%}
+<a class="tm-admin-link{% if tone != 'default' %} tm-admin-link--{{ tone }}{% endif %}" href="{{ href }}">
+  <span class="tm-admin-link__marker" aria-hidden="true">{{ marker }}</span>
+  <span class="tm-admin-link__body">
+    <span class="tm-admin-link__title">{{ title }}</span>
+    <span class="tm-admin-link__description">{{ description }}</span>
+  </span>
+  <span class="tm-admin-link__arrow" aria-hidden="true">&rsaquo;</span>
+</a>
+{%- endmacro %}

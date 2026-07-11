@@ -131,6 +131,29 @@ def upload_pack():
             ),
             500,
         )
+    try:
+        from app.services.audit import log_action
+
+        def metric_count(value):
+            if isinstance(value, (list, tuple, set, dict)):
+                return len(value)
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        log_action(
+            "upload.pack",
+            resource_type="import",
+            resource=filename,
+            meta={
+                "parts_imported": metric_count(result.get("parts_imported") or result.get("imported_parts") or result.get("parts")),
+                "files_uploaded": metric_count(result.get("files_uploaded") or result.get("file_count") or result.get("files")),
+                "dry_run": dry_run,
+            },
+        )
+    except Exception:
+        pass
     return jsonify(result)
 
 
@@ -243,6 +266,17 @@ def upload_extra_files(pn: str, rev: str):
         except Exception:
             errors.append(f"failed to save: {filename}")
 
+    try:
+        from app.services.audit import log_action
+
+        log_action(
+            "upload.extra_files",
+            resource_type="part",
+            resource=f"{pn_clean}:{rev_clean}",
+            meta={"files_uploaded": len(created), "errors": len(errors)},
+        )
+    except Exception:
+        pass
     return jsonify({"files": created, "errors": errors})
 
 

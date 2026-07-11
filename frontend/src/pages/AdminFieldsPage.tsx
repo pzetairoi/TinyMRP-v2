@@ -12,6 +12,15 @@ import {
 } from '../lib/fieldConfig'
 
 const ARENA_FIXED_FIELD_IDS = new Set(['thumbnail', 'part_number', 'description', 'qty', 'level'])
+const CONTEXT_ORDER = ['parts_list', 'bom_tree', 'part_detail_summary', 'where_used', 'excel_bom', 'arena_bom']
+const CONTEXT_HELP: Record<string, { title: string; description: string }> = {
+  parts_list: { title: 'Parts table', description: 'Columns people can show while browsing and filtering the main parts register.' },
+  bom_tree: { title: 'BOM tree', description: 'Columns shown while navigating parent and child items in a bill of materials.' },
+  part_detail_summary: { title: 'Part summary', description: 'Key attributes presented in the summary area of an individual part.' },
+  where_used: { title: 'Where used', description: 'Columns shown when finding assemblies, jobs, and orders that reference a part.' },
+  excel_bom: { title: 'Excel BOM export', description: 'Optional columns available in generated Excel bill-of-material exports.' },
+  arena_bom: { title: 'Arena BOM export', description: 'Optional columns mapped into Arena-compatible BOM exports.' },
+}
 
 function slugFieldId(value: string) {
   return String(value || '')
@@ -65,6 +74,8 @@ export default function AdminFieldsPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [builtinSearch, setBuiltinSearch] = useState('')
+  const [aliasSearch, setAliasSearch] = useState('')
 
   useEffect(() => {
     ;(async () => {
@@ -90,10 +101,21 @@ export default function AdminFieldsPage() {
     })()
   }, [])
 
-  const fields = config?.fields || []
+  const fields = useMemo(() => config?.fields || [], [config?.fields])
   const builtinFields = useMemo(() => fields.filter((field) => field.kind !== 'custom'), [fields])
   const customFields = useMemo(() => fields.filter((field) => field.kind === 'custom'), [fields])
-  const canonicalAliases = config?.canonical_aliases || []
+  const canonicalAliases = useMemo(() => config?.canonical_aliases || [], [config?.canonical_aliases])
+  const filteredBuiltinFields = useMemo(() => {
+    const term = builtinSearch.trim().toLowerCase()
+    if (!term) return builtinFields
+    return builtinFields.filter((field) => [field.id, field.label, field.arena_header, field.source_path].some((value) => String(value || '').toLowerCase().includes(term)))
+  }, [builtinFields, builtinSearch])
+  const filteredCanonicalAliases = useMemo(() => {
+    const term = aliasSearch.trim().toLowerCase()
+    if (!term) return canonicalAliases
+    return canonicalAliases.filter((entry) => [entry.field_id, entry.label, ...(entry.aliases || [])].some((value) => String(value || '').toLowerCase().includes(term)))
+  }, [aliasSearch, canonicalAliases])
+  const orderedContexts = useMemo(() => CONTEXT_ORDER.map((name) => [name, config?.contexts?.[name]] as const).filter((entry): entry is readonly [string, FieldContext] => !!entry[1]), [config?.contexts])
   const availableFieldCandidates = useMemo(() => {
     const configuredIds = new Set(fields.map((field) => slugFieldId(field.id)))
     const configuredSources = new Set(fields.map((field) => normalizeSourcePath(field.source_path || '')).filter(Boolean))
@@ -407,15 +429,16 @@ export default function AdminFieldsPage() {
   }
 
   return (
-    <div className="p-3">
-      <div className="d-flex align-items-center justify-content-between mb-3">
-        <div>
-          <h4 className="mb-0">Field Configuration</h4>
-          <div className="text-muted small">
+    <div className="tm-react-admin">
+      <header className="tm-page-header">
+        <div className="tm-page-header__body">
+          <div className="tm-page-header__eyebrow">Configuration</div>
+          <h1 className="tm-page-title">Fields &amp; exports</h1>
+          <p className="tm-page-subtitle">
             Define the source field mapping once, keep defaults available, and control which fields users can expose in tables, Excel BOM exports, and Arena BOM exports.
-          </div>
+          </p>
         </div>
-        <div className="d-flex gap-2">
+        <div className="tm-page-header__actions">
           <button className="btn btn-outline-secondary" onClick={resetConfig} disabled={saving}>
             Restore defaults
           </button>
@@ -423,17 +446,18 @@ export default function AdminFieldsPage() {
             {saving ? 'Saving...' : 'Save'}
           </button>
         </div>
-      </div>
+      </header>
 
       {message && <div className="alert alert-success">{message}</div>}
       {error && <div className="alert alert-danger">{error}</div>}
 
       <div className="card p-3 mb-4">
-        <div className="d-flex align-items-center justify-content-between mb-3">
-          <h5 className="mb-0">Built-in Fields</h5>
-          <div className="text-muted small">These are the core fields used across part views and exports.</div>
+        <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
+          <div><h5 className="mb-0">Built-in fields</h5><div className="text-muted small">Core fields shared by part views and exports.</div></div>
+          <button className="btn btn-sm btn-outline-primary" onClick={rebuildSearchFields} disabled={saving}>{saving ? 'Working...' : 'Rebuild searchable values'}</button>
         </div>
-        <div className="table-responsive">
+        <div className="tm-table-search mb-2"><input className="form-control form-control-sm" type="search" value={builtinSearch} onChange={(event) => setBuiltinSearch(event.target.value)} placeholder="Find by field name, label, header, or source path..." /><span>{filteredBuiltinFields.length} of {builtinFields.length}</span></div>
+        <div className="table-responsive tm-admin-table-scroll">
           <table className="table table-sm align-middle">
             <thead>
               <tr>
@@ -444,7 +468,7 @@ export default function AdminFieldsPage() {
               </tr>
             </thead>
             <tbody>
-              {builtinFields.map((field) => (
+              {filteredBuiltinFields.map((field) => (
                 <tr key={field.id}>
                   <td className="font-monospace small">{field.id}</td>
                   <td>
@@ -481,33 +505,17 @@ export default function AdminFieldsPage() {
       <div className="card p-3 mb-4">
         <div className="d-flex align-items-center justify-content-between mb-3">
           <div>
-            <h5 className="mb-0">Searchable Part Fields</h5>
-            <div className="text-muted small">
-              Use this after changing field mappings or after upgrading from older data so custom fields and file availability filters work correctly.
-            </div>
-          </div>
-          <button className="btn btn-outline-primary" onClick={rebuildSearchFields} disabled={saving}>
-            {saving ? 'Working...' : 'Rebuild searchable part fields'}
-          </button>
-        </div>
-        <div className="small text-muted">
-          This rebuild updates canonical mirrors where needed, materialized custom/remapped field values, and file availability coverage on existing parts.
-        </div>
-      </div>
-
-      <div className="card p-3 mb-4">
-        <div className="d-flex align-items-center justify-content-between mb-3">
-          <div>
             <h5 className="mb-0">Canonical Import Aliases</h5>
             <div className="text-muted small">
               Map raw imported attribute names to the app canonical fields. Use this for files where fields such as `comments` really mean `process`.
             </div>
           </div>
-          <button className="btn btn-outline-primary" onClick={rebuildCanonicalFields} disabled={saving}>
+          <button className="btn btn-sm btn-outline-primary" onClick={rebuildCanonicalFields} disabled={saving}>
             {saving ? 'Working...' : 'Rebuild canonical fields'}
           </button>
         </div>
-        <div className="table-responsive">
+        <div className="tm-table-search mb-2"><input className="form-control form-control-sm" type="search" value={aliasSearch} onChange={(event) => setAliasSearch(event.target.value)} placeholder="Find a canonical field or imported alias..." /><span>{filteredCanonicalAliases.length} of {canonicalAliases.length}</span></div>
+        <div className="table-responsive tm-admin-table-scroll">
           <table className="table table-sm align-middle">
             <thead>
               <tr>
@@ -517,7 +525,7 @@ export default function AdminFieldsPage() {
               </tr>
             </thead>
             <tbody>
-              {canonicalAliases.map((entry) => (
+              {filteredCanonicalAliases.map((entry) => (
                 <tr key={entry.field_id}>
                   <td>
                     <div className="fw-semibold">{entry.label}</div>
@@ -681,20 +689,19 @@ export default function AdminFieldsPage() {
       </div>
 
       <div className="card p-3">
-        <h5 className="mb-3">View Defaults</h5>
-        <div className="text-muted small mb-3">
-          `Allowed` controls which fields users can add in each view. `Default` controls the preset users get when they reset to the admin baseline.
-        </div>
-        <div className="row g-3">
-          {Object.entries(config.contexts || {}).map(([contextName, ctx]) => {
+        <h5 className="mb-1">Screen &amp; export presets</h5>
+        <div className="text-muted small mb-3">Open one destination at a time. Available fields control user choice; default fields are shown after a user resets their personal layout.</div>
+        <div className="tm-context-list">
+          {orderedContexts.map(([contextName, ctx], contextIndex) => {
             const required = new Set(ctx.required_field_ids || [])
+            const help = CONTEXT_HELP[contextName] || { title: ctx.label, description: 'Controls the fields available in this destination.' }
             const selectableFields = contextName === 'arena_bom'
               ? fields.filter((field) => !ARENA_FIXED_FIELD_IDS.has(field.id))
               : fields
             return (
-              <div key={contextName} className="col-12">
-                <div className="border rounded p-3">
-                  <div className="fw-semibold mb-2">{ctx.label}</div>
+              <details key={contextName} className="tm-context-panel" open={contextIndex === 0}>
+                <summary><span><strong>{help.title}</strong><small>{help.description}</small></span><span className="tm-context-panel__count">{ctx.default_field_ids.length} default / {ctx.allowed_field_ids.length} available</span></summary>
+                <div className="tm-context-panel__body">
                   {contextName === 'arena_bom' ? (
                     <div className="small text-muted mb-2">
                       Fixed Arena columns such as item number, item name, level, and quantity are always included separately.
@@ -750,7 +757,7 @@ export default function AdminFieldsPage() {
                     </div>
                   </div>
                 </div>
-              </div>
+              </details>
             )
           })}
         </div>

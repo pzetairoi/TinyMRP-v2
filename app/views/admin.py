@@ -21,8 +21,30 @@ from app.services.timezone_utils import (
     timezone_choices,
     utc_now,
 )
+from werkzeug.utils import secure_filename
 import os
 import re
+
+
+def _safe_process_svg(raw: bytes) -> bool:
+    try:
+        from defusedxml import ElementTree as SafeET
+
+        root = SafeET.fromstring(raw)
+    except Exception:
+        return False
+    for element in root.iter():
+        tag = str(element.tag or "").rsplit("}", 1)[-1].lower()
+        if tag in ("script", "foreignobject", "iframe", "object", "embed"):
+            return False
+        for raw_name, raw_value in element.attrib.items():
+            name = str(raw_name or "").rsplit("}", 1)[-1].lower()
+            value = str(raw_value or "").strip().lower()
+            if name.startswith("on"):
+                return False
+            if name in ("href", "src") and value.startswith(("javascript:", "data:", "http:", "https:", "//")):
+                return False
+    return str(root.tag or "").rsplit("}", 1)[-1].lower() == "svg"
 
 
 def _parse_hw_folders(value: str) -> list[str]:
@@ -56,41 +78,6 @@ def _parse_int(value: str, default_value: int) -> int:
         return max(0, int(str(value).strip()))
     except Exception:
         return default_value
-
-
-def _parse_file_sources(form) -> list[dict]:
-    labels = form.getlist("source_label")
-    roots = form.getlist("source_local_root")
-    urls = form.getlist("source_url_prefix")
-    priorities = form.getlist("source_priority")
-    scopes = form.getlist("source_scope")
-    out: list[dict] = []
-    total = max(len(labels), len(roots), len(urls), len(priorities), len(scopes))
-    for idx in range(total):
-        label = (labels[idx] if idx < len(labels) else "").strip()
-        local_root = (roots[idx] if idx < len(roots) else "").strip()
-        url_prefix = (urls[idx] if idx < len(urls) else "").strip()
-        scope = (scopes[idx] if idx < len(scopes) else "both").strip().lower()
-        if not local_root:
-            continue
-        try:
-            priority = max(1, int((priorities[idx] if idx < len(priorities) else str(idx + 1)).strip()))
-        except Exception:
-            priority = idx + 1
-        use_for_approved = scope in ("both", "approved")
-        use_for_unapproved = scope in ("both", "unapproved")
-        out.append(
-            {
-                "label": label or f"Source {idx + 1}",
-                "local_root": local_root,
-                "url_prefix": url_prefix,
-                "priority": priority,
-                "use_for_approved": use_for_approved,
-                "use_for_unapproved": use_for_unapproved,
-                "active": True,
-            }
-        )
-    return out
 
 
 def _parse_process_meta(form) -> dict:
@@ -133,11 +120,18 @@ def _process_rows_from_meta(process_meta: dict) -> list[dict]:
     for name, meta in (process_meta or {}).items():
         if str(name).startswith("_"):
             continue
+        color = (meta or {}).get("color", "118, 113, 113")
+        try:
+            channels = [max(0, min(255, int(part.strip()))) for part in color.split(",")]
+            color_hex = "#{:02x}{:02x}{:02x}".format(*channels) if len(channels) == 3 else "#767171"
+        except Exception:
+            color_hex = "#767171"
         rows.append(
             {
                 "name": name,
                 "icon": (meta or {}).get("icon", ""),
-                "color": (meta or {}).get("color", ""),
+                "color": color,
+                "color_hex": color_hex,
                 "aliases": list((meta or {}).get("aliases") or []),
                 "file_groups": list((meta or {}).get("file_groups") or []),
             }
@@ -194,7 +188,6 @@ def admin_settings():
         settings.upload_pack_max_files = _parse_int(
             request.form.get("upload_pack_max_files"), settings.upload_pack_max_files or 5000
         )
-        settings.file_sources = _parse_file_sources(request.form)
         if request.form.get("reset_process_library") in ("1", "true", "on"):
             settings.process_meta = {}
         else:
@@ -230,6 +223,40 @@ def admin_settings():
                 rel_path = abs_path
             settings.brand_logo_rel_path = rel_path
             remove_logo = False
+
+        process_icon_upload = request.files.get("process_icon_upload")
+        if process_icon_upload and process_icon_upload.filename:
+            raw = process_icon_upload.read() or b""
+            max_bytes = 2 * 1024 * 1024
+            filename = secure_filename(process_icon_upload.filename)
+            ext = os.path.splitext(filename)[1].lower()
+            if not filename or filename.startswith("."):
+                flash("Process icon needs a valid filename.", "error")
+                return redirect(url_for("admin.admin_settings"))
+            if len(raw) > max_bytes:
+                flash("Process icon is too large (maximum 2 MB).", "error")
+                return redirect(url_for("admin.admin_settings"))
+            if ext not in (".png", ".svg"):
+                flash("Process icon must be a PNG or SVG file.", "error")
+                return redirect(url_for("admin.admin_settings"))
+            if ext == ".png" and not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                flash("Invalid process icon PNG.", "error")
+                return redirect(url_for("admin.admin_settings"))
+            if ext == ".svg" and not _safe_process_svg(raw):
+                flash("Invalid process icon SVG.", "error")
+                return redirect(url_for("admin.admin_settings"))
+            image_root = os.path.join(current_app.root_path, "static", "images")
+            os.makedirs(image_root, exist_ok=True)
+            stem = os.path.splitext(filename)[0]
+            candidate = filename
+            suffix = 2
+            while os.path.exists(os.path.join(image_root, candidate)):
+                candidate = f"{stem}-{suffix}{ext}"
+                suffix += 1
+            filename = candidate
+            with open(os.path.join(image_root, filename), "wb") as icon_file:
+                icon_file.write(raw)
+            flash(f"Process icon '{filename}' uploaded and is now available.", "success")
 
         if remove_logo:
             settings.brand_logo_rel_path = ""
@@ -308,9 +335,6 @@ def admin_settings():
     process_meta = _active_process_meta(settings)
     current_app.config["PROCESS_META"] = process_meta
     process_rows = _process_rows_from_meta(process_meta)
-    blank_process_row = {"name": "", "icon": "", "color": "", "aliases": [], "file_groups": []}
-    for _ in range(5):
-        process_rows.append(dict(blank_process_row))
     image_root = os.path.join(current_app.root_path, "static", "images")
     process_icon_choices = sorted(
         [
@@ -321,9 +345,6 @@ def admin_settings():
     ) if os.path.isdir(image_root) else []
     hw_display = "\n".join(settings.hardware_folders or [])
     fp_display = "\n".join(settings.flat_pattern_page_names or [])
-    file_source_rows = list(settings.file_sources or [])
-    while len(file_source_rows) < 5:
-        file_source_rows.append({})
     return render_template(
         "admin/settings.html",
         settings=settings,
@@ -334,7 +355,15 @@ def admin_settings():
         process_icon_choices=process_icon_choices,
         hardware_folders_text=hw_display,
         flat_pattern_page_names_text=fp_display,
-        file_source_rows=file_source_rows,
+        process_file_group_choices=[
+            ("pdf", "PDF drawing"),
+            ("datasheet", "Datasheet"),
+            ("png", "Preview image"),
+            ("step", "STEP model"),
+            ("dxf", "DXF flat pattern"),
+            ("edr", "eDrawings"),
+            ("3mf", "3MF model"),
+        ],
     )
 
 @bp.route("/users")

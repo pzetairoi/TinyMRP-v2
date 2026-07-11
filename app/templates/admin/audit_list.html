@@ -1,117 +1,96 @@
 {% extends "security/base.html" %}
-{% from "ui/_components.html" import page_header, action_bar, empty_state %}
-{% block title %}Audit Log â€” Admin{% endblock %}
+{% from "ui/_components.html" import page_header, empty_state, status_badge %}
+{% block title %}Activity & Audit - Admin{% endblock %}
 {% block content %}
-{% call page_header("Audit Log", "Review recorded access and operational events.", "Admin") %}
-  <div class="tm-helper-text">
-    <div>DB alias: {{ alias }} | URI: {{ uri }} | ping: {{ "ok" if ping_ok else "fail" }}</div>
-    <div>Total entries: {{ total }} | Filtered: {{ filtered_total }}</div>
-  </div>
+{% call page_header("Activity & Audit", "Understand what people did while retaining the complete technical audit trail.", "System") %}
+  <div class="tm-helper-text">{{ filtered_total }} matching of {{ total }} recorded events</div>
 {% endcall %}
+
+{% if activity_summary %}
+<section class="mb-4" aria-label="User activity summary">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+    <div><h2 class="tm-section-title">{{ activity_summary.email or email or 'Selected user' }}</h2><p class="tm-section-subtitle">Activity summary for this account.</p></div>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">View everyone</a>
+  </div>
+  <div class="tm-audit-stats">
+    <div><strong>{{ activity_summary.total_events }}</strong><span>Total events</span></div>
+    <div><strong>{{ activity_summary.parts_viewed }}</strong><span>Unique parts opened</span></div>
+    <div><strong>{{ activity_summary.upload_actions }}</strong><span>Upload sessions</span></div>
+    <div><strong>{{ activity_summary.parts_uploaded }}</strong><span>Parts reported uploaded</span></div>
+    <div><strong>{{ activity_summary.files_uploaded }}</strong><span>Files reported uploaded</span></div>
+    <div><strong>{{ activity_summary.changes }}</strong><span>Changes made</span></div>
+    <div><strong>{{ activity_summary.exports }}</strong><span>Exports & packs</span></div>
+    <div><strong>{{ display_ts(activity_summary.last_activity, '%Y-%m-%d %H:%M %Z') if activity_summary.last_activity else '-' }}</strong><span>Last activity</span></div>
+  </div>
+</section>
+{% endif %}
 
 <form method="get" class="card shadow-sm tm-card mb-3">
   <div class="card-body">
+    {% if user_id %}<input type="hidden" name="user_id" value="{{ user_id }}">{% endif %}
     <div class="row g-2 align-items-end">
-      <div class="col-lg-3">
-        <label class="form-label small">Search</label>
-        <input class="form-control" type="text" name="q" placeholder="Search email, action, resource, IP, endpoint" value="{{ q or '' }}">
+      <div class="col-lg-5">
+        <label class="form-label small" for="auditSearch">Search activity</label>
+        <input class="form-control" id="auditSearch" type="search" name="q" placeholder="Action, part, file, email, endpoint or IP" value="{{ q or '' }}">
       </div>
-      <div class="col-lg-2">
-        <label class="form-label small">User (email)</label>
-        <input class="form-control" type="text" name="email" value="{{ email or '' }}">
-      </div>
-      <div class="col-lg-2">
-        <label class="form-label small">User ID</label>
-        <input class="form-control" type="text" name="user_id" value="{{ user_id or '' }}">
-      </div>
-      <div class="col-lg-2">
-        <label class="form-label small">IP</label>
-        <input class="form-control" type="text" name="ip" value="{{ ip or '' }}">
-      </div>
-      <div class="col-lg-2">
-        <label class="form-label small">Action</label>
-        <input class="form-control" type="text" name="action" value="{{ action or '' }}">
-      </div>
-      <div class="col-lg-1">
-        <label class="form-label small">Method</label>
-        <select class="form-select" name="method">
-          <option value="" {% if not method %}selected{% endif %}>Any</option>
-          {% for m in ["GET","POST","PUT","PATCH","DELETE"] %}
-            <option value="{{ m }}" {% if method == m %}selected{% endif %}>{{ m }}</option>
-          {% endfor %}
+      <div class="col-md-4 col-lg-2">
+        <label class="form-label small" for="auditCategory">Activity type</label>
+        <select class="form-select" id="auditCategory" name="category">
+          <option value="">All activity</option>
+          {% for key, label in audit_categories %}<option value="{{ key }}" {% if category == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
       </div>
-      <div class="col-lg-3">
-        <label class="form-label small">Endpoint</label>
-        <input class="form-control" type="text" name="endpoint" value="{{ endpoint or '' }}">
+      {% if not user_id %}
+      <div class="col-md-4 col-lg-3">
+        <label class="form-label small" for="auditEmail">User email</label>
+        <input class="form-control" id="auditEmail" type="text" name="email" value="{{ email or '' }}" placeholder="Anyone">
       </div>
-      <div class="col-lg-2">
-        <label class="form-label small">Resource type</label>
-        <input class="form-control" type="text" name="resource_type" value="{{ resource_type or '' }}">
-      </div>
-      <div class="col-lg-2">
-        <label class="form-label small">Start ({{ selected_timezone }})</label>
-        <input class="form-control" type="datetime-local" name="start" value="{{ start }}">
-      </div>
-      <div class="col-lg-2">
-        <label class="form-label small">End ({{ selected_timezone }})</label>
-        <input class="form-control" type="datetime-local" name="end" value="{{ end }}">
-      </div>
-      <div class="col-lg-1">
-        <label class="form-label small">Limit</label>
-        <input class="form-control" type="number" name="limit" min="1" max="1000" value="{{ limit or 200 }}" title="Max rows">
-      </div>
-      <div class="col-lg-1">
-        <label class="form-label small">Offset</label>
-        <input class="form-control" type="number" name="offset" min="0" value="{{ offset or 0 }}" title="Skip rows">
+      {% endif %}
+      <div class="col-md-4 col-lg-2 d-flex gap-2">
+        <button class="btn btn-primary flex-grow-1" type="submit">Apply</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list', user_id=user_id) if user_id else url_for('admin_audit.audit_list') }}">Clear</a>
       </div>
     </div>
+    <details class="tm-filter-details mt-3" {% if ip or action or endpoint or method or resource_type or start or end %}open{% endif %}>
+      <summary>Advanced filters</summary>
+      <div class="row g-2 pt-3">
+        <div class="col-md-3"><label class="form-label small">Action code</label><input class="form-control form-control-sm" name="action" value="{{ action or '' }}"></div>
+        <div class="col-md-3"><label class="form-label small">Endpoint</label><input class="form-control form-control-sm" name="endpoint" value="{{ endpoint or '' }}"></div>
+        <div class="col-md-2"><label class="form-label small">Resource type</label><input class="form-control form-control-sm" name="resource_type" value="{{ resource_type or '' }}"></div>
+        <div class="col-md-2"><label class="form-label small">IP address</label><input class="form-control form-control-sm" name="ip" value="{{ ip or '' }}"></div>
+        <div class="col-md-2"><label class="form-label small">Method</label><select class="form-select form-select-sm" name="method"><option value="">Any</option>{% for m in ["GET","POST","PUT","PATCH","DELETE"] %}<option value="{{ m }}" {% if method == m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label small">Start ({{ selected_timezone }})</label><input class="form-control form-control-sm" type="datetime-local" name="start" value="{{ start }}"></div>
+        <div class="col-md-3"><label class="form-label small">End ({{ selected_timezone }})</label><input class="form-control form-control-sm" type="datetime-local" name="end" value="{{ end }}"></div>
+        <div class="col-md-2"><label class="form-label small">Rows</label><input class="form-control form-control-sm" type="number" name="limit" min="1" max="1000" value="{{ limit or 200 }}"></div>
+        <div class="col-md-2"><label class="form-label small">Offset</label><input class="form-control form-control-sm" type="number" name="offset" min="0" value="{{ offset or 0 }}"></div>
+      </div>
+    </details>
   </div>
-  {% call action_bar("Filters update the table below without changing audit semantics.") %}
-    <button class="btn btn-primary" type="submit">Filter</button>
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Clear</a>
-  {% endcall %}
 </form>
 
-<div class="table-responsive tm-table-shell">
-  <table class="table table-sm table-striped align-middle mb-0">
-    <thead>
-      <tr>
-        <th style="white-space:nowrap">Time ({{ selected_timezone }})</th>
-        <th>Email</th>
-        <th>Roles</th>
-        <th>Action</th>
-        <th>Type</th>
-        <th>Method</th>
-        <th>Endpoint</th>
-        <th>Resource</th>
-        <th>IP</th>
-        <th>User-Agent</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for e in logs %}
-      <tr>
-        <td style="white-space:nowrap">{{ display_ts(e.ts, '%Y-%m-%d %H:%M:%S %Z') if e.ts else '' }}</td>
-        <td>{{ e.email }}</td>
-        <td>{{ e.roles }}</td>
-        <td>{{ e.action }}</td>
-        <td>{{ e.resource_type }}</td>
-        <td>{{ e.method }}</td>
-        <td style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.endpoint }}">{{ e.endpoint }}</td>
-        <td style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.resource }}">{{ e.resource }}</td>
-        <td>{{ e.ip }}</td>
-        <td style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ e.ua }}">{{ e.ua }}</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="10" class="py-3">{{ empty_state("No audit entries found", "Try widening the filters or generate activity before refreshing this page.") }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="tm-audit-feed">
+  {% for row in audit_rows %}
+  {% set e = row.entry %}
+  <article class="tm-audit-event">
+    <div class="tm-audit-event__time">{{ display_ts(e.ts, '%d %b %Y') if e.ts else '' }}<small>{{ display_ts(e.ts, '%H:%M:%S %Z') if e.ts else '' }}</small></div>
+    <div class="tm-audit-event__marker tm-audit-event__marker--{{ row.category }}" aria-hidden="true"></div>
+    <div class="tm-audit-event__body">
+      <div class="d-flex flex-wrap align-items-start justify-content-between gap-2">
+        <div><strong>{{ row.label }}</strong><div class="small text-muted">{{ e.email or 'System' }}{% if e.resource %} · <span class="font-monospace">{{ e.resource }}</span>{% endif %}</div></div>
+        <span class="badge text-bg-light border">{{ row.category_label }}</span>
+      </div>
+      <details class="tm-audit-technical mt-2">
+        <summary>Technical details</summary>
+        <dl>
+          <div><dt>Action</dt><dd>{{ e.action }}</dd></div><div><dt>Endpoint</dt><dd>{{ e.method }} {{ e.endpoint }}</dd></div>
+          <div><dt>Resource type</dt><dd>{{ e.resource_type or '-' }}</dd></div><div><dt>IP</dt><dd>{{ e.ip or '-' }}</dd></div>
+          <div class="tm-audit-technical__wide"><dt>User agent</dt><dd>{{ e.ua or '-' }}</dd></div>
+        </dl>
+      </details>
+    </div>
+  </article>
+  {% else %}
+    {{ empty_state("No activity found", "Try a broader date range, another category, or clear the filters.") }}
+  {% endfor %}
 </div>
-
-<form method="post" action="{{ url_for('admin_audit.audit_test') }}" class="mt-3">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <button class="btn btn-outline-secondary btn-sm" type="submit">Insert test audit entry</button>
-</form>
 {% endblock %}

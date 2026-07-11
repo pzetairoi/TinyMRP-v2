@@ -4,11 +4,88 @@ from flask_security import roles_required
 from mongoengine.queryset.visitor import Q
 
 from app.models.audit import AuditLog
+from app.models.auth import User
 from app.services.audit import log_action
 from app.services.timezone_utils import local_input_value, parse_user_datetime, resolve_timezone_name
 from mongoengine import get_connection
 
 bp = Blueprint("admin_audit", __name__, url_prefix="/admin/audit")
+
+AUDIT_CATEGORIES = {
+    "view": ("Viewed", ("part.view", "parts.list", "whereused.view", "file.list", "file.view", "part.files.view", "docpack.options")),
+    "change": ("Changed", ("part.notes.update", "part.comments.add", "part.files.refresh", "part.delete")),
+    "upload": ("Uploaded", ("upload.", "import.")),
+    "export": ("Exported", ("arena.export.", "docpack.build", "download.")),
+    "access": ("Access & admin", ("account.", "admin.", "share.")),
+}
+
+ACTION_LABELS = {
+    "parts.list": "Browsed the parts table",
+    "part.view": "Opened a part",
+    "part.view.deny": "Was denied access to a part",
+    "whereused.view": "Checked where a part is used",
+    "part.files.view": "Viewed part files",
+    "file.view": "Opened a file",
+    "file.list": "Listed available files",
+    "part.notes.update": "Updated part notes",
+    "part.comments.add": "Added a part comment",
+    "part.files.refresh": "Refreshed part files",
+    "part.delete": "Deleted a part",
+    "upload.pack": "Uploaded a BOM pack",
+    "upload.extra_files": "Uploaded part files",
+    "arena.export.bom": "Exported an Arena BOM",
+    "arena.export.files": "Exported Arena file links",
+    "docpack.build": "Built a document pack",
+    "account.profile.update": "Updated their profile",
+    "account.password.change": "Changed their password",
+    "admin.settings.update": "Changed application settings",
+}
+
+
+def _audit_category(action: str) -> tuple[str, str]:
+    action_text = str(action or "")
+    for key, (label, prefixes) in AUDIT_CATEGORIES.items():
+        if any(action_text == prefix or action_text.startswith(prefix) for prefix in prefixes):
+            return key, label
+    return "other", "Other"
+
+
+def _activity_summary(user_id: str) -> dict | None:
+    if not user_id:
+        return None
+    base = AuditLog.objects(user_id=user_id)
+    latest = base.order_by("-ts").first()
+    part_resources = set()
+    for row in base(action="part.view").only("resource").limit(5000):
+        if row.resource:
+            part_resources.add(row.resource)
+    upload_rows = list(base(action__in=["upload.pack", "upload.extra_files"]).only("action", "extra"))
+    parts_uploaded = 0
+    files_uploaded = 0
+    for row in upload_rows:
+        extra = row.extra or {}
+        parts_uploaded += int(extra.get("parts_imported") or extra.get("imported_parts") or 0)
+        files_uploaded += int(extra.get("files_uploaded") or extra.get("file_count") or 0)
+    changes = sum(
+        base(action__icontains=token).count()
+        for token in ("update", "add", "delete", "create", "edit", "refresh")
+    )
+    exports = sum(base(action__startswith=prefix).count() for prefix in ("arena.export", "docpack.build", "download."))
+    try:
+        user = User.objects(id=user_id).only("email").first()
+    except Exception:
+        user = None
+    return {
+        "total_events": base.count(),
+        "last_activity": latest.ts if latest else None,
+        "parts_viewed": len(part_resources),
+        "upload_actions": len(upload_rows),
+        "parts_uploaded": parts_uploaded,
+        "files_uploaded": files_uploaded,
+        "changes": changes,
+        "exports": exports,
+        "email": (user.email if user else "") or (latest.email if latest else ""),
+    }
 
 def _parse_dt(value: str | None, end: bool = False) -> datetime | None:
     return parse_user_datetime(value, end_of_day=end)
@@ -29,6 +106,7 @@ def audit_list():
     endpoint = (request.args.get("endpoint") or "").strip()
     method = (request.args.get("method") or "").strip()
     resource_type = (request.args.get("resource_type") or "").strip()
+    category = (request.args.get("category") or "").strip().lower()
     start = _parse_dt(request.args.get("start"))
     end = _parse_dt(request.args.get("end"), end=True)
 
@@ -56,12 +134,28 @@ def audit_list():
         q = q & Q(method__iexact=method)
     if resource_type:
         q = q & Q(resource_type__icontains=resource_type)
+    if category in AUDIT_CATEGORIES:
+        category_q = Q(action="__never__")
+        for prefix in AUDIT_CATEGORIES[category][1]:
+            category_q = category_q | Q(action__startswith=prefix)
+        q = q & category_q
     if start:
         q = q & Q(ts__gte=start)
     if end:
         q = q & Q(ts__lte=end)
 
-    logs = AuditLog.objects(q).order_by("-ts").skip(offset).limit(limit)
+    logs = list(AuditLog.objects(q).order_by("-ts").skip(offset).limit(limit))
+    audit_rows = []
+    for entry in logs:
+        category_key, category_label = _audit_category(entry.action)
+        audit_rows.append(
+            {
+                "entry": entry,
+                "category": category_key,
+                "category_label": category_label,
+                "label": ACTION_LABELS.get(entry.action, str(entry.action or "Activity").replace(".", " ").title()),
+            }
+        )
     total = AuditLog.objects.count()
     filtered_total = AuditLog.objects(q).count()
     # Diagnostics: try pinging the Mongo server for the configured alias
@@ -77,6 +171,10 @@ def audit_list():
     return render_template(
         "admin/audit_list.html",
         logs=logs,
+        audit_rows=audit_rows,
+        activity_summary=_activity_summary(user_id),
+        audit_categories=[(key, value[0]) for key, value in AUDIT_CATEGORIES.items()],
+        category=category,
         q=qtext,
         limit=limit,
         offset=offset,

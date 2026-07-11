@@ -1,50 +1,126 @@
 {% extends "security/base.html" %}
 {% from "ui/_components.html" import page_header, card_header, empty_state %}
-{% block title %}{{ 'Edit role' if role else 'New role' }} Â· Admin{% endblock %}
+{% block title %}{{ 'Edit role' if role else 'New role' }} - Admin{% endblock %}
 {% block content %}
-{% call page_header('Edit Role' if role else 'Create Role', 'Define the role name, description, and granted permissions.', 'Admin') %}{% endcall %}
+{% call page_header('Edit Role' if role else 'Create Role', 'Define what people with this role can see and change.', 'People & access') %}{% endcall %}
 <div class="row justify-content-center">
-  <div class="col-md-8 col-lg-7">
+  <div class="col-xl-10">
     <div class="card shadow-sm tm-card">
       <div class="card-body p-4">
-        {{ card_header('Role Details', 'Permissions are granted exactly as selected below.') }}
+        {{ card_header('Role Details', 'Use a clear role name and select only the access this team needs.') }}
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <div class="mb-3">
-            <label class="form-label">Name</label>
-            <input class="form-control" type="text" name="name" value="{{ role.name if role else '' }}" required>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Description</label>
-            <input class="form-control" type="text" name="description" value="{{ role.description if role else '' }}">
+          <div class="row g-3 mb-4">
+            <div class="col-md-4">
+              <label class="form-label" for="roleName">Name</label>
+              <input class="form-control" id="roleName" type="text" name="name" value="{{ role.name if role else '' }}" required>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label" for="roleDescription">Description</label>
+              <input class="form-control" id="roleDescription" type="text" name="description" value="{{ role.description if role else '' }}" placeholder="Who should receive this role?">
+            </div>
           </div>
 
           {% set selected = role.permissions if role else [] %}
-
-          <div class="mb-3">
-            <label class="form-label">Permissions</label>
+          <div class="mb-4">
+            <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
+              <div>
+                <h2 class="tm-card-title">Permissions</h2>
+                <p class="tm-card-subtitle">View permissions are read-only. Manage or edit permissions allow users to create and change records.</p>
+              </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-permission-action="clear">Clear all</button>
+                <button class="btn btn-sm btn-outline-primary" type="button" data-permission-action="view">Select view permissions</button>
+              </div>
+            </div>
             {% if permissions %}
-              <div class="row row-cols-2 row-cols-md-3 g-2">
-                {% for p in permissions %}
-                <div class="col">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox"
-                           id="perm-{{ loop.index }}" name="permissions" value="{{ p }}"
-                           {% if p in selected %}checked{% endif %}>
-                    <label class="form-check-label" for="perm-{{ loop.index }}">{{ p }}</label>
+              {% set permission_groups = [
+                ('Administration', 'Control access and instance-wide configuration.', [
+                  ('users.manage', 'Manage users', 'Create accounts, assign roles, reset passwords, and remove eligible users.'),
+                  ('roles.manage', 'Manage roles', 'Create and change permission bundles.'),
+                  ('settings.manage', 'Manage settings', 'Change shared application and engineering settings.')
+                ]),
+                ('Parts & BOM', 'Access engineering records and product structures.', [
+                  ('items.view', 'View parts', 'Browse part records, files, and details.'),
+                  ('items.edit', 'Edit parts', 'Change part data, notes, files, and related content.'),
+                  ('bom.view', 'View BOMs', 'Inspect bill-of-material structures.'),
+                  ('bom.edit', 'Edit BOMs', 'Add, remove, or change BOM relationships.'),
+                  ('numbering.manage', 'Manage numbering', 'Create and administer part-numbering schemes.')
+                ]),
+                ('Operations', 'Commercial and production records around parts.', [
+                  ('jobs.view', 'View jobs', 'Open job records and linked parts.'),
+                  ('jobs.manage', 'Manage jobs', 'Create and change jobs and participants.'),
+                  ('orders.view', 'View orders', 'Open sales and purchase order records.'),
+                  ('orders.manage', 'Manage orders', 'Create and change orders and order lines.'),
+                  ('customers.view', 'View customers', 'Browse customer organisations.'),
+                  ('customers.manage', 'Manage customers', 'Create and change customer records and links.'),
+                  ('suppliers.view', 'View suppliers', 'Browse supplier organisations.'),
+                  ('suppliers.manage', 'Manage suppliers', 'Create and change supplier records and links.')
+                ]),
+                ('Production & inventory', 'Production planning and stock workflows.', [
+                  ('workorders.view', 'View work orders', 'Review work-order status and requirements.'),
+                  ('workorders.edit', 'Edit work orders', 'Change work-order details and progress.'),
+                  ('workorders.close', 'Close work orders', 'Complete and close production work.'),
+                  ('inventory.issue', 'Issue inventory', 'Record material issued from stock.'),
+                  ('inventory.receive', 'Receive inventory', 'Record material received into stock.'),
+                  ('mrp.run', 'Run MRP', 'Start material-requirements planning calculations.'),
+                  ('reports.view', 'View reports', 'Access operational and management reports.')
+                ]),
+                ('Tools & imports', 'Supporting utilities and external data.', [
+                  ('tools.view', 'Use tools', 'Open shared engineering and SolidWorks utilities.'),
+                  ('import.bom', 'Import BOM packs', 'Upload BOM packs and associated part files.')
+                ])
+              ] %}
+              <div class="tm-permission-groups">
+                {% for group_name, group_description, group_permissions in permission_groups %}
+                <section class="tm-permission-group">
+                  <div class="tm-permission-group__header">
+                    <div><h3>{{ group_name }}</h3><p>{{ group_description }}</p></div>
+                    <button class="btn btn-sm btn-link text-decoration-none" type="button" data-permission-group-toggle>Select group</button>
                   </div>
-                </div>
+                  <div class="tm-permission-group__items">
+                    {% for permission_id, permission_label, permission_description in group_permissions %}
+                    {% if permission_id in permissions %}
+                    <label class="tm-permission-option" for="perm-{{ permission_id|replace('.', '-') }}">
+                      <input class="form-check-input" type="checkbox" id="perm-{{ permission_id|replace('.', '-') }}" name="permissions" value="{{ permission_id }}" {% if permission_id in selected %}checked{% endif %}>
+                      <span><strong>{{ permission_label }}</strong><small>{{ permission_description }}</small><code>{{ permission_id }}</code></span>
+                    </label>
+                    {% endif %}
+                    {% endfor %}
+                  </div>
+                </section>
                 {% endfor %}
               </div>
             {% else %}
-              {{ empty_state("No permissions available", "Leave this page unchanged and review the permission catalogue in code before editing roles.") }}
+              {{ empty_state("No permissions available", "Review the permission catalogue before editing roles.") }}
             {% endif %}
           </div>
-
-          <button class="btn btn-primary w-100" type="submit">{{ 'Save' if role else 'Create' }}</button>
+          <div class="d-flex justify-content-end gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Cancel</a>
+            <button class="btn btn-primary" type="submit">{{ 'Save role' if role else 'Create role' }}</button>
+          </div>
         </form>
       </div>
     </div>
   </div>
 </div>
+<script>
+(function () {
+  const checkboxes = Array.from(document.querySelectorAll('input[name="permissions"]'));
+  document.querySelector('[data-permission-action="clear"]')?.addEventListener('click', function () {
+    checkboxes.forEach(function (checkbox) { checkbox.checked = false; });
+  });
+  document.querySelector('[data-permission-action="view"]')?.addEventListener('click', function () {
+    checkboxes.forEach(function (checkbox) { checkbox.checked = checkbox.value.endsWith('.view'); });
+  });
+  document.querySelectorAll('[data-permission-group-toggle]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      const groupBoxes = Array.from(button.closest('.tm-permission-group').querySelectorAll('input[name="permissions"]'));
+      const shouldSelect = groupBoxes.some(function (checkbox) { return !checkbox.checked; });
+      groupBoxes.forEach(function (checkbox) { checkbox.checked = shouldSelect; });
+      button.textContent = shouldSelect ? 'Clear group' : 'Select group';
+    });
+  });
+})();
+</script>
 {% endblock %}

@@ -43,7 +43,12 @@
               <td>{{ u.email }}</td>
               <td>{{ status_badge('Active' if u.active else 'Inactive', 'active' if u.active else 'inactive') }}</td>
               <td>{{ role_names | join(', ') if role_names else '-' }}</td>
-              <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_edit', user_id=u.id) }}">Edit</a></td>
+              <td>
+                <div class="d-flex flex-wrap gap-1">
+                  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_audit.audit_list', user_id=u.id) }}">Activity</a>
+                  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_edit', user_id=u.id) }}">Edit</a>
+                </div>
+              </td>
             </tr>
           {% endfor %}
         {% else %}

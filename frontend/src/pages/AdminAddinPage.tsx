@@ -581,8 +581,14 @@ export default function AdminAddinPage() {
   const draftKind = getSegmentKind(segmentDraft)
 
   return (
-    <div className="p-3">
-      <h3 className="mb-3">Add-in Admin</h3>
+    <div className="tm-react-admin">
+      <header className="tm-page-header">
+        <div className="tm-page-header__body">
+          <div className="tm-page-header__eyebrow">Configuration</div>
+          <h1 className="tm-page-title">SolidWorks add-in</h1>
+          <p className="tm-page-subtitle">Manage user tokens and the part-numbering schemes available to connected SolidWorks clients.</p>
+        </div>
+      </header>
       {message && <div className="alert alert-success">{message}</div>}
       {error && <div className="alert alert-danger">{error}</div>}
 
