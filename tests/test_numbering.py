@@ -29,7 +29,7 @@ def test_allocate_increments_sequence():
     scheme = NumberingScheme(
         name="TypeSeq",
         pattern_segments=[
-            {"kind": "field", "field": "type", "casing": "upper"},
+            {"kind": "literal", "value": "ASM"},
             {"kind": "seq", "padding": 3, "base": 10},
         ],
         separator="-",
@@ -128,7 +128,7 @@ def test_concurrent_allocate_unique():
     scheme = NumberingScheme(
         name="ConcurrentSeq",
         pattern_segments=[
-            {"kind": "field", "field": "type", "casing": "upper"},
+            {"kind": "literal", "value": "CONC"},
             {"kind": "seq", "padding": 3, "base": 10},
         ],
         separator="-",
@@ -173,6 +173,85 @@ def test_validate_simple_literal_seq_scheme_with_start_at():
     v_errors, _, example = validate_scheme_definition(scheme)
     assert not v_errors
     assert example["part_number_example"] == "PART-012"
+
+
+def test_validate_rejects_field_segments():
+    payload = {
+        "name": "LegacyFieldScheme",
+        "pattern_segments": [
+            {"kind": "field", "field": "type", "casing": "upper"},
+            {"kind": "seq", "padding": 3, "base": 10},
+        ],
+    }
+    scheme, errors = normalize_scheme_payload(payload, "user@example.com", None)
+    assert not errors
+    v_errors, _, _ = validate_scheme_definition(scheme)
+    assert any("must be literal, seq, or date" in error for error in v_errors)
+
+
+def _simple_auto_scheme(name: str, padding: int = 3) -> NumberingScheme:
+    return NumberingScheme(
+        name=name,
+        pattern_segments=[
+            {"kind": "literal", "value": "GAP"},
+            {"kind": "seq", "padding": padding, "base": 10, "start_at": 1, "auto_counter": True},
+        ],
+        separator="-",
+        scope_mode="global",
+        seq={"padding": padding, "base": 10, "start_at": 1, "reset_policy": "never"},
+        revision={"policy": "none", "start": ""},
+        validation_rules={"max_length": 32, "allowed_charset": "A-Z0-9-", "require_seq_segment": True},
+        audit={"created_at": utc_now()},
+    ).save()
+
+
+def _alloc(scheme, sequence_values=None):
+    result, errors = allocate_number(
+        scheme,
+        {},
+        create_part_if_missing=True,
+        requested_revision_action="new_part",
+        existing_part_number=None,
+        user_email="user@example.com",
+        cad_ref=None,
+        sequence_values=sequence_values,
+    )
+    assert not errors, errors
+    return result["part_number"]
+
+
+def test_allocate_fills_gaps_after_manual_jump():
+    # 1, 2, manual jump to 9 -> the next automatic allocations must fill 3..8, then 10.
+    scheme = _simple_auto_scheme("GapFilling")
+
+    assert _alloc(scheme) == "GAP-001"
+    assert _alloc(scheme) == "GAP-002"
+    assert _alloc(scheme, sequence_values=[9]) == "GAP-009"
+
+    for expected in (3, 4, 5, 6, 7, 8):
+        assert _alloc(scheme) == f"GAP-{expected:03d}"
+
+    # 9 is taken, so the counter continues at 10.
+    assert _alloc(scheme) == "GAP-010"
+
+
+def test_allocate_never_reissues_a_number_even_after_part_deletion():
+    scheme = _simple_auto_scheme("NoReuse")
+
+    first = _alloc(scheme)
+    assert first == "GAP-001"
+    Part.objects(part_number=first).delete()
+
+    # The value was claimed when issued; deleting the part must not free the number.
+    assert _alloc(scheme) == "GAP-002"
+
+
+def test_allocate_manual_value_respected_and_duplicates_rejected():
+    scheme = _simple_auto_scheme("ManualStart")
+
+    assert _alloc(scheme, sequence_values=[5]) == "GAP-005"
+    # Requesting 5 again yields the next free value at or above 5.
+    assert _alloc(scheme, sequence_values=[5]) == "GAP-006"
 
 
 def test_validate_multi_sequence_requires_exactly_one_automatic_segment():

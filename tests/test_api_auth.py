@@ -78,7 +78,7 @@ def test_settings_and_numbering_with_bearer(client, user):
     scheme = NumberingScheme(
         name="TypeSeqApi",
         pattern_segments=[
-            {"kind": "field", "field": "type", "casing": "upper"},
+            {"kind": "literal", "value": "API"},
             {"kind": "seq", "padding": 3, "base": 10},
         ],
         separator="-",

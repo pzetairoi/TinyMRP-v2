@@ -195,7 +195,7 @@ def validate_scheme():
         require_name=False,
         allow_admin_flags=_can_manage(user),
     )
-    v_errors, v_warnings, example = validate_scheme_definition(scheme_data, payload.get("context"))
+    v_errors, v_warnings, example = validate_scheme_definition(scheme_data)
     errors.extend(v_errors)
     if errors:
         return jsonify({

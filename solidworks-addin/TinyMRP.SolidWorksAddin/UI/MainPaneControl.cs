@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Drawing;
@@ -141,10 +141,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         private ListBox _segmentsList;
         private ComboBox _segmentKindCombo;
         private TextBox _segmentLiteralText;
-        private ComboBox _segmentFieldCombo;
-        private ComboBox _segmentCasingCombo;
-        private NumericUpDown _segmentPadLeftUpDown;
-        private TextBox _segmentPadCharText;
         private NumericUpDown _segmentSeqPaddingUpDown;
         private ComboBox _segmentSeqBaseCombo;
         private NumericUpDown _segmentSeqStartUpDown;
@@ -854,21 +850,11 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             var segmentForm = CreateFormLayout();
             _segmentKindCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
-            _segmentKindCombo.Items.AddRange(new object[] { "literal", "field", "seq", "date" });
+            _segmentKindCombo.Items.AddRange(new object[] { "literal", "seq", "date" });
             _segmentKindCombo.SelectedIndexChanged += (_, __) => UpdateSegmentEditorState();
             AddField(segmentForm, "Kind", _segmentKindCombo);
             _segmentLiteralText = new TextBox { Width = 200 };
             AddField(segmentForm, "Literal value", _segmentLiteralText);
-            _segmentFieldCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
-            _segmentFieldCombo.Items.AddRange(new object[] { "type", "family", "subfamily", "project", "site" });
-            AddField(segmentForm, "Field", _segmentFieldCombo);
-            _segmentCasingCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
-            _segmentCasingCombo.Items.AddRange(new object[] { "upper", "lower", "none" });
-            AddField(segmentForm, "Casing", _segmentCasingCombo);
-            _segmentPadLeftUpDown = new NumericUpDown { Width = 80, Minimum = 0, Maximum = 20 };
-            AddField(segmentForm, "Pad left", _segmentPadLeftUpDown);
-            _segmentPadCharText = new TextBox { Width = 40 };
-            AddField(segmentForm, "Pad char", _segmentPadCharText);
             _segmentSeqPaddingUpDown = new NumericUpDown { Width = 80, Minimum = 1, Maximum = 12, Value = 6 };
             AddField(segmentForm, "Seq padding", _segmentSeqPaddingUpDown);
             _segmentSeqBaseCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
@@ -3675,15 +3661,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 _segmentKindCombo.SelectedIndex = 0;
             }
 
-            if (_segmentFieldCombo != null && _segmentFieldCombo.SelectedIndex < 0)
-            {
-                _segmentFieldCombo.SelectedIndex = 0;
-            }
-
-            if (_segmentCasingCombo != null && _segmentCasingCombo.SelectedIndex < 0)
-            {
-                _segmentCasingCombo.SelectedIndex = 0;
-            }
 
             if (_segmentSeqBaseCombo != null && _segmentSeqBaseCombo.SelectedIndex < 0)
             {
@@ -4094,10 +4071,6 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             SelectComboItem(_segmentKindCombo, segment.Kind);
             _segmentLiteralText.Text = segment.Value ?? string.Empty;
-            SelectComboItem(_segmentFieldCombo, segment.Field);
-            SelectComboItem(_segmentCasingCombo, segment.Casing);
-            _segmentPadLeftUpDown.Value = segment.PadLeft.HasValue ? segment.PadLeft.Value : 0;
-            _segmentPadCharText.Text = segment.PadChar ?? string.Empty;
             _segmentSeqPaddingUpDown.Value = segment.Padding.HasValue ? segment.Padding.Value : _segmentSeqPaddingUpDown.Value;
             SelectComboItem(_segmentSeqBaseCombo, segment.Base.HasValue ? segment.Base.Value.ToString() : string.Empty);
             if (_segmentSeqStartUpDown != null)
@@ -4508,16 +4481,11 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             string kind = GetComboText(_segmentKindCombo).ToLowerInvariant();
             bool isLiteral = kind == "literal";
-            bool isField = kind == "field";
             bool isSeq = kind == "seq";
             bool isDate = kind == "date";
             bool seqIsAutomatic = _segmentSeqAutoCheck != null && _segmentSeqAutoCheck.Checked;
 
             if (_segmentLiteralText != null) _segmentLiteralText.Enabled = isLiteral;
-            if (_segmentFieldCombo != null) _segmentFieldCombo.Enabled = isField;
-            if (_segmentCasingCombo != null) _segmentCasingCombo.Enabled = isField;
-            if (_segmentPadLeftUpDown != null) _segmentPadLeftUpDown.Enabled = isField;
-            if (_segmentPadCharText != null) _segmentPadCharText.Enabled = isField;
             if (_segmentSeqPaddingUpDown != null) _segmentSeqPaddingUpDown.Enabled = isSeq;
             if (_segmentSeqBaseCombo != null) _segmentSeqBaseCombo.Enabled = isSeq;
             if (_segmentSeqStartUpDown != null) _segmentSeqStartUpDown.Enabled = isSeq && !seqIsAutomatic;
@@ -4529,10 +4497,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         {
             SelectComboItem(_segmentKindCombo, "literal");
             _segmentLiteralText.Text = string.Empty;
-            SelectComboItem(_segmentFieldCombo, "type");
-            SelectComboItem(_segmentCasingCombo, "upper");
-            _segmentPadLeftUpDown.Value = 0;
-            _segmentPadCharText.Text = string.Empty;
             _segmentSeqPaddingUpDown.Value = 6;
             SelectComboItem(_segmentSeqBaseCombo, "10");
             if (_segmentSeqStartUpDown != null)
@@ -4568,32 +4532,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                     return null;
                 }
                 segment.Value = value;
-            }
-            else if (kind == "field")
-            {
-                string field = GetComboText(_segmentFieldCombo);
-                if (string.IsNullOrWhiteSpace(field))
-                {
-                    MessageBox.Show("Field is required.", "TinyMRP",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return null;
-                }
-                segment.Field = field;
-                string casing = GetComboText(_segmentCasingCombo);
-                if (!string.IsNullOrWhiteSpace(casing) && !string.Equals(casing, "none", StringComparison.OrdinalIgnoreCase))
-                {
-                    segment.Casing = casing;
-                }
-                int padLeft = (int)(_segmentPadLeftUpDown != null ? _segmentPadLeftUpDown.Value : 0);
-                if (padLeft > 0)
-                {
-                    segment.PadLeft = padLeft;
-                }
-                string padChar = _segmentPadCharText != null ? _segmentPadCharText.Text.Trim() : string.Empty;
-                if (!string.IsNullOrWhiteSpace(padChar))
-                {
-                    segment.PadChar = padChar;
-                }
             }
             else if (kind == "seq")
             {
