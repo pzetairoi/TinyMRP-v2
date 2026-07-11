@@ -160,6 +160,7 @@ def delete_part_and_refs(pn: str, rev: str | None, *, delete_files: bool = False
             "deleted_thumb_files": 0,
             "deleted_extra_files": 0,
             "deleted_extra_records": 0,
+            "deleted_drawing_markups": 0,
         }
 
     physical = {
@@ -173,6 +174,14 @@ def delete_part_and_refs(pn: str, rev: str | None, *, delete_files: bool = False
             physical = _delete_physical_files_for(pn_clean, rev_clean)
         except Exception:
             pass
+
+    deleted_drawing_markups = 0
+    try:
+        from app.services.part_drawing_markups import delete_markups_for_part
+
+        deleted_drawing_markups = delete_markups_for_part(pn_clean, rev_clean)
+    except Exception:
+        deleted_drawing_markups = 0
 
     deleted_parts = Part.objects(
         part_number__iexact=pn_clean,
@@ -236,6 +245,7 @@ def delete_part_and_refs(pn: str, rev: str | None, *, delete_files: bool = False
         "deleted_thumb_files": int(physical.get("deleted_thumb_files") or 0),
         "deleted_extra_files": int(physical.get("deleted_extra_files") or 0),
         "deleted_extra_records": int(physical.get("deleted_extra_records") or 0),
+        "deleted_drawing_markups": int(deleted_drawing_markups or 0),
     }
 
 
@@ -339,6 +349,7 @@ def delete_part_and_refs_cascade(
         "deleted_thumb_files": 0,
         "deleted_extra_files": 0,
         "deleted_extra_records": 0,
+        "deleted_drawing_markups": 0,
     }
 
     def _sum_into(res: Dict[str, int]) -> None:
