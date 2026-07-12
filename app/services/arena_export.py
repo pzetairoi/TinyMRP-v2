@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import os
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -66,19 +67,6 @@ def _child_links(parent_pn: str, parent_rev: Optional[str]) -> list[BOMLink]:
     return list(query.order_by("child_pn", "child_rev"))
 
 
-def _link_occurrence_qtys(link: BOMLink) -> list[float]:
-    occs = getattr(link, "occurrences", None) or []
-    if occs:
-        out: list[float] = []
-        for occ in occs:
-            qty_val = occ.get("qty")
-            if qty_val is None:
-                qty_val = getattr(link, "qty", 1.0)
-            out.append(float(qty_val or 0.0))
-        return out
-    return [float(getattr(link, "qty", 1.0) or 0.0)]
-
-
 def _csv_text(value: Any) -> str:
     if value is None:
         return ""
@@ -92,6 +80,18 @@ def _csv_text(value: Any) -> str:
     if isinstance(value, (list, tuple, set)):
         return ", ".join(_csv_text(item) for item in value if item is not None)
     return str(value)
+
+
+def _quantity_text(value: Any) -> str:
+    """Format BOM quantities without the general one-decimal display rounding."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return _csv_text(value)
+    if not math.isfinite(number):
+        return str(number)
+    return format(number, ".15g")
+
 
 def _desc_from(pn: str, rev: str) -> str:
     safe_rev = str(rev or "").replace("/", "-").replace("\\", "-").replace(":", "-")
@@ -214,7 +214,8 @@ def build_arena_bom_csv(
         )
         out: Dict[str, Any] = {}
         for field_id, header in header_by_field_id.items():
-            out[header] = values.get(field_id, "")
+            value = values.get(field_id, "")
+            out[header] = _quantity_text(value) if field_id in {"level_qty", "total_qty"} else value
         return out
 
     root_values = values_for(
@@ -229,7 +230,9 @@ def build_arena_bom_csv(
     rows.append(
         {
             "item number": root_part.part_number,
-            "line number": 3,
+            # The root is not a BOM line: line number belongs to the
+            # parent/child relationship, so it must be blank at level zero.
+            "line number": "",
             "level": 0,
             "quantity": 1,
             "item name": _resolve_values(root_part, ["description"], extra={"part_number": root_part.part_number, "revision": root_effective_rev}).get("description", ""),
@@ -238,6 +241,7 @@ def build_arena_bom_csv(
     )
 
     def walk(parent_pn: str, parent_rev: str, depth: int, ancestry: tuple[tuple[str, str], ...], parent_total_qty: float) -> None:
+        line_number = 0
         for link in _child_links(parent_pn, parent_rev):
             child_pn = str(getattr(link, "child_pn", None) or "").strip()
             if not child_pn:
@@ -255,29 +259,34 @@ def build_arena_bom_csv(
                 _resolve_values(child_part, ["description"], extra={"part_number": child_pn, "revision": effective_rev}).get("description")
             )
             next_ancestry = ancestry + (child_key,)
-            for occ_qty in _link_occurrence_qtys(link):
-                quantity = float(occ_qty or 0.0)
-                total_qty = float(parent_total_qty or 0.0) * quantity
-                row = {
-                    "item number": child_pn,
-                    "line number": 3,
-                    "level": depth,
-                    "quantity": quantity,
-                    "item name": description,
-                }
-                row.update(
-                    values_for(
-                        child_part,
-                        pn=child_pn,
-                        rev=effective_rev,
-                        description=description,
-                        level=depth,
-                        quantity=quantity,
-                        total_qty=total_qty,
-                    )
+            # BOMLink.qty is the authoritative quantity for this parent/child
+            # relationship. ``occurrences`` only preserves the individual
+            # source rows that were aggregated during import; exporting those
+            # as separate Arena BOM lines duplicates both the item and any
+            # descendant subtree.
+            quantity = float(getattr(link, "qty", 1.0) or 0.0)
+            total_qty = float(parent_total_qty or 0.0) * quantity
+            line_number += 10
+            row = {
+                "item number": child_pn,
+                "line number": line_number,
+                "level": depth,
+                "quantity": _quantity_text(quantity),
+                "item name": description,
+            }
+            row.update(
+                values_for(
+                    child_part,
+                    pn=child_pn,
+                    rev=effective_rev,
+                    description=description,
+                    level=depth,
+                    quantity=quantity,
+                    total_qty=total_qty,
                 )
-                rows.append(row)
-                walk(child_pn, effective_rev, depth + 1, next_ancestry, total_qty)
+            )
+            rows.append(row)
+            walk(child_pn, effective_rev, depth + 1, next_ancestry, total_qty)
 
     walk(root_part.part_number, root_effective_rev, 1, ((root_part.part_number, root_effective_rev),), 1.0)
 

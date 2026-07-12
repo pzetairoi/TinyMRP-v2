@@ -68,6 +68,7 @@ def test_arena_bom_export_outputs_tree_rows_and_selected_fields(client):
     assert list(rows[0].keys()) == ["item number", "line number", "level", "quantity", "item name", "Revision", "material", "item category"]
 
     assert rows[0]["item number"] == "ASM-ARENA"
+    assert rows[0]["line number"] == ""
     assert rows[0]["level"] == "0"
     assert rows[0]["quantity"] == "1"
     assert rows[0]["item name"] == "Arena Root"
@@ -76,14 +77,76 @@ def test_arena_bom_export_outputs_tree_rows_and_selected_fields(client):
     assert rows[0]["item category"] == "Assembly"
 
     assert rows[1]["item number"] == "CMP-ARENA"
+    assert rows[1]["line number"] == "10"
     assert rows[1]["level"] == "1"
     assert rows[1]["quantity"] == "2"
     assert rows[1]["item name"] == "Arena Child"
 
     assert rows[2]["item number"] == "SUB-ARENA"
+    assert rows[2]["line number"] == "10"
     assert rows[2]["level"] == "2"
     assert rows[2]["quantity"] == "3"
     assert rows[2]["item name"] == "Arena Grandchild"
+
+
+def test_arena_bom_export_uses_aggregate_link_qty_not_source_occurrences(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    root = Part(part_number="ASM-OCC", revision="A", description="Root").save()
+    child = Part(part_number="SUB-OCC", revision="A", description="Subassembly").save()
+    grandchild = Part(part_number="CMP-OCC", revision="A", description="Component").save()
+
+    BOMLink(
+        parent_pn=root.part_number,
+        parent_rev=root.revision,
+        child_pn=child.part_number,
+        child_rev=child.revision,
+        qty=2,
+        occurrences=[{"seq": 1, "qty": 1}, {"seq": 2, "qty": 1}],
+    ).save()
+    BOMLink(
+        parent_pn=child.part_number,
+        parent_rev=child.revision,
+        child_pn=grandchild.part_number,
+        child_rev=grandchild.revision,
+        qty=3,
+        occurrences=[{"seq": 1, "qty": 3}],
+    ).save()
+
+    resp = client.post(
+        f"/api/parts/{root.part_number}/export/arena_bom",
+        json={"rev": root.revision, "field_ids": ["total_qty"]},
+    )
+    assert resp.status_code == 200
+
+    rows = _read_csv_response(resp)
+    assert [row["item number"] for row in rows] == ["ASM-OCC", "SUB-OCC", "CMP-OCC"]
+    assert [row["quantity"] for row in rows] == ["1", "2", "3"]
+    assert rows[2]["Total Qty"] == "6"
+
+
+def test_arena_bom_export_preserves_fractional_quantity_precision(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    root = Part(part_number="ASM-FRACTION", revision="A", description="Root").save()
+    child = Part(part_number="CMP-FRACTION", revision="A", description="Component").save()
+    BOMLink(
+        parent_pn=root.part_number,
+        parent_rev=root.revision,
+        child_pn=child.part_number,
+        child_rev=child.revision,
+        qty=0.125,
+    ).save()
+
+    resp = client.post(
+        f"/api/parts/{root.part_number}/export/arena_bom",
+        json={"rev": root.revision},
+    )
+    assert resp.status_code == 200
+    rows = _read_csv_response(resp)
+    assert rows[1]["quantity"] == "0.125"
 
 
 def test_arena_bom_export_uses_admin_defaults_and_alias_headers(client):
