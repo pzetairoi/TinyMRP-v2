@@ -713,6 +713,13 @@ def create_app(config_object=None):
     except Exception:
         pass
 
+    from app.views.notifications import bp as notifications_bp
+    app.register_blueprint(notifications_bp)
+    try:
+        csrf.exempt(notifications_bp)
+    except Exception:
+        pass
+
     from app.views.field_config import bp as field_config_bp
     app.register_blueprint(field_config_bp)
     try:

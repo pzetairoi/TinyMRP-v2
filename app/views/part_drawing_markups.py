@@ -30,6 +30,7 @@ from app.services.part_drawing_markups import (
     validate_canvas_json,
 )
 from app.services.part_norm import clean_rev, clean_rev_or_none
+from app.services.notifications import notify_part_activity
 
 
 bp = Blueprint("part_drawing_markups_api", __name__, url_prefix="/api")
@@ -71,6 +72,12 @@ def _can_edit_markups() -> bool:
 
 def _user_email() -> str:
     return str(getattr(current_user, "email", "") or "")
+
+
+def _thread_participants(thread) -> set[str]:
+    participants = {str(getattr(thread, "created_by", "") or "").strip()}
+    participants.update(str(getattr(message, "author", "") or "").strip() for message in (thread.messages or []))
+    return {email for email in participants if email}
 
 
 def _page_number(value) -> int:
@@ -273,6 +280,16 @@ def drawing_markup_thread_create(pn: str):
             "version": int(doc.version or 0),
         },
     )
+    try:
+        notify_part_activity(
+            part,
+            actor_email=_user_email(),
+            text=str(data.get("message") or ""),
+            title=f"Markup review on {part.part_number}: {thread.title or 'Review'}",
+            thread_id=str(thread.id),
+        )
+    except Exception:
+        pass
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number, status=201)
 
 
@@ -290,7 +307,7 @@ def drawing_markup_thread_reply(pn: str, thread_id: str):
     if not thread:
         return _error(404, "thread_not_found", "review thread not found")
     try:
-        add_thread_message(doc, thread, text=data.get("text"), user_email=_user_email())
+        message = add_thread_message(doc, thread, text=data.get("text"), user_email=_user_email())
     except MarkupTooLargeError as exc:
         return _error(413, "too_large", str(exc))
     except MarkupValidationError as exc:
@@ -305,6 +322,18 @@ def drawing_markup_thread_reply(pn: str, thread_id: str):
             "version": int(doc.version or 0),
         },
     )
+    try:
+        notify_part_activity(
+            part,
+            actor_email=_user_email(),
+            text=str(message.text or ""),
+            title=f"Reply on {part.part_number}: {thread.title or 'Markup review'}",
+            participant_emails=_thread_participants(thread),
+            thread_id=str(thread.id),
+            kind="thread_update",
+        )
+    except Exception:
+        pass
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)
 
 
@@ -343,4 +372,17 @@ def drawing_markup_thread_patch(pn: str, thread_id: str):
             update_thread_priority(doc, thread, priority=priority, user_email=_user_email())
     except MarkupValidationError as exc:
         return _error(400, "invalid", str(exc))
+    try:
+        change = action or (f"priority changed to {priority}" if priority is not None else "updated")
+        notify_part_activity(
+            part,
+            actor_email=_user_email(),
+            text=f"Markup review {change}.",
+            title=f"Review updated on {part.part_number}: {thread.title or 'Markup review'}",
+            participant_emails=_thread_participants(thread),
+            thread_id=str(thread.id),
+            kind="thread_update",
+        )
+    except Exception:
+        pass
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)

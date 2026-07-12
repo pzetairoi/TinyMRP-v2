@@ -11,6 +11,7 @@ import ThumbImg from "../components/ThumbImg";
 import "./partdetail.css";
 import FieldSelector from "../components/FieldSelector";
 import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
+import MentionTextarea from "../components/MentionTextarea";
 import type {
   DrawingImageRow,
   MarkupDraft,
@@ -2130,6 +2131,15 @@ function isExternalDatasheetUrl(url: string): boolean {
     if (notes.trim()) return "note"
     return null
   }, [comments, hasMarkups, markupThreads, notes])
+  const reviewTabIndex =
+    Number(hasDrawing) +
+    Number(hasDatasheetPreview) +
+    Number(!isSharedView || sharedAllowsAttributes) +
+    Number(threeDOptions.length > 0) +
+    1 + // Files
+    Number(!isSharedView || sharedAllowsDocpacks) +
+    Number(!isSharedView && versions.length > 1) +
+    Number(!isSharedView && jobsOrders.length > 0)
   const notesDirty = notes !== savedNotes
 
   function tabHeader(label: string, icon: string, indicator: ReviewIndicator = null) {
@@ -2147,6 +2157,12 @@ function isExternalDatasheetUrl(url: string): boolean {
       setTabIndex(0)
     }
   }, [effectiveRev, hasDrawing, hasDatasheetPreview, isSharedView, pn])
+
+  useEffect(() => {
+    if (!isSharedView && sp.get("tab") === "reviews") {
+      setTabIndex(reviewTabIndex)
+    }
+  }, [isSharedView, reviewTabIndex, sp])
 
   async function saveNotes(nextNotes = notes) {
     if (!canPartsNote || !part) return
@@ -3438,11 +3454,13 @@ function isExternalDatasheetUrl(url: string): boolean {
                         <option value="high">High importance</option>
                       </select>
                       <div className="input-group input-group-sm">
-                      <textarea
-                        className="form-control"
+                      <MentionTextarea
+                        partNumber={pn}
+                        revision={effectiveRev || ""}
+                        className="form-control form-control-sm"
                         rows={2}
                         value={commentText}
-                        onChange={(e) => setCommentText(e.target.value)}
+                        onChange={setCommentText}
                         onKeyDown={(e) => {
                           if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && commentText.trim() && !commentSaving) {
                             e.preventDefault()

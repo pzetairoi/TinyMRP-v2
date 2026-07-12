@@ -5,6 +5,19 @@
   <div class="account-shell">
     {{ page_header("Home", dashboard.subtitle, "TinyMRP") }}
 
+    <section class="account-panel mb-4" id="notifications">
+      <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+        <div>
+          <div class="account-section-title">Notifications</div>
+          <div class="small text-muted">Mentions and review activity that need your attention.</div>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" type="button" id="accountNotificationsReadAll">Mark all read</button>
+      </div>
+      <div id="accountNotificationList" class="tm-account-notification-list">
+        <div class="tm-notification-empty">Loading notifications...</div>
+      </div>
+    </section>
+
     <div class="row g-4">
       <div class="col-xl-4">
         <section class="account-panel account-panel--hero">
@@ -347,4 +360,53 @@
       </div>
     </div>
   </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  (() => {
+    const list = document.getElementById('accountNotificationList');
+    const readAll = document.getElementById('accountNotificationsReadAll');
+    if (!list) return;
+    const render = (rows) => {
+      list.replaceChildren();
+      if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.className = 'tm-notification-empty';
+        empty.textContent = 'You are all caught up.';
+        list.appendChild(empty);
+        return;
+      }
+      rows.forEach((row) => {
+        const item = document.createElement('a');
+        item.href = row.url || '/app';
+        item.className = `tm-account-notification${row.unread ? ' tm-account-notification--unread' : ''}`;
+        const title = document.createElement('strong');
+        title.textContent = row.title || 'Notification';
+        const body = document.createElement('span');
+        body.textContent = row.body || '';
+        const meta = document.createElement('small');
+        const created = row.created_at ? new Date(row.created_at).toLocaleString() : '';
+        meta.textContent = [row.actor_email || '', created].filter(Boolean).join(' · ');
+        item.append(title, body, meta);
+        item.addEventListener('click', () => fetch(`/api/notifications/${encodeURIComponent(row.id)}/read`, { method: 'POST', keepalive: true }));
+        list.appendChild(item);
+      });
+    };
+    const load = async () => {
+      try {
+        const response = await fetch('/api/notifications?limit=50');
+        if (!response.ok) return;
+        const data = await response.json();
+        render(Array.isArray(data.notifications) ? data.notifications : []);
+      } catch (_) {}
+    };
+    readAll?.addEventListener('click', async () => {
+      try { await fetch('/api/notifications/read-all', { method: 'POST' }); } catch (_) {}
+      window.dispatchEvent(new Event('tinymrp:notifications-refresh'));
+      await load();
+    });
+    load();
+  })();
+</script>
 {% endblock %}
