@@ -61,10 +61,12 @@ def test_jobs_form_docpack_section_keeps_field_names_and_hooks(client, app):
         "depth", "classified", "process_mode", "output_name", "processes", "file_types",
         "selected_files", "excel_bom", "pdf_binder", "index_pdf", "visual_list",
         "hardware_summary", "cover_page", "whereused_report", "fabrication_pack",
+        "markup_files", "markup_report",
         "excel_all_fields", "include_consumed",
         "binder_add_cover", "binder_add_index", "binder_add_visual_list",
         "binder_add_whereused", "binder_add_datasheets", "binder_add_hardware_summary",
         "binder_page_numbers", "binder_include_flat_patterns",
+        "binder_add_markups",
         "stamp_quote", "stamp_confidential", "stamp_approved", "stamp_wip", "stamp_inprogress",
     ]:
         assert f'name="{name}"' in body, f"missing field: {name}"
@@ -88,6 +90,7 @@ def test_orders_form_docpack_and_scope_sections_keep_field_names(client, app):
     for name in [
         "depth", "classified", "process_mode", "output_name", "processes", "file_types",
         "selected_files", "excel_bom", "pdf_binder", "binder_add_datasheets",
+        "markup_files", "markup_report", "binder_add_markups",
         "stamp_quote", "stamp_inprogress",
     ]:
         assert f'name="{name}"' in body, f"missing docpack field: {name}"

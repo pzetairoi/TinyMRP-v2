@@ -146,6 +146,7 @@ type CommentRow = {
   author_profile?: IdentityProfile | null;
   text: string;
   priority?: "low" | "normal" | "high" | "";
+  status?: "open" | "resolved";
 };
 
 type ExtraFileRow = {
@@ -247,6 +248,9 @@ type FlatBomRow = {
   uom?: string;
   alt_group?: string;
   thumb_urls?: string[];
+  pending_review_count?: number;
+  pending_review_severity?: "low" | "normal" | "high" | "";
+  has_pending_reviews?: boolean;
   [key: string]: any;
 };
 
@@ -638,8 +642,8 @@ export default function PartDetailPage() {
   const [selectedDatasheetKey, setSelectedDatasheetKey] = useState<string>("");
 
   // Doc Packs state
-  type DocOpts = { file_types: string[]; processes: string[] };
-  const [docOpts, setDocOpts] = useState<DocOpts>({ file_types: [], processes: [] });
+  type DocOpts = { file_types: string[]; processes: string[]; markup_document_count: number };
+  const [docOpts, setDocOpts] = useState<DocOpts>({ file_types: [], processes: [], markup_document_count: 0 });
   const [docLoading, setDocLoading] = useState(false);
   const [docProgress, setDocProgress] = useState(0);
   const progressTimer = useRef<number | null>(null);
@@ -658,6 +662,8 @@ export default function PartDetailPage() {
   const [wantCoverPage, setWantCoverPage] = useState(false);
   const [wantWhereusedReport, setWantWhereusedReport] = useState(false);
   const [wantHardwareSummary, setWantHardwareSummary] = useState(false);
+  const [wantMarkupFiles, setWantMarkupFiles] = useState(false);
+  const [wantMarkupReport, setWantMarkupReport] = useState(false);
   const [binderAddCover, setBinderAddCover] = useState(true);
   const [binderAddVisualList, setBinderAddVisualList] = useState(true);
   const [binderAddWhereused, setBinderAddWhereused] = useState(false);
@@ -666,6 +672,7 @@ export default function PartDetailPage() {
   const [binderAddHardwareSummary, setBinderAddHardwareSummary] = useState(true);
   const [binderPageNumbers, setBinderPageNumbers] = useState(true);
   const [binderIncludeFlatPatterns, setBinderIncludeFlatPatterns] = useState(false);
+  const [binderAddMarkups, setBinderAddMarkups] = useState(false);
   const [stampQuote, setStampQuote] = useState(false);
   const [stampConfidential, setStampConfidential] = useState(false);
   const [stampApproved, setStampApproved] = useState(false);
@@ -1249,7 +1256,7 @@ function isExternalDatasheetUrl(url: string): boolean {
     (async () => {
       try {
         if (isSharedView && !sharedAllowsDocpacks) {
-          if (!cancelled) setDocOpts({ file_types: [], processes: [] });
+          if (!cancelled) setDocOpts({ file_types: [], processes: [], markup_document_count: 0 });
           return;
         }
         const optionsUrl = isSharedView
@@ -1262,7 +1269,7 @@ function isExternalDatasheetUrl(url: string): boolean {
         if (cancelled) return;
         const file_types = Array.isArray(j.file_types) ? j.file_types : [];
         const processes = Array.isArray(j.processes) ? j.processes : [];
-        setDocOpts({ file_types, processes });
+        setDocOpts({ file_types, processes, markup_document_count: Number(j.markup_document_count || 0) });
         if (selTypes.size === 0 && file_types.length) setSelTypes(new Set(file_types));
         if (selProcesses.size === 0 && processes.length) setSelProcesses(new Set(processes));
       } catch {}
@@ -1513,8 +1520,15 @@ function isExternalDatasheetUrl(url: string): boolean {
 
   const rowClassName = (node: any) => {
     const d = Number(node?.data?._depth ?? 0) % 5; // 5-color loop
-    return { [`tt-depth-${d}`]: true };
+    const severity = String(node?.data?.pending_review_severity || "");
+    return {
+      [`tt-depth-${d}`]: true,
+      [`parts-review-row parts-review-row--${severity}`]: Boolean(severity),
+    };
   };
+
+  const flatReviewRowClassName = (row: FlatBomRow) =>
+    row.has_pending_reviews ? `parts-review-row parts-review-row--${row.pending_review_severity || "low"}` : "";
 
   // ---------- Derived ----------
   const fileGroups = useMemo(() => groupFiles(files), [files]);
@@ -1776,6 +1790,7 @@ function isExternalDatasheetUrl(url: string): boolean {
   )
   const flatFilteredRows = useMemo(() => {
     const activeEntries = Object.entries(ttFilters || {}).filter(([fieldId, filterMeta]) => {
+      if (fieldId === "pending_review_severity") return hasActiveFilterValue(filterMetaValue(filterMeta));
       const field = bomFieldMap.get(fieldId);
       if (!field || field.id === "thumbnail") return false;
       return hasActiveFilterValue(filterMetaValue(filterMeta));
@@ -1785,6 +1800,9 @@ function isExternalDatasheetUrl(url: string): boolean {
 
     return flatBomRows.filter((row) =>
       activeEntries.every(([fieldId, filterMeta]) => {
+        if (fieldId === "pending_review_severity") {
+          return reviewFilterMatches(row.pending_review_severity, filterMetaValue(filterMeta));
+        }
         const field = bomFieldMap.get(fieldId)
         if (!field) return true;
 
@@ -2122,7 +2140,7 @@ function isExternalDatasheetUrl(url: string): boolean {
   type ReviewIndicator = "note" | "low" | "normal" | "high" | null
   const reviewIndicator = useMemo<ReviewIndicator>(() => {
     const priorities = [
-      ...comments.map((comment) => comment.priority || "low"),
+      ...comments.filter((comment) => comment.status !== "resolved").map((comment) => comment.priority || "low"),
       ...markupThreads.filter((thread) => thread.status === "open").map((thread) => thread.priority),
     ]
     if (priorities.includes("high")) return "high"
@@ -2189,6 +2207,49 @@ function isExternalDatasheetUrl(url: string): boolean {
     }
   }
 
+  function reviewFilterMatches(value: unknown, filterValue: unknown) {
+    const filter = String(filterValue || "").toLowerCase();
+    const severity = String(value || "").toLowerCase();
+    if (!filter) return true;
+    if (filter === "pending") return Boolean(severity);
+    if (filter === "none") return !severity;
+    return severity === filter;
+  }
+
+  function renderReviewFilter() {
+    const value = String(filterMetaValue(ttFilters?.pending_review_severity) || "");
+    return (
+      <select
+        className="form-select form-select-sm"
+        aria-label="Filter BOM by pending reviews"
+        value={value}
+        onChange={(e) => setTTFilterValue("pending_review_severity", e.target.value, "custom")}
+      >
+        <option value="">Any</option>
+        <option value="pending">Pending</option>
+        <option value="high">High</option>
+        <option value="normal">Normal</option>
+        <option value="low">Low</option>
+        <option value="none">None</option>
+      </select>
+    );
+  }
+
+  function bomReviewIndicator(row: any) {
+    const data = bomData(row);
+    if (!data?.has_pending_reviews) return <span className="text-muted">—</span>;
+    const severity = data.pending_review_severity || "low";
+    return (
+      <span
+        className={`parts-review-indicator parts-review-indicator--${severity}`}
+        title={`${data.pending_review_count || 0} pending review item(s), ${severity} priority`}
+      >
+        <span aria-hidden="true" />
+        {data.pending_review_count || 0}
+      </span>
+    );
+  }
+
   async function clearNotes() {
     if (!notes && !savedNotes) return
     if (!window.confirm("Erase these notes? This cannot be undone.")) return
@@ -2241,6 +2302,28 @@ function isExternalDatasheetUrl(url: string): boolean {
       setComments(Array.isArray(j.comments) ? j.comments : [])
     } catch (e: any) {
       setCommentError(e?.message || "Failed to erase comment")
+    } finally {
+      setCommentDeleting(null)
+    }
+  }
+
+  async function toggleCommentStatus(comment: CommentRow, index: number) {
+    if (!canPartsNote || !part || !comment.id) return
+    const key = comment.id || `${comment.ts}-${index}`
+    const status = comment.status === "resolved" ? "open" : "resolved"
+    setCommentDeleting(key)
+    setCommentError(null)
+    try {
+      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/comments/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: comment.id, status, rev: part.revision || "" }),
+      })
+      const payload = await resp.json().catch(() => null)
+      if (!resp.ok || !payload?.comment) throw new Error(payload?.error || `HTTP ${resp.status}`)
+      setComments((current) => current.map((row) => row.id === comment.id ? payload.comment as CommentRow : row))
+    } catch (e: any) {
+      setCommentError(e?.message || "Failed to update comment")
     } finally {
       setCommentDeleting(null)
     }
@@ -3032,7 +3115,8 @@ function isExternalDatasheetUrl(url: string): boolean {
               <div className="pd-card p-3 mt-3">
                 <h6 className="mb-3">Outputs to generate</h6>
                 <div className="row g-2">
-                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>setWantSelectedFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docSel" checked={wantSelectedFiles} onChange={(e)=>{ setWantSelectedFiles(e.target.checked); if (!e.target.checked) setWantMarkupFiles(false); }} /><label className="form-check-label" htmlFor="docSel">Selected files</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docMarkupFiles" checked={wantMarkupFiles} disabled={!wantSelectedFiles || docOpts.markup_document_count === 0} onChange={(e)=>setWantMarkupFiles(e.target.checked)} /><label className="form-check-label" htmlFor="docMarkupFiles">Markup documents in selected files <span className="text-muted">({docOpts.markup_document_count})</span></label></div></div>
                   <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docExcel" checked={wantExcel} onChange={(e)=>setWantExcel(e.target.checked)} /><label className="form-check-label" htmlFor="docExcel">Excel BOM</label></div></div>
                   <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docBinder" checked={wantBinder} onChange={(e)=>setWantBinder(e.target.checked)} /><label className="form-check-label" htmlFor="docBinder">PDF binder</label></div></div>
                   <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docIndex" checked={wantIndex} onChange={(e)=>setWantIndex(e.target.checked)} /><label className="form-check-label" htmlFor="docIndex">Index (PDF, standalone)</label></div></div>
@@ -3040,6 +3124,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                   <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docHardware" checked={wantHardwareSummary} onChange={(e)=>setWantHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="docHardware">Hardware summary (standalone)</label></div></div>
                   <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docCover" checked={wantCoverPage} onChange={(e)=>setWantCoverPage(e.target.checked)} /><label className="form-check-label" htmlFor="docCover">Cover page (standalone)</label></div></div>
                   <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docWhere" checked={wantWhereusedReport} onChange={(e)=>setWantWhereusedReport(e.target.checked)} /><label className="form-check-label" htmlFor="docWhere">Where-used report (standalone)</label></div></div>
+                  <div className="col-md-6 col-lg-4"><div className="form-check"><input className="form-check-input" type="checkbox" id="docMarkupReport" checked={wantMarkupReport} disabled={docOpts.markup_document_count === 0} onChange={(e)=>setWantMarkupReport(e.target.checked)} /><label className="form-check-label" htmlFor="docMarkupReport">Markup drawings report (print-only)</label></div></div>
                   <div className="col-md-6 col-lg-4">
                     <div className="form-check"><input className="form-check-input" type="checkbox" id="docFab" checked={fabricationPack} onChange={(e)=>{
                       const on=e.target.checked; setFabricationPack(on);
@@ -3122,6 +3207,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="bWhere" checked={binderAddWhereused} onChange={(e)=>setBinderAddWhereused(e.target.checked)} /><label className="form-check-label" htmlFor="bWhere">Where-used report section</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="bHard" checked={binderAddHardwareSummary} onChange={(e)=>setBinderAddHardwareSummary(e.target.checked)} /><label className="form-check-label" htmlFor="bHard">Hardware summary</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="bData" checked={binderAddDatasheets} onChange={(e)=>setBinderAddDatasheets(e.target.checked)} /><label className="form-check-label" htmlFor="bData">Datasheets</label></div>
+                      <div className="form-check"><input className="form-check-input" type="checkbox" id="bMarkups" checked={binderAddMarkups} disabled={docOpts.markup_document_count === 0} onChange={(e)=>setBinderAddMarkups(e.target.checked)} /><label className="form-check-label" htmlFor="bMarkups">Markup drawings <span className="text-muted">({docOpts.markup_document_count})</span></label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="bFlat" checked={binderIncludeFlatPatterns} onChange={(e)=>setBinderIncludeFlatPatterns(e.target.checked)} /><label className="form-check-label" htmlFor="bFlat">Flat pattern PDFs</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="bNums" checked={binderPageNumbers} onChange={(e)=>setBinderPageNumbers(e.target.checked)} /><label className="form-check-label" htmlFor="bNums">Page numbers</label></div>
                     </div>
@@ -3172,6 +3258,8 @@ function isExternalDatasheetUrl(url: string): boolean {
                         hardware_summary: wantHardwareSummary,
                         cover_page: wantCoverPage,
                         whereused_report: wantWhereusedReport,
+                        markup_files: wantMarkupFiles,
+                        markup_report: wantMarkupReport,
                         fabrication_pack: fabricationPack,
                         binder_add_cover: binderAddCover,
                         binder_add_visual_list: binderAddVisualList,
@@ -3181,6 +3269,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                         binder_add_hardware_summary: binderAddHardwareSummary,
                         binder_page_numbers: binderPageNumbers,
                         binder_include_flat_patterns: binderIncludeFlatPatterns,
+                        binder_add_markups: binderAddMarkups,
                         stamp_quote: stampQuote,
                         stamp_confidential: stampConfidential,
                         stamp_approved: stampApproved,
@@ -3224,6 +3313,8 @@ function isExternalDatasheetUrl(url: string): boolean {
                           if (wantHardwareSummary) items.push("Hardware summary");
                           if (wantCoverPage) items.push("Cover page");
                           if (wantWhereusedReport) items.push("Where-used report");
+                          if (wantMarkupFiles) items.push("markup files");
+                          if (wantMarkupReport) items.push("markup report");
                           if (wantBinder) items.push("Binder");
                           return `Preparing ${items.join(", ") || "outputs"}...`;
                         })()}
@@ -3397,7 +3488,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                 {filteredComments.length ? (
                   <div className="pd-review-list">
                     {filteredComments.map((c, idx) => (
-                      <article key={`${c.ts}-${idx}`} className="pd-review-item">
+                      <article key={`${c.ts}-${idx}`} className={`pd-review-item${c.status === "resolved" ? " pd-review-item--resolved" : ""}`}>
                         <div className="pd-comment-row">
                           {identityAvatar(c.author_profile, c.author_display || c.author || "User", "md")}
                           <div className="pd-comment-body">
@@ -3414,6 +3505,18 @@ function isExternalDatasheetUrl(url: string): boolean {
                               <span className={`badge ${c.priority === "high" ? "text-bg-danger" : c.priority === "low" ? "text-bg-secondary" : "text-bg-info"}`}>
                                 {c.priority}
                               </span>
+                            ) : null}
+                            {canPartsNote ? (
+                              <button
+                                type="button"
+                                className={`btn btn-sm ${c.status === "resolved" ? "btn-outline-secondary" : "btn-outline-success"}`}
+                                title={c.status === "resolved" ? "Reopen comment" : "Resolve comment"}
+                                aria-label={c.status === "resolved" ? "Reopen comment" : "Resolve comment"}
+                                disabled={commentDeleting !== null || !c.id}
+                                onClick={() => toggleCommentStatus(c, idx)}
+                              >
+                                <i className={`pi ${c.status === "resolved" ? "pi-replay" : "pi-check"}`} aria-hidden="true" />
+                              </button>
                             ) : null}
                             {canPartsNote ? (
                               <button
@@ -3915,6 +4018,19 @@ function isExternalDatasheetUrl(url: string): boolean {
               style={{ width: 30, minWidth: 30, maxWidth: 30 }}
             />
 
+            <Column
+              field="pending_review_severity"
+              header="Reviews"
+              body={bomReviewIndicator}
+              sortable
+              filter
+              filterMatchMode="custom"
+              filterFunction={reviewFilterMatches}
+              showFilterMenu={false}
+              filterElement={renderReviewFilter()}
+              style={{ width: 105 }}
+            />
+
             {selectedBomIds.map((fieldId) => {
               const field = bomFields.find((item) => item.id === fieldId)
               if (!field) return null
@@ -3973,7 +4089,18 @@ function isExternalDatasheetUrl(url: string): boolean {
             scrollHeight="55vh"
             resizableColumns
             size="small"
+            rowClassName={flatReviewRowClassName}
           >
+            <Column
+              field="pending_review_severity"
+              header="Reviews"
+              body={bomReviewIndicator}
+              sortable
+              filter
+              showFilterMenu={false}
+              filterElement={renderReviewFilter()}
+              style={{ width: 105 }}
+            />
             {selectedBomIds.map((fieldId) => {
               const field = bomFields.find((item) => item.id === fieldId)
               if (!field) return null

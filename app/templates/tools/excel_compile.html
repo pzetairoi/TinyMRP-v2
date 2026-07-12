@@ -181,6 +181,14 @@
             <input class="form-check-input" type="checkbox" name="want_cover_page" id="wantCover">
             <label class="form-check-label" for="wantCover">Cover page (standalone)</label>
           </div></div>
+          <div class="col-md-6 col-lg-4"><div class="form-check">
+            <input class="form-check-input" type="checkbox" name="want_markup_files" id="wantMarkupFiles">
+            <label class="form-check-label" for="wantMarkupFiles">Markup drawings in selected files</label>
+          </div></div>
+          <div class="col-md-6 col-lg-4"><div class="form-check">
+            <input class="form-check-input" type="checkbox" name="want_markup_report" id="wantMarkupReport">
+            <label class="form-check-label" for="wantMarkupReport">Markup drawings report</label>
+          </div></div>
         </div>
 
         {% if excel_fields %}
@@ -215,6 +223,7 @@
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_visual_list" id="binderVisual" checked><label class="form-check-label" for="binderVisual">Visual index section</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_hardware_summary" id="binderHardware" checked><label class="form-check-label" for="binderHardware">Hardware summary</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_datasheets" id="binderDatasheets"><label class="form-check-label" for="binderDatasheets">Datasheets</label></div>
+            <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_add_markups" id="binderMarkups"><label class="form-check-label" for="binderMarkups">Markup drawings</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_include_flat_patterns" id="binderFlat"><label class="form-check-label" for="binderFlat">Flat pattern PDFs</label></div>
             <div class="form-check"><input class="form-check-input" type="checkbox" name="binder_page_numbers" id="binderPages" checked><label class="form-check-label" for="binderPages">Page numbers</label></div>
           </div>

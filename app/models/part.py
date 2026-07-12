@@ -1,5 +1,5 @@
 # app/models/part.py
-from mongoengine import BooleanField, DateTimeField, DictField, Document, ListField, StringField
+from mongoengine import BooleanField, DateTimeField, DictField, Document, IntField, ListField, StringField
 from datetime import datetime
 from app.services.timezone_utils import utc_now
 
@@ -31,6 +31,8 @@ class Part(Document):
     has_datasheet = BooleanField(default=False)
     notes_search = StringField(default="")
     comments_search = StringField(default="")
+    pending_review_count = IntField(default=0)
+    pending_review_severity = StringField(default="")
     created_at  = DateTimeField(default=utc_now)
     updated_at  = DateTimeField(default=utc_now)
 
@@ -45,6 +47,8 @@ class Part(Document):
             { "fields": ["description"], "name": "parts_description_idx" },
             { "fields": ["notes_search"], "name": "parts_notes_search_idx" },
             { "fields": ["comments_search"], "name": "parts_comments_search_idx" },
+            { "fields": ["pending_review_count"], "name": "parts_pending_review_count_idx" },
+            { "fields": ["pending_review_severity"], "name": "parts_pending_review_severity_idx" },
             { "fields": ["category"], "name": "parts_category_idx" },
             { "fields": ["status"], "name": "parts_status_idx" },
             { "fields": ["manufacturer"], "name": "parts_manufacturer_idx" },

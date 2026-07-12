@@ -157,3 +157,64 @@ def test_comment_priority_id_and_delete_endpoint(client, user):
         json={"rev": "B", "id": first_comment["id"]},
     )
     assert missing.status_code == 404
+
+
+def test_parts_table_exposes_and_filters_pending_review_severity(client, user):
+    viewer_role = Role(name="viewer_review_filter", permissions=["items.view"]).save()
+    user.roles = [viewer_role]
+    user.save()
+    _login(client, user)
+
+    high_part = Part(part_number="REVIEW-HIGH", revision="A", description="Needs review").save()
+    clear_part = Part(part_number="REVIEW-CLEAR", revision="A", description="Ready").save()
+    created = client.post(
+        f"/api/parts/{high_part.part_number}/comments",
+        json={"rev": "A", "text": "Dimension needs confirmation", "priority": "high"},
+    )
+    assert created.status_code == 200
+
+    pending = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"pending_reviews": {"value": "pending"}}},
+    )
+    assert pending.status_code == 200
+    pending_rows = pending.get_json()["data"]
+    assert [row["part_number"] for row in pending_rows] == ["REVIEW-HIGH"]
+    assert pending_rows[0]["pending_review_count"] == 1
+    assert pending_rows[0]["pending_review_severity"] == "high"
+    assert pending_rows[0]["has_pending_reviews"] is True
+    assert "comments" not in pending_rows[0]
+
+    high = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"pending_reviews": {"value": "high"}}},
+    )
+    assert [row["part_number"] for row in high.get_json()["data"]] == ["REVIEW-HIGH"]
+
+    comment_id = created.get_json()["comment"]["id"]
+    resolved = client.post(
+        f"/api/parts/{high_part.part_number}/comments/status",
+        json={"rev": "A", "id": comment_id, "status": "resolved"},
+    )
+    assert resolved.status_code == 200
+    assert resolved.get_json()["comment"]["status"] == "resolved"
+
+    clear = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"pending_reviews": {"value": "none"}}},
+    )
+    assert [row["part_number"] for row in clear.get_json()["data"]] == [clear_part.part_number, high_part.part_number]
+
+    reopened = client.post(
+        f"/api/parts/{high_part.part_number}/comments/status",
+        json={"rev": "A", "id": comment_id, "status": "open"},
+    )
+    assert reopened.status_code == 200
+    deleted = client.post(
+        f"/api/parts/{high_part.part_number}/comments/delete",
+        json={"rev": "A", "id": comment_id},
+    )
+    assert deleted.status_code == 200
+    high_part.reload()
+    assert high_part.pending_review_count == 0
+    assert high_part.pending_review_severity == ""

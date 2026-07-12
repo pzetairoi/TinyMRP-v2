@@ -75,6 +75,7 @@ COMMENT_PRIORITIES = ("low", "normal", "high")
 def _normalize_comment(value: Any) -> Optional[dict[str, str]]:
     priority = ""
     comment_id = ""
+    status = "open"
     if isinstance(value, dict):
         text = str(value.get("text") or "").strip()
         author = str(value.get("author") or "").strip()
@@ -85,6 +86,8 @@ def _normalize_comment(value: Any) -> Optional[dict[str, str]]:
         raw_id = str(value.get("id") or "").strip()
         if raw_id and len(raw_id) <= 64:
             comment_id = raw_id
+        if str(value.get("status") or "").strip().lower() == "resolved":
+            status = "resolved"
     else:
         text = str(value or "").strip()
         author = ""
@@ -96,6 +99,7 @@ def _normalize_comment(value: Any) -> Optional[dict[str, str]]:
         out["id"] = comment_id
     if priority:
         out["priority"] = priority
+    out["status"] = status
     return out
 
 
@@ -312,6 +316,7 @@ def add_part_comment(
         "ts": str(ts or utc_iso(utc_now()) or ""),
         "author": str(author or "").strip(),
         "text": str(text or "").strip(),
+        "status": "open",
     }
     priority_text = str(priority or "").strip().lower()
     if priority_text in COMMENT_PRIORITIES:
@@ -335,7 +340,38 @@ def add_part_comment(
     part.comments_search = str(payload.get("comments_search") or "")
     part.updated_at = now
     part.save()
+    from app.services.part_review_status import sync_part_review_status
+    sync_part_review_status(part)
     return comment
+
+
+def set_part_comment_status(part: Part, *, comment_id: str, status: str) -> Optional[dict[str, Any]]:
+    migrate_legacy_annotations(part)
+    doc = _get_doc(part)
+    if not doc:
+        return None
+    next_status = "resolved" if str(status or "").strip().lower() == "resolved" else "open"
+    comments = normalize_comment_rows(getattr(doc, "comments", []) or [])
+    updated = None
+    for row in comments:
+        if str(row.get("id") or "") == str(comment_id or ""):
+            row["status"] = next_status
+            updated = row
+            break
+    if updated is None:
+        return None
+    doc.comments = comments
+    doc.updated_at = utc_now()
+    doc.save()
+    _set_doc_cache(part, doc)
+    payload = _payload(notes=str(doc.notes or ""), comments=comments)
+    _set_payload_cache(part, payload)
+    part.comments_search = str(payload.get("comments_search") or "")
+    part.updated_at = utc_now()
+    part.save()
+    from app.services.part_review_status import sync_part_review_status
+    sync_part_review_status(part)
+    return updated
 
 
 def remove_part_comment(
@@ -391,6 +427,8 @@ def remove_part_comment(
     part.comments_search = str(payload.get("comments_search") or "")
     part.updated_at = utc_now()
     part.save()
+    from app.services.part_review_status import sync_part_review_status
+    sync_part_review_status(part)
     return removed
 
 

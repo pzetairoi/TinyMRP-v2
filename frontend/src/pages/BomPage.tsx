@@ -193,6 +193,54 @@ export default function BomPage() {
     setTreeFilters({})
   }
 
+  function reviewFilterMatches(value: unknown, filterValue: unknown) {
+    const filter = String(filterValue || '').toLowerCase()
+    const severity = String(value || '').toLowerCase()
+    if (!filter) return true
+    if (filter === 'pending') return Boolean(severity)
+    if (filter === 'none') return !severity
+    return severity === filter
+  }
+
+  function reviewIndicator(node: any) {
+    const data = node?.data || node || {}
+    if (!data.has_pending_reviews) return <span className="text-muted">—</span>
+    const severity = data.pending_review_severity || 'low'
+    return (
+      <span className={`parts-review-indicator parts-review-indicator--${severity}`} title={`${data.pending_review_count || 0} pending review item(s), ${severity} priority`}>
+        <span aria-hidden="true" />
+        {data.pending_review_count || 0}
+      </span>
+    )
+  }
+
+  function reviewFilterElement() {
+    const value = String(treeFilters.pending_review_severity?.value || '')
+    return (
+      <select
+        className="form-select form-select-sm"
+        aria-label="Filter BOM by pending reviews"
+        value={value}
+        onChange={(e) => setTreeFilters((current) => normalizeFilters({
+          ...current,
+          pending_review_severity: { value: e.target.value, matchMode: 'custom' },
+        }))}
+      >
+        <option value="">Any</option>
+        <option value="pending">Pending</option>
+        <option value="high">High</option>
+        <option value="normal">Normal</option>
+        <option value="low">Low</option>
+        <option value="none">None</option>
+      </select>
+    )
+  }
+
+  function reviewRowClass(row: any) {
+    const data = row?.data || row || {}
+    return data.has_pending_reviews ? `parts-review-row parts-review-row--${data.pending_review_severity || 'low'}` : ''
+  }
+
   const [lazy, setLazy] = useState<LazyWUState>({
     first: 0,
     rows: 25,
@@ -297,7 +345,20 @@ export default function BomPage() {
     resizableColumns
     showGridlines
     size="small"
+    rowClassName={reviewRowClass}
   >
+    <Column
+      field="pending_review_severity"
+      header="Reviews"
+      body={reviewIndicator}
+      sortable
+      filter
+      filterMatchMode="custom"
+      filterFunction={reviewFilterMatches}
+      showFilterMenu={false}
+      filterElement={reviewFilterElement()}
+      style={{ width: 105 }}
+    />
     {selectedBomIds.map((fieldId) => {
       const field = bomFields.find((item) => item.id === fieldId)
       if (!field) return null

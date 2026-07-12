@@ -156,3 +156,50 @@ body.wide-page main.container {
 .parts-columns-trigger .pi {
   font-size: 0.85rem;
 }
+
+.parts-review-indicator {
+  align-items: center;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 700;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.parts-review-indicator > span {
+  background: #3b82f6;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+  height: 0.55rem;
+  width: 0.55rem;
+}
+
+.parts-review-indicator--normal > span {
+  background: #d97706;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.15);
+}
+
+.parts-review-indicator--high > span {
+  background: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
+}
+
+.p-datatable .p-datatable-tbody > tr.parts-review-row--low > td,
+.p-treetable .p-treetable-tbody > tr.parts-review-row--low > td {
+  background-color: rgba(59, 130, 246, 0.07);
+}
+
+.p-datatable .p-datatable-tbody > tr.parts-review-row--normal > td,
+.p-treetable .p-treetable-tbody > tr.parts-review-row--normal > td {
+  background-color: rgba(245, 158, 11, 0.09);
+}
+
+.p-datatable .p-datatable-tbody > tr.parts-review-row--high > td,
+.p-treetable .p-treetable-tbody > tr.parts-review-row--high > td {
+  background-color: rgba(239, 68, 68, 0.09);
+}
+
+.p-datatable .p-datatable-tbody > tr.parts-review-row:hover > td,
+.p-treetable .p-treetable-tbody > tr.parts-review-row:hover > td {
+  filter: brightness(0.98);
+}

@@ -14,6 +14,7 @@ from app.services.acl import require_items_view
 from app.services.audit import log_action
 from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.part_norm import clean_rev
+from app.services.part_review_status import part_review_status_map
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
@@ -73,7 +74,13 @@ def _link_occurrence_qtys(link: BOMLink) -> list[float]:
         qty = 1.0
     return [float(qty or 0.0)]
 
-def _node(pn: str, link=None, rev: str | None = None, config: dict | None = None):
+def _node(
+    pn: str,
+    link=None,
+    rev: str | None = None,
+    config: dict | None = None,
+    review_statuses: dict | None = None,
+):
     # Prefer specific revision when provided, else pick latest by updated_at
     rev_clean = _clean_rev(rev) if rev is not None else None
     if rev is not None:
@@ -86,6 +93,10 @@ def _node(pn: str, link=None, rev: str | None = None, config: dict | None = None
     config = config or get_field_config()
     thumbs = preview_png_urls_for(pn, effective_rev)
     coverage = _coverage_groups(pn, effective_rev)
+    review = (review_statuses or {}).get(
+        (str(pn or "").strip(), _clean_rev(effective_rev)),
+        {"count": 0, "severity": "", "pending": False},
+    )
     values = resolve_part_field_values(
         p,
         context_field_ids("bom_tree", config),
@@ -118,6 +129,9 @@ def _node(pn: str, link=None, rev: str | None = None, config: dict | None = None
             "process":   proc_label,
             "thumb_urls": thumbs,
             "attrs": attrs,
+            "pending_review_count": int(review.get("count") or 0),
+            "pending_review_severity": str(review.get("severity") or ""),
+            "has_pending_reviews": bool(review.get("pending")),
             **values,
         }
     }
@@ -142,6 +156,7 @@ def _is_hardware_node(node: dict) -> bool:
 @require_items_view
 def bom_tree():
     config = get_field_config()
+    review_statuses = part_review_status_map()
     pn = (request.args.get("pn") or "").strip()
     rev = request.args.get("rev")  # keep None vs ""
     parent = (request.args.get("parent") or "").strip()
@@ -164,7 +179,12 @@ def bom_tree():
         except Exception:
             pass
         root_rev = _clean_rev(rev) if rev is not None else _clean_rev(p.revision or "")
-        root = _node(p.part_number, rev=(root_rev if rev is not None else root_rev), config=config)
+        root = _node(
+            p.part_number,
+            rev=(root_rev if rev is not None else root_rev),
+            config=config,
+            review_statuses=review_statuses,
+        )
         root["children"] = []   # lazy
         try:
             log_action("bom.view", resource_type="bom", resource=f"root:{p.part_number}:{p.revision or ''}")
@@ -188,7 +208,7 @@ def bom_tree():
                             continue
                     except Exception:
                         pass
-                    kids.append(_node(child_pn, l, rev=c_rev, config=config))
+                    kids.append(_node(child_pn, l, rev=c_rev, config=config, review_statuses=review_statuses))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}:{(parent_rev or '')}")
             except Exception:
@@ -211,7 +231,7 @@ def bom_tree():
                             continue
                     except Exception:
                         pass
-                    kids.append(_node(child_pn, l, config=config))
+                    kids.append(_node(child_pn, l, config=config, review_statuses=review_statuses))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}")
             except Exception:
@@ -227,6 +247,7 @@ def bom_tree():
 @require_items_view
 def bom_flat():
     config = get_field_config()
+    review_statuses = part_review_status_map()
     pn = (request.args.get("pn") or "").strip()
     rev = request.args.get("rev")
     if not pn:
@@ -286,6 +307,10 @@ def bom_flat():
             part_cache[key] = cached
 
         _part_doc, attrs, proc_label, thumbs, _coverage, values = cached
+        review = review_statuses.get(
+            (str(child_pn or "").strip(), _clean_rev(key[1])),
+            {"count": 0, "severity": "", "pending": False},
+        )
         row = {
             "row_key": f"{child_pn}::{key[1]}",
             "part_number": child_pn,
@@ -297,6 +322,9 @@ def bom_flat():
             "process": proc_label,
             "thumb_urls": thumbs,
             "attrs": attrs,
+            "pending_review_count": int(review.get("count") or 0),
+            "pending_review_severity": str(review.get("severity") or ""),
+            "has_pending_reviews": bool(review.get("pending")),
             **values,
         }
         rows_by_key[key] = row
