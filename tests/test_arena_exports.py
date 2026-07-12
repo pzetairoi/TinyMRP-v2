@@ -65,28 +65,31 @@ def test_arena_bom_export_outputs_tree_rows_and_selected_fields(client):
     assert len(rows) == 3
 
     assert resp.headers["Content-Disposition"].endswith('ASM-ARENA_A_arena_bom.csv"') or "ASM-ARENA_A_arena_bom.csv" in resp.headers["Content-Disposition"]
-    assert list(rows[0].keys()) == ["item number", "line number", "level", "quantity", "item name", "Revision", "material", "item category"]
+    assert list(rows[0].keys()) == ["item number", "line number", "level", "quantity", "item name", "description", "Revision", "material", "item category"]
 
     assert rows[0]["item number"] == "ASM-ARENA"
-    assert rows[0]["line number"] == ""
+    assert rows[0]["line number"] == "3"
     assert rows[0]["level"] == "0"
     assert rows[0]["quantity"] == "1"
     assert rows[0]["item name"] == "Arena Root"
+    assert rows[0]["description"] == rows[0]["item name"]
     assert rows[0]["Revision"] == "A"
     assert rows[0]["material"] == "Steel"
     assert rows[0]["item category"] == "Assembly"
 
     assert rows[1]["item number"] == "CMP-ARENA"
-    assert rows[1]["line number"] == "10"
+    assert rows[1]["line number"] == "3"
     assert rows[1]["level"] == "1"
     assert rows[1]["quantity"] == "2"
     assert rows[1]["item name"] == "Arena Child"
+    assert rows[1]["description"] == rows[1]["item name"]
 
     assert rows[2]["item number"] == "SUB-ARENA"
-    assert rows[2]["line number"] == "10"
+    assert rows[2]["line number"] == "3"
     assert rows[2]["level"] == "2"
     assert rows[2]["quantity"] == "3"
     assert rows[2]["item name"] == "Arena Grandchild"
+    assert rows[2]["description"] == rows[2]["item name"]
 
 
 def test_arena_bom_export_uses_aggregate_link_qty_not_source_occurrences(client):
@@ -212,6 +215,7 @@ def test_arena_bom_export_uses_admin_defaults_and_alias_headers(client):
         "level",
         "quantity",
         "item name",
+        "description",
         "Arena Revision",
         "Arena Material",
         "Legacy Arena Code",
