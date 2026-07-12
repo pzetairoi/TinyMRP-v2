@@ -88,6 +88,11 @@ type ImportReport = {
   flat_lines_skipped_not_dict?: number;
   flat_lines_failed_normalize?: number;
   tree_rows_failed_qty?: number;
+  bom_integrity_status?: "ok" | "warning" | "conflict";
+  bom_repeated_subassemblies?: number;
+  bom_repeated_subassembly_copies_collapsed?: number;
+  bom_definition_conflicts?: number;
+  tree_links_skipped_integrity?: number;
   errors?: ImportIssue[];
   warnings?: ImportIssue[];
   timings?: Record<string, { elapsed_s?: number; cpu_s?: number; idle_s?: number }>;
@@ -224,6 +229,16 @@ export default function UploadPackPage() {
   const flatParseFailures = Number(importSummary?.flat_lines_failed_parse ?? 0);
   const flatNormalizeFailures = Number(importSummary?.flat_lines_failed_normalize ?? 0);
   const treeQtyFailures = Number(importSummary?.tree_rows_failed_qty ?? 0);
+  const repeatedSubassemblies = Number(importSummary?.bom_repeated_subassemblies ?? 0);
+  const repeatedCopiesCollapsed = Number(importSummary?.bom_repeated_subassembly_copies_collapsed ?? 0);
+  const bomDefinitionConflicts = Number(importSummary?.bom_definition_conflicts ?? 0);
+  const integrityLinksSkipped = Number(importSummary?.tree_links_skipped_integrity ?? 0);
+  const hasBomIntegrityNotice =
+    importSummary?.bom_integrity_status === "warning" ||
+    importSummary?.bom_integrity_status === "conflict" ||
+    repeatedSubassemblies > 0 ||
+    bomDefinitionConflicts > 0 ||
+    integrityLinksSkipped > 0;
   const reportHasDiagnostics =
     skippedBlankParts > 0 || flatParseFailures > 0 || flatNormalizeFailures > 0 || treeQtyFailures > 0;
 
@@ -930,6 +945,49 @@ extra/
                 </div>
               </div>
             )}
+
+            {importSummary && hasBomIntegrityNotice ? (
+              <div
+                className={`alert ${bomDefinitionConflicts || integrityLinksSkipped ? "alert-danger" : "alert-warning"} mt-3`}
+                role="alert"
+              >
+                <div className="d-flex align-items-start gap-2">
+                  <i className="pi pi-exclamation-triangle fs-3" aria-hidden="true" />
+                  <div>
+                    <h5 className="alert-heading mb-1">BOM quantity integrity warning</h5>
+                    {bomDefinitionConflicts || integrityLinksSkipped ? (
+                      <p className="mb-2 fw-semibold">
+                        Conflicting repeated subassembly definitions were found. Ambiguous child BOMs were not
+                        replaced. Do not rely on this import for production quantities until the TREEBOM issues are
+                        reviewed.
+                      </p>
+                    ) : (
+                      <p className="mb-2">
+                        Repeated expanded subassemblies were detected. Their identical child definitions were
+                        canonicalized so descendants are not multiplied once for every repeated occurrence. Please
+                        verify the BOM summary before using it for production.
+                      </p>
+                    )}
+                    <div className="small">
+                      Repeated subassemblies: <b>{repeatedSubassemblies}</b>. Duplicate expanded copies collapsed:{" "}
+                      <b>{repeatedCopiesCollapsed}</b>. Conflicting definitions: <b>{bomDefinitionConflicts}</b>.
+                      Integrity-skipped links: <b>{integrityLinksSkipped}</b>.
+                    </div>
+                    <details className="mt-2">
+                      <summary>Show BOM integrity details</summary>
+                      <ul className="mb-0 mt-2">
+                        {[...importErrors, ...importWarnings]
+                          .filter((issue) => issue.stage === "treebom.integrity")
+                          .slice(0, 50)
+                          .map((issue, idx) => (
+                            <li key={`integrity-${idx}`}>{formatImportIssue(issue)}</li>
+                          ))}
+                      </ul>
+                    </details>
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             {importSummary && (
               <div className="mt-3">

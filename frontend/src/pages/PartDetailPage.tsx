@@ -11,6 +11,7 @@ import ThumbImg from "../components/ThumbImg";
 import "./partdetail.css";
 import FieldSelector from "../components/FieldSelector";
 import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
+import { withBomOccurrenceKeys } from "../lib/bomTree";
 import type {
   DrawingImageRow,
   MarkupDraft,
@@ -1333,7 +1334,7 @@ function isExternalDatasheetUrl(url: string): boolean {
           return;
         }
 
-        const rootNode = root[0] as any;
+        const rootNode = withBomOccurrenceKeys(root)[0] as any;
         const rootPn = (rootNode?.data?.pn || pn) as string;
         const rootRev = (rootNode?.data?.rev || "") as string;
 
@@ -1342,7 +1343,7 @@ function isExternalDatasheetUrl(url: string): boolean {
           : `/api/bom_tree?parent=${encodeURIComponent(rootPn)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`;
         const r2 = await fetch(childUrl);
         if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
-        let kids: TreeNode[] = asArr(await r2.json());
+        let kids: TreeNode[] = withBomOccurrenceKeys(asArr(await r2.json()), String(rootNode?.key || "bom"));
 
         kids = annotateDepth(kids, 0, String(rootNode?.key ?? rootPn));
         if (!cancelled) {
@@ -1431,7 +1432,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       const r = await fetch(url);
       if (r.status === 403) { setForbidden(true); return; }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const kids: TreeNode[] = asArr(await r.json());
+      const kids: TreeNode[] = withBomOccurrenceKeys(asArr(await r.json()), key);
 
       setBomNodes((prev) => {
         const parentDepth = findNodeDepth(prev, key) ?? 0;
@@ -1471,7 +1472,7 @@ function isExternalDatasheetUrl(url: string): boolean {
             : `/api/bom_tree?parent=${encodeURIComponent(parentPn2)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`;
           const r = await fetch(url);
           if (r.ok) {
-            let kids: TreeNode[] = asArr(await r.json());
+            let kids: TreeNode[] = withBomOccurrenceKeys(asArr(await r.json()), key);
             const parentDepth = findNodeDepth(nextTree, key) ?? 0;
             kids = annotateDepth(kids, parentDepth + 1, key);
             if (kids.length) {

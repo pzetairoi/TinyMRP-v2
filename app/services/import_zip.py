@@ -1,5 +1,5 @@
 # app/services/import_zip.py
-import ast, io, json, zipfile, re, traceback, os, time
+import ast, io, json, zipfile, re, traceback, os, time, math
 from datetime import datetime
 from typing import Dict, Any, List, Tuple, Iterable, Set
 from mongoengine import NotUniqueError
@@ -616,6 +616,32 @@ def _item_seq(item_no: str) -> object:
         return seg
 
 
+def _tree_definition_totals(
+    links: Iterable[Tuple[str, str, str, str, float, object]],
+) -> Dict[Tuple[str, str], float]:
+    """Return the canonical child quantities for one parent occurrence."""
+    totals: Dict[Tuple[str, str], float] = {}
+    for _parent_pn, _parent_rev, child_pn, child_rev, qty, _seq in links:
+        child_key = (_norm_pn(child_pn), clean_rev(child_rev))
+        if not child_key[0]:
+            continue
+        totals[child_key] = totals.get(child_key, 0.0) + float(qty or 0.0)
+    return totals
+
+
+def _same_tree_definition(
+    left: Dict[Tuple[str, str], float],
+    right: Dict[Tuple[str, str], float],
+) -> bool:
+    """Compare BOM definitions without making floating-point text formatting significant."""
+    if set(left) != set(right):
+        return False
+    return all(
+        math.isclose(float(left[key]), float(right[key]), rel_tol=1e-9, abs_tol=1e-9)
+        for key in left
+    )
+
+
 def _parse_treebom(
     txt: str,
     source_name: str = "",
@@ -682,7 +708,15 @@ def _parse_treebom(
                     exc=exc,
                 )
                 continue
-        rows.append({"item_no": item_no, "part_number": part_number, "revision": revision, "qty": qty})
+        rows.append(
+            {
+                "item_no": item_no,
+                "part_number": part_number,
+                "revision": revision,
+                "qty": qty,
+                "line_number": line_no,
+            }
+        )
 
     # Map item_no -> (pn, revision) then build links
     item_to_part: Dict[str, Tuple[str, str]] = {}
@@ -691,7 +725,14 @@ def _parse_treebom(
         rev = clean_rev(r.get("revision") or "")
         item_to_part[r["item_no"]] = (pn, rev)
 
-    links: List[Tuple[str, str, str, str, float, object]] = []
+    # Keep outgoing links separated by the concrete parent occurrence path.
+    # A CAD TREEBOM commonly expands the same subassembly under every place it
+    # is used. Those are copies of one BOM definition, not extra children to
+    # add together.
+    links_by_parent: Dict[
+        Tuple[str, str],
+        Dict[str, List[Tuple[str, str, str, str, float, object]]],
+    ] = {}
     for r in rows:
         item = r["item_no"]
         child_entry = item_to_part.get(item)
@@ -705,11 +746,98 @@ def _parse_treebom(
         if not parent_item:
             continue
         parent_pn, parent_rev = item_to_part[parent_item]
-        if not parent_pn or parent_pn == child_pn:
+        if not parent_pn:
+            continue
+        if parent_pn == child_pn and clean_rev(parent_rev) == clean_rev(child_rev):
+            _report_inc(report, "tree_links_skipped_integrity", 1)
+            if report is not None:
+                report["bom_integrity_status"] = "conflict"
+            _report_issue(
+                report,
+                "error",
+                stage="treebom.integrity",
+                file=source_name,
+                line_number=int(r.get("line_number") or 0),
+                part_number=child_pn,
+                path=item,
+                message=(
+                    f"BOM self-reference skipped at tree path {item}: "
+                    f"{child_pn} revision {child_rev or '(blank)'} cannot be its own child."
+                ),
+            )
             continue
         qty = clean_qty(r["qty"])
         seq = _item_seq(item)
-        links.append((parent_pn, parent_rev, child_pn, child_rev, qty, seq))
+        parent_key = (_norm_pn(parent_pn), clean_rev(parent_rev))
+        edge = (parent_key[0], parent_key[1], child_pn, child_rev, qty, seq)
+        links_by_parent.setdefault(parent_key, {}).setdefault(parent_item, []).append(edge)
+
+    links: List[Tuple[str, str, str, str, float, object]] = []
+    for (parent_pn, parent_rev), occurrence_groups in links_by_parent.items():
+        occurrences = list(occurrence_groups.items())
+        first_path, first_links = occurrences[0]
+        if len(occurrences) == 1:
+            links.extend(first_links)
+            continue
+
+        _report_inc(report, "bom_repeated_subassemblies", 1)
+        first_definition = _tree_definition_totals(first_links)
+        conflicting_paths = [
+            path
+            for path, occurrence_links in occurrences[1:]
+            if not _same_tree_definition(first_definition, _tree_definition_totals(occurrence_links))
+        ]
+        all_paths = [path for path, _occurrence_links in occurrences]
+        paths_text = ", ".join(all_paths)
+
+        if conflicting_paths:
+            # There is no safe canonical BOM to write. Do not emit any outgoing
+            # links for this parent, which also keeps an existing definition out
+            # of the clear-and-replace set later in the import.
+            _report_inc(report, "bom_definition_conflicts", 1)
+            _report_inc(
+                report,
+                "tree_links_skipped_integrity",
+                sum(len(occurrence_links) for _path, occurrence_links in occurrences),
+            )
+            if report is not None:
+                report["bom_integrity_status"] = "conflict"
+            _report_issue(
+                report,
+                "error",
+                stage="treebom.integrity",
+                file=source_name,
+                part_number=parent_pn,
+                path=paths_text,
+                message=(
+                    f"CRITICAL BOM QUANTITY WARNING: repeated subassembly {parent_pn} "
+                    f"revision {parent_rev or '(blank)'} has conflicting child quantities at tree paths "
+                    f"{paths_text}. Its child BOM was not replaced; review the source TREEBOM before "
+                    "using imported quantities."
+                ),
+            )
+            continue
+
+        # All expanded copies describe the same parent BOM. Keep one canonical
+        # definition; the incoming links from each containing parent remain in
+        # their own parent group and are still aggregated normally.
+        links.extend(first_links)
+        _report_inc(report, "bom_repeated_subassembly_copies_collapsed", len(occurrences) - 1)
+        if report is not None and report.get("bom_integrity_status") == "ok":
+            report["bom_integrity_status"] = "warning"
+        _report_issue(
+            report,
+            "warning",
+            stage="treebom.integrity",
+            file=source_name,
+            part_number=parent_pn,
+            path=paths_text,
+            message=(
+                f"BOM quantity integrity notice: {len(occurrences)} expanded copies of subassembly "
+                f"{parent_pn} revision {parent_rev or '(blank)'} were found at tree paths {paths_text}. "
+                f"Their identical child definitions were safely collapsed to the canonical definition at {first_path}."
+            ),
+        )
     return links
 
 def _aggregate_links(
@@ -890,6 +1018,12 @@ def import_bom_zip(
         "flat_lines_skipped_not_dict": 0,
         "flat_lines_failed_normalize": 0,
         "tree_rows_failed_qty": 0,
+        # Quantity-integrity diagnostics for repeated expanded subassemblies.
+        "bom_integrity_status": "ok",
+        "bom_repeated_subassemblies": 0,
+        "bom_repeated_subassembly_copies_collapsed": 0,
+        "bom_definition_conflicts": 0,
+        "tree_links_skipped_integrity": 0,
         "errors": [],
         "warnings": [],
         "timings": {},

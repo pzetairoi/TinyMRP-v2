@@ -29,6 +29,31 @@
 
 {% set err_count = result.errors|length if result.errors else 0 %}
 {% set warn_count = result.warnings|length if result.warnings else 0 %}
+{% set bom_conflicts = result.bom_definition_conflicts or 0 %}
+{% set bom_integrity_skipped = result.tree_links_skipped_integrity or 0 %}
+{% set repeated_subassemblies = result.bom_repeated_subassemblies or 0 %}
+{% if result.bom_integrity_status in ['warning', 'conflict'] or repeated_subassemblies or bom_conflicts or bom_integrity_skipped %}
+  <div class="alert {{ 'alert-danger' if bom_conflicts or bom_integrity_skipped else 'alert-warning' }} mt-3" role="alert">
+    <h4 class="alert-heading">BOM quantity integrity warning</h4>
+    {% if bom_conflicts or bom_integrity_skipped %}
+      <p class="fw-semibold">
+        Conflicting repeated subassembly definitions were found. Ambiguous child BOMs were not replaced.
+        Do not rely on this import for production quantities until the TREEBOM issues are reviewed.
+      </p>
+    {% else %}
+      <p>
+        Repeated expanded subassemblies were detected and their identical child definitions were canonicalized
+        to prevent descendant quantities from being multiplied.
+      </p>
+    {% endif %}
+    <div class="small">
+      Repeated subassemblies: <b>{{ repeated_subassemblies }}</b>.
+      Duplicate expanded copies collapsed: <b>{{ result.bom_repeated_subassembly_copies_collapsed or 0 }}</b>.
+      Conflicting definitions: <b>{{ bom_conflicts }}</b>.
+      Integrity-skipped links: <b>{{ bom_integrity_skipped }}</b>.
+    </div>
+  </div>
+{% endif %}
 {% if err_count or warn_count %}
   {{ error_state(
     "Import completed with issues",
