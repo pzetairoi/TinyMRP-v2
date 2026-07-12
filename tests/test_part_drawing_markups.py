@@ -194,8 +194,9 @@ def test_source_belonging_to_other_part_rejected(client):
     assert resp.get_json()["error"] == "source_not_found"
 
 
-def test_non_drawing_source_rejected(client):
+def test_preview_png_source_accepted_but_non_png_rejected(client):
     part, pf, viewer = _setup(client)
+    # Parts without an exported drawing can be marked up on the preview PNG.
     preview = PartFile(
         part_number="PN-500",
         revision="A",
@@ -206,6 +207,20 @@ def test_non_drawing_source_rejected(client):
         path="C:/store/previews/PN-500.png",
     ).save()
     resp = _put(client, preview, _canvas("obj-1"), expected_version=0)
+    assert resp.status_code == 200
+    assert resp.get_json()["version"] == 1
+
+    # Non-PNG sources (e.g. the PDF itself) are still refused.
+    pdf = PartFile(
+        part_number="PN-500",
+        revision="A",
+        ext_group="pdf",
+        ext="pdf",
+        is_dwg=False,
+        rel_path="pdf/PN-500.pdf",
+        path="C:/store/pdf/PN-500.pdf",
+    ).save()
+    resp = _put(client, pdf, _canvas("obj-1"), expected_version=0)
     assert resp.status_code == 404
     assert resp.get_json()["error"] == "source_not_found"
 
@@ -371,6 +386,28 @@ def test_resolve_and_reopen_update_metadata(client):
     assert resp.status_code == 400
 
 
+def test_thread_delete_removes_thread_but_keeps_markup(client):
+    part, pf, viewer = _setup(client)
+    _put(client, pf, _canvas("obj-1"), expected_version=0)
+    thread_id = _create_thread(client, pf, ["obj-1"]).get_json()["threads"][0]["id"]
+
+    resp = client.delete(
+        f"{_base_url()}/threads/{thread_id}",
+        json={"rev": "A", "source_file_id": str(pf.id)},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["threads"] == []
+    # The markup object itself stays on the canvas.
+    assert [o["tmObjectId"] for o in data["canvas_json"]["objects"]] == ["obj-1"]
+
+    missing = client.delete(
+        f"{_base_url()}/threads/{thread_id}",
+        json={"rev": "A", "source_file_id": str(pf.id)},
+    )
+    assert missing.status_code == 404
+
+
 def test_identity_and_display_time_fields_returned(client):
     part, pf, viewer = _setup(client)
     _put(client, pf, _canvas("obj-1"), expected_version=0)
@@ -451,13 +488,38 @@ def test_part_images_drawing_rows_expose_safe_metadata(client):
     assert row["source_file_id"] == str(pf.id)
     assert row["rel_path"] == "drawings/PN-500_DWG.png"
     assert row["source_fingerprint"].startswith("sha256:")
+    assert row["is_dwg"] is True
+    assert row["image_urls"]
     # No absolute server paths leak through.
     assert "C:/" not in str(row)
 
+    # Preview rows also expose the metadata (preview-PNG markup fallback) and
+    # full-size image URLs that skip the thumbnail.
+    PartFile(
+        part_number="PN-500",
+        revision="A",
+        ext_group="png",
+        ext="png",
+        is_dwg=False,
+        rel_path="previews/PN-500.png",
+        path="C:/store/previews/PN-500.png",
+        thumb_rel_path="thumbs/png/PN-500.png",
+        sha256="previewsha",
+    ).save()
     preview = client.get("/api/part_images?pn=PN-500&rev=A&mode=preview")
     assert preview.status_code == 200
-    for prow in preview.get_json():
-        assert "source_fingerprint" not in prow
+    prows = preview.get_json()
+    assert len(prows) == 1
+    prow = prows[0]
+    assert prow["is_dwg"] is False
+    assert prow["source_file_id"]
+    assert prow["source_fingerprint"].startswith("sha256:")
+    # image_urls skips the thumbnail: it is the full-size file URL only,
+    # while urls leads with the thumbnail variant.
+    assert prow["image_urls"]
+    assert len(prow["urls"]) > len(prow["image_urls"])
+    assert prow["image_urls"][0] == prow["urls"][-1]
+    assert prow["image_urls"][0] != prow["urls"][0]
 
 
 # ---------------------------------------------------------------------------

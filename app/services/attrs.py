@@ -171,6 +171,15 @@ def comments_search_text(value: Any) -> str:
                     text = str(item.get(key) or "").strip()
                     if text:
                         parts.append(text)
+                replies = item.get("replies")
+                if isinstance(replies, list):
+                    for reply in replies:
+                        if not isinstance(reply, dict):
+                            continue
+                        for key in ("author", "text"):
+                            text = str(reply.get(key) or "").strip()
+                            if text:
+                                parts.append(text)
             else:
                 text = str(item).strip()
                 if text:

@@ -2900,7 +2900,11 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     if opts.want_markup_report:
         if not markup_documents:
             raise RuntimeError("No drawing markups are available for the selected parts.")
-        markup_report = combine_markup_documents(markup_documents)
+        markup_report = combine_markup_documents(
+            markup_documents,
+            root_label=f"{opts.root_pn} {root_rev_resolved}".strip() + (f" - {root_desc}" if root_desc else ""),
+            build_ts=build_ts,
+        )
         markup_report_name = build_output_name(f"{base_stub}_MarkupReport", "pdf", max_len=96, include_time=False, now=build_ts)
         if want_zip:
             z.writestr(markup_report_name, markup_report)

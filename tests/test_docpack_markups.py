@@ -106,7 +106,13 @@ def test_docpack_can_return_markup_only_report_or_binder(app, tmp_path):
 
     assert "MarkupReport" in report_name
     assert report_type == "application/pdf"
-    assert len(PdfReader(io.BytesIO(report)).pages) == 1
+    # The report leads with a binder-style index page listing the parts,
+    # followed by one page per marked-up drawing.
+    report_pages = PdfReader(io.BytesIO(report)).pages
+    assert len(report_pages) == 2
+    index_text = report_pages[0].extract_text() or ""
+    assert "Markup Report" in index_text
+    assert "MK-100" in index_text
     assert binder_name.endswith(".pdf")
     assert binder_type == "application/pdf"
     assert len(PdfReader(io.BytesIO(binder)).pages) == 1

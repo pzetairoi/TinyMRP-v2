@@ -11,7 +11,6 @@ import ThumbImg from "../components/ThumbImg";
 import "./partdetail.css";
 import FieldSelector from "../components/FieldSelector";
 import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
-import MentionTextarea from "../components/MentionTextarea";
 import type {
   DrawingImageRow,
   MarkupDraft,
@@ -136,6 +135,17 @@ type IdentityProfile = {
   permissions?: string[];
 };
 
+type CommentReplyRow = {
+  id: string;
+  ts: string | null;
+  ts_display?: string | null;
+  ts_local?: string | null;
+  author: string;
+  author_display?: string;
+  author_profile?: IdentityProfile | null;
+  text: string;
+};
+
 type CommentRow = {
   id?: string;
   ts: string;
@@ -147,6 +157,8 @@ type CommentRow = {
   text: string;
   priority?: "low" | "normal" | "high" | "";
   status?: "open" | "resolved";
+  replies?: CommentReplyRow[];
+  reply_count?: number;
 };
 
 type ExtraFileRow = {
@@ -606,10 +618,7 @@ export default function PartDetailPage() {
   const [approverProfile, setApproverProfile] = useState<IdentityProfile | null>(null);
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
-  const [commentText, setCommentText] = useState("");
-  const [commentPriority, setCommentPriority] = useState<"low" | "normal" | "high" | "">("");
   const [commentSaving, setCommentSaving] = useState(false);
-  const [commentDeleting, setCommentDeleting] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
   const [notesSearch, setNotesSearch] = useState("");
   const [attributeSearch, setAttributeSearch] = useState("");
@@ -1211,10 +1220,18 @@ function isExternalDatasheetUrl(url: string): boolean {
       setMarkupLoading(true);
       setMarkupError(null);
       try {
-        const qs = new URLSearchParams({ pn, mode: "drawing", rev: effectiveRev || "" });
-        const r = await fetch(`/api/part_images?${qs.toString()}`);
-        const rows = (r.ok ? await r.json() : []) as DrawingImageRow[];
-        const source = Array.isArray(rows) ? rows.find((row) => row.source_file_id) || null : null;
+        const fetchRows = async (mode: "drawing" | "preview"): Promise<DrawingImageRow[]> => {
+          const qs = new URLSearchParams({ pn, mode, rev: effectiveRev || "" });
+          const r = await fetch(`/api/part_images?${qs.toString()}`);
+          const rows = (r.ok ? await r.json() : []) as DrawingImageRow[];
+          return Array.isArray(rows) ? rows : [];
+        };
+        // Exported drawing PNG preferred; otherwise the part's full-size
+        // preview PNG (never the thumbnail) still allows markups.
+        let source = (await fetchRows("drawing")).find((row) => row.source_file_id) || null;
+        if (!source) {
+          source = (await fetchRows("preview")).find((row) => row.source_file_id && row.image_urls?.length) || null;
+        }
         if (cancelled) return;
         setDrawingSource(source);
         if (!source?.source_file_id) {
@@ -2035,17 +2052,6 @@ function isExternalDatasheetUrl(url: string): boolean {
     return { approved: hasApprovalValue, label: hasApprovalValue ? label || "" : "" }
   }, [approvedAliases, approvedByAliases, part])
 
-  const notesSearchLower = notesSearch.trim().toLowerCase()
-  const notesMatchesSearch = !notesSearchLower || notes.toLowerCase().includes(notesSearchLower)
-  const filteredComments = useMemo(() => {
-    if (!notesSearchLower) return comments
-    return comments.filter((item) =>
-      [item.author || "", item.author_display || "", item.text || "", item.ts || "", item.priority || ""].some((value) =>
-        String(value).toLowerCase().includes(notesSearchLower),
-      ),
-    )
-  }, [comments, notesSearchLower])
-
   const uploaderIdentity = useMemo(() => {
     const a = part?.attrs || {}
     return (
@@ -2146,9 +2152,10 @@ function isExternalDatasheetUrl(url: string): boolean {
     if (priorities.includes("high")) return "high"
     if (priorities.includes("normal")) return "normal"
     if (priorities.length || hasMarkups) return "low"
-    if (notes.trim()) return "note"
     return null
-  }, [comments, hasMarkups, markupThreads, notes])
+  }, [comments, hasMarkups, markupThreads])
+  // Notes live on the Attributes & Notes tab now.
+  const notesIndicator: ReviewIndicator = notes.trim() ? "note" : null
   const reviewTabIndex =
     Number(hasDrawing) +
     Number(hasDatasheetPreview) +
@@ -2257,76 +2264,73 @@ function isExternalDatasheetUrl(url: string): boolean {
     await saveNotes("")
   }
 
-  async function addComment() {
-    if (!canPartsNote || !part) return
-    const text = commentText.trim()
-    if (!text) return
+  // Comment operations for the unified review panel (comments + markup
+  // reviews share one list inside the markup workspace).
+  async function commentRequest(path: string, body: Record<string, any>): Promise<any | null> {
+    if (!canPartsNote || !part) return null
     setCommentSaving(true)
     setCommentError(null)
     try {
-      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/comments?rev=${encodeURIComponent(part.revision || "")}`, {
+      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, priority: commentPriority || undefined, rev: part.revision || "" }),
+        body: JSON.stringify({ rev: part.revision || "", ...body }),
       })
-      if (!resp.ok) {
-        throw new Error(await resp.text())
-      }
-      const j = await resp.json()
-      if (j.comment) {
-        setComments((prev) => [...prev, j.comment as CommentRow])
-      }
-      setCommentText("")
-      setCommentPriority("")
+      const j = await resp.json().catch(() => null)
+      if (!resp.ok || !j?.ok) throw new Error(j?.error || j?.message || `HTTP ${resp.status}`)
+      return j
     } catch (e: any) {
-      setCommentError(e?.message || "Failed to add comment")
+      setCommentError(e?.message || "Comment request failed")
+      return null
     } finally {
       setCommentSaving(false)
     }
   }
 
-  async function deleteComment(comment: CommentRow, index: number) {
-    if (!canPartsNote || !part) return
-    if (!window.confirm("Erase this comment? This cannot be undone.")) return
-    const key = comment.id || `${comment.ts}-${index}`
-    setCommentDeleting(key)
-    setCommentError(null)
-    try {
-      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/comments/delete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: comment.id || undefined, ts: comment.ts, text: comment.text, rev: part.revision || "" }),
-      })
-      const j = await resp.json().catch(() => null)
-      if (!resp.ok || !j?.ok) throw new Error(j?.error || `HTTP ${resp.status}`)
-      setComments(Array.isArray(j.comments) ? j.comments : [])
-    } catch (e: any) {
-      setCommentError(e?.message || "Failed to erase comment")
-    } finally {
-      setCommentDeleting(null)
-    }
+  function replaceComment(updated: CommentRow) {
+    setComments((current) => current.map((row) => (row.id === updated.id ? updated : row)))
   }
 
-  async function toggleCommentStatus(comment: CommentRow, index: number) {
-    if (!canPartsNote || !part || !comment.id) return
-    const key = comment.id || `${comment.ts}-${index}`
-    const status = comment.status === "resolved" ? "open" : "resolved"
-    setCommentDeleting(key)
-    setCommentError(null)
-    try {
-      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/comments/status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: comment.id, status, rev: part.revision || "" }),
-      })
-      const payload = await resp.json().catch(() => null)
-      if (!resp.ok || !payload?.comment) throw new Error(payload?.error || `HTTP ${resp.status}`)
-      setComments((current) => current.map((row) => row.id === comment.id ? payload.comment as CommentRow : row))
-    } catch (e: any) {
-      setCommentError(e?.message || "Failed to update comment")
-    } finally {
-      setCommentDeleting(null)
-    }
+  async function addComment(text: string, priority: string): Promise<boolean> {
+    const trimmed = text.trim()
+    if (!trimmed) return false
+    const j = await commentRequest("/comments", { text: trimmed, priority: priority || undefined })
+    if (!j?.comment) return false
+    setComments((prev) => [...prev, j.comment as CommentRow])
+    return true
+  }
+
+  async function replyComment(commentId: string, text: string): Promise<boolean> {
+    const j = await commentRequest("/comments/reply", { id: commentId, text })
+    if (!j?.comment) return false
+    replaceComment(j.comment as CommentRow)
+    return true
+  }
+
+  async function setCommentStatus(commentId: string, status: "open" | "resolved"): Promise<boolean> {
+    const j = await commentRequest("/comments/status", { id: commentId, status })
+    if (!j?.comment) return false
+    replaceComment(j.comment as CommentRow)
+    return true
+  }
+
+  async function setCommentPriority(commentId: string, priority: string): Promise<boolean> {
+    const j = await commentRequest("/comments/priority", { id: commentId, priority })
+    if (!j?.comment) return false
+    replaceComment(j.comment as CommentRow)
+    return true
+  }
+
+  async function deleteComment(comment: CommentRow): Promise<boolean> {
+    if (!window.confirm("Erase this comment? This cannot be undone.")) return false
+    const j = await commentRequest("/comments/delete", {
+      id: comment.id || undefined,
+      ts: comment.ts,
+      text: comment.text,
+    })
+    if (!j) return false
+    setComments(Array.isArray(j.comments) ? j.comments : [])
+    return true
   }
 
   async function handleRefreshFiles() {
@@ -2823,7 +2827,62 @@ function isExternalDatasheetUrl(url: string): boolean {
 
             
 
-            {(!isSharedView || sharedAllowsAttributes) && <TabPanel header={tabHeader("All attributes", "pi-list")}>
+            {(!isSharedView || sharedAllowsAttributes) && <TabPanel
+              header={tabHeader("Attributes & Notes", "pi-list", notesIndicator)}
+              headerClassName={notesIndicator ? "pd-tab-indicator pd-tab-indicator--note" : undefined}
+            >
+              {!isSharedView && (
+                <div className="pd-card p-3 mb-3">
+                  <div className="d-flex align-items-center justify-content-between gap-2">
+                    <h6 className="mb-0">Notes</h6>
+                    {canPartsNote ? (
+                      <div className="d-flex align-items-center gap-2">
+                        {notesDirty ? (
+                          <span className="small text-warning-emphasis">Unsaved changes</span>
+                        ) : notesSavedOnce ? (
+                          <span className="small text-success"><i className="pi pi-check me-1" aria-hidden="true" />Saved</span>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => saveNotes()}
+                          disabled={notesSaving || !notesDirty}
+                        >
+                          {notesSaving ? "Saving..." : "Save"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={clearNotes}
+                          disabled={notesSaving || (!notes && !savedNotes)}
+                          title="Erase notes"
+                          aria-label="Erase notes"
+                        >
+                          <i className="pi pi-trash" aria-hidden="true" />
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <textarea
+                    className="form-control form-control-sm mt-2"
+                    rows={4}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && canPartsNote && notesDirty && !notesSaving) {
+                        e.preventDefault()
+                        saveNotes()
+                      }
+                    }}
+                    placeholder="Add notes for this part..."
+                    disabled={!canPartsNote}
+                  />
+                  {notesError ? <div className="text-danger small mt-1">{notesError}</div> : null}
+                  {canPartsNote
+                    ? <div className="text-muted small mt-1">Ctrl+Enter to save</div>
+                    : <div className="text-muted small mt-1">Read-only</div>}
+                </div>
+              )}
               {attrs.length === 0 ? (
                 <div className="text-muted small">No attributes.</div>
               ) : (
@@ -3414,198 +3473,46 @@ function isExternalDatasheetUrl(url: string): boolean {
             headerClassName={reviewIndicator ? `pd-tab-indicator pd-tab-indicator--${reviewIndicator}` : undefined}
           >
             <div className="pd-card p-3 mt-3">
-              <div className="d-flex align-items-center justify-content-between gap-2">
-                <h6 className="mb-0">Notes</h6>
-                {canPartsNote ? (
-                  <div className="d-flex align-items-center gap-2">
-                    {notesDirty ? (
-                      <span className="small text-warning-emphasis">Unsaved changes</span>
-                    ) : notesSavedOnce ? (
-                      <span className="small text-success"><i className="pi pi-check me-1" aria-hidden="true" />Saved</span>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-primary"
-                      onClick={() => saveNotes()}
-                      disabled={notesSaving || !notesDirty}
-                    >
-                      {notesSaving ? "Saving..." : "Save"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-danger"
-                      onClick={clearNotes}
-                      disabled={notesSaving || (!notes && !savedNotes)}
-                      title="Erase notes"
-                      aria-label="Erase notes"
-                    >
-                      <i className="pi pi-trash" aria-hidden="true" />
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-              <textarea
-                className="form-control form-control-sm mt-2"
-                rows={4}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && canPartsNote && notesDirty && !notesSaving) {
-                    e.preventDefault()
-                    saveNotes()
-                  }
-                }}
-                placeholder="Add notes for this part..."
-                disabled={!canPartsNote}
-              />
-              {notesError ? <div className="text-danger small mt-1">{notesError}</div> : null}
-              {canPartsNote
-                ? <div className="text-muted small mt-1">Ctrl+Enter to save</div>
-                : <div className="text-muted small mt-1">Read-only</div>}
-
-              <section className="mt-3 pd-review-activity" aria-labelledby="reviewActivityTitle">
-                <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
-                  <h6 id="reviewActivityTitle" className="mb-0 d-flex align-items-center gap-2">
-                    Review activity
-                    <span className="badge rounded-pill text-bg-secondary">{comments.length} comments</span>
-                    <span className="badge rounded-pill text-bg-secondary">{markupThreads.length} markup reviews</span>
-                  </h6>
-                  <input
-                    type="search"
-                    className="form-control form-control-sm"
-                    style={{ maxWidth: 280 }}
-                    value={notesSearch}
-                    onChange={(e) => setNotesSearch(e.target.value)}
-                    placeholder="Search notes, comments & markups"
-                  />
-                </div>
-                {notesSearch.trim() ? (
-                  <div className="small text-muted mb-2">
-                    Showing {filteredComments.length} of {comments.length} comments.
-                    {" "}Notes: {notesMatchesSearch ? "match found" : "no match"}.
-                  </div>
-                ) : null}
-                {filteredComments.length ? (
-                  <div className="pd-review-list">
-                    {filteredComments.map((c, idx) => (
-                      <article key={`${c.ts}-${idx}`} className={`pd-review-item${c.status === "resolved" ? " pd-review-item--resolved" : ""}`}>
-                        <div className="pd-comment-row">
-                          {identityAvatar(c.author_profile, c.author_display || c.author || "User", "md")}
-                          <div className="pd-comment-body">
-                            <div className="small text-muted">
-                              <span className="fw-semibold">{c.author_display || c.author || "User"}</span>
-                              {c.ts ? (
-                                <span title={c.ts_local || c.ts}> - {c.ts_display || c.ts}</span>
-                              ) : null}
-                            </div>
-                            <div className="small pd-comment-text">{c.text}</div>
-                          </div>
-                          <div className="pd-comment-actions">
-                            {c.priority ? (
-                              <span className={`badge ${c.priority === "high" ? "text-bg-danger" : c.priority === "low" ? "text-bg-secondary" : "text-bg-info"}`}>
-                                {c.priority}
-                              </span>
-                            ) : null}
-                            {canPartsNote ? (
-                              <button
-                                type="button"
-                                className={`btn btn-sm ${c.status === "resolved" ? "btn-outline-secondary" : "btn-outline-success"}`}
-                                title={c.status === "resolved" ? "Reopen comment" : "Resolve comment"}
-                                aria-label={c.status === "resolved" ? "Reopen comment" : "Resolve comment"}
-                                disabled={commentDeleting !== null || !c.id}
-                                onClick={() => toggleCommentStatus(c, idx)}
-                              >
-                                <i className={`pi ${c.status === "resolved" ? "pi-replay" : "pi-check"}`} aria-hidden="true" />
-                              </button>
-                            ) : null}
-                            {canPartsNote ? (
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-outline-danger"
-                                title="Erase comment"
-                                aria-label="Erase comment"
-                                disabled={commentDeleting !== null}
-                                onClick={() => deleteComment(c, idx)}
-                              >
-                                <i className={`pi ${commentDeleting === (c.id || `${c.ts}-${idx}`) ? "pi-spin pi-spinner" : "pi-trash"}`} aria-hidden="true" />
-                              </button>
-                            ) : null}
-                          </div>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-muted small">
-                    {notesSearch.trim() ? "No matching comments." : "No comments yet. Start the discussion below."}
-                  </div>
-                )}
-                {canPartsNote && (
-                  <>
-                    <div className="pd-comment-compose mt-2">
-                      <select
-                        className="form-select form-select-sm"
-                        value={commentPriority}
-                        onChange={(e) => setCommentPriority(e.target.value as "low" | "normal" | "high" | "")}
-                        aria-label="Comment importance"
-                        title="Optional importance"
-                        disabled={commentSaving}
-                      >
-                        <option value="">No importance</option>
-                        <option value="low">Low importance</option>
-                        <option value="normal">Normal importance</option>
-                        <option value="high">High importance</option>
-                      </select>
-                      <div className="input-group input-group-sm">
-                      <MentionTextarea
-                        partNumber={pn}
-                        revision={effectiveRev || ""}
-                        className="form-control form-control-sm"
-                        rows={2}
-                        value={commentText}
-                        onChange={setCommentText}
-                        onKeyDown={(e) => {
-                          if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && commentText.trim() && !commentSaving) {
-                            e.preventDefault()
-                            addComment()
-                          }
-                        }}
-                        placeholder="Add a comment..."
-                        disabled={commentSaving}
-                      />
-                      <button
-                        className="btn btn-outline-primary"
-                        type="button"
-                        onClick={addComment}
-                        disabled={commentSaving || !commentText.trim()}
-                      >
-                        {commentSaving ? "Posting..." : "Post"}
-                      </button>
-                      </div>
-                    </div>
-                    <div className="text-muted small mt-1">Ctrl+Enter to post</div>
-                  </>
-                )}
-                {commentError ? <div className="text-danger small mt-1">{commentError}</div> : null}
-              </section>
-
-              {/* Drawing markup editor and linked review threads. */}
-              <div className="mt-4">
-                <DrawingMarkupWorkspace
-                  key={`${pn}::${revToken}::${drawingSource?.source_file_id || "none"}`}
-                  pn={pn}
-                  rev={effectiveRev || ""}
-                  pdfHref={pdfHref}
-                  drawingSource={drawingSource}
-                  layer={markupLayer}
-                  layerLoading={markupLoading}
-                  layerError={markupError}
-                  canEdit={canPartsNote}
-                  onLayerChange={setMarkupLayer}
-                  draftRef={markupDraftRef}
-                  searchText={notesSearch}
+              <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
+                <h6 className="mb-0 d-flex align-items-center gap-2">
+                  Comments & drawing markups
+                  <span className="badge rounded-pill text-bg-secondary">{comments.length} comments</span>
+                  <span className="badge rounded-pill text-bg-secondary">{markupThreads.length} markup reviews</span>
+                </h6>
+                <input
+                  type="search"
+                  className="form-control form-control-sm"
+                  style={{ maxWidth: 300 }}
+                  value={notesSearch}
+                  onChange={(e) => setNotesSearch(e.target.value)}
+                  placeholder="Search comments & markups"
+                  aria-label="Search comments and markups"
                 />
               </div>
+              {/* Canvas editor plus the unified review panel: general comments
+                  and markup review threads share one list and one feature set. */}
+              <DrawingMarkupWorkspace
+                key={`${pn}::${revToken}::${drawingSource?.source_file_id || "none"}`}
+                pn={pn}
+                rev={effectiveRev || ""}
+                pdfHref={pdfHref}
+                drawingSource={drawingSource}
+                layer={markupLayer}
+                layerLoading={markupLoading}
+                layerError={markupError}
+                canEdit={canPartsNote}
+                onLayerChange={setMarkupLayer}
+                draftRef={markupDraftRef}
+                searchText={notesSearch}
+                comments={comments}
+                commentsBusy={commentSaving}
+                commentsError={commentError}
+                onAddComment={addComment}
+                onReplyComment={replyComment}
+                onSetCommentStatus={setCommentStatus}
+                onSetCommentPriority={setCommentPriority}
+                onDeleteComment={deleteComment}
+              />
             </div>
           </TabPanel>}
 

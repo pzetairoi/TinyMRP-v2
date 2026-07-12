@@ -70,12 +70,29 @@ def _normalize_notes(value: Any) -> str:
 
 
 COMMENT_PRIORITIES = ("low", "normal", "high")
+MAX_COMMENT_REPLIES = 200
+
+
+def _normalize_comment_reply(value: Any) -> Optional[dict[str, str]]:
+    if not isinstance(value, dict):
+        return None
+    text = str(value.get("text") or "").strip()
+    if not text:
+        return None
+    reply_id = str(value.get("id") or "").strip()[:64]
+    return {
+        "id": reply_id or uuid4().hex,
+        "ts": str(value.get("ts") or "").strip(),
+        "author": str(value.get("author") or "").strip(),
+        "text": text,
+    }
 
 
 def _normalize_comment(value: Any) -> Optional[dict[str, str]]:
     priority = ""
     comment_id = ""
     status = "open"
+    replies: list[dict[str, str]] = []
     if isinstance(value, dict):
         text = str(value.get("text") or "").strip()
         author = str(value.get("author") or "").strip()
@@ -88,6 +105,12 @@ def _normalize_comment(value: Any) -> Optional[dict[str, str]]:
             comment_id = raw_id
         if str(value.get("status") or "").strip().lower() == "resolved":
             status = "resolved"
+        raw_replies = value.get("replies")
+        if isinstance(raw_replies, list):
+            for raw_reply in raw_replies[:MAX_COMMENT_REPLIES]:
+                normalized_reply = _normalize_comment_reply(raw_reply)
+                if normalized_reply:
+                    replies.append(normalized_reply)
     else:
         text = str(value or "").strip()
         author = ""
@@ -99,6 +122,8 @@ def _normalize_comment(value: Any) -> Optional[dict[str, str]]:
         out["id"] = comment_id
     if priority:
         out["priority"] = priority
+    if replies:
+        out["replies"] = replies
     out["status"] = status
     return out
 
@@ -345,21 +370,7 @@ def add_part_comment(
     return comment
 
 
-def set_part_comment_status(part: Part, *, comment_id: str, status: str) -> Optional[dict[str, Any]]:
-    migrate_legacy_annotations(part)
-    doc = _get_doc(part)
-    if not doc:
-        return None
-    next_status = "resolved" if str(status or "").strip().lower() == "resolved" else "open"
-    comments = normalize_comment_rows(getattr(doc, "comments", []) or [])
-    updated = None
-    for row in comments:
-        if str(row.get("id") or "") == str(comment_id or ""):
-            row["status"] = next_status
-            updated = row
-            break
-    if updated is None:
-        return None
+def _persist_comment_rows(part: Part, doc: PartAnnotation, comments: list[dict[str, Any]]) -> None:
     doc.comments = comments
     doc.updated_at = utc_now()
     doc.save()
@@ -371,7 +382,85 @@ def set_part_comment_status(part: Part, *, comment_id: str, status: str) -> Opti
     part.save()
     from app.services.part_review_status import sync_part_review_status
     sync_part_review_status(part)
+
+
+def _find_comment_row(comments: list[dict[str, Any]], comment_id: str) -> Optional[dict[str, Any]]:
+    key = str(comment_id or "").strip()
+    if not key:
+        return None
+    for row in comments:
+        if str(row.get("id") or "") == key:
+            return row
+    return None
+
+
+def set_part_comment_status(part: Part, *, comment_id: str, status: str) -> Optional[dict[str, Any]]:
+    migrate_legacy_annotations(part)
+    doc = _get_doc(part)
+    if not doc:
+        return None
+    next_status = "resolved" if str(status or "").strip().lower() == "resolved" else "open"
+    comments = normalize_comment_rows(getattr(doc, "comments", []) or [])
+    updated = _find_comment_row(comments, comment_id)
+    if updated is None:
+        return None
+    updated["status"] = next_status
+    _persist_comment_rows(part, doc, comments)
     return updated
+
+
+def set_part_comment_priority(part: Part, *, comment_id: str, priority: str) -> Optional[dict[str, Any]]:
+    """Set or clear ('' / 'none') the importance of one comment."""
+    migrate_legacy_annotations(part)
+    doc = _get_doc(part)
+    if not doc:
+        return None
+    comments = normalize_comment_rows(getattr(doc, "comments", []) or [])
+    updated = _find_comment_row(comments, comment_id)
+    if updated is None:
+        return None
+    priority_text = str(priority or "").strip().lower()
+    if priority_text in COMMENT_PRIORITIES:
+        updated["priority"] = priority_text
+    else:
+        updated.pop("priority", None)
+    _persist_comment_rows(part, doc, comments)
+    return updated
+
+
+def add_part_comment_reply(
+    part: Part,
+    *,
+    comment_id: str,
+    author: str,
+    text: str,
+    ts: Optional[str] = None,
+) -> Optional[Tuple[dict[str, Any], dict[str, Any]]]:
+    """Append a reply to one comment. Returns (comment, reply) or None."""
+    reply_text = str(text or "").strip()
+    if not reply_text:
+        return None
+    migrate_legacy_annotations(part)
+    doc = _get_doc(part)
+    if not doc:
+        return None
+    comments = normalize_comment_rows(getattr(doc, "comments", []) or [])
+    target = _find_comment_row(comments, comment_id)
+    if target is None:
+        return None
+    replies = list(target.get("replies") or [])
+    if len(replies) >= MAX_COMMENT_REPLIES:
+        return None
+    reply = {
+        "id": uuid4().hex,
+        "ts": str(ts or utc_iso(utc_now()) or ""),
+        "author": str(author or "").strip(),
+        "text": reply_text,
+    }
+    replies.append(reply)
+    target["replies"] = replies
+    _persist_comment_rows(part, doc, comments)
+    return target, reply
 
 
 def remove_part_comment(

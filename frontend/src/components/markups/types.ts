@@ -76,17 +76,51 @@ export type MarkupLayer = {
   message?: string
 }
 
-// Drawing rows returned by /api/part_images (mode=drawing) with source metadata.
+// PNG rows returned by /api/part_images with source metadata. Drawing PNGs
+// are preferred; parts without one can be marked up on their preview PNG.
 export type DrawingImageRow = {
   urls: string[]
   revision?: string
   id?: string
   source_file_id?: string
+  is_dwg?: boolean
   rel_path?: string
   sha256?: string
   size?: number
   mtime?: string
   source_fingerprint?: string
+  /** Full-size image URLs (no thumbnails) for the markup canvas. */
+  image_urls?: string[]
+}
+
+export type PartCommentPriority = '' | 'low' | 'normal' | 'high'
+
+export type PartCommentReply = {
+  id: string
+  ts: string | null
+  ts_display?: string | null
+  ts_local?: string | null
+  author: string
+  author_display?: string
+  author_profile?: MarkupIdentityProfile | null
+  text: string
+}
+
+// General part comment (no linked markup), unified with markup threads in the
+// review panel. Stored in PartAnnotation; markup threads live in the layer.
+export type PartCommentRow = {
+  id?: string
+  ts: string
+  ts_display?: string | null
+  ts_local?: string | null
+  author: string
+  author_display?: string
+  author_profile?: MarkupIdentityProfile | null
+  text: string
+  priority?: PartCommentPriority
+  status?: 'open' | 'resolved'
+  replies?: PartCommentReply[]
+  reply_count?: number
 }
 
 export type MarkupTool =

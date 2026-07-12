@@ -82,6 +82,8 @@ from app.services.part_norm import clean_rev, clean_rev_or_none
 from app.services.part_annotations import (
     COMMENT_PRIORITIES,
     add_part_comment,
+    add_part_comment_reply,
+    set_part_comment_priority,
     annotation_payload,
     filtered_part_attrs,
     migrate_legacy_annotations,
@@ -254,11 +256,8 @@ def _attr_identity(attrs: dict, *keys: str) -> str:
     return ""
 
 
-def _comment_payload(comment: dict, resolved: dict[str, dict[str, object]] | None = None) -> dict[str, object]:
-    item = dict(comment or {})
-    author = str(item.get("author") or "").strip()
-    profile = None
-    ts_text = str(item.get("ts") or "").strip()
+def _comment_ts_fields(ts_value: object) -> dict[str, object]:
+    ts_text = str(ts_value or "").strip()
     ts_dt = None
     if ts_text:
         try:
@@ -266,24 +265,53 @@ def _comment_payload(comment: dict, resolved: dict[str, dict[str, object]] | Non
             ts_dt = datetime.fromisoformat(normalized)
         except Exception:
             ts_dt = None
-    if author:
-        if resolved is not None:
-            profile = resolved.get(author.lower()) or resolve_identity_profile(author)
-        else:
-            profile = resolve_identity_profile(author)
-    priority = str(item.get("priority") or "").strip().lower()
     return {
-        "id": str(item.get("id") or ""),
         "ts": utc_iso(ts_dt) or ts_text,
         "ts_display": format_display_ts(ts_dt, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
         "ts_local": local_input_value(ts_dt) or None,
-        "author": author,
-        "author_display": (profile or {}).get("label") or author or "User",
-        "author_profile": profile or resolve_identity_profile(author),
+    }
+
+
+def _comment_author_fields(author: object, resolved: dict[str, dict[str, object]] | None) -> dict[str, object]:
+    author_text = str(author or "").strip()
+    profile = None
+    if author_text:
+        if resolved is not None:
+            profile = resolved.get(author_text.lower()) or resolve_identity_profile(author_text)
+        else:
+            profile = resolve_identity_profile(author_text)
+    return {
+        "author": author_text,
+        "author_display": (profile or {}).get("label") or author_text or "User",
+        "author_profile": profile or resolve_identity_profile(author_text),
+    }
+
+
+def _comment_payload(comment: dict, resolved: dict[str, dict[str, object]] | None = None) -> dict[str, object]:
+    item = dict(comment or {})
+    priority = str(item.get("priority") or "").strip().lower()
+    replies: list[dict[str, object]] = []
+    for raw_reply in item.get("replies") or []:
+        if not isinstance(raw_reply, dict):
+            continue
+        reply: dict[str, object] = {
+            "id": str(raw_reply.get("id") or ""),
+            "text": str(raw_reply.get("text") or ""),
+        }
+        reply.update(_comment_ts_fields(raw_reply.get("ts")))
+        reply.update(_comment_author_fields(raw_reply.get("author"), resolved))
+        replies.append(reply)
+    out: dict[str, object] = {
+        "id": str(item.get("id") or ""),
         "text": str(item.get("text") or ""),
         "priority": priority if priority in COMMENT_PRIORITIES else "",
         "status": "resolved" if str(item.get("status") or "").lower() == "resolved" else "open",
+        "replies": replies,
+        "reply_count": len(replies),
     }
+    out.update(_comment_ts_fields(item.get("ts")))
+    out.update(_comment_author_fields(item.get("author"), resolved))
+    return out
 
 
 def _display_revision_label(rev: str | None) -> str:
@@ -1211,6 +1239,9 @@ def part_detail():
     raw_comments = list(notes_comments.get("comments") or [])
     identity_keys = [uploader_identity, approver_identity]
     identity_keys.extend(str((comment or {}).get("author") or "").strip() for comment in raw_comments)
+    for comment in raw_comments:
+        for reply in (comment or {}).get("replies") or []:
+            identity_keys.append(str((reply or {}).get("author") or "").strip())
     resolved_profiles = resolve_identity_profiles(identity_keys)
     comments = [_comment_payload(comment, resolved_profiles) for comment in raw_comments]
     uploader_profile = resolve_identity_profile(uploader_identity) if uploader_identity else None
@@ -1742,6 +1773,113 @@ def part_comments_status(pn):
             actor_email=getattr(current_user, "email", "") or "",
             kind="comment_changed",
             title=f"Your comment on {p.part_number} was {status}",
+            body=str(updated.get("text") or ""),
+            url=part_url(p.part_number, p.revision or ""),
+            part_number=p.part_number,
+            revision=p.revision or "",
+            comment_id=comment_id,
+        )
+    except Exception:
+        pass
+    return jsonify({"ok": True, "comment": _comment_payload(updated)})
+
+
+@bp.post("/parts/<pn>/comments/reply")
+@login_required
+@require_items_view
+@csrf.exempt
+def part_comments_reply(pn):
+    data = request.get_json(silent=True) or {}
+    rev = data.get("rev") if "rev" in data else request.args.get("rev")
+    comment_id = str(data.get("id") or "").strip()
+    text = str(data.get("text") or "").strip()
+    if not comment_id or not text:
+        return jsonify({"ok": False, "error": "id and text are required"}), 400
+    p = _find_part_doc((pn or "").strip(), rev)
+    if not p:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+    except Exception:
+        pass
+    result = add_part_comment_reply(
+        p,
+        comment_id=comment_id,
+        author=getattr(current_user, "email", "") or "",
+        text=text,
+        ts=utc_iso(utc_now()),
+    )
+    if result is None:
+        return jsonify({"ok": False, "error": "comment not found"}), 404
+    comment, reply = result
+    try:
+        log_action(
+            "part.comments.reply",
+            resource_type="part",
+            resource=f"{p.part_number}:{p.revision or ''}",
+            meta={"comment_id": comment_id, "reply_len": len(text)},
+        )
+    except Exception:
+        pass
+    try:
+        participants = {str(comment.get("author") or "")}
+        participants.update(str((r or {}).get("author") or "") for r in (comment.get("replies") or []))
+        notify_part_activity(
+            p,
+            actor_email=getattr(current_user, "email", "") or "",
+            text=text,
+            title=f"Reply on {p.part_number} comment",
+            participant_emails={email for email in participants if email},
+            comment_id=comment_id,
+            kind="thread_update",
+        )
+    except Exception:
+        pass
+    return jsonify({"ok": True, "comment": _comment_payload(comment)})
+
+
+@bp.post("/parts/<pn>/comments/priority")
+@login_required
+@require_items_view
+@csrf.exempt
+def part_comments_priority(pn):
+    data = request.get_json(silent=True) or {}
+    rev = data.get("rev") if "rev" in data else request.args.get("rev")
+    comment_id = str(data.get("id") or "").strip()
+    priority = str(data.get("priority") or "").strip().lower()
+    if not comment_id or priority not in {"", "none", *COMMENT_PRIORITIES}:
+        return jsonify({"ok": False, "error": "id and a valid priority are required"}), 400
+    p = _find_part_doc((pn or "").strip(), rev)
+    if not p:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+    except Exception:
+        pass
+    updated = set_part_comment_priority(p, comment_id=comment_id, priority=priority)
+    if updated is None:
+        return jsonify({"ok": False, "error": "comment not found"}), 404
+    try:
+        log_action(
+            "part.comments.priority",
+            resource_type="part",
+            resource=f"{p.part_number}:{p.revision or ''}",
+            meta={"comment_id": comment_id, "priority": updated.get("priority") or ""},
+        )
+    except Exception:
+        pass
+    try:
+        # The comment author learns when someone else changes the importance
+        # (create_notifications never notifies the actor themselves).
+        create_notifications(
+            recipient_emails=[str(updated.get("author") or "")],
+            actor_email=getattr(current_user, "email", "") or "",
+            kind="comment_changed",
+            title=f"Importance changed on your {p.part_number} comment: {updated.get('priority') or 'none'}",
             body=str(updated.get("text") or ""),
             url=part_url(p.part_number, p.revision or ""),
             part_number=p.part_number,

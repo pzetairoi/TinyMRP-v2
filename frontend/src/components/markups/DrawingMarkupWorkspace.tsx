@@ -24,6 +24,8 @@ import type {
   MarkupThread,
   MarkupThreadPriority,
   MarkupTool,
+  PartCommentPriority,
+  PartCommentRow,
 } from './types'
 
 type Props = {
@@ -37,8 +39,17 @@ type Props = {
   canEdit: boolean
   onLayerChange: (layer: MarkupLayer) => void
   draftRef: React.MutableRefObject<MarkupDraft | null>
-  /** Search text shared with the Comments section (filters threads + markup text). */
+  /** Search text shared with the review panel (filters comments, threads and markup text). */
   searchText?: string
+  // General part comments shown unified with markup reviews in the panel.
+  comments: PartCommentRow[]
+  commentsBusy?: boolean
+  commentsError?: string | null
+  onAddComment: (text: string, priority: PartCommentPriority) => Promise<boolean>
+  onReplyComment: (commentId: string, text: string) => Promise<boolean>
+  onSetCommentStatus: (commentId: string, status: 'open' | 'resolved') => Promise<boolean>
+  onSetCommentPriority: (commentId: string, priority: PartCommentPriority) => Promise<boolean>
+  onDeleteComment: (comment: PartCommentRow) => Promise<boolean>
 }
 
 const DRAW_TOOLS: MarkupTool[] = ['arrow', 'rect', 'ellipse', 'cloud']
@@ -78,6 +89,14 @@ export default function DrawingMarkupWorkspace({
   onLayerChange,
   draftRef,
   searchText,
+  comments,
+  commentsBusy,
+  commentsError,
+  onAddComment,
+  onReplyComment,
+  onSetCommentStatus,
+  onSetCommentPriority,
+  onDeleteComment,
 }: Props) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const canvasElRef = useRef<HTMLCanvasElement | null>(null)
@@ -142,8 +161,11 @@ export default function DrawingMarkupWorkspace({
   const revealedResolvedIdsRef = useRef<Set<string>>(new Set())
 
   const sourceFileId = drawingSource?.source_file_id || ''
-  const imgUrls = drawingSource?.urls || []
+  // Prefer the full-size image URLs (no thumbnails); preview-PNG sources list
+  // their thumbnail first in `urls`, which must never back the markup canvas.
+  const imgUrls = drawingSource?.image_urls?.length ? drawingSource.image_urls : drawingSource?.urls || []
   const imgUrl = imgUrls.length && imgIdx < imgUrls.length ? imgUrls[imgIdx] : ''
+  const isPreviewSource = !!drawingSource && drawingSource.is_dwg === false
 
   // ------------------------------------------------------------------
   // Serialization (visibility of hidden-resolved markups is runtime-only,
@@ -1105,21 +1127,37 @@ export default function DrawingMarkupWorkspace({
         partNumber={pn}
         revision={rev}
         threads={layer?.threads || []}
-        canEdit={effectiveCanEdit && !missingDrawingPng}
+        comments={comments}
+        canEditThreads={effectiveCanEdit && !missingDrawingPng}
+        canComment={canEdit}
         selectedObjectIds={selectedIds}
         hiddenObjectIds={Array.from(hiddenIdsRef.current)}
         busy={threadBusy}
+        commentsBusy={commentsBusy}
         loading={layerLoading && !layer}
         error={threadError}
+        commentsError={commentsError}
         filterText={searchText}
         textMatches={textMatches}
         promptObjectIds={promptIds}
         onPromptDismiss={() => setPromptIds(null)}
         onCreateThread={createThread}
-        onReply={(threadId, text) => threadRequest(`/threads/${encodeURIComponent(threadId)}/messages`, 'POST', { text })}
-        onSetStatus={(threadId, action) => threadRequest(`/threads/${encodeURIComponent(threadId)}`, 'PATCH', { action })}
+        onReplyThread={(threadId, text) => threadRequest(`/threads/${encodeURIComponent(threadId)}/messages`, 'POST', { text })}
+        onSetThreadStatus={(threadId, action) => threadRequest(`/threads/${encodeURIComponent(threadId)}`, 'PATCH', { action })}
+        onSetThreadPriority={(threadId, priority) => threadRequest(`/threads/${encodeURIComponent(threadId)}`, 'PATCH', { priority })}
+        onDeleteThread={(thread) => {
+          if (!window.confirm('Delete this review thread and its replies? The markup objects stay on the drawing.')) {
+            return Promise.resolve(false)
+          }
+          return threadRequest(`/threads/${encodeURIComponent(thread.id)}`, 'DELETE', {})
+        }}
         onToggleThreadVisibility={toggleThreadVisibility}
         onViewObject={focusObjectById}
+        onAddComment={onAddComment}
+        onReplyComment={onReplyComment}
+        onSetCommentStatus={onSetCommentStatus}
+        onSetCommentPriority={onSetCommentPriority}
+        onDeleteComment={onDeleteComment}
       />
 
       <div className="pd-markup-body">
@@ -1146,10 +1184,10 @@ export default function DrawingMarkupWorkspace({
           {missingDrawingPng ? (
             <div className="pd-markup-missing">
               <i className="pi pi-image" aria-hidden="true" />
-              <div className="fw-semibold">No drawing PNG available for web markup</div>
+              <div className="fw-semibold">No drawing or preview PNG available for web markup</div>
               <div className="text-muted small">
-                Generate/refresh the exported drawing PNG for this part to enable drawing markups. The original PDF
-                remains available.
+                Generate/refresh the exported drawing PNG (or a preview image) for this part to enable drawing
+                markups. General comments still work below. The original PDF remains available.
               </div>
               {pdfHref ? (
                 <a className="btn btn-sm btn-success" href={pdfHref} target="_blank" rel="noreferrer" title="Open PDF drawing">
@@ -1202,6 +1240,11 @@ export default function DrawingMarkupWorkspace({
               <i className="pi pi-pencil" aria-hidden="true" />
               <span>Drawing markups</span>
             </div>
+            {isPreviewSource ? (
+              <span className="badge text-bg-light border" title="No exported drawing PNG exists; markups are drawn on the preview image">
+                preview image
+              </span>
+            ) : null}
             {saveStatus(saveState)}
             <div className="pd-markup-actions-group">
               {effectiveCanEdit ? (
