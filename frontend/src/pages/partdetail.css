@@ -749,3 +749,168 @@
     height: min(72vw, 520px);
   }
 }
+
+/* Polished comments + markup workspace (tool rail | drawing | reviews). */
+.pd-comment-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .35rem;
+}
+
+.pd-comment-compose {
+  display: grid;
+  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+  gap: .5rem;
+  align-items: start;
+}
+
+.pd-markup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .75rem;
+  padding: .55rem .65rem;
+  border: 1px solid rgba(0,0,0,.08);
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.pd-markup-header-title,
+.pd-markup-header-actions {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+
+.pd-markup-body {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) minmax(280px, 340px);
+  gap: .65rem;
+  align-items: stretch;
+}
+
+.pd-markup-toolbar {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: .4rem;
+  align-items: stretch;
+  padding: .35rem;
+}
+
+.pd-markup-toolbar-group {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: .25rem;
+  align-items: stretch;
+}
+
+.pd-markup-toolbar .btn {
+  width: 100%;
+  min-height: 34px;
+  padding-inline: .3rem;
+}
+
+.pd-markup-toolbar-sep {
+  height: 1px;
+  margin: .1rem 0;
+  background: rgba(0,0,0,.12);
+}
+
+.pd-markup-color input[type="color"] {
+  width: 100%;
+}
+
+.pd-markup-width {
+  width: 100%;
+  min-width: 0;
+  padding-inline: .2rem;
+}
+
+.pd-markup-panel {
+  width: auto;
+  min-width: 0;
+  max-height: 600px;
+}
+
+.pd-markup-stage {
+  height: 600px;
+}
+
+.pd-markup-textmatches {
+  padding: .5rem;
+  border: 1px solid rgba(13,110,253,.2);
+  border-radius: 6px;
+  background: rgba(13,110,253,.04);
+}
+
+.pd-markup-textmatch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin-top: .35rem;
+}
+
+.pd-markup-textmatch-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pd-markup-root--expanded {
+  position: fixed;
+  inset: .75rem;
+  z-index: 1080;
+  padding: .75rem;
+  border: 1px solid rgba(0,0,0,.18);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1rem 3rem rgba(0,0,0,.24);
+}
+
+.pd-markup-root--expanded .pd-markup-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pd-markup-root--expanded .pd-markup-stage,
+.pd-markup-root--expanded .pd-markup-panel {
+  height: auto;
+  max-height: none;
+  min-height: 0;
+}
+
+@media (max-width: 991.98px) {
+  .pd-markup-body {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .pd-markup-panel {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .pd-markup-stage {
+    height: min(72vw, 520px);
+  }
+
+  .pd-markup-root--expanded {
+    inset: .25rem;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .pd-comment-compose {
+    grid-template-columns: 1fr;
+  }
+
+  .pd-markup-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

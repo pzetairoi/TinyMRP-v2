@@ -2,10 +2,11 @@
 // Fabric.js overlay editor for the exported drawing PNG. The PNG/PDF are never
 // modified: the image is a plain <img> under a transparent Fabric canvas and
 // only the vector layer is persisted (as JSON) through the markup API.
-import { useEffect, useRef, useState } from 'react'
-import { ActiveSelection, Canvas, Ellipse, Line, PencilBrush, Rect, Textbox } from 'fabric'
+// Layout: vertical tool rail | canvas stage | review-thread panel.
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ActiveSelection, Canvas, Ellipse, Line, PencilBrush, Rect, StaticCanvas, Textbox } from 'fabric'
 import MarkupToolbar from './MarkupToolbar'
-import MarkupThreadsPanel from './MarkupThreadsPanel'
+import MarkupThreadsPanel, { type MarkupTextMatch } from './MarkupThreadsPanel'
 import {
   TM_OBJECT_ID,
   ensureObjectIds,
@@ -36,8 +37,8 @@ type Props = {
   canEdit: boolean
   onLayerChange: (layer: MarkupLayer) => void
   draftRef: React.MutableRefObject<MarkupDraft | null>
-  focusThreadId?: string | null
-  onFocusHandled?: () => void
+  /** Search text shared with the Comments section (filters threads + markup text). */
+  searchText?: string
 }
 
 const DRAW_TOOLS: MarkupTool[] = ['arrow', 'rect', 'ellipse', 'cloud']
@@ -45,6 +46,24 @@ const DRAW_TOOLS: MarkupTool[] = ['arrow', 'rect', 'ellipse', 'cloud']
 function clientXY(e: any): { x: number; y: number } {
   if (e && e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY }
   return { x: e?.clientX ?? 0, y: e?.clientY ?? 0 }
+}
+
+function saveStatus(state: MarkupSaveState) {
+  switch (state) {
+    case 'dirty':
+      return <span className="pd-markup-status pd-markup-status--dirty">Unsaved changes</span>
+    case 'saving':
+      return <span className="pd-markup-status pd-markup-status--saving">Saving...</span>
+    case 'conflict':
+      return <span className="pd-markup-status pd-markup-status--conflict">Conflict – reload required</span>
+    default:
+      return (
+        <span className="pd-markup-status pd-markup-status--saved">
+          <i className="pi pi-check me-1" aria-hidden="true" />
+          Saved
+        </span>
+      )
+  }
 }
 
 export default function DrawingMarkupWorkspace({
@@ -58,8 +77,7 @@ export default function DrawingMarkupWorkspace({
   canEdit,
   onLayerChange,
   draftRef,
-  focusThreadId,
-  onFocusHandled,
+  searchText,
 }: Props) {
   const stageRef = useRef<HTMLDivElement | null>(null)
   const canvasElRef = useRef<HTMLCanvasElement | null>(null)
@@ -71,6 +89,7 @@ export default function DrawingMarkupWorkspace({
   const [wrapSize, setWrapSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const [fabricReady, setFabricReady] = useState(false)
   const [canvasLoaded, setCanvasLoaded] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   const [tool, setTool] = useState<MarkupTool>(canEdit ? 'select' : 'pan')
   const [strokeColor, setStrokeColor] = useState('#d00000')
@@ -82,6 +101,9 @@ export default function DrawingMarkupWorkspace({
   const [actionError, setActionError] = useState<string | null>(null)
   const [threadBusy, setThreadBusy] = useState(false)
   const [threadError, setThreadError] = useState<string | null>(null)
+  const [showResolved, setShowResolved] = useState(false)
+  const [promptIds, setPromptIds] = useState<string[] | null>(null)
+  const [mutationTick, setMutationTick] = useState(0)
 
   // Refs mirroring state for use inside Fabric event handlers.
   const toolRef = useRef(tool)
@@ -113,10 +135,28 @@ export default function DrawingMarkupWorkspace({
   const drawStateRef = useRef<null | { kind: MarkupTool; startX: number; startY: number; obj?: any }>(null)
   const panStateRef = useRef<null | { startX: number; startY: number; panX: number; panY: number }>(null)
   const highlightTimerRef = useRef<number | null>(null)
+  // Object ids hidden at runtime because their review threads are resolved.
+  const hiddenIdsRef = useRef<Set<string>>(new Set())
 
   const sourceFileId = drawingSource?.source_file_id || ''
   const imgUrls = drawingSource?.urls || []
   const imgUrl = imgUrls.length && imgIdx < imgUrls.length ? imgUrls[imgIdx] : ''
+
+  // ------------------------------------------------------------------
+  // Serialization (visibility of hidden-resolved markups is runtime-only,
+  // so persisted JSON always stores them as visible)
+  // ------------------------------------------------------------------
+  function serialize(): MarkupCanvasJson {
+    const canvas = fabricRef.current
+    if (!canvas) return { objects: [] }
+    const json = serializeCanvas(canvas)
+    if (hiddenIdsRef.current.size) {
+      json.objects = json.objects.map((o: any) =>
+        o && hiddenIdsRef.current.has(o[TM_OBJECT_ID]) ? { ...o, visible: true } : o,
+      )
+    }
+    return json
+  }
 
   // ------------------------------------------------------------------
   // View helpers
@@ -129,21 +169,25 @@ export default function DrawingMarkupWorkspace({
     if (imgRef.current) imgRef.current.style.transform = `matrix(${z},0,0,${z},${x},${y})`
   }
 
-  function zoomBy(factor: number) {
+  function zoomAt(px: number, py: number, factor: number) {
     const canvas = fabricRef.current
     if (!canvas) return
-    const next = Math.min(8, Math.max(0.4, userZoomRef.current * factor))
+    const next = Math.min(10, Math.max(0.4, userZoomRef.current * factor))
     if (next === userZoomRef.current) return
     const zOld = baseScaleRef.current * userZoomRef.current
     const zNew = baseScaleRef.current * next
-    const cx = canvas.getWidth() / 2
-    const cy = canvas.getHeight() / 2
     panRef.current = {
-      x: cx - ((cx - panRef.current.x) * zNew) / zOld,
-      y: cy - ((cy - panRef.current.y) * zNew) / zOld,
+      x: px - ((px - panRef.current.x) * zNew) / zOld,
+      y: py - ((py - panRef.current.y) * zNew) / zOld,
     }
     userZoomRef.current = next
     applyView()
+  }
+
+  function zoomBy(factor: number) {
+    const canvas = fabricRef.current
+    if (!canvas) return
+    zoomAt(canvas.getWidth() / 2, canvas.getHeight() / 2, factor)
   }
 
   function fitView() {
@@ -170,7 +214,7 @@ export default function DrawingMarkupWorkspace({
       setSaveState('dirty')
       return
     }
-    const current = JSON.stringify(serializeCanvas(canvas))
+    const current = JSON.stringify(serialize())
     setSaveState(current === savedJsonRef.current ? 'saved' : 'dirty')
   }
 
@@ -182,7 +226,7 @@ export default function DrawingMarkupWorkspace({
         sourceFileId,
         fingerprint: fingerprintRef.current,
         baseVersion: baseVersionRef.current,
-        canvasJson: serializeCanvas(canvas),
+        canvasJson: serialize(),
         dirty: true,
       }
     }
@@ -191,7 +235,7 @@ export default function DrawingMarkupWorkspace({
   function snapshotHistory() {
     const canvas = fabricRef.current
     if (!canvas) return
-    const json = JSON.stringify(serializeCanvas(canvas))
+    const json = JSON.stringify(serialize())
     const stack = historyRef.current.slice(0, historyIndexRef.current + 1)
     if (stack.length && stack[stack.length - 1] === json) return
     stack.push(json)
@@ -208,6 +252,7 @@ export default function DrawingMarkupWorkspace({
     snapshotHistory()
     refreshDirty()
     updateDraft()
+    setMutationTick((t) => t + 1)
   }
 
   async function loadCanvasJson(json: MarkupCanvasJson) {
@@ -223,6 +268,7 @@ export default function DrawingMarkupWorkspace({
       suspendRef.current = false
     }
     applyView()
+    setMutationTick((t) => t + 1)
   }
 
   async function applyHistory(index: number) {
@@ -230,12 +276,78 @@ export default function DrawingMarkupWorkspace({
     if (index < 0 || index >= stack.length) return
     historyIndexRef.current = index
     await loadCanvasJson(JSON.parse(stack[index]) as MarkupCanvasJson)
+    applyHiddenVisibility()
     setCanUndo(index > 0)
     setCanRedo(index < stack.length - 1)
     setSelectedIds([])
     refreshDirty()
     updateDraft()
   }
+
+  // ------------------------------------------------------------------
+  // Hidden resolved markups
+  // ------------------------------------------------------------------
+  function computeHiddenIds(): Set<string> {
+    const hidden = new Set<string>()
+    if (showResolved) return hidden
+    const hasOpen = new Map<string, boolean>()
+    for (const thread of layerRef.current?.threads || []) {
+      for (const id of thread.object_ids || []) {
+        hasOpen.set(id, (hasOpen.get(id) || false) || thread.status === 'open')
+      }
+    }
+    hasOpen.forEach((open, id) => {
+      if (!open) hidden.add(id)
+    })
+    return hidden
+  }
+
+  function applyHiddenVisibility() {
+    const canvas = fabricRef.current
+    if (!canvas) return
+    const hidden = computeHiddenIds()
+    hiddenIdsRef.current = hidden
+    let changed = false
+    let selectionHidden = false
+    const active = new Set(canvas.getActiveObjects())
+    canvas.getObjects().forEach((o: any) => {
+      if (o.excludeFromExport || o.__tmTemp) return
+      const id = o[TM_OBJECT_ID]
+      const visible = !(id && hidden.has(id))
+      if (o.visible !== visible) {
+        o.visible = visible
+        changed = true
+        if (!visible && active.has(o)) selectionHidden = true
+      }
+    })
+    if (selectionHidden) {
+      canvas.discardActiveObject()
+      setSelectedIds([])
+    }
+    if (changed) canvas.requestRenderAll()
+  }
+
+  useEffect(() => {
+    if (canvasLoaded) applyHiddenVisibility()
+  }, [layer, showResolved, canvasLoaded])
+
+  const hiddenResolvedCount = useMemo(() => {
+    if (showResolved) {
+      // Count what WOULD be hidden so the toggle tooltip stays informative.
+      const hasOpen = new Map<string, boolean>()
+      for (const thread of layer?.threads || []) {
+        for (const id of thread.object_ids || []) {
+          hasOpen.set(id, (hasOpen.get(id) || false) || thread.status === 'open')
+        }
+      }
+      let n = 0
+      hasOpen.forEach((open) => {
+        if (!open) n += 1
+      })
+      return n
+    }
+    return hiddenIdsRef.current.size
+  }, [layer, showResolved, mutationTick, canvasLoaded])
 
   // ------------------------------------------------------------------
   // API calls
@@ -268,7 +380,7 @@ export default function DrawingMarkupWorkspace({
     if (!canvas || !canEditRef.current || !sourceFileId) return false
     setActionError(null)
     setSaveState('saving')
-    const canvasJson = serializeCanvas(canvas)
+    const canvasJson = serialize()
     try {
       const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/drawing-markups`, {
         method: 'PUT',
@@ -287,6 +399,7 @@ export default function DrawingMarkupWorkspace({
       savedJsonRef.current = JSON.stringify(canvasJson)
       draftRef.current = null
       setSaveState('saved')
+      setExpanded(false) // marking-up finished: back to the normal size
       onLayerChange(j as MarkupLayer)
       return true
     } catch (e: any) {
@@ -304,15 +417,17 @@ export default function DrawingMarkupWorkspace({
     baseVersionRef.current = Number(fresh.version || 0)
     fingerprintRef.current = fresh.source?.fingerprint || ''
     await loadCanvasJson(fresh.canvas_json || { objects: [] })
-    savedJsonRef.current = JSON.stringify(serializeCanvas(canvas))
+    savedJsonRef.current = JSON.stringify(serialize())
     historyRef.current = [savedJsonRef.current]
     historyIndexRef.current = 0
     setCanUndo(false)
     setCanRedo(false)
     setSelectedIds([])
+    setPromptIds(null)
     draftRef.current = null
     setSaveState('saved')
     onLayerChange(fresh)
+    applyHiddenVisibility()
   }
 
   async function threadRequest(path: string, method: string, extra: Record<string, any>): Promise<boolean> {
@@ -367,7 +482,7 @@ export default function DrawingMarkupWorkspace({
   }
 
   // ------------------------------------------------------------------
-  // Selection / focus / delete
+  // Selection / prompt / focus / delete / export
   // ------------------------------------------------------------------
   function updateSelection() {
     const canvas = fabricRef.current
@@ -380,6 +495,15 @@ export default function DrawingMarkupWorkspace({
       .map((o: any) => o[TM_OBJECT_ID])
       .filter((v: any) => typeof v === 'string' && v)
     setSelectedIds(ids)
+  }
+
+  /** A freshly drawn markup asks for a review description automatically. */
+  function promptReviewFor(obj: any) {
+    if (!canEditRef.current || !obj || obj.__tmPrompted) return
+    const id = obj[TM_OBJECT_ID]
+    if (!id) return
+    obj.__tmPrompted = true
+    setPromptIds((prev) => (prev && prev.length ? [...prev, id] : [id]))
   }
 
   function deleteSelected() {
@@ -404,19 +528,20 @@ export default function DrawingMarkupWorkspace({
     suspendRef.current = false
     canvas.requestRenderAll()
     setSelectedIds([])
+    setPromptIds((prev) => {
+      if (!prev) return prev
+      const kept = prev.filter((id) => !ids.includes(id))
+      return kept.length ? kept : null
+    })
     snapshotHistory()
     refreshDirty()
     updateDraft()
+    setMutationTick((t) => t + 1)
   }
 
-  function focusThread(thread: MarkupThread) {
+  function focusObjects(objs: any[]) {
     const canvas = fabricRef.current
-    if (!canvas) return
-    const objs = canvas.getObjects().filter((o: any) => thread.object_ids.includes(o[TM_OBJECT_ID]))
-    if (!objs.length) {
-      setThreadError('Markup no longer present on the drawing.')
-      return
-    }
+    if (!canvas || !objs.length) return
     canvas.discardActiveObject()
     if (canEditRef.current) {
       if (objs.length === 1) canvas.setActiveObject(objs[0])
@@ -439,14 +564,12 @@ export default function DrawingMarkupWorkspace({
     })
     if (!isFinite(minX)) return
 
-    // Bring the bbox centre into the middle of the viewport at current zoom;
-    // zoom in a little when the target is tiny on screen.
     const bw = Math.max(1, maxX - minX)
     const bh = Math.max(1, maxY - minY)
     let z = baseScaleRef.current * userZoomRef.current
     if (Math.max(bw, bh) * z < 60) {
-      const target = Math.min(8, Math.max(userZoomRef.current, 160 / (Math.max(bw, bh) * baseScaleRef.current)))
-      userZoomRef.current = Math.min(8, target)
+      const target = Math.min(10, Math.max(userZoomRef.current, 160 / (Math.max(bw, bh) * baseScaleRef.current)))
+      userZoomRef.current = Math.min(10, target)
       z = baseScaleRef.current * userZoomRef.current
     }
     const cx = canvas.getWidth() / 2
@@ -454,8 +577,7 @@ export default function DrawingMarkupWorkspace({
     panRef.current = { x: cx - z * (minX + bw / 2), y: cy - z * (minY + bh / 2) }
     applyView()
 
-    // Transient highlight; excludeFromExport keeps it out of history/saves
-    // and out of the persisted stored style.
+    // Transient highlight; excludeFromExport keeps it out of history/saves.
     const pad = Math.max(8, logicalSize(10))
     const highlight = new Rect({
       left: minX - pad,
@@ -490,7 +612,91 @@ export default function DrawingMarkupWorkspace({
       }
     }, 1800)
     updateSelection()
+    try {
+      stageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    } catch { /* older browsers */ }
   }
+
+  function focusThread(thread: MarkupThread) {
+    const canvas = fabricRef.current
+    if (!canvas) return
+    // Resolved threads may reference hidden markups: reveal before focusing.
+    const needsReveal = !showResolved && thread.object_ids.some((id) => hiddenIdsRef.current.has(id))
+    if (needsReveal) setShowResolved(true)
+    const objs = canvas.getObjects().filter((o: any) => thread.object_ids.includes(o[TM_OBJECT_ID]))
+    if (!objs.length) {
+      setThreadError('Markup no longer present on the drawing.')
+      return
+    }
+    if (needsReveal) {
+      objs.forEach((o: any) => {
+        o.visible = true
+      })
+    }
+    focusObjects(objs)
+  }
+
+  function focusObjectById(objectId: string) {
+    const canvas = fabricRef.current
+    if (!canvas) return
+    const objs = canvas.getObjects().filter((o: any) => o[TM_OBJECT_ID] === objectId)
+    if (objs.length) focusObjects(objs)
+  }
+
+  /** Download the drawing with the visible markups flattened on top (PNG).
+   * Renders client-side; the original PNG/PDF stay untouched. */
+  async function downloadComposite() {
+    const canvas = fabricRef.current
+    const img = imgRef.current
+    if (!canvas || !img || !natural) return
+    setActionError(null)
+    const json = serialize()
+    json.objects = json.objects.filter((o: any) => !(o && hiddenIdsRef.current.has(o[TM_OBJECT_ID])))
+    const sc = new StaticCanvas(undefined, { width: natural.w, height: natural.h })
+    try {
+      await sc.loadFromJSON({ version: json.version, objects: json.objects })
+      sc.renderAll()
+      const out = document.createElement('canvas')
+      out.width = natural.w
+      out.height = natural.h
+      const ctx = out.getContext('2d')
+      if (!ctx) throw new Error('Canvas not supported')
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, natural.w, natural.h)
+      ctx.drawImage(img, 0, 0, natural.w, natural.h)
+      ctx.drawImage((sc as any).lowerCanvasEl, 0, 0)
+      const blob: Blob | null = await new Promise((res) => out.toBlob(res, 'image/png'))
+      if (!blob) throw new Error('PNG export failed')
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `${pn}${rev ? `_REV_${rev}` : ''}_markups.png`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+    } catch (e: any) {
+      setActionError(e?.message || 'Could not export the marked-up drawing')
+    } finally {
+      try {
+        sc.dispose()
+      } catch { /* already disposed */ }
+    }
+  }
+
+  // Markup text objects matching the shared search.
+  const textMatches = useMemo<MarkupTextMatch[]>(() => {
+    const needle = String(searchText || '').trim().toLowerCase()
+    const canvas = fabricRef.current
+    if (!needle || !canvas) return []
+    const out: MarkupTextMatch[] = []
+    canvas.getObjects().forEach((o: any) => {
+      if (o.excludeFromExport || o.__tmTemp) return
+      const text = typeof o.text === 'string' ? o.text : ''
+      const id = o[TM_OBJECT_ID]
+      if (id && text && text.toLowerCase().includes(needle)) out.push({ id, text })
+    })
+    return out
+  }, [searchText, mutationTick, canvasLoaded])
 
   // ------------------------------------------------------------------
   // Tool configuration + pointer handlers
@@ -645,6 +851,8 @@ export default function DrawingMarkupWorkspace({
       snapshotHistory()
       refreshDirty()
       updateDraft()
+      setMutationTick((t) => t + 1)
+      promptReviewFor(obj)
     } else if (draw.kind === 'arrow') {
       discardTemp()
       const arrow = makeArrow(draw.startX, draw.startY, p.x, p.y, { stroke, strokeWidth: width })
@@ -678,16 +886,33 @@ export default function DrawingMarkupWorkspace({
       const t: any = e.target
       if (t && !t.__tmTemp && !t.excludeFromExport && !t[TM_OBJECT_ID]) t[TM_OBJECT_ID] = newObjectId()
       onCanvasMutated(t)
+      // Arrows, clouds and freehand strokes arrive here as user-created adds;
+      // text prompts on editing exit instead (the user is still typing).
+      if (!suspendRef.current && t && !t.__tmTemp && !t.excludeFromExport) {
+        const type = String(t.type || '').toLowerCase()
+        if (type !== 'textbox') promptReviewFor(t)
+      }
     })
     canvas.on('object:modified', (e: any) => onCanvasMutated(e.target))
     canvas.on('object:removed', (e: any) => onCanvasMutated(e.target))
-    canvas.on('text:editing:exited', (e: any) => onCanvasMutated(e.target))
+    canvas.on('text:editing:exited', (e: any) => {
+      onCanvasMutated(e.target)
+      if (e.target && String(e.target.text || '').trim()) promptReviewFor(e.target)
+    })
     canvas.on('selection:created', updateSelection)
     canvas.on('selection:updated', updateSelection)
     canvas.on('selection:cleared', () => setSelectedIds([]))
     canvas.on('mouse:down', (opt: any) => handleMouseDown(canvas, opt))
     canvas.on('mouse:move', (opt: any) => handleMouseMove(canvas, opt))
     canvas.on('mouse:up', (opt: any) => handleMouseUp(canvas, opt))
+    canvas.on('mouse:wheel', (opt: any) => {
+      const e = opt.e as WheelEvent
+      e.preventDefault()
+      e.stopPropagation()
+      const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1
+      const vp = canvas.getViewportPoint(e)
+      zoomAt(vp.x, vp.y, factor)
+    })
 
     configureTool(canvas, toolRef.current)
     setFabricReady(true)
@@ -700,7 +925,7 @@ export default function DrawingMarkupWorkspace({
             sourceFileId,
             fingerprint: fingerprintRef.current,
             baseVersion: baseVersionRef.current,
-            canvasJson: serializeCanvas(canvas),
+            canvasJson: serialize(),
             dirty: true,
           }
         } else if (saveStateRef.current === 'saved') {
@@ -736,10 +961,10 @@ export default function DrawingMarkupWorkspace({
       } else {
         baseVersionRef.current = Number(layer.version || 0)
         await loadCanvasJson(layer.canvas_json || { objects: [] })
-        savedJsonRef.current = JSON.stringify(serializeCanvas(canvas))
+        savedJsonRef.current = JSON.stringify(serialize())
         setSaveState('saved')
       }
-      historyRef.current = [JSON.stringify(serializeCanvas(canvas))]
+      historyRef.current = [JSON.stringify(serialize())]
       historyIndexRef.current = 0
       setCanUndo(false)
       setCanRedo(false)
@@ -801,48 +1026,69 @@ export default function DrawingMarkupWorkspace({
     return () => document.removeEventListener('keydown', onKey)
   }, [])
 
-  // "View on drawing" navigation coming from the Notes & Comments tab.
-  useEffect(() => {
-    if (!focusThreadId || !canvasLoaded) return
-    const thread = (layerRef.current?.threads || []).find((t) => t.id === focusThreadId)
-    if (thread) {
-      if (thread.linked) focusThread(thread)
-      else setThreadError('Markup no longer present on the drawing.')
-    }
-    onFocusHandled?.()
-  }, [focusThreadId, canvasLoaded])
-
   // ------------------------------------------------------------------
   // Render
   // ------------------------------------------------------------------
   const missingDrawingPng = !drawingSource
   const showEditor = !missingDrawingPng
+  const effectiveCanEdit = canEdit && (layer ? layer.can_edit : true)
 
   return (
-    <div className="pd-markup-root">
+    <div className={`pd-markup-root${expanded ? ' pd-markup-root--expanded' : ''}`}>
       {showEditor ? (
-        <MarkupToolbar
-          tool={tool}
-          onToolChange={setTool}
-          strokeColor={strokeColor}
-          onStrokeColorChange={setStrokeColor}
-          strokeWidth={strokeWidth}
-          onStrokeWidthChange={setStrokeWidth}
-          canEdit={canEdit && (layer ? layer.can_edit : true)}
-          hasSelection={selectedIds.length > 0}
-          canUndo={canUndo}
-          canRedo={canRedo}
-          saveState={saveState}
-          onDelete={deleteSelected}
-          onUndo={() => applyHistory(historyIndexRef.current - 1)}
-          onRedo={() => applyHistory(historyIndexRef.current + 1)}
-          onZoomIn={() => zoomBy(1.25)}
-          onZoomOut={() => zoomBy(1 / 1.25)}
-          onFitView={fitView}
-          onSave={save}
-          onReload={reloadFromServer}
-          pdfHref={pdfHref}
-        />
+        <div className="pd-markup-header">
+          <div className="pd-markup-header-title">
+            <i className="pi pi-pencil" aria-hidden="true" />
+            <span className="fw-semibold small">Drawing markups</span>
+          </div>
+          <div className="pd-markup-header-actions">
+            {saveStatus(saveState)}
+            {effectiveCanEdit ? (
+              saveState === 'conflict' ? (
+                <button type="button" className="btn btn-sm btn-warning" onClick={reloadFromServer}>
+                  <i className="pi pi-replay me-1" aria-hidden="true" />
+                  Reload
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary"
+                  disabled={saveState !== 'dirty'}
+                  onClick={save}
+                >
+                  {saveState === 'saving' ? 'Saving...' : 'Save markups'}
+                </button>
+              )
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              title="Download the drawing with markups overlaid (PNG)"
+              aria-label="Download marked-up drawing"
+              disabled={!canvasLoaded}
+              onClick={downloadComposite}
+            >
+              <i className="pi pi-download me-1" aria-hidden="true" />
+              PNG
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${expanded ? 'btn-secondary' : 'btn-outline-secondary'}`}
+              title={expanded ? 'Back to normal size' : 'Enlarge the markup workspace'}
+              aria-label={expanded ? 'Exit large editing view' : 'Enlarge markup workspace'}
+              aria-pressed={expanded}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              <i className={`pi ${expanded ? 'pi-window-minimize' : 'pi-expand'}`} aria-hidden="true" />
+            </button>
+            {pdfHref ? (
+              <a className="btn btn-sm btn-success" href={pdfHref} target="_blank" rel="noreferrer" title="Open PDF drawing">
+                <i className="pi pi-file-pdf me-1" aria-hidden="true" />
+                Open PDF
+              </a>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       {layer && layer.stale_layers_count > 0 ? (
@@ -856,6 +1102,31 @@ export default function DrawingMarkupWorkspace({
       {layerError ? <div className="alert alert-warning py-1 px-2 small mb-2">{layerError}</div> : null}
 
       <div className="pd-markup-body">
+        {showEditor ? (
+          <MarkupToolbar
+            tool={tool}
+            onToolChange={setTool}
+            strokeColor={strokeColor}
+            onStrokeColorChange={setStrokeColor}
+            strokeWidth={strokeWidth}
+            onStrokeWidthChange={setStrokeWidth}
+            canEdit={effectiveCanEdit}
+            hasSelection={selectedIds.length > 0}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            saveState={saveState}
+            hiddenResolvedCount={hiddenResolvedCount}
+            showResolved={showResolved}
+            onToggleResolved={() => setShowResolved((v) => !v)}
+            onDelete={deleteSelected}
+            onUndo={() => applyHistory(historyIndexRef.current - 1)}
+            onRedo={() => applyHistory(historyIndexRef.current + 1)}
+            onZoomIn={() => zoomBy(1.25)}
+            onZoomOut={() => zoomBy(1 / 1.25)}
+            onFitView={fitView}
+          />
+        ) : null}
+
         <div className="pd-markup-stage" ref={stageRef}>
           {missingDrawingPng ? (
             <div className="pd-markup-missing">
@@ -863,7 +1134,7 @@ export default function DrawingMarkupWorkspace({
               <div className="fw-semibold">No drawing PNG available for web markup</div>
               <div className="text-muted small">
                 Generate/refresh the exported drawing PNG for this part to enable drawing markups. The original PDF
-                remains available below.
+                remains available.
               </div>
               {pdfHref ? (
                 <a className="btn btn-sm btn-success" href={pdfHref} target="_blank" rel="noreferrer" title="Open PDF drawing">
@@ -912,15 +1183,20 @@ export default function DrawingMarkupWorkspace({
 
         <MarkupThreadsPanel
           threads={layer?.threads || []}
-          canEdit={canEdit && !!layer?.can_edit && !missingDrawingPng}
+          canEdit={effectiveCanEdit && !missingDrawingPng}
           selectedObjectIds={selectedIds}
           busy={threadBusy}
           loading={layerLoading && !layer}
           error={threadError}
+          filterText={searchText}
+          textMatches={textMatches}
+          promptObjectIds={promptIds}
+          onPromptDismiss={() => setPromptIds(null)}
           onCreateThread={createThread}
           onReply={(threadId, text) => threadRequest(`/threads/${encodeURIComponent(threadId)}/messages`, 'POST', { text })}
           onSetStatus={(threadId, action) => threadRequest(`/threads/${encodeURIComponent(threadId)}`, 'PATCH', { action })}
           onViewThread={focusThread}
+          onViewObject={focusObjectById}
         />
       </div>
     </div>

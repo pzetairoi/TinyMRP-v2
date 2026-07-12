@@ -1,4 +1,5 @@
 // frontend/src/components/markups/MarkupToolbar.tsx
+// Vertical tool rail shown to the left of the markup canvas.
 import type { MarkupSaveState, MarkupTool } from './types'
 
 type ToolDef = { tool: MarkupTool; icon: string; label: string }
@@ -28,33 +29,15 @@ type Props = {
   canUndo: boolean
   canRedo: boolean
   saveState: MarkupSaveState
+  hiddenResolvedCount: number
+  showResolved: boolean
+  onToggleResolved: () => void
   onDelete: () => void
   onUndo: () => void
   onRedo: () => void
   onZoomIn: () => void
   onZoomOut: () => void
   onFitView: () => void
-  onSave: () => void
-  onReload: () => void
-  pdfHref?: string
-}
-
-function saveStatus(state: MarkupSaveState) {
-  switch (state) {
-    case 'dirty':
-      return <span className="pd-markup-status pd-markup-status--dirty">Unsaved changes</span>
-    case 'saving':
-      return <span className="pd-markup-status pd-markup-status--saving">Saving...</span>
-    case 'conflict':
-      return <span className="pd-markup-status pd-markup-status--conflict">Conflict – reload required</span>
-    default:
-      return (
-        <span className="pd-markup-status pd-markup-status--saved">
-          <i className="pi pi-check me-1" aria-hidden="true" />
-          Saved
-        </span>
-      )
-  }
 }
 
 export default function MarkupToolbar({
@@ -69,19 +52,19 @@ export default function MarkupToolbar({
   canUndo,
   canRedo,
   saveState,
+  hiddenResolvedCount,
+  showResolved,
+  onToggleResolved,
   onDelete,
   onUndo,
   onRedo,
   onZoomIn,
   onZoomOut,
   onFitView,
-  onSave,
-  onReload,
-  pdfHref,
 }: Props) {
   const editingBlocked = !canEdit || saveState === 'conflict' || saveState === 'saving'
   return (
-    <div className="pd-markup-toolbar" role="toolbar" aria-label="Drawing markup tools">
+    <div className="pd-markup-toolbar" role="toolbar" aria-label="Drawing markup tools" aria-orientation="vertical">
       <div className="pd-markup-toolbar-group" aria-label="Markup tools">
         {TOOLS.map((def) => {
           const drawingTool = def.tool !== 'select' && def.tool !== 'pan'
@@ -101,6 +84,8 @@ export default function MarkupToolbar({
           )
         })}
       </div>
+
+      <div className="pd-markup-toolbar-sep" role="separator" />
 
       <div className="pd-markup-toolbar-group" aria-label="Stroke settings">
         <label className="pd-markup-color" title="Stroke colour">
@@ -123,11 +108,13 @@ export default function MarkupToolbar({
         >
           {STROKE_WIDTHS.map((w) => (
             <option key={w} value={w}>
-              {w}px
+              {w}
             </option>
           ))}
         </select>
       </div>
+
+      <div className="pd-markup-toolbar-sep" role="separator" />
 
       <div className="pd-markup-toolbar-group" aria-label="Edit actions">
         <button
@@ -162,8 +149,10 @@ export default function MarkupToolbar({
         </button>
       </div>
 
+      <div className="pd-markup-toolbar-sep" role="separator" />
+
       <div className="pd-markup-toolbar-group" aria-label="View controls">
-        <button type="button" className="btn btn-sm btn-outline-secondary" title="Zoom in" aria-label="Zoom in" onClick={onZoomIn}>
+        <button type="button" className="btn btn-sm btn-outline-secondary" title="Zoom in (mouse wheel also zooms)" aria-label="Zoom in" onClick={onZoomIn}>
           <i className="pi pi-search-plus" aria-hidden="true" />
         </button>
         <button type="button" className="btn btn-sm btn-outline-secondary" title="Zoom out" aria-label="Zoom out" onClick={onZoomOut}>
@@ -172,33 +161,20 @@ export default function MarkupToolbar({
         <button type="button" className="btn btn-sm btn-outline-secondary" title="Fit / reset view" aria-label="Fit view" onClick={onFitView}>
           <i className="pi pi-window-maximize" aria-hidden="true" />
         </button>
-      </div>
-
-      <div className="pd-markup-toolbar-group pd-markup-toolbar-group--end">
-        {pdfHref ? (
-          <a className="btn btn-sm btn-success" href={pdfHref} target="_blank" rel="noreferrer" title="Open PDF drawing">
-            <i className="pi pi-file-pdf me-1" aria-hidden="true" />
-            Open PDF
-          </a>
-        ) : null}
-        {canEdit ? (
-          saveState === 'conflict' ? (
-            <button type="button" className="btn btn-sm btn-warning" onClick={onReload}>
-              <i className="pi pi-replay me-1" aria-hidden="true" />
-              Reload
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-primary"
-              disabled={saveState !== 'dirty'}
-              onClick={onSave}
-            >
-              {saveState === 'saving' ? 'Saving...' : 'Save'}
-            </button>
-          )
-        ) : null}
-        {saveStatus(saveState)}
+        <button
+          type="button"
+          className={`btn btn-sm ${showResolved ? 'btn-secondary' : 'btn-outline-secondary'}`}
+          title={
+            showResolved
+              ? 'Hide markups from resolved review threads'
+              : `Show markups from resolved review threads${hiddenResolvedCount ? ` (${hiddenResolvedCount} hidden)` : ''}`
+          }
+          aria-label={showResolved ? 'Hide resolved markups' : 'Show resolved markups'}
+          aria-pressed={showResolved}
+          onClick={onToggleResolved}
+        >
+          <i className={`pi ${showResolved ? 'pi-eye' : 'pi-eye-slash'}`} aria-hidden="true" />
+        </button>
       </div>
     </div>
   )

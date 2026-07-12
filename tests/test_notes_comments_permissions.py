@@ -112,3 +112,48 @@ def test_notes_and_comments_preserve_attrs_and_keep_search_indexes(client, user)
     assert list_resp.status_code == 200
     rows = list_resp.get_json()["data"]
     assert [row["part_number"] for row in rows] == ["PN-901"]
+
+
+def test_comment_priority_id_and_delete_endpoint(client, user):
+    viewer_role = Role(name="viewer_comment_delete", permissions=["items.view"]).save()
+    user.roles = [viewer_role]
+    user.save()
+    _login(client, user)
+
+    part = Part(part_number="PN-902", revision="B", description="Comment actions").save()
+    first = client.post(
+        f"/api/parts/{part.part_number}/comments",
+        json={"rev": "B", "text": "Critical drawing issue", "priority": "high"},
+    )
+    second = client.post(
+        f"/api/parts/{part.part_number}/comments",
+        json={"rev": "B", "text": "Unranked note"},
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    first_comment = first.get_json()["comment"]
+    assert first_comment["id"]
+    assert first_comment["priority"] == "high"
+    assert second.get_json()["comment"]["priority"] == ""
+
+    deleted = client.post(
+        f"/api/parts/{part.part_number}/comments/delete",
+        json={"rev": "B", "id": first_comment["id"]},
+    )
+    assert deleted.status_code == 200
+    remaining = deleted.get_json()["comments"]
+    assert [row["text"] for row in remaining] == ["Unranked note"]
+
+    part.reload()
+    annotation = PartAnnotation.objects(part_number=part.part_number, revision="B").first()
+    assert annotation is not None
+    assert [row["text"] for row in annotation.comments] == ["Unranked note"]
+    assert "Critical drawing issue" not in (part.comments_search or "")
+    assert "Unranked note" in (part.comments_search or "")
+
+    missing = client.post(
+        f"/api/parts/{part.part_number}/comments/delete",
+        json={"rev": "B", "id": first_comment["id"]},
+    )
+    assert missing.status_code == 404

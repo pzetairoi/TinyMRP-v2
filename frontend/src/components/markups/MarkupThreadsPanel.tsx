@@ -1,8 +1,10 @@
 // frontend/src/components/markups/MarkupThreadsPanel.tsx
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { MarkupIdentityProfile, MarkupThread, MarkupThreadPriority } from './types'
 
 type StatusFilter = 'open' | 'resolved' | 'all'
+
+export type MarkupTextMatch = { id: string; text: string }
 
 type Props = {
   threads: MarkupThread[]
@@ -11,6 +13,13 @@ type Props = {
   busy: boolean
   loading?: boolean
   error?: string | null
+  /** Search text shared with the Comments section; filters threads too. */
+  filterText?: string
+  /** Markup text objects matching the search. */
+  textMatches?: MarkupTextMatch[]
+  /** Object ids of a just-drawn markup: auto-opens the review form. */
+  promptObjectIds?: string[] | null
+  onPromptDismiss?: () => void
   onCreateThread: (input: {
     object_ids: string[]
     title: string
@@ -20,6 +29,7 @@ type Props = {
   onReply: (threadId: string, text: string) => Promise<boolean>
   onSetStatus: (threadId: string, action: 'resolve' | 'reopen') => Promise<boolean>
   onViewThread: (thread: MarkupThread) => void
+  onViewObject?: (objectId: string) => void
 }
 
 function initialsFor(label: string): string {
@@ -58,6 +68,23 @@ function statusBadge(status: 'open' | 'resolved') {
   )
 }
 
+function threadMatchesFilter(thread: MarkupThread, needle: string): boolean {
+  if (!needle) return true
+  const haystack: string[] = [
+    thread.title || '',
+    thread.status || '',
+    thread.priority || '',
+    thread.created_by || '',
+    thread.created_by_display || '',
+    thread.created_at_display || '',
+    thread.created_at || '',
+  ]
+  for (const msg of thread.messages || []) {
+    haystack.push(msg.text || '', msg.author || '', msg.author_display || '', msg.ts_display || '', msg.ts || '')
+  }
+  return haystack.some((value) => String(value).toLowerCase().includes(needle))
+}
+
 export default function MarkupThreadsPanel({
   threads,
   canEdit,
@@ -65,10 +92,15 @@ export default function MarkupThreadsPanel({
   busy,
   loading,
   error,
+  filterText,
+  textMatches,
+  promptObjectIds,
+  onPromptDismiss,
   onCreateThread,
   onReply,
   onSetStatus,
   onViewThread,
+  onViewObject,
 }: Props) {
   const [filter, setFilter] = useState<StatusFilter>('open')
   const [creating, setCreating] = useState(false)
@@ -77,27 +109,40 @@ export default function MarkupThreadsPanel({
   const [message, setMessage] = useState('')
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
 
+  const prompted = !!(promptObjectIds && promptObjectIds.length)
+  const linkIds = prompted ? promptObjectIds! : selectedObjectIds
+
+  // A freshly drawn markup opens the review form automatically.
+  useEffect(() => {
+    if (prompted) setCreating(true)
+  }, [prompted, promptObjectIds])
+
+  const needle = String(filterText || '').trim().toLowerCase()
   const openCount = useMemo(() => threads.filter((t) => t.status === 'open').length, [threads])
   const visible = useMemo(() => {
-    if (filter === 'all') return threads
-    return threads.filter((t) => t.status === filter)
-  }, [threads, filter])
+    if (needle) return threads.filter((t) => threadMatchesFilter(t, needle))
+    return filter === 'all' ? threads : threads.filter((t) => t.status === filter)
+  }, [threads, filter, needle])
+
+  function closeForm() {
+    setCreating(false)
+    setTitle('')
+    setPriority('normal')
+    setMessage('')
+    onPromptDismiss?.()
+  }
 
   async function submitThread() {
     const text = message.trim()
-    if (!text || !selectedObjectIds.length) return
+    const threadTitle = title.trim()
+    if (!threadTitle || !text || !linkIds.length) return
     const ok = await onCreateThread({
-      object_ids: selectedObjectIds,
-      title: title.trim(),
+      object_ids: linkIds,
+      title: threadTitle,
       priority,
       message: text,
     })
-    if (ok) {
-      setCreating(false)
-      setTitle('')
-      setPriority('normal')
-      setMessage('')
-    }
+    if (ok) closeForm()
   }
 
   async function submitReply(threadId: string) {
@@ -136,26 +181,27 @@ export default function MarkupThreadsPanel({
               <button
                 type="button"
                 className="btn btn-sm btn-outline-primary"
-                disabled={busy || !selectedObjectIds.length}
+                disabled={busy || !linkIds.length}
                 onClick={() => setCreating(true)}
               >
                 <i className="pi pi-comments me-1" aria-hidden="true" />
                 Add review comment
-                {selectedObjectIds.length ? ` (${selectedObjectIds.length} object${selectedObjectIds.length > 1 ? 's' : ''})` : ''}
+                {linkIds.length ? ` (${linkIds.length} object${linkIds.length > 1 ? 's' : ''})` : ''}
               </button>
-              {!selectedObjectIds.length ? (
+              {!linkIds.length ? (
                 <div className="text-muted small mt-1">Select one or more markup objects on the drawing first.</div>
               ) : null}
             </>
           ) : (
             <div className="pd-markup-newthread-form border rounded p-2">
               <div className="small fw-semibold mb-1">
-                New review thread ({selectedObjectIds.length} linked object{selectedObjectIds.length > 1 ? 's' : ''})
+                {prompted ? 'Describe the new markup' : 'New review thread'} ({linkIds.length} linked object
+                {linkIds.length > 1 ? 's' : ''})
               </div>
               <input
                 type="text"
                 className="form-control form-control-sm mb-1"
-                placeholder="Title (optional)"
+                placeholder="Review title"
                 maxLength={200}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -175,10 +221,11 @@ export default function MarkupThreadsPanel({
                 className="form-control form-control-sm mb-1"
                 rows={3}
                 placeholder="Describe the issue or request..."
+                autoFocus={prompted}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && message.trim() && !busy) {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && title.trim() && message.trim() && !busy) {
                     e.preventDefault()
                     submitThread()
                   }
@@ -189,15 +236,18 @@ export default function MarkupThreadsPanel({
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
-                  disabled={busy || !message.trim() || !selectedObjectIds.length}
+                  disabled={busy || !title.trim() || !message.trim() || !linkIds.length}
                   onClick={submitThread}
                 >
                   {busy ? 'Saving...' : 'Create thread'}
                 </button>
-                <button type="button" className="btn btn-sm btn-outline-secondary" disabled={busy} onClick={() => setCreating(false)}>
-                  Cancel
+                <button type="button" className="btn btn-sm btn-outline-secondary" disabled={busy} onClick={closeForm}>
+                  {prompted ? 'Skip' : 'Cancel'}
                 </button>
               </div>
+              {prompted ? (
+                <div className="text-muted small mt-1">Saving the thread also saves the markup layer.</div>
+              ) : null}
             </div>
           )}
         </div>
@@ -205,13 +255,34 @@ export default function MarkupThreadsPanel({
 
       {error ? <div className="alert alert-danger py-1 px-2 small my-2">{error}</div> : null}
 
+      {needle && textMatches && textMatches.length ? (
+        <div className="pd-markup-textmatches">
+          <div className="small fw-semibold">Markup text matches ({textMatches.length})</div>
+          {textMatches.map((match) => (
+            <div key={match.id} className="pd-markup-textmatch small">
+              <span className="pd-markup-textmatch-text" title={match.text}>
+                <i className="pi pi-language me-1" aria-hidden="true" />
+                {match.text.length > 60 ? `${match.text.slice(0, 60)}…` : match.text}
+              </span>
+              {onViewObject ? (
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => onViewObject(match.id)}>
+                  <i className="pi pi-eye" aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="pd-markup-threadlist">
         {loading ? (
           <div className="text-muted small">Loading review threads...</div>
         ) : visible.length === 0 ? (
           <div className="text-muted small pd-markup-empty">
             {threads.length === 0
-              ? 'No review threads yet. Select a markup object and add the first review comment.'
+              ? 'No review threads yet. Draw a markup on the drawing to start one.'
+              : needle
+              ? 'No threads match the search.'
               : `No ${filter} threads.`}
           </div>
         ) : (
