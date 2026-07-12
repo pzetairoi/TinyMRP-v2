@@ -19,6 +19,7 @@ from app.services.part_drawing_markups import (
     MarkupValidationError,
     add_thread_message,
     create_thread,
+    delete_thread,
     find_drawing_source,
     find_thread,
     get_markup_layer,
@@ -385,6 +386,48 @@ def drawing_markup_thread_patch(pn: str, thread_id: str):
             title=f"Review updated on {part.part_number}: {thread.title or 'Markup review'}",
             participant_emails=_thread_participants(thread),
             thread_id=str(thread.id),
+            kind="thread_update",
+        )
+    except Exception:
+        pass
+    sync_part_review_status(part)
+    return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)
+
+
+@bp.delete("/parts/<path:pn>/drawing-markups/threads/<thread_id>")
+@login_required
+@require_items_view
+def drawing_markup_thread_delete(pn: str, thread_id: str):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    doc, part, pf, fingerprint, page_number, err = _load_layer_or_error(pn, data)
+    if err:
+        return err
+    thread = find_thread(doc, thread_id)
+    if not thread:
+        return _error(404, "thread_not_found", "review thread not found")
+    participants = _thread_participants(thread)
+    title = str(thread.title or "Markup review")
+    delete_thread(doc, thread, user_email=_user_email())
+    _audit(
+        "part.markup.thread.delete",
+        part,
+        {
+            "source_file_id": str(pf.id),
+            "page_number": page_number,
+            "thread_id": str(thread_id),
+            "version": int(doc.version or 0),
+        },
+    )
+    try:
+        notify_part_activity(
+            part,
+            actor_email=_user_email(),
+            text="The review thread was deleted; the markup objects stay on the drawing.",
+            title=f"Review deleted on {part.part_number}: {title}",
+            participant_emails=participants,
+            thread_id=str(thread_id),
             kind="thread_update",
         )
     except Exception:

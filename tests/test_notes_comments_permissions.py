@@ -218,3 +218,85 @@ def test_parts_table_exposes_and_filters_pending_review_severity(client, user):
     high_part.reload()
     assert high_part.pending_review_count == 0
     assert high_part.pending_review_severity == ""
+
+
+def test_comment_reply_and_priority_edit_endpoints(client, user):
+    from app.models.notification import UserNotification
+
+    viewer_role = Role(name="viewer_reply", permissions=["items.view"]).save()
+    user.roles = [viewer_role]
+    user.save()
+    _login(client, user)
+
+    part = Part(part_number="PN-905", revision="A", description="Reply Part").save()
+    created = client.post(
+        f"/api/parts/{part.part_number}/comments",
+        json={"rev": "A", "text": "Base comment", "priority": "low"},
+    )
+    assert created.status_code == 200
+    comment_id = created.get_json()["comment"]["id"]
+
+    # Replies persist and are returned with identity/display fields.
+    reply = client.post(
+        f"/api/parts/{part.part_number}/comments/reply",
+        json={"rev": "A", "id": comment_id, "text": "A reply"},
+    )
+    assert reply.status_code == 200
+    payload = reply.get_json()["comment"]
+    assert payload["reply_count"] == 1
+    assert payload["replies"][0]["text"] == "A reply"
+    assert payload["replies"][0]["author"] == user.email
+    assert payload["replies"][0]["ts_display"]
+    assert payload["replies"][0]["author_profile"]["initials"]
+
+    missing = client.post(
+        f"/api/parts/{part.part_number}/comments/reply",
+        json={"rev": "A", "id": "nope", "text": "x"},
+    )
+    assert missing.status_code == 404
+
+    # Replies survive round-trips through part_detail and are searchable.
+    detail = client.get(f"/api/part_detail?pn={part.part_number}&rev=A")
+    assert detail.get_json()["comments"][0]["replies"][0]["text"] == "A reply"
+    part.reload()
+    assert "A reply" in (part.comments_search or "")
+
+    # Importance can be edited after creation...
+    updated = client.post(
+        f"/api/parts/{part.part_number}/comments/priority",
+        json={"rev": "A", "id": comment_id, "priority": "high"},
+    )
+    assert updated.status_code == 200
+    assert updated.get_json()["comment"]["priority"] == "high"
+
+    # ...cleared again...
+    cleared = client.post(
+        f"/api/parts/{part.part_number}/comments/priority",
+        json={"rev": "A", "id": comment_id, "priority": ""},
+    )
+    assert cleared.status_code == 200
+    assert cleared.get_json()["comment"]["priority"] == ""
+
+    invalid = client.post(
+        f"/api/parts/{part.part_number}/comments/priority",
+        json={"rev": "A", "id": comment_id, "priority": "urgent"},
+    )
+    assert invalid.status_code == 400
+
+    # Changing your own comment's importance never notifies yourself.
+    assert UserNotification.objects(kind="comment_changed").count() == 0
+
+    # A different user editing the importance notifies the comment author.
+    editor = _make_user("importance-editor@example.com")
+    editor.roles = [viewer_role]
+    editor.save()
+    _login(client, editor)
+    other_edit = client.post(
+        f"/api/parts/{part.part_number}/comments/priority",
+        json={"rev": "A", "id": comment_id, "priority": "normal"},
+    )
+    assert other_edit.status_code == 200
+    notes = list(UserNotification.objects(kind="comment_changed"))
+    assert len(notes) == 1
+    assert notes[0].recipient.email == user.email
+    assert "Importance changed" in notes[0].title

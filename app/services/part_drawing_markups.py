@@ -101,7 +101,9 @@ def find_drawing_source(pn: str, rev: str, source_file_id: str) -> Optional[Part
         return None
     if clean_rev(pf.revision or "").lower() != clean_rev(rev or "").lower():
         return None
-    if str(getattr(pf, "ext_group", "") or "").lower() != "png" or not bool(getattr(pf, "is_dwg", False)):
+    # Exported drawing PNGs are preferred, but a part without a drawing may be
+    # marked up on its full-size preview PNG instead.
+    if str(getattr(pf, "ext_group", "") or "").lower() != "png":
         return None
     return pf
 
@@ -554,6 +556,14 @@ def update_thread_priority(doc: PartDrawingMarkup, thread: PartDrawingMarkupThre
     thread.priority = _normalize_priority(priority)
     thread.updated_by = user_email
     thread.updated_at = utc_now()
+    _bump_version(doc, user_email)
+
+
+def delete_thread(doc: PartDrawingMarkup, thread: PartDrawingMarkupThread, *, user_email: str) -> None:
+    """Remove one review thread (and its replies) from the layer. The linked
+    markup objects stay on the canvas."""
+    thread_id = str(thread.id or "")
+    doc.threads = [t for t in (doc.threads or []) if str(t.id) != thread_id]
     _bump_version(doc, user_email)
 
 

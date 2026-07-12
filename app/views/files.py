@@ -86,22 +86,40 @@ def part_images():
                 seen.add(u)
                 dedup.append(u)
 
-        row = {"urls": dedup, "revision": d.revision}
-        # Drawing rows also carry safe source metadata so the markup editor
-        # can identify the exact drawing file. No filesystem paths, no tokens.
-        if bool(getattr(d, "is_dwg", False)):
-            mtime = getattr(d, "mtime_iso", None) or getattr(d, "mtime", None)
-            row.update(
-                {
-                    "id": str(d.id),
-                    "source_file_id": str(d.id),
-                    "rel_path": d.rel_path or "",
-                    "sha256": getattr(d, "sha256", "") or "",
-                    "size": d.size,
-                    "mtime": utc_iso(mtime),
-                    "source_fingerprint": source_fingerprint_for(d),
-                }
-            )
+        # Full-size image URLs (no thumbnails) for the markup editor: parts
+        # without an exported drawing can be marked up on their preview PNG.
+        full_urls: list[str] = []
+        if allow_public and getattr(d, "http_url", None):
+            full_urls.append(d.http_url)
+        if allow_public and getattr(d, "rel_path", None) and http_base:
+            full_urls.append(f"{http_base}/{d.rel_path}")
+        try:
+            full_urls.append(file_url_for(d))
+        except Exception:
+            pass
+        seen_full = set()
+        dedup_full = []
+        for u in full_urls:
+            if u and u not in seen_full:
+                seen_full.add(u)
+                dedup_full.append(u)
+
+        # Every PNG row carries safe source metadata so the markup editor can
+        # identify the exact source file. No filesystem paths, no tokens.
+        mtime = getattr(d, "mtime_iso", None) or getattr(d, "mtime", None)
+        row = {
+            "urls": dedup,
+            "revision": d.revision,
+            "id": str(d.id),
+            "source_file_id": str(d.id),
+            "is_dwg": bool(getattr(d, "is_dwg", False)),
+            "rel_path": d.rel_path or "",
+            "sha256": getattr(d, "sha256", "") or "",
+            "size": d.size,
+            "mtime": utc_iso(mtime),
+            "source_fingerprint": source_fingerprint_for(d),
+            "image_urls": dedup_full,
+        }
         rows.append(row)
     try:
         log_action("file.list", resource_type="file", resource=f"{pn}:{rev}")

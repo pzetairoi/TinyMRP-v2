@@ -264,12 +264,94 @@ def markup_document_count_for_pairs(pairs: Iterable[tuple[str, str]]) -> int:
     return count
 
 
-def combine_markup_documents(documents: Iterable[MarkupDocument]) -> bytes:
+_INDEX_ROWS_PER_PAGE = 38
+
+
+def _markup_index_pdf(
+    entries: list[tuple[str, str, int, int]],
+    *,
+    root_label: str = "",
+    build_ts=None,
+) -> bytes:
+    """Index page(s) for the combined markup report: which parts are included
+    and on which page their marked-up drawing starts (binder-style)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as rl_canvas
+
+    width, height = A4
+    output = io.BytesIO()
+    pdf = rl_canvas.Canvas(output, pagesize=A4)
+
+    def draw_header() -> float:
+        pdf.setFont("Helvetica-Bold", 16)
+        pdf.drawString(18 * mm, height - 20 * mm, "Markup Report")
+        pdf.setFont("Helvetica", 10)
+        line2 = root_label.strip()
+        if build_ts is not None:
+            try:
+                stamp = build_ts.strftime("%Y-%m-%d %H:%M")
+                line2 = f"{line2}  -  {stamp}" if line2 else stamp
+            except Exception:
+                pass
+        if line2:
+            pdf.drawString(18 * mm, height - 27 * mm, line2)
+        pdf.setFont("Helvetica-Bold", 9)
+        y = height - 38 * mm
+        pdf.drawString(18 * mm, y, "Part number")
+        pdf.drawString(95 * mm, y, "Rev")
+        pdf.drawString(115 * mm, y, "Pages")
+        pdf.line(18 * mm, y - 2 * mm, width - 18 * mm, y - 2 * mm)
+        return y - 8 * mm
+
+    y = draw_header()
+    pdf.setFont("Helvetica", 9)
+    rows_on_page = 0
+    for pn, rev, start_page, page_count in entries:
+        if rows_on_page >= _INDEX_ROWS_PER_PAGE:
+            pdf.showPage()
+            y = draw_header()
+            pdf.setFont("Helvetica", 9)
+            rows_on_page = 0
+        pages_label = str(start_page) if page_count <= 1 else f"{start_page}-{start_page + page_count - 1}"
+        pdf.drawString(18 * mm, y, str(pn)[:48])
+        pdf.drawString(95 * mm, y, str(rev or "-")[:12])
+        pdf.drawString(115 * mm, y, pages_label)
+        y -= 6 * mm
+        rows_on_page += 1
+    pdf.save()
+    return output.getvalue()
+
+
+def combine_markup_documents(
+    documents: Iterable[MarkupDocument],
+    *,
+    include_index: bool = True,
+    root_label: str = "",
+    build_ts=None,
+) -> bytes:
     from PyPDF2 import PdfReader, PdfWriter
 
+    docs = list(documents)
+    readers = [PdfReader(io.BytesIO(document.pdf_bytes)) for document in docs]
+    page_counts = [len(reader.pages) for reader in readers]
+
     writer = PdfWriter()
-    for document in documents:
-        for page in PdfReader(io.BytesIO(document.pdf_bytes)).pages:
+    if include_index and docs:
+        # Page numbers must account for the index page(s) themselves.
+        index_pages = max(1, math.ceil(len(docs) / _INDEX_ROWS_PER_PAGE))
+        entries: list[tuple[str, str, int, int]] = []
+        next_page = index_pages + 1
+        for document, count in zip(docs, page_counts):
+            entries.append((document.part_number, document.revision, next_page, count))
+            next_page += count
+        index_reader = PdfReader(
+            io.BytesIO(_markup_index_pdf(entries, root_label=root_label, build_ts=build_ts))
+        )
+        for page in index_reader.pages:
+            writer.add_page(page)
+    for reader in readers:
+        for page in reader.pages:
             writer.add_page(page)
     output = io.BytesIO()
     writer.write(output)
