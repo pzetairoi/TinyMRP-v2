@@ -1,5 +1,6 @@
 // frontend/src/components/markups/MarkupThreadsPanel.tsx
 import { useEffect, useMemo, useState } from 'react'
+import MentionTextarea from '../MentionTextarea'
 import type { MarkupIdentityProfile, MarkupThread, MarkupThreadPriority } from './types'
 
 type StatusFilter = 'open' | 'resolved' | 'all'
@@ -7,6 +8,8 @@ type StatusFilter = 'open' | 'resolved' | 'all'
 export type MarkupTextMatch = { id: string; text: string }
 
 type Props = {
+  partNumber: string
+  revision: string
   threads: MarkupThread[]
   canEdit: boolean
   selectedObjectIds: string[]
@@ -88,6 +91,8 @@ function threadMatchesFilter(thread: MarkupThread, needle: string): boolean {
 }
 
 export default function MarkupThreadsPanel({
+  partNumber,
+  revision,
   threads,
   canEdit,
   selectedObjectIds,
@@ -221,20 +226,22 @@ export default function MarkupThreadsPanel({
                 <option value="normal">Normal priority</option>
                 <option value="high">High priority</option>
               </select>
-              <textarea
+              <MentionTextarea
+                partNumber={partNumber}
+                revision={revision}
                 className="form-control form-control-sm mb-1"
                 rows={3}
                 placeholder="Describe the issue or request..."
                 autoFocus={prompted}
                 value={message}
-                onChange={(e) => setMessage(e.target.value)}
+                onChange={setMessage}
                 onKeyDown={(e) => {
                   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && title.trim() && message.trim() && !busy) {
                     e.preventDefault()
                     submitThread()
                   }
                 }}
-                aria-label="Initial message"
+                ariaLabel="Initial message"
               />
               <div className="d-flex gap-2">
                 <button
@@ -364,19 +371,21 @@ export default function MarkupThreadsPanel({
 
               {canEdit ? (
                 <div className="input-group input-group-sm mt-2">
-                  <textarea
-                    className="form-control"
+                  <MentionTextarea
+                    partNumber={partNumber}
+                    revision={revision}
+                    className="form-control form-control-sm"
                     rows={1}
                     placeholder="Reply..."
                     value={replyDrafts[thread.id] || ''}
-                    onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [thread.id]: e.target.value }))}
+                    onChange={(value) => setReplyDrafts((prev) => ({ ...prev, [thread.id]: value }))}
                     onKeyDown={(e) => {
                       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && (replyDrafts[thread.id] || '').trim() && !busy) {
                         e.preventDefault()
                         submitReply(thread.id)
                       }
                     }}
-                    aria-label={`Reply to thread ${thread.title || thread.id}`}
+                    ariaLabel={`Reply to thread ${thread.title || thread.id}`}
                   />
                   <button
                     type="button"

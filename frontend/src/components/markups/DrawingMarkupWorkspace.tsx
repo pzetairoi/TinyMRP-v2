@@ -1102,6 +1102,8 @@ export default function DrawingMarkupWorkspace({
       {layerError ? <div className="alert alert-warning py-1 px-2 small mb-2">{layerError}</div> : null}
 
       <MarkupThreadsPanel
+        partNumber={pn}
+        revision={rev}
         threads={layer?.threads || []}
         canEdit={effectiveCanEdit && !missingDrawingPng}
         selectedObjectIds={selectedIds}

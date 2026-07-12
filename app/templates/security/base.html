@@ -151,6 +151,30 @@
                 <button class="btn btn-sm btn-outline-light" type="submit">Go</button>
               </form>
             </li>
+              <li class="nav-item dropdown tm-notification-nav">
+                <button
+                  class="nav-link btn btn-link tm-notification-bell"
+                  id="navNotifications"
+                  type="button"
+                  data-bs-toggle="dropdown"
+                  aria-expanded="false"
+                  aria-label="Notifications"
+                  title="Notifications"
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm7-6.5-1.5-1.8V9a5.5 5.5 0 0 0-4.25-5.35V3a1.25 1.25 0 0 0-2.5 0v.65A5.5 5.5 0 0 0 6.5 9v4.7L5 15.5V17h14v-1.5Z"/></svg>
+                  <span class="tm-notification-count d-none" id="navNotificationCount">0</span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-end tm-notification-menu" aria-labelledby="navNotifications">
+                  <div class="tm-notification-head">
+                    <strong>Notifications</strong>
+                    <button type="button" class="btn btn-sm btn-link" id="navNotificationsReadAll">Mark all read</button>
+                  </div>
+                  <div id="navNotificationList" class="tm-notification-list">
+                    <div class="tm-notification-empty">Loading notifications...</div>
+                  </div>
+                  <div class="tm-notification-footer"><a href="{{ url_for('main.app_home') }}#notifications">View in My Account</a></div>
+                </div>
+              </li>
               {% if is_admin %}
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle{% if admin_active %} active{% endif %}" href="#" id="navAdmin" role="button" data-bs-toggle="dropdown" aria-expanded="false">Admin</a>
@@ -259,6 +283,95 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"></script>
+    {% if current_user.is_authenticated %}
+    <script>
+      (() => {
+        const countEl = document.getElementById('navNotificationCount');
+        const listEl = document.getElementById('navNotificationList');
+        const bellEl = document.getElementById('navNotifications');
+        const readAllEl = document.getElementById('navNotificationsReadAll');
+        if (!countEl || !listEl || !bellEl) return;
+
+        const setCount = (count) => {
+          const value = Math.max(0, Number(count) || 0);
+          countEl.textContent = value > 99 ? '99+' : String(value);
+          countEl.classList.toggle('d-none', value === 0);
+          bellEl.classList.toggle('tm-notification-bell--unread', value > 0);
+          bellEl.setAttribute('aria-label', value ? `Notifications, ${value} unread` : 'Notifications');
+        };
+
+        const shortTime = (value) => {
+          if (!value) return '';
+          const date = new Date(value);
+          if (Number.isNaN(date.getTime())) return '';
+          const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+          if (seconds < 60) return 'now';
+          if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+          if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+          if (seconds < 604800) return `${Math.floor(seconds / 86400)}d`;
+          return date.toLocaleDateString();
+        };
+
+        const markRead = async (id) => {
+          if (!id) return;
+          try { await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'POST', keepalive: true }); } catch (_) {}
+        };
+
+        const render = (rows) => {
+          listEl.replaceChildren();
+          if (!rows.length) {
+            const empty = document.createElement('div');
+            empty.className = 'tm-notification-empty';
+            empty.textContent = 'You are all caught up.';
+            listEl.appendChild(empty);
+            return;
+          }
+          rows.forEach((row) => {
+            const item = document.createElement('a');
+            item.href = row.url || '/app';
+            item.className = `tm-notification-item${row.unread ? ' tm-notification-item--unread' : ''}`;
+            const dot = document.createElement('span');
+            dot.className = `tm-notification-dot tm-notification-dot--${row.kind || 'part_review'}`;
+            const content = document.createElement('span');
+            content.className = 'tm-notification-content';
+            const title = document.createElement('strong');
+            title.textContent = row.title || 'Notification';
+            const body = document.createElement('span');
+            body.textContent = row.body || '';
+            const meta = document.createElement('small');
+            meta.textContent = [row.actor_email || '', shortTime(row.created_at)].filter(Boolean).join(' · ');
+            content.append(title, body, meta);
+            item.append(dot, content);
+            item.addEventListener('click', () => markRead(row.id));
+            listEl.appendChild(item);
+          });
+        };
+
+        const load = async () => {
+          try {
+            const response = await fetch('/api/notifications?limit=12', { headers: { Accept: 'application/json' } });
+            if (!response.ok) return;
+            const data = await response.json();
+            setCount(data.unread_count);
+            render(Array.isArray(data.notifications) ? data.notifications : []);
+            window.dispatchEvent(new CustomEvent('tinymrp:notifications', { detail: data }));
+          } catch (_) {}
+        };
+
+        bellEl.addEventListener('show.bs.dropdown', load);
+        bellEl.addEventListener('click', load);
+        readAllEl?.addEventListener('click', async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          try { await fetch('/api/notifications/read-all', { method: 'POST' }); } catch (_) {}
+          await load();
+        });
+        window.addEventListener('tinymrp:notifications-refresh', load);
+        load();
+        window.setInterval(load, 60000);
+      })();
+    </script>
+    {% endif %}
     {% block extra_scripts %}{% endblock %}
   </body>
 </html>

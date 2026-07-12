@@ -87,6 +87,7 @@ from app.services.part_annotations import (
     remove_part_comment,
     set_part_notes,
 )
+from app.services.notifications import create_notifications, notify_part_activity, part_url
 #from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
 
 from app.services.user_profile import (
@@ -1596,6 +1597,16 @@ def part_comments_add(pn):
         )
     except Exception:
         pass
+    try:
+        notify_part_activity(
+            p,
+            actor_email=getattr(current_user, "email", "") or "",
+            text=text,
+            title=f"New comment on {p.part_number}",
+            comment_id=str(comment.get("id") or ""),
+        )
+    except Exception:
+        pass
     return jsonify({"ok": True, "comment": _comment_payload(comment)})
 
 
@@ -1630,6 +1641,20 @@ def part_comments_delete(pn):
             resource_type="part",
             resource=f"{p.part_number}:{p.revision or ''}",
             meta={"comment_len": len(str(removed.get("text") or ""))},
+        )
+    except Exception:
+        pass
+    try:
+        create_notifications(
+            recipient_emails=[str(removed.get("author") or "")],
+            actor_email=getattr(current_user, "email", "") or "",
+            kind="comment_changed",
+            title=f"Your comment on {p.part_number} was removed",
+            body=str(removed.get("text") or ""),
+            url=part_url(p.part_number, p.revision or ""),
+            part_number=p.part_number,
+            revision=p.revision or "",
+            comment_id=str(removed.get("id") or ""),
         )
     except Exception:
         pass
