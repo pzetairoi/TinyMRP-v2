@@ -79,10 +79,12 @@ from app.services.arena_export import build_arena_bom_csv, build_arena_file_link
 from app.services.parts_delete import delete_part_and_refs_cascade
 from app.services.part_norm import clean_rev, clean_rev_or_none
 from app.services.part_annotations import (
+    COMMENT_PRIORITIES,
     add_part_comment,
     annotation_payload,
     filtered_part_attrs,
     migrate_legacy_annotations,
+    remove_part_comment,
     set_part_notes,
 )
 #from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
@@ -265,7 +267,9 @@ def _comment_payload(comment: dict, resolved: dict[str, dict[str, object]] | Non
             profile = resolved.get(author.lower()) or resolve_identity_profile(author)
         else:
             profile = resolve_identity_profile(author)
+    priority = str(item.get("priority") or "").strip().lower()
     return {
+        "id": str(item.get("id") or ""),
         "ts": utc_iso(ts_dt) or ts_text,
         "ts_display": format_display_ts(ts_dt, fmt="%Y-%m-%d %H:%M:%S %Z") or None,
         "ts_local": local_input_value(ts_dt) or None,
@@ -273,6 +277,7 @@ def _comment_payload(comment: dict, resolved: dict[str, dict[str, object]] | Non
         "author_display": (profile or {}).get("label") or author or "User",
         "author_profile": profile or resolve_identity_profile(author),
         "text": str(item.get("text") or ""),
+        "priority": priority if priority in COMMENT_PRIORITIES else "",
     }
 
 
@@ -1574,22 +1579,63 @@ def part_comments_add(pn):
     except Exception:
         pass
     migrate_legacy_annotations(p)
+    priority = str(data.get("priority") or "").strip().lower()
     comment = add_part_comment(
         p,
         author=getattr(current_user, "email", "") or "",
         text=text,
         ts=utc_iso(utc_now()),
+        priority=priority if priority in COMMENT_PRIORITIES else None,
     )
     try:
         log_action(
             "part.comments.add",
             resource_type="part",
             resource=f"{p.part_number}:{p.revision or ''}",
-            meta={"comment_len": len(text)},
+            meta={"comment_len": len(text), "priority": comment.get("priority") or ""},
         )
     except Exception:
         pass
     return jsonify({"ok": True, "comment": _comment_payload(comment)})
+
+
+@bp.post("/parts/<pn>/comments/delete")
+@login_required
+@require_items_view
+@csrf.exempt
+def part_comments_delete(pn):
+    pn = (pn or "").strip()
+    data = request.get_json(silent=True) or {}
+    rev = data.get("rev") if "rev" in data else request.args.get("rev")
+    comment_id = str(data.get("id") or "").strip()
+    ts = str(data.get("ts") or "").strip()
+    text = str(data.get("text") or "").strip()
+    if not comment_id and not ts:
+        return jsonify({"ok": False, "error": "missing id or ts"}), 400
+    p = _find_part_doc(pn, rev)
+    if not p:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+    except Exception:
+        pass
+    removed = remove_part_comment(p, comment_id=comment_id or None, ts=ts or None, text=text or None)
+    if removed is None:
+        return jsonify({"ok": False, "error": "comment not found"}), 404
+    try:
+        log_action(
+            "part.comments.delete",
+            resource_type="part",
+            resource=f"{p.part_number}:{p.revision or ''}",
+            meta={"comment_len": len(str(removed.get("text") or ""))},
+        )
+    except Exception:
+        pass
+    payload = annotation_payload(p)
+    comments = [_comment_payload(row) for row in (payload.get("comments") or [])]
+    return jsonify({"ok": True, "comments": comments})
 
 
 @bp.post("/parts/<pn>/refresh_files")

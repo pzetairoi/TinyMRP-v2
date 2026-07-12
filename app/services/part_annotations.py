@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from uuid import uuid4
 
 from flask import g, has_request_context
 
@@ -68,18 +69,34 @@ def _normalize_notes(value: Any) -> str:
     return str(value or "").strip()
 
 
+COMMENT_PRIORITIES = ("low", "normal", "high")
+
+
 def _normalize_comment(value: Any) -> Optional[dict[str, str]]:
+    priority = ""
+    comment_id = ""
     if isinstance(value, dict):
         text = str(value.get("text") or "").strip()
         author = str(value.get("author") or "").strip()
         ts = str(value.get("ts") or "").strip()
+        raw_priority = str(value.get("priority") or "").strip().lower()
+        if raw_priority in COMMENT_PRIORITIES:
+            priority = raw_priority
+        raw_id = str(value.get("id") or "").strip()
+        if raw_id and len(raw_id) <= 64:
+            comment_id = raw_id
     else:
         text = str(value or "").strip()
         author = ""
         ts = ""
     if not text and not author and not ts:
         return None
-    return {"ts": ts, "author": author, "text": text}
+    out = {"ts": ts, "author": author, "text": text}
+    if comment_id:
+        out["id"] = comment_id
+    if priority:
+        out["priority"] = priority
+    return out
 
 
 def normalize_comment_rows(values: Any) -> list[dict[str, str]]:
@@ -278,16 +295,27 @@ def set_part_notes(part: Part, notes: str) -> dict[str, Any]:
     return payload
 
 
-def add_part_comment(part: Part, *, author: str, text: str, ts: Optional[str] = None) -> dict[str, Any]:
+def add_part_comment(
+    part: Part,
+    *,
+    author: str,
+    text: str,
+    ts: Optional[str] = None,
+    priority: Optional[str] = None,
+) -> dict[str, Any]:
     migrate_legacy_annotations(part)
     doc = _get_doc(part)
     notes_text = str(getattr(doc, "notes", "") or "") if doc else ""
     comments = normalize_comment_rows(getattr(doc, "comments", []) if doc else [])
     comment = {
+        "id": uuid4().hex,
         "ts": str(ts or utc_iso(utc_now()) or ""),
         "author": str(author or "").strip(),
         "text": str(text or "").strip(),
     }
+    priority_text = str(priority or "").strip().lower()
+    if priority_text in COMMENT_PRIORITIES:
+        comment["priority"] = priority_text
     comments.append(comment)
 
     if not doc:
@@ -308,6 +336,62 @@ def add_part_comment(part: Part, *, author: str, text: str, ts: Optional[str] = 
     part.updated_at = now
     part.save()
     return comment
+
+
+def remove_part_comment(
+    part: Part,
+    *,
+    comment_id: Optional[str] = None,
+    ts: Optional[str] = None,
+    text: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Remove one comment identified by id (preferred) or by (ts, text).
+
+    Returns the removed comment dict, or None when no match was found.
+    """
+    migrate_legacy_annotations(part)
+    doc = _get_doc(part)
+    if not doc:
+        return None
+    notes_text = str(getattr(doc, "notes", "") or "")
+    comments = normalize_comment_rows(getattr(doc, "comments", []) or [])
+
+    id_key = str(comment_id or "").strip()
+    ts_key = str(ts or "").strip()
+    text_key = str(text or "").strip()
+    removed: Optional[dict[str, Any]] = None
+    remaining: list[dict[str, str]] = []
+    for row in comments:
+        if removed is None:
+            if id_key and str(row.get("id") or "") == id_key:
+                removed = row
+                continue
+            if not id_key and ts_key and str(row.get("ts") or "") == ts_key and (
+                not text_key or str(row.get("text") or "") == text_key
+            ):
+                removed = row
+                continue
+        remaining.append(row)
+    if removed is None:
+        return None
+
+    if notes_text or remaining:
+        doc.notes = notes_text
+        doc.comments = remaining
+        doc.updated_at = utc_now()
+        doc.save()
+        _set_doc_cache(part, doc)
+    else:
+        doc.delete()
+        _set_doc_cache(part, None)
+
+    payload = _payload(notes=notes_text, comments=remaining)
+    _set_payload_cache(part, payload)
+    part.notes_search = str(payload.get("notes") or "")
+    part.comments_search = str(payload.get("comments_search") or "")
+    part.updated_at = utc_now()
+    part.save()
+    return removed
 
 
 def filtered_part_attrs(part: Part, attrs: Optional[Dict[str, Any]] = None) -> dict[str, Any]:
