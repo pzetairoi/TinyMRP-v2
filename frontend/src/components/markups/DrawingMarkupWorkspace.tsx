@@ -123,6 +123,7 @@ export default function DrawingMarkupWorkspace({
   const baseScaleRef = useRef(1)
   const userZoomRef = useRef(1)
   const panRef = useRef({ x: 0, y: 0 })
+  const stageSizeRef = useRef({ w: 0, h: 0 })
 
   // Editing state.
   const baseVersionRef = useRef(0)
@@ -137,6 +138,8 @@ export default function DrawingMarkupWorkspace({
   const highlightTimerRef = useRef<number | null>(null)
   // Object ids hidden at runtime because their review threads are resolved.
   const hiddenIdsRef = useRef<Set<string>>(new Set())
+  const manuallyHiddenIdsRef = useRef<Set<string>>(new Set())
+  const revealedResolvedIdsRef = useRef<Set<string>>(new Set())
 
   const sourceFileId = drawingSource?.source_file_id || ''
   const imgUrls = drawingSource?.urls || []
@@ -191,8 +194,16 @@ export default function DrawingMarkupWorkspace({
   }
 
   function fitView() {
+    const canvas = fabricRef.current
     userZoomRef.current = 1
-    panRef.current = { x: 0, y: 0 }
+    const width = canvas?.getWidth() || stageSizeRef.current.w
+    const height = canvas?.getHeight() || stageSizeRef.current.h
+    const drawingWidth = (natural?.w || 0) * baseScaleRef.current
+    const drawingHeight = (natural?.h || 0) * baseScaleRef.current
+    panRef.current = {
+      x: Math.max(0, (width - drawingWidth) / 2),
+      y: Math.max(0, (height - drawingHeight) / 2),
+    }
     applyView()
   }
 
@@ -288,7 +299,7 @@ export default function DrawingMarkupWorkspace({
   // Hidden resolved markups
   // ------------------------------------------------------------------
   function computeHiddenIds(): Set<string> {
-    const hidden = new Set<string>()
+    const hidden = new Set<string>(manuallyHiddenIdsRef.current)
     if (showResolved) return hidden
     const hasOpen = new Map<string, boolean>()
     for (const thread of layerRef.current?.threads || []) {
@@ -297,7 +308,7 @@ export default function DrawingMarkupWorkspace({
       }
     }
     hasOpen.forEach((open, id) => {
-      if (!open) hidden.add(id)
+      if (!open && !revealedResolvedIdsRef.current.has(id)) hidden.add(id)
     })
     return hidden
   }
@@ -328,26 +339,25 @@ export default function DrawingMarkupWorkspace({
   }
 
   useEffect(() => {
-    if (canvasLoaded) applyHiddenVisibility()
+    if (canvasLoaded) {
+      applyHiddenVisibility()
+      setMutationTick((tick) => tick + 1)
+    }
   }, [layer, showResolved, canvasLoaded])
 
   const hiddenResolvedCount = useMemo(() => {
-    if (showResolved) {
-      // Count what WOULD be hidden so the toggle tooltip stays informative.
-      const hasOpen = new Map<string, boolean>()
-      for (const thread of layer?.threads || []) {
-        for (const id of thread.object_ids || []) {
-          hasOpen.set(id, (hasOpen.get(id) || false) || thread.status === 'open')
-        }
+    const hasOpen = new Map<string, boolean>()
+    for (const thread of layer?.threads || []) {
+      for (const id of thread.object_ids || []) {
+        hasOpen.set(id, (hasOpen.get(id) || false) || thread.status === 'open')
       }
-      let n = 0
-      hasOpen.forEach((open) => {
-        if (!open) n += 1
-      })
-      return n
     }
-    return hiddenIdsRef.current.size
-  }, [layer, showResolved, mutationTick, canvasLoaded])
+    let count = 0
+    hasOpen.forEach((open) => {
+      if (!open) count += 1
+    })
+    return count
+  }, [layer])
 
   // ------------------------------------------------------------------
   // API calls
@@ -634,6 +644,28 @@ export default function DrawingMarkupWorkspace({
       })
     }
     focusObjects(objs)
+  }
+
+  function toggleThreadVisibility(thread: MarkupThread) {
+    const ids = (thread.object_ids || []).filter(Boolean)
+    if (!ids.length) return
+    const currentlyHidden = ids.every((id) => hiddenIdsRef.current.has(id))
+    if (currentlyHidden) {
+      ids.forEach((id) => {
+        manuallyHiddenIdsRef.current.delete(id)
+        revealedResolvedIdsRef.current.add(id)
+      })
+      applyHiddenVisibility()
+      setMutationTick((tick) => tick + 1)
+      window.requestAnimationFrame(() => focusThread(thread))
+      return
+    }
+    ids.forEach((id) => {
+      manuallyHiddenIdsRef.current.add(id)
+      revealedResolvedIdsRef.current.delete(id)
+    })
+    applyHiddenVisibility()
+    setMutationTick((tick) => tick + 1)
   }
 
   function focusObjectById(objectId: string) {
@@ -972,8 +1004,8 @@ export default function DrawingMarkupWorkspace({
     })()
   }, [fabricReady, layer])
 
-  // Stage sizing: the wrapper matches the fitted image rectangle exactly, so
-  // the overlay always aligns with the rendered drawing (no letterbox skew).
+  // The Fabric viewport fills the complete stage. The drawing is fitted and
+  // centred within it, keeping the whole assigned area available for pan/zoom.
   useEffect(() => {
     if (!natural) return
     const stage = stageRef.current
@@ -984,16 +1016,27 @@ export default function DrawingMarkupWorkspace({
       if (!cw || !ch) return
       const fit = Math.min(cw / natural.w, ch / natural.h)
       const fitW = Math.max(1, Math.floor(natural.w * fit))
-      const fitH = Math.max(1, Math.floor(natural.h * fit))
-      setWrapSize((prev) => (prev.w === fitW && prev.h === fitH ? prev : { w: fitW, h: fitH }))
+      const previousSize = stageSizeRef.current
       const oldBase = baseScaleRef.current
+      const oldZoom = oldBase * userZoomRef.current
+      const oldCenterScene =
+        previousSize.w > 0 && previousSize.h > 0 && oldZoom > 0
+          ? {
+              x: (previousSize.w / 2 - panRef.current.x) / oldZoom,
+              y: (previousSize.h / 2 - panRef.current.y) / oldZoom,
+            }
+          : { x: natural.w / 2, y: natural.h / 2 }
+
       baseScaleRef.current = fitW / natural.w
-      if (oldBase > 0 && oldBase !== baseScaleRef.current) {
-        const ratio = baseScaleRef.current / oldBase
-        panRef.current = { x: panRef.current.x * ratio, y: panRef.current.y * ratio }
+      const newZoom = baseScaleRef.current * userZoomRef.current
+      panRef.current = {
+        x: cw / 2 - oldCenterScene.x * newZoom,
+        y: ch / 2 - oldCenterScene.y * newZoom,
       }
+      stageSizeRef.current = { w: cw, h: ch }
+      setWrapSize((prev) => (prev.w === cw && prev.h === ch ? prev : { w: cw, h: ch }))
       const canvas = fabricRef.current
-      if (canvas) canvas.setDimensions({ width: fitW, height: fitH })
+      if (canvas) canvas.setDimensions({ width: cw, height: ch })
       applyView()
     }
     compute()
@@ -1001,6 +1044,19 @@ export default function DrawingMarkupWorkspace({
     ro.observe(stage)
     return () => ro.disconnect()
   }, [natural])
+
+  // Expanded editing should begin fitted to the newly enlarged viewport.
+  useEffect(() => {
+    if (!expanded) return
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => fitView())
+    })
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      if (secondFrame) window.cancelAnimationFrame(secondFrame)
+    }
+  }, [expanded])
 
   // Tool/permission changes.
   useEffect(() => {
@@ -1035,62 +1091,6 @@ export default function DrawingMarkupWorkspace({
 
   return (
     <div className={`pd-markup-root${expanded ? ' pd-markup-root--expanded' : ''}`}>
-      {showEditor ? (
-        <div className="pd-markup-header">
-          <div className="pd-markup-header-title">
-            <i className="pi pi-pencil" aria-hidden="true" />
-            <span className="fw-semibold small">Drawing markups</span>
-          </div>
-          <div className="pd-markup-header-actions">
-            {saveStatus(saveState)}
-            {effectiveCanEdit ? (
-              saveState === 'conflict' ? (
-                <button type="button" className="btn btn-sm btn-warning" onClick={reloadFromServer}>
-                  <i className="pi pi-replay me-1" aria-hidden="true" />
-                  Reload
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-primary"
-                  disabled={saveState !== 'dirty'}
-                  onClick={save}
-                >
-                  {saveState === 'saving' ? 'Saving...' : 'Save markups'}
-                </button>
-              )
-            ) : null}
-            <button
-              type="button"
-              className="btn btn-sm btn-outline-secondary"
-              title="Download the drawing with markups overlaid (PNG)"
-              aria-label="Download marked-up drawing"
-              disabled={!canvasLoaded}
-              onClick={downloadComposite}
-            >
-              <i className="pi pi-download me-1" aria-hidden="true" />
-              PNG
-            </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${expanded ? 'btn-secondary' : 'btn-outline-secondary'}`}
-              title={expanded ? 'Back to normal size' : 'Enlarge the markup workspace'}
-              aria-label={expanded ? 'Exit large editing view' : 'Enlarge markup workspace'}
-              aria-pressed={expanded}
-              onClick={() => setExpanded((v) => !v)}
-            >
-              <i className={`pi ${expanded ? 'pi-window-minimize' : 'pi-expand'}`} aria-hidden="true" />
-            </button>
-            {pdfHref ? (
-              <a className="btn btn-sm btn-success" href={pdfHref} target="_blank" rel="noreferrer" title="Open PDF drawing">
-                <i className="pi pi-file-pdf me-1" aria-hidden="true" />
-                Open PDF
-              </a>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
       {layer && layer.stale_layers_count > 0 ? (
         <div className="alert alert-info py-1 px-2 small mb-2 pd-markup-stale">
           <i className="pi pi-history me-1" aria-hidden="true" />
@@ -1100,6 +1100,25 @@ export default function DrawingMarkupWorkspace({
       ) : null}
       {actionError ? <div className="alert alert-danger py-1 px-2 small mb-2">{actionError}</div> : null}
       {layerError ? <div className="alert alert-warning py-1 px-2 small mb-2">{layerError}</div> : null}
+
+      <MarkupThreadsPanel
+        threads={layer?.threads || []}
+        canEdit={effectiveCanEdit && !missingDrawingPng}
+        selectedObjectIds={selectedIds}
+        hiddenObjectIds={Array.from(hiddenIdsRef.current)}
+        busy={threadBusy}
+        loading={layerLoading && !layer}
+        error={threadError}
+        filterText={searchText}
+        textMatches={textMatches}
+        promptObjectIds={promptIds}
+        onPromptDismiss={() => setPromptIds(null)}
+        onCreateThread={createThread}
+        onReply={(threadId, text) => threadRequest(`/threads/${encodeURIComponent(threadId)}/messages`, 'POST', { text })}
+        onSetStatus={(threadId, action) => threadRequest(`/threads/${encodeURIComponent(threadId)}`, 'PATCH', { action })}
+        onToggleThreadVisibility={toggleThreadVisibility}
+        onViewObject={focusObjectById}
+      />
 
       <div className="pd-markup-body">
         {showEditor ? (
@@ -1115,15 +1134,9 @@ export default function DrawingMarkupWorkspace({
             canUndo={canUndo}
             canRedo={canRedo}
             saveState={saveState}
-            hiddenResolvedCount={hiddenResolvedCount}
-            showResolved={showResolved}
-            onToggleResolved={() => setShowResolved((v) => !v)}
             onDelete={deleteSelected}
             onUndo={() => applyHistory(historyIndexRef.current - 1)}
             onRedo={() => applyHistory(historyIndexRef.current + 1)}
-            onZoomIn={() => zoomBy(1.25)}
-            onZoomOut={() => zoomBy(1 / 1.25)}
-            onFitView={fitView}
           />
         ) : null}
 
@@ -1181,23 +1194,78 @@ export default function DrawingMarkupWorkspace({
           )}
         </div>
 
-        <MarkupThreadsPanel
-          threads={layer?.threads || []}
-          canEdit={effectiveCanEdit && !missingDrawingPng}
-          selectedObjectIds={selectedIds}
-          busy={threadBusy}
-          loading={layerLoading && !layer}
-          error={threadError}
-          filterText={searchText}
-          textMatches={textMatches}
-          promptObjectIds={promptIds}
-          onPromptDismiss={() => setPromptIds(null)}
-          onCreateThread={createThread}
-          onReply={(threadId, text) => threadRequest(`/threads/${encodeURIComponent(threadId)}/messages`, 'POST', { text })}
-          onSetStatus={(threadId, action) => threadRequest(`/threads/${encodeURIComponent(threadId)}`, 'PATCH', { action })}
-          onViewThread={focusThread}
-          onViewObject={focusObjectById}
-        />
+        {showEditor ? (
+          <aside className="pd-markup-actions" aria-label="Drawing markup actions">
+            <div className="pd-markup-actions-title">
+              <i className="pi pi-pencil" aria-hidden="true" />
+              <span>Drawing markups</span>
+            </div>
+            {saveStatus(saveState)}
+            <div className="pd-markup-actions-group">
+              {effectiveCanEdit ? (
+                saveState === 'conflict' ? (
+                  <button type="button" className="btn btn-sm btn-warning" onClick={reloadFromServer}>
+                    <i className="pi pi-replay" aria-hidden="true" />
+                    <span>Reload</span>
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-sm btn-primary" disabled={saveState !== 'dirty'} onClick={save}>
+                    <i className="pi pi-save" aria-hidden="true" />
+                    <span>{saveState === 'saving' ? 'Saving...' : 'Save'}</span>
+                  </button>
+                )
+              ) : null}
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary"
+                title="Download drawing with visible markups"
+                disabled={!canvasLoaded}
+                onClick={downloadComposite}
+              >
+                <i className="pi pi-download" aria-hidden="true" />
+                <span>PNG</span>
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${expanded ? 'btn-secondary' : 'btn-outline-secondary'}`}
+                title={expanded ? 'Back to normal size' : 'Enlarge markup workspace'}
+                aria-pressed={expanded}
+                onClick={() => setExpanded((v) => !v)}
+              >
+                <i className={`pi ${expanded ? 'pi-window-minimize' : 'pi-expand'}`} aria-hidden="true" />
+                <span>{expanded ? 'Close' : 'Expand'}</span>
+              </button>
+              {pdfHref ? (
+                <a className="btn btn-sm btn-outline-danger" href={pdfHref} target="_blank" rel="noreferrer" title="Open PDF drawing">
+                  <i className="pi pi-file-pdf" aria-hidden="true" />
+                  <span>Open PDF</span>
+                </a>
+              ) : null}
+            </div>
+            <div className="pd-markup-toolbar-sep" role="separator" />
+            <div className="pd-markup-actions-group" aria-label="Drawing view controls">
+              <button type="button" className="btn btn-sm btn-outline-secondary" title="Zoom in" onClick={() => zoomBy(1.25)}>
+                <i className="pi pi-search-plus" aria-hidden="true" /><span>Zoom in</span>
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-secondary" title="Zoom out" onClick={() => zoomBy(1 / 1.25)}>
+                <i className="pi pi-search-minus" aria-hidden="true" /><span>Zoom out</span>
+              </button>
+              <button type="button" className="btn btn-sm btn-outline-secondary" title="Fit drawing in viewport" onClick={fitView}>
+                <i className="pi pi-window-maximize" aria-hidden="true" /><span>Fit view</span>
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${showResolved ? 'btn-secondary' : 'btn-outline-secondary'}`}
+                title={showResolved ? 'Hide resolved markups' : 'Show resolved markups'}
+                aria-pressed={showResolved}
+                onClick={() => setShowResolved((value) => !value)}
+              >
+                <i className={`pi ${showResolved ? 'pi-eye-slash' : 'pi-eye'}`} aria-hidden="true" />
+                <span>{showResolved ? 'Hide resolved' : `Resolved${hiddenResolvedCount ? ` (${hiddenResolvedCount})` : ''}`}</span>
+              </button>
+            </div>
+          </aside>
+        ) : null}
       </div>
     </div>
   )

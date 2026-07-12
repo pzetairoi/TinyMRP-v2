@@ -1241,10 +1241,6 @@ function isExternalDatasheetUrl(url: string): boolean {
   }, [isSharedView, pn, effectiveRev, refreshTick]);
 
   const markupThreads = useMemo<MarkupThread[]>(() => markupLayer?.threads || [], [markupLayer]);
-  const openMarkupThreadCount = useMemo(
-    () => markupThreads.filter((t) => t.status === "open").length,
-    [markupThreads],
-  );
 
   // Load DocPack options when pn/rev/depth changes
   useEffect(() => {
@@ -2121,15 +2117,26 @@ function isExternalDatasheetUrl(url: string): boolean {
   // consider that we have a drawing. Otherwise, hide the Drawing tab and
   // default to All attributes.
   const hasDrawing = Boolean(pdfHref) || (drawingUrls?.length || 0) > 0
-  const hasNotesOrComments = notes.trim().length > 0 || comments.length > 0
   const hasMarkups = (markupLayer?.canvas_json?.objects?.length || 0) > 0
-  const notesTabAttention = hasNotesOrComments || hasMarkups || openMarkupThreadCount > 0
+  type ReviewIndicator = "note" | "low" | "normal" | "high" | null
+  const reviewIndicator = useMemo<ReviewIndicator>(() => {
+    const priorities = [
+      ...comments.map((comment) => comment.priority || "low"),
+      ...markupThreads.filter((thread) => thread.status === "open").map((thread) => thread.priority),
+    ]
+    if (priorities.includes("high")) return "high"
+    if (priorities.includes("normal")) return "normal"
+    if (priorities.length || hasMarkups) return "low"
+    if (notes.trim()) return "note"
+    return null
+  }, [comments, hasMarkups, markupThreads, notes])
   const notesDirty = notes !== savedNotes
 
-  function tabHeader(label: string, icon: string, attention = false) {
+  function tabHeader(label: string, icon: string, indicator: ReviewIndicator = null) {
+    const indicatorIcon = indicator === "note" ? "pi-file-edit" : icon
     return (
-      <span className={`pd-tab-label${attention ? " pd-tab-label--attention" : ""}`}>
-        <i className={`pi ${attention ? "pi-exclamation-triangle" : icon}`} aria-hidden="true" />
+      <span className={`pd-tab-label${indicator ? ` pd-tab-label--${indicator}` : ""}`}>
+        <i className={`pi ${indicatorIcon}`} aria-hidden="true" />
         <span>{label}</span>
       </span>
     )
@@ -3296,8 +3303,8 @@ function isExternalDatasheetUrl(url: string): boolean {
 
             
           {!isSharedView && <TabPanel
-            header={tabHeader("Comments & Markups", "pi-comments", notesTabAttention)}
-            headerClassName={notesTabAttention ? "pd-tab-attention" : undefined}
+            header={tabHeader("Comments & Markups", "pi-comments", reviewIndicator)}
+            headerClassName={reviewIndicator ? `pd-tab-indicator pd-tab-indicator--${reviewIndicator}` : undefined}
           >
             <div className="pd-card p-3 mt-3">
               <div className="d-flex align-items-center justify-content-between gap-2">
@@ -3349,11 +3356,12 @@ function isExternalDatasheetUrl(url: string): boolean {
                 ? <div className="text-muted small mt-1">Ctrl+Enter to save</div>
                 : <div className="text-muted small mt-1">Read-only</div>}
 
-              <div className="mt-3">
+              <section className="mt-3 pd-review-activity" aria-labelledby="reviewActivityTitle">
                 <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
-                  <h6 className="mb-0 d-flex align-items-center gap-2">
-                    Comments
-                    <span className="badge rounded-pill text-bg-secondary">{comments.length}</span>
+                  <h6 id="reviewActivityTitle" className="mb-0 d-flex align-items-center gap-2">
+                    Review activity
+                    <span className="badge rounded-pill text-bg-secondary">{comments.length} comments</span>
+                    <span className="badge rounded-pill text-bg-secondary">{markupThreads.length} markup reviews</span>
                   </h6>
                   <input
                     type="search"
@@ -3371,9 +3379,9 @@ function isExternalDatasheetUrl(url: string): boolean {
                   </div>
                 ) : null}
                 {filteredComments.length ? (
-                  <div className="d-flex flex-column gap-2">
+                  <div className="pd-review-list">
                     {filteredComments.map((c, idx) => (
-                      <div key={`${c.ts}-${idx}`} className="border rounded p-2">
+                      <article key={`${c.ts}-${idx}`} className="pd-review-item">
                         <div className="pd-comment-row">
                           {identityAvatar(c.author_profile, c.author_display || c.author || "User", "md")}
                           <div className="pd-comment-body">
@@ -3405,7 +3413,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                             ) : null}
                           </div>
                         </div>
-                      </div>
+                      </article>
                     ))}
                   </div>
                 ) : (
@@ -3458,7 +3466,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                   </>
                 )}
                 {commentError ? <div className="text-danger small mt-1">{commentError}</div> : null}
-              </div>
+              </section>
 
               {/* Drawing markup editor and linked review threads. */}
               <div className="mt-4">
