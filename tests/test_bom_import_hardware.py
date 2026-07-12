@@ -7,6 +7,7 @@ import pytest
 
 from app.models.part import Part
 from app.models.bom import BOMLink
+from app.services.docpacks import _flatten_bom
 from app.services.field_config import save_field_config
 from app.services.import_zip import import_bom_zip
 
@@ -95,6 +96,107 @@ def test_import_bom_aggregates_duplicate_links(app):
         assert len(occs) == 2
         assert {o.get("seq") for o in occs} == {1, 2}
         assert sum(float(o.get("qty") or 0) for o in occs) == 5
+
+
+def test_import_bom_canonicalizes_repeated_subassembly_definitions(app):
+    """Expanded copies of the same subassembly must not multiply its children."""
+    flat_rows = [
+        {"partnumber": "ASM-REPEAT", "revision": "A", "description": "Root"},
+        {"partnumber": "SUB-REPEAT", "revision": "A", "description": "Repeated subassembly"},
+        {"partnumber": "CH-REPEAT", "revision": "A", "description": "Child"},
+    ]
+    tree_txt = "\n".join(
+        [
+            "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+            "1\tASM-REPEAT\tA\t1",
+            "1.1\tSUB-REPEAT\tA\t1",
+            "1.1.1\tCH-REPEAT\tA\t2",
+            "1.2\tSUB-REPEAT\tA\t1",
+            "1.2.1\tCH-REPEAT\tA\t2",
+        ]
+    )
+
+    with app.app_context():
+        report = import_bom_zip(_make_zip("\n".join(repr(r) for r in flat_rows), tree_txt), "repeat.zip")
+
+        root_link = BOMLink.objects(
+            parent_pn="ASM-REPEAT", parent_rev="A", child_pn="SUB-REPEAT", child_rev="A"
+        ).first()
+        child_link = BOMLink.objects(
+            parent_pn="SUB-REPEAT", parent_rev="A", child_pn="CH-REPEAT", child_rev="A"
+        ).first()
+
+        assert root_link is not None
+        assert root_link.qty == 2
+        assert len(root_link.occurrences or []) == 2
+        assert child_link is not None
+        assert child_link.qty == 2
+        assert len(child_link.occurrences or []) == 1
+
+        flattened = {(pn, rev): qty for pn, rev, qty in _flatten_bom("ASM-REPEAT", "A", full=True)}
+        assert flattened[("SUB-REPEAT", "A")] == 2
+        assert flattened[("CH-REPEAT", "A")] == 4
+
+        assert report["bom_integrity_status"] == "warning"
+        assert report["bom_repeated_subassemblies"] == 1
+        assert report["bom_repeated_subassembly_copies_collapsed"] == 1
+        assert report["bom_definition_conflicts"] == 0
+        assert any(issue.get("stage") == "treebom.integrity" for issue in report["warnings"])
+
+
+def test_import_bom_conflicting_repeated_subassembly_preserves_existing_definition(app):
+    """Ambiguous repeated definitions must be reported and never silently overwrite data."""
+    with app.app_context():
+        Part(part_number="SUB-CONFLICT", revision="A", description="Existing subassembly").save()
+        Part(part_number="OLD-CHILD", revision="A", description="Existing child").save()
+        BOMLink(
+            parent_pn="SUB-CONFLICT",
+            parent_rev="A",
+            child_pn="OLD-CHILD",
+            child_rev="A",
+            qty=7,
+        ).save()
+
+        flat_rows = [
+            {"partnumber": "ASM-CONFLICT", "revision": "A", "description": "Root"},
+            {"partnumber": "SUB-CONFLICT", "revision": "A", "description": "Repeated subassembly"},
+            {"partnumber": "NEW-CHILD", "revision": "A", "description": "New child"},
+        ]
+        tree_txt = "\n".join(
+            [
+                "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+                "1\tASM-CONFLICT\tA\t1",
+                "1.1\tSUB-CONFLICT\tA\t1",
+                "1.1.1\tNEW-CHILD\tA\t2",
+                "1.2\tSUB-CONFLICT\tA\t1",
+                "1.2.1\tNEW-CHILD\tA\t3",
+            ]
+        )
+
+        report = import_bom_zip(_make_zip("\n".join(repr(r) for r in flat_rows), tree_txt), "conflict.zip")
+
+        root_link = BOMLink.objects(
+            parent_pn="ASM-CONFLICT", parent_rev="A", child_pn="SUB-CONFLICT", child_rev="A"
+        ).first()
+        assert root_link is not None
+        assert root_link.qty == 2
+
+        preserved = BOMLink.objects(
+            parent_pn="SUB-CONFLICT", parent_rev="A", child_pn="OLD-CHILD", child_rev="A"
+        ).first()
+        assert preserved is not None
+        assert preserved.qty == 7
+        assert not BOMLink.objects(
+            parent_pn="SUB-CONFLICT", parent_rev="A", child_pn="NEW-CHILD", child_rev="A"
+        ).first()
+
+        assert report["bom_integrity_status"] == "conflict"
+        assert report["bom_definition_conflicts"] == 1
+        assert report["tree_links_skipped_integrity"] == 2
+        assert any(
+            issue.get("stage") == "treebom.integrity" and issue.get("part_number") == "SUB-CONFLICT"
+            for issue in report["errors"]
+        )
 
 
 def test_import_bom_no_duplicate_links_sample(app):

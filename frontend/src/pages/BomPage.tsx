@@ -26,6 +26,7 @@ import {
 
 // Import the ImageStrip component to display images for the part
 import ImageStrip from "../components/ImageStrip"
+import { withBomOccurrenceKeys } from '../lib/bomTree'
 
 
 // Backend must return Where-Used rows as objects with these keys:
@@ -107,7 +108,7 @@ export default function BomPage() {
         const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || '')}`)
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         const root: TreeNode[] = await r.json()
-        if (!cancelled) setNodes(root)
+        if (!cancelled) setNodes(withBomOccurrenceKeys(root))
       } catch (e) {
         console.error('bom_tree root failed', e)
         if (!cancelled) setNodes([])
@@ -149,7 +150,7 @@ export default function BomPage() {
       const prev = (parent as any)?.data?.rev || ''
       const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(prev)}`)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const kids: TreeNode[] = await r.json()
+      const kids: TreeNode[] = withBomOccurrenceKeys(await r.json(), key)
       setNodes((prev) => setNodeChildren(prev, key, kids))
       setExpandedKeys((prev) => ({ ...prev, [key]: true }))
     } catch (e) {
