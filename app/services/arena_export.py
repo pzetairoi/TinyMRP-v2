@@ -173,7 +173,7 @@ def build_arena_bom_csv(
 
     extra_headers: list[str] = []
     header_by_field_id: dict[str, str] = {}
-    used_headers = {"item number", "line number", "level", "quantity", "item name"}
+    used_headers = {"item number", "line number", "level", "quantity", "item name", "description"}
     for field_id in selected_field_ids:
         field = fields_by_id.get(field_id)
         if not field:
@@ -186,7 +186,7 @@ def build_arena_bom_csv(
         extra_headers.append(header)
         header_by_field_id[field_id] = header
 
-    headers = ["item number", "line number", "level", "quantity", "item name", *extra_headers]
+    headers = ["item number", "line number", "level", "quantity", "item name", "description", *extra_headers]
     rows: list[dict[str, Any]] = []
 
     def values_for(
@@ -227,21 +227,24 @@ def build_arena_bom_csv(
         quantity=1.0,
         total_qty=1.0,
     )
+    root_description = _resolve_values(
+        root_part,
+        ["description"],
+        extra={"part_number": root_part.part_number, "revision": root_effective_rev},
+    ).get("description", "")
     rows.append(
         {
             "item number": root_part.part_number,
-            # The root is not a BOM line: line number belongs to the
-            # parent/child relationship, so it must be blank at level zero.
-            "line number": "",
+            "line number": 3,
             "level": 0,
             "quantity": 1,
-            "item name": _resolve_values(root_part, ["description"], extra={"part_number": root_part.part_number, "revision": root_effective_rev}).get("description", ""),
+            "item name": root_description,
+            "description": root_description,
             **root_values,
         }
     )
 
     def walk(parent_pn: str, parent_rev: str, depth: int, ancestry: tuple[tuple[str, str], ...], parent_total_qty: float) -> None:
-        line_number = 0
         for link in _child_links(parent_pn, parent_rev):
             child_pn = str(getattr(link, "child_pn", None) or "").strip()
             if not child_pn:
@@ -266,13 +269,13 @@ def build_arena_bom_csv(
             # descendant subtree.
             quantity = float(getattr(link, "qty", 1.0) or 0.0)
             total_qty = float(parent_total_qty or 0.0) * quantity
-            line_number += 10
             row = {
                 "item number": child_pn,
-                "line number": line_number,
+                "line number": 3,
                 "level": depth,
                 "quantity": _quantity_text(quantity),
                 "item name": description,
+                "description": description,
             }
             row.update(
                 values_for(
