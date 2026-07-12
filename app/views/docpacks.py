@@ -22,6 +22,7 @@ def options():
     from app.models.bom import BOMLink
     from app.models.artifact import PartFile
     from app.services.docpacks import _flatten_bom
+    from app.services.markup_documents import markup_document_count_for_pairs
     from flask import current_app
 
     pn = (request.args.get("pn") or "").strip()
@@ -63,6 +64,7 @@ def options():
     return jsonify({
         "file_types": sorted(groups),
         "processes": sorted(procs),
+        "markup_document_count": markup_document_count_for_pairs([(p, r) for p, r, _qty in flat]),
     })
 
 def _parse_docpack_request():
@@ -111,6 +113,8 @@ def _parse_docpack_request():
         ),
         want_cover_page=bool(gv("cover_page") in (True, "true", "1", 1, "on")),
         want_whereused_report=bool(gv("whereused_report") in (True, "true", "1", 1, "on")),
+        want_markup_files=bool(gv("markup_files") in (True, "true", "1", 1, "on")),
+        want_markup_report=bool(gv("markup_report") in (True, "true", "1", 1, "on")),
         binder_add_cover=bool(gv("binder_add_cover") not in (False, None, "false", "0", 0)),
         binder_add_visual_list=bool(gv("binder_add_visual_list") not in (False, None, "false", "0", 0)),
         binder_add_whereused=bool(gv("binder_add_whereused") in (True, "true", "1", 1, "on")),
@@ -119,6 +123,7 @@ def _parse_docpack_request():
         binder_add_hardware_summary=bool(gv("binder_add_hardware_summary") not in (False, None, "false", "0", 0)),
         binder_page_numbers=bool(gv("binder_page_numbers") not in (False, None, "false", "0", 0)),
         binder_include_flat_patterns=bool(gv("binder_include_flat_patterns") in (True, "true", "1", 1, "on")),
+        binder_add_markups=bool(gv("binder_add_markups") in (True, "true", "1", 1, "on")),
         stamp_quote=bool(gv("stamp_quote") in (True, "true", "1", 1, "on")),
         stamp_confidential=bool(gv("stamp_confidential") in (True, "true", "1", 1, "on")),
         stamp_approved=bool(gv("stamp_approved") in (True, "true", "1", 1, "on")),

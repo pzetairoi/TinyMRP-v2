@@ -31,6 +31,7 @@ from app.services.part_drawing_markups import (
 )
 from app.services.part_norm import clean_rev, clean_rev_or_none
 from app.services.notifications import notify_part_activity
+from app.services.part_review_status import sync_part_review_status
 
 
 bp = Blueprint("part_drawing_markups_api", __name__, url_prefix="/api")
@@ -231,6 +232,7 @@ def drawing_markups_put(pn: str):
             "version": int(doc.version or 0),
         },
     )
+    sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)
 
 
@@ -290,6 +292,7 @@ def drawing_markup_thread_create(pn: str):
         )
     except Exception:
         pass
+    sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number, status=201)
 
 
@@ -334,6 +337,7 @@ def drawing_markup_thread_reply(pn: str, thread_id: str):
         )
     except Exception:
         pass
+    sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)
 
 
@@ -385,4 +389,5 @@ def drawing_markup_thread_patch(pn: str, thread_id: str):
         )
     except Exception:
         pass
+    sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)

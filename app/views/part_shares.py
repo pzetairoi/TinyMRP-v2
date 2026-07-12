@@ -756,6 +756,10 @@ def public_share_docpack_build(share_id: str, token: str):
         root_rev=revision,
         **base_kwargs,
     )
+    # Internal review markups are never exposed through public share docpacks.
+    opts.want_markup_files = False
+    opts.want_markup_report = False
+    opts.binder_add_markups = False
     if fab_enabled:
         setattr(opts, "fabrication_pack", True)
 

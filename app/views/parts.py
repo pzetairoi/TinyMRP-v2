@@ -69,6 +69,7 @@ from app.services.field_config import (
 )
 from app.services.part_materialized import batch_file_groups_for_parts
 from app.services.part_query import (
+    exclude_pairs_query,
     filter_constraints,
     filter_value,
     or_contains,
@@ -85,8 +86,10 @@ from app.services.part_annotations import (
     filtered_part_attrs,
     migrate_legacy_annotations,
     remove_part_comment,
+    set_part_comment_status,
     set_part_notes,
 )
+from app.services.part_review_status import compute_part_review_status, part_review_status_map
 from app.services.notifications import create_notifications, notify_part_activity, part_url
 #from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
 
@@ -279,6 +282,7 @@ def _comment_payload(comment: dict, resolved: dict[str, dict[str, object]] | Non
         "author_profile": profile or resolve_identity_profile(author),
         "text": str(item.get("text") or ""),
         "priority": priority if priority in COMMENT_PRIORITIES else "",
+        "status": "resolved" if str(item.get("status") or "").lower() == "resolved" else "open",
     }
 
 
@@ -808,6 +812,32 @@ def parts_lazy():
             q = q & or_q
             fallback_base_q = fallback_base_q & or_q
 
+    review_statuses: dict[tuple[str, str], dict[str, object]] | None = None
+    review_filter = str(filter_value(filters, "pending_reviews", "") or "").strip().lower()
+    if review_filter:
+        review_statuses = part_review_status_map()
+        pending_pairs = [key for key, status in review_statuses.items() if bool(status.get("pending"))]
+        if review_filter in {"pending", "true", "yes", "1"}:
+            matching_pairs = pending_pairs
+        elif review_filter in {"high", "normal", "low"}:
+            matching_pairs = [key for key, status in review_statuses.items() if status.get("severity") == review_filter]
+        elif review_filter in {"none", "false", "no", "0"}:
+            matching_pairs = []
+            excluded = exclude_pairs_query(pending_pairs)
+            q = q & excluded
+            fallback_base_q = fallback_base_q & excluded
+        else:
+            matching_pairs = []
+        if review_filter not in {"none", "false", "no", "0"}:
+            if matching_pairs:
+                matched = pairs_query(matching_pairs)
+                q = q & matched
+                fallback_base_q = fallback_base_q & matched
+            else:
+                impossible = Q(__raw__={"_id": {"$exists": False}})
+                q = q & impossible
+                fallback_base_q = fallback_base_q & impossible
+
     job_id = body.get("job") or request.args.get("job")
     job_filter_enabled = bool(job_id) and str(body.get("job_only", "true")).lower() != "false"
     if job_filter_enabled and job_id:
@@ -1028,6 +1058,8 @@ def parts_lazy():
                 coverage = {}
 
     thumb_map = thumb_urls_map([(part.part_number, _normalized_revision(part, harvest_part_attrs(part))) for part in docs])
+    if review_statuses is None:
+        review_statuses = part_review_status_map()
 
     out = []
     for part in docs:
@@ -1051,6 +1083,11 @@ def parts_lazy():
             values["thumbnail"] = thumb_list[0]
         values["display_code"] = f"{pn}-{rev}" if rev else pn
         values = serialize_field_values(values, field_config)
+        # Annotation text remains searchable, but list/search results expose only
+        # the pending-review signal so private discussion content is not repeated
+        # across general-purpose tables.
+        values.pop("comments", None)
+        review_status = review_statuses.get((pn, rev), {"count": 0, "severity": "", "pending": False})
         out.append(
             {
                 "id": f"{pn}::{rev}",
@@ -1074,6 +1111,9 @@ def parts_lazy():
                 "has_ply": bool(values.get("has_ply", getattr(part, "has_ply", False))),
                 "has_stl": bool(values.get("has_stl", getattr(part, "has_stl", False))),
                 "has_datasheet": bool(values.get("has_datasheet", getattr(part, "has_datasheet", False))),
+                "pending_review_count": int(review_status.get("count") or 0),
+                "pending_review_severity": str(review_status.get("severity") or ""),
+                "has_pending_reviews": bool(review_status.get("pending")),
                 **values,
             }
         )
@@ -1218,6 +1258,7 @@ def part_detail():
     can_parts_delete = user_has_permission(current_user, "items.edit")
     can_parts_edit = can_parts_delete
     can_parts_note = user_has_permission(current_user, "items.view")
+    review_status = compute_part_review_status(p)
 
     return jsonify(
         {
@@ -1235,6 +1276,9 @@ def part_detail():
                 "notes": str(notes_comments.get("notes") or ""),
                 "field_values": summary_field_values,
                 "attributes": visible_attrs,
+                "pending_review_count": int(review_status.get("count") or 0),
+                "pending_review_severity": str(review_status.get("severity") or ""),
+                "has_pending_reviews": bool(review_status.get("pending")),
             },
             "images": preview_urls,
             "drawing_urls": drawing_urls,
@@ -1661,6 +1705,52 @@ def part_comments_delete(pn):
     payload = annotation_payload(p)
     comments = [_comment_payload(row) for row in (payload.get("comments") or [])]
     return jsonify({"ok": True, "comments": comments})
+
+
+@bp.post("/parts/<pn>/comments/status")
+@login_required
+@require_items_view
+@csrf.exempt
+def part_comments_status(pn):
+    data = request.get_json(silent=True) or {}
+    rev = data.get("rev") if "rev" in data else request.args.get("rev")
+    comment_id = str(data.get("id") or "").strip()
+    status = str(data.get("status") or "").strip().lower()
+    if not comment_id or status not in {"open", "resolved"}:
+        return jsonify({"ok": False, "error": "id and a valid status are required"}), 400
+    p = _find_part_doc((pn or "").strip(), rev)
+    if not p:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        allowed = allowed_parts_for(current_user)
+        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
+    except Exception:
+        pass
+    updated = set_part_comment_status(p, comment_id=comment_id, status=status)
+    if updated is None:
+        return jsonify({"ok": False, "error": "comment not found"}), 404
+    try:
+        log_action(
+            "part.comments.status",
+            resource_type="part",
+            resource=f"{p.part_number}:{p.revision or ''}",
+            meta={"comment_id": comment_id, "status": status},
+        )
+        create_notifications(
+            recipient_emails=[str(updated.get("author") or "")],
+            actor_email=getattr(current_user, "email", "") or "",
+            kind="comment_changed",
+            title=f"Your comment on {p.part_number} was {status}",
+            body=str(updated.get("text") or ""),
+            url=part_url(p.part_number, p.revision or ""),
+            part_number=p.part_number,
+            revision=p.revision or "",
+            comment_id=comment_id,
+        )
+    except Exception:
+        pass
+    return jsonify({"ok": True, "comment": _comment_payload(updated)})
 
 
 @bp.post("/parts/<pn>/refresh_files")

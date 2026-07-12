@@ -17,6 +17,7 @@ from app.services.filenames import build_output_name
 from app.services.part_norm import clean_rev as _clean_rev, clean_rev_or_none as _rev_or_none
 from app.services.app_settings import format_display_ts, get_display_dt, resolve_brand_logo_path
 from app.services.insights import classify_part
+from app.services.markup_documents import combine_markup_documents, markup_documents_for_pairs
 
 
 @dataclass
@@ -39,6 +40,8 @@ class DocPackOptions:
     want_cover_page: bool = False
     want_whereused_report: bool = False
     want_hardware_summary: bool = False
+    want_markup_files: bool = False
+    want_markup_report: bool = False
     fabrication_pack: bool = False
     binder_add_cover: bool = True
     binder_add_index: bool = True
@@ -48,6 +51,7 @@ class DocPackOptions:
     binder_add_whereused: bool = False
     binder_page_numbers: bool = True
     binder_include_flat_patterns: bool = False
+    binder_add_markups: bool = False
     # binder stamps
     stamp_quote: bool = False
     stamp_confidential: bool = False
@@ -2322,6 +2326,8 @@ def _merge_pdfs_filtered(paths: List[str], *, fp_tokens: List[str]) -> Tuple[byt
 
 
 def _index_label_suffix(path: str, ext_group: str, seq: int) -> str:
+    if (ext_group or "").lower() == "markup":
+        return "markups"
     if (ext_group or "").lower() == "datasheet":
         return "datasheet"
     base = os.path.splitext(os.path.basename(path or ""))[0].lower()
@@ -2681,6 +2687,9 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
     if not root_desc and opts.root_desc_override:
         root_desc = opts.root_desc_override
     chosen_files = _collect_files(filtered_flat + [(opts.root_pn, root_rev_resolved, 1.0)], opts.file_types)
+    markup_pairs = [(opts.root_pn, root_rev_resolved)] + [(pn, rev) for pn, rev, _qty in filtered_flat]
+    need_markup_documents = bool(opts.want_markup_files or opts.want_markup_report or (opts.want_pdf_binder and opts.binder_add_markups))
+    markup_documents = markup_documents_for_pairs(markup_pairs) if need_markup_documents else []
     output_count = 0
     if opts.want_selected_files:
         output_count += 1
@@ -2696,11 +2705,15 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         output_count += 1
     if getattr(opts, "want_hardware_summary", False):
         output_count += 1
+    if opts.want_markup_report:
+        output_count += 1
+    if opts.want_markup_files:
+        output_count += 1
     if getattr(opts, "fabrication_pack", False):
         output_count += 2
     if opts.want_pdf_binder:
         output_count += 1
-    want_zip = bool(opts.want_selected_files) or output_count != 1
+    want_zip = bool(opts.want_selected_files or opts.want_markup_files) or output_count != 1
     if not want_zip and opts.want_excel_bom:
         want_zip = True
     # Precompute PDF body items for binder/index
@@ -2737,6 +2750,31 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     "docpack: failed to compute missing-file diagnostics for %s:%s",
                     opts.root_pn, opts.root_rev or "",
                 )
+    markup_tmpdir: Optional[str] = None
+    if opts.want_pdf_binder and opts.binder_add_markups and markup_documents:
+        markup_tmpdir = tempfile.mkdtemp(prefix="tinymrp-markups-")
+        markup_by_pair = {(doc.part_number.lower(), _norm_rev(doc.revision)): doc for doc in markup_documents}
+        reordered_items: List[Dict[str, object]] = []
+        reordered_paths: List[str] = []
+        for pair_pn, pair_rev in pairs:
+            pair_key = (str(pair_pn or "").lower(), _norm_rev(pair_rev))
+            for item, path in zip(pdf_items, pdf_paths):
+                if (str(item.get("pn") or "").lower(), _norm_rev(str(item.get("rev") or ""))) == pair_key:
+                    reordered_items.append(item)
+                    reordered_paths.append(path)
+            markup_doc = markup_by_pair.get(pair_key)
+            if markup_doc:
+                markup_path = os.path.join(markup_tmpdir, markup_doc.filename)
+                with open(markup_path, "wb") as handle:
+                    handle.write(markup_doc.pdf_bytes)
+                reordered_items.append({
+                    "pn": markup_doc.part_number,
+                    "rev": markup_doc.revision,
+                    "path": markup_path,
+                    "ext_group": "markup",
+                })
+                reordered_paths.append(markup_path)
+        pdf_items, pdf_paths = reordered_items, reordered_paths
     # 4) Build payloads (ZIP container)
     zip_buf = io.BytesIO()
     z: Optional[zipfile.ZipFile] = None
@@ -2784,6 +2822,10 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                 z.write(abs_path, arcname)
             except Exception:
                 continue
+
+    if opts.want_markup_files and markup_documents:
+        for document in markup_documents:
+            z.writestr(f"markups/{document.filename}", document.pdf_bytes)
 
     if want_zip:
         z.writestr(
@@ -2854,6 +2896,16 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             z.writestr(hw_name, hardware_pdf)
         else:
             return (hw_name, hardware_pdf, "application/pdf")
+
+    if opts.want_markup_report:
+        if not markup_documents:
+            raise RuntimeError("No drawing markups are available for the selected parts.")
+        markup_report = combine_markup_documents(markup_documents)
+        markup_report_name = build_output_name(f"{base_stub}_MarkupReport", "pdf", max_len=96, include_time=False, now=build_ts)
+        if want_zip:
+            z.writestr(markup_report_name, markup_report)
+        else:
+            return (markup_report_name, markup_report, "application/pdf")
 
     # Index PDF (standalone)
     if opts.want_index_pdf:

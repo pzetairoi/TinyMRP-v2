@@ -41,6 +41,9 @@ type Part = {
   has_ply?: boolean;
   has_stl?: boolean;
   has_datasheet?: boolean;
+  pending_review_count?: number;
+  pending_review_severity?: 'low' | 'normal' | 'high' | '';
+  has_pending_reviews?: boolean;
   [key: string]: any;
 }
 
@@ -124,6 +127,7 @@ export default function PartsPage() {
       material:    { value: '', matchMode: FilterMatchMode.CONTAINS },
       finish:      { value: '', matchMode: FilterMatchMode.CONTAINS },
       process:     { value: '', matchMode: FilterMatchMode.CONTAINS },
+      pending_reviews: { value: '', matchMode: FilterMatchMode.EQUALS },
     } as DataTableFilterMeta
   })
   const fallbackLogo = "/branding/logo"
@@ -319,6 +323,24 @@ export default function PartsPage() {
     return formatFieldValue(value)
   }
 
+  function reviewIndicator(row: Part) {
+    if (!row.has_pending_reviews) return <span className="text-muted">—</span>
+    const severity = row.pending_review_severity || 'low'
+    return (
+      <span className={`parts-review-indicator parts-review-indicator--${severity}`} title={`${row.pending_review_count || 0} pending review item(s), ${severity} priority`}>
+        <span aria-hidden="true" />
+        {row.pending_review_count || 0}
+      </span>
+    )
+  }
+
+  function reviewRowClass(row: Part) {
+    const classes = []
+    if (pickMode) classes.push('pick-row')
+    if (row.has_pending_reviews) classes.push(`parts-review-row parts-review-row--${row.pending_review_severity || 'low'}`)
+    return classes.join(' ')
+  }
+
   function renderColumnFilter(field: FieldDefinition) {
     const rawValue = (tableFilters as any)?.[field.id]?.value
     if (field.data_type === 'boolean') {
@@ -396,7 +418,7 @@ export default function PartsPage() {
           )}
         </div>
       ) : (
-        <div className="d-flex align-items-center gap-2">
+        <div className="d-flex flex-wrap align-items-center gap-2">
           <input
             className="form-control form-control-sm"
             style={{ width: 260, maxWidth: '100%' }}
@@ -405,6 +427,20 @@ export default function PartsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          <select
+            className="form-select form-select-sm"
+            style={{ width: 190 }}
+            aria-label="Filter by pending reviews"
+            value={String((lazy.filters as any)?.pending_reviews?.value || '')}
+            onChange={(e) => setFilterValue('pending_reviews', e.target.value)}
+          >
+            <option value="">All review states</option>
+            <option value="pending">Pending reviews</option>
+            <option value="high">High priority</option>
+            <option value="normal">Normal priority</option>
+            <option value="low">Low priority</option>
+            <option value="none">No pending reviews</option>
+          </select>
         </div>
       )}
       {pickMode && (
@@ -420,6 +456,7 @@ export default function PartsPage() {
     search,
     jobOnly,
     jobId,
+    lazy.filters,
   ])
 
   if (pickMode) {
@@ -591,8 +628,31 @@ export default function PartsPage() {
         stripedRows responsiveLayout="scroll"
         resizableColumns
         tableStyle={{ tableLayout: 'fixed' }}
-        rowClassName={pickMode ? () => 'pick-row' : undefined}
+        rowClassName={reviewRowClass}
       >
+        <Column
+          field="pending_reviews"
+          header="Reviews"
+          body={reviewIndicator}
+          sortable={false}
+          filter
+          showFilterMenu={false}
+          filterElement={(
+            <select
+              className="form-select form-select-sm"
+              value={String((tableFilters as any)?.pending_reviews?.value || '')}
+              onChange={(e) => setFilterValue('pending_reviews', e.target.value)}
+            >
+              <option value="">Any</option>
+              <option value="pending">Pending</option>
+              <option value="high">High</option>
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+              <option value="none">None</option>
+            </select>
+          )}
+          style={{ width: 105 }}
+        />
         {selectedPartsFields.map((field) => {
           const isThumbnail = field.id === 'thumbnail'
           const showColumnSelector = field.id === columnSelectorFieldId && partsFields.length > 0

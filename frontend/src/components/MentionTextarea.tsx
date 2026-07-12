@@ -21,7 +21,13 @@ type Props = {
   onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void
 }
 
-const EMOJIS = ['👍', '✅', '👀', '⚠️', '🚨', '🔧', '📐', '💡', '🎉', '🙂']
+const EMOJI_GROUPS = [
+  { id: 'popular', label: 'Popular', icon: '👍', emojis: ['👍', '❤️', '😂', '😊', '🎉', '✅', '👏', '🙏', '👀', '🔥', '💡', '🤔', '😄', '😢', '🚨', '⚠️'] },
+  { id: 'smileys', label: 'Smileys', icon: '😊', emojis: ['😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '🙂', '🙃', '😉', '😍', '🥰', '😘', '😎', '🤓', '🧐', '🤔', '🤨', '😐', '😕', '🙁', '😞', '😢', '😭', '😤', '😡', '🤯', '😴', '🥳', '🤩'] },
+  { id: 'gestures', label: 'People', icon: '👋', emojis: ['👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '☝️', '✋', '🤚', '👋', '👏', '🙌', '👐', '🤲', '🙏', '💪', '🤝', '🫡'] },
+  { id: 'work', label: 'Work', icon: '🔧', emojis: ['✅', '❌', '⚠️', '🚨', '🔧', '🔨', '🛠️', '⚙️', '📐', '📏', '📝', '📌', '📎', '📁', '📊', '📈', '🔍', '💡', '🧪', '🏭', '🚚', '📦', '🧰'] },
+  { id: 'symbols', label: 'Symbols', icon: '❤️', emojis: ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '💔', '💯', '✨', '⭐', '🔥', '🎯', '🎉', '🏆', '🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '➡️', '⬆️'] },
+] as const
 
 export default function MentionTextarea({
   value,
@@ -44,6 +50,7 @@ export default function MentionTextarea({
   const [suggestions, setSuggestions] = useState<MentionUser[]>([])
   const [activeSuggestion, setActiveSuggestion] = useState(0)
   const [emojiOpen, setEmojiOpen] = useState(false)
+  const [emojiGroup, setEmojiGroup] = useState<(typeof EMOJI_GROUPS)[number]['id']>('popular')
 
   function closeSuggestions() {
     mentionRangeRef.current = null
@@ -181,19 +188,37 @@ export default function MentionTextarea({
       </div>
       {emojiOpen ? (
         <div className="tm-emoji-menu" aria-label="Choose an emoji">
-          {EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                replaceSelection(emoji)
-                setEmojiOpen(false)
-              }}
-            >
-              {emoji}
-            </button>
-          ))}
+          <div className="tm-emoji-tabs" role="tablist" aria-label="Emoji categories">
+            {EMOJI_GROUPS.map((group) => (
+              <button
+                key={group.id}
+                type="button"
+                role="tab"
+                className={emojiGroup === group.id ? 'active' : ''}
+                aria-label={group.label}
+                aria-selected={emojiGroup === group.id}
+                title={group.label}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setEmojiGroup(group.id)}
+              >
+                {group.icon}
+              </button>
+            ))}
+          </div>
+          <div className="tm-emoji-heading">{EMOJI_GROUPS.find((group) => group.id === emojiGroup)?.label}</div>
+          <div className="tm-emoji-grid" role="tabpanel">
+            {(EMOJI_GROUPS.find((group) => group.id === emojiGroup)?.emojis || []).map((emoji, index) => (
+              <button
+                key={`${emoji}-${index}`}
+                type="button"
+                title={emoji}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => replaceSelection(emoji)}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>
