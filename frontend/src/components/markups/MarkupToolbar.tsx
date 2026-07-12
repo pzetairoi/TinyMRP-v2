@@ -29,15 +29,9 @@ type Props = {
   canUndo: boolean
   canRedo: boolean
   saveState: MarkupSaveState
-  hiddenResolvedCount: number
-  showResolved: boolean
-  onToggleResolved: () => void
   onDelete: () => void
   onUndo: () => void
   onRedo: () => void
-  onZoomIn: () => void
-  onZoomOut: () => void
-  onFitView: () => void
 }
 
 export default function MarkupToolbar({
@@ -52,15 +46,9 @@ export default function MarkupToolbar({
   canUndo,
   canRedo,
   saveState,
-  hiddenResolvedCount,
-  showResolved,
-  onToggleResolved,
   onDelete,
   onUndo,
   onRedo,
-  onZoomIn,
-  onZoomOut,
-  onFitView,
 }: Props) {
   const editingBlocked = !canEdit || saveState === 'conflict' || saveState === 'saving'
   return (
@@ -146,34 +134,6 @@ export default function MarkupToolbar({
           onClick={onRedo}
         >
           <i className="pi pi-refresh" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div className="pd-markup-toolbar-sep" role="separator" />
-
-      <div className="pd-markup-toolbar-group" aria-label="View controls">
-        <button type="button" className="btn btn-sm btn-outline-secondary" title="Zoom in (mouse wheel also zooms)" aria-label="Zoom in" onClick={onZoomIn}>
-          <i className="pi pi-search-plus" aria-hidden="true" />
-        </button>
-        <button type="button" className="btn btn-sm btn-outline-secondary" title="Zoom out" aria-label="Zoom out" onClick={onZoomOut}>
-          <i className="pi pi-search-minus" aria-hidden="true" />
-        </button>
-        <button type="button" className="btn btn-sm btn-outline-secondary" title="Fit / reset view" aria-label="Fit view" onClick={onFitView}>
-          <i className="pi pi-window-maximize" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className={`btn btn-sm ${showResolved ? 'btn-secondary' : 'btn-outline-secondary'}`}
-          title={
-            showResolved
-              ? 'Hide markups from resolved review threads'
-              : `Show markups from resolved review threads${hiddenResolvedCount ? ` (${hiddenResolvedCount} hidden)` : ''}`
-          }
-          aria-label={showResolved ? 'Hide resolved markups' : 'Show resolved markups'}
-          aria-pressed={showResolved}
-          onClick={onToggleResolved}
-        >
-          <i className={`pi ${showResolved ? 'pi-eye' : 'pi-eye-slash'}`} aria-hidden="true" />
         </button>
       </div>
     </div>

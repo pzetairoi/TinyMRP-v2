@@ -19,6 +19,8 @@ type Props = {
   textMatches?: MarkupTextMatch[]
   /** Object ids of a just-drawn markup: auto-opens the review form. */
   promptObjectIds?: string[] | null
+  /** Object ids currently hidden on the drawing, including resolved/manual hides. */
+  hiddenObjectIds?: string[]
   onPromptDismiss?: () => void
   onCreateThread: (input: {
     object_ids: string[]
@@ -28,7 +30,7 @@ type Props = {
   }) => Promise<boolean>
   onReply: (threadId: string, text: string) => Promise<boolean>
   onSetStatus: (threadId: string, action: 'resolve' | 'reopen') => Promise<boolean>
-  onViewThread: (thread: MarkupThread) => void
+  onToggleThreadVisibility: (thread: MarkupThread) => void
   onViewObject?: (objectId: string) => void
 }
 
@@ -95,11 +97,12 @@ export default function MarkupThreadsPanel({
   filterText,
   textMatches,
   promptObjectIds,
+  hiddenObjectIds,
   onPromptDismiss,
   onCreateThread,
   onReply,
   onSetStatus,
-  onViewThread,
+  onToggleThreadVisibility,
   onViewObject,
 }: Props) {
   const [filter, setFilter] = useState<StatusFilter>('open')
@@ -119,6 +122,7 @@ export default function MarkupThreadsPanel({
 
   const needle = String(filterText || '').trim().toLowerCase()
   const openCount = useMemo(() => threads.filter((t) => t.status === 'open').length, [threads])
+  const hiddenIds = useMemo(() => new Set(hiddenObjectIds || []), [hiddenObjectIds])
   const visible = useMemo(() => {
     if (needle) return threads.filter((t) => threadMatchesFilter(t, needle))
     return filter === 'all' ? threads : threads.filter((t) => t.status === filter)
@@ -156,7 +160,7 @@ export default function MarkupThreadsPanel({
     <div className="pd-markup-panel pd-card">
       <div className="pd-markup-panel-head">
         <h6 className="mb-0 d-flex align-items-center gap-2">
-          Review threads
+          Markup reviews
           <span className="badge rounded-pill text-bg-secondary">{threads.length}</span>
           {openCount > 0 ? <span className="badge rounded-pill text-bg-warning">{openCount} open</span> : null}
         </h6>
@@ -286,7 +290,9 @@ export default function MarkupThreadsPanel({
               : `No ${filter} threads.`}
           </div>
         ) : (
-          visible.map((thread) => (
+          visible.map((thread) => {
+            const threadHidden = !!thread.object_ids.length && thread.object_ids.every((id) => hiddenIds.has(id))
+            return (
             <div key={thread.id} className={`pd-markup-thread border rounded p-2 ${thread.status === 'resolved' ? 'pd-markup-thread--resolved' : ''}`}>
               <div className="pd-markup-thread-head">
                 <div className="pd-markup-thread-title">
@@ -298,12 +304,13 @@ export default function MarkupThreadsPanel({
                   {thread.linked ? (
                     <button
                       type="button"
-                      className="btn btn-sm btn-outline-secondary"
-                      title="View on drawing"
-                      onClick={() => onViewThread(thread)}
+                      className={`btn btn-sm ${threadHidden ? 'btn-outline-primary' : 'btn-outline-secondary'}`}
+                      title={threadHidden ? 'Show and focus this markup' : 'Hide this markup from the drawing'}
+                      aria-pressed={!threadHidden}
+                      onClick={() => onToggleThreadVisibility(thread)}
                     >
-                      <i className="pi pi-eye me-1" aria-hidden="true" />
-                      View
+                      <i className={`pi ${threadHidden ? 'pi-eye' : 'pi-eye-slash'} me-1`} aria-hidden="true" />
+                      {threadHidden ? 'View' : 'Hide'}
                     </button>
                   ) : (
                     <span className="badge text-bg-light border" title="The linked markup object was removed">
@@ -382,7 +389,8 @@ export default function MarkupThreadsPanel({
                 </div>
               ) : null}
             </div>
-          ))
+            )
+          })
         )}
       </div>
     </div>

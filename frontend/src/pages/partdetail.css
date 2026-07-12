@@ -267,15 +267,18 @@
   font-size: 0.9rem;
 }
 
-.pd-tab-label--attention,
-.pd-tabs .p-tabview-nav li.pd-tab-attention .p-tabview-nav-link {
-  color: #c92a2a;
-}
-
-.pd-tabs .p-tabview-nav li.pd-tab-attention.p-highlight .p-tabview-nav-link {
-  border-color: #c92a2a;
-  color: #b42318;
-}
+.pd-tab-label--note,
+.pd-tab-label--low,
+.pd-tabs .p-tabview-nav li.pd-tab-indicator--note .p-tabview-nav-link,
+.pd-tabs .p-tabview-nav li.pd-tab-indicator--low .p-tabview-nav-link { color: #1769aa; }
+.pd-tab-label--normal,
+.pd-tabs .p-tabview-nav li.pd-tab-indicator--normal .p-tabview-nav-link { color: #a15c00; }
+.pd-tab-label--high,
+.pd-tabs .p-tabview-nav li.pd-tab-indicator--high .p-tabview-nav-link { color: #c92a2a; }
+.pd-tabs .p-tabview-nav li.pd-tab-indicator--note.p-highlight .p-tabview-nav-link,
+.pd-tabs .p-tabview-nav li.pd-tab-indicator--low.p-highlight .p-tabview-nav-link { border-color: #1769aa; }
+.pd-tabs .p-tabview-nav li.pd-tab-indicator--normal.p-highlight .p-tabview-nav-link { border-color: #d17a00; }
+.pd-tabs .p-tabview-nav li.pd-tab-indicator--high.p-highlight .p-tabview-nav-link { border-color: #c92a2a; }
 
 .pd-attrs-search {
   position: sticky;
@@ -912,5 +915,188 @@
   .pd-markup-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+/* Review activity and second-pass editor layout. */
+.pd-review-activity {
+  padding: .75rem;
+  border: 1px solid rgba(0,0,0,.09);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.pd-review-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: .5rem;
+}
+
+.pd-review-item,
+.pd-markup-thread {
+  padding: .65rem;
+  border: 1px solid rgba(0,0,0,.1);
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+
+.pd-markup-root {
+  min-width: 0;
+}
+
+.pd-markup-panel {
+  order: -1;
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  padding: .75rem;
+  border: 1px solid rgba(0,0,0,.09);
+  background: #f8fafc;
+}
+
+.pd-markup-threadlist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+  gap: .5rem;
+}
+
+.pd-markup-newthread-form {
+  max-width: 720px;
+  background: #fff;
+}
+
+.pd-markup-body {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 148px;
+  gap: .65rem;
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.pd-markup-stage {
+  width: 100%;
+  min-width: 0;
+  height: clamp(620px, 68vw, 860px);
+  padding: 0;
+}
+
+.pd-markup-canvas-wrap {
+  flex: 0 0 auto;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.pd-markup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  min-width: 0;
+  padding: .55rem;
+  border: 1px solid rgba(0,0,0,.09);
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.pd-markup-actions-title {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .8rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pd-markup-actions-group {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+}
+
+.pd-markup-actions .btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: .4rem;
+  width: 100%;
+  min-height: 32px;
+  padding-inline: .5rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.pd-markup-actions .pd-markup-status {
+  white-space: normal;
+}
+
+.pd-markup-root--expanded .pd-markup-panel {
+  flex: 0 0 auto;
+  max-height: 28vh;
+  overflow-y: auto;
+}
+
+.pd-markup-root--expanded .pd-markup-body {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 148px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pd-markup-root--expanded .pd-markup-stage {
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 991.98px) {
+  .pd-markup-body,
+  .pd-markup-root--expanded .pd-markup-body {
+    grid-template-columns: 44px minmax(0, 1fr) 48px;
+  }
+
+  .pd-markup-actions {
+    padding: .35rem;
+  }
+
+  .pd-markup-actions-title span,
+  .pd-markup-actions .btn span,
+  .pd-markup-actions .pd-markup-status {
+    display: none;
+  }
+
+  .pd-markup-actions .btn {
+    justify-content: center;
+    padding-inline: .25rem;
+  }
+
+  .pd-markup-stage {
+    height: clamp(500px, 82vw, 680px);
+  }
+}
+
+@media (max-width: 575.98px) {
+  .pd-markup-body,
+  .pd-markup-root--expanded .pd-markup-body {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .pd-markup-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .pd-markup-actions-title {
+    width: 100%;
+  }
+
+  .pd-markup-actions-group {
+    flex: 1 1 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .pd-markup-actions .btn {
+    width: auto;
   }
 }
