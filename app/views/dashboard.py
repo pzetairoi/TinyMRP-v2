@@ -26,6 +26,11 @@ _CACHE_LOCK = Lock()
 _CACHE_TTL = 45.0
 
 
+def clear_dashboard_cache() -> None:
+    with _CACHE_LOCK:
+        _CACHE.clear()
+
+
 def _cache_key() -> str:
     try:
         uid = current_user.get_id() or "anon"

@@ -4,6 +4,7 @@ import zipfile
 
 from app.models.part import Part
 from app.services.import_zip import import_bom_zip
+from app.services.field_config import save_field_config
 from app.services.part_annotations import annotation_payload
 
 
@@ -90,7 +91,7 @@ def test_import_override_modes_upgrade_approved_and_preserve_notes(app):
     assert part.attrs.get("approved_by") == "QA"
     assert part.attrs.get("approved_date") == "2026-01-15"
     assert part.attrs.get("approvedby") is None
-    assert part.attrs.get("approved") is None
+    assert part.attrs.get("approved") is True
     payload = annotation_payload(part)
     assert payload.get("notes") == "Operator note"
     assert [row.get("text") for row in (payload.get("comments") or [])] == ["Keep me"]
@@ -164,3 +165,96 @@ def test_import_default_mode_preserves_existing_approved_parts(app):
     assert part.description == "Approved Description"
     assert part.attrs.get("material") == "Titanium"
     assert part.attrs.get("approved_by") == "QA"
+
+
+def test_import_modes_honor_custom_approval_aliases(app):
+    with app.app_context():
+        save_field_config(
+            {
+                "canonical_aliases": [
+                    {
+                        "field_id": "approved_by",
+                        "aliases": ["approved_by", "approvedby", "EngineeringApproval"],
+                    }
+                ]
+            }
+        )
+        Part(
+            part_number="OVR-CUSTOM-EXISTING",
+            revision="",
+            description="Released Description",
+            attrs={"material": "Titanium", "EngineeringApproval": "QA Person"},
+        ).save()
+
+        import_bom_zip(
+            _make_zip(
+                [
+                    {
+                        "partnumber": "OVR-CUSTOM-EXISTING",
+                        "revision": "",
+                        "description": "Incoming Draft",
+                        "material": "Plastic",
+                    }
+                ]
+            ),
+            "custom-existing.zip",
+            scan_artifacts=False,
+            generate_thumbs=False,
+        )
+        existing = Part.objects(part_number="OVR-CUSTOM-EXISTING", revision="").first()
+        assert existing.description == "Released Description"
+        assert existing.attrs.get("material") == "Titanium"
+
+        Part(
+            part_number="OVR-CUSTOM-INCOMING",
+            revision="",
+            description="Draft Description",
+            attrs={"material": "Steel"},
+        ).save()
+        import_bom_zip(
+            _make_zip(
+                [
+                    {
+                        "partnumber": "OVR-CUSTOM-INCOMING",
+                        "revision": "",
+                        "description": "Released Description",
+                        "material": "Stainless",
+                        "EngineeringApproval": "QA Person",
+                    }
+                ]
+            ),
+            "custom-incoming.zip",
+            scan_artifacts=False,
+            generate_thumbs=False,
+            override_mode="approved_only",
+        )
+        incoming = Part.objects(part_number="OVR-CUSTOM-INCOMING", revision="").first()
+        assert incoming.description == "Released Description"
+        assert incoming.attrs.get("material") == "Stainless"
+        assert incoming.canonical.get("approved") is True
+        assert incoming.canonical.get("approved_by") == "QA Person"
+
+
+def test_import_reports_conflicting_approval_statuses(app):
+    with app.app_context():
+        report = import_bom_zip(
+            _make_zip(
+                [
+                    {
+                        "partnumber": "OVR-APPROVAL-CONFLICT",
+                        "revision": "",
+                        "description": "Conflicting Approval",
+                        "approved": "Approved",
+                        "is_approved": "Not Approved",
+                    }
+                ]
+            ),
+            "approval-conflict.zip",
+            scan_artifacts=False,
+            generate_thumbs=False,
+        )
+        part = Part.objects(part_number="OVR-APPROVAL-CONFLICT", revision="").first()
+        assert part is not None
+        assert part.canonical.get("approved") is False
+        assert report["approval_integrity_warnings"] == 1
+        assert any(issue.get("stage") == "flatbom.approval" for issue in report["warnings"])

@@ -274,7 +274,7 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
     summary_field_values["comments"] = ""
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
-    approver_identity = str(approved_value(attrs) or "").strip()
+    approver_identity = str(approval_field_values(attrs).get("approved_by") or "").strip()
     raw_comments = attrs.get("comments")
     if not isinstance(raw_comments, list):
         raw_comments = []

@@ -13,7 +13,7 @@ from collections import defaultdict
 from app.services.filescan import discover_part_files, upsert_part_files_detailed
 # Import necessary services for attributes normalization and merging
 from app.services.attrs import approved_value, harvest_part_attrs, normalize_record_attrs, process_attributes
-from app.services.canonical_fields import sync_part_canonical_fields
+from app.services.canonical_fields import resolve_approval, sync_part_canonical_fields
 from app.services.part_annotations import migrate_legacy_annotations
 from app.services.processmeta import normalize_processes
 from app.services.part_norm import clean_rev, clean_pn, clean_qty
@@ -1018,6 +1018,7 @@ def import_bom_zip(
         "flat_lines_skipped_not_dict": 0,
         "flat_lines_failed_normalize": 0,
         "tree_rows_failed_qty": 0,
+        "approval_integrity_warnings": 0,
         # Quantity-integrity diagnostics for repeated expanded subassemblies.
         "bom_integrity_status": "ok",
         "bom_repeated_subassemblies": 0,
@@ -1137,6 +1138,24 @@ def import_bom_zip(
                                 message="FLATBOM row skipped: blank part number.",
                             )
                             continue
+
+                        approval = resolve_approval(norm.get("attrs") or {})
+                        if approval.get("ambiguous"):
+                            _report_inc(report, "approval_integrity_warnings", 1)
+                            reasons = sorted({str(item.get("reason") or "ambiguous") for item in approval["ambiguous"]})
+                            _report_issue(
+                                report,
+                                "warning",
+                                stage="flatbom.approval",
+                                file=flat_name,
+                                line_number=line_no,
+                                part_number=pn,
+                                message=(
+                                    "Approval fields conflict ("
+                                    + ", ".join(reasons)
+                                    + "). The conservative unapproved result was used; review this part before release."
+                                ),
+                            )
 
                         key = (pn, rev)
                         part_props[key] = norm

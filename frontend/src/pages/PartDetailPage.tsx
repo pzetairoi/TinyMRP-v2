@@ -272,6 +272,7 @@ const FALLBACK_SUMMARY_FIELDS: FieldDefinition[] = [
   { id: "finish", label: "Finish", kind: "builtin", filterable: true, sortable: true },
   { id: "mass", label: "Mass", kind: "builtin", filterable: true, sortable: true },
   { id: "process", label: "Process", kind: "builtin", filterable: true, sortable: true },
+  { id: "approved", label: "Approved", kind: "builtin", data_type: "boolean", filterable: true, sortable: false },
 ];
 
 const FALLBACK_BOM_FIELDS: FieldDefinition[] = [
@@ -282,6 +283,7 @@ const FALLBACK_BOM_FIELDS: FieldDefinition[] = [
   { id: "process", label: "Process", kind: "builtin", filterable: true, sortable: true },
   { id: "finish", label: "Finish", kind: "builtin", filterable: true, sortable: true },
   { id: "material", label: "Material", kind: "builtin", filterable: true, sortable: true },
+  { id: "approved", label: "Approved", kind: "builtin", data_type: "boolean", filterable: true, sortable: false },
   { id: "qty", label: "Qty", kind: "special", filterable: true, sortable: true },
 ];
 
@@ -290,6 +292,7 @@ const FALLBACK_WHERE_USED_FIELDS: FieldDefinition[] = [
   { id: "part_number", label: "Part Number", kind: "builtin", filterable: true, sortable: true },
   { id: "revision", label: "Revision", kind: "builtin", filterable: true, sortable: true },
   { id: "description", label: "Description", kind: "builtin", filterable: true, sortable: true },
+  { id: "approved", label: "Approved", kind: "builtin", data_type: "boolean", filterable: true, sortable: false },
   { id: "qty", label: "Qty", kind: "special", filterable: true, sortable: true },
 ];
 
@@ -754,6 +757,25 @@ export default function PartDetailPage() {
         className="form-select form-select-sm"
         value={value}
         onChange={(e) => setBooleanTTFilter(field.id, e.target.value)}
+      >
+        <option value="">Any</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+    )
+  }
+
+  function renderBooleanTableFilter(options: any) {
+    const value = options.value === true ? "true" : options.value === false ? "false" : ""
+    return (
+      <select
+        className="form-select form-select-sm"
+        aria-label="Filter by final approval status"
+        value={value}
+        onChange={(event) => {
+          const nextValue = event.target.value === "" ? null : event.target.value === "true"
+          options.filterApplyCallback(nextValue)
+        }}
       >
         <option value="">Any</option>
         <option value="true">Yes</option>
@@ -3836,8 +3858,11 @@ function isExternalDatasheetUrl(url: string): boolean {
                     }
                     sortable={field.sortable !== false}
                     filter={field.filterable !== false}
+                    filterMatchMode="custom"
+                    filterFunction={(value, filterValue) => matchesFieldFilter(field, value, filterValue)}
                     showFilterMenu={false}
-                    filterPlaceholder={fieldFilterPlaceholder(field)}
+                    filterPlaceholder={field.data_type === "boolean" ? undefined : fieldFilterPlaceholder(field)}
+                    filterElement={field.data_type === "boolean" ? renderBooleanTableFilter : undefined}
                     body={(row: WURow) => renderWhereUsedCell(field, row)}
                     style={isThumbnail ? { width: 110 } : field.id === "revision" ? { width: 100 } : field.id === "qty" ? { width: 100 } : undefined}
                   />

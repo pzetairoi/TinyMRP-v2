@@ -3,16 +3,15 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Tuple
 
 from app.services.canonical_fields import (
-    APPROVAL_VOID_RE,
+    APPROVED_STATUS_ATTR_ALIASES,
     APPROVED_BY_ATTR_ALIASES,
     APPROVED_DATE_ATTR_ALIASES,
-    approved_by_attr_value,
-    approved_date_attr_value,
+    approval_void_regex,
     canonical_attr_key,
     canonical_attrs_for_part,
     default_normalized_attr_alias_map,
     extract_canonical_fields,
-    is_blankish_approval,
+    resolve_approval,
     sync_part_canonical_fields,
 )
 
@@ -45,22 +44,12 @@ REQUIRED_KEYS: Iterable[str] = (
     "spare_part",
 )
 
-def _is_blankish_approval(value: Any) -> bool:
-    return is_blankish_approval(value)
-
-
-def _is_blankish_text(value: Any) -> bool:
-    if value is None:
-        return True
-    return not str(value).strip()
-
-
 def approval_query_keys(*, include_canonical: bool = True, include_legacy: bool = True) -> List[str]:
     keys: List[str] = []
     if include_canonical:
-        keys.extend(["canonical.approved_by", "attrs.approved_by"])
+        keys.extend(["canonical.approved", "canonical.approved_by", "field_values.approved", "attrs.approved", "attrs.approved_by"])
     if include_legacy:
-        keys.extend(["attrs.approvedby", "attrs.approved"])
+        keys.extend(["attrs.approvedby", "attrs.is_approved", "attrs.approval_status"])
     seen = set()
     out: List[str] = []
     for key in keys:
@@ -77,81 +66,119 @@ def approval_filter_raw(keys: Iterable[str] | None = None, *, approved: bool) ->
     if not fields:
         return {}
 
+    canonical_field = "canonical.approved" if "canonical.approved" in fields else ""
+    fallback_fields = [field for field in fields if field != canonical_field]
+    void_re = approval_void_regex()
+
+    positive_clauses = [
+        {
+            "$and": [
+                {field: {"$exists": True}},
+                {field: {"$nin": [None, False, 0]}},
+                {field: {"$not": void_re}},
+            ]
+        }
+        for field in fallback_fields
+    ]
+    negative_clauses = [
+        condition
+        for field in fallback_fields
+        for condition in ({field: {"$in": [None, False, 0]}}, {field: void_re})
+    ]
+
+    if positive_clauses:
+        fallback_approved: Dict[str, Any] = {"$and": [{"$or": positive_clauses}, {"$nor": negative_clauses}]}
+        fallback_unapproved: Dict[str, Any] = {"$or": [{"$nor": positive_clauses}, {"$or": negative_clauses}]}
+    else:
+        fallback_approved = {"_id": {"$exists": False}}
+        fallback_unapproved = {}
+
+    if not canonical_field:
+        return fallback_approved if approved else fallback_unapproved
+
     if approved:
         return {
             "$or": [
-                {
-                    "$and": [
-                        {field: {"$exists": True}},
-                        {field: {"$nin": [None, False, 0]}},
-                        {field: {"$not": APPROVAL_VOID_RE}},
-                    ]
-                }
-                for field in fields
+                {canonical_field: True},
+                {"$and": [{canonical_field: {"$exists": False}}, fallback_approved]},
             ]
         }
-
     return {
-        "$and": [
-            {
-                "$or": [
-                    {field: {"$exists": False}},
-                    {field: {"$in": [None, False, 0]}},
-                    {field: APPROVAL_VOID_RE},
-                ]
-            }
-            for field in fields
+        "$or": [
+            {canonical_field: {"$exists": True, "$ne": True}},
+            {"$and": [{canonical_field: {"$exists": False}}, fallback_unapproved]},
         ]
     }
 
 
 def approved_by_value(attrs: Dict[str, Any]) -> Any:
-    return approved_by_attr_value(attrs)
+    return resolve_approval(attrs or {}).get("approved_by") or None
 
 
 def approved_date_value(attrs: Dict[str, Any]) -> Any:
-    return approved_date_attr_value(attrs)
+    return resolve_approval(attrs or {}).get("approved_date") or None
 
 
 def approved_value(attrs: Dict[str, Any]) -> Any:
-    return approved_by_value(attrs)
+    approval = resolve_approval(attrs or {})
+    return approval.get("approved_by") or (True if approval.get("approved") else None)
 
 
 def approval_field_values(attrs: Dict[str, Any]) -> Dict[str, Any]:
-    approver = approved_by_value(attrs or {})
-    approved_date = approved_date_value(attrs or {})
+    approval = resolve_approval(attrs or {})
     return {
-        "approved": bool(approver),
-        "approved_by": str(approver or "").strip(),
-        "approved_date": str(approved_date or "").strip(),
+        "approved": bool(approval.get("approved")),
+        "approved_by": str(approval.get("approved_by") or "").strip(),
+        "approved_date": str(approval.get("approved_date") or "").strip(),
     }
 
 
-def _normalize_alias_group(attrs: Dict[str, Any], aliases: Iterable[str], canonical_key: str, *, blankish) -> None:
+def _normalize_approved_fields(attrs: Dict[str, Any]) -> None:
     if not isinstance(attrs, dict):
         return
-    alias_tokens = {canonical_attr_key(alias) for alias in aliases if canonical_attr_key(alias)}
-    matching_keys = [key for key in list(attrs.keys()) if canonical_attr_key(key) in alias_tokens]
-    value = None
-    if tuple(aliases) == tuple(APPROVED_BY_ATTR_ALIASES):
-        value = approved_by_value(attrs)
-    elif tuple(aliases) == tuple(APPROVED_DATE_ATTR_ALIASES):
-        value = approved_date_value(attrs)
-    else:
-        for key in matching_keys:
-            raw_value = attrs.get(key)
-            if not blankish(raw_value):
-                value = raw_value
+    approval = resolve_approval(attrs)
+    groups = {
+        "approved": {
+            canonical_attr_key(alias)
+            for alias in APPROVED_STATUS_ATTR_ALIASES
+            if canonical_attr_key(alias)
+        },
+        "approved_by": {
+            canonical_attr_key(alias)
+            for alias in APPROVED_BY_ATTR_ALIASES
+            if canonical_attr_key(alias)
+        },
+        "approved_date": {
+            canonical_attr_key(alias)
+            for alias in APPROVED_DATE_ATTR_ALIASES
+            if canonical_attr_key(alias)
+        },
+    }
+    preserved: Dict[str, List[Any]] = {key: [] for key in groups}
+    for key in list(attrs.keys()):
+        token = canonical_attr_key(key)
+        for target, aliases in groups.items():
+            if token in aliases:
+                value = attrs.pop(key, None)
+                if isinstance(value, (list, tuple, set)):
+                    preserved[target].extend(value)
+                else:
+                    preserved[target].append(value)
                 break
-    for key in matching_keys:
-        attrs.pop(key, None)
-    if value is not None:
-        attrs[canonical_key] = value
 
+    # Keep the source values instead of replacing them with a derived boolean.
+    # Approval rules are configurable, so preserving the source lets a later
+    # rule change consistently re-evaluate already stored parts.
+    for target, values in preserved.items():
+        if not values:
+            continue
+        attrs[target] = values[0] if len(values) == 1 else values
 
-def _normalize_approved_fields(attrs: Dict[str, Any]) -> None:
-    _normalize_alias_group(attrs, APPROVED_BY_ATTR_ALIASES, "approved_by", blankish=_is_blankish_approval)
-    _normalize_alias_group(attrs, APPROVED_DATE_ATTR_ALIASES, "approved_date", blankish=_is_blankish_text)
+    # Preserve the long-standing normalized shape for a real approver identity.
+    # This flag is only derived when there was no explicit status value. A
+    # configured negative/placeholder remains authoritative in the resolver.
+    if not preserved["approved"] and preserved["approved_by"] and approval.get("approved"):
+        attrs["approved"] = True
 
 
 def normalize_record_attrs(raw: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -262,6 +289,8 @@ def harvest_part_attrs(part) -> Dict[str, Any]:
 
     canonical = canonical_attrs_for_part(part, raw_attrs=raw_attrs) if part else {}
     for key, value in canonical.items():
+        if key in {"approved", "approved_by", "approved_date"}:
+            continue
         if key == "processes":
             if value and not merged.get("processes"):
                 merged["processes"] = list(value)
@@ -279,6 +308,12 @@ def harvest_part_attrs(part) -> Dict[str, Any]:
         if value is not None and merged.get(key) in (None, ""):
             merged[key] = value
 
+    raw_approval = resolve_approval(merged)
+    if not raw_approval.get("has_approval_signal"):
+        for key in ("approved", "approved_by", "approved_date"):
+            value = canonical.get(key)
+            if value not in (None, ""):
+                merged[key] = value
     _normalize_approved_fields(merged)
     return merged
 

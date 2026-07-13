@@ -33,7 +33,7 @@ def test_visual_list_uses_merged_approved_fields(app, monkeypatch, tmp_path):
     assert "approved.svg" in calls
 
 
-def test_visual_list_treats_placeholder_approved_values_as_unapproved(app, monkeypatch, tmp_path):
+def test_visual_list_treats_approved_status_value_as_approved(app, monkeypatch, tmp_path):
     calls = []
 
     fake_part = SimpleNamespace(
@@ -60,5 +60,5 @@ def test_visual_list_treats_placeholder_approved_values_as_unapproved(app, monke
         pdf = _visual_list_pdf([("VIS-102", "A", 1.0)], root_pn="ROOT-100", root_rev="A")
 
     assert pdf
-    assert "approved.svg" not in calls
-    assert "notapproved.svg" in calls
+    assert "approved.svg" in calls
+    assert "notapproved.svg" not in calls

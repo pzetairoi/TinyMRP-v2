@@ -4,6 +4,7 @@ import type { ApiError } from '../lib/api'
 import {
   loadFieldCandidates,
   loadFieldConfig,
+  type ApprovalRules,
   type CanonicalAliasEntry,
   type FieldCandidate,
   type FieldConfigPayload,
@@ -65,6 +66,30 @@ function cloneCanonicalAliases(entries: CanonicalAliasEntry[] | undefined) {
   }))
 }
 
+function cloneApprovalRules(rules: ApprovalRules | undefined): ApprovalRules {
+  return {
+    approved_values: [...(rules?.approved_values || [])],
+    unapproved_values: [...(rules?.unapproved_values || [])],
+    identity_placeholders: [...(rules?.identity_placeholders || [])],
+  }
+}
+
+function approvalRuleDrafts(rules: ApprovalRules | undefined): Record<keyof ApprovalRules, string> {
+  const cloned = cloneApprovalRules(rules)
+  return {
+    approved_values: cloned.approved_values.join(', '),
+    unapproved_values: cloned.unapproved_values.join(', '),
+    identity_placeholders: cloned.identity_placeholders.join(', '),
+  }
+}
+
+function parseApprovalRuleValues(value: string) {
+  return value
+    .split(/[,;\n]/)
+    .map((item) => item.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' '))
+    .filter((item, index, values) => item && values.indexOf(item) === index)
+}
+
 export default function AdminFieldsPage() {
   const [config, setConfig] = useState<FieldConfigPayload | null>(null)
   const [fieldCandidates, setFieldCandidates] = useState<FieldCandidate[]>([])
@@ -76,6 +101,7 @@ export default function AdminFieldsPage() {
   const [error, setError] = useState<string | null>(null)
   const [builtinSearch, setBuiltinSearch] = useState('')
   const [aliasSearch, setAliasSearch] = useState('')
+  const [approvalRuleText, setApprovalRuleText] = useState<Record<keyof ApprovalRules, string>>(() => approvalRuleDrafts(undefined))
 
   useEffect(() => {
     ;(async () => {
@@ -85,7 +111,9 @@ export default function AdminFieldsPage() {
           fields: [...(resp.config.fields || [])],
           contexts: cloneContexts(resp.config.contexts || {}),
           canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
+          approval_rules: cloneApprovalRules(resp.config.approval_rules),
         })
+        setApprovalRuleText(approvalRuleDrafts(resp.config.approval_rules))
         setCanAdmin(!!resp.permissions?.can_admin)
         if (resp.permissions?.can_admin) {
           try {
@@ -182,6 +210,10 @@ export default function AdminFieldsPage() {
         ),
       }
     })
+  }
+
+  function updateApprovalRules(rule: keyof ApprovalRules, value: string) {
+    setApprovalRuleText((prev) => ({ ...prev, [rule]: value }))
   }
 
   function addCandidateField() {
@@ -324,8 +356,13 @@ export default function AdminFieldsPage() {
           field_id: entry.field_id,
           aliases: entry.aliases || [],
         })),
+        approval_rules: {
+          approved_values: parseApprovalRuleValues(approvalRuleText.approved_values),
+          unapproved_values: parseApprovalRuleValues(approvalRuleText.unapproved_values),
+          identity_placeholders: parseApprovalRuleValues(approvalRuleText.identity_placeholders),
+        },
       }
-      const resp = await apiFetch<{ config: FieldConfigPayload }>('/api/admin/field-config', {
+      const resp = await apiFetch<{ config: FieldConfigPayload; rebuild?: { scanned?: number; updated?: number; errors?: number } }>('/api/admin/field-config', {
         method: 'PUT',
         body: JSON.stringify(payload),
       })
@@ -333,8 +370,15 @@ export default function AdminFieldsPage() {
         fields: [...(resp.config.fields || [])],
         contexts: cloneContexts(resp.config.contexts || {}),
         canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
+        approval_rules: cloneApprovalRules(resp.config.approval_rules),
       })
-      setMessage('Field configuration saved.')
+      setApprovalRuleText(approvalRuleDrafts(resp.config.approval_rules))
+      const rebuilt = resp.rebuild
+      setMessage(
+        rebuilt
+          ? `Field configuration saved and applied to ${rebuilt.scanned || 0} parts (${rebuilt.updated || 0} updated${rebuilt.errors ? `, ${rebuilt.errors} errors` : ''}).`
+          : 'Field configuration saved.',
+      )
     } catch (err) {
       setError((err as ApiError).message || 'Failed to save field configuration.')
     } finally {
@@ -347,15 +391,22 @@ export default function AdminFieldsPage() {
     setError(null)
     setMessage(null)
     try {
-      const resp = await apiFetch<{ config: FieldConfigPayload }>('/api/admin/field-config/reset', {
+      const resp = await apiFetch<{ config: FieldConfigPayload; rebuild?: { scanned?: number; updated?: number; errors?: number } }>('/api/admin/field-config/reset', {
         method: 'POST',
       })
       setConfig({
         fields: [...(resp.config.fields || [])],
         contexts: cloneContexts(resp.config.contexts || {}),
         canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
+        approval_rules: cloneApprovalRules(resp.config.approval_rules),
       })
-      setMessage('Defaults restored.')
+      setApprovalRuleText(approvalRuleDrafts(resp.config.approval_rules))
+      const rebuilt = resp.rebuild
+      setMessage(
+        rebuilt
+          ? `Defaults restored and applied to ${rebuilt.scanned || 0} parts (${rebuilt.updated || 0} updated${rebuilt.errors ? `, ${rebuilt.errors} errors` : ''}).`
+          : 'Defaults restored.',
+      )
     } catch (err) {
       setError((err as ApiError).message || 'Failed to restore defaults.')
     } finally {
@@ -382,7 +433,9 @@ export default function AdminFieldsPage() {
         fields: [...(resp.config.fields || [])],
         contexts: cloneContexts(resp.config.contexts || {}),
         canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
+        approval_rules: cloneApprovalRules(resp.config.approval_rules),
       })
+      setApprovalRuleText(approvalRuleDrafts(resp.config.approval_rules))
       setMessage(`Canonical fields rebuilt for ${resp.report.updated} of ${resp.report.scanned} parts.`)
     } catch (err) {
       setError((err as ApiError).message || 'Failed to rebuild canonical fields.')
@@ -404,7 +457,9 @@ export default function AdminFieldsPage() {
         fields: [...(resp.config.fields || [])],
         contexts: cloneContexts(resp.config.contexts || {}),
         canonical_aliases: cloneCanonicalAliases(resp.config.canonical_aliases),
+        approval_rules: cloneApprovalRules(resp.config.approval_rules),
       })
+      setApprovalRuleText(approvalRuleDrafts(resp.config.approval_rules))
       setMessage(
         `Searchable part fields rebuilt for ${resp.report.updated} of ${resp.report.scanned} parts.` +
           (resp.report.errors ? ` Errors: ${resp.report.errors}.` : ''),
@@ -545,6 +600,56 @@ export default function AdminFieldsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="card p-3 mb-4">
+        <div className="mb-3">
+          <h5 className="mb-0">Approval value rules</h5>
+          <div className="text-muted small">
+            Control how approval fields are interpreted during import and everywhere approval is displayed or exported. Separate values with commas or new lines.
+          </div>
+        </div>
+        <div className="alert alert-warning py-2 small">
+          Unapproved values and generic approver placeholders always win if a value also appears in the approved list. A real person or identity in an Approved By field counts as approved unless it is listed as a placeholder.
+        </div>
+        <div className="row g-3">
+          <div className="col-lg-4">
+            <label className="form-label fw-semibold" htmlFor="approval-approved-values">Approved status values</label>
+            <textarea
+              id="approval-approved-values"
+              className="form-control form-control-sm font-monospace"
+              rows={5}
+              value={approvalRuleText.approved_values}
+              onChange={(event) => updateApprovalRules('approved_values', event.target.value)}
+              placeholder="approved, released, yes, true"
+            />
+            <div className="form-text">Exact status values that mean approved.</div>
+          </div>
+          <div className="col-lg-4">
+            <label className="form-label fw-semibold" htmlFor="approval-unapproved-values">Unapproved status values</label>
+            <textarea
+              id="approval-unapproved-values"
+              className="form-control form-control-sm font-monospace"
+              rows={5}
+              value={approvalRuleText.unapproved_values}
+              onChange={(event) => updateApprovalRules('unapproved_values', event.target.value)}
+              placeholder="not approved, pending, draft, no"
+            />
+            <div className="form-text">Exact values that force the part to be not approved.</div>
+          </div>
+          <div className="col-lg-4">
+            <label className="form-label fw-semibold" htmlFor="approval-placeholder-values">Generic approver placeholders</label>
+            <textarea
+              id="approval-placeholder-values"
+              className="form-control form-control-sm font-monospace"
+              rows={5}
+              value={approvalRuleText.identity_placeholders}
+              onChange={(event) => updateApprovalRules('identity_placeholders', event.target.value)}
+              placeholder="approver, approved by"
+            />
+            <div className="form-text">Generic text in Approved By fields that must not be mistaken for a real approver.</div>
+          </div>
         </div>
       </div>
 

@@ -32,6 +32,17 @@
 {% set bom_conflicts = result.bom_definition_conflicts or 0 %}
 {% set bom_integrity_skipped = result.tree_links_skipped_integrity or 0 %}
 {% set repeated_subassemblies = result.bom_repeated_subassemblies or 0 %}
+{% set approval_integrity_warnings = result.approval_integrity_warnings or 0 %}
+{% if approval_integrity_warnings %}
+  <div class="alert alert-danger mt-3" role="alert">
+    <h4 class="alert-heading">Approval integrity warning</h4>
+    <p class="fw-semibold mb-0">
+      {{ approval_integrity_warnings }} imported part{{ '' if approval_integrity_warnings == 1 else 's' }}
+      had conflicting approval fields. The conservative unapproved result was used; review the import issues
+      before treating these parts as released.
+    </p>
+  </div>
+{% endif %}
 {% if result.bom_integrity_status in ['warning', 'conflict'] or repeated_subassemblies or bom_conflicts or bom_integrity_skipped %}
   <div class="alert {{ 'alert-danger' if bom_conflicts or bom_integrity_skipped else 'alert-warning' }} mt-3" role="alert">
     <h4 class="alert-heading">BOM quantity integrity warning</h4>

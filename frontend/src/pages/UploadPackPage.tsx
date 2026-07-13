@@ -88,6 +88,7 @@ type ImportReport = {
   flat_lines_skipped_not_dict?: number;
   flat_lines_failed_normalize?: number;
   tree_rows_failed_qty?: number;
+  approval_integrity_warnings?: number;
   bom_integrity_status?: "ok" | "warning" | "conflict";
   bom_repeated_subassemblies?: number;
   bom_repeated_subassembly_copies_collapsed?: number;
@@ -229,6 +230,7 @@ export default function UploadPackPage() {
   const flatParseFailures = Number(importSummary?.flat_lines_failed_parse ?? 0);
   const flatNormalizeFailures = Number(importSummary?.flat_lines_failed_normalize ?? 0);
   const treeQtyFailures = Number(importSummary?.tree_rows_failed_qty ?? 0);
+  const approvalIntegrityWarnings = Number(importSummary?.approval_integrity_warnings ?? 0);
   const repeatedSubassemblies = Number(importSummary?.bom_repeated_subassemblies ?? 0);
   const repeatedCopiesCollapsed = Number(importSummary?.bom_repeated_subassembly_copies_collapsed ?? 0);
   const bomDefinitionConflicts = Number(importSummary?.bom_definition_conflicts ?? 0);
@@ -240,7 +242,7 @@ export default function UploadPackPage() {
     bomDefinitionConflicts > 0 ||
     integrityLinksSkipped > 0;
   const reportHasDiagnostics =
-    skippedBlankParts > 0 || flatParseFailures > 0 || flatNormalizeFailures > 0 || treeQtyFailures > 0;
+    skippedBlankParts > 0 || flatParseFailures > 0 || flatNormalizeFailures > 0 || treeQtyFailures > 0 || approvalIntegrityWarnings > 0;
 
   const rootPn = importSummary?.root || "";
   const rootRev = importSummary?.root_revision || "";
@@ -946,6 +948,21 @@ extra/
               </div>
             )}
 
+            {importSummary && approvalIntegrityWarnings > 0 ? (
+              <div className="alert alert-danger mt-3" role="alert">
+                <div className="d-flex align-items-start gap-2">
+                  <i className="pi pi-exclamation-triangle fs-3" aria-hidden="true" />
+                  <div>
+                    <h5 className="alert-heading mb-1">Approval integrity warning</h5>
+                    <p className="mb-1 fw-semibold">
+                      {approvalIntegrityWarnings} imported part{approvalIntegrityWarnings === 1 ? " has" : "s have"} conflicting approval fields.
+                      The conservative unapproved result was used. Review the import issues before treating these parts as released.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {importSummary && hasBomIntegrityNotice ? (
               <div
                 className={`alert ${bomDefinitionConflicts || integrityLinksSkipped ? "alert-danger" : "alert-warning"} mt-3`}
@@ -1024,6 +1041,7 @@ extra/
                     Skipped blank PN rows: <b>{skippedBlankParts}</b>. FLATBOM parse failures:{" "}
                     <b>{flatParseFailures}</b>. FLATBOM normalize failures: <b>{flatNormalizeFailures}</b>. TREEBOM qty
                     failures: <b>{treeQtyFailures}</b>.
+                    Approval integrity warnings: <b>{approvalIntegrityWarnings}</b>.
                   </div>
                 ) : null}
                 <div className="mt-2">
