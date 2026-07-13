@@ -6,6 +6,7 @@ from openpyxl import load_workbook
 from app.models.auth import Role, User
 from app.models.bom import BOMLink
 from app.models.part import Part
+from app.services.attrs import normalize_record_attrs
 from app.services.docpacks import DocPackOptions, build_docpack
 from app.services.field_config import field_requires_runtime_scan, query_paths_for_field, save_field_config
 
@@ -90,6 +91,10 @@ def test_field_config_api_and_user_preferences(client):
     assert data["permissions"]["can_admin"] is True
     parts_ctx = data["config"]["contexts"]["parts_list"]
     assert "legacy_code" in parts_ctx["allowed_field_ids"]
+    # Final approval remains searchable in interactive views even when an
+    # older saved configuration did not list the field.
+    for context_name in ("parts_list", "part_detail_summary", "bom_tree", "where_used"):
+        assert "approved" in data["config"]["contexts"][context_name]["allowed_field_ids"]
     desc_field = next(field for field in data["config"]["fields"] if field["id"] == "description")
     assert desc_field["source_path"] == "attrs.summary_text"
 
@@ -449,11 +454,12 @@ def test_admin_can_rebuild_search_fields_for_existing_parts(client):
         },
     )
     assert save_resp.status_code == 200
+    assert save_resp.get_json()["rebuild"]["updated"] >= 1
 
     rebuild_resp = client.post("/api/admin/field-config/rebuild-search-fields")
     assert rebuild_resp.status_code == 200
     report = rebuild_resp.get_json()["report"]
-    assert report["updated"] >= 1
+    assert report["errors"] == 0
     assert report["errors"] == 0
 
     legacy.reload()
@@ -499,11 +505,12 @@ def test_admin_can_rebuild_canonical_fields_using_custom_aliases(client):
         },
     )
     assert save_resp.status_code == 200
+    assert save_resp.get_json()["rebuild"]["updated"] >= 1
 
     rebuild_resp = client.post("/api/admin/field-config/rebuild-canonical-fields")
     assert rebuild_resp.status_code == 200
     report = rebuild_resp.get_json()["report"]
-    assert report["updated"] >= 1
+    assert report["scanned"] >= 1
 
     part.reload()
     assert part.attrs["comments"] == "LASERCUT"
@@ -554,3 +561,146 @@ def test_part_detail_exposes_placeholder_approval_alias_as_unapproved(client):
     assert detail["part"]["field_values"]["approved"] is False
     assert detail["part"]["field_values"]["approved_by"] == ""
     assert detail["part"]["field_values"]["approved_date"] == "2026-06-24"
+
+
+def test_part_detail_exposes_real_custom_approval_alias_as_approved(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    save_resp = client.put(
+        "/api/admin/field-config",
+        json={
+            "canonical_aliases": [
+                {
+                    "field_id": "approved_by",
+                    "aliases": ["approved_by", "approvedby", "EngineeringApproval"],
+                }
+            ]
+        },
+    )
+    assert save_resp.status_code == 200
+
+    part = Part(
+        part_number="APR-DETAIL-REAL",
+        revision="A",
+        description="Custom Approval",
+        attrs={"EngineeringApproval": "QA Person", "approveddate": "2026-07-13"},
+    ).save()
+
+    detail_resp = client.get(f"/api/part_detail?pn={part.part_number}&rev={part.revision}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.get_json()
+    assert detail["part"]["field_values"]["approved"] is True
+    assert detail["part"]["field_values"]["approved_by"] == "QA Person"
+    assert detail["part"]["field_values"]["approved_date"] == "2026-07-13"
+
+
+def test_admin_approval_rules_reclassify_existing_preserved_values(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    part = Part(
+        part_number="APR-RULE-EXISTING",
+        revision="A",
+        description="Configurable approval placeholder",
+        attrs=normalize_record_attrs({"approvedby": "Generic Signoff"}),
+    ).save()
+    part.reload()
+    assert part.attrs.get("approved_by") == "Generic Signoff"
+    assert part.canonical.get("approved") is True
+
+    save_resp = client.put(
+        "/api/admin/field-config",
+        json={
+            "approval_rules": {
+                "identity_placeholders": ["approver", "generic signoff"],
+            }
+        },
+    )
+    assert save_resp.status_code == 200
+    saved_rules = save_resp.get_json()["config"]["approval_rules"]
+    assert "generic signoff" in saved_rules["identity_placeholders"]
+    assert save_resp.get_json()["rebuild"]["scanned"] >= 1
+
+    part.reload()
+    assert part.attrs.get("approved_by") == "Generic Signoff"
+    assert part.canonical.get("approved") is False
+    assert not part.canonical.get("approved_by")
+
+    detail_resp = client.get(f"/api/part_detail?pn={part.part_number}&rev={part.revision}")
+    assert detail_resp.status_code == 200
+    assert detail_resp.get_json()["part"]["field_values"]["approved"] is False
+
+    approved_resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"approved": {"value": True}}},
+    )
+    assert approved_resp.status_code == 200
+    assert part.part_number not in [row["part_number"] for row in approved_resp.get_json()["data"]]
+    unapproved_resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"approved": {"value": False}}},
+    )
+    assert unapproved_resp.status_code == 200
+    assert part.part_number in [row["part_number"] for row in unapproved_resp.get_json()["data"]]
+
+    public_config = client.get("/api/field-config")
+    assert public_config.status_code == 200
+    assert "generic signoff" in public_config.get_json()["config"]["approval_rules"]["identity_placeholders"]
+
+    restore_resp = client.put(
+        "/api/admin/field-config",
+        json={
+            "approval_rules": {
+                "identity_placeholders": [],
+            }
+        },
+    )
+    assert restore_resp.status_code == 200
+    part.reload()
+    assert part.canonical.get("approved") is True
+    assert part.canonical.get("approved_by") == "Generic Signoff"
+
+
+def test_saving_alias_config_rebuilds_existing_parts(client):
+    admin = _admin_user()
+    _login(client, admin)
+    part = Part(
+        part_number="APR-EXISTING-ALIAS",
+        revision="A",
+        description="Existing custom approval",
+        attrs={"EngineeringApproval": "QA Person"},
+    ).save()
+    part.reload()
+    assert part.canonical.get("approved") is False
+
+    save_resp = client.put(
+        "/api/admin/field-config",
+        json={
+            "canonical_aliases": [
+                {
+                    "field_id": "approved_by",
+                    "aliases": ["approved_by", "approvedby", "EngineeringApproval"],
+                }
+            ]
+        },
+    )
+    assert save_resp.status_code == 200
+    assert save_resp.get_json()["rebuild"]["scanned"] >= 1
+
+    part.reload()
+    assert part.canonical.get("approved") is True
+    assert part.canonical.get("approved_by") == "QA Person"
+
+    approved_resp = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"approved": {"value": True}}},
+    )
+    assert approved_resp.status_code == 200
+    assert part.part_number in [row["part_number"] for row in approved_resp.get_json()["data"]]
+
+    reset_resp = client.post("/api/admin/field-config/reset")
+    assert reset_resp.status_code == 200
+    part.reload()
+    assert part.canonical.get("approved") is False
+    assert not part.canonical.get("approved_by")

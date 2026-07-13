@@ -148,6 +148,12 @@ def sync_part_materialized_fields(
 
     config = config or get_field_config()
     raw_attrs = dict(getattr(part, "attrs", {}) or {})
+    before_canonical = dict(getattr(part, "canonical", {}) or {})
+    before_processes = list(getattr(part, "processes", None) or [])
+    before_top_level = {
+        field: getattr(part, field, None)
+        for field in ("description", "revision", "category", "uom", "manufacturer", "mfr_part")
+    }
     process_override = None
     try:
         from app.services.import_zip import _is_hardware_by_folder, _is_hardware_by_process
@@ -160,7 +166,15 @@ def sync_part_materialized_fields(
     attrs = harvest_part_attrs(part) if attrs is None else attrs
     groups = set(coverage) if coverage is not None else file_groups_for_part(part, attrs=attrs)
 
-    changed = False
+    changed = (
+        before_canonical != dict(getattr(part, "canonical", {}) or {})
+        or before_processes != list(getattr(part, "processes", None) or [])
+        or before_top_level
+        != {
+            field: getattr(part, field, None)
+            for field in ("description", "revision", "category", "uom", "manufacturer", "mfr_part")
+        }
+    )
     if _apply_annotation_search_fields(part, attrs=attrs):
         changed = True
     if _apply_file_coverage_fields(part, groups):

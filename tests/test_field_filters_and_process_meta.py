@@ -104,7 +104,7 @@ def test_parts_lazy_filters_approved_column_true_false_and_any(client):
     )
     assert approved_resp.status_code == 200
     approved_rows = approved_resp.get_json()["data"]
-    assert [row["part_number"] for row in approved_rows] == ["APR-100"]
+    assert [row["part_number"] for row in approved_rows] == ["APR-100", "APR-250"]
 
     unapproved_resp = client.post(
         "/api/parts_lazy",
@@ -112,7 +112,7 @@ def test_parts_lazy_filters_approved_column_true_false_and_any(client):
     )
     assert unapproved_resp.status_code == 200
     unapproved_rows = unapproved_resp.get_json()["data"]
-    assert [row["part_number"] for row in unapproved_rows] == ["APR-200", "APR-250", "APR-300"]
+    assert [row["part_number"] for row in unapproved_rows] == ["APR-200", "APR-300"]
 
     any_resp = client.post(
         "/api/parts_lazy",
@@ -393,6 +393,103 @@ def test_bom_tree_and_whereused_include_extended_file_availability(client):
     assert len(wu_rows) == 1
     assert wu_rows[0]["part_number"] == root.part_number
     assert wu_rows[0]["has_pdf"] is True
+
+
+def test_final_approval_state_is_exposed_and_filterable_across_part_views(client):
+    admin = _admin_user()
+    _login(client, admin)
+
+    approved_parent = Part(
+        part_number="APR-VIEW-PARENT-YES",
+        revision="A",
+        description="Approved parent",
+        attrs={"approvedby": "QA Person"},
+    ).save()
+    unapproved_parent = Part(
+        part_number="APR-VIEW-PARENT-NO",
+        revision="A",
+        description="Unapproved parent",
+        attrs={"approvedby": "Approver"},
+    ).save()
+    approved_child = Part(
+        part_number="APR-VIEW-CHILD-YES",
+        revision="A",
+        description="Approved child",
+        attrs={"approvedby": "QA Person"},
+    ).save()
+    unapproved_child = Part(
+        part_number="APR-VIEW-CHILD-NO",
+        revision="A",
+        description="Unapproved child",
+        attrs={"approvedby": "Approver"},
+    ).save()
+    target = Part(part_number="APR-VIEW-TARGET", revision="A", description="Where-used target").save()
+
+    for child in (approved_child, unapproved_child, target):
+        BOMLink(
+            parent_pn=approved_parent.part_number,
+            parent_rev=approved_parent.revision,
+            child_pn=child.part_number,
+            child_rev=child.revision,
+            qty=1,
+        ).save()
+    BOMLink(
+        parent_pn=unapproved_parent.part_number,
+        parent_rev=unapproved_parent.revision,
+        child_pn=target.part_number,
+        child_rev=target.revision,
+        qty=1,
+    ).save()
+
+    config_resp = client.get("/api/field-config")
+    assert config_resp.status_code == 200
+    contexts = config_resp.get_json()["config"]["contexts"]
+    for context_name in ("parts_list", "part_detail_summary", "bom_tree", "where_used"):
+        assert "approved" in contexts[context_name]["allowed_field_ids"]
+
+    bom_resp = client.get(
+        f"/api/bom_tree?parent={approved_parent.part_number}&parent_rev={approved_parent.revision}"
+    )
+    assert bom_resp.status_code == 200
+    bom_approval = {node["data"]["part_number"]: node["data"]["approved"] for node in bom_resp.get_json()}
+    assert bom_approval[approved_child.part_number] is True
+    assert bom_approval[unapproved_child.part_number] is False
+
+    approved_wu = client.post(
+        "/api/whereused_lazy",
+        json={
+            "pn": target.part_number,
+            "rev": target.revision,
+            "first": 0,
+            "rows": 25,
+            "filters": {"approved": {"value": True}},
+        },
+    )
+    assert approved_wu.status_code == 200
+    assert [row["part_number"] for row in approved_wu.get_json()["data"]] == [approved_parent.part_number]
+
+    unapproved_wu = client.post(
+        "/api/whereused_lazy",
+        json={
+            "pn": target.part_number,
+            "rev": target.revision,
+            "first": 0,
+            "rows": 25,
+            "filters": {"approved": {"value": False}},
+        },
+    )
+    assert unapproved_wu.status_code == 200
+    assert [row["part_number"] for row in unapproved_wu.get_json()["data"]] == [unapproved_parent.part_number]
+
+    detail_resp = client.get(f"/api/part_detail?pn={target.part_number}&rev={target.revision}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.get_json()
+    assert detail["part"]["field_values"]["approved"] is False
+    used_in_approval = {row["part_number"]: row["approved"] for row in detail["whereused"]}
+    assert used_in_approval == {
+        approved_parent.part_number: True,
+        unapproved_parent.part_number: False,
+    }
 
 
 def test_bom_flat_aggregates_duplicate_descendants(client):

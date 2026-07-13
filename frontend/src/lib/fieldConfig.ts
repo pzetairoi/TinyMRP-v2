@@ -37,6 +37,12 @@ export type CanonicalAliasEntry = {
   aliases: string[]
 }
 
+export type ApprovalRules = {
+  approved_values: string[]
+  unapproved_values: string[]
+  identity_placeholders: string[]
+}
+
 export type FieldPreferences = {
   contexts: Record<string, { field_ids: string[]; use_default?: boolean }>
 }
@@ -45,6 +51,7 @@ export type FieldConfigPayload = {
   fields: FieldDefinition[]
   contexts: Record<string, FieldContext>
   canonical_aliases?: CanonicalAliasEntry[]
+  approval_rules?: ApprovalRules
 }
 
 export type FieldConfigResponse = {

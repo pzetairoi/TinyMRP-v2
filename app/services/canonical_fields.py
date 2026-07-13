@@ -4,7 +4,7 @@ import re
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
-from flask import current_app, has_app_context
+from flask import current_app, g, has_app_context
 
 from app.models.app_settings import AppSettings
 from app.models.part import Part
@@ -12,28 +12,58 @@ from app.services.processmeta import normalize_processes
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
+APPROVED_FIELD_ID = "approved"
 APPROVED_BY_FIELD_ID = "approved_by"
 APPROVED_DATE_FIELD_ID = "approved_date"
-APPROVED_BY_ATTR_ALIASES: tuple[str, ...] = ("approvedby", "approved_by", "approved")
+APPROVED_STATUS_ATTR_ALIASES: tuple[str, ...] = ("approved", "is_approved", "approval_status", "released")
+APPROVED_BY_ATTR_ALIASES: tuple[str, ...] = ("approvedby", "approved_by", "approver", "released_by")
 APPROVED_DATE_ATTR_ALIASES: tuple[str, ...] = ("approveddate", "approved_date")
-APPROVAL_VOID_VALUES: set[str] = {
+APPROVAL_TRUE_VALUES: set[str] = {
+    "1",
+    "approved",
+    "released",
+    "true",
+    "y",
+    "yes",
+    "on",
+}
+APPROVAL_FALSE_VALUES: set[str] = {
     "",
     "-",
     "--",
     "0",
-    "approved",
+    "absent",
+    "draft",
+    "false",
+    "in progress",
+    "missing",
+    "n/a",
+    "na",
+    "n",
+    "no",
+    "none",
+    "not approved",
+    "not-approved",
+    "not_approved",
+    "notapproved",
+    "null",
+    "off",
+    "pending",
+    "pending approval",
+    "pending review",
+    "rejected",
+    "tbc",
+    "tbd",
+    "unapproved",
+    "wip",
+    "work in progress",
+}
+APPROVAL_IDENTITY_PLACEHOLDERS: set[str] = {
     "approved by",
     "approved_by",
     "approver",
-    "false",
-    "n/a",
-    "na",
-    "none",
-    "null",
-    "pending",
-    "tbc",
-    "tbd",
 }
+APPROVAL_VOID_VALUES: set[str] = APPROVAL_FALSE_VALUES | APPROVAL_IDENTITY_PLACEHOLDERS
 APPROVAL_VOID_RE = re.compile(
     r"^\s*(?:"
     + "|".join(sorted(re.escape(token) for token in APPROVAL_VOID_VALUES))
@@ -62,6 +92,7 @@ CANONICAL_FIELD_DEFINITIONS: List[Dict[str, Any]] = [
         "aliases": ["datasheet", "oem_data_sheet", "oem_datasheet", "data_sheet", "datasheet_url"],
     },
     {"field_id": "classified", "label": "Classified", "aliases": ["classified"]},
+    {"field_id": APPROVED_FIELD_ID, "label": "Approved Status", "aliases": list(APPROVED_STATUS_ATTR_ALIASES)},
     {"field_id": APPROVED_BY_FIELD_ID, "label": "Approved By", "aliases": list(APPROVED_BY_ATTR_ALIASES)},
     {"field_id": APPROVED_DATE_FIELD_ID, "label": "Approved Date", "aliases": list(APPROVED_DATE_ATTR_ALIASES)},
     {"field_id": "drawn_by", "label": "Drawn By", "aliases": ["drawnby", "drawn_by"]},
@@ -100,7 +131,9 @@ _TOP_LEVEL_MIRRORS = {
 }
 _DEFAULT_NORMALIZED_ATTR_ALIASES: Dict[str, str] = {
     "approvedby": "approved_by",
-    "approved": "approved_by",
+    "approved": "approved",
+    "is_approved": "approved",
+    "approval_status": "approved",
     "approved_by": "approved_by",
     "approveddate": "approved_date",
     "approveddate_": "approved_date",
@@ -158,33 +191,11 @@ def is_blankish_approval(value: Any) -> bool:
         return True
     if isinstance(value, bool):
         return not value
+    if isinstance(value, (list, tuple, set)):
+        return not any(not is_blankish_approval(item) for item in value)
+    if isinstance(value, dict):
+        return not bool(value)
     return bool(APPROVAL_VOID_RE.match(str(value)))
-
-
-def _is_blankish_text(value: Any) -> bool:
-    if value is None:
-        return True
-    return not str(value).strip()
-
-
-def _first_alias_value(attrs: Optional[Dict[str, Any]], aliases: Iterable[str], *, blankish) -> Any:
-    if not isinstance(attrs, dict):
-        return None
-    items = list(attrs.items())
-    tokens = [canonical_attr_key(alias) for alias in aliases if canonical_attr_key(alias)]
-    for token in tokens:
-        for raw_key, raw_value in items:
-            if canonical_attr_key(raw_key) == token and not blankish(raw_value):
-                return raw_value
-    return None
-
-
-def approved_by_attr_value(attrs: Optional[Dict[str, Any]]) -> Any:
-    return _first_alias_value(attrs, APPROVED_BY_ATTR_ALIASES, blankish=is_blankish_approval)
-
-
-def approved_date_attr_value(attrs: Optional[Dict[str, Any]]) -> Any:
-    return _first_alias_value(attrs, APPROVED_DATE_ATTR_ALIASES, blankish=_is_blankish_text)
 
 
 def default_normalized_attr_alias_map() -> Dict[str, str]:
@@ -207,6 +218,64 @@ def default_canonical_alias_entries() -> List[Dict[str, Any]]:
             }
         )
     return out
+
+
+def default_approval_rules() -> Dict[str, List[str]]:
+    return {
+        "approved_values": sorted(APPROVAL_TRUE_VALUES),
+        "unapproved_values": sorted(APPROVAL_FALSE_VALUES),
+        "identity_placeholders": sorted(APPROVAL_IDENTITY_PLACEHOLDERS),
+    }
+
+
+def _normalize_approval_rule_values(values: Any, defaults: Iterable[str]) -> List[str]:
+    if isinstance(values, str):
+        raw_items: Iterable[Any] = re.split(r"[,;\r\n]+", values)
+    elif isinstance(values, (list, tuple, set)):
+        raw_items = values
+    else:
+        raw_items = defaults
+    seen: set[str] = set()
+    out: List[str] = []
+    for value in raw_items:
+        raw_token = str(value or "").strip().lower()
+        token = raw_token if re.fullmatch(r"-+", raw_token) else re.sub(r"\s+", " ", raw_token.replace("_", " ").replace("-", " "))
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out
+
+
+def sanitize_approval_rules(raw: Any) -> Dict[str, List[str]]:
+    source = raw if isinstance(raw, dict) else {}
+    defaults = default_approval_rules()
+    approved = _normalize_approval_rule_values(
+        source.get("approved_values") if "approved_values" in source else None,
+        defaults["approved_values"],
+    )
+    unapproved = _normalize_approval_rule_values(
+        source.get("unapproved_values") if "unapproved_values" in source else None,
+        defaults["unapproved_values"],
+    )
+    placeholders = _normalize_approval_rule_values(
+        source.get("identity_placeholders") if "identity_placeholders" in source else None,
+        defaults["identity_placeholders"],
+    )
+    # A negative or placeholder rule is conservative and wins collisions.
+    blocked = set(unapproved) | set(placeholders)
+    approved = [value for value in approved if value not in blocked]
+    return {
+        "approved_values": approved,
+        "unapproved_values": unapproved,
+        "identity_placeholders": placeholders,
+    }
+
+
+def approval_rules_from_field_config(config: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
+    if not isinstance(config, dict):
+        return default_approval_rules()
+    return sanitize_approval_rules(config.get("approval_rules"))
 
 
 def _settings_doc(create: bool = False) -> Optional[AppSettings]:
@@ -268,6 +337,28 @@ def sanitize_canonical_alias_entries(raw: Any) -> List[Dict[str, Any]]:
                 "aliases": aliases,
             }
         )
+    # Canonical field ids own their names, and a raw alias may map to only one
+    # canonical field. This makes collisions deterministic and migrates the
+    # legacy `approved` alias from approved_by to the status field.
+    reserved = {canonical_attr_key(item["field_id"]) for item in out}
+    claimed: set[str] = set()
+    for item in out:
+        field_key = canonical_attr_key(item["field_id"])
+        unique_aliases: List[str] = []
+        for alias in item.get("aliases") or []:
+            token = canonical_attr_key(alias)
+            if not token:
+                continue
+            if token in reserved and token != field_key:
+                continue
+            if token in claimed:
+                continue
+            claimed.add(token)
+            unique_aliases.append(token)
+        if field_key not in unique_aliases:
+            unique_aliases.insert(0, field_key)
+            claimed.add(field_key)
+        item["aliases"] = unique_aliases
     return out
 
 
@@ -280,13 +371,14 @@ def canonical_alias_entries_from_field_config(config: Optional[Dict[str, Any]]) 
 def set_runtime_canonical_aliases(config: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     aliases = canonical_alias_entries_from_field_config(config)
     if has_app_context():
-        current_app.config["CANONICAL_FIELD_ALIASES"] = deepcopy(aliases)
+        g._canonical_field_aliases = deepcopy(aliases)
+        g._approval_rules = deepcopy(approval_rules_from_field_config(config))
     return aliases
 
 
 def get_runtime_canonical_aliases() -> List[Dict[str, Any]]:
     if has_app_context():
-        cached = current_app.config.get("CANONICAL_FIELD_ALIASES")
+        cached = getattr(g, "_canonical_field_aliases", None)
         if isinstance(cached, list) and cached:
             return deepcopy(cached)
 
@@ -294,8 +386,41 @@ def get_runtime_canonical_aliases() -> List[Dict[str, Any]]:
     stored = getattr(settings, "field_config", None) if settings else None
     aliases = canonical_alias_entries_from_field_config(stored if isinstance(stored, dict) else {})
     if has_app_context():
-        current_app.config["CANONICAL_FIELD_ALIASES"] = deepcopy(aliases)
+        g._canonical_field_aliases = deepcopy(aliases)
+        g._approval_rules = deepcopy(approval_rules_from_field_config(stored if isinstance(stored, dict) else {}))
     return aliases
+
+
+def get_runtime_approval_rules() -> Dict[str, List[str]]:
+    if has_app_context():
+        cached = getattr(g, "_approval_rules", None)
+        if isinstance(cached, dict):
+            return deepcopy(cached)
+        get_runtime_canonical_aliases()
+        cached = getattr(g, "_approval_rules", None)
+        if isinstance(cached, dict):
+            return deepcopy(cached)
+    settings = _settings_doc(create=False)
+    stored = getattr(settings, "field_config", None) if settings else None
+    return approval_rules_from_field_config(stored if isinstance(stored, dict) else {})
+
+
+def approval_void_regex(config: Optional[Dict[str, Any]] = None) -> re.Pattern[str]:
+    """Build an exact negative/placeholder matcher from the active admin rules."""
+    rules = approval_rules_from_field_config(config) if isinstance(config, dict) else get_runtime_approval_rules()
+    patterns = [""]  # Blank approval fields are always unapproved.
+    for value in [*(rules.get("unapproved_values") or []), *(rules.get("identity_placeholders") or [])]:
+        token = str(value or "").strip()
+        if not token:
+            continue
+        if re.fullmatch(r"-+", token):
+            pattern = re.escape(token)
+        else:
+            words = [re.escape(word) for word in re.split(r"[\s_-]+", token) if word]
+            pattern = r"[\s_-]+".join(words)
+        if pattern and pattern not in patterns:
+            patterns.append(pattern)
+    return re.compile(r"^\s*(?:" + "|".join(patterns) + r")\s*$", re.IGNORECASE)
 
 
 def canonical_alias_index(config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
@@ -314,6 +439,193 @@ def canonical_alias_index(config: Optional[Dict[str, Any]] = None) -> Dict[str, 
 
 def canonical_field_for_attr_key(raw_key: Any, config: Optional[Dict[str, Any]] = None) -> str:
     return canonical_alias_index(config).get(canonical_attr_key(raw_key), "")
+
+
+def canonical_aliases_for_field(field_id: str, config: Optional[Dict[str, Any]] = None) -> List[str]:
+    entries = canonical_alias_entries_from_field_config(config) if isinstance(config, dict) else get_runtime_canonical_aliases()
+    target = canonical_attr_key(field_id)
+    for item in entries:
+        if canonical_attr_key(item.get("field_id")) == target:
+            return [canonical_attr_key(alias) for alias in (item.get("aliases") or []) if canonical_attr_key(alias)]
+    return [target] if target else []
+
+
+def _approval_text_token(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if re.fullmatch(r"-+", raw):
+        return raw
+    return re.sub(r"\s+", " ", raw.replace("_", " ").replace("-", " "))
+
+
+_APPROVAL_FALSE_TOKENS = {_approval_text_token(item) for item in APPROVAL_FALSE_VALUES}
+_APPROVAL_TRUE_TOKENS = {_approval_text_token(item) for item in APPROVAL_TRUE_VALUES}
+def _approval_scalar_status(
+    value: Any,
+    *,
+    true_tokens: Optional[set[str]] = None,
+    false_tokens: Optional[set[str]] = None,
+) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if not isinstance(value, str):
+        return None
+    token = _approval_text_token(value)
+    if not token:
+        return None
+    if token in (false_tokens if false_tokens is not None else _APPROVAL_FALSE_TOKENS):
+        return False
+    if token in (true_tokens if true_tokens is not None else _APPROVAL_TRUE_TOKENS):
+        return True
+    return None
+
+
+def _iter_approval_values(attrs: Dict[str, Any], aliases: Iterable[str]) -> List[tuple[str, Any]]:
+    items = list((attrs or {}).items())
+    out: List[tuple[str, Any]] = []
+    seen_keys: set[str] = set()
+    for alias in aliases:
+        token = canonical_attr_key(alias)
+        if not token:
+            continue
+        for raw_key, raw_value in items:
+            raw_token = canonical_attr_key(raw_key)
+            if raw_token == token and str(raw_key) not in seen_keys:
+                seen_keys.add(str(raw_key))
+                out.append((str(raw_key), raw_value))
+    return out
+
+
+def _flatten_approval_value(value: Any) -> List[Any]:
+    if isinstance(value, (list, tuple, set)):
+        out: List[Any] = []
+        for item in value:
+            out.extend(_flatten_approval_value(item))
+        return out
+    return [value]
+
+
+def resolve_approval(
+    attrs: Optional[Dict[str, Any]],
+    *,
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Resolve approval once for imports, canonical fields, APIs, filters and files."""
+    raw = dict(attrs or {})
+    rules = approval_rules_from_field_config(config) if isinstance(config, dict) else get_runtime_approval_rules()
+    false_tokens = set(rules.get("unapproved_values") or [])
+    true_tokens = set(rules.get("approved_values") or [])
+    placeholder_tokens = set(rules.get("identity_placeholders") or [])
+    status_values = _iter_approval_values(raw, canonical_aliases_for_field(APPROVED_FIELD_ID, config))
+    identity_values = _iter_approval_values(raw, canonical_aliases_for_field(APPROVED_BY_FIELD_ID, config))
+    date_values = _iter_approval_values(raw, canonical_aliases_for_field(APPROVED_DATE_FIELD_ID, config))
+
+    explicit_statuses: List[bool] = []
+    approved_by = ""
+    status_source = ""
+    identity_source = ""
+    ambiguous: List[Dict[str, str]] = []
+
+    for raw_key, raw_value in status_values:
+        for value in _flatten_approval_value(raw_value):
+            if isinstance(value, dict):
+                if value:
+                    ambiguous.append({"source": raw_key, "reason": "unsupported_approval_value"})
+                continue
+            status = _approval_scalar_status(value, true_tokens=true_tokens, false_tokens=false_tokens)
+            if status is not None:
+                explicit_statuses.append(status)
+                if not status_source:
+                    status_source = raw_key
+                continue
+            text = str(value or "").strip()
+            token = _approval_text_token(text)
+            if not text:
+                continue
+            if token in placeholder_tokens:
+                explicit_statuses.append(False)
+                if not status_source:
+                    status_source = raw_key
+                continue
+            # Legacy `approved` fields sometimes contain a person's name rather
+            # than a boolean. Preserve that useful identity while recording it
+            # as an implicit approval.
+            if not approved_by:
+                approved_by = text
+                identity_source = raw_key
+            elif approved_by.casefold() != text.casefold():
+                ambiguous.append({"source": raw_key, "reason": "conflicting_approver_identity"})
+
+    for raw_key, raw_value in identity_values:
+        for value in _flatten_approval_value(raw_value):
+            if isinstance(value, dict):
+                if value:
+                    ambiguous.append({"source": raw_key, "reason": "unsupported_approval_value"})
+                continue
+            status = _approval_scalar_status(value, true_tokens=true_tokens, false_tokens=false_tokens)
+            if status is not None:
+                explicit_statuses.append(status)
+                if not status_source:
+                    status_source = raw_key
+                continue
+            text = str(value or "").strip()
+            token = _approval_text_token(text)
+            if not text:
+                continue
+            if token in placeholder_tokens:
+                explicit_statuses.append(False)
+                if not status_source:
+                    status_source = raw_key
+                continue
+            if not approved_by:
+                approved_by = text
+                identity_source = raw_key
+            elif approved_by.casefold() != text.casefold():
+                ambiguous.append({"source": raw_key, "reason": "conflicting_approver_identity"})
+
+    approved_date = ""
+    date_source = ""
+    for raw_key, raw_value in date_values:
+        for value in _flatten_approval_value(raw_value):
+            text = str(value or "").strip()
+            if text:
+                approved_date = text
+                date_source = raw_key
+                break
+        if approved_date:
+            break
+
+    # An explicit negative status is authoritative. Otherwise either an
+    # explicit positive status or a real approver identity establishes approval.
+    if False in explicit_statuses and True in explicit_statuses:
+        ambiguous.append({"source": status_source, "reason": "conflicting_approval_status"})
+    approved = False if False in explicit_statuses else bool(True in explicit_statuses or approved_by)
+    if not approved:
+        approved_by = ""
+        identity_source = ""
+
+    return {
+        "approved": approved,
+        "approved_by": approved_by,
+        "approved_date": approved_date,
+        "status_source": status_source,
+        "identity_source": identity_source,
+        "date_source": date_source,
+        "has_approval_signal": bool(status_values or identity_values),
+        "ambiguous": ambiguous,
+    }
+
+
+def approved_by_attr_value(attrs: Optional[Dict[str, Any]], *, config: Optional[Dict[str, Any]] = None) -> Any:
+    result = resolve_approval(attrs, config=config)
+    return result.get("approved_by") or (True if result.get("approved") else None)
+
+
+def approved_date_attr_value(attrs: Optional[Dict[str, Any]], *, config: Optional[Dict[str, Any]] = None) -> Any:
+    return resolve_approval(attrs, config=config).get("approved_date") or None
 
 
 def _has_value(value: Any) -> bool:
@@ -350,6 +662,8 @@ def extract_canonical_fields(
         field_id = alias_index.get(canonical_attr_key(raw_key))
         if not field_id or not _has_value(raw_value):
             continue
+        if field_id in {APPROVED_FIELD_ID, APPROVED_BY_FIELD_ID, APPROVED_DATE_FIELD_ID}:
+            continue
         if field_id == "process":
             process_values.append(raw_value)
             continue
@@ -364,15 +678,12 @@ def extract_canonical_fields(
         if _has_value(value):
             canonical[field_id] = value
 
-    approved_by = approved_by_attr_value(attrs)
-    if approved_by is not None:
-        canonical[APPROVED_BY_FIELD_ID] = approved_by
-    else:
-        canonical.pop(APPROVED_BY_FIELD_ID, None)
-
-    approved_date = approved_date_attr_value(attrs)
-    if approved_date is not None:
-        canonical[APPROVED_DATE_FIELD_ID] = approved_date
+    approval = resolve_approval(attrs, config=config)
+    canonical[APPROVED_FIELD_ID] = bool(approval.get("approved"))
+    if approval.get("approved_by"):
+        canonical[APPROVED_BY_FIELD_ID] = approval["approved_by"]
+    if approval.get("approved_date"):
+        canonical[APPROVED_DATE_FIELD_ID] = approval["approved_date"]
 
     processes = normalize_processes({"processes": process_values}, _process_meta(process_meta))
     if not processes:
@@ -410,15 +721,20 @@ def canonical_attrs_for_part(
             if not _has_value(merged.get(field_id)) and _has_value(value):
                 merged[field_id] = value
 
-        approved_by = approved_by_attr_value(raw)
-        if approved_by is not None:
-            merged[APPROVED_BY_FIELD_ID] = approved_by
-        elif is_blankish_approval(merged.get(APPROVED_BY_FIELD_ID)):
-            merged.pop(APPROVED_BY_FIELD_ID, None)
-
-        approved_date = approved_date_attr_value(raw)
-        if approved_date is not None:
-            merged[APPROVED_DATE_FIELD_ID] = approved_date
+        approval = resolve_approval(raw)
+        if approval.get("has_approval_signal"):
+            merged[APPROVED_FIELD_ID] = bool(approval.get("approved"))
+            if approval.get("approved_by"):
+                merged[APPROVED_BY_FIELD_ID] = approval["approved_by"]
+            else:
+                merged.pop(APPROVED_BY_FIELD_ID, None)
+        if approval.get("approved_date"):
+            merged[APPROVED_DATE_FIELD_ID] = approval["approved_date"]
+        elif APPROVED_FIELD_ID not in merged:
+            current_approval = resolve_approval(current)
+            merged[APPROVED_FIELD_ID] = bool(current_approval.get("approved"))
+            if current_approval.get("approved_by"):
+                merged[APPROVED_BY_FIELD_ID] = current_approval["approved_by"]
         return merged
 
     return extract_canonical_fields(
@@ -457,7 +773,6 @@ def sync_part_canonical_fields(
     process_override: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     raw = dict(raw_attrs if isinstance(raw_attrs, dict) else getattr(part, "attrs", {}) or {})
-    current = dict(getattr(part, "canonical", {}) or {})
     top_level = {
         field_id: (top_level_overrides or {}).get(field_id, getattr(part, attr_name, None))
         for field_id, attr_name in _TOP_LEVEL_MIRRORS.items()
@@ -465,14 +780,6 @@ def sync_part_canonical_fields(
     top_level["processes"] = list((top_level_overrides or {}).get("processes") or list(getattr(part, "processes", None) or []))
 
     canonical = extract_canonical_fields(raw, process_meta=process_meta, top_level=top_level)
-    if APPROVED_BY_FIELD_ID not in canonical:
-        current_approved_by = current.get(APPROVED_BY_FIELD_ID)
-        if _has_value(current_approved_by) and not is_blankish_approval(current_approved_by):
-            canonical[APPROVED_BY_FIELD_ID] = current_approved_by
-    if APPROVED_DATE_FIELD_ID not in canonical:
-        current_approved_date = current.get(APPROVED_DATE_FIELD_ID)
-        if _has_value(current_approved_date):
-            canonical[APPROVED_DATE_FIELD_ID] = current_approved_date
     if process_override is not None:
         canonical["processes"] = normalize_processes({"processes": list(process_override or [])}, _process_meta(process_meta))
 

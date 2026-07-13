@@ -42,7 +42,7 @@ def test_dashboard_summary_shape(client, user):
     assert "top_hardware" in data
 
 
-def test_dashboard_summary_excludes_placeholder_approval_values(client, user):
+def test_dashboard_summary_distinguishes_status_from_identity_placeholders(client, user):
     role = Role(name="viewer", permissions=["items.view"]).save()
     user.roles = [role]
     user.save()
@@ -60,7 +60,7 @@ def test_dashboard_summary_excludes_placeholder_approval_values(client, user):
     resp = client.get("/api/dashboard/summary")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["counts"]["approved"] == 1
+    assert data["counts"]["approved"] == 2
 
 
 def test_dashboard_recent_parts_include_display_timestamp(client, user):

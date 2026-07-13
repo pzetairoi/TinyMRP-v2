@@ -11,16 +11,19 @@ from app.models.app_settings import AppSettings
 from app.models.part import Part
 from app.services.attrs import ALIASES, approved_value, canonical_attr_key, harvest_part_attrs, normalize_props
 from app.services.canonical_fields import (
+    approval_rules_from_field_config,
     canonical_alias_entries_from_field_config,
     canonical_field_for_attr_key,
     canonical_process_label_for_part,
     default_canonical_alias_entries,
+    default_approval_rules,
     set_runtime_canonical_aliases,
 )
 from app.services.filescan import datasheet_attr_present, datasheet_url_from_attrs
 from app.services.part_annotations import annotation_payload
 from app.services.part_norm import clean_rev
 from app.services.processmeta import normalize_processes
+from app.services.timezone_utils import utc_now
 
 
 _FIELD_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -32,6 +35,7 @@ _NUMBER_COMPARE_RE = re.compile(r"^\s*(<=|>=|=|<|>)?\s*(-?\d+(?:\.\d+)?)\s*$")
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 _FIELD_CANDIDATE_EXCLUDED_IDS = {"process", "process2", "process3", "processes", "comments_search"}
 _ARENA_BOM_FIXED_FIELD_IDS = {"thumbnail", "part_number", "description", "qty", "level"}
+_FINAL_APPROVAL_CONTEXTS = {"parts_list", "part_detail_summary", "bom_tree", "where_used"}
 _DEFAULT_ARENA_HEADERS = {
     "description": "item name",
     "category": "item category",
@@ -471,6 +475,7 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "material",
             "finish",
             "process",
+            "approved",
         ],
     },
     "part_detail_summary": {
@@ -493,6 +498,7 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "oem_partnumber",
             "datasheet",
             "classified",
+            "approved",
             "approved_by",
             "approved_date",
             "drawn_by",
@@ -508,6 +514,7 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "process",
             "oem",
             "oem_partnumber",
+            "approved",
         ],
     },
     "bom_tree": {
@@ -523,6 +530,7 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "material",
             "mass",
             "uom",
+            "approved",
             "qty",
             "alt_group",
             *[field_id for field_id, _label, _group in FILE_AVAILABILITY_FIELDS],
@@ -535,6 +543,7 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "process",
             "finish",
             "material",
+            "approved",
             "qty",
         ],
     },
@@ -551,6 +560,7 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "material",
             "category",
             "uom",
+            "approved",
             "qty",
             "alt_group",
             *[field_id for field_id, _label, _group in FILE_AVAILABILITY_FIELDS],
@@ -560,6 +570,7 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "part_number",
             "revision",
             "description",
+            "approved",
             "qty",
         ],
     },
@@ -949,6 +960,7 @@ def default_field_config() -> Dict[str, Any]:
         "custom_fields": [],
         "contexts": deepcopy(DEFAULT_CONTEXTS),
         "canonical_aliases": default_canonical_alias_entries(),
+        "approval_rules": default_approval_rules(),
     }
 
 
@@ -1044,6 +1056,11 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
         allowed = _unique_ids(raw.get("allowed_field_ids") or default_ctx["allowed_field_ids"], field_ids)
         if not allowed:
             allowed = list(default_ctx["allowed_field_ids"])
+        # Final approval is a core searchable state. Keep it available in every
+        # interactive part context, including configurations saved by older
+        # installations before the field was exposed there.
+        if name in _FINAL_APPROVAL_CONTEXTS and "approved" in field_ids and "approved" not in allowed:
+            allowed.append("approved")
         default_selected = _unique_ids(raw.get("default_field_ids") or default_ctx["default_field_ids"], set(allowed))
         if name == "arena_bom":
             allowed = [field_id for field_id in allowed if field_id not in _ARENA_BOM_FIXED_FIELD_IDS]
@@ -1068,6 +1085,7 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
         "custom_fields": custom_fields,
         "contexts": contexts,
         "canonical_aliases": canonical_alias_entries_from_field_config(payload),
+        "approval_rules": approval_rules_from_field_config(payload),
     }
 
 
@@ -1143,22 +1161,38 @@ def get_field_config() -> Dict[str, Any]:
         "fields": fields,
         "contexts": contexts,
         "canonical_aliases": list(sanitized.get("canonical_aliases") or default_canonical_alias_entries()),
+        "approval_rules": dict(sanitized.get("approval_rules") or default_approval_rules()),
     }
 
 
 def save_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any]:
     sanitized = sanitize_admin_field_config(payload)
     settings = _settings_doc(create=True)
+    saved_at = utc_now()
     settings.field_config = sanitized
+    settings.updated_at = saved_at
     settings.save()
+    # Older/restored installations can contain more than one global settings
+    # document. Keep the field configuration identical across them so selecting
+    # the newest document cannot make aliases disappear.
+    AppSettings.objects(id__ne=settings.id).update(
+        set__field_config=sanitized,
+        set__updated_at=saved_at,
+    )
     set_runtime_canonical_aliases(sanitized)
     return get_field_config()
 
 
 def reset_field_config() -> Dict[str, Any]:
     settings = _settings_doc(create=True)
+    saved_at = utc_now()
     settings.field_config = {}
+    settings.updated_at = saved_at
     settings.save()
+    AppSettings.objects(id__ne=settings.id).update(
+        set__field_config={},
+        set__updated_at=saved_at,
+    )
     set_runtime_canonical_aliases({})
     return get_field_config()
 

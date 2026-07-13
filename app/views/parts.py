@@ -1235,7 +1235,7 @@ def part_detail():
     summary_field_values = serialize_field_values(summary_field_values)
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
-    approver_identity = str(approved_value(attrs) or "").strip()
+    approver_identity = str(approval_field_values(attrs).get("approved_by") or "").strip()
     raw_comments = list(notes_comments.get("comments") or [])
     identity_keys = [uploader_identity, approver_identity]
     identity_keys.extend(str((comment or {}).get("author") or "").strip() for comment in raw_comments)

@@ -59,8 +59,14 @@ def field_config_save():
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     payload = request.get_json(force=True, silent=True) or {}
     config = save_field_config(payload)
+    rebuild = rebuild_part_materialized_fields(config=config)
     indexes = ensure_active_part_field_indexes(config)
-    return jsonify({"ok": True, "config": config, "indexes": indexes})
+    try:
+        from app.views.dashboard import clear_dashboard_cache
+        clear_dashboard_cache()
+    except Exception:
+        pass
+    return jsonify({"ok": True, "config": config, "indexes": indexes, "rebuild": rebuild})
 
 
 @bp.get("/admin/field-config/candidates")
@@ -79,8 +85,14 @@ def field_config_reset():
     if not _is_admin(user):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     config = reset_field_config()
+    rebuild = rebuild_part_materialized_fields(config=config)
     indexes = ensure_active_part_field_indexes(config)
-    return jsonify({"ok": True, "config": config, "indexes": indexes})
+    try:
+        from app.views.dashboard import clear_dashboard_cache
+        clear_dashboard_cache()
+    except Exception:
+        pass
+    return jsonify({"ok": True, "config": config, "indexes": indexes, "rebuild": rebuild})
 
 
 @bp.post("/admin/field-config/rebuild-canonical-fields")
@@ -90,6 +102,11 @@ def field_config_rebuild_canonical_fields():
     if not _is_admin(user):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     report = rebuild_all_part_canonical_fields()
+    try:
+        from app.views.dashboard import clear_dashboard_cache
+        clear_dashboard_cache()
+    except Exception:
+        pass
     return jsonify({"ok": True, "report": report, "config": get_field_config()})
 
 
@@ -100,6 +117,11 @@ def field_config_rebuild_search_fields():
     if not _is_admin(user):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     report = rebuild_part_materialized_fields()
+    try:
+        from app.views.dashboard import clear_dashboard_cache
+        clear_dashboard_cache()
+    except Exception:
+        pass
     config = get_field_config()
     indexes = ensure_active_part_field_indexes(config)
     return jsonify({"ok": True, "report": report, "config": config, "indexes": indexes})

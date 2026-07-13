@@ -51,7 +51,7 @@ type LazyWUState = {
   rows: number
   sortField: string
   sortOrder: 1 | -1
-  filters: Record<string, { value: string; matchMode: string }>
+  filters: Record<string, { value: any; matchMode: string }>
 }
 
 const FALLBACK_BOM_FIELDS: FieldDefinition[] = [
@@ -62,6 +62,7 @@ const FALLBACK_BOM_FIELDS: FieldDefinition[] = [
   { id: 'process', label: 'Process', kind: 'builtin', filterable: true, sortable: true },
   { id: 'finish', label: 'Finish', kind: 'builtin', filterable: true, sortable: true },
   { id: 'material', label: 'Material', kind: 'builtin', filterable: true, sortable: true },
+  { id: 'approved', label: 'Approved', kind: 'builtin', data_type: 'boolean', filterable: true, sortable: false },
   { id: 'qty', label: 'Qty', kind: 'special', filterable: true, sortable: true },
 ]
 
@@ -70,6 +71,7 @@ const FALLBACK_WHERE_USED_FIELDS: FieldDefinition[] = [
   { id: 'part_number', label: 'Part Number', kind: 'builtin', filterable: true, sortable: true },
   { id: 'revision', label: 'Revision', kind: 'builtin', filterable: true, sortable: true },
   { id: 'description', label: 'Description', kind: 'builtin', filterable: true, sortable: true },
+  { id: 'approved', label: 'Approved', kind: 'builtin', data_type: 'boolean', filterable: true, sortable: false },
   { id: 'qty', label: 'Qty', kind: 'special', filterable: true, sortable: true },
 ]
 
@@ -237,6 +239,25 @@ export default function BomPage() {
     )
   }
 
+  function booleanFilterElement(options: any) {
+    const value = options.value === true ? 'true' : options.value === false ? 'false' : ''
+    return (
+      <select
+        className="form-select form-select-sm"
+        aria-label="Filter by final approval status"
+        value={value}
+        onChange={(event) => {
+          const nextValue = event.target.value === '' ? null : event.target.value === 'true'
+          options.filterApplyCallback(nextValue)
+        }}
+      >
+        <option value="">Any</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+    )
+  }
+
   function reviewRowClass(row: any) {
     const data = row?.data || row || {}
     return data.has_pending_reviews ? `parts-review-row parts-review-row--${data.pending_review_severity || 'low'}` : ''
@@ -375,7 +396,8 @@ export default function BomPage() {
           filterMatchMode="custom"
           filterFunction={(value, filterValue) => matchesFieldFilter(field, value, filterValue)}
           showFilterMenu={false}
-          filterPlaceholder={fieldFilterPlaceholder(field)}
+          filterPlaceholder={field.data_type === 'boolean' ? undefined : fieldFilterPlaceholder(field)}
+          filterElement={field.data_type === 'boolean' ? booleanFilterElement : undefined}
           body={(node: any) => renderBomCell(field, node)}
           style={
             field.id === 'thumbnail'
@@ -453,9 +475,10 @@ export default function BomPage() {
               sortable={field.sortable !== false}
               filter={field.filterable !== false}
               showFilterMenu={false}
-              filterMatchMode="contains"
-              filterMatchModeOptions={["contains"]}
-              filterPlaceholder={fieldFilterPlaceholder(field)}
+              filterMatchMode={field.data_type === 'boolean' ? 'equals' : 'contains'}
+              filterMatchModeOptions={field.data_type === 'boolean' ? ['equals'] : ['contains']}
+              filterPlaceholder={field.data_type === 'boolean' ? undefined : fieldFilterPlaceholder(field)}
+              filterElement={field.data_type === 'boolean' ? booleanFilterElement : undefined}
               body={(row: WURow) => renderWhereUsedCell(field, row)}
             />
           )
