@@ -6,16 +6,16 @@
 # --- Tests ---
 pytest==8.2.2
 pytest-cov==5.0.0
-mongomock==4.1.2
+mongomock==4.3.0
 
 # --- Lint / static analysis ---
-ruff==0.6.9
+ruff==0.15.22
 black==24.8.0
-bandit==1.7.9
+bandit==1.9.4
 mypy==1.11.2
 
 # --- Supply chain ---
-pip-audit==2.7.3
+pip-audit==2.10.1
 cyclonedx-bom==4.6.1
 
 # --- Git hooks ---
