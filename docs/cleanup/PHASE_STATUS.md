@@ -2,8 +2,8 @@
 
 | Phase | Name | Status | Prerequisites / risks | Candidate count | Required tests | Authorised |
 |---|---|---|---|---:|---|---|
-| 0 | Baseline and repository audit | completed with validation limitations | coverage runner and C# lock recorded | 18 | collection, static/C#/available checks | yes |
-| 1 | Low-risk static cleanup | pending | confirm affected dynamic registrations; no broad autofix | 6 proposed | focused pytest + Ruff F401/F811/F841 | no |
+| 0 | Baseline and repository audit | completed | Python 3.11 unavailable locally; complete 3.12 suite/coverage and deterministic C# baseline recorded | 19 | collection, full pytest, coverage, static/C#/frontend checks | yes |
+| 1 | Low-risk static cleanup | pending | confirm affected dynamic registrations; no broad autofix | 6 proposed | focused pytest + Ruff F401/F811/F841 | yes |
 | 2 | Shared primitive consolidation | pending | behavioural equivalence contracts | 0 | timezone/filename/revision tests | no |
 | 3 | Search and filter consolidation | pending | query/index and RLS equivalence | 0 | filter/query integration | no |
 | 4 | File and document services | pending | filesystem/PDF visual regressions | 0 | docpack/file tests | no |
