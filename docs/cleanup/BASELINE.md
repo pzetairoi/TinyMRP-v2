@@ -6,10 +6,10 @@ Audit date: 2026-07-25 (Australia/Sydney).  Inspected branch: `main`; inspected 
 
 | Item | Observed |
 |---|---|
-| Python | 3.12.4 (project targets 3.11) |
+| Python | 3.12.4; Python 3.11 was not installed locally (`py -0p` listed only 3.12) |
 | .NET SDK | 8.0.204 |
 | Node / npm | v20.14.0 / 10.7.0 |
-| Dependency method | pinned `requirements.txt` plus `requirements-dev.txt`; audit tools installed into existing `.venv` only |
+| Dependency method | pinned `requirements.txt` plus `requirements-dev.txt`; existing `.venv` supplied validation tooling |
 | C# target | .NET Framework 4.8, x64 |
 
 ## Validation results
@@ -17,15 +17,15 @@ Audit date: 2026-07-25 (Australia/Sydney).  Inspected branch: `main`; inspected 
 | Command | Result | Counts / notes |
 |---|---|---|
 | `python -m pytest --collect-only -q` | pass | 263 collected in 1.60 s; three dependency deprecation warnings |
-| `python -m pytest -q` | environment limitation | runner did not return a final pytest summary; child Python processes had to be stopped. Do not treat dots printed as a pass result. |
-| `.venv\\Scripts\\python -m pytest -q --cov=app --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json` | environment limitation | same runner/process issue; no coverage JSON/HTML was produced, so no line/branch rate is claimed. |
+| `python -m pytest -vv --durations=20` | pass | 263 passed, 280 warnings in 93.22 s. The earlier apparent non-termination was the command runner returning before its child Python process, not a pytest lifecycle defect. |
+| `.venv\\Scripts\\python -m pytest -q --cov=app --cov-branch --cov-report=term-missing --cov-report=html --cov-report=json` | pass | 263 passed, 280 warnings in 285.98 s; 61.27% line coverage and 49.78% branch coverage. `htmlcov/` and `coverage.json` were generated locally and not committed. |
 | `.venv\\Scripts\\python -m ruff check .` | pass | configured CI rules: all checks passed. |
 | `.venv\\Scripts\\python -m ruff check app tests --select F401,F811,F841` | fail (evidence only) | 95 findings: 75 safely autofixable according to Ruff; not applied. |
 | `.venv\\Scripts\\python -m black --check .` | fail | 125 files would be reformatted; CI marks this non-blocking. |
 | `.venv\\Scripts\\python -m mypy app/services/security_mode.py app/services/api_auth.py` | pass | no issues in the two CI-scoped modules. |
 | `.venv\\Scripts\\python -m bandit -r app -ll` | pass | 28,373 LOC scanned; no medium/high issues (275 low findings below threshold). |
 | `dotnet build solidworks-addin\\TinyMRP.SolidWorksAddin\\TinyMRP.SolidWorksAddin.csproj -c Release -p:Platform=x64` | pass | 0 warnings, 0 errors. |
-| `dotnet test solidworks-addin\\TinyMRP.SolidWorksAddin.Tests\\TinyMRP.SolidWorksAddin.Tests.csproj -c Release -p:Platform=x64 --no-build` | fail, pre-existing/environmental | 43/44 passed; `HasIncompleteExportSession_RejectsLegacySchemaVersion` hit a lock on `%APPDATA%\\TinyMRP\\export-sessions\\active-export-session.json`. |
+| `dotnet test solidworks-addin\\TinyMRP.SolidWorksAddin.Tests\\TinyMRP.SolidWorksAddin.Tests.csproj -c Release -p:Platform=x64 --no-build` | pass twice | 44/44 passed in 4.38 s, then 44/44 passed in 3 s after test-only AppData isolation. |
 | ShellCheck / Hadolint | command unavailable | required by CI but not installed on this Windows host. |
 | `frontend: npm ci` | pass with warnings | installed 285 packages; Node 20.14.0 is below Vite/plugin declared minimum 20.19.0; audit reported 12 total vulnerabilities. |
 | `frontend: npm run lint` | pass | ESLint exited 0. |
@@ -35,4 +35,4 @@ Audit date: 2026-07-25 (Australia/Sydney).  Inspected branch: `main`; inspected 
 
 ## Acceptance conclusion
 
-The source baseline is sufficient for a controlled Phase 1 limited to selected Ruff findings, but validation is incomplete: establish a clean Python 3.11 run with coverage and resolve/isolate the C# session-file lock first.  No production behaviour was changed in Phase 0.
+Phase 0 is complete. Python 3.11 remains an external host limitation, precisely evidenced by the installed-interpreter listing; the complete suite and coverage baseline nevertheless pass under the available Python 3.12.4. No production behaviour was changed.
