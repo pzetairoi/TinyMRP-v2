@@ -380,22 +380,21 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
+        [DoNotParallelize]
         public void HasIncompleteExportSession_RejectsLegacySchemaVersion()
         {
-            var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
-            string activePath = (string)InvokePrivate(publisher, "GetActiveExportSessionPath");
-            string backupPath = activePath + ".test-backup";
-            string directory = Path.GetDirectoryName(activePath);
-            Directory.CreateDirectory(directory);
-
-            bool hadExisting = File.Exists(activePath);
-            if (hadExisting)
-            {
-                File.Copy(activePath, backupPath, true);
-            }
+            string appDataRoot = Path.Combine(Path.GetTempPath(), "tinymrp-test-appdata-" + Guid.NewGuid().ToString("N"));
+            string originalAppData = Environment.GetEnvironmentVariable("APPDATA", EnvironmentVariableTarget.Process);
 
             try
             {
+                Directory.CreateDirectory(appDataRoot);
+                Environment.SetEnvironmentVariable("APPDATA", appDataRoot, EnvironmentVariableTarget.Process);
+
+                var publisher = new TinyMrpPublisher(null, new TinyMrpConfig());
+                string activePath = (string)InvokePrivate(publisher, "GetActiveExportSessionPath");
+                Directory.CreateDirectory(Path.GetDirectoryName(activePath));
+
                 // A schema-version-1 (legacy PlannedRef-based) session with no PhysicalQueue must never
                 // be reported as resumable by the current (PhysicalExportQueueItem-based) pipeline.
                 object legacySession = Activator.CreateInstance(GetNestedType("ExportSessionState"), true);
@@ -408,14 +407,10 @@ namespace TinyMRP.SolidWorksAddin.Tests
             }
             finally
             {
-                if (hadExisting)
+                Environment.SetEnvironmentVariable("APPDATA", originalAppData, EnvironmentVariableTarget.Process);
+                if (Directory.Exists(appDataRoot))
                 {
-                    File.Copy(backupPath, activePath, true);
-                    File.Delete(backupPath);
-                }
-                else if (File.Exists(activePath))
-                {
-                    File.Delete(activePath);
+                    Directory.Delete(appDataRoot, true);
                 }
             }
         }
