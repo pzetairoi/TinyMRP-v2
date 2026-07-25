@@ -11,9 +11,16 @@ from app.services.processmeta import normalize_processes
 from flask_login import current_user
 from app.services.authorization import (
     authorised_part_pairs,
+    has_permission,
     require_permission,
     scope_queryset,
 )
+from app.services.field_policies import (
+    filter_part_custom_fields,
+    filter_response_fields,
+    response_context,
+)
+from app.services.file_security import managed_file_group_allowed
 from app.services.audit import log_action
 from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.part_norm import clean_rev
@@ -36,9 +43,11 @@ def _has_children(pn: str, rev: str | None = None) -> bool:
 
 
 def _coverage_groups(pn: str, rev: str) -> set[str]:
+    if not has_permission(current_user, "files.read"):
+        return set()
     groups: set[str] = set()
     for row in PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev)).only("ext_group"):
-        if row.ext_group:
+        if row.ext_group and managed_file_group_allowed(current_user, row.ext_group):
             groups.add(str(row.ext_group).lower())
     return groups
 
@@ -125,7 +134,12 @@ def _node(
     effective_rev = _clean_rev(attrs.get("revision") or (p.revision if p else "") or (rev_clean or ""))
     proc_label = _process_label(p, attrs)
     config = config or get_field_config()
-    thumbs = preview_png_urls_for(pn, effective_rev)
+    boundary = response_context("parts", current_user)
+    thumbs = (
+        preview_png_urls_for(pn, effective_rev, user=current_user)
+        if has_permission(current_user, "files.read")
+        else []
+    )
     coverage = _coverage_groups(pn, effective_rev)
     review = (review_statuses or {}).get(
         (str(pn or "").strip(), _clean_rev(effective_rev)),
@@ -148,26 +162,57 @@ def _node(
         },
         coverage=coverage,
     )
-    return {
-        "key": f"{pn}::{effective_rev}",
-        "leaf": not _has_children(pn, effective_rev),
-        "data": {
+    custom_field_ids = {
+        str(field.get("id") or "").strip()
+        for field in config.get("fields") or []
+        if isinstance(field, dict)
+        and field.get("kind") == "custom"
+        and str(field.get("id") or "").strip()
+    }
+    custom_attr_keys = {
+        str(field.get("source_path") or "")[6:].lower(): str(
+            field.get("source_path") or ""
+        )[6:]
+        for field in config.get("fields") or []
+        if isinstance(field, dict)
+        and field.get("kind") == "custom"
+        and str(field.get("source_path") or "").lower().startswith("attrs.")
+    }
+    data = filter_response_fields(
+        "bom_line",
+        current_user,
+        {
             "pn": pn,
-            "desc": attrs.get("description",""),
-            "rev":  effective_rev,
-            "qty":  getattr(link,"qty",None),
-            "uom":  getattr(link,"uom",None),
-            "alt_group": getattr(link,"alt_group","") or "",
-            "material":  attrs.get("material",""),
-            "finish":    attrs.get("finish",""),
-            "process":   proc_label,
+            "desc": attrs.get("description", ""),
+            "rev": effective_rev,
+            "qty": getattr(link, "qty", None),
+            "uom": getattr(link, "uom", None),
+            "alt_group": getattr(link, "alt_group", "") or "",
+            "material": attrs.get("material", ""),
+            "finish": attrs.get("finish", ""),
+            "process": proc_label,
             "thumb_urls": thumbs,
-            "attrs": attrs,
+            "attrs": filter_part_custom_fields(
+                current_user,
+                attrs,
+                configured_fields=custom_attr_keys,
+                context={"policy_context": boundary},
+            ),
             "pending_review_count": int(review.get("count") or 0),
             "pending_review_severity": str(review.get("severity") or ""),
             "has_pending_reviews": bool(review.get("pending")),
             **values,
-        }
+        },
+        context={
+            "policy_context": boundary,
+            "surface": "embedded",
+            "configured_fields": custom_field_ids,
+        },
+    )
+    return {
+        "key": f"{pn}::{effective_rev}",
+        "leaf": not _has_children(pn, effective_rev),
+        "data": data,
     }
 
 
@@ -350,7 +395,15 @@ def bom_flat():
             attrs = harvest_part_attrs(part_doc) if part_doc else {}
             effective_rev = _clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
             proc_label = _process_label(part_doc, attrs)
-            thumbs = preview_png_urls_for(child_pn, effective_rev)
+            thumbs = (
+                preview_png_urls_for(
+                    child_pn,
+                    effective_rev,
+                    user=current_user,
+                )
+                if has_permission(current_user, "files.read")
+                else []
+            )
             coverage = _coverage_groups(child_pn, effective_rev)
             values = resolve_part_field_values(
                 part_doc,
@@ -377,7 +430,27 @@ def bom_flat():
             (str(child_pn or "").strip(), _clean_rev(key[1])),
             {"count": 0, "severity": "", "pending": False},
         )
-        row = {
+        boundary = response_context("parts", current_user)
+        custom_field_ids = {
+            str(field.get("id") or "").strip()
+            for field in config.get("fields") or []
+            if isinstance(field, dict)
+            and field.get("kind") == "custom"
+            and str(field.get("id") or "").strip()
+        }
+        custom_attr_keys = {
+            str(field.get("source_path") or "")[6:].lower(): str(
+                field.get("source_path") or ""
+            )[6:]
+            for field in config.get("fields") or []
+            if isinstance(field, dict)
+            and field.get("kind") == "custom"
+            and str(field.get("source_path") or "").lower().startswith("attrs.")
+        }
+        row = filter_response_fields(
+            "bom_line",
+            current_user,
+            {
             "row_key": f"{child_pn}::{key[1]}",
             "part_number": child_pn,
             "revision": key[1],
@@ -387,12 +460,23 @@ def bom_flat():
             "alt_group": "",
             "process": proc_label,
             "thumb_urls": thumbs,
-            "attrs": attrs,
+            "attrs": filter_part_custom_fields(
+                current_user,
+                attrs,
+                configured_fields=custom_attr_keys,
+                context={"policy_context": boundary},
+            ),
             "pending_review_count": int(review.get("count") or 0),
             "pending_review_severity": str(review.get("severity") or ""),
             "has_pending_reviews": bool(review.get("pending")),
             **values,
-        }
+            },
+            context={
+                "policy_context": boundary,
+                "surface": "embedded",
+                "configured_fields": custom_field_ids,
+            },
+        )
         rows_by_key[key] = row
         return row
 

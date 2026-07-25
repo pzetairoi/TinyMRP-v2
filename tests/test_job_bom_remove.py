@@ -15,7 +15,7 @@ def test_job_bom_remove_uses_line_rev(client, user):
     user.save()
     _login(client, user)
 
-    Part(part_number="PN-1", revision="A", description="Test").save()
+    Part(part_number="PN-1", revision="", description="Test").save()
     job = Job(job_number="JOB-100", title="Test Job").save()
     job.bom = [JobBOMLine(pn="PN-1", rev="", qty=2)]
     job.save()

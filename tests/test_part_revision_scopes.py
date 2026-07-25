@@ -195,9 +195,7 @@ def test_portal_and_production_scopes_are_exact_and_released_only(client):
     latest_allowed = client.get("/api/part_detail?pn=SCOPE-100")
     assert latest_allowed.status_code == 200
     assert latest_allowed.get_json()["part"]["revision"] == "A"
-    assert {
-        row["revision"] for row in latest_allowed.get_json()["other_versions"]
-    } == {"A"}
+    assert latest_allowed.get_json()["other_versions"] == []
     listing = client.post(
         "/api/parts_lazy",
         json={"first": 0, "rows": 25, "filters": {}},

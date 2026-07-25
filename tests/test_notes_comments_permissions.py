@@ -96,8 +96,8 @@ def test_notes_and_comments_preserve_attrs_and_keep_search_indexes(client, user)
     detail = detail_resp.get_json()
     assert detail["part"]["field_values"]["material"] == "Steel"
     assert detail["part"]["notes"] == "Needs fixture before release"
-    assert detail["part"]["attributes"]["notes"] == "Imported supplier note"
-    assert detail["part"]["attributes"]["comments"] == "Imported drawing comment"
+    assert "notes" not in detail["part"]["attributes"]
+    assert "comments" not in detail["part"]["attributes"]
     assert detail["comments"][0]["text"] == "Waiting for QA review"
 
     list_resp = client.post(

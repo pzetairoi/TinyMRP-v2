@@ -13,7 +13,17 @@ from app.models.part import Part
 from app.models.artifact import PartFile
 from app.models.bom import BOMLink
 from app.services.attrs import approval_filter_raw, harvest_part_attrs
-from app.services.authorization import require_permission, scope_queryset
+from app.services.authorization import (
+    effective_permissions,
+    has_permission,
+    require_permission,
+    scope_queryset,
+)
+from app.services.field_policies import (
+    filter_response_fields,
+    response_context,
+)
+from app.services.file_security import managed_file_group_allowed
 from app.services.insights import classify_part
 from app.services.timezone_utils import utc_now
 from app.views.api_helpers import add_datetime_fields
@@ -36,7 +46,8 @@ def _cache_key() -> str:
         uid = current_user.get_id() or "anon"
     except Exception:
         uid = "anon"
-    return f"summary:{uid}"
+    permissions = ",".join(sorted(effective_permissions(current_user)))
+    return f"summary:{uid}:{permissions}"
 
 
 def _get_cache(key: str) -> Optional[Dict]:
@@ -260,6 +271,15 @@ def dashboard_summary():
             "recent_parts": [],
             "top_hardware": [],
         }
+        empty = filter_response_fields(
+            "part_dashboard",
+            current_user,
+            empty,
+            context={
+                "policy_context": response_context("parts", current_user),
+                "surface": "dashboard",
+            },
+        )
         _set_cache(cache_key, empty)
         return jsonify(empty)
 
@@ -290,6 +310,11 @@ def dashboard_summary():
     approved_count = base.filter(__raw__=approved_raw).count()
 
     doc_coverage = _coverage_counts(allowed)
+    doc_coverage = {
+        group: count
+        for group, count in doc_coverage.items()
+        if managed_file_group_allowed(current_user, group)
+    }
     top_processes = _top_processes(allowed)
     top_hardware = _top_hardware_usage(allowed)
 
@@ -299,17 +324,35 @@ def dashboard_summary():
         rev = (attrs.get("revision") or p.revision or "").strip()
         desc = p.description or attrs.get("description") or ""
         recent_parts.append(
-            {
+            filter_response_fields(
+                "parts",
+                current_user,
+                {
                 "part_number": p.part_number,
                 "revision": rev,
                 "description": desc,
-            }
+                },
+                context={"surface": "dashboard"},
+            )
         )
         add_datetime_fields(recent_parts[-1], "updated_at", p.updated_at)
 
-    payload = {
+    boundary = response_context("parts", current_user)
+    top_hardware = [
+        filter_response_fields(
+            "parts",
+            current_user,
+            row,
+            context={"policy_context": boundary, "surface": "dashboard"},
+        )
+        for row in top_hardware
+    ]
+    payload = filter_response_fields(
+        "part_dashboard",
+        current_user,
+        {
         "counts": {"total_parts": total_parts, "updated_7d": updated_7d, "approved": approved_count},
-        "doc_coverage": doc_coverage,
+        "doc_coverage": doc_coverage if has_permission(current_user, "files.read") else {},
         "data_health": {
             "missing_material": missing_material,
             "missing_process": missing_process,
@@ -318,6 +361,8 @@ def dashboard_summary():
         "top_processes": top_processes,
         "recent_parts": recent_parts,
         "top_hardware": top_hardware,
-    }
+        },
+        context={"policy_context": boundary, "surface": "dashboard"},
+    )
     _set_cache(cache_key, payload)
     return jsonify(payload)

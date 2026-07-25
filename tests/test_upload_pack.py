@@ -448,4 +448,7 @@ def test_files_overview_separates_current_and_other_revisions(client, app, user,
     assert len(data["other_revisions"]) == 1
     other_section = data["other_revisions"][0]
     assert other_section["revision"] == other_rev
-    assert {row["collection"] for row in other_section["files"]} == {"part_files", "part_extra_files"}
+    assert {row["kind"] for row in other_section["files"]} == {"scanned", "extra"}
+    assert all("collection" not in row for row in other_section["files"])
+    assert all("db_id" not in row for row in other_section["files"])
+    assert all("rel_path" not in row for row in other_section["files"])

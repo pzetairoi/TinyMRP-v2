@@ -13,6 +13,10 @@ from app.services.api_auth import api_auth_required
 from app.services.authorization import authorised_get, has_permission, scope_queryset
 from app.services.attrs import harvest_part_attrs
 from app.services.biz_utils import generate_supplier_code
+from app.services.field_policies import (
+    filter_response_fields,
+    response_context,
+)
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
 
 bp = Blueprint("suppliers_api", __name__, url_prefix="/api/suppliers")
@@ -79,6 +83,17 @@ _SUPPLIER_FINANCIAL_FIELDS = {
     "min_order_value",
     "billing_address",
 }
+_ADDRESS_FIELDS = {
+    "label",
+    "line1",
+    "line2",
+    "city",
+    "state",
+    "postal",
+    "country",
+    "is_default",
+}
+_CONTACT_FIELDS = {"name", "title", "email", "phone", "is_primary"}
 
 
 def _invalid_payload_fields(data, allowed):
@@ -89,6 +104,27 @@ def _invalid_payload_fields(data, allowed):
             f"Unsupported fields: {', '.join(invalid)}.",
             400,
         )
+    return None
+
+
+def _invalid_nested_fields(data):
+    for key in ("address", "billing_address"):
+        value = data.get(key)
+        if value is not None and not isinstance(value, dict):
+            return json_error("invalid_address", "Address must be an object.", 400)
+        if isinstance(value, dict):
+            invalid = _invalid_payload_fields(value, _ADDRESS_FIELDS)
+            if invalid:
+                return invalid
+    contacts = data.get("contacts")
+    if contacts is not None and not isinstance(contacts, list):
+        return json_error("invalid_contacts", "Contacts must be a list.", 400)
+    for value in contacts or []:
+        if not isinstance(value, dict):
+            return json_error("invalid_contact", "Contacts must be objects.", 400)
+        invalid = _invalid_payload_fields(value, _CONTACT_FIELDS)
+        if invalid:
+            return invalid
     return None
 
 
@@ -112,33 +148,62 @@ def _scoped_supplier(user, code, permission):
     )
 
 
-def _supplier_to_dict(s: Supplier, *, include_financial=True):
-    return {
+def _address_to_dict(value, user, boundary):
+    if value is None:
+        return None
+    return filter_response_fields(
+        "address",
+        user,
+        {field: getattr(value, field, None) for field in _ADDRESS_FIELDS},
+        context={"policy_context": boundary, "surface": "embedded"},
+    )
+
+
+def _contact_to_dict(value, user, boundary):
+    return filter_response_fields(
+        "contact",
+        user,
+        {field: getattr(value, field, None) for field in _CONTACT_FIELDS},
+        context={"policy_context": boundary, "surface": "embedded"},
+    )
+
+
+def _supplier_to_dict(s: Supplier, *, user):
+    boundary = response_context("suppliers", user)
+    payload = {
         "code": s.code,
         "name": s.name,
         "description": s.description,
         "status": s.status,
-        "rating": s.rating if include_financial else None,
+        "rating": s.rating,
         "tags": s.tags or [],
         "categories": s.categories or [],
         "primary_contact": s.contact or "",
         "email": s.email,
         "phone": s.phone,
         "website": s.website,
-        "tax_id": s.tax_id if include_financial else None,
-        "payment_terms": s.payment_terms if include_financial else None,
-        "currency": s.currency if include_financial else None,
-        "min_order_value": s.min_order_value if include_financial else None,
+        "tax_id": s.tax_id,
+        "payment_terms": s.payment_terms,
+        "currency": s.currency,
+        "min_order_value": s.min_order_value,
         "lead_time_days": s.lead_time_days,
-        "address": s.address.to_mongo() if s.address else None,
-        "billing_address": (
-            s.billing_address.to_mongo()
-            if include_financial and s.billing_address
-            else None
-        ),
-        "contacts": [c.to_mongo() for c in (s.contacts or [])],
+        "address": _address_to_dict(s.address, user, boundary),
+        "billing_address": _address_to_dict(s.billing_address, user, boundary),
+        "contacts": [
+            _contact_to_dict(contact, user, boundary)
+            for contact in (s.contacts or [])
+        ],
         "created_at": None,
     }
+    return filter_response_fields(
+        "suppliers",
+        user,
+        payload,
+        context={
+            "policy_context": boundary,
+            "preserve_null_fields": _SUPPLIER_FINANCIAL_FIELDS,
+        },
+    )
 
 
 @bp.get("")
@@ -177,10 +242,9 @@ def list_suppliers():
 
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
-    financial = has_permission(user, "suppliers.financial.read")
     return jsonify({
         "ok": True,
-        "items": [_supplier_to_dict(s, include_financial=financial) for s in items],
+        "items": [_supplier_to_dict(s, user=user) for s in items],
         "page": page,
         "page_size": size,
         "total": total,
@@ -195,6 +259,9 @@ def create_supplier():
         return err
     data = get_json()
     invalid = _invalid_payload_fields(data, _SUPPLIER_FIELDS)
+    if invalid:
+        return invalid
+    invalid = _invalid_nested_fields(data)
     if invalid:
         return invalid
     if set(data) & _SUPPLIER_FINANCIAL_FIELDS:
@@ -232,10 +299,7 @@ def create_supplier():
     s.save()
     return jsonify({
         "ok": True,
-        "supplier": _supplier_to_dict(
-            s,
-            include_financial=has_permission(user, "suppliers.financial.read"),
-        ),
+        "supplier": _supplier_to_dict(s, user=user),
     })
 
 
@@ -250,10 +314,7 @@ def get_supplier(code):
         return json_error("not_found", "Supplier not found.", 404)
     return jsonify({
         "ok": True,
-        "supplier": _supplier_to_dict(
-            s,
-            include_financial=has_permission(user, "suppliers.financial.read"),
-        ),
+        "supplier": _supplier_to_dict(s, user=user),
     })
 
 
@@ -268,6 +329,9 @@ def update_supplier(code):
         return json_error("not_found", "Supplier not found.", 404)
     data = get_json()
     invalid = _invalid_payload_fields(data, _SUPPLIER_FIELDS - {"code"})
+    if invalid:
+        return invalid
+    invalid = _invalid_nested_fields(data)
     if invalid:
         return invalid
     if set(data) & _SUPPLIER_FINANCIAL_FIELDS:
@@ -298,10 +362,7 @@ def update_supplier(code):
     s.save()
     return jsonify({
         "ok": True,
-        "supplier": _supplier_to_dict(
-            s,
-            include_financial=has_permission(user, "suppliers.financial.read"),
-        ),
+        "supplier": _supplier_to_dict(s, user=user),
     })
 
 
@@ -325,10 +386,7 @@ def supplier_status(code):
     s.save()
     return jsonify({
         "ok": True,
-        "supplier": _supplier_to_dict(
-            s,
-            include_financial=has_permission(user, "suppliers.financial.read"),
-        ),
+        "supplier": _supplier_to_dict(s, user=user),
     })
 
 
@@ -346,16 +404,25 @@ def supplier_orders(code):
         .order_by("-order_date")
         .limit(50)
     )
-    financial = has_permission(user, "orders.financial.read")
+    boundary = response_context("suppliers", user)
     return jsonify({
         "ok": True,
         "orders": [
-            {
-                "order_number": o.order_number,
-                "status": o.status,
-                "total": o.total if financial else None,
-                "order_date": iso(o.order_date),
-            }
+            filter_response_fields(
+                "supplier_order",
+                user,
+                {
+                    "order_number": o.order_number,
+                    "status": o.status,
+                    "total": o.total,
+                    "order_date": iso(o.order_date),
+                },
+                context={
+                    "policy_context": boundary,
+                    "surface": "embedded",
+                    "preserve_null_fields": {"total"},
+                },
+            )
             for o in orders
         ]
     })
@@ -389,13 +456,20 @@ def supplier_parts(code):
     items = []
     for p in parts:
         attrs = harvest_part_attrs(p)
-        items.append({
-            "part_number": p.part_number,
-            "revision": attrs.get("revision", "") or p.revision or "",
-            "description": attrs.get("description") or p.description or "",
-            "category": attrs.get("category") or p.category or "",
-            "uom": p.uom or "EA",
-        })
+        items.append(
+            filter_response_fields(
+                "parts",
+                user,
+                {
+                    "part_number": p.part_number,
+                    "revision": attrs.get("revision", "") or p.revision or "",
+                    "description": attrs.get("description") or p.description or "",
+                    "category": attrs.get("category") or p.category or "",
+                    "uom": p.uom or "EA",
+                },
+                context={"surface": "autocomplete"},
+            )
+        )
     return jsonify({"ok": True, "items": items})
 
 
@@ -417,9 +491,16 @@ def supplier_performance(code):
             if o.actual_delivery <= o.promised_delivery:
                 on_time += 1
             avg_lead += (o.actual_delivery - o.order_date).days if o.order_date else 0
-    return jsonify({
-        "ok": True,
-        "on_time_rate": (on_time / total) if total else None,
-        "avg_lead_days": (avg_lead / total) if total else None,
-        "orders_count": total,
-    })
+    return jsonify(
+        filter_response_fields(
+            "supplier_stats",
+            user,
+            {
+                "ok": True,
+                "on_time_rate": (on_time / total) if total else None,
+                "avg_lead_days": (avg_lead / total) if total else None,
+                "orders_count": total,
+            },
+            context={"policy_context": response_context("suppliers", user)},
+        )
+    )

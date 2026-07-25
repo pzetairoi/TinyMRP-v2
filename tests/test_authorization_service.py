@@ -459,7 +459,7 @@ def test_field_filtering_unsupported_external_policy_fails_safely(app):
         ) == {}
 
 
-def test_field_filtering_internal_policy_preserves_copy(app):
+def test_field_filtering_internal_policy_is_an_explicit_allowlist(app):
     with app.app_context():
         role = _role("engineering_data_steward", ["parts.read"])
         user = _user("field-internal@example.com", [role])
@@ -467,7 +467,7 @@ def test_field_filtering_internal_policy_preserves_copy(app):
 
         filtered = filter_response_fields("parts", user, payload)
 
-        assert filtered == payload
+        assert filtered == {"part_number": "PART-2"}
         assert filtered is not payload
 
 

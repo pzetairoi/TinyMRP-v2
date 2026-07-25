@@ -498,7 +498,8 @@ def test_part_images_drawing_rows_expose_safe_metadata(client, app, tmp_path):
     assert row["urls"]
     assert row["revision"] == "A"
     assert row["source_file_id"] == str(pf.id)
-    assert row["rel_path"] == "drawings/PN-500_DWG.png"
+    assert "rel_path" not in row
+    assert "sha256" not in row
     assert row["source_fingerprint"].startswith("sha256:")
     assert row["is_dwg"] is True
     assert row["image_urls"]

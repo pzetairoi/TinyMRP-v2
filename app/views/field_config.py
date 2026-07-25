@@ -12,6 +12,7 @@ from app.services.field_config import (
     reset_field_config,
     save_field_config,
 )
+from app.services.field_policies import filter_part_field_config
 from app.services.part_materialized import rebuild_part_materialized_fields
 from app.services.user_settings import get_or_create_settings, settings_to_dict
 
@@ -40,12 +41,36 @@ def _is_admin(user) -> bool:
 def field_config_get():
     user = get_request_user()
     settings = get_or_create_settings(user)
-    config = get_field_config()
+    config = filter_part_field_config(user, get_field_config())
+    visible_ids = {
+        str(field.get("id") or "")
+        for field in config.get("fields") or []
+        if isinstance(field, dict)
+    }
+    preferences = settings_to_dict(settings).get("field_preferences") or {}
+    safe_preferences = {"contexts": {}, "review_columns": {}}
+    for name, pref in (preferences.get("contexts") or {}).items():
+        if name not in config.get("contexts", {}) or not isinstance(pref, dict):
+            continue
+        safe_preferences["contexts"][name] = {
+            "field_ids": [
+                str(field_id)
+                for field_id in pref.get("field_ids") or []
+                if str(field_id) in visible_ids
+            ]
+        }
+    if user_has_permission(user, "comments.read") or user_has_permission(
+        user,
+        "markups.read",
+    ):
+        safe_preferences["review_columns"] = dict(
+            preferences.get("review_columns") or {}
+        )
     return jsonify(
         {
             "ok": True,
             "config": config,
-            "user_preferences": settings_to_dict(settings).get("field_preferences") or {},
+            "user_preferences": safe_preferences,
             "permissions": {"can_admin": _is_admin(user)},
         }
     )

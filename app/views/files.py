@@ -10,6 +10,7 @@ from app.services.file_security import (
     managed_thumbnail_available,
 )
 from app.services.files_access import file_url_for
+from app.services.field_policies import filter_response_fields, response_context
 from app.services.part_drawing_markups import source_fingerprint_for
 from app.services.timezone_utils import utc_iso
 from app.models.artifact import PartFile
@@ -95,7 +96,18 @@ def part_images():
             "source_fingerprint": source_fingerprint_for(d),
             "image_urls": dedup_full,
         }
-        rows.append(row)
+        rows.append(
+            filter_response_fields(
+                "file_metadata",
+                current_user,
+                row,
+                context={
+                    "policy_context": response_context("parts", current_user),
+                    "surface": "detail",
+                    "markup_source": True,
+                },
+            )
+        )
     try:
         log_action("file.list", resource_type="file", resource=f"{pn}:{rev}")
     except Exception:
