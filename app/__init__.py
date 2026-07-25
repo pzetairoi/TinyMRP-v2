@@ -167,6 +167,11 @@ def create_app(config_object=None):
     app.config.setdefault("SECURITY_REGISTERABLE", False)
     app.config.setdefault("SECURITY_RECOVERABLE", False)
     app.config.setdefault("SECURITY_CONFIRMABLE", False)
+    app.config.setdefault(
+        "ALLOW_PERMISSION_TEST_DATA",
+        str(os.getenv("ALLOW_PERMISSION_TEST_DATA") or "false").strip().lower()
+        in ("1", "true", "yes", "on"),
+    )
     app.config.setdefault("SESSION_COOKIE_HTTPONLY", True)
     app.config.setdefault("SESSION_COOKIE_SAMESITE", "Lax")
     app.config.setdefault("SESSION_COOKIE_SECURE", False)

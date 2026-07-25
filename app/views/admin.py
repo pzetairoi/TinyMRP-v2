@@ -19,6 +19,7 @@ from ..models.user_settings import UserSettings
 from app.services.app_settings import branding_root, get_app_settings
 from app.services.password_policy import validate_admin_password
 from app.services.processmeta import load_process_meta, sanitize_process_meta
+from app.services.standard_roles import STANDARD_ROLES
 from app.services.timezone_utils import (
     clear_timezone_cache,
     format_display_ts,
@@ -381,11 +382,84 @@ def admin_settings():
         ],
     )
 
+def _role_options():
+    options = []
+    for role in Role.objects().order_by("display_name", "name"):
+        definition = STANDARD_ROLES.get(role.name)
+        permissions = list(role.permissions or [])
+        options.append(
+            {
+                "role": role,
+                "display_name": (
+                    role.display_name
+                    or (definition.display_name if definition else "")
+                    or role.name.replace("_", " ").title()
+                ),
+                "description": role.description or (
+                    definition.description if definition else ""
+                ),
+                "is_standard": definition is not None,
+                "permission_count": len(permissions),
+                "permissions": permissions,
+            }
+        )
+    return options
+
+
+def _active_legacy_admin_count() -> int:
+    admin_role = Role.objects(name="admin").first()
+    if admin_role is None:
+        return 0
+    return User.objects(active=True, roles=admin_role).count()
+
+
 @bp.route("/users")
 @require_permission("security.users.read")
 def users_list():
-    users = User.objects().order_by("-id").limit(200)
-    return render_template("admin/users_list.html", users=users)
+    query = (request.args.get("q") or "").strip()
+    role_filter = (request.args.get("role") or "").strip()
+    active_filter = (request.args.get("active") or "all").strip().lower()
+    if active_filter not in {"all", "active", "inactive"}:
+        active_filter = "all"
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+
+    users_query = User.objects()
+    if query:
+        users_query = users_query.filter(email__icontains=query)
+    if role_filter:
+        selected_role = Role.objects(name=role_filter).first()
+        users_query = (
+            users_query.filter(roles=selected_role)
+            if selected_role is not None
+            else users_query.filter(id=None)
+        )
+    if active_filter != "all":
+        users_query = users_query.filter(active=active_filter == "active")
+
+    page_size = 50
+    total = users_query.count()
+    page_count = max(1, (total + page_size - 1) // page_size)
+    page = min(page, page_count)
+    users = list(
+        users_query.order_by("email")
+        .skip((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return render_template(
+        "admin/users_list.html",
+        users=users,
+        roles=_role_options(),
+        query=query,
+        role_filter=role_filter,
+        active_filter=active_filter,
+        page=page,
+        page_count=page_count,
+        page_size=page_size,
+        total=total,
+    )
 
 
 def _cleanup_user_references(u: User):
@@ -453,6 +527,69 @@ def users_bulk_delete():
         flash("Skipped your own account.", "warning")
     return redirect(url_for("admin.users_list"))
 
+
+@bp.post("/users/bulk-status")
+@require_permission("security.users.manage")
+def users_bulk_status():
+    ids = request.form.getlist("user_ids")
+    action = (request.form.get("action") or "").strip().lower()
+    if action not in {"activate", "deactivate"}:
+        abort(400)
+    if not ids:
+        flash("No users selected.", "error")
+        return redirect(url_for("admin.users_list"))
+
+    active_admins = _active_legacy_admin_count()
+    changed = 0
+    skipped_self = 0
+    skipped_last_admin = 0
+    for user in User.objects(id__in=ids):
+        is_deactivate = action == "deactivate"
+        if (
+            is_deactivate
+            and str(user.id) == str(getattr(current_user, "id", ""))
+        ):
+            skipped_self += 1
+            continue
+        is_legacy_admin = user.has_role("admin")
+        if (
+            is_deactivate
+            and user.active
+            and is_legacy_admin
+            and active_admins <= 1
+        ):
+            skipped_last_admin += 1
+            continue
+        next_active = action == "activate"
+        if bool(user.active) == next_active:
+            continue
+        user.active = next_active
+        user.updated_at = utc_now()
+        user.save()
+        if is_deactivate and is_legacy_admin:
+            active_admins -= 1
+        changed += 1
+        try:
+            log_action(
+                f"admin.user.{action}",
+                resource_type="user",
+                resource=str(user.email),
+            )
+        except Exception:
+            pass
+
+    if changed:
+        flash(f"{action.title()}d {changed} user(s).", "success")
+    if skipped_self:
+        flash("Your own account was not deactivated.", "warning")
+    if skipped_last_admin:
+        flash(
+            "The only active legacy administrator was not deactivated.",
+            "warning",
+        )
+    return redirect(url_for("admin.users_list"))
+
+
 @bp.route("/users/new", methods=["GET", "POST"])
 @require_permission("security.users.manage")
 @require_permission("security.assignments.manage")
@@ -474,6 +611,11 @@ def users_create():
             email=email,
             password=hash_password(password),
             fs_uniquifier=secrets.token_hex(16),
+            active=(
+                request.form.get("active") is not None
+                if "active_present" in request.form
+                else True
+            ),
             password_changed_at=utc_now(),
             updated_at=utc_now(),
         )
@@ -494,8 +636,7 @@ def users_create():
             pass
         flash("User created.", "success")
         return redirect(url_for("admin.users_list"))
-    roles = Role.objects().order_by("name")
-    return render_template("admin/users_form.html", roles=roles)
+    return render_template("admin/users_form.html", role_options=_role_options())
 
 @bp.route("/users/<user_id>/edit", methods=["GET", "POST"])
 @require_permission("security.users.manage")
@@ -525,7 +666,18 @@ def users_edit(user_id):
             requested_role_ids = {str(role.id) for role in selected_roles}
             if requested_role_ids - current_role_ids:
                 abort(403)
+        requested_active = (
+            request.form.get("active") is not None
+            if "active_present" in request.form
+            else bool(u.active)
+        )
+        if not requested_active and u.active:
+            if str(u.id) == str(current_user.id):
+                abort(403)
+            if u.has_role("admin") and _active_legacy_admin_count() <= 1:
+                abort(403)
         u.roles = selected_roles
+        u.active = requested_active
 
         # Optional password reset
         new_pw = (request.form.get("new_password") or "").strip()
@@ -556,8 +708,11 @@ def users_edit(user_id):
         flash("User updated.", "success")
         return redirect(url_for("admin.users_list"))
 
-    roles = Role.objects().order_by("name")
-    return render_template("admin/users_edit.html", user=u, roles=roles)
+    return render_template(
+        "admin/users_edit.html",
+        user=u,
+        role_options=_role_options(),
+    )
 
 
 @bp.route("/purge-parts", methods=["GET", "POST"])

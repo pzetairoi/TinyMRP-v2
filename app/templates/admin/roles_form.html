@@ -1,126 +1,164 @@
 {% extends "security/base.html" %}
-{% from "ui/_components.html" import page_header, card_header, empty_state %}
-{% block title %}{{ 'Edit role' if role else 'New role' }} - Admin{% endblock %}
+{% from "ui/_components.html" import page_header, card_header %}
+{% block title %}{{ "Edit Role" if role else "Create Role" }} · Admin{% endblock %}
 {% block content %}
-{% call page_header('Edit Role' if role else 'Create Role', 'Define what people with this role can see and change.', 'People & access') %}{% endcall %}
-<div class="row justify-content-center">
-  <div class="col-xl-10">
-    <div class="card shadow-sm tm-card">
-      <div class="card-body p-4">
-        {{ card_header('Role Details', 'Use a clear role name and select only the access this team needs.') }}
-        <form method="post">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <div class="row g-3 mb-4">
-            <div class="col-md-4">
-              <label class="form-label" for="roleName">Name</label>
-              <input class="form-control" id="roleName" type="text" name="name" value="{{ role.name if role else '' }}" required>
-            </div>
-            <div class="col-md-8">
-              <label class="form-label" for="roleDescription">Description</label>
-              <input class="form-control" id="roleDescription" type="text" name="description" value="{{ role.description if role else '' }}" placeholder="Who should receive this role?">
-            </div>
-          </div>
+{% call page_header("Edit role" if role else "New custom role", "Define a focused permission bundle. The backend remains authoritative.", "People & access") %}
+  <a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Back to roles</a>
+{% endcall %}
 
-          {% set selected = role.permissions if role else [] %}
-          <div class="mb-4">
-            <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3">
-              <div>
-                <h2 class="tm-card-title">Permissions</h2>
-                <p class="tm-card-subtitle">View permissions are read-only. Manage or edit permissions allow users to create and change records.</p>
-              </div>
-              <div class="d-flex gap-2">
-                <button class="btn btn-sm btn-outline-secondary" type="button" data-permission-action="clear">Clear all</button>
-                <button class="btn btn-sm btn-outline-primary" type="button" data-permission-action="view">Select view permissions</button>
-              </div>
-            </div>
-            {% if permissions %}
-              {% set permission_groups = [
-                ('Administration', 'Control access and instance-wide configuration.', [
-                  ('users.manage', 'Manage users', 'Create accounts, assign roles, reset passwords, and remove eligible users.'),
-                  ('roles.manage', 'Manage roles', 'Create and change permission bundles.'),
-                  ('settings.manage', 'Manage settings', 'Change shared application and engineering settings.')
-                ]),
-                ('Parts & BOM', 'Access engineering records and product structures.', [
-                  ('items.view', 'View parts', 'Browse part records, files, and details.'),
-                  ('items.edit', 'Edit parts', 'Change part data, notes, files, and related content.'),
-                  ('bom.view', 'View BOMs', 'Inspect bill-of-material structures.'),
-                  ('bom.edit', 'Edit BOMs', 'Add, remove, or change BOM relationships.'),
-                  ('numbering.manage', 'Manage numbering', 'Create and administer part-numbering schemes.')
-                ]),
-                ('Operations', 'Commercial and production records around parts.', [
-                  ('jobs.view', 'View jobs', 'Open job records and linked parts.'),
-                  ('jobs.manage', 'Manage jobs', 'Create and change jobs and participants.'),
-                  ('orders.view', 'View orders', 'Open sales and purchase order records.'),
-                  ('orders.manage', 'Manage orders', 'Create and change orders and order lines.'),
-                  ('customers.view', 'View customers', 'Browse customer organisations.'),
-                  ('customers.manage', 'Manage customers', 'Create and change customer records and links.'),
-                  ('suppliers.view', 'View suppliers', 'Browse supplier organisations.'),
-                  ('suppliers.manage', 'Manage suppliers', 'Create and change supplier records and links.')
-                ]),
-                ('Production & inventory', 'Production planning and stock workflows.', [
-                  ('workorders.view', 'View work orders', 'Review work-order status and requirements.'),
-                  ('workorders.edit', 'Edit work orders', 'Change work-order details and progress.'),
-                  ('workorders.close', 'Close work orders', 'Complete and close production work.'),
-                  ('inventory.issue', 'Issue inventory', 'Record material issued from stock.'),
-                  ('inventory.receive', 'Receive inventory', 'Record material received into stock.'),
-                  ('mrp.run', 'Run MRP', 'Start material-requirements planning calculations.'),
-                  ('reports.view', 'View reports', 'Access operational and management reports.')
-                ]),
-                ('Tools & imports', 'Supporting utilities and external data.', [
-                  ('tools.view', 'Use tools', 'Open shared engineering and SolidWorks utilities.'),
-                  ('import.bom', 'Import BOM packs', 'Upload BOM packs and associated part files.')
-                ])
-              ] %}
-              <div class="tm-permission-groups">
-                {% for group_name, group_description, group_permissions in permission_groups %}
-                <section class="tm-permission-group">
-                  <div class="tm-permission-group__header">
-                    <div><h3>{{ group_name }}</h3><p>{{ group_description }}</p></div>
-                    <button class="btn btn-sm btn-link text-decoration-none" type="button" data-permission-group-toggle>Select group</button>
-                  </div>
-                  <div class="tm-permission-group__items">
-                    {% for permission_id, permission_label, permission_description in group_permissions %}
-                    {% if permission_id in permissions %}
-                    <label class="tm-permission-option" for="perm-{{ permission_id|replace('.', '-') }}">
-                      <input class="form-check-input" type="checkbox" id="perm-{{ permission_id|replace('.', '-') }}" name="permissions" value="{{ permission_id }}" {% if permission_id in selected %}checked{% endif %}>
-                      <span><strong>{{ permission_label }}</strong><small>{{ permission_description }}</small><code>{{ permission_id }}</code></span>
-                    </label>
-                    {% endif %}
-                    {% endfor %}
-                  </div>
-                </section>
-                {% endfor %}
-              </div>
-            {% else %}
-              {{ empty_state("No permissions available", "Review the permission catalogue before editing roles.") }}
-            {% endif %}
-          </div>
-          <div class="d-flex justify-content-end gap-2">
-            <a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Cancel</a>
-            <button class="btn btn-primary" type="submit">{{ 'Save role' if role else 'Create role' }}</button>
-          </div>
-        </form>
+{% if standard_definition %}
+<div class="alert alert-primary d-flex flex-wrap align-items-center justify-content-between gap-2">
+  <div>
+    <span class="badge text-bg-primary me-2">Standard role</span>
+    The machine slug is fixed because it identifies this catalogue role.
+    {% if drift_fields %}
+    <strong class="d-block mt-1 text-warning">This role differs in: {{ drift_fields|join(', ') }}.</strong>
+    {% endif %}
+  </div>
+  {% if drift_fields %}
+  <form method="post" action="{{ url_for('admin_roles.standard_roles_restore') }}"
+        data-confirm="Restore every drifted standard-role definition? User assignments will remain unchanged.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-sm btn-outline-warning" type="submit">Restore canonical definition</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+<form method="post" data-permission-editor>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <section class="card shadow-sm tm-card mb-4">
+    <div class="card-body p-4">
+      {{ card_header("Role details", "Use a stable machine slug and a human-readable name and description.") }}
+      <div class="row g-3">
+        <div class="col-md-4">
+          <label class="form-label" for="roleName">Machine slug</label>
+          {% set name_value = submitted.name if submitted else (role.name if role else '') %}
+          {% if standard_definition %}
+          <input type="hidden" name="name" value="{{ role.name }}">
+          <input class="form-control font-monospace" id="roleName" value="{{ role.name }}" readonly aria-readonly="true">
+          {% else %}
+          <input class="form-control font-monospace" id="roleName" type="text" name="name"
+                 value="{{ name_value }}" pattern="[a-z0-9][a-z0-9_]*" required
+                 placeholder="quality_inspector">
+          <div class="form-text">Lowercase letters, numbers and underscores.</div>
+          {% endif %}
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="roleDisplayName">Display name</label>
+          <input class="form-control" id="roleDisplayName" type="text" name="display_name"
+                 value="{{ submitted.display_name if submitted else (role.display_name if role else '') }}"
+                 placeholder="Quality Inspector">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label" for="roleDescription">Description</label>
+          <input class="form-control" id="roleDescription" type="text" name="description"
+                 value="{{ submitted.description if submitted else (role.description if role else '') }}"
+                 placeholder="Who should receive this role?">
+        </div>
       </div>
     </div>
+  </section>
+
+  <section class="card shadow-sm tm-card mb-4">
+    <div class="card-body p-4">
+      {% call card_header("Canonical permissions", "Select the least access this role needs.") %}
+      <span class="tm-selected-count" aria-live="polite"><strong data-permission-count>0</strong> selected</span>
+      {% endcall %}
+      <div class="row g-2 align-items-end mb-3">
+        <div class="col-lg-6">
+          <label class="form-label" for="permissionSearch">Search permissions</label>
+          <input class="form-control" id="permissionSearch" type="search" data-permission-search
+                 placeholder="Label, identifier, group or action">
+        </div>
+        <div class="col-lg-6">
+          <div class="d-flex flex-wrap gap-2 justify-content-lg-end">
+            <button class="btn btn-sm btn-outline-primary" type="button" data-permission-action="read">Select all read permissions</button>
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-permission-action="expand">Expand groups</button>
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-permission-action="collapse">Collapse groups</button>
+            <button class="btn btn-sm btn-outline-danger" type="button" data-permission-action="clear">Clear all</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tm-permission-groups">
+        {% for group in canonical_groups %}
+        <details class="tm-permission-group" data-permission-group open>
+          <summary class="tm-permission-group__header">
+            <span>
+              <strong>{{ group.label }}</strong>
+              <small>{{ group.permissions|length }} canonical permissions</small>
+            </span>
+            <span class="tm-group-controls">
+              <button class="btn btn-sm btn-link" type="button" data-permission-group-select>Select group</button>
+              <button class="btn btn-sm btn-link" type="button" data-permission-group-clear>Clear group</button>
+            </span>
+          </summary>
+          <div class="tm-permission-group__items">
+            {% for permission in group.permissions %}
+            <label class="tm-permission-option"
+                   data-permission-option
+                   data-permission-search-value="{{ permission.label }} {{ permission.id }} {{ group.label }} {{ permission.action }}">
+              <input class="form-check-input" type="checkbox" name="permissions"
+                     value="{{ permission.id }}" data-permission-kind="canonical"
+                     {% if permission.id in selected_permissions %}checked{% endif %}>
+              <span>
+                <span class="d-flex flex-wrap align-items-center gap-2">
+                  <strong>{{ permission.label }}</strong>
+                  <span class="badge text-bg-light tm-action-badge">{{ permission.action }}</span>
+                </span>
+                <small>{{ group.label }}</small>
+                <code>{{ permission.id }}</code>
+              </span>
+            </label>
+            {% endfor %}
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+
+      <details class="tm-permission-group tm-permission-group--legacy mt-3" data-permission-group>
+        <summary class="tm-permission-group__header">
+          <span>
+            <strong>Legacy compatibility permissions</strong>
+            <small>New roles should normally use canonical permissions.</small>
+          </span>
+          <span class="tm-group-controls">
+            <span class="badge text-bg-warning">Compatibility only</span>
+            <button class="btn btn-sm btn-link" type="button" data-permission-group-select>Select group</button>
+            <button class="btn btn-sm btn-link" type="button" data-permission-group-clear>Clear group</button>
+          </span>
+        </summary>
+        <div class="alert alert-warning small">
+          These identifiers remain available for compatibility with older integrations and roles.
+        </div>
+        <div class="tm-permission-group__items">
+          {% for permission in legacy_permissions %}
+          <label class="tm-permission-option"
+                 data-permission-option
+                 data-permission-search-value="{{ permission.label }} {{ permission.id }} Legacy compatibility {{ permission.action }}">
+            <input class="form-check-input" type="checkbox" name="permissions"
+                   value="{{ permission.id }}" data-permission-kind="legacy"
+                   {% if permission.id in selected_permissions %}checked{% endif %}>
+            <span>
+              <span class="d-flex flex-wrap align-items-center gap-2">
+                <strong>{{ permission.label }}</strong>
+                <span class="badge text-bg-light tm-action-badge">{{ permission.action }}</span>
+              </span>
+              <small>Legacy compatibility</small>
+              <code>{{ permission.id }}</code>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <div class="d-flex justify-content-end gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Cancel</a>
+    <button class="btn btn-primary" type="submit">{{ "Save role" if role else "Create custom role" }}</button>
   </div>
-</div>
-<script>
-(function () {
-  const checkboxes = Array.from(document.querySelectorAll('input[name="permissions"]'));
-  document.querySelector('[data-permission-action="clear"]')?.addEventListener('click', function () {
-    checkboxes.forEach(function (checkbox) { checkbox.checked = false; });
-  });
-  document.querySelector('[data-permission-action="view"]')?.addEventListener('click', function () {
-    checkboxes.forEach(function (checkbox) { checkbox.checked = checkbox.value.endsWith('.view'); });
-  });
-  document.querySelectorAll('[data-permission-group-toggle]').forEach(function (button) {
-    button.addEventListener('click', function () {
-      const groupBoxes = Array.from(button.closest('.tm-permission-group').querySelectorAll('input[name="permissions"]'));
-      const shouldSelect = groupBoxes.some(function (checkbox) { return !checkbox.checked; });
-      groupBoxes.forEach(function (checkbox) { checkbox.checked = shouldSelect; });
-      button.textContent = shouldSelect ? 'Clear group' : 'Select group';
-    });
-  });
-})();
-</script>
+</form>
+<script src="{{ url_for('static', filename='admin-access.js') }}" defer></script>
 {% endblock %}

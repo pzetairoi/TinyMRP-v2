@@ -1,48 +1,51 @@
 {% extends "security/base.html" %}
-{% from "ui/_components.html" import page_header, card_header, empty_state %}
-{% block title %}Edit user Â· Admin{% endblock %}
+{% from "ui/_components.html" import page_header, card_header %}
+{% block title %}Edit user · Admin{% endblock %}
 {% block content %}
-{% call page_header("Edit User", "Update role access and optionally reset the password.", "Admin") %}{% endcall %}
-<div class="row justify-content-center">
-  <div class="col-md-6 col-lg-5">
-    <div class="card shadow-sm tm-card">
-      <div class="card-body p-4">
-        {{ card_header("Access Settings", "Review assigned roles and change the password if needed.") }}
-        <p class="text-muted mb-3">{{ user.email }}</p>
-        <form method="post">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <div class="mb-3">
-            <label class="form-label">Roles</label>
-            {% if roles %}
-              <div class="row row-cols-2 g-2">
-                {% set assigned_ids = user.roles | map(attribute='id') | map('string') | list %}
-                {% for r in roles %}
-                <div class="col">
-                  <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="roles" id="role-{{ r.id }}"
-                      value="{{ r.id }}"
-                      {% if r.id|string in assigned_ids %}checked{% endif %}>
-                    <label class="form-check-label" for="role-{{ r.id }}">{{ r.name }}</label>
-                  </div>
-                </div>
-                {% endfor %}
-              </div>
-            {% else %}
-              {{ empty_state("No roles available", "Create a role before changing access for this user.", url_for('admin_roles.roles_create'), "Create role") }}
-            {% endif %}
+{% call page_header("Edit user", user.email, "People & access") %}
+  <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list', user_id=user.id) }}">Activity</a>
+  <a class="btn btn-outline-secondary" href="{{ url_for('admin.users_list') }}">Back to users</a>
+{% endcall %}
+<form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="active_present" value="1">
+  <div class="row g-4">
+    <div class="col-xl-4">
+      <section class="card shadow-sm tm-card">
+        <div class="card-body p-4">
+          {{ card_header("Account", "Deactivation is the normal way to suspend access.") }}
+          <p class="fw-semibold mb-3">{{ user.email }}</p>
+          <div class="form-check form-switch mb-4">
+            <input class="form-check-input" id="userActive" type="checkbox" name="active" {% if user.active %}checked{% endif %}>
+            <label class="form-check-label" for="userActive">Active account</label>
           </div>
+          <hr>
           <div class="mb-3">
-            <label class="form-label">Set new password (optional)</label>
-            <input class="form-control" type="password" name="new_password" autocomplete="new-password" placeholder="Leave blank to keep current password">
+            <label class="form-label" for="newPassword">Set new password <span class="text-muted">(optional)</span></label>
+            <input class="form-control" id="newPassword" type="password" name="new_password"
+                   autocomplete="new-password" placeholder="Leave blank to keep current password">
           </div>
-          <div class="mb-3">
-            <label class="form-label">Confirm new password</label>
-            <input class="form-control" type="password" name="confirm_password" autocomplete="new-password">
+          <div>
+            <label class="form-label" for="confirmPassword">Confirm new password</label>
+            <input class="form-control" id="confirmPassword" type="password" name="confirm_password" autocomplete="new-password">
           </div>
-          <button class="btn btn-primary w-100" type="submit">Save</button>
-        </form>
-      </div>
+        </div>
+      </section>
+    </div>
+    <div class="col-xl-8">
+      <section class="card shadow-sm tm-card">
+        <div class="card-body p-4">
+          {{ card_header("Role assignments", "The permission preview is informational; server-side checks remain authoritative.") }}
+          {% set assigned_ids = user.roles | map(attribute='id') | map('string') | list %}
+          {% include "admin/_role_cards.html" %}
+        </div>
+      </section>
     </div>
   </div>
-</div>
+  <div class="d-flex justify-content-end gap-2 mt-4">
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin.users_list') }}">Cancel</a>
+    <button class="btn btn-primary" type="submit">Save user</button>
+  </div>
+</form>
+<script src="{{ url_for('static', filename='admin-access.js') }}" defer></script>
 {% endblock %}

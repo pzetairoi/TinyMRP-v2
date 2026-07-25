@@ -187,12 +187,13 @@
                   <li><h6 class="dropdown-header tm-nav-section-title">People &amp; access</h6></li>
                   <li><a class="dropdown-item{% if request_endpoint in ['admin.users_list', 'admin.users_create', 'admin.users_edit'] %} active{% endif %}" href="{{ url_for('admin.users_list') }}">Users</a></li>
                   <li><a class="dropdown-item{% if request_endpoint in ['admin_roles.roles_list', 'admin_roles.roles_create', 'admin_roles.roles_edit'] %} active{% endif %}" href="{{ url_for('admin_roles.roles_list') }}">Roles &amp; permissions</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}#permission-test-setup">Permission test setup</a></li>
+                  <li><a class="dropdown-item{% if request_endpoint in ['admin_audit.audit_list', 'admin_audit.audit_test'] %} active{% endif %}" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a></li>
                   <li><h6 class="dropdown-header tm-nav-section-title">Configuration</h6></li>
                   <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_settings' %} active{% endif %}" href="{{ url_for('admin.admin_settings') }}">Application settings</a></li>
                   <li><a class="dropdown-item{% if request_endpoint == 'ui.admin_fields_ui' %} active{% endif %}" href="{{ url_for('ui.admin_fields_ui') }}">Fields &amp; exports</a></li>
                   <li><a class="dropdown-item{% if request_endpoint == 'ui.admin_addin_ui' %} active{% endif %}" href="{{ url_for('ui.admin_addin_ui') }}">SolidWorks add-in</a></li>
                   <li><h6 class="dropdown-header tm-nav-section-title">System</h6></li>
-                  <li><a class="dropdown-item{% if request_endpoint in ['admin_audit.audit_list', 'admin_audit.audit_test'] %} active{% endif %}" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a></li>
                   <li><a class="dropdown-item{% if request_endpoint == 'admin.admin_metrics' %} active{% endif %}" href="{{ url_for('admin.admin_metrics') }}">System metrics</a></li>
                 </ul>
               </li>
@@ -253,6 +254,8 @@
             <ul class="dropdown-menu">
               <li><a class="dropdown-item" href="{{ url_for('admin.users_list') }}">Users</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}">Roles &amp; permissions</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_roles.roles_list') }}#permission-test-setup">Permission test setup</a></li>
+              <li><a class="dropdown-item" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a></li>
             </ul>
           </div>
           <div class="dropdown">
@@ -266,7 +269,6 @@
           <div class="dropdown">
             <button class="tm-admin-bar__link dropdown-toggle{% if admin_system_active %} active{% endif %}" type="button" data-bs-toggle="dropdown" aria-expanded="false">System</button>
             <ul class="dropdown-menu dropdown-menu-end">
-              <li><a class="dropdown-item" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a></li>
               <li><a class="dropdown-item" href="{{ url_for('admin.admin_metrics') }}">System metrics</a></li>
               <li><hr class="dropdown-divider"></li>
               <li><a class="dropdown-item text-danger" href="{{ url_for('admin.purge_parts') }}">Purge parts data</a></li>
