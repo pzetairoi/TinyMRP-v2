@@ -1,7 +1,12 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import current_user
-from flask_security import roles_required
-from app.services.acl import permissions_required, apply_supplier_scope, is_external_scoped_user
+from app.services.acl import permissions_required, is_external_scoped_user
+from app.services.authorization import (
+    authorised_get,
+    authorise,
+    has_permission,
+    scope_queryset,
+)
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -14,11 +19,76 @@ from app.services.biz_utils import generate_supplier_code
 
 bp = Blueprint("admin_suppliers", __name__, url_prefix="/admin/suppliers")
 
+_SUPPLIER_FORM_FIELDS = {
+    "csrf_token",
+    "code",
+    "name",
+    "description",
+    "status",
+    "rating",
+    "contact",
+    "email",
+    "phone",
+    "website",
+    "tax_id",
+    "payment_terms",
+    "currency",
+    "min_order_value",
+    "lead_time_days",
+    "address_label",
+    "address_line1",
+    "address_line2",
+    "address_city",
+    "address_state",
+    "address_postal",
+    "address_country",
+    "billing_label",
+    "billing_line1",
+    "billing_line2",
+    "billing_city",
+    "billing_state",
+    "billing_postal",
+    "billing_country",
+    "contacts_text",
+    "users",
+    "processes",
+    "categories",
+    "tags",
+}
+_SUPPLIER_FINANCIAL_FORM_FIELDS = {
+    "rating",
+    "tax_id",
+    "payment_terms",
+    "currency",
+    "min_order_value",
+    "billing_label",
+    "billing_line1",
+    "billing_line2",
+    "billing_city",
+    "billing_state",
+    "billing_postal",
+    "billing_country",
+}
+
+
+def _require(permission):
+    if not authorise(current_user, permission).allowed:
+        abort(403)
+
+
+def _require_supplier_form_permissions():
+    if set(request.form) - _SUPPLIER_FORM_FIELDS:
+        abort(400)
+    if set(request.form) & _SUPPLIER_FINANCIAL_FORM_FIELDS:
+        _require("suppliers.financial.update")
+    if "users" in request.form:
+        _require("suppliers.portal_users.manage")
+
 
 @bp.get("/")
-@permissions_required("suppliers.view")
+@permissions_required("suppliers.read")
 def suppliers_list():
-    sups = Supplier.objects()
+    sups = scope_queryset(Supplier.objects, current_user, "suppliers")
     q_text = (request.args.get("q") or "").strip()
     code_q = (request.args.get("code_q") or "").strip()
     name_q = (request.args.get("name_q") or "").strip()
@@ -42,11 +112,12 @@ def suppliers_list():
     if email_q:
         sups = sups.filter(email__icontains=email_q)
     if rating_q:
+        _require("suppliers.financial.read")
         try:
             sups = sups.filter(rating=int(rating_q))
         except Exception:
             pass
-    sups = apply_supplier_scope(sups, current_user).order_by("name")
+    sups = sups.order_by("name")
     return render_template(
         "admin/suppliers_list.html",
         suppliers=sups,
@@ -62,38 +133,62 @@ def suppliers_list():
     )
 
 @bp.post("/<sup_id>/delete")
-@permissions_required("suppliers.manage")
+@permissions_required("suppliers.archive")
 def suppliers_delete(sup_id):
     try:
-        s = apply_supplier_scope(Supplier.objects(id=sup_id), current_user).first()
+        s = authorised_get(
+            Supplier.objects,
+            current_user,
+            sup_id,
+            resource_type="suppliers",
+            permission="suppliers.archive",
+        )
         if not s:
             flash("Supplier not found.", "error")
             return redirect(url_for("admin_suppliers.suppliers_list"))
-        Job.objects(vendors=s).update(pull__vendors=s)
-        Order.objects(supplier=s).update(supplier=None)
-        s.delete()
-        flash("Supplier deleted.", "success")
+        s.status = "inactive"
+        s.save()
+        flash("Supplier archived.", "success")
     except Exception:
         flash("Delete failed.", "error")
     return redirect(url_for("admin_suppliers.suppliers_list"))
 
 
 @bp.get("/<sup_id>")
-@permissions_required("suppliers.view")
+@permissions_required("suppliers.read")
 def suppliers_view(sup_id):
     try:
-        s = apply_supplier_scope(Supplier.objects(id=sup_id), current_user).first()
+        s = authorised_get(
+            Supplier.objects,
+            current_user,
+            sup_id,
+            resource_type="suppliers",
+        )
         if not s:
             abort(404)
     except (DoesNotExist, ValidationError):
         abort(404)
-    users = User.objects().order_by("email")
-    orders = Order.objects(supplier=s).order_by("-order_date")
+    users = (
+        User.objects().order_by("email")
+        if has_permission(current_user, "suppliers.portal_users.manage")
+        else []
+    )
+    orders = scope_queryset(
+        Order.objects(supplier=s),
+        current_user,
+        "orders",
+    ).order_by("-order_date")
+    jobs = scope_queryset(
+        Job.objects(vendors=s),
+        current_user,
+        "jobs",
+    ).order_by("job_number")
     return render_template(
         "admin/suppliers_form.html",
         users=users,
         supplier=s,
         orders=orders,
+        jobs=jobs,
         readonly=True,
         hide_user_links=is_external_scoped_user(current_user),
     )
@@ -167,9 +262,10 @@ def _primary_from_contacts(contacts):
 
 
 @bp.route("/new", methods=["GET","POST"])
-@permissions_required("suppliers.manage")
+@permissions_required("suppliers.update")
 def suppliers_new():
     if request.method == "POST":
+        _require_supplier_form_permissions()
         name = (request.form.get("name") or "").strip()
         if not name:
             flash("Supplier name is required.", "error")
@@ -228,20 +324,31 @@ def suppliers_new():
         s.save()
         flash("Supplier created.", "success")
         return redirect(url_for("admin_suppliers.suppliers_list"))
-    users = User.objects().order_by("email")
+    users = (
+        User.objects().order_by("email")
+        if has_permission(current_user, "suppliers.portal_users.manage")
+        else []
+    )
     return render_template("admin/suppliers_form.html", users=users, supplier=None)
 
 
 @bp.route("/<sup_id>/edit", methods=["GET","POST"])
-@permissions_required("suppliers.manage")
+@permissions_required("suppliers.update")
 def suppliers_edit(sup_id):
     try:
-        s = apply_supplier_scope(Supplier.objects(id=sup_id), current_user).first()
+        s = authorised_get(
+            Supplier.objects,
+            current_user,
+            sup_id,
+            resource_type="suppliers",
+            permission="suppliers.update",
+        )
         if not s:
             abort(404)
     except (DoesNotExist, ValidationError):
         abort(404)
     if request.method == "POST":
+        _require_supplier_form_permissions()
         if "name" in request.form:
             s.name = (request.form.get("name") or s.name).strip()
         if "code" in request.form:
@@ -283,8 +390,9 @@ def suppliers_edit(sup_id):
                     s.contact = primary.name or s.contact
                     s.email = primary.email or s.email
                     s.phone = primary.phone or s.phone
-        user_ids = request.form.getlist("users")
-        s.users = list(User.objects(id__in=user_ids)) if user_ids else []
+        if "users" in request.form:
+            user_ids = request.form.getlist("users")
+            s.users = list(User.objects(id__in=user_ids)) if user_ids else []
         if "processes" in request.form:
             s.processes = [p.strip() for p in (request.form.get("processes") or "").split(",") if p.strip()]
         if "categories" in request.form:
@@ -294,6 +402,25 @@ def suppliers_edit(sup_id):
         s.save()
         flash("Supplier updated.", "success")
         return redirect(url_for("admin_suppliers.suppliers_list"))
-    users = User.objects().order_by("email")
-    orders = Order.objects(supplier=s).order_by("-order_date")
-    return render_template("admin/suppliers_form.html", users=users, supplier=s, orders=orders)
+    users = (
+        User.objects().order_by("email")
+        if has_permission(current_user, "suppliers.portal_users.manage")
+        else []
+    )
+    orders = scope_queryset(
+        Order.objects(supplier=s),
+        current_user,
+        "orders",
+    ).order_by("-order_date")
+    jobs = scope_queryset(
+        Job.objects(vendors=s),
+        current_user,
+        "jobs",
+    ).order_by("job_number")
+    return render_template(
+        "admin/suppliers_form.html",
+        users=users,
+        supplier=s,
+        orders=orders,
+        jobs=jobs,
+    )

@@ -4,12 +4,12 @@ from datetime import timedelta
 from typing import Dict, List, Tuple
 from app.services.acl import (
     permissions_required,
-    apply_job_scope,
     is_external_scoped_user,
     customer_scope_ids,
     supplier_scope_ids,
     user_has_permission,
 )
+from app.services.authorization import authorised_get, authorise, scope_queryset
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -28,6 +28,62 @@ from app.services.timezone_utils import parse_user_datetime, utc_now
 from app.services.audit import log_action
 
 bp = Blueprint("admin_jobs", __name__, url_prefix="/admin/jobs")
+
+_JOB_FORM_FIELDS = {
+    "csrf_token",
+    "job_number",
+    "title",
+    "description",
+    "status",
+    "priority",
+    "scheduled_start",
+    "scheduled_end",
+    "participants",
+    "vendors",
+    "customer",
+    "bom_text",
+}
+
+
+def _require(permission):
+    if not authorise(current_user, permission).allowed:
+        abort(403)
+
+
+def _scoped_job(job_id, permission):
+    return authorised_get(
+        Job.objects,
+        current_user,
+        job_id,
+        resource_type="jobs",
+        permission=permission,
+    )
+
+
+def _job_form_destinations():
+    suppliers = scope_queryset(
+        Supplier.objects,
+        current_user,
+        "suppliers",
+        permission="jobs.assign",
+    ).order_by("name")
+    customers = scope_queryset(
+        Customer.objects,
+        current_user,
+        "customers",
+        permission="jobs.assign",
+    ).order_by("name")
+    return suppliers, customers
+
+
+def _require_job_form_permissions():
+    if set(request.form) - _JOB_FORM_FIELDS:
+        abort(400)
+    if set(request.form) & {"customer", "participants", "vendors"}:
+        _require("jobs.assign")
+    if "bom_text" in request.form:
+        _require("jobs.bom.update")
+
 
 def _clean_rev(value: object) -> str:
     return clean_rev(value)
@@ -446,10 +502,11 @@ def _build_job_bom_rollup(job: Job, can_manage_orders: bool):
 
 
 @bp.get("/")
-@permissions_required("jobs.view")
+@permissions_required("jobs.read")
 def jobs_list():
     show_deleted = _parse_bool(request.args.get("show_deleted"))
     q = Job.objects() if show_deleted else Job.objects(is_deleted=False)
+    q = scope_queryset(q, current_user, "jobs")
     status = (request.args.get("status") or "").strip()
     if status:
         q = q.filter(status=status)
@@ -479,7 +536,6 @@ def jobs_list():
     if date_to:
         q = q.filter(scheduled_end__lte=date_to)
 
-    q = apply_job_scope(q, current_user)
     is_external = is_external_scoped_user(current_user)
     cust_ids = customer_scope_ids(current_user)
     supp_ids = supplier_scope_ids(current_user)
@@ -528,11 +584,15 @@ def jobs_list():
             }
         )
     now = utc_now()
-    base_q = apply_job_scope(Job.objects(is_deleted=False), current_user)
+    base_q = scope_queryset(Job.objects(is_deleted=False), current_user, "jobs")
     active_count = base_q.filter(status__in=["released", "in_progress"]).count()
     overdue_count = base_q.filter(status__in=["released", "in_progress"], scheduled_end__lt=now).count()
     completed_week = base_q.filter(status="completed", actual_end__gte=now - timedelta(days=7)).count()
-    deleted_count = apply_job_scope(Job.objects(is_deleted=True), current_user).count()
+    deleted_count = scope_queryset(
+        Job.objects(is_deleted=True),
+        current_user,
+        "jobs",
+    ).count()
     return render_template(
         "admin/jobs_list.html",
         jobs=safe_jobs,
@@ -554,9 +614,9 @@ def jobs_list():
 
 
 @bp.get("/<job_id>")
-@permissions_required("jobs.view")
+@permissions_required("jobs.read")
 def jobs_view(job_id):
-    j = apply_job_scope(Job.objects(id=job_id), current_user).first()
+    j = _scoped_job(job_id, "jobs.read")
     if not j:
         abort(404)
     try:
@@ -566,11 +626,8 @@ def jobs_view(job_id):
     is_external = is_external_scoped_user(current_user)
     cust_ids = customer_scope_ids(current_user)
     supp_ids = supplier_scope_ids(current_user)
-    if supp_ids and not cust_ids:
-        abort(404)
-    users = _eligible_job_users()
-    suppliers = Supplier.objects().order_by("name")
-    customers = Customer.objects().order_by("name")
+    users = _eligible_job_users() if user_has_permission(current_user, "jobs.assign") else []
+    suppliers, customers = _job_form_destinations()
     bom_text = "\n".join([f"{l.pn},{l.rev},{l.qty:g}" for l in (j.bom or [])])
     orders = _orders_for_job(j)
     can_manage_orders = user_has_permission(current_user, "orders.manage")
@@ -595,11 +652,27 @@ def jobs_view(job_id):
     )
 
 @bp.post("/<job_id>/delete")
-@permissions_required("jobs.manage")
+@permissions_required("jobs.archive", "orders.update")
 def jobs_delete(job_id):
     try:
-        j = Job.objects.get(id=job_id, is_deleted=False)
-        Order.objects(job=j).update(job=None, updated_at=utc_now())
+        j = authorised_get(
+            Job.objects(is_deleted=False),
+            current_user,
+            job_id,
+            resource_type="jobs",
+            permission="jobs.archive",
+        )
+        if not j:
+            abort(404)
+        related = scope_queryset(
+            Order.objects(job=j),
+            current_user,
+            "orders",
+            permission="orders.update",
+        )
+        if related.count() != Order.objects(job=j).count():
+            abort(404)
+        related.update(job=None, updated_at=utc_now())
         j.status = "cancelled"
         j.is_deleted = True
         j.updated_at = utc_now()
@@ -611,18 +684,28 @@ def jobs_delete(job_id):
 
 
 @bp.post("/purge_deleted")
-@permissions_required("jobs.manage")
+@permissions_required("jobs.archive", "orders.update")
 def jobs_purge_deleted():
-    q = apply_job_scope(Job.objects(is_deleted=True), current_user)
+    q = scope_queryset(
+        Job.objects(is_deleted=True),
+        current_user,
+        "jobs",
+        permission="jobs.archive",
+    )
     ids = [j.id for j in q.only("id")]
     if not ids:
         flash("No deleted jobs to purge.", "info")
         return redirect(url_for("admin_jobs.jobs_list"))
 
-    try:
-        Order.objects(job__in=ids).update(job=None, updated_at=utc_now())
-    except Exception:
-        pass
+    related = scope_queryset(
+        Order.objects(job__in=ids),
+        current_user,
+        "orders",
+        permission="orders.update",
+    )
+    if related.count() != Order.objects(job__in=ids).count():
+        abort(404)
+    related.update(job=None, updated_at=utc_now())
 
     try:
         deleted = Job.objects(id__in=ids, is_deleted=True).delete()
@@ -682,9 +765,10 @@ def _parse_date(value: str | None, *, end_of_day: bool = False):
 
 
 @bp.route("/new", methods=["GET","POST"])
-@permissions_required("jobs.manage")
+@permissions_required("jobs.create")
 def jobs_new():
     if request.method == "POST":
+        _require_job_form_permissions()
         job_number = (request.form.get("job_number") or "").strip() or generate_job_number()
         desc = (request.form.get("description") or "").strip()
         if Job.objects(job_number=job_number).first():
@@ -706,12 +790,28 @@ def jobs_new():
         # vendors
         supp_ids = request.form.getlist("vendors")
         if supp_ids:
-            j.vendors = list(Supplier.objects(id__in=supp_ids))
+            scoped = scope_queryset(
+                Supplier.objects(id__in=supp_ids),
+                current_user,
+                "suppliers",
+                permission="jobs.assign",
+            )
+            j.vendors = list(scoped)
+            if len(j.vendors) != len(set(supp_ids)):
+                abort(404)
         # Customer
         cust_id = request.form.get("customer")
         if cust_id:
             try:
-                j.customer = Customer.objects.get(id=cust_id)
+                j.customer = authorised_get(
+                    Customer.objects,
+                    current_user,
+                    cust_id,
+                    resource_type="customers",
+                    permission="jobs.assign",
+                )
+                if not j.customer:
+                    abort(404)
             except Exception:
                 j.customer = None
 
@@ -724,23 +824,22 @@ def jobs_new():
         flash("Job created.", "success")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=str(j.id)))
     users = _eligible_job_users()
-    suppliers = Supplier.objects().order_by("name")
-    customers = Customer.objects().order_by("name")
+    suppliers, customers = _job_form_destinations()
     return render_template("admin/jobs_form.html", users=users, suppliers=suppliers, customers=customers, job=None)
 
 
 @bp.route("/<job_id>/edit", methods=["GET","POST"])
-@permissions_required("jobs.manage")
+@permissions_required("jobs.update")
 def jobs_edit(job_id):
-    try:
-        j = Job.objects.get(id=job_id)
-    except (DoesNotExist, ValidationError):
+    j = _scoped_job(job_id, "jobs.update")
+    if not j:
         abort(404)
     try:
         log_action("job.view", resource_type="job", resource=str(j.id))
     except Exception:
         pass
     if request.method == "POST":
+        _require_job_form_permissions()
         j.job_number = (request.form.get("job_number") or j.job_number).strip()
         j.title = (request.form.get("title") or "").strip()
         j.description = (request.form.get("description") or "").strip()
@@ -749,11 +848,35 @@ def jobs_edit(job_id):
         j.scheduled_start = _parse_date(request.form.get("scheduled_start"))
         j.scheduled_end = _parse_date(request.form.get("scheduled_end"))
         cust_id = request.form.get("customer")
-        j.customer = Customer.objects(id=cust_id).first() if cust_id else None
+        j.customer = (
+            authorised_get(
+                Customer.objects,
+                current_user,
+                cust_id,
+                resource_type="customers",
+                permission="jobs.assign",
+            )
+            if cust_id
+            else None
+        )
+        if cust_id and not j.customer:
+            abort(404)
         user_ids = request.form.getlist("participants")
         j.participants = _filter_job_participants(user_ids) if user_ids else []
         supp_ids = request.form.getlist("vendors")
-        j.vendors = list(Supplier.objects(id__in=supp_ids)) if supp_ids else []
+        if supp_ids:
+            j.vendors = list(
+                scope_queryset(
+                    Supplier.objects(id__in=supp_ids),
+                    current_user,
+                    "suppliers",
+                    permission="jobs.assign",
+                )
+            )
+            if len(j.vendors) != len(set(supp_ids)):
+                abort(404)
+        else:
+            j.vendors = []
         bom_text = request.form.get("bom_text") or ""
         j.bom = _parse_bom_text(bom_text)
         j.updated_at = utc_now()
@@ -761,8 +884,7 @@ def jobs_edit(job_id):
         flash("Job updated.", "success")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=str(j.id)))
     users = _eligible_job_users()
-    suppliers = Supplier.objects().order_by("name")
-    customers = Customer.objects().order_by("name")
+    suppliers, customers = _job_form_destinations()
     # Clean up broken references to avoid deref errors
     try:
         _ = j.customer.id if j.customer else None
@@ -791,7 +913,16 @@ def jobs_edit(job_id):
 
 def _orders_for_job(job: Job):
     try:
-        return list(Order.objects(job=job, status__ne="cancelled"))
+        queryset = Order.objects(job=job, status__ne="cancelled")
+        if not getattr(current_user, "is_authenticated", False):
+            return list(queryset)
+        return list(
+            scope_queryset(
+                queryset,
+                current_user,
+                "orders",
+            )
+        )
     except Exception:
         return []
 
@@ -846,9 +977,14 @@ def _part_meta(pn: str, rev: str):
     return {"desc": desc, "rev": resolved_rev, "thumb": thumb}
 
 @bp.get("/<job_id>/bom_json")
-@permissions_required("jobs.view")
+@permissions_required("jobs.read")
 def job_bom_json(job_id):
-    j = apply_job_scope(Job.objects(id=job_id, is_deleted=False), current_user).first()
+    j = authorised_get(
+        Job.objects(is_deleted=False),
+        current_user,
+        job_id,
+        resource_type="jobs",
+    )
     if not j:
         abort(404)
     rows = []
@@ -882,10 +1018,12 @@ def job_bom_json(job_id):
     return jsonify(rows)
 
 @bp.post("/<job_id>/bom_update")
-@permissions_required("jobs.manage")
+@permissions_required("jobs.bom.update")
 def job_bom_update(job_id):
-    j = Job.objects(id=job_id).first() or abort(404)
+    j = _scoped_job(job_id, "jobs.bom.update") or abort(404)
     data = request.get_json(silent=True) or {}
+    if set(data) - {"pn", "rev", "line_rev", "qty"}:
+        abort(400)
     pn = _canonical_pn(data.get("pn") or "")
     rev = _clean_rev(data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
     try:
@@ -906,10 +1044,12 @@ def job_bom_update(job_id):
     return jsonify({"ok": True})
 
 @bp.post("/<job_id>/bom_remove")
-@permissions_required("jobs.manage")
+@permissions_required("jobs.bom.update")
 def job_bom_remove(job_id):
-    j = Job.objects(id=job_id).first() or abort(404)
+    j = _scoped_job(job_id, "jobs.bom.update") or abort(404)
     data = request.get_json(silent=True) or {}
+    if set(data) - {"pn", "rev", "line_rev"}:
+        abort(400)
     pn = (data.get("pn") or "").strip()
     rev = _clean_rev(data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
     before = len(j.bom or [])
@@ -919,10 +1059,12 @@ def job_bom_remove(job_id):
     return jsonify({"ok": True, "removed": before - len(j.bom)})
 
 @bp.post("/<job_id>/bom_replace")
-@permissions_required("jobs.manage")
+@permissions_required("jobs.bom.update")
 def job_bom_replace(job_id):
-    j = Job.objects(id=job_id).first() or abort(404)
+    j = _scoped_job(job_id, "jobs.bom.update") or abort(404)
     d = request.get_json(silent=True) or {}
+    if set(d) - {"old_pn", "old_rev", "new_pn", "new_rev"}:
+        abort(400)
     opn = (d.get("old_pn") or "").strip(); orev = _clean_rev(d.get("old_rev") or "")
     npn = _canonical_pn(d.get("new_pn") or ""); nrev = _clean_rev(d.get("new_rev") or "")
     if not npn:

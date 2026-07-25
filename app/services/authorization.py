@@ -54,6 +54,7 @@ class _PermissionSnapshot:
     direct: frozenset[str]
     expanded: frozenset[str]
     role_names: frozenset[str]
+    role_permissions: tuple[tuple[str, frozenset[str]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -63,22 +64,14 @@ class _ScopeContext:
     supplier_ids: tuple[Any, ...] = ()
     participant_job_ids: tuple[Any, ...] = ()
     role_names: frozenset[str] = frozenset()
+    role_permissions: tuple[tuple[str, frozenset[str]], ...] = ()
 
 
 class AuthorizationScopeError(RuntimeError):
     """Raised when a scope policy does not exist for a resource type."""
 
 
-_EMPTY_SNAPSHOT = _PermissionSnapshot(frozenset(), frozenset(), frozenset())
-_EXTERNAL_ROLE_NAMES = frozenset(
-    {
-        "customer_viewer",
-        "supplier_viewer",
-        "customer_portal",
-        "supplier_portal",
-        "production_operator",
-    }
-)
+_EMPTY_SNAPSHOT = _PermissionSnapshot(frozenset(), frozenset(), frozenset(), ())
 _RESOURCE_PERMISSIONS = {
     "parts": "parts.read",
     "jobs": "jobs.read",
@@ -163,6 +156,7 @@ def _build_permission_snapshot(user: Any) -> _PermissionSnapshot:
 
     direct: set[str] = set()
     role_names: set[str] = set()
+    role_permissions: list[tuple[str, frozenset[str]]] = []
     try:
         roles = tuple(getattr(user, "roles", None) or ())
         for role in roles:
@@ -178,6 +172,16 @@ def _build_permission_snapshot(user: Any) -> _PermissionSnapshot:
                 permission_values = tuple(permissions)
                 if isinstance(name, str) and name:
                     role_names.add(name)
+                valid_permissions = {
+                    permission
+                    for permission in permission_values
+                    if isinstance(permission, str) and permission in PERMISSION_REGISTRY
+                }
+                role_expanded = set(valid_permissions)
+                for permission in valid_permissions & LEGACY_PERMISSIONS:
+                    role_expanded.update(LEGACY_PERMISSION_COMPATIBILITY.get(permission, ()))
+                if isinstance(name, str) and name:
+                    role_permissions.append((name, frozenset(role_expanded)))
                 for permission in permission_values:
                     if isinstance(permission, str) and permission in PERMISSION_REGISTRY:
                         direct.add(permission)
@@ -193,6 +197,7 @@ def _build_permission_snapshot(user: Any) -> _PermissionSnapshot:
         direct=frozenset(direct),
         expanded=frozenset(expanded),
         role_names=frozenset(role_names),
+        role_permissions=tuple(role_permissions),
     )
 
 
@@ -483,6 +488,7 @@ def _build_scope_context(user: Any) -> _ScopeContext:
             supplier_ids=supplier_ids,
             participant_job_ids=participant_ids,
             role_names=_permission_snapshot(user).role_names,
+            role_permissions=_permission_snapshot(user).role_permissions,
         )
     except Exception:
         return _ScopeContext(valid=False)
@@ -514,31 +520,58 @@ def _deny_all(queryset: Any) -> Any:
             raise AuthorizationScopeError("Unable to construct a deny-all queryset") from exc
 
 
-def _requires_relationship_scope(scope: _ScopeContext) -> bool:
-    return bool(
-        scope.customer_ids
-        or scope.supplier_ids
-        or scope.participant_job_ids
-        or (scope.role_names & _EXTERNAL_ROLE_NAMES)
-    )
+def _scope_modes(
+    scope: _ScopeContext,
+    resource_type: str,
+    permission: str,
+) -> frozenset[str]:
+    """Return the union of scope contributions from roles granting permission."""
+
+    modes: set[str] = set()
+    for role_name, permissions in scope.role_permissions:
+        if permission not in permissions:
+            continue
+        if role_name in {"customer_portal", "customer_viewer"}:
+            modes.add("customer")
+            continue
+        if role_name in {"supplier_portal", "supplier_viewer"}:
+            modes.add("supplier")
+            continue
+        if role_name in {"production_operator", "operator"}:
+            modes.add("assigned")
+            continue
+        if role_name == "viewer" and (
+            scope.customer_ids or scope.supplier_ids or scope.participant_job_ids
+        ):
+            if scope.customer_ids:
+                modes.add("customer")
+            if scope.supplier_ids:
+                modes.add("supplier")
+            if scope.participant_job_ids:
+                modes.add("assigned")
+            continue
+        if resource_type == "orders" and role_name == "procurement":
+            modes.add("purchase")
+            continue
+        if resource_type == "orders" and role_name == "sales_customer_service":
+            modes.add("sales")
+            continue
+        modes.add("global")
+    return frozenset(modes)
 
 
-def _scope_jobs(queryset: Any, scope: _ScopeContext) -> Any:
+def _scope_jobs(queryset: Any, scope: _ScopeContext, modes: frozenset[str]) -> Any:
     from mongoengine.queryset.visitor import Q
 
-    if scope.supplier_ids and not scope.customer_ids and not scope.participant_job_ids:
-        return _deny_all(queryset)
     query = Q()
     has_clause = False
-    if scope.customer_ids:
+    if "customer" in modes and scope.customer_ids:
         query |= Q(customer__in=scope.customer_ids)
         has_clause = True
-    if scope.participant_job_ids:
+    if "assigned" in modes and scope.participant_job_ids:
         query |= Q(id__in=scope.participant_job_ids)
         has_clause = True
-    if scope.supplier_ids:
-        query |= Q(vendors__in=scope.supplier_ids)
-        has_clause = True
+    if "supplier" in modes and scope.supplier_ids:
         from app.models.order import Order
 
         order_job_ids = tuple(
@@ -548,19 +581,26 @@ def _scope_jobs(queryset: Any, scope: _ScopeContext) -> Any:
         )
         if order_job_ids:
             query |= Q(id__in=order_job_ids)
+            has_clause = True
     return queryset.filter(query) if has_clause else _deny_all(queryset)
 
 
-def _scope_orders(queryset: Any, scope: _ScopeContext) -> Any:
+def _scope_orders(queryset: Any, scope: _ScopeContext, modes: frozenset[str]) -> Any:
     from mongoengine.queryset.visitor import Q
 
     query = Q()
     has_clause = False
-    if scope.supplier_ids:
-        query |= Q(supplier__in=scope.supplier_ids)
+    if "purchase" in modes:
+        query |= Q(kind="purchase")
         has_clause = True
-    if scope.customer_ids:
-        query |= Q(customer__in=scope.customer_ids)
+    if "sales" in modes:
+        query |= Q(kind="sales")
+        has_clause = True
+    if "supplier" in modes and scope.supplier_ids:
+        query |= Q(kind="purchase", supplier__in=scope.supplier_ids)
+        has_clause = True
+    if "customer" in modes and scope.customer_ids:
+        query |= Q(kind="sales", customer__in=scope.customer_ids)
         has_clause = True
         from app.models.job import Job
 
@@ -572,8 +612,8 @@ def _scope_orders(queryset: Any, scope: _ScopeContext) -> Any:
             ).only("id")
         )
         if customer_job_ids:
-            query |= Q(job__in=customer_job_ids)
-    if scope.participant_job_ids:
+            query |= Q(kind="sales", job__in=customer_job_ids)
+    if "assigned" in modes and scope.participant_job_ids:
         query |= Q(job__in=scope.participant_job_ids)
         has_clause = True
     return queryset.filter(query) if has_clause else _deny_all(queryset)
@@ -598,7 +638,13 @@ def _scope_parts(queryset: Any, user: Any) -> Any:
     return queryset.filter(query) if has_clause else _deny_all(queryset)
 
 
-def scope_queryset(queryset: Any, user: Any, resource_type: str) -> Any:
+def scope_queryset(
+    queryset: Any,
+    user: Any,
+    resource_type: str,
+    *,
+    permission: str | None = None,
+) -> Any:
     """Apply a supported resource scope, returning deny-all on evaluation errors."""
 
     normalized = _normalise_resource_type(resource_type)
@@ -608,28 +654,94 @@ def scope_queryset(queryset: Any, user: Any, resource_type: str) -> Any:
         return _deny_all(queryset)
     if _uses_legacy_admin_bypass(user):
         return queryset
-    if not has_permission(user, _RESOURCE_PERMISSIONS[normalized]):
+    required_permission = permission or _RESOURCE_PERMISSIONS[normalized]
+    if not has_permission(user, required_permission):
         return _deny_all(queryset)
 
     try:
         scope = _scope_context(user)
         if not scope.valid:
             return _deny_all(queryset)
-        if not _requires_relationship_scope(scope):
+        modes = _scope_modes(scope, normalized, required_permission)
+        if "global" in modes:
             return queryset
+        if not modes:
+            return _deny_all(queryset)
         if normalized == "parts":
             return _scope_parts(queryset, user)
         if normalized == "jobs":
-            return _scope_jobs(queryset, scope)
+            return _scope_jobs(queryset, scope, modes)
         if normalized == "orders":
-            return _scope_orders(queryset, scope)
+            return _scope_orders(queryset, scope, modes)
         if normalized == "customers":
-            return queryset.filter(id__in=scope.customer_ids)
+            if "customer" in modes:
+                return queryset.filter(id__in=scope.customer_ids)
+            return _deny_all(queryset)
         if normalized == "suppliers":
-            return queryset.filter(id__in=scope.supplier_ids)
+            if "supplier" in modes:
+                return queryset.filter(id__in=scope.supplier_ids)
+            return _deny_all(queryset)
     except Exception:
         return _deny_all(queryset)
     return _deny_all(queryset)
+
+
+def order_kind_allowed(user: Any, kind: str, permission: str) -> bool:
+    """Return whether the user's contributing order scopes include ``kind``."""
+
+    normalized_kind = str(kind or "").strip().lower()
+    if normalized_kind not in {"purchase", "sales"}:
+        return False
+    if not has_permission(user, permission):
+        return False
+    if _uses_legacy_admin_bypass(user):
+        return True
+    try:
+        scope = _scope_context(user)
+        if not scope.valid:
+            return False
+        modes = _scope_modes(scope, "orders", permission)
+        if "global" in modes:
+            return True
+        if normalized_kind == "purchase":
+            return bool(modes & {"purchase", "supplier"})
+        return bool(modes & {"sales", "customer"})
+    except Exception:
+        return False
+
+
+def order_relationship_allowed(
+    user: Any,
+    kind: str,
+    relationship: str,
+    permission: str,
+) -> bool:
+    """Authorise a trusted order-to-resource relationship by contributing scope."""
+
+    normalized_kind = str(kind or "").strip().lower()
+    normalized_relationship = str(relationship or "").strip().lower()
+    if normalized_relationship not in {"customer", "supplier", "job"}:
+        return False
+    if not order_kind_allowed(user, normalized_kind, permission):
+        return False
+    if _uses_legacy_admin_bypass(user):
+        return True
+    try:
+        scope = _scope_context(user)
+        if not scope.valid:
+            return False
+        modes = _scope_modes(scope, "orders", permission)
+        if "global" in modes:
+            return True
+        if normalized_kind == "purchase":
+            return normalized_relationship in {"supplier", "job"} and bool(
+                modes & {"purchase", "supplier"}
+            )
+        return normalized_relationship in {"customer", "job"} and bool(
+            modes & {"sales", "customer"}
+        )
+    except Exception:
+        return False
 
 
 def authorised_get(
@@ -639,6 +751,7 @@ def authorised_get(
     *,
     resource_type: str,
     identifier_field: str = "id",
+    permission: str | None = None,
 ) -> Any | None:
     """Scope first, then retrieve one caller-supplied identifier."""
 
@@ -646,8 +759,25 @@ def authorised_get(
     if normalized not in _RESOURCE_PERMISSIONS:
         raise AuthorizationScopeError(f"Unsupported resource type: {resource_type}")
     try:
-        scoped = scope_queryset(queryset, user, normalized)
-        return scoped.filter(**{identifier_field: identifier}).first()
+        scoped = scope_queryset(queryset, user, normalized, permission=permission)
+        result = scoped.filter(**{identifier_field: identifier}).first()
+        if result is not None:
+            return result
+        try:
+            exists_unscoped = (
+                queryset.filter(**{identifier_field: identifier}).only("id").first()
+            )
+        except Exception:
+            exists_unscoped = None
+        if exists_unscoped is not None:
+            _denied(
+                user,
+                reason_code="scope_denied",
+                permission=permission or _RESOURCE_PERMISSIONS[normalized],
+                resource_type=normalized,
+                resource_id=str(identifier or ""),
+            )
+        return None
     except AuthorizationScopeError:
         raise
     except Exception:
@@ -735,7 +865,13 @@ def _is_external_field_context(user: Any) -> tuple[bool, bool]:
         return True, False
     try:
         scope = _scope_context(user)
-        return scope.valid, _requires_relationship_scope(scope)
+        if not scope.valid:
+            return False, True
+        external = not any(
+            "global" in _scope_modes(scope, resource_type, permission)
+            for resource_type, permission in _RESOURCE_PERMISSIONS.items()
+        )
+        return True, external
     except Exception:
         return False, True
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List
 
 from flask import Blueprint, jsonify, request
@@ -11,10 +10,10 @@ from app.models.part import Part
 from app.models.order import Order
 from app.models.common import Contact, Address
 from app.services.api_auth import api_auth_required
+from app.services.authorization import authorised_get, has_permission, scope_queryset
 from app.services.attrs import harvest_part_attrs
 from app.services.biz_utils import generate_supplier_code
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
-from app.services.acl import apply_supplier_scope
 
 bp = Blueprint("suppliers_api", __name__, url_prefix="/api/suppliers")
 
@@ -50,26 +49,93 @@ def _parse_contacts(items) -> List[Contact]:
     return out
 
 
-def _supplier_to_dict(s: Supplier):
+_SUPPLIER_FIELDS = {
+    "code",
+    "name",
+    "description",
+    "status",
+    "rating",
+    "tags",
+    "categories",
+    "contact",
+    "email",
+    "phone",
+    "website",
+    "tax_id",
+    "payment_terms",
+    "currency",
+    "min_order_value",
+    "lead_time_days",
+    "address",
+    "billing_address",
+    "contacts",
+    "processes",
+}
+_SUPPLIER_FINANCIAL_FIELDS = {
+    "rating",
+    "tax_id",
+    "payment_terms",
+    "currency",
+    "min_order_value",
+    "billing_address",
+}
+
+
+def _invalid_payload_fields(data, allowed):
+    invalid = sorted(set(data) - set(allowed))
+    if invalid:
+        return json_error(
+            "invalid_fields",
+            f"Unsupported fields: {', '.join(invalid)}.",
+            400,
+        )
+    return None
+
+
+def _scoped_supplier(user, code, permission):
+    supplier = authorised_get(
+        Supplier.objects,
+        user,
+        code,
+        resource_type="suppliers",
+        identifier_field="code",
+        permission=permission,
+    )
+    if supplier:
+        return supplier
+    return authorised_get(
+        Supplier.objects,
+        user,
+        code,
+        resource_type="suppliers",
+        permission=permission,
+    )
+
+
+def _supplier_to_dict(s: Supplier, *, include_financial=True):
     return {
         "code": s.code,
         "name": s.name,
         "description": s.description,
         "status": s.status,
-        "rating": s.rating,
+        "rating": s.rating if include_financial else None,
         "tags": s.tags or [],
         "categories": s.categories or [],
         "primary_contact": s.contact or "",
         "email": s.email,
         "phone": s.phone,
         "website": s.website,
-        "tax_id": s.tax_id,
-        "payment_terms": s.payment_terms,
-        "currency": s.currency,
-        "min_order_value": s.min_order_value,
+        "tax_id": s.tax_id if include_financial else None,
+        "payment_terms": s.payment_terms if include_financial else None,
+        "currency": s.currency if include_financial else None,
+        "min_order_value": s.min_order_value if include_financial else None,
         "lead_time_days": s.lead_time_days,
         "address": s.address.to_mongo() if s.address else None,
-        "billing_address": s.billing_address.to_mongo() if s.billing_address else None,
+        "billing_address": (
+            s.billing_address.to_mongo()
+            if include_financial and s.billing_address
+            else None
+        ),
         "contacts": [c.to_mongo() for c in (s.contacts or [])],
         "created_at": None,
     }
@@ -78,11 +144,11 @@ def _supplier_to_dict(s: Supplier):
 @bp.get("")
 @api_auth_required
 def list_suppliers():
-    user, err = ensure_permissions("suppliers.view")
+    user, err = ensure_permissions("suppliers.read")
     if err:
         return err
     page, size = parse_pagination()
-    q = Supplier.objects()
+    q = scope_queryset(Supplier.objects, user, "suppliers")
     status = request.args.get("status")
     if status:
         q = q.filter(status__in=[s.strip() for s in status.split(",") if s.strip()])
@@ -91,6 +157,8 @@ def list_suppliers():
         q = q.filter(categories__in=[category])
     rating = request.args.get("rating")
     if rating:
+        if not has_permission(user, "suppliers.financial.read"):
+            return json_error("forbidden", "Permission denied.", 403)
         try:
             q = q.filter(rating=int(rating))
         except Exception:
@@ -100,17 +168,19 @@ def list_suppliers():
         q = q.filter(Q(name__icontains=q_text) | Q(code__icontains=q_text))
 
     sort = request.args.get("sort", "name")
+    if sort == "rating" and not has_permission(user, "suppliers.financial.read"):
+        return json_error("forbidden", "Permission denied.", 403)
     direction = request.args.get("direction", "asc").lower()
     sort_key = "name" if sort not in ("name", "rating", "status") else sort
     if direction == "desc":
         sort_key = "-" + sort_key
 
-    q = apply_supplier_scope(q, user)
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
+    financial = has_permission(user, "suppliers.financial.read")
     return jsonify({
         "ok": True,
-        "items": [_supplier_to_dict(s) for s in items],
+        "items": [_supplier_to_dict(s, include_financial=financial) for s in items],
         "page": page,
         "page_size": size,
         "total": total,
@@ -120,10 +190,17 @@ def list_suppliers():
 @bp.post("")
 @api_auth_required
 def create_supplier():
-    user, err = ensure_permissions("suppliers.manage")
+    user, err = ensure_permissions("suppliers.update")
     if err:
         return err
     data = get_json()
+    invalid = _invalid_payload_fields(data, _SUPPLIER_FIELDS)
+    if invalid:
+        return invalid
+    if set(data) & _SUPPLIER_FINANCIAL_FIELDS:
+        _, err = ensure_permissions("suppliers.financial.update")
+        if err:
+            return err
     name = (data.get("name") or "").strip()
     if not name:
         return json_error("missing_name", "Supplier name is required.")
@@ -153,33 +230,50 @@ def create_supplier():
         processes=data.get("processes") or [],
     )
     s.save()
-    return jsonify({"ok": True, "supplier": _supplier_to_dict(s)})
+    return jsonify({
+        "ok": True,
+        "supplier": _supplier_to_dict(
+            s,
+            include_financial=has_permission(user, "suppliers.financial.read"),
+        ),
+    })
 
 
 @bp.get("/<code>")
 @api_auth_required
 def get_supplier(code):
-    user, err = ensure_permissions("suppliers.view")
+    user, err = ensure_permissions("suppliers.read")
     if err:
         return err
-    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
-        or apply_supplier_scope(Supplier.objects(id=code), user).first()
+    s = _scoped_supplier(user, code, "suppliers.read")
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
-    return jsonify({"ok": True, "supplier": _supplier_to_dict(s)})
+    return jsonify({
+        "ok": True,
+        "supplier": _supplier_to_dict(
+            s,
+            include_financial=has_permission(user, "suppliers.financial.read"),
+        ),
+    })
 
 
 @bp.put("/<code>")
 @api_auth_required
 def update_supplier(code):
-    user, err = ensure_permissions("suppliers.manage")
+    user, err = ensure_permissions("suppliers.update")
     if err:
         return err
-    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
-        or apply_supplier_scope(Supplier.objects(id=code), user).first()
+    s = _scoped_supplier(user, code, "suppliers.update")
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     data = get_json()
+    invalid = _invalid_payload_fields(data, _SUPPLIER_FIELDS - {"code"})
+    if invalid:
+        return invalid
+    if set(data) & _SUPPLIER_FINANCIAL_FIELDS:
+        _, err = ensure_permissions("suppliers.financial.update")
+        if err:
+            return err
     for key in ("name", "description", "status", "contact", "email", "phone", "website", "tax_id", "payment_terms", "currency"):
         if key in data:
             setattr(s, key, (data.get(key) or "").strip())
@@ -202,46 +296,64 @@ def update_supplier(code):
     if "processes" in data:
         s.processes = data.get("processes") or []
     s.save()
-    return jsonify({"ok": True, "supplier": _supplier_to_dict(s)})
+    return jsonify({
+        "ok": True,
+        "supplier": _supplier_to_dict(
+            s,
+            include_financial=has_permission(user, "suppliers.financial.read"),
+        ),
+    })
 
 
 @bp.patch("/<code>/status")
 @api_auth_required
 def supplier_status(code):
-    user, err = ensure_permissions("suppliers.manage")
+    user, err = ensure_permissions("suppliers.update")
     if err:
         return err
-    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
-        or apply_supplier_scope(Supplier.objects(id=code), user).first()
+    s = _scoped_supplier(user, code, "suppliers.update")
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     data = get_json()
+    invalid = _invalid_payload_fields(data, {"status"})
+    if invalid:
+        return invalid
     status = (data.get("status") or "").strip()
     if status not in ("active", "inactive", "pending", "blacklisted"):
         return json_error("invalid_status", "Invalid status.", 400)
     s.status = status
     s.save()
-    return jsonify({"ok": True, "supplier": _supplier_to_dict(s)})
+    return jsonify({
+        "ok": True,
+        "supplier": _supplier_to_dict(
+            s,
+            include_financial=has_permission(user, "suppliers.financial.read"),
+        ),
+    })
 
 
 @bp.get("/<code>/orders")
 @api_auth_required
 def supplier_orders(code):
-    user, err = ensure_permissions("suppliers.view")
+    user, err = ensure_permissions("suppliers.read", "orders.read")
     if err:
         return err
-    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
-        or apply_supplier_scope(Supplier.objects(id=code), user).first()
+    s = _scoped_supplier(user, code, "suppliers.read")
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
-    orders = Order.objects(supplier=s).order_by("-order_date").limit(50)
+    orders = (
+        scope_queryset(Order.objects(supplier=s), user, "orders")
+        .order_by("-order_date")
+        .limit(50)
+    )
+    financial = has_permission(user, "orders.financial.read")
     return jsonify({
         "ok": True,
         "orders": [
             {
                 "order_number": o.order_number,
                 "status": o.status,
-                "total": o.total,
+                "total": o.total if financial else None,
                 "order_date": iso(o.order_date),
             }
             for o in orders
@@ -252,11 +364,10 @@ def supplier_orders(code):
 @bp.get("/<code>/parts")
 @api_auth_required
 def supplier_parts(code):
-    user, err = ensure_permissions("suppliers.view")
+    user, err = ensure_permissions("suppliers.read")
     if err:
         return err
-    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
-        or apply_supplier_scope(Supplier.objects(id=code), user).first()
+    s = _scoped_supplier(user, code, "suppliers.read")
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     name = (s.name or "").strip()
@@ -286,14 +397,13 @@ def supplier_parts(code):
 @bp.get("/<code>/performance")
 @api_auth_required
 def supplier_performance(code):
-    user, err = ensure_permissions("suppliers.view")
+    user, err = ensure_permissions("suppliers.read", "orders.read")
     if err:
         return err
-    s = apply_supplier_scope(Supplier.objects(code=code), user).first() \
-        or apply_supplier_scope(Supplier.objects(id=code), user).first()
+    s = _scoped_supplier(user, code, "suppliers.read")
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
-    orders = Order.objects(supplier=s)
+    orders = scope_queryset(Order.objects(supplier=s), user, "orders")
     total = orders.count()
     on_time = 0
     avg_lead = 0.0

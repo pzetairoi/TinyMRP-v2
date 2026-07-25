@@ -11,8 +11,14 @@ from app.models.supplier import Supplier
 from app.models.job import Job
 from app.models.common import Address
 from app.services.api_auth import api_auth_required
+from app.services.authorization import (
+    authorised_get,
+    has_permission,
+    order_kind_allowed,
+    order_relationship_allowed,
+    scope_queryset,
+)
 from app.services.biz_utils import generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines
-from app.services.acl import apply_order_scope
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import utc_now
 from app.views.api_helpers import (
@@ -25,6 +31,155 @@ from app.views.api_helpers import (
 )
 
 bp = Blueprint("orders_api", __name__, url_prefix="/api/orders")
+
+_ORDER_FIELDS = {
+    "order_number",
+    "description",
+    "kind",
+    "status",
+    "customer_po",
+    "order_date",
+    "requested_delivery",
+    "promised_delivery",
+    "actual_delivery",
+    "shipping_cost",
+    "discount_amount",
+    "currency",
+    "shipping_address",
+    "shipping_method",
+    "carrier",
+    "tracking_number",
+    "lines",
+    "customer_id",
+    "customer_code",
+    "supplier_id",
+    "supplier_code",
+    "job_id",
+}
+_ORDER_FINANCIAL_FIELDS = {"shipping_cost", "discount_amount", "currency"}
+_LINE_FINANCIAL_FIELDS = {"unit_price", "discount_pct", "tax_pct"}
+_LINE_FULFILMENT_FIELDS = {"qty_shipped", "qty_received"}
+_LINE_FIELDS = {
+    "pn",
+    "part_number",
+    "rev",
+    "revision",
+    "qty",
+    "uom",
+    "note",
+    "description",
+    "unit_price",
+    "discount_pct",
+    "tax_pct",
+    "qty_shipped",
+    "qty_received",
+    "requested_delivery",
+}
+_ADDRESS_FIELDS = {
+    "label",
+    "line1",
+    "line2",
+    "city",
+    "state",
+    "postal",
+    "country",
+    "is_default",
+}
+
+
+def _invalid_payload_fields(data, allowed):
+    unknown = sorted(set(data) - set(allowed))
+    if unknown:
+        return json_error(
+            "invalid_fields",
+            "Unsupported field(s) in request.",
+            400,
+            unknown,
+        )
+    return None
+
+
+def _has_financial_changes(data):
+    if set(data) & _ORDER_FINANCIAL_FIELDS:
+        return True
+    return any(
+        bool(set(raw or {}) & _LINE_FINANCIAL_FIELDS)
+        for raw in (data.get("lines") or [])
+        if isinstance(raw, dict)
+    )
+
+
+def _invalid_nested_fields(data):
+    address = data.get("shipping_address")
+    if isinstance(address, dict):
+        invalid = _invalid_payload_fields(address, _ADDRESS_FIELDS)
+        if invalid:
+            return invalid
+    for raw in data.get("lines") or []:
+        if not isinstance(raw, dict):
+            return json_error("invalid_lines", "Order lines must be objects.", 400)
+        invalid = _invalid_payload_fields(raw, _LINE_FIELDS)
+        if invalid:
+            return invalid
+    return None
+
+
+def _has_fulfilment_changes(data):
+    return any(
+        bool(set(raw or {}) & _LINE_FULFILMENT_FIELDS)
+        for raw in (data.get("lines") or [])
+        if isinstance(raw, dict)
+    )
+
+
+def _scoped_order(user, order_number, permission):
+    return authorised_get(
+        Order.objects,
+        user,
+        order_number,
+        resource_type="orders",
+        identifier_field="order_number",
+        permission=permission,
+    )
+
+
+def _scoped_related(user, queryset, identifier, resource_type, permission, field="id"):
+    if not identifier:
+        return None
+    return authorised_get(
+        queryset,
+        user,
+        identifier,
+        resource_type=resource_type,
+        identifier_field=field,
+        permission=permission,
+    )
+
+
+def _related_by_id_or_code(user, queryset, resource_type, permission, object_id, code):
+    item = _scoped_related(user, queryset, object_id, resource_type, permission)
+    if item:
+        return item
+    return _scoped_related(
+        user,
+        queryset,
+        code,
+        resource_type,
+        permission,
+        field="code",
+    )
+
+
+def _status_permission(status):
+    return {
+        "submitted": "orders.submit",
+        "confirmed": "orders.approve",
+        "in_production": "orders.fulfil",
+        "ready_to_ship": "orders.fulfil",
+        "shipped": "orders.ship",
+        "delivered": "orders.fulfil",
+        "cancelled": "orders.cancel",
+    }.get(status, "orders.update")
 
 
 def _parse_address(data) -> Address | None:
@@ -66,7 +221,7 @@ def _parse_lines(items) -> List[OrderLine]:
     return consolidate_order_lines(out)
 
 
-def _order_to_dict(o: Order):
+def _order_to_dict(o: Order, *, include_financial=True):
     payload = {
         "order_number": o.order_number,
         "kind": o.kind,
@@ -117,12 +272,18 @@ def _order_to_dict(o: Order):
         add_datetime_fields(payload, field_name, value)
     for line_payload, line in zip(payload["lines"], o.lines or []):
         add_datetime_fields(line_payload, "requested_delivery", line.requested_delivery)
+    if not include_financial:
+        for key in ("subtotal", "tax_amount", "shipping_cost", "discount_amount", "total"):
+            payload[key] = None
+        for line_payload in payload["lines"]:
+            for key in ("unit_price", "discount_pct", "tax_pct", "line_total"):
+                line_payload[key] = None
     return payload
 
 
 def _list_orders(args, user):
     page, size = parse_pagination()
-    q = Order.objects()
+    q = scope_queryset(Order.objects, user, "orders")
     kind = args.get("type")
     if kind:
         q = q.filter(kind__in=[k.strip() for k in kind.split(",") if k.strip()])
@@ -134,14 +295,32 @@ def _list_orders(args, user):
         q = q.filter(Q(order_number__icontains=q_text) | Q(description__icontains=q_text))
     customer = args.get("customer")
     if customer:
-        cust = Customer.objects(code=customer).first() or Customer.objects(id=customer).first()
+        cust = _related_by_id_or_code(
+            user,
+            Customer.objects,
+            "customers",
+            "orders.read",
+            customer,
+            customer,
+        )
         if cust:
             q = q.filter(customer=cust)
+        else:
+            q = q.filter(id__in=[])
     supplier = args.get("supplier")
     if supplier:
-        sup = Supplier.objects(code=supplier).first() or Supplier.objects(id=supplier).first()
+        sup = _related_by_id_or_code(
+            user,
+            Supplier.objects,
+            "suppliers",
+            "orders.read",
+            supplier,
+            supplier,
+        )
         if sup:
             q = q.filter(supplier=sup)
+        else:
+            q = q.filter(id__in=[])
 
     date_from = parse_datetime_param(args.get("from"))
     date_to = parse_datetime_param(args.get("to"), end_of_day=True)
@@ -151,12 +330,13 @@ def _list_orders(args, user):
         q = q.filter(order_date__lte=date_to)
 
     sort = args.get("sort", "order_date")
+    if sort == "total" and not has_permission(user, "orders.financial.read"):
+        return json_error("forbidden", "Permission denied.", 403)
     direction = (args.get("direction", "desc") or "desc").lower()
     sort_key = "order_date" if sort not in ("order_date", "total", "status", "order_number") else sort
     if direction == "desc":
         sort_key = "-" + sort_key
 
-    q = apply_order_scope(q, user)
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
     return jsonify({
@@ -171,7 +351,7 @@ def _list_orders(args, user):
 @bp.get("")
 @api_auth_required
 def list_orders():
-    user, err = ensure_permissions("orders.view")
+    user, err = ensure_permissions("orders.read")
     if err:
         return err
     return _list_orders(request.args, user)
@@ -180,7 +360,7 @@ def list_orders():
 @bp.get("/sales")
 @api_auth_required
 def list_sales_orders():
-    user, err = ensure_permissions("orders.view")
+    user, err = ensure_permissions("orders.read")
     if err:
         return err
     args = request.args.to_dict(flat=True)
@@ -191,7 +371,7 @@ def list_sales_orders():
 @bp.get("/purchase")
 @api_auth_required
 def list_purchase_orders():
-    user, err = ensure_permissions("orders.view")
+    user, err = ensure_permissions("orders.read")
     if err:
         return err
     args = request.args.to_dict(flat=True)
@@ -202,11 +382,36 @@ def list_purchase_orders():
 @bp.post("")
 @api_auth_required
 def create_order():
-    user, err = ensure_permissions("orders.manage")
+    user, err = ensure_permissions("orders.create")
     if err:
         return err
     data = get_json()
+    invalid = _invalid_payload_fields(data, _ORDER_FIELDS)
+    if invalid:
+        return invalid
+    invalid = _invalid_nested_fields(data)
+    if invalid:
+        return invalid
+    if _has_financial_changes(data):
+        _, err = ensure_permissions("orders.financial.update")
+        if err:
+            return err
+    if _has_fulfilment_changes(data):
+        _, err = ensure_permissions("orders.fulfil")
+        if err:
+            return err
     kind = (data.get("kind") or "purchase").strip()
+    if kind not in {"purchase", "sales"}:
+        return json_error("invalid_kind", "Invalid order type.", 400)
+    if not order_kind_allowed(user, kind, "orders.create"):
+        return json_error("forbidden", "Permission denied.", 403)
+    status = (data.get("status") or "draft").strip()
+    if status not in ORDER_STATUS_FLOW:
+        return json_error("invalid_status", "Invalid status.", 400)
+    if status != "draft":
+        _, err = ensure_permissions(_status_permission(status))
+        if err:
+            return err
     order_number = (data.get("order_number") or "").strip() or generate_order_number(kind)
     if Order.objects(order_number=order_number).first():
         return json_error("conflict", "Order number already exists.", 409)
@@ -215,7 +420,7 @@ def create_order():
         order_number=order_number,
         description=(data.get("description") or "").strip(),
         kind=kind,
-        status=(data.get("status") or "draft").strip(),
+        status=status,
         customer_po=(data.get("customer_po") or "").strip(),
         order_date=parse_datetime_param(data.get("order_date")) or utc_now(),
         requested_delivery=parse_datetime_param(data.get("requested_delivery")),
@@ -240,14 +445,46 @@ def create_order():
     cust_id = data.get("customer_id") or ""
     cust_code = data.get("customer_code") or ""
     if cust_id or cust_code:
-        order.customer = Customer.objects(id=cust_id).first() if cust_id else Customer.objects(code=cust_code).first()
+        if not order_relationship_allowed(user, kind, "customer", "orders.create"):
+            return json_error("not_found", "Customer not found.", 404)
+        order.customer = _related_by_id_or_code(
+            user,
+            Customer.objects,
+            "customers",
+            "orders.create",
+            cust_id,
+            cust_code,
+        )
+        if not order.customer:
+            return json_error("not_found", "Customer not found.", 404)
     sup_id = data.get("supplier_id") or ""
     sup_code = data.get("supplier_code") or ""
     if sup_id or sup_code:
-        order.supplier = Supplier.objects(id=sup_id).first() if sup_id else Supplier.objects(code=sup_code).first()
+        if not order_relationship_allowed(user, kind, "supplier", "orders.create"):
+            return json_error("not_found", "Supplier not found.", 404)
+        order.supplier = _related_by_id_or_code(
+            user,
+            Supplier.objects,
+            "suppliers",
+            "orders.create",
+            sup_id,
+            sup_code,
+        )
+        if not order.supplier:
+            return json_error("not_found", "Supplier not found.", 404)
     job_id = data.get("job_id") or ""
     if job_id:
-        order.job = Job.objects(id=job_id).first()
+        if not order_relationship_allowed(user, kind, "job", "orders.create"):
+            return json_error("not_found", "Job not found.", 404)
+        order.job = _scoped_related(
+            user,
+            Job.objects(is_deleted=False),
+            job_id,
+            "jobs",
+            "orders.create",
+        )
+        if not order.job:
+            return json_error("not_found", "Job not found.", 404)
 
     order.updated_at = utc_now()
     order.save()
@@ -257,10 +494,10 @@ def create_order():
 @bp.get("/<order_number>")
 @api_auth_required
 def get_order(order_number):
-    user, err = ensure_permissions("orders.view")
+    user, err = ensure_permissions("orders.read")
     if err:
         return err
-    order = apply_order_scope(Order.objects(order_number=order_number), user).first()
+    order = _scoped_order(user, order_number, "orders.read")
     if not order:
         return json_error("not_found", "Order not found.", 404)
     return jsonify({"ok": True, "order": _order_to_dict(order)})
@@ -269,14 +506,56 @@ def get_order(order_number):
 @bp.put("/<order_number>")
 @api_auth_required
 def update_order(order_number):
-    user, err = ensure_permissions("orders.manage")
+    user, err = ensure_permissions("orders.update")
     if err:
         return err
-    order = Order.objects(order_number=order_number).first()
+    data = get_json()
+    invalid = _invalid_payload_fields(data, _ORDER_FIELDS - {"order_number"})
+    if invalid:
+        return invalid
+    invalid = _invalid_nested_fields(data)
+    if invalid:
+        return invalid
+    if _has_financial_changes(data):
+        _, err = ensure_permissions("orders.financial.update")
+        if err:
+            return err
+    if _has_fulfilment_changes(data):
+        _, err = ensure_permissions("orders.fulfil")
+        if err:
+            return err
+    order = _scoped_order(user, order_number, "orders.update")
     if not order:
         return json_error("not_found", "Order not found.", 404)
-    data = get_json()
-    for key in ("description", "kind", "status", "customer_po", "shipping_method", "carrier", "tracking_number", "currency"):
+    target_kind = (data.get("kind") or order.kind or "purchase").strip()
+    if target_kind not in {"purchase", "sales"}:
+        return json_error("invalid_kind", "Invalid order type.", 400)
+    if not order_kind_allowed(user, target_kind, "orders.update"):
+        return json_error("forbidden", "Permission denied.", 403)
+    if "status" in data:
+        new_status = (data.get("status") or "").strip()
+        if new_status not in ORDER_STATUS_FLOW:
+            return json_error("invalid_status", "Invalid status.", 400)
+        if new_status != order.status:
+            _, err = ensure_permissions(_status_permission(new_status))
+            if err:
+                return err
+            if not can_transition_order(order.status, new_status):
+                return json_error(
+                    "invalid_transition",
+                    "Status transition not allowed.",
+                    400,
+                )
+    for key in (
+        "description",
+        "kind",
+        "status",
+        "customer_po",
+        "shipping_method",
+        "carrier",
+        "tracking_number",
+        "currency",
+    ):
         if key in data:
             setattr(order, key, (data.get(key) or "").strip())
     if "order_date" in data:
@@ -305,13 +584,61 @@ def update_order(order_number):
     if "customer_id" in data or "customer_code" in data:
         cust_id = data.get("customer_id") or ""
         cust_code = data.get("customer_code") or ""
-        order.customer = Customer.objects(id=cust_id).first() if cust_id else Customer.objects(code=cust_code).first()
+        if not cust_id and not cust_code:
+            order.customer = None
+        else:
+            if not order_relationship_allowed(
+                user, target_kind, "customer", "orders.update"
+            ):
+                return json_error("not_found", "Customer not found.", 404)
+            customer = _related_by_id_or_code(
+                user,
+                Customer.objects,
+                "customers",
+                "orders.update",
+                cust_id,
+                cust_code,
+            )
+            if not customer:
+                return json_error("not_found", "Customer not found.", 404)
+            order.customer = customer
     if "supplier_id" in data or "supplier_code" in data:
         sup_id = data.get("supplier_id") or ""
         sup_code = data.get("supplier_code") or ""
-        order.supplier = Supplier.objects(id=sup_id).first() if sup_id else Supplier.objects(code=sup_code).first()
+        if not sup_id and not sup_code:
+            order.supplier = None
+        else:
+            if not order_relationship_allowed(
+                user, target_kind, "supplier", "orders.update"
+            ):
+                return json_error("not_found", "Supplier not found.", 404)
+            supplier = _related_by_id_or_code(
+                user,
+                Supplier.objects,
+                "suppliers",
+                "orders.update",
+                sup_id,
+                sup_code,
+            )
+            if not supplier:
+                return json_error("not_found", "Supplier not found.", 404)
+            order.supplier = supplier
     if "job_id" in data:
-        order.job = Job.objects(id=data.get("job_id")).first() if data.get("job_id") else None
+        if not data.get("job_id"):
+            order.job = None
+        else:
+            if not order_relationship_allowed(user, target_kind, "job", "orders.update"):
+                return json_error("not_found", "Job not found.", 404)
+            job = _scoped_related(
+                user,
+                Job.objects(is_deleted=False),
+                data.get("job_id"),
+                "jobs",
+                "orders.update",
+            )
+            if not job:
+                return json_error("not_found", "Job not found.", 404)
+            order.job = job
 
     order.updated_at = utc_now()
     order.save()
@@ -321,10 +648,10 @@ def update_order(order_number):
 @bp.delete("/<order_number>")
 @api_auth_required
 def delete_order(order_number):
-    user, err = ensure_permissions("orders.manage")
+    user, err = ensure_permissions("orders.archive")
     if err:
         return err
-    order = Order.objects(order_number=order_number).first()
+    order = _scoped_order(user, order_number, "orders.archive")
     if not order:
         return json_error("not_found", "Order not found.", 404)
     if order.status not in ("draft", "submitted", "cancelled"):
@@ -338,10 +665,10 @@ def delete_order(order_number):
 @bp.post("/<order_number>/submit")
 @api_auth_required
 def order_submit(order_number):
-    user, err = ensure_permissions("orders.manage")
+    user, err = ensure_permissions("orders.submit")
     if err:
         return err
-    order = Order.objects(order_number=order_number).first()
+    order = _scoped_order(user, order_number, "orders.submit")
     if not order:
         return json_error("not_found", "Order not found.", 404)
     if not can_transition_order(order.status, "submitted"):
@@ -355,10 +682,10 @@ def order_submit(order_number):
 @bp.post("/<order_number>/approve")
 @api_auth_required
 def order_approve(order_number):
-    user, err = ensure_permissions("orders.manage")
+    user, err = ensure_permissions("orders.approve")
     if err:
         return err
-    order = Order.objects(order_number=order_number).first()
+    order = _scoped_order(user, order_number, "orders.approve")
     if not order:
         return json_error("not_found", "Order not found.", 404)
     if not can_transition_order(order.status, "confirmed"):
@@ -374,13 +701,19 @@ def order_approve(order_number):
 @bp.post("/<order_number>/ship")
 @api_auth_required
 def order_ship(order_number):
-    user, err = ensure_permissions("orders.manage")
+    user, err = ensure_permissions("orders.ship")
     if err:
         return err
-    order = Order.objects(order_number=order_number).first()
+    order = _scoped_order(user, order_number, "orders.ship")
     if not order:
         return json_error("not_found", "Order not found.", 404)
     data = get_json()
+    invalid = _invalid_payload_fields(
+        data,
+        {"carrier", "tracking_number", "actual_delivery"},
+    )
+    if invalid:
+        return invalid
     if not can_transition_order(order.status, "shipped"):
         return json_error("invalid_transition", "Status transition not allowed.", 400)
     order.status = "shipped"
@@ -395,16 +728,20 @@ def order_ship(order_number):
 @bp.patch("/<order_number>/status")
 @api_auth_required
 def order_status(order_number):
-    user, err = ensure_permissions("orders.manage")
-    if err:
-        return err
-    order = Order.objects(order_number=order_number).first()
-    if not order:
-        return json_error("not_found", "Order not found.", 404)
     data = get_json()
+    invalid = _invalid_payload_fields(data, {"status"})
+    if invalid:
+        return invalid
     new_status = (data.get("status") or "").strip()
     if new_status not in ORDER_STATUS_FLOW:
         return json_error("invalid_status", "Invalid status.", 400)
+    permission = _status_permission(new_status)
+    user, err = ensure_permissions(permission)
+    if err:
+        return err
+    order = _scoped_order(user, order_number, permission)
+    if not order:
+        return json_error("not_found", "Order not found.", 404)
     if not can_transition_order(order.status, new_status):
         return json_error("invalid_transition", "Status transition not allowed.", 400)
     order.status = new_status
@@ -416,28 +753,34 @@ def order_status(order_number):
 @bp.get("/stats")
 @api_auth_required
 def order_stats():
-    user, err = ensure_permissions("orders.view")
+    user, err = ensure_permissions("orders.read")
     if err:
         return err
-    base = Order.objects()
+    base = scope_queryset(Order.objects, user, "orders")
+    financial = has_permission(user, "orders.financial.read")
+    month = base.filter(order_date__gte=utc_now().replace(day=1))
+    count = base.count()
+    total_value = float(base.sum("total") or 0.0) if financial else None
     return jsonify({
         "ok": True,
         "status_counts": {s: base.filter(status=s).count() for s in ORDER_STATUS_FLOW.keys()},
-        "revenue_month": sum([float(o.total or 0.0) for o in base.filter(order_date__gte=utc_now().replace(day=1))]),
-        "avg_order_value": (sum([float(o.total or 0.0) for o in base]) / base.count()) if base.count() else 0.0,
+        "revenue_month": float(month.sum("total") or 0.0) if financial else None,
+        "avg_order_value": (total_value / count) if financial and count else (0.0 if financial else None),
     })
 
 
 @bp.get("/dashboard")
 @api_auth_required
 def order_dashboard():
-    user, err = ensure_permissions("orders.view")
+    user, err = ensure_permissions("orders.read")
     if err:
         return err
-    recent = Order.objects().order_by("-order_date").limit(10)
-    pending = Order.objects(status__in=["draft", "submitted"]).order_by("-order_date").limit(10)
+    base = scope_queryset(Order.objects, user, "orders")
+    recent = base.order_by("-order_date").limit(10)
+    pending = base.filter(status__in=["draft", "submitted"]).order_by("-order_date").limit(10)
+    financial = has_permission(user, "orders.financial.read")
     return jsonify({
         "ok": True,
-        "recent": [_order_to_dict(o) for o in recent],
-        "pending": [_order_to_dict(o) for o in pending],
+        "recent": [_order_to_dict(o, include_financial=financial) for o in recent],
+        "pending": [_order_to_dict(o, include_financial=financial) for o in pending],
     })

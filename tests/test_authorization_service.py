@@ -326,7 +326,7 @@ def test_unsupported_resource_type_never_returns_unrestricted(app):
             )
 
 
-def test_planner_name_does_not_bypass_relationship_scope(app):
+def test_planner_permission_contribution_remains_global_despite_relationship(app):
     with app.app_context():
         role = _role("planner", ["jobs.read"])
         user = _user("scoped-planner@example.com", [role])
@@ -337,7 +337,7 @@ def test_planner_name_does_not_bypass_relationship_scope(app):
 
         assert [item.job_number for item in scope_queryset(
             Job.objects, user, "jobs"
-        )] == ["PLANNER-OWN"]
+        )] == ["PLANNER-OWN", "PLANNER-OTHER"]
 
 
 def test_part_access_uses_exact_revision_and_case_normalisation(app):

@@ -11,8 +11,8 @@ from app.models.part import Part
 from app.models.supplier import Supplier
 from app.models.auth import User
 from app.services.api_auth import api_auth_required
+from app.services.authorization import authorised_get, scope_queryset
 from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW
-from app.services.acl import apply_job_scope
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import utc_now
 from app.views.api_helpers import (
@@ -25,6 +25,126 @@ from app.views.api_helpers import (
 )
 
 bp = Blueprint("jobs_api", __name__, url_prefix="/api/jobs")
+
+_JOB_BASE_FIELDS = {
+    "job_number",
+    "title",
+    "description",
+    "part_number",
+    "part_revision",
+    "qty_ordered",
+    "qty_produced",
+    "qty_scrapped",
+    "status",
+    "priority",
+    "scheduled_start",
+    "scheduled_end",
+    "actual_start",
+    "actual_end",
+    "material_reserved",
+    "estimated_hours",
+    "actual_hours",
+    "order_number",
+    "customer_id",
+    "customer_code",
+    "vendor_ids",
+    "participant_ids",
+    "stages",
+    "bom",
+}
+_JOB_ASSIGNMENT_FIELDS = {"customer_id", "customer_code", "vendor_ids", "participant_ids"}
+_STAGE_FIELDS = {
+    "name",
+    "sequence",
+    "status",
+    "assigned_to",
+    "department",
+    "started_at",
+    "completed_at",
+    "estimated_hours",
+    "actual_hours",
+    "note",
+}
+_BOM_FIELDS = {"pn", "part_number", "rev", "revision", "qty"}
+
+
+def _invalid_payload_fields(data, allowed):
+    unknown = sorted(set(data) - set(allowed))
+    if unknown:
+        return json_error(
+            "invalid_fields",
+            "Unsupported field(s) in request.",
+            400,
+            unknown,
+        )
+    return None
+
+
+def _invalid_nested_fields(data):
+    for raw in data.get("stages") or []:
+        if not isinstance(raw, dict):
+            return json_error("invalid_stages", "Job stages must be objects.", 400)
+        invalid = _invalid_payload_fields(raw, _STAGE_FIELDS)
+        if invalid:
+            return invalid
+    for raw in data.get("bom") or []:
+        if not isinstance(raw, dict):
+            return json_error("invalid_bom", "Job BOM lines must be objects.", 400)
+        invalid = _invalid_payload_fields(raw, _BOM_FIELDS)
+        if invalid:
+            return invalid
+    return None
+
+
+def _scoped_job(user, job_number, permission):
+    return authorised_get(
+        Job.objects(is_deleted=False),
+        user,
+        job_number,
+        resource_type="jobs",
+        identifier_field="job_number",
+        permission=permission,
+    )
+
+
+def _scoped_customer(user, permission, customer_id="", customer_code=""):
+    if customer_id:
+        customer = authorised_get(
+            Customer.objects,
+            user,
+            customer_id,
+            resource_type="customers",
+            permission=permission,
+        )
+        if customer:
+            return customer
+    if customer_code:
+        return authorised_get(
+            Customer.objects,
+            user,
+            customer_code,
+            resource_type="customers",
+            identifier_field="code",
+            permission=permission,
+        )
+    return None
+
+
+def _scoped_suppliers(user, permission, supplier_ids):
+    identifiers = [value for value in supplier_ids if value]
+    if not identifiers:
+        return []
+    scoped = scope_queryset(
+        Supplier.objects,
+        user,
+        "suppliers",
+        permission=permission,
+    )
+    suppliers = list(scoped.filter(id__in=identifiers))
+    if len({str(item.id) for item in suppliers}) != len({str(item) for item in identifiers}):
+        return None
+    return suppliers
+
 
 def _external_user_ids() -> set[str]:
     ids: set[str] = set()
@@ -152,12 +272,12 @@ def _job_to_dict(job: Job):
 @bp.get("")
 @api_auth_required
 def list_jobs():
-    user, err = ensure_permissions("jobs.view")
+    user, err = ensure_permissions("jobs.read")
     if err:
         return err
 
     page, size = parse_pagination()
-    q = Job.objects(is_deleted=False)
+    q = scope_queryset(Job.objects(is_deleted=False), user, "jobs")
 
     status = request.args.get("status")
     if status:
@@ -169,9 +289,11 @@ def list_jobs():
 
     customer = request.args.get("customer")
     if customer:
-        cust = Customer.objects(code=customer).first() or Customer.objects(id=customer).first()
+        cust = _scoped_customer(user, "jobs.read", customer, customer)
         if cust:
             q = q.filter(customer=cust)
+        else:
+            q = q.filter(id__in=[])
 
     part_number = request.args.get("part_number")
     if part_number:
@@ -200,7 +322,6 @@ def list_jobs():
     if direction == "desc":
         sort_key = "-" + sort_key
 
-    q = apply_job_scope(q, user)
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
 
@@ -216,10 +337,32 @@ def list_jobs():
 @bp.post("")
 @api_auth_required
 def create_job():
-    user, err = ensure_permissions("jobs.manage")
+    user, err = ensure_permissions("jobs.create")
     if err:
         return err
     data = get_json()
+    invalid = _invalid_payload_fields(data, _JOB_BASE_FIELDS)
+    if invalid:
+        return invalid
+    invalid = _invalid_nested_fields(data)
+    if invalid:
+        return invalid
+    if set(data) & _JOB_ASSIGNMENT_FIELDS:
+        _, err = ensure_permissions("jobs.assign")
+        if err:
+            return err
+    if data.get("bom"):
+        _, err = ensure_permissions("jobs.bom.update")
+        if err:
+            return err
+    if data.get("stages"):
+        _, err = ensure_permissions("jobs.stages.update")
+        if err:
+            return err
+    if data.get("material_reserved"):
+        _, err = ensure_permissions("jobs.material.issue")
+        if err:
+            return err
 
     job_number = (data.get("job_number") or "").strip() or generate_job_number()
     if Job.objects(job_number=job_number).first():
@@ -233,6 +376,11 @@ def create_job():
     status = (data.get("status") or "draft").strip()
     if status not in ("draft", "released", "in_progress", "on_hold", "completed", "cancelled"):
         return json_error("invalid_status", "Invalid status.", 400)
+    if status != "draft":
+        required = "jobs.cancel" if status == "cancelled" else "jobs.update"
+        _, err = ensure_permissions(required)
+        if err:
+            return err
 
     job = Job(
         job_number=job_number,
@@ -260,16 +408,26 @@ def create_job():
     cust_id = data.get("customer_id") or ""
     cust_code = data.get("customer_code") or ""
     if cust_id or cust_code:
-        cust = Customer.objects(id=cust_id).first() if cust_id else Customer.objects(code=cust_code).first()
+        cust = _scoped_customer(user, "jobs.assign", cust_id, cust_code)
+        if not cust:
+            return json_error("not_found", "Customer not found.", 404)
         job.customer = cust
 
     vendor_ids = data.get("vendor_ids") or []
     if vendor_ids:
-        job.vendors = list(Supplier.objects(id__in=vendor_ids))
+        vendors = _scoped_suppliers(user, "jobs.assign", vendor_ids)
+        if vendors is None:
+            return json_error("not_found", "Supplier not found.", 404)
+        job.vendors = vendors
 
     participant_ids = data.get("participant_ids") or []
     if participant_ids:
-        job.participants = _filter_participant_users(participant_ids)
+        participants = _filter_participant_users(participant_ids)
+        if len({str(item.id) for item in participants}) != len(
+            {str(item) for item in participant_ids}
+        ):
+            return json_error("not_found", "Participant not found.", 404)
+        job.participants = participants
 
     job.created_at = utc_now()
     job.updated_at = utc_now()
@@ -280,10 +438,10 @@ def create_job():
 @bp.get("/<job_number>")
 @api_auth_required
 def get_job(job_number):
-    user, err = ensure_permissions("jobs.view")
+    user, err = ensure_permissions("jobs.read")
     if err:
         return err
-    job = apply_job_scope(Job.objects(job_number=job_number, is_deleted=False), user).first()
+    job = _scoped_job(user, job_number, "jobs.read")
     if not job:
         return json_error("not_found", "Job not found.", 404)
     return jsonify({"ok": True, "job": _job_to_dict(job)})
@@ -292,13 +450,35 @@ def get_job(job_number):
 @bp.put("/<job_number>")
 @api_auth_required
 def update_job(job_number):
-    user, err = ensure_permissions("jobs.manage")
+    user, err = ensure_permissions("jobs.update")
     if err:
         return err
-    job = Job.objects(job_number=job_number, is_deleted=False).first()
+    data = get_json()
+    invalid = _invalid_payload_fields(data, _JOB_BASE_FIELDS - {"job_number", "status"})
+    if invalid:
+        return invalid
+    invalid = _invalid_nested_fields(data)
+    if invalid:
+        return invalid
+    if set(data) & _JOB_ASSIGNMENT_FIELDS:
+        _, err = ensure_permissions("jobs.assign")
+        if err:
+            return err
+    if "bom" in data:
+        _, err = ensure_permissions("jobs.bom.update")
+        if err:
+            return err
+    if "stages" in data:
+        _, err = ensure_permissions("jobs.stages.update")
+        if err:
+            return err
+    if "material_reserved" in data:
+        _, err = ensure_permissions("jobs.material.issue")
+        if err:
+            return err
+    job = _scoped_job(user, job_number, "jobs.update")
     if not job:
         return json_error("not_found", "Job not found.", 404)
-    data = get_json()
 
     if "title" in data:
         job.title = (data.get("title") or "").strip()
@@ -343,12 +523,27 @@ def update_job(job_number):
     if "customer_id" in data or "customer_code" in data:
         cust_id = data.get("customer_id") or ""
         cust_code = data.get("customer_code") or ""
-        job.customer = Customer.objects(id=cust_id).first() if cust_id else Customer.objects(code=cust_code).first()
+        if not cust_id and not cust_code:
+            job.customer = None
+        else:
+            customer = _scoped_customer(user, "jobs.assign", cust_id, cust_code)
+            if not customer:
+                return json_error("not_found", "Customer not found.", 404)
+            job.customer = customer
 
     if "vendor_ids" in data:
-        job.vendors = list(Supplier.objects(id__in=(data.get("vendor_ids") or [])))
+        vendors = _scoped_suppliers(user, "jobs.assign", data.get("vendor_ids") or [])
+        if vendors is None:
+            return json_error("not_found", "Supplier not found.", 404)
+        job.vendors = vendors
     if "participant_ids" in data:
-        job.participants = _filter_participant_users(data.get("participant_ids") or [])
+        participant_ids = data.get("participant_ids") or []
+        participants = _filter_participant_users(participant_ids)
+        if len({str(item.id) for item in participants}) != len(
+            {str(item) for item in participant_ids}
+        ):
+            return json_error("not_found", "Participant not found.", 404)
+        job.participants = participants
 
     job.updated_at = utc_now()
     job.save()
@@ -358,16 +553,25 @@ def update_job(job_number):
 @bp.delete("/<job_number>")
 @api_auth_required
 def delete_job(job_number):
-    user, err = ensure_permissions("jobs.manage")
+    user, err = ensure_permissions("jobs.archive", "orders.update")
     if err:
         return err
-    job = Job.objects(job_number=job_number, is_deleted=False).first()
+    job = _scoped_job(user, job_number, "jobs.archive")
     if not job:
         return json_error("not_found", "Job not found.", 404)
     if job.status in ("in_progress", "completed"):
         return json_error("invalid_state", "Job cannot be deleted in this status.", 400)
     from app.models.order import Order
-    Order.objects(job=job).update(job=None, updated_at=utc_now())
+    related_orders = Order.objects(job=job)
+    scoped_orders = scope_queryset(
+        related_orders,
+        user,
+        "orders",
+        permission="orders.update",
+    )
+    if scoped_orders.count() != related_orders.count():
+        return json_error("not_found", "Related order not found.", 404)
+    scoped_orders.update(job=None, updated_at=utc_now())
     job.status = "cancelled"
     job.is_deleted = True
     job.updated_at = utc_now()
@@ -378,16 +582,20 @@ def delete_job(job_number):
 @bp.patch("/<job_number>/status")
 @api_auth_required
 def job_status(job_number):
-    user, err = ensure_permissions("jobs.manage")
-    if err:
-        return err
-    job = Job.objects(job_number=job_number, is_deleted=False).first()
-    if not job:
-        return json_error("not_found", "Job not found.", 404)
     data = get_json()
+    invalid = _invalid_payload_fields(data, {"status", "allow_override"})
+    if invalid:
+        return invalid
     new_status = (data.get("status") or "").strip()
     if not new_status:
         return json_error("missing_status", "Status is required.", 400)
+    permission = "jobs.cancel" if new_status == "cancelled" else "jobs.update"
+    user, err = ensure_permissions(permission)
+    if err:
+        return err
+    job = _scoped_job(user, job_number, permission)
+    if not job:
+        return json_error("not_found", "Job not found.", 404)
     if not can_transition_job(job.status, new_status):
         return json_error("invalid_transition", "Status transition not allowed.", 400)
     if new_status == "released":
@@ -409,10 +617,10 @@ def job_status(job_number):
 @bp.post("/<job_number>/stages/<stage_id>/complete")
 @api_auth_required
 def job_stage_complete(job_number, stage_id):
-    user, err = ensure_permissions("jobs.manage")
+    user, err = ensure_permissions("jobs.stages.update")
     if err:
         return err
-    job = Job.objects(job_number=job_number, is_deleted=False).first()
+    job = _scoped_job(user, job_number, "jobs.stages.update")
     if not job:
         return json_error("not_found", "Job not found.", 404)
     for stage in job.stages or []:
@@ -435,10 +643,10 @@ def job_stage_complete(job_number, stage_id):
 @bp.post("/<job_number>/materials/reserve")
 @api_auth_required
 def job_reserve_materials(job_number):
-    user, err = ensure_permissions("jobs.manage")
+    user, err = ensure_permissions("jobs.material.issue")
     if err:
         return err
-    job = Job.objects(job_number=job_number, is_deleted=False).first()
+    job = _scoped_job(user, job_number, "jobs.material.issue")
     if not job:
         return json_error("not_found", "Job not found.", 404)
     job.material_reserved = True
@@ -450,10 +658,10 @@ def job_reserve_materials(job_number):
 @bp.get("/stats")
 @api_auth_required
 def job_stats():
-    user, err = ensure_permissions("jobs.view")
+    user, err = ensure_permissions("jobs.read")
     if err:
         return err
-    base = Job.objects(is_deleted=False)
+    base = scope_queryset(Job.objects(is_deleted=False), user, "jobs")
     return jsonify({
         "ok": True,
         "status_counts": {s: base.filter(status=s).count() for s in JOB_STATUS_FLOW.keys()},
@@ -465,11 +673,12 @@ def job_stats():
 @bp.get("/dashboard")
 @api_auth_required
 def job_dashboard():
-    user, err = ensure_permissions("jobs.view")
+    user, err = ensure_permissions("jobs.read")
     if err:
         return err
-    recent = Job.objects(is_deleted=False).order_by("-created_at").limit(10)
-    upcoming = Job.objects(is_deleted=False, status__in=["released", "in_progress"]).order_by("scheduled_end").limit(10)
+    base = scope_queryset(Job.objects(is_deleted=False), user, "jobs")
+    recent = base.order_by("-created_at").limit(10)
+    upcoming = base.filter(status__in=["released", "in_progress"]).order_by("scheduled_end").limit(10)
     return jsonify({
         "ok": True,
         "recent": [_job_to_dict(j) for j in recent],
