@@ -3164,23 +3164,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 initialFolder = System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments);
             }
 
-            using (var dialog = new FolderBrowserDialog())
-            {
-                dialog.Description = "Choose where to save the allocated SolidWorks file.";
-                dialog.ShowNewFolderButton = true;
-                if (!string.IsNullOrWhiteSpace(initialFolder) && Directory.Exists(initialFolder))
-                {
-                    dialog.SelectedPath = initialFolder;
-                }
-
-                if (dialog.ShowDialog(this) != DialogResult.OK)
-                {
-                    return false;
-                }
-
-                targetFolder = dialog.SelectedPath ?? string.Empty;
-                return !string.IsNullOrWhiteSpace(targetFolder);
-            }
+            targetFolder = BrowseFolderModern("Choose where to save the allocated SolidWorks file.", initialFolder);
+            return !string.IsNullOrWhiteSpace(targetFolder);
         }
 
         private bool TryGetSolidWorksExtension(ModelDoc2 model, out string extension)
@@ -3610,15 +3595,48 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         private string BrowseFolder(string initialPath)
         {
-            using (var dialog = new FolderBrowserDialog())
+            return BrowseFolderModern("Select folder", initialPath);
+        }
+
+        /// <summary>
+        /// Folder picker that shows the modern Windows Explorer folder-selection UI,
+        /// including the "Quick access" shortcuts pane (pinned/frequent folders),
+        /// instead of the legacy FolderBrowserDialog tree view, which predates Quick
+        /// access and doesn't show it. See GitHub issue #56.
+        ///
+        /// This intentionally stays on the WinForms OpenFileDialog (which already
+        /// wraps the modern Explorer picker) rather than hand-rolling IFileOpenDialog
+        /// COM interop: a hand-written vtable for that interface is easy to get
+        /// subtly wrong, and a bad COM interop call here runs in-process with
+        /// SolidWorks and can crash the host, not just this add-in.
+        /// </summary>
+        private string BrowseFolderModern(string title, string initialPath)
+        {
+            using (var dialog = new OpenFileDialog())
             {
-                if (!string.IsNullOrWhiteSpace(initialPath))
+                dialog.Title = title;
+                dialog.CheckFileExists = false;
+                dialog.CheckPathExists = true;
+                dialog.ValidateNames = false;
+                dialog.Multiselect = false;
+                // There is no file to pick: this placeholder name is what the user
+                // leaves in place while browsing into the desired folder. The
+                // folder containing it (not the placeholder itself) is the result.
+                dialog.FileName = "Select this folder";
+                dialog.Filter = "Folders|\n";
+
+                if (!string.IsNullOrWhiteSpace(initialPath) && Directory.Exists(initialPath))
                 {
-                    dialog.SelectedPath = initialPath;
+                    dialog.InitialDirectory = initialPath;
                 }
 
-                DialogResult result = dialog.ShowDialog();
-                return result == DialogResult.OK ? dialog.SelectedPath : string.Empty;
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return string.Empty;
+                }
+
+                string folder = Path.GetDirectoryName(dialog.FileName);
+                return !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder) ? folder : string.Empty;
             }
         }
 
