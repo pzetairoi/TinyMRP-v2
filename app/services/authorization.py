@@ -714,6 +714,35 @@ def scope_queryset(
     return _deny_all(queryset)
 
 
+def permission_scope_modes(
+    user: Any,
+    permission: str,
+    *,
+    resource_type: str = "parts",
+) -> frozenset[str]:
+    """Return the deliberate scope contributions for a canonical permission.
+
+    This is a policy-introspection helper for services, such as protected file
+    delivery, that need to apply a narrower category policy to portal and
+    assigned-job roles after the ordinary object scope has been enforced.
+    """
+
+    normalized = _normalise_resource_type(resource_type)
+    if normalized not in _RESOURCE_PERMISSIONS:
+        return frozenset()
+    if not has_permission(user, permission):
+        return frozenset()
+    if _uses_legacy_admin_bypass(user):
+        return frozenset({"global"})
+    try:
+        scope = _scope_context(user)
+        if not scope.valid:
+            return frozenset()
+        return _scope_modes(scope, normalized, permission)
+    except Exception:
+        return frozenset()
+
+
 def order_kind_allowed(user: Any, kind: str, permission: str) -> bool:
     """Return whether the user's contributing order scopes include ``kind``."""
 

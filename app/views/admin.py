@@ -534,6 +534,10 @@ def purge_parts():
     Requires admin and explicit POST with CSRF.
     """
     if request.method == "POST":
+        from app.services.authorization import has_permission
+
+        if not has_permission(current_user, "files.purge"):
+            abort(403)
         # Import here to avoid circulars at import time
         from ..models.part import Part
         from ..models.bom import BOMLink

@@ -1,42 +1,54 @@
 from typing import Iterable, List, Optional
 from flask import current_app
 from app.models.artifact import PartFile
-from app.services.files_access import file_url_for, public_file_urls_enabled
+from app.services.file_security import (
+    managed_file_category_allowed,
+    managed_file_metadata_allowed,
+    managed_file_path_allowed,
+    managed_thumbnail_available,
+)
+from app.services.files_access import file_url_for
 from app.services.part_norm import clean_rev
 
-def _urls_for(pn: str, rev: Optional[str], *, is_dwg: bool):
+def _urls_for(pn: str, rev: Optional[str], *, is_dwg: bool, user=None):
     """Return best-first URLs for preview/drawing PNGs.
 
     Order: preview prefers thumbnails; drawings prefer originals.
     """
-    if rev is not None:
-        rev_clean = rev or ""
-        rows = PartFile.objects(part_number__iexact=pn, revision__iexact=rev_clean, ext_group="png", is_dwg=is_dwg)
-        if not rows:
-            return []
-    else:
-        rows = PartFile.objects(part_number__iexact=pn, ext_group="png", is_dwg=is_dwg).order_by("-mtime")
-        if not rows:
-            return []
+    rev_clean = rev or ""
+    rows = PartFile.objects(
+        part_number__iexact=pn,
+        revision__iexact=rev_clean,
+        ext_group="png",
+        is_dwg=is_dwg,
+    )
+    if not rows:
+        return []
     pf = rows.first()
+    if user is not None and not managed_file_metadata_allowed(user, pf):
+        return []
 
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
     prefer_thumb = not is_dwg
     out = _urls_for_doc(pf, http_base, prefer_thumb=prefer_thumb)
     return _dedup_urls(out)
 
-def preview_png_urls_for(pn: str, rev: str | None):
-    return _urls_for(pn, rev, is_dwg=False)
+def preview_png_urls_for(pn: str, rev: str | None, *, user=None):
+    return _urls_for(pn, rev, is_dwg=False, user=user)
 
-def drawing_png_urls_for(pn: str, rev: str | None):
-    return _urls_for(pn, rev, is_dwg=True)
+def drawing_png_urls_for(pn: str, rev: str | None, *, user=None):
+    return _urls_for(pn, rev, is_dwg=True, user=user)
 
 # kept for backward compat – use only for places that truly want preview images
-def thumb_urls_for(pn: str, rev: str | None):
-    return preview_png_urls_for(pn, rev)
+def thumb_urls_for(pn: str, rev: str | None, *, user=None):
+    return preview_png_urls_for(pn, rev, user=user)
 
 
-def preview_png_urls_map(pairs: Iterable[tuple[str, str | None]]) -> dict[tuple[str, str], List[str]]:
+def preview_png_urls_map(
+    pairs: Iterable[tuple[str, str | None]],
+    *,
+    user=None,
+) -> dict[tuple[str, str], List[str]]:
     requested: dict[tuple[str, str], tuple[str, str]] = {}
     for pn, rev in pairs:
         pn_clean = str(pn or "").strip()
@@ -47,6 +59,11 @@ def preview_png_urls_map(pairs: Iterable[tuple[str, str | None]]) -> dict[tuple[
     if not requested:
         return {}
 
+    authorised = None
+    if user is not None:
+        from app.services.authorization import authorised_part_pairs
+
+        authorised = authorised_part_pairs(user, requested.values())
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
     out: dict[tuple[str, str], List[str]] = {}
     pn_list = sorted({pn for pn, _rev in requested.values()})
@@ -59,27 +76,31 @@ def preview_png_urls_map(pairs: Iterable[tuple[str, str | None]]) -> dict[tuple[
         match = requested.get((str(getattr(row, "part_number", "") or "").strip().lower(), clean_rev(getattr(row, "revision", "") or "").lower()))
         if not match or match in out:
             continue
+        if user is not None:
+            key = (match[0].casefold(), match[1].casefold())
+            if (
+                key not in (authorised or frozenset())
+                or not managed_file_category_allowed(user, row)
+                or not managed_file_path_allowed(row)
+            ):
+                continue
         out[match] = _dedup_urls(_urls_for_doc(row, http_base, prefer_thumb=True))
     return out
 
 
-def thumb_urls_map(pairs: Iterable[tuple[str, str | None]]) -> dict[tuple[str, str], List[str]]:
-    return preview_png_urls_map(pairs)
+def thumb_urls_map(
+    pairs: Iterable[tuple[str, str | None]],
+    *,
+    user=None,
+) -> dict[tuple[str, str], List[str]]:
+    return preview_png_urls_map(pairs, user=user)
 
 
 # helper: build URL list for a single PartFile doc
 def _urls_for_doc(d: PartFile, http_base: str, *, prefer_thumb: bool = True) -> List[str]:
     urls: List[str] = []
-    allow_public = public_file_urls_enabled()
-    if prefer_thumb and allow_public and http_base and d.thumb_rel_path:
-        urls.append(f"{http_base}/{d.thumb_rel_path}")
-    if allow_public and http_base and d.rel_path:
-        urls.append(f"{http_base}/{d.rel_path}")
-    if allow_public and getattr(d, "http_url", None):
-        urls.append(d.http_url)
-    # fallback to tokenized local file using signed token
     try:
-        if prefer_thumb and d.thumb_rel_path:
+        if prefer_thumb and managed_thumbnail_available(d):
             urls.append(file_url_for(d, kind="thumb"))
         urls.append(file_url_for(d, kind="file"))
     except Exception:

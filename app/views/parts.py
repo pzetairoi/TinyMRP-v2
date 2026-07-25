@@ -33,6 +33,7 @@ from app.services.filescan import (
     datasheet_attr_present,
     datasheet_url_from_attrs,
     discover_part_files,
+    plan_part_file_refresh,
     remove_stale_part_files,
     upsert_part_files,
 )
@@ -43,17 +44,24 @@ from app.services.acl import (
     allowed_parts_for,
     part_is_allowed,
     user_has_permission,
-    permissions_required,
 )
 from app.services.authorization import (
     authorised_get,
     has_permission,
-    legacy_admin_bypass_enabled,
+    part_is_released,
     require_permission,
     scope_queryset,
 )
 from app.services.audit import log_action
-from app.services.files_access import file_url_for, public_file_urls_enabled
+from app.services.file_security import (
+    associated_file_category_allowed,
+    associated_file_path_allowed,
+    exact_file_part,
+    managed_file_group_allowed,
+    managed_file_category_allowed,
+    managed_file_path_allowed,
+)
+from app.services.files_access import file_url_for
 from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
 from app.services.field_config import (
     boolean_filter_value,
@@ -83,7 +91,11 @@ from app.services.part_query import (
     terms,
 )
 from app.services.arena_export import build_arena_bom_csv, build_arena_file_links_csv
-from app.services.parts_delete import delete_part_and_refs_cascade
+from app.services.parts_delete import (
+    delete_part_and_refs_cascade,
+    plan_part_delete_pairs,
+    validate_physical_delete_plan,
+)
 from app.services.part_norm import clean_rev, clean_rev_or_none
 from app.services.part_annotations import (
     COMMENT_PRIORITIES,
@@ -326,18 +338,10 @@ def _display_revision_label(rev: str | None) -> str:
 
 
 def _part_file_overview_row(pf: PartFile) -> dict[str, Any]:
-    http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
-    allow_public = public_file_urls_enabled()
-    url = ""
-    if allow_public and getattr(pf, "http_url", None):
-        url = pf.http_url
-    elif allow_public and http_base and getattr(pf, "rel_path", None):
-        url = f"{http_base}/{pf.rel_path}"
-    else:
-        try:
-            url = file_url_for(pf)
-        except Exception:
-            url = ""
+    try:
+        url = file_url_for(pf)
+    except Exception:
+        url = ""
     ext = str(getattr(pf, "ext", "") or "").strip().lower()
     name = os.path.basename(pf.rel_path or pf.path or "") or (f"{pf.ext_group}.{ext}" if pf.ext_group else "file")
     recorded_at = getattr(pf, "mtime_iso", None) or getattr(pf, "mtime", None) or getattr(pf, "discovered_at", None)
@@ -1075,7 +1079,20 @@ def parts_lazy():
                 coverage = {}
 
     _t_query = time.perf_counter()
-    thumb_map = thumb_urls_map([(part.part_number, _normalized_revision(part, harvest_part_attrs(part))) for part in docs])
+    thumb_map = (
+        thumb_urls_map(
+            [
+                (
+                    part.part_number,
+                    _normalized_revision(part, harvest_part_attrs(part)),
+                )
+                for part in docs
+            ],
+            user=current_user,
+        )
+        if has_permission(current_user, "files.read")
+        else {}
+    )
     _t_thumbs = time.perf_counter()
     if review_statuses is None:
         review_statuses = part_review_status_map()
@@ -1122,15 +1139,15 @@ def parts_lazy():
                 "process": values.get("process", ""),
                 "processes": process_list,
                 "thumb_urls": thumb_list,
-                "has_pdf": bool(values.get("has_pdf", getattr(part, "has_pdf", False))),
-                "has_png": bool(values.get("has_png", getattr(part, "has_png", False))),
-                "has_dxf": bool(values.get("has_dxf", getattr(part, "has_dxf", False))),
-                "has_step": bool(values.get("has_step", getattr(part, "has_step", False))),
-                "has_edr": bool(values.get("has_edr", getattr(part, "has_edr", False))),
-                "has_3mf": bool(values.get("has_3mf", getattr(part, "has_3mf", False))),
-                "has_ply": bool(values.get("has_ply", getattr(part, "has_ply", False))),
-                "has_stl": bool(values.get("has_stl", getattr(part, "has_stl", False))),
-                "has_datasheet": bool(values.get("has_datasheet", getattr(part, "has_datasheet", False))),
+                "has_pdf": bool(managed_file_group_allowed(current_user, "pdf") and values.get("has_pdf", getattr(part, "has_pdf", False))),
+                "has_png": bool(managed_file_group_allowed(current_user, "png") and values.get("has_png", getattr(part, "has_png", False))),
+                "has_dxf": bool(managed_file_group_allowed(current_user, "dxf") and values.get("has_dxf", getattr(part, "has_dxf", False))),
+                "has_step": bool(managed_file_group_allowed(current_user, "step") and values.get("has_step", getattr(part, "has_step", False))),
+                "has_edr": bool(managed_file_group_allowed(current_user, "edr") and values.get("has_edr", getattr(part, "has_edr", False))),
+                "has_3mf": bool(managed_file_group_allowed(current_user, "3mf") and values.get("has_3mf", getattr(part, "has_3mf", False))),
+                "has_ply": bool(managed_file_group_allowed(current_user, "ply") and values.get("has_ply", getattr(part, "has_ply", False))),
+                "has_stl": bool(managed_file_group_allowed(current_user, "stl") and values.get("has_stl", getattr(part, "has_stl", False))),
+                "has_datasheet": bool(managed_file_group_allowed(current_user, "datasheet") and values.get("has_datasheet", getattr(part, "has_datasheet", False))),
                 "pending_review_count": int(review_status.get("count") or 0),
                 "pending_review_severity": str(review_status.get("severity") or ""),
                 "has_pending_reviews": bool(review_status.get("pending")),
@@ -1193,17 +1210,19 @@ def part_detail():
     meta = current_app.config.get("PROCESS_META", {})
     proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
 
-    preview_urls = preview_png_urls_for(p.part_number, norm_rev)
-    drawing_urls = drawing_png_urls_for(p.part_number, norm_rev)
-
-    http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
-    allow_public = public_file_urls_enabled()
+    can_read_files = has_permission(current_user, "files.read")
+    preview_urls = (
+        preview_png_urls_for(p.part_number, norm_rev, user=current_user)
+        if can_read_files
+        else []
+    )
+    drawing_urls = (
+        drawing_png_urls_for(p.part_number, norm_rev, user=current_user)
+        if can_read_files
+        else []
+    )
 
     def to_url(f: PartFile):
-        if allow_public and getattr(f, "http_url", None):
-            return f.http_url
-        if allow_public and http_base and f.rel_path:
-            return f"{http_base}/{f.rel_path}"
         return file_url_for(f)
 
     def datasheet_file_url(f: PartFile):
@@ -1219,7 +1238,12 @@ def part_detail():
         .only("ext_group", "rel_path", "path", "http_url")
         .order_by("ext_group", "rel_path")
     ):
-        if f.ext_group in files:
+        if (
+            can_read_files
+            and f.ext_group in files
+            and managed_file_category_allowed(current_user, f)
+            and managed_file_path_allowed(f)
+        ):
             files[f.ext_group].append(
                 {
                     "url": datasheet_file_url(f) if f.ext_group == "datasheet" else to_url(f),
@@ -1227,7 +1251,7 @@ def part_detail():
                     "name": file_label(f),
                 }
             )
-    datasheet_url = datasheet_url_from_attrs(attrs)
+    datasheet_url = datasheet_url_from_attrs(attrs) if can_read_files else None
     if datasheet_url:
         datasheet_name = os.path.basename(urlsplit(datasheet_url).path) or "datasheet"
         files["datasheet"].append({"url": datasheet_url, "rel": "", "name": datasheet_name})
@@ -1279,7 +1303,9 @@ def part_detail():
                 "revision": rev_v,
                 "display_code": f"{pn_key}-{rev_v}" if rev_v else pn_key,
                 "description": op.description or attrs_v.get("description") or "",
-                "thumb_urls": thumb_urls_for(pn_key, rev_v),
+                "thumb_urls": thumb_urls_for(pn_key, rev_v, user=current_user)
+                if can_read_files
+                else [],
             }
         )
 
@@ -1483,20 +1509,23 @@ def export_arena_file_links(pn: str):
 
 @bp.get("/parts/<path:pn>/files_overview")
 @login_required
-@require_items_view
+@require_permission("files.read")
 def part_files_overview(pn: str):
     pn = (pn or "").strip()
     rev = request.args.get("rev")
-    p = _find_part_doc(pn, rev)
+    if not has_permission(current_user, "files.read"):
+        return jsonify({"error": "not found"}), 404
+    rev_clean = _clean_rev_input(rev) if rev is not None else ""
+    p = exact_file_part(current_user, pn, rev_clean or "")
     if not p:
         return jsonify({"error": "not found"}), 404
 
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            return jsonify({"error": "forbidden"}), 403
-    except Exception:
-        allowed = None
+    scoped_revisions = {
+        _clean_rev_value(part.revision or "").casefold()
+        for part in scope_queryset(Part.objects, current_user, "parts")
+        .filter(part_number__iexact=p.part_number)
+        .only("revision")
+    }
 
     attrs = harvest_part_attrs(p)
     current_rev = _normalized_revision(p, attrs)
@@ -1522,7 +1551,12 @@ def part_files_overview(pn: str):
         .order_by("revision", "ext_group", "rel_path")
     ):
         row_rev = _clean_rev_value(pf.revision or "")
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, row_rev):
+        if row_rev.casefold() not in scoped_revisions:
+            continue
+        if (
+            not managed_file_category_allowed(current_user, pf)
+            or not managed_file_path_allowed(pf)
+        ):
             continue
         rows.append(_part_file_overview_row(pf))
 
@@ -1543,7 +1577,12 @@ def part_files_overview(pn: str):
         .order_by("revision", "-uploaded_at", "original_name")
     ):
         row_rev = _clean_rev_value(ef.revision or "")
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, row_rev):
+        if row_rev.casefold() not in scoped_revisions:
+            continue
+        if (
+            not associated_file_category_allowed(current_user, ef)
+            or not associated_file_path_allowed(ef)
+        ):
             continue
         rows.append(_extra_file_overview_row(ef))
 
@@ -1589,7 +1628,11 @@ def part_insights(pn):
     proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
     classification = classify_part(attrs, list(p.processes or []), meta, category=p.category or "")
     missing = insights_missing_fields(attrs, p.description or "", list(p.processes or []), meta)
-    deliverables_present = _deliverables_present(p.part_number, norm_rev)
+    deliverables_present = (
+        _deliverables_present(p.part_number, norm_rev)
+        if has_permission(current_user, "files.read")
+        else {}
+    )
     where_used_count = 0
     total_qty = 0.0
     has_bom = False
@@ -1937,16 +1980,24 @@ def part_comments_priority(pn):
 
 @bp.post("/parts/<pn>/refresh_files")
 @login_required
-@permissions_required("items.edit")
 @csrf.exempt
 def part_refresh_files(pn):
     pn = (pn or "").strip()
     data = request.get_json(silent=True) or {}
     rev_in = data.get("rev") if "rev" in data else request.args.get("rev")
     recursive_in = data.get("recursive") if "recursive" in data else request.args.get("recursive")
-    rev_clean = _clean_rev_input(rev_in)
-    p = _find_part_doc(pn, rev_clean)
+    rev_clean = _clean_rev_input(rev_in) if rev_in is not None else ""
+    p = (
+        scope_queryset(Part.objects, current_user, "parts")
+        .filter(
+            part_number__iexact=pn,
+            revision__iexact=(rev_clean or ""),
+        )
+        .first()
+    )
     if not p:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if part_is_released(p):
         return jsonify({"ok": False, "error": "not found"}), 404
     target_rev = _clean_rev_value(p.revision or "")
 
@@ -1983,35 +2034,73 @@ def part_refresh_files(pn):
                 queue.append(ckey)
         pairs = list(visited) if visited else pairs
 
-    files_found_total = 0
-    upserts_total = 0
-    removed_total = 0
-    refreshed: list[dict] = []
+    planned: list[dict[str, Any]] = []
+    required_permissions: set[str] = set()
+    scoped_parts = scope_queryset(Part.objects, current_user, "parts")
     for pn_i, rev_i in pairs:
-        part_doc = (
-            p
-            if p.part_number.lower() == pn_i.lower() and _clean_rev_value(p.revision or "") == _clean_rev_value(rev_i)
-            else Part.objects(part_number__iexact=pn_i, revision__iexact=rev_i)
-            .only("attrs", "canonical", "description", "revision", "category", "uom")
-            .first()
-        )
-        part_attrs = harvest_part_attrs(part_doc) if part_doc else {}
-        found = discover_part_files(
-            pn_i,
-            rev_i,
-            approved=bool(approved_value(part_attrs)) if part_doc else None,
-            attrs=part_attrs,
-        )
+        part_doc = scoped_parts.filter(
+            part_number__iexact=pn_i,
+            revision__iexact=rev_i,
+        ).first()
+        if part_doc is None or part_is_released(part_doc):
+            return jsonify({"ok": False, "error": "not found"}), 404
+        part_attrs = harvest_part_attrs(part_doc)
+        try:
+            found = discover_part_files(
+                pn_i,
+                rev_i,
+                approved=bool(approved_value(part_attrs)),
+                attrs=part_attrs,
+            )
+        except Exception:
+            return jsonify({"ok": False, "error": "refresh failed"}), 400
         recs = []
         for (group, is_dwg), meta in (found or {}).items():
             rec = dict(meta)
             rec["ext_group"] = group
             rec["is_dwg"] = bool(is_dwg)
             recs.append(rec)
+        plan = plan_part_file_refresh(pn_i, rev_i, recs, found)
+        required_permissions.update(plan["requires"])
+        planned.append(
+            {
+                "pn": pn_i,
+                "rev": rev_i,
+                "found": found,
+                "recs": recs,
+                "plan": plan,
+            }
+        )
+
+    # This endpoint is a mutating refresh capability even when a particular
+    # scan happens to find no delta. A read-only discovery route does not
+    # currently exist.
+    required_permissions.add("files.add")
+    if any(
+        not has_permission(current_user, permission)
+        for permission in required_permissions
+    ):
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    files_found_total = 0
+    upserts_total = 0
+    removed_total = 0
+    refreshed: list[dict] = []
+    for item in planned:
+        pn_i = item["pn"]
+        rev_i = item["rev"]
+        found = item["found"]
+        recs = item["recs"]
+        plan = item["plan"]
         files_found_total += len(recs)
         upserts_total += upsert_part_files(recs, pn_i, rev_i)
         try:
-            removed_report = remove_stale_part_files(pn_i, rev_i, found)
+            removed_report = remove_stale_part_files(
+                pn_i,
+                rev_i,
+                found,
+                allowed_ids=set(plan["stale_ids"]),
+            )
         except Exception:
             removed_report = {"count": 0}
         removed_count = int(removed_report.get("count") or 0)
@@ -2068,13 +2157,47 @@ def part_delete():
 
     delete_children = _parse_bool(body.get("delete_children") or request.form.get("delete_children"))
     delete_files = _parse_bool(body.get("delete_files") or request.form.get("delete_files"))
-    role_names = {
-        str(getattr(role, "name", "") or "").strip()
-        for role in (getattr(current_user, "roles", None) or [])
+    planned_pairs = plan_part_delete_pairs(
+        pn,
+        rev,
+        delete_children=delete_children,
+    )
+    from app.services.authorization import authorised_part_pairs
+
+    allowed_pairs = authorised_part_pairs(
+        current_user,
+        planned_pairs,
+        permission="parts.purge",
+    )
+    normalized_plan = {
+        (
+            str(part_number or "").strip().casefold(),
+            str(revision or "").strip().casefold(),
+        )
+        for part_number, revision in planned_pairs
     }
-    legacy_admin = "admin" in role_names and legacy_admin_bypass_enabled()
-    if delete_files and not legacy_admin:
+    if allowed_pairs != normalized_plan:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    if delete_files and not has_permission(current_user, "files.purge"):
         return jsonify({"ok": False, "error": "forbidden"}), 403
+    if delete_files:
+        try:
+            validate_physical_delete_plan(planned_pairs)
+        except Exception:
+            return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        log_action(
+            "part.delete.requested",
+            resource_type="part",
+            resource=f"{pn}:{rev}",
+            meta={
+                "delete_children": bool(delete_children),
+                "delete_files": bool(delete_files),
+                "planned_parts": len(planned_pairs),
+            },
+        )
+    except Exception:
+        pass
     result = delete_part_and_refs_cascade(pn, rev, delete_children=delete_children, delete_files=delete_files)
     try:
         log_action(

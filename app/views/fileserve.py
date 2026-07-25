@@ -1,51 +1,40 @@
 import os, mimetypes
+from pathlib import Path
 from urllib.parse import unquote
 from flask import Blueprint, current_app, send_file, abort, request, g
 from flask_login import login_required, current_user
 from app.services.audit import log_action
-from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.files_access import resolve_file_token
-from app.services.app_settings import resolve_file_sources
+from app.services.file_security import (
+    FileSecurityError,
+    managed_file_read_allowed,
+    managed_storage_roots,
+    resolve_managed_path,
+)
 from app.models.artifact import PartFile
 
 bp = Blueprint("fileserve", __name__, url_prefix="/files")
 
 def _configured_roots() -> list[str]:
-    roots: list[str] = []
     try:
-        configured = current_app.config.get("FILE_SOURCES")
-        if isinstance(configured, list) and configured:
-            sources = [dict(item) for item in configured if isinstance(item, dict)]
-        else:
-            sources = resolve_file_sources()
-        for source in sources:
-            root = str(source.get("local_root") or "").strip()
-            if root:
-                roots.append(os.path.abspath(root))
+        return [str(root.path) for root in managed_storage_roots()]
     except Exception:
-        pass
-    fallback = (current_app.config.get("FILE_ROOT_LOCAL") or "").strip()
-    if fallback:
-        fallback_abs = os.path.abspath(fallback)
-        if fallback_abs not in roots:
-            roots.append(fallback_abs)
-    return roots
+        return []
 
 def _allowed_path(abs_path: str) -> bool:
     try:
-        ap = os.path.abspath(abs_path)
-        for base in _configured_roots():
-            if not base:
-                continue
-            ap_norm, base_norm = os.path.normcase(ap), os.path.normcase(base)
+        resolved = Path(abs_path).resolve(strict=True)
+        if not resolved.is_file():
+            return False
+        for root in managed_storage_roots():
             try:
-                if os.path.commonpath([ap_norm, base_norm]) == base_norm:
-                    return True
-            except Exception:
-                if ap_norm.startswith(base_norm):
-                    return True
+                resolved.relative_to(root.path)
+            except (ValueError, OSError):
+                continue
+            else:
+                return True
         return False
-    except Exception:
+    except (OSError, RuntimeError, ValueError):
         return False
 
 def _safe_rel_path(rel: str) -> str | None:
@@ -88,65 +77,45 @@ def _rel_from_abs(abs_path: str) -> str | None:
 
 
 def _path_for_pf(pf: PartFile, kind: str) -> tuple[str | None, str | None]:
-    if kind == "thumb" and getattr(pf, "thumb_rel_path", None):
-        rel_norm = _safe_rel_path(pf.thumb_rel_path)
-        if rel_norm:
-            abs_path = _abs_from_rel(rel_norm)
-            if abs_path and os.path.isfile(abs_path):
-                return abs_path, rel_norm
-    if getattr(pf, "path", None) and os.path.isabs(pf.path):
-        rel = _rel_from_abs(pf.path) or getattr(pf, "rel_path", None)
-        return pf.path, rel
-    rel = None
-    if getattr(pf, "rel_path", None):
-        rel = pf.rel_path
-    if rel:
-        rel_norm = _safe_rel_path(rel)
-        if rel_norm:
-            abs_path = _abs_from_rel(rel_norm)
-            return abs_path, rel_norm
-    if getattr(pf, "path", None):
-        pth = pf.path
-        abs_path = pth if os.path.isabs(pth) else _abs_from_rel(pth)
-        return abs_path, _rel_from_abs(abs_path or "")
-    return None, None
+    try:
+        path = resolve_managed_path(
+            pf,
+            kind="thumb" if kind == "thumb" else "file",
+            must_exist=True,
+        )
+    except FileSecurityError:
+        return None, None
+    rel = pf.thumb_rel_path if kind == "thumb" else pf.rel_path
+    return str(path), _safe_rel_path(rel or "")
 
 
 @bp.get("/view/<token>")
 @login_required
 def view(token: str):
     resolved = resolve_file_token(token)
-    if not resolved and current_app.config.get("FILES_ALLOW_LEGACY_TOKENS"):
-        try:
-            import base64
-            legacy_path = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
-        except Exception:
-            legacy_path = ""
-        if legacy_path and _allowed_path(legacy_path) and os.path.isfile(legacy_path):
-            rel = _rel_from_abs(legacy_path)
-            try:
-                from mongoengine.queryset.visitor import Q
-                rel_norm = rel or ""
-                pf = PartFile.objects(Q(rel_path=rel_norm) | Q(rel_path__iexact=rel_norm)).first()
-            except Exception:
-                pf = None
-            if pf:
-                resolved = (pf, "file")
     if not resolved:
         abort(404)
     pf, kind = resolved
     if kind == "preview":
         g.allow_frame_embedding = True
-    # ACL: enforce PN/REV access
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, pf.part_number, pf.revision or ""):
-            return abort(403)
-    except Exception:
-        pass
+    if not managed_file_read_allowed(current_user, pf):
+        abort(404)
     path, rel = _path_for_pf(pf, kind)
-    if not path or not os.path.isfile(path) or not _allowed_path(path):
-        if rel and (current_app.config.get("FILES_UPSTREAM_BASE") or "").strip():
+    if not path:
+        try:
+            candidate = resolve_managed_path(
+                pf,
+                kind="thumb" if kind == "thumb" else "file",
+                must_exist=False,
+            )
+            rel = _safe_rel_path(
+                pf.thumb_rel_path if kind == "thumb" else pf.rel_path
+            )
+        except FileSecurityError:
+            candidate = None
+        if candidate is not None and rel and (
+            current_app.config.get("FILES_UPSTREAM_BASE") or ""
+        ).strip():
             try:
                 from app.files_proxy import _proxy
                 return _proxy(rel, rel_path=rel)
@@ -155,7 +124,12 @@ def view(token: str):
         abort(404)
     ct, _ = mimetypes.guess_type(path)
     try:
-        log_action("file.view", resource_type="file", resource=(rel or pf.rel_path or "unknown"))
+        log_action(
+            "file.view",
+            resource_type="file",
+            resource=f"partfile:{pf.id}",
+            meta={"part": f"{pf.part_number}:{pf.revision or ''}", "kind": kind},
+        )
     except Exception:
         pass
 
@@ -204,12 +178,17 @@ def auth():
         return ("", 403)
     try:
         from mongoengine.queryset.visitor import Q
-        pf = PartFile.objects(Q(rel_path=rel_norm) | Q(rel_path__iexact=rel_norm)).first()
-        if not pf:
+
+        matches = [
+            pf
+            for pf in PartFile.objects(
+                Q(rel_path=rel_norm) | Q(rel_path__iexact=rel_norm)
+            )
+            if managed_file_read_allowed(current_user, pf)
+        ]
+        if len(matches) != 1:
             return ("", 404)
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, pf.part_number, pf.revision or ""):
-            return ("", 403)
+        resolve_managed_path(matches[0], must_exist=False)
     except Exception:
         return ("", 403)
     return ("", 204)

@@ -3,7 +3,8 @@ from urllib.parse import urlparse
 from flask import Blueprint, request, Response, stream_with_context, current_app, abort
 from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
-from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed
+from app.services.authorization import require_permission
+from app.services.file_security import managed_file_read_allowed
 from app.models.artifact import PartFile
 from app.services.security_mode import is_strict_mode
 
@@ -14,19 +15,17 @@ def _normalize_rel(rel: str) -> str:
     return os.path.normpath(rel_norm).replace("\\", "/")
 
 
-def _authorize_rel_path(rel_path: str) -> None:
+def _authorize_rel_path(rel_path: str) -> PartFile:
     rel_norm = _normalize_rel(rel_path)
     if not rel_norm or rel_norm.startswith(".."):
         abort(404)
-    pf = PartFile.objects(Q(rel_path=rel_norm) | Q(rel_path__iexact=rel_norm)).first()
-    if not pf:
+    matches = list(
+        PartFile.objects(Q(rel_path=rel_norm) | Q(rel_path__iexact=rel_norm))
+    )
+    allowed = [pf for pf in matches if managed_file_read_allowed(current_user, pf)]
+    if len(allowed) != 1:
         abort(404)
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, pf.part_number, pf.revision or ""):
-            abort(403)
-    except Exception:
-        abort(403)
+    return allowed[0]
 
 
 def _proxy(up_path: str, *, rel_path: str | None = None):
@@ -62,7 +61,13 @@ def _proxy(up_path: str, *, rel_path: str | None = None):
         except ValueError:
             pass
     if rel_path:
-        _authorize_rel_path(rel_path)
+        file_record = _authorize_rel_path(rel_path)
+        canonical_rel = str(file_record.rel_path or "").replace("\\", "/").lstrip("/")
+        up_path = (
+            f"deliverables/{canonical_rel}"
+            if up_path.lower().startswith("deliverables/")
+            else canonical_rel
+        )
     url = f"{upstream}/{up_path.lstrip('/')}"
     headers = {}
     if "Range" in request.headers:
@@ -106,7 +111,7 @@ def _proxy(up_path: str, *, rel_path: str | None = None):
 
 @files_proxy.route("/extfiles/<path:rest>")          # e.g. /extfiles/deliverables/3mf/file.3mf
 @login_required
-@require_items_view
+@require_permission("files.read")
 def extfiles(rest: str):
     rel = rest
     if rel.lower().startswith("deliverables/"):
@@ -115,6 +120,6 @@ def extfiles(rest: str):
 
 @files_proxy.route("/deliverables/<path:rest>")      # also allow direct /deliverables/*
 @login_required
-@require_items_view
+@require_permission("files.read")
 def deliverables(rest: str):
     return _proxy(f"deliverables/{rest}", rel_path=rest)

@@ -207,6 +207,14 @@ def _build_record(
     is_dwg: bool,
     match_priority: int = 1,
 ) -> Dict[str, Any]:
+    try:
+        resolved_root = local_root.resolve(strict=False)
+        resolved_file = p.resolve(strict=True)
+        resolved_file.relative_to(resolved_root)
+        if not resolved_file.is_file():
+            raise ValueError("not a regular file")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError("discovered file is outside its storage root") from exc
     stat = p.stat()
     rel_path = _rel_path_for(p, local_root)
     return {
@@ -457,22 +465,12 @@ def _part_file_on_disk(doc: PartFile, roots: List[Path]) -> bool:
     Checks the stored absolute path first, then rel_path against every
     configured source root (case-insensitive, matching discovery behaviour).
     """
-    abs_path = str(getattr(doc, "path", "") or "").strip()
-    if abs_path and os.path.isabs(abs_path):
-        try:
-            if os.path.isfile(abs_path):
-                return True
-        except Exception:
-            pass
-    rel = str(getattr(doc, "rel_path", "") or "").strip().replace("\\", "/").lstrip("/")
-    if rel:
-        for root in roots:
-            try:
-                if _find_case_insensitive(root, rel):
-                    return True
-            except Exception:
-                continue
-    return False
+    try:
+        from app.services.file_security import resolve_managed_path
+
+        return resolve_managed_path(doc, must_exist=True).is_file()
+    except Exception:
+        return False
 
 
 def _remove_thumb_file(doc: PartFile) -> None:
@@ -502,6 +500,8 @@ def remove_stale_part_files(
     pn: str,
     rev: str,
     found: Optional[Dict[Tuple[str, bool], Dict]] = None,
+    *,
+    allowed_ids: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     """
     Remove PartFile DB entries for (pn, rev) whose backing file no longer
@@ -538,6 +538,8 @@ def remove_stale_part_files(
 
     removed: List[Dict[str, Any]] = []
     for doc in PartFile.objects(part_number__iexact=pn_clean, revision__iexact=rev_clean):
+        if allowed_ids is not None and str(doc.id) not in allowed_ids:
+            continue
         key = ((doc.ext_group or "").lower(), bool(doc.is_dwg))
         if key in found_keys:
             continue
@@ -558,3 +560,68 @@ def remove_stale_part_files(
         doc.delete()
 
     return {"count": len(removed), "removed": removed}
+
+
+def plan_part_file_refresh(
+    pn: str,
+    rev: str,
+    recs: List[Dict[str, Any]],
+    found: Optional[Dict[Tuple[str, bool], Dict]] = None,
+) -> Dict[str, Any]:
+    """Classify all metadata effects without mutating database or storage."""
+
+    additions = 0
+    replacements = 0
+    for record in recs:
+        ext = str(record.get("ext") or "").strip().lower()
+        group = str(record.get("ext_group") or "").strip().lower()
+        if not ext:
+            continue
+        existing = PartFile.objects(
+            part_number__iexact=pn,
+            revision__iexact=rev,
+            ext_group=group,
+            ext=ext,
+            is_dwg=bool(record.get("is_dwg")),
+        ).first()
+        if existing is None:
+            additions += 1
+        else:
+            replacements += 1
+
+    roots: List[Path] = []
+    for source in _sources(None):
+        try:
+            root = Path(str(source.get("local_root") or "").strip())
+            if str(root) and root.is_dir():
+                roots.append(root)
+        except Exception:
+            continue
+    stale_ids: list[str] = []
+    if roots:
+        found_keys = {
+            (str(group or "").lower(), bool(is_dwg))
+            for (group, is_dwg) in (found or {}).keys()
+        }
+        for doc in PartFile.objects(
+            part_number__iexact=pn,
+            revision__iexact=rev,
+        ):
+            key = ((doc.ext_group or "").lower(), bool(doc.is_dwg))
+            if key in found_keys or _part_file_on_disk(doc, roots):
+                continue
+            stale_ids.append(str(doc.id))
+    return {
+        "additions": additions,
+        "replacements": replacements,
+        "stale_ids": stale_ids,
+        "requires": frozenset(
+            permission
+            for permission, needed in (
+                ("files.add", additions > 0),
+                ("files.replace", replacements > 0),
+                ("files.purge", bool(stale_ids)),
+            )
+            if needed
+        ),
+    }

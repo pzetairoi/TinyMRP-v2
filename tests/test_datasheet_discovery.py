@@ -66,7 +66,10 @@ def test_import_bom_zip_discovers_attr_named_datasheet(app, tmp_path):
 
 
 def test_refresh_files_recursive_discovers_attr_named_datasheets(client, app, user, tmp_path):
-    role = Role(name="datasheet_editor", permissions=["items.view", "items.edit"]).save()
+    role = Role(
+        name="datasheet_editor",
+        permissions=["items.view", "items.edit", "parts.read_unreleased"],
+    ).save()
     user.roles = [role]
     user.save()
     _login(client, user)

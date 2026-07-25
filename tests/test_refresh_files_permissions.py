@@ -16,7 +16,10 @@ def _make_user(email: str):
 
 def test_refresh_files_permissions(client, user):
     viewer_role = Role(name="viewer", permissions=["items.view"]).save()
-    editor_role = Role(name="editor", permissions=["items.view", "items.edit"]).save()
+    editor_role = Role(
+        name="editor",
+        permissions=["items.view", "items.edit", "parts.read_unreleased"],
+    ).save()
 
     part = Part(part_number="PN-901", revision="A", description="Refresh Part").save()
 
@@ -24,7 +27,7 @@ def test_refresh_files_permissions(client, user):
     user.save()
     _login(client, user)
     resp = client.post(f"/api/parts/{part.part_number}/refresh_files", json={"rev": part.revision})
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
     editor = _make_user("editor2@example.com")
     editor.roles = [editor_role]

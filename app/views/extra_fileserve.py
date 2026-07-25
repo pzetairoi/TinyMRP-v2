@@ -1,25 +1,29 @@
-import os
 import mimetypes
+from pathlib import Path
 from flask import Blueprint, abort, send_file
 from flask_login import current_user, login_required
 
-from app.services.acl import allowed_parts_for, part_is_allowed
-from app.services.extra_files import resolve_extra_file_token, extra_abs_path, extra_root
+from app.services.audit import log_action
+from app.services.extra_files import resolve_extra_file_token
+from app.services.file_security import (
+    FileSecurityError,
+    associated_file_read_allowed,
+    resolve_associated_path,
+)
 
 
 bp = Blueprint("extra_fileserve", __name__, url_prefix="/extra")
 
 
 def _allowed_path(abs_path: str, base_root: str) -> bool:
+    """Compatibility helper used by the deferred public-share route."""
+
     try:
-        ap = os.path.abspath(abs_path)
-        base = os.path.abspath(base_root)
-        ap_norm, base_norm = os.path.normcase(ap), os.path.normcase(base)
-        try:
-            return os.path.commonpath([ap_norm, base_norm]) == base_norm
-        except Exception:
-            return ap_norm.startswith(base_norm)
-    except Exception:
+        path = Path(abs_path).resolve(strict=True)
+        root = Path(base_root).resolve(strict=False)
+        path.relative_to(root)
+        return path.is_file()
+    except (OSError, RuntimeError, ValueError):
         return False
 
 
@@ -31,21 +35,23 @@ def view(token: str):
         abort(404)
     ef, _kind = resolved
 
+    if not associated_file_read_allowed(current_user, ef):
+        abort(404)
     try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, ef.part_number, ef.revision or ""):
-            return abort(403)
+        abs_path = resolve_associated_path(ef)
+    except FileSecurityError:
+        abort(404)
+
+    try:
+        log_action(
+            "file.view",
+            resource_type="file",
+            resource=f"extra:{ef.id}",
+            meta={"part": f"{ef.part_number}:{ef.revision or ''}"},
+        )
     except Exception:
         pass
-
-    base_root = extra_root()
-    if not base_root:
-        abort(404)
-    abs_path = extra_abs_path(ef.rel_path or "")
-    if not abs_path or not _allowed_path(abs_path, base_root) or not os.path.isfile(abs_path):
-        abort(404)
-
-    ct = ef.mime or mimetypes.guess_type(abs_path)[0] or "application/octet-stream"
+    ct = ef.mime or mimetypes.guess_type(str(abs_path))[0] or "application/octet-stream"
     resp = send_file(abs_path, mimetype=ct, conditional=True, max_age=3600)
     resp.headers["Cache-Control"] = "private, max-age=3600"
     return resp
