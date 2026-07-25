@@ -17,15 +17,11 @@ def _role_names(user) -> Set[str]:
 
 
 def user_has_permission(user, perm: str) -> bool:
-    """Check if the user has a given permission string via any of their roles."""
-    try:
-        for r in (user.roles or []):
-            perms = getattr(r, "permissions", []) or []
-            if perm in perms:
-                return True
-    except Exception:
-        return False
-    return False
+    """Compatibility wrapper around the central Stage 2 evaluator."""
+
+    from app.services.authorization import has_permission
+
+    return has_permission(user, perm)
 
 
 def is_privileged_internal(user) -> bool:
@@ -403,15 +399,10 @@ def permissions_required(*perms: str):
             if not getattr(current_user, "is_authenticated", False):
                 from flask import abort
                 return abort(401)
-            # Admin bypass
-            try:
-                names = _role_names(current_user)
-                if "admin" in names:
-                    return fn(*args, **kwargs)
-            except Exception:
-                pass
+            from app.services.authorization import authorise
+
             for p in perms:
-                if not user_has_permission(current_user, p):
+                if not authorise(current_user, p).allowed:
                     from flask import abort
                     return abort(403)
             return fn(*args, **kwargs)

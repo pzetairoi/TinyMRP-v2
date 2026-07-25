@@ -158,38 +158,26 @@ def revoke_role(email, role_name):
     click.echo("Role revoked")
     
 @user.command("seed-roles")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Report missing and drifted standard roles without writing changes.",
+)
+@click.option(
+    "--apply",
+    is_flag=True,
+    help="Replace drifted standard role fields with their canonical definitions.",
+)
 @with_appcontext
-def seed_roles():
-    from .views.admin_roles import PERMISSIONS
-    from .models.auth import Role
-    def upsert(name, desc, perms):
-        r = Role.objects(name=name).first()
-        if not r: r = Role(name=name)
-        r.description = desc; r.permissions = perms; r.save()
-    upsert("admin", "Full access", PERMISSIONS)
-    upsert("planner", "Plan and run MRP", [
-        "items.view","bom.view","mrp.run","reports.view",
-        "jobs.view","jobs.manage","orders.view","orders.manage",
-        "suppliers.view","customers.view",
-        "tools.view","import.bom"
-    ])
-    upsert("operator", "Execute work orders", [
-        "workorders.view","workorders.edit","workorders.close",
-        "inventory.issue","inventory.receive",
-        "items.view","bom.view",
-        "tools.view","import.bom"
-    ])
-    upsert("viewer", "Read-only", [
-        "items.view","bom.view","workorders.view","reports.view",
-        "jobs.view","orders.view","suppliers.view","customers.view"
-    ])
-    upsert("customer_viewer", "Customer-linked viewer", [
-        "items.view","bom.view","jobs.view","orders.view","customers.view"
-    ])
-    upsert("supplier_viewer", "Supplier-linked viewer", [
-        "items.view","bom.view","orders.view","suppliers.view"
-    ])
-    click.echo("Seeded roles.")
+def seed_roles(dry_run, apply):
+    import json
+
+    from app.services.standard_roles import reconcile_standard_roles
+
+    if dry_run and apply:
+        raise click.UsageError("--dry-run and --apply cannot be used together")
+    report = reconcile_standard_roles(dry_run=dry_run, apply=apply)
+    click.echo(json.dumps(report, indent=2, sort_keys=True))
 
 @user.command("bootstrap-admin")
 @click.option("--email", prompt=True)
@@ -197,7 +185,9 @@ def seed_roles():
 @with_appcontext
 def bootstrap_admin(email, password):
     email = str(email or "").strip().lower()
-    seed_roles()
+    from app.services.standard_roles import reconcile_standard_roles
+
+    reconcile_standard_roles()
     u = _get_user(email)
     if not u:
         u = User(email=email.lower(), fs_uniquifier=secrets.token_hex(16))
