@@ -16,9 +16,11 @@ import {
   loadFieldConfig,
   matchesFieldFilter,
   requiredFieldIds,
+  reviewColumnVisible,
   saveFieldPreferences,
   selectedFieldIds,
   updateContextSelection,
+  updateReviewColumnVisibility,
   type FieldConfigPayload,
   type FieldDefinition,
   type FieldPreferences,
@@ -172,10 +174,20 @@ export default function BomPage() {
   const requiredWhereUsedIds = fieldConfig ? requiredFieldIds(fieldConfig, 'where_used') : ['part_number']
   const selectedBomIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, 'bom_tree') : defaultBomIds
   const selectedWhereUsedIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, 'where_used') : defaultWhereUsedIds
+  const showBomReviewColumn = reviewColumnVisible(fieldPreferences, 'bom_tree')
 
   async function persistFieldSelection(contextName: string, fieldIds: string[]) {
     if (!fieldConfig) return
     const nextPrefs = updateContextSelection(fieldConfig, fieldPreferences, contextName, fieldIds)
+    setFieldPreferences(nextPrefs)
+    try {
+      const resp = await saveFieldPreferences(nextPrefs)
+      setFieldPreferences(resp.settings.field_preferences || nextPrefs)
+    } catch {}
+  }
+
+  async function persistReviewColumnVisibility(visible: boolean) {
+    const nextPrefs = updateReviewColumnVisibility(fieldPreferences, 'bom_tree', visible)
     setFieldPreferences(nextPrefs)
     try {
       const resp = await saveFieldPreferences(nextPrefs)
@@ -348,6 +360,18 @@ export default function BomPage() {
         requiredIds={requiredBomIds}
         onChange={(fieldIds) => persistFieldSelection('bom_tree', fieldIds)}
         onReset={() => persistFieldSelection('bom_tree', defaultBomIds)}
+        extraOptions={(
+          <div className="form-check">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              id="bom-reviews-column"
+              checked={showBomReviewColumn}
+              onChange={(e) => persistReviewColumnVisibility(e.target.checked)}
+            />
+            <label className="form-check-label small" htmlFor="bom-reviews-column">Reviews</label>
+          </div>
+        )}
       />
     )}
     <button type="button" className="btn btn-sm btn-outline-secondary" onClick={clearTreeFilters}>
@@ -365,13 +389,15 @@ export default function BomPage() {
     scrollable
     scrollHeight="60vh"
     resizableColumns
+    stateKey="tinymrp-bom-browser-tree-layout-v1"
+    stateStorage="local"
     columnResizeMode="expand"
     tableStyle={{ tableLayout: 'fixed' }}
     showGridlines
     size="small"
     rowClassName={reviewRowClass}
   >
-    <Column
+    {showBomReviewColumn && <Column
       field="pending_review_severity"
       header="Reviews"
       body={reviewIndicator}
@@ -382,7 +408,7 @@ export default function BomPage() {
       showFilterMenu={false}
       filterElement={reviewFilterElement()}
       style={{ width: 105 }}
-    />
+    />}
     {selectedBomIds.map((fieldId) => {
       const field = bomFields.find((item) => item.id === fieldId)
       if (!field) return null

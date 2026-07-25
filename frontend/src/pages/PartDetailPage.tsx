@@ -26,6 +26,7 @@ import {
   loadFieldConfig,
   matchesFieldFilter,
   requiredFieldIds,
+  reviewColumnVisible,
   saveFieldPreferences,
   selectedFieldIds,
   updateContextSelection,
@@ -33,6 +34,7 @@ import {
   type FieldConfigPayload,
   type FieldDefinition,
   type FieldPreferences,
+  updateReviewColumnVisibility,
 } from "../lib/fieldConfig";
 
 // ---------- Types ----------
@@ -1765,6 +1767,7 @@ function isExternalDatasheetUrl(url: string): boolean {
   const selectedWhereUsedIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "where_used") : defaultWhereUsedIds
   const selectedExcelIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "excel_bom") : defaultExcelIds
   const selectedArenaIds = fieldConfig ? selectedFieldIds(fieldConfig, fieldPreferences, "arena_bom") : defaultArenaIds
+  const showBomReviewColumn = reviewColumnVisible(fieldPreferences, "bom_tree")
   const whereUsedSelectorFieldId = selectedWhereUsedIds.includes("thumbnail") ? "thumbnail" : selectedWhereUsedIds[0]
   const bomSelectorFieldId = selectedBomIds.includes("thumbnail") ? "thumbnail" : selectedBomIds[0]
 
@@ -1782,6 +1785,18 @@ function isExternalDatasheetUrl(url: string): boolean {
         requiredIds={requiredBomIds}
         onChange={(fieldIds) => persistFieldSelection("bom_tree", fieldIds)}
         onReset={() => persistFieldSelection("bom_tree", defaultBomIds)}
+        extraOptions={(
+          <div className="form-check">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              id="part-detail-bom-reviews-column"
+              checked={showBomReviewColumn}
+              onChange={(e) => persistReviewColumnVisibility("bom_tree", e.target.checked)}
+            />
+            <label className="form-check-label small" htmlFor="part-detail-bom-reviews-column">Reviews</label>
+          </div>
+        )}
       />
     )
   }
@@ -1867,6 +1882,24 @@ function isExternalDatasheetUrl(url: string): boolean {
     if (!fieldConfig) return
     const nextPrefs = updateContextSelection(fieldConfig, fieldPreferences, contextName, fieldIds)
     await persistFieldPreferences(nextPrefs)
+  }
+
+  async function persistReviewColumnVisibility(contextName: string, visible: boolean) {
+    await persistFieldPreferences(updateReviewColumnVisibility(fieldPreferences, contextName, visible))
+  }
+
+  // PrimeReact returns all rendered columns after a header drag. Keep only the
+  // configurable fields; fixed utility columns (for example Reviews and the
+  // tree expander) deliberately stay in place.
+  function persistDraggedColumnOrder(contextName: string, selectedIds: string[], columns: any) {
+    const order = Array.isArray(columns)
+      ? columns
+          .map((column: any) => String(column?.props?.field || ""))
+          .filter((fieldId) => selectedIds.includes(fieldId))
+      : []
+    if (order.length === selectedIds.length && new Set(order).size === order.length) {
+      void persistFieldSelection(contextName, order)
+    }
   }
 
   async function persistFieldMode(contextName: string, useDefault: boolean) {
@@ -3825,7 +3858,15 @@ function isExternalDatasheetUrl(url: string): boolean {
             <div className="d-flex align-items-center justify-content-between mb-2">
               <h6 className="mb-0">Used in</h6>
             </div>
-            <DataTable value={wu} size="small" stripedRows responsiveLayout="scroll" filterDisplay="row">
+            <DataTable
+              value={wu}
+              size="small"
+              stripedRows
+              responsiveLayout="scroll"
+              filterDisplay="row"
+              reorderableColumns
+              onColReorder={(event) => persistDraggedColumnOrder("where_used", selectedWhereUsedIds, event.columns)}
+            >
               {selectedWhereUsedIds.map((fieldId) => {
                 const field = whereUsedFields.find((item) => item.id === fieldId)
                 if (!field) return null
@@ -3941,6 +3982,10 @@ function isExternalDatasheetUrl(url: string): boolean {
             scrollable
             scrollHeight="55vh"
             resizableColumns
+            stateKey="tinymrp-part-detail-bom-tree-layout-v1"
+            stateStorage="local"
+            reorderableColumns
+            onColReorder={(event) => persistDraggedColumnOrder("bom_tree", selectedBomIds, event.columns)}
             columnResizeMode="expand"
             tableStyle={{ tableLayout: 'fixed' }}
             size="small"
@@ -3951,9 +3996,10 @@ function isExternalDatasheetUrl(url: string): boolean {
               bodyClassName="tt-expander"
               headerClassName="tt-expander"
               style={{ width: 30, minWidth: 30, maxWidth: 30 }}
+              reorderable={false}
             />
 
-            <Column
+            {showBomReviewColumn && <Column
               field="pending_review_severity"
               header="Reviews"
               body={bomReviewIndicator}
@@ -3964,7 +4010,8 @@ function isExternalDatasheetUrl(url: string): boolean {
               showFilterMenu={false}
               filterElement={renderReviewFilter()}
               style={{ width: 105 }}
-            />
+              reorderable={false}
+            />}
 
             {selectedBomIds.map((fieldId) => {
               const field = bomFields.find((item) => item.id === fieldId)
@@ -4025,12 +4072,16 @@ function isExternalDatasheetUrl(url: string): boolean {
             scrollable
             scrollHeight="55vh"
             resizableColumns
+            stateKey="tinymrp-part-detail-bom-flat-layout-v1"
+            stateStorage="local"
+            reorderableColumns
+            onColReorder={(event) => persistDraggedColumnOrder("bom_tree", selectedBomIds, event.columns)}
             columnResizeMode="expand"
             tableStyle={{ tableLayout: 'fixed' }}
             size="small"
             rowClassName={flatReviewRowClassName}
           >
-            <Column
+            {showBomReviewColumn && <Column
               field="pending_review_severity"
               header="Reviews"
               body={bomReviewIndicator}
@@ -4039,7 +4090,8 @@ function isExternalDatasheetUrl(url: string): boolean {
               showFilterMenu={false}
               filterElement={renderReviewFilter()}
               style={{ width: 105 }}
-            />
+              reorderable={false}
+            />}
             {selectedBomIds.map((fieldId) => {
               const field = bomFields.find((item) => item.id === fieldId)
               if (!field) return null

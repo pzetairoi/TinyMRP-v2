@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type { FieldDefinition } from '../lib/fieldConfig'
 
 const MENU_MARGIN = 8
@@ -48,6 +48,7 @@ type Props = {
   buttonClassName?: string
   buttonStyle?: CSSProperties
   menuAlign?: 'start' | 'end'
+  extraOptions?: ReactNode
 }
 
 function SelectorBody({
@@ -57,15 +58,28 @@ function SelectorBody({
   requiredIds = [],
   onChange,
   onReset,
+  extraOptions,
 }: Omit<Props, 'inline' | 'buttonLabel'>) {
   const required = useMemo(() => new Set(requiredIds), [requiredIds])
   const selected = useMemo(() => new Set(selectedIds), [selectedIds])
 
   function toggleField(fieldId: string, checked: boolean) {
     if (!checked && required.has(fieldId)) return
-    const next = availableFields
-      .map((field) => field.id)
-      .filter((field) => (field === fieldId ? checked : selected.has(field)))
+    // Keep the user's current order when visibility changes.  Field order is
+    // also the table column order, so rebuilding from availableFields here
+    // would unexpectedly undo a previous drag/reorder.
+    const next = checked
+      ? [...selectedIds, fieldId]
+      : selectedIds.filter((id) => id !== fieldId)
+    onChange(next)
+  }
+
+  function moveField(fieldId: string, direction: -1 | 1) {
+    const index = selectedIds.indexOf(fieldId)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= selectedIds.length) return
+    const next = [...selectedIds]
+    ;[next[index], next[target]] = [next[target], next[index]]
     onChange(next)
   }
 
@@ -87,10 +101,14 @@ function SelectorBody({
             Select all
           </button>
         </div>
+        {extraOptions && <div className="mb-2" style={{ flex: '0 0 auto' }}>{extraOptions}</div>}
         <div className="row g-2" style={{ overflowY: 'auto', minHeight: 0, margin: 0 }}>
-          {availableFields.map((field) => (
+          {availableFields.map((field) => {
+            const selectedIndex = selectedIds.indexOf(field.id)
+            return (
             <div key={field.id} className="col-12 col-md-6">
-              <div className="form-check">
+              <div className="d-flex align-items-center gap-1">
+                <div className="form-check flex-grow-1">
                 <input
                   className="form-check-input"
                   type="checkbox"
@@ -103,9 +121,35 @@ function SelectorBody({
                   {field.label}
                   {required.has(field.id) ? ' (required)' : ''}
                 </label>
+                </div>
+                {selectedIndex >= 0 && (
+                  <div className="btn-group btn-group-sm" role="group" aria-label={`Move ${field.label} column`}>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      aria-label={`Move ${field.label} left`}
+                      title="Move left"
+                      disabled={selectedIndex === 0}
+                      onClick={() => moveField(field.id, -1)}
+                    >
+                      <i className="pi pi-angle-left" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      aria-label={`Move ${field.label} right`}
+                      title="Move right"
+                      disabled={selectedIndex === selectedIds.length - 1}
+                      onClick={() => moveField(field.id, 1)}
+                    >
+                      <i className="pi pi-angle-right" aria-hidden="true" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-          ))}
+            )
+          })}
           {!availableFields.length && <div className="text-muted small">No configurable fields.</div>}
         </div>
       </div>
