@@ -115,37 +115,35 @@ def _normalize_domain(domain: str) -> str:
 def _ensure_roles() -> Dict[str, Role]:
     from app.views.admin_roles import PERMISSIONS
 
-    def upsert(name: str, desc: str, perms: list[str]) -> Role:
+    def ensure(name: str, desc: str, perms: list[str]) -> Role:
         r = Role.objects(name=name).first()
-        if not r:
-            r = Role(name=name)
-        r.description = desc
-        r.permissions = perms
-        r.save()
+        if r:
+            return r
+        r = Role(name=name, description=desc, permissions=perms).save()
         return r
 
     roles = {
-        "admin": upsert("admin", "Full access", PERMISSIONS),
-        "planner": upsert("planner", "Plan and run MRP", [
+        "admin": ensure("admin", "Full access", PERMISSIONS),
+        "planner": ensure("planner", "Plan and run MRP", [
             "items.view","bom.view","mrp.run","reports.view",
             "jobs.view","jobs.manage","orders.view","orders.manage",
             "suppliers.view","customers.view",
             "tools.view","import.bom"
         ]),
-        "operator": upsert("operator", "Execute work orders", [
+        "operator": ensure("operator", "Execute work orders", [
             "workorders.view","workorders.edit","workorders.close",
             "inventory.issue","inventory.receive",
             "items.view","bom.view",
             "tools.view","import.bom"
         ]),
-        "viewer": upsert("viewer", "Read-only", [
+        "viewer": ensure("viewer", "Read-only", [
             "items.view","bom.view","workorders.view","reports.view",
             "jobs.view","orders.view","suppliers.view","customers.view"
         ]),
-        "customer_viewer": upsert("customer_viewer", "Customer-linked viewer", [
+        "customer_viewer": ensure("customer_viewer", "Customer-linked viewer", [
             "items.view","bom.view","jobs.view","orders.view","customers.view"
         ]),
-        "supplier_viewer": upsert("supplier_viewer", "Supplier-linked viewer", [
+        "supplier_viewer": ensure("supplier_viewer", "Supplier-linked viewer", [
             "items.view","bom.view","orders.view","suppliers.view"
         ]),
     }

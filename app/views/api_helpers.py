@@ -6,7 +6,7 @@ from typing import Any, Dict, Tuple
 from flask import jsonify, request
 
 from app.services.api_auth import get_request_user
-from app.services.acl import user_has_permission
+from app.services.authorization import authorise
 from app.services.timezone_utils import (
     format_display_ts,
     local_input_value,
@@ -27,14 +27,8 @@ def ensure_permissions(*perms: str):
     user = get_request_user()
     if not user:
         return None, json_error("unauthorized", "Authentication required.", 401)
-    try:
-        for r in (user.roles or []):
-            if getattr(r, "name", "") == "admin":
-                return user, None
-    except Exception:
-        pass
     for p in perms:
-        if not user_has_permission(user, p):
+        if not authorise(user, p).allowed:
             return user, json_error("forbidden", "Permission denied.", 403)
     return user, None
 
