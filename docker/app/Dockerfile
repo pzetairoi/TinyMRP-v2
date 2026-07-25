@@ -3,7 +3,7 @@
 # Base tags are precise; Dependabot (docker ecosystem) proposes updates.
 
 # ---------- Frontend build ----------
-FROM node:20-alpine AS fe
+FROM node:24-alpine AS fe
 WORKDIR /fe
 
 # Install deps first for layer caching (lockfile optional)
