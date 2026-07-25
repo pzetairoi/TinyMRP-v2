@@ -61,6 +61,7 @@ def test_notes_and_comments_preserve_attrs_and_keep_search_indexes(client, user)
         attrs={
             "material": "Steel",
             "finish": "Paint",
+            "approvedby": "QA Person",
             "notes": "Imported supplier note",
             "comments": "Imported drawing comment",
         },
@@ -165,8 +166,18 @@ def test_parts_table_exposes_and_filters_pending_review_severity(client, user):
     user.save()
     _login(client, user)
 
-    high_part = Part(part_number="REVIEW-HIGH", revision="A", description="Needs review").save()
-    clear_part = Part(part_number="REVIEW-CLEAR", revision="A", description="Ready").save()
+    high_part = Part(
+        part_number="REVIEW-HIGH",
+        revision="A",
+        description="Needs review",
+        attrs={"approvedby": "QA Person"},
+    ).save()
+    clear_part = Part(
+        part_number="REVIEW-CLEAR",
+        revision="A",
+        description="Ready",
+        attrs={"approvedby": "QA Person"},
+    ).save()
     created = client.post(
         f"/api/parts/{high_part.part_number}/comments",
         json={"rev": "A", "text": "Dimension needs confirmation", "priority": "high"},
@@ -228,7 +239,12 @@ def test_comment_reply_and_priority_edit_endpoints(client, user):
     user.save()
     _login(client, user)
 
-    part = Part(part_number="PN-905", revision="A", description="Reply Part").save()
+    part = Part(
+        part_number="PN-905",
+        revision="A",
+        description="Reply Part",
+        attrs={"approvedby": "QA Person"},
+    ).save()
     created = client.post(
         f"/api/parts/{part.part_number}/comments",
         json={"rev": "A", "text": "Base comment", "priority": "low"},

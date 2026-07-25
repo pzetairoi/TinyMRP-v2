@@ -11,7 +11,11 @@ from app.models.part import Part
 from app.models.supplier import Supplier
 from app.models.auth import User
 from app.services.api_auth import api_auth_required
-from app.services.authorization import authorised_get, scope_queryset
+from app.services.authorization import (
+    authorised_get,
+    authorised_part_pairs,
+    scope_queryset,
+)
 from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import utc_now
@@ -220,13 +224,33 @@ def _parse_bom(items) -> List[JobBOMLine]:
     return out
 
 
-def _job_to_dict(job: Job):
+def _job_to_dict(job: Job, user=None):
+    requested_pairs = [
+        (line.pn, line.rev or "")
+        for line in (job.bom or [])
+        if (line.pn or "").strip()
+    ]
+    if (job.part_number or "").strip():
+        requested_pairs.append((job.part_number, job.part_revision or ""))
+    allowed_parts = (
+        authorised_part_pairs(user, requested_pairs) if user is not None else None
+    )
+
+    def can_include(part_number, revision) -> bool:
+        if allowed_parts is None:
+            return True
+        return (
+            str(part_number or "").strip().casefold(),
+            str(revision or "").strip().casefold(),
+        ) in allowed_parts
+
+    primary_allowed = can_include(job.part_number, job.part_revision)
     payload = {
         "job_number": job.job_number,
         "title": job.title,
         "description": job.description,
-        "part_number": job.part_number,
-        "part_revision": job.part_revision,
+        "part_number": job.part_number if primary_allowed else "",
+        "part_revision": job.part_revision if primary_allowed else "",
         "qty_ordered": float(job.qty_ordered or 0.0),
         "qty_produced": float(job.qty_produced or 0.0),
         "qty_scrapped": float(job.qty_scrapped or 0.0),
@@ -252,7 +276,11 @@ def _job_to_dict(job: Job):
             }
             for s in (job.stages or [])
         ],
-        "bom": [{"pn": l.pn, "rev": l.rev or "", "qty": float(l.qty or 0.0)} for l in (job.bom or [])],
+        "bom": [
+            {"pn": line.pn, "rev": line.rev or "", "qty": float(line.qty or 0.0)}
+            for line in (job.bom or [])
+            if can_include(line.pn, line.rev or "")
+        ],
     }
     for field_name, value in (
         ("scheduled_start", job.scheduled_start),
@@ -327,7 +355,7 @@ def list_jobs():
 
     return jsonify({
         "ok": True,
-        "items": [_job_to_dict(j) for j in items],
+        "items": [_job_to_dict(j, user) for j in items],
         "page": page,
         "page_size": size,
         "total": total,
@@ -432,7 +460,7 @@ def create_job():
     job.created_at = utc_now()
     job.updated_at = utc_now()
     job.save()
-    return jsonify({"ok": True, "job": _job_to_dict(job)})
+    return jsonify({"ok": True, "job": _job_to_dict(job, user)})
 
 
 @bp.get("/<job_number>")
@@ -444,7 +472,7 @@ def get_job(job_number):
     job = _scoped_job(user, job_number, "jobs.read")
     if not job:
         return json_error("not_found", "Job not found.", 404)
-    return jsonify({"ok": True, "job": _job_to_dict(job)})
+    return jsonify({"ok": True, "job": _job_to_dict(job, user)})
 
 
 @bp.put("/<job_number>")
@@ -547,7 +575,7 @@ def update_job(job_number):
 
     job.updated_at = utc_now()
     job.save()
-    return jsonify({"ok": True, "job": _job_to_dict(job)})
+    return jsonify({"ok": True, "job": _job_to_dict(job, user)})
 
 
 @bp.delete("/<job_number>")
@@ -611,7 +639,7 @@ def job_status(job_number):
     job.status = new_status
     job.updated_at = utc_now()
     job.save()
-    return jsonify({"ok": True, "job": _job_to_dict(job)})
+    return jsonify({"ok": True, "job": _job_to_dict(job, user)})
 
 
 @bp.post("/<job_number>/stages/<stage_id>/complete")
@@ -637,7 +665,7 @@ def job_stage_complete(job_number, stage_id):
         if not job.actual_end:
             job.actual_end = utc_now()
     job.save()
-    return jsonify({"ok": True, "job": _job_to_dict(job)})
+    return jsonify({"ok": True, "job": _job_to_dict(job, user)})
 
 
 @bp.post("/<job_number>/materials/reserve")
@@ -652,7 +680,7 @@ def job_reserve_materials(job_number):
     job.material_reserved = True
     job.updated_at = utc_now()
     job.save()
-    return jsonify({"ok": True, "job": _job_to_dict(job)})
+    return jsonify({"ok": True, "job": _job_to_dict(job, user)})
 
 
 @bp.get("/stats")
@@ -681,6 +709,6 @@ def job_dashboard():
     upcoming = base.filter(status__in=["released", "in_progress"]).order_by("scheduled_end").limit(10)
     return jsonify({
         "ok": True,
-        "recent": [_job_to_dict(j) for j in recent],
-        "upcoming": [_job_to_dict(j) for j in upcoming],
+        "recent": [_job_to_dict(j, user) for j in recent],
+        "upcoming": [_job_to_dict(j, user) for j in upcoming],
     })

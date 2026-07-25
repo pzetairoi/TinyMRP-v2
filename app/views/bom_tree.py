@@ -9,8 +9,11 @@ from app.services.attrs import harvest_part_attrs
 from app.services.canonical_fields import canonical_process_label_for_part
 from app.services.processmeta import normalize_processes
 from flask_login import current_user
-from app.services.acl import allowed_parts_for, part_is_allowed
-from app.services.acl import require_items_view
+from app.services.authorization import (
+    authorised_part_pairs,
+    require_permission,
+    scope_queryset,
+)
 from app.services.audit import log_action
 from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.part_norm import clean_rev
@@ -57,6 +60,37 @@ def _child_links(parent_pn: str, parent_rev: str | None):
             "child_pn", "qty", "uom", "alt_group", "child_rev", "occurrences"
         )
     )
+
+
+def _bom_is_fully_authorised(user, parent_pn: str, parent_rev: str) -> bool:
+    """Deny a BOM response when any exact descendant is inaccessible."""
+
+    queue = [(str(parent_pn or "").strip(), _clean_rev(parent_rev))]
+    visited: set[tuple[str, str]] = set()
+    while queue:
+        current = queue.pop()
+        normalized = (current[0].casefold(), current[1].casefold())
+        if normalized in visited:
+            continue
+        visited.add(normalized)
+        links = _child_links(*current)
+        pairs = [
+            (
+                str(getattr(link, "child_pn", "") or "").strip(),
+                _clean_rev(getattr(link, "child_rev", "") or ""),
+            )
+            for link in links
+            if str(getattr(link, "child_pn", "") or "").strip()
+        ]
+        allowed = authorised_part_pairs(user, pairs)
+        expected = frozenset(
+            (child_pn.casefold(), child_rev.casefold())
+            for child_pn, child_rev in pairs
+        )
+        if allowed != expected:
+            return False
+        queue.extend(pairs)
+    return True
 
 
 def _link_occurrence_qtys(link: BOMLink) -> list[float]:
@@ -153,7 +187,7 @@ def _is_hardware_node(node: dict) -> bool:
 
 @bp.get("/bom_tree")
 @login_required
-@require_items_view
+@require_permission("bom.read")
 def bom_tree():
     config = get_field_config()
     review_statuses = part_review_status_map()
@@ -161,24 +195,22 @@ def bom_tree():
     rev = request.args.get("rev")  # keep None vs ""
     parent = (request.args.get("parent") or "").strip()
     parent_rev = request.args.get("parent_rev")
-    parent_rev = request.args.get("parent_rev")
+    scoped_parts = scope_queryset(Part.objects, current_user, "parts")
 
     if pn:
         # Build root node for specific revision if provided; else latest
         if rev is not None:
-            p = Part.objects(part_number=pn, revision=_clean_rev(rev)).first()
+            p = scoped_parts.filter(
+                part_number__iexact=pn,
+                revision__iexact=_clean_rev(rev),
+            ).first()
         else:
-            p = Part.objects(part_number=pn).order_by("-updated_at").first()
+            p = scoped_parts.filter(part_number__iexact=pn).order_by("-updated_at").first()
         if not p:
             return jsonify([])
-        # ACL: root must be allowed if enforcement active
-        try:
-            allowed = allowed_parts_for(current_user)
-            if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-                return jsonify([]), 403
-        except Exception:
-            pass
         root_rev = _clean_rev(rev) if rev is not None else _clean_rev(p.revision or "")
+        if not _bom_is_fully_authorised(current_user, p.part_number, root_rev):
+            return jsonify([]), 403
         root = _node(
             p.part_number,
             rev=(root_rev if rev is not None else root_rev),
@@ -193,21 +225,51 @@ def bom_tree():
         return jsonify([root])
  
     if parent:
+        parent_part_query = scoped_parts.filter(part_number__iexact=parent)
+        if parent_rev is not None:
+            parent_part_query = parent_part_query.filter(
+                revision__iexact=_clean_rev(parent_rev)
+            )
+        else:
+            parent_part_query = parent_part_query.order_by("-updated_at")
+        parent_part = parent_part_query.first()
+        if not parent_part:
+            return jsonify([]), 403
+        exact_parent_rev = _clean_rev(parent_part.revision or "")
+        if not _bom_is_fully_authorised(
+            current_user,
+            parent_part.part_number,
+            exact_parent_rev,
+        ):
+            return jsonify([]), 403
         # children
         if "parent_pn" in BOMLink._fields:
-            links = _child_links(parent, parent_rev)
+            links = _child_links(parent_part.part_number, exact_parent_rev)
+            child_pairs = [
+                (
+                    getattr(link, "child_pn", "") or "",
+                    getattr(link, "child_rev", "") or "",
+                )
+                for link in links
+                if getattr(link, "child_pn", None)
+            ]
+            allowed_children = authorised_part_pairs(current_user, child_pairs)
+            if len(allowed_children) != len(
+                {
+                    (
+                        str(child_pn or "").strip().casefold(),
+                        str(child_rev or "").strip().casefold(),
+                    )
+                    for child_pn, child_rev in child_pairs
+                    if str(child_pn or "").strip()
+                }
+            ):
+                return jsonify([]), 403
             kids = []
             for l in links:
                 child_pn = getattr(l, "child_pn", None)
                 if child_pn and child_pn != parent:
                     c_rev = _clean_rev(getattr(l, "child_rev", None)) if hasattr(l, "child_rev") else None
-                    # ACL filter per child if enforced
-                    try:
-                        allowed = allowed_parts_for(current_user)
-                        if isinstance(allowed, set) and not part_is_allowed(allowed, child_pn, c_rev or ""):
-                            continue
-                    except Exception:
-                        pass
                     kids.append(_node(child_pn, l, rev=c_rev, config=config, review_statuses=review_statuses))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}:{(parent_rev or '')}")
@@ -216,7 +278,7 @@ def bom_tree():
             kids.sort(key=lambda n: 1 if _is_hardware_node(n) else 0)
             return jsonify(kids)
         else:
-            pp = Part.objects(part_number=parent).only("id").first()
+            pp = parent_part
             if not pp:
                 return jsonify([])
             links = BOMLink.objects(parent=pp).only("child","qty","uom","alt_group")
@@ -225,12 +287,11 @@ def bom_tree():
                 c = getattr(l, "child", None)
                 child_pn = getattr(c, "part_number", None) if c else None
                 if child_pn and child_pn != parent:
-                    try:
-                        allowed = allowed_parts_for(current_user)
-                        if isinstance(allowed, set) and not part_is_allowed(allowed, child_pn, ""):
-                            continue
-                    except Exception:
-                        pass
+                    if not authorised_part_pairs(
+                        current_user,
+                        [(child_pn, getattr(c, "revision", "") or "")],
+                    ):
+                        return jsonify([]), 403
                     kids.append(_node(child_pn, l, config=config, review_statuses=review_statuses))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}")
@@ -244,7 +305,7 @@ def bom_tree():
 
 @bp.get("/bom_flat")
 @login_required
-@require_items_view
+@require_permission("bom.read")
 def bom_flat():
     config = get_field_config()
     review_statuses = part_review_status_map()
@@ -253,22 +314,24 @@ def bom_flat():
     if not pn:
         return jsonify([])
 
+    scoped_parts = scope_queryset(Part.objects, current_user, "parts")
     if rev is not None:
-        root_part = Part.objects(part_number=pn, revision=_clean_rev(rev)).first()
+        root_part = scoped_parts.filter(
+            part_number__iexact=pn,
+            revision__iexact=_clean_rev(rev),
+        ).first()
     else:
-        root_part = Part.objects(part_number=pn).order_by("-updated_at").first()
+        root_part = scoped_parts.filter(part_number__iexact=pn).order_by("-updated_at").first()
     if not root_part:
         return jsonify([])
 
     root_rev = _clean_rev(rev) if rev is not None else _clean_rev(root_part.revision or "")
-    allowed = None
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, root_part.part_number, root_rev):
-            return jsonify([]), 403
-    except Exception:
-        allowed = None
-
+    if not _bom_is_fully_authorised(
+        current_user,
+        root_part.part_number,
+        root_rev,
+    ):
+        return jsonify([]), 403
     rows_by_key: dict[tuple[str, str], dict] = {}
     part_cache: dict[tuple[str, str], tuple[Part | None, dict, str, list[str], set[str], dict]] = {}
 
@@ -280,7 +343,10 @@ def bom_flat():
 
         cached = part_cache.get(key)
         if cached is None:
-            part_doc = Part.objects(part_number=child_pn, revision=key[1]).first()
+            part_doc = scoped_parts.filter(
+                part_number__iexact=child_pn,
+                revision__iexact=key[1],
+            ).first()
             attrs = harvest_part_attrs(part_doc) if part_doc else {}
             effective_rev = _clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
             proc_label = _process_label(part_doc, attrs)
@@ -332,15 +398,34 @@ def bom_flat():
 
     root_key = (root_part.part_number, root_rev)
     stack: list[tuple[str, str, float, str, str, tuple[tuple[str, str], ...]]] = []
-    for link in _child_links(root_part.part_number, root_rev):
+    root_links = _child_links(root_part.part_number, root_rev)
+    root_child_pairs = [
+        (
+            getattr(link, "child_pn", "") or "",
+            getattr(link, "child_rev", "") or "",
+        )
+        for link in root_links
+        if getattr(link, "child_pn", None)
+    ]
+    allowed_root_children = authorised_part_pairs(current_user, root_child_pairs)
+    if len(allowed_root_children) != len(
+        {
+            (
+                str(child_pn or "").strip().casefold(),
+                str(child_rev or "").strip().casefold(),
+            )
+            for child_pn, child_rev in root_child_pairs
+            if str(child_pn or "").strip()
+        }
+    ):
+        return jsonify([]), 403
+    for link in root_links:
         child_pn = getattr(link, "child_pn", None)
         if not child_pn:
             continue
         child_rev = _clean_rev(getattr(link, "child_rev", "") or "")
         child_key = (child_pn, child_rev)
         if child_key == root_key:
-            continue
-        if isinstance(allowed, set) and not part_is_allowed(allowed, child_pn, child_rev):
             continue
         for occ_qty in _link_occurrence_qtys(link):
             stack.append(
@@ -370,15 +455,34 @@ def bom_flat():
             alt_set.add(str(alt_group))
         row["alt_group"] = ", ".join(sorted(alt_set)) if alt_set else ""
 
-        for link in _child_links(child_pn, child_rev):
+        child_links = _child_links(child_pn, child_rev)
+        descendant_pairs = [
+            (
+                getattr(link, "child_pn", "") or "",
+                getattr(link, "child_rev", "") or "",
+            )
+            for link in child_links
+            if getattr(link, "child_pn", None)
+        ]
+        allowed_descendants = authorised_part_pairs(current_user, descendant_pairs)
+        if len(allowed_descendants) != len(
+            {
+                (
+                    str(next_pn or "").strip().casefold(),
+                    str(next_rev or "").strip().casefold(),
+                )
+                for next_pn, next_rev in descendant_pairs
+                if str(next_pn or "").strip()
+            }
+        ):
+            return jsonify([]), 403
+        for link in child_links:
             next_pn = getattr(link, "child_pn", None)
             if not next_pn:
                 continue
             next_rev = _clean_rev(getattr(link, "child_rev", "") or "")
             next_key = (next_pn, next_rev)
             if next_key in lineage:
-                continue
-            if isinstance(allowed, set) and not part_is_allowed(allowed, next_pn, next_rev):
                 continue
             for occ_qty in _link_occurrence_qtys(link):
                 stack.append(

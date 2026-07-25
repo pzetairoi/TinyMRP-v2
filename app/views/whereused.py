@@ -1,7 +1,6 @@
 # app/views/whereused.py
 from flask import Blueprint, request, jsonify
 from flask_login import login_required
-from app.services.acl import require_items_view
 from app.services.audit import log_action
 from app.models.artifact import PartFile
 from app.models.part import Part
@@ -15,8 +14,12 @@ from app.services.field_config import (
     matches_field_filter_value,
     resolve_part_field_values,
 )
-from flask_login import login_required, current_user
-from app.services.acl import require_items_view, allowed_parts_for, part_is_allowed
+from flask_login import current_user
+from app.services.authorization import (
+    authorised_part_pairs,
+    require_permission,
+    scope_queryset,
+)
 from app.services.part_norm import clean_rev
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
@@ -32,7 +35,13 @@ def _coverage_groups(pn: str, rev: str) -> set[str]:
             groups.add(str(row.ext_group).lower())
     return groups
 
-def _rows_for_child_pn(pn: str, child_rev: str | None = None, *, config: dict | None = None):
+def _rows_for_child_pn(
+    pn: str,
+    child_rev: str | None = None,
+    *,
+    config: dict | None = None,
+    user=None,
+):
     """Return where-used rows for a child part number, keeping revisions accurate."""
     config = config or get_field_config()
     # Fetch links where this PN is the child
@@ -40,10 +49,28 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None, *, config: dict | 
         query = BOMLink.objects(child_pn=pn)
         if child_rev is not None and "child_rev" in BOMLink._fields:
             query = query.filter(child_rev=_clean_rev(child_rev))
-        links = query
+        links = list(query)
     else:
         child_part = Part.objects(part_number=pn).only("id").first()
-        links = BOMLink.objects(child=child_part)
+        links = list(BOMLink.objects(child=child_part))
+
+    allowed_pairs = None
+    if user is not None:
+        requested_pairs = []
+        for link in links:
+            requested_pairs.append(
+                (
+                    getattr(link, "child_pn", pn) or pn,
+                    getattr(link, "child_rev", child_rev or "") or "",
+                )
+            )
+            requested_pairs.append(
+                (
+                    getattr(link, "parent_pn", "") or "",
+                    getattr(link, "parent_rev", "") or "",
+                )
+            )
+        allowed_pairs = authorised_part_pairs(user, requested_pairs)
 
     rows = []
     seen = set()
@@ -61,6 +88,11 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None, *, config: dict | 
 
         if not parent_pn:
             continue
+        if allowed_pairs is not None:
+            child_key = (pn.casefold(), effective_child_rev.casefold())
+            parent_key = (parent_pn.casefold(), parent_rev.casefold())
+            if child_key not in allowed_pairs or parent_key not in allowed_pairs:
+                continue
 
         # Keep distinct rows per PN/REV combination
         key = (parent_pn, parent_rev or "", effective_child_rev or "")
@@ -69,7 +101,15 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None, *, config: dict | 
         seen.add(key)
 
         # Prefer the exact revision from the link; no cross-rev fallback
-        parent_part = Part.objects(part_number=parent_pn, revision=(parent_rev or "")).first()
+        parent_query = Part.objects
+        if user is not None:
+            parent_query = scope_queryset(parent_query, user, "parts")
+        parent_part = parent_query.filter(
+            part_number__iexact=parent_pn,
+            revision__iexact=(parent_rev or ""),
+        ).first()
+        if not parent_part:
+            continue
         attrs = harvest_part_attrs(parent_part) if parent_part else {}
         resolved_parent_rev = _clean_rev(attrs.get("revision", "") or parent_rev or "")
         thumbs = thumb_urls_for(parent_pn, resolved_parent_rev)
@@ -111,7 +151,7 @@ def _rows_for_child_pn(pn: str, child_rev: str | None = None, *, config: dict | 
 
 @bp.post("/whereused_lazy")
 @login_required
-@require_items_view
+@require_permission("bom.read")
 def whereused_lazy():
     p = request.get_json(silent=True) or {}
     pn = (p.get("pn") or "").strip()
@@ -123,7 +163,7 @@ def whereused_lazy():
     filters = p.get("filters") or {}
     config = get_field_config()
 
-    rows = _rows_for_child_pn(pn, rev, config=config)
+    rows = _rows_for_child_pn(pn, rev, config=config, user=current_user)
 
     filterable_ids = set(context_field_ids("where_used", config))
     field_meta = field_index(config)
@@ -147,13 +187,6 @@ def whereused_lazy():
     else:
         rows.sort(key=lambda r: (str(r.get(sort_field) or "")).lower(), reverse=reverse)
 
-    # ACL: filter rows by whether parent is allowed (if enforced)
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set):
-            rows = [r for r in rows if part_is_allowed(allowed, r.get("part_number"), r.get("revision") or "")]
-    except Exception:
-        pass
     total = len(rows)
     page = rows[first:first+rows_per_page]
     try:

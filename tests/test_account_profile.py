@@ -46,7 +46,12 @@ def test_account_home_shows_permissions_and_security_summary(client, app):
         }
         settings.save()
         customer = Customer(name="Account Customer").save()
-        part = Part(part_number="ACC-100", revision="A", description="Account Part").save()
+        part = Part(
+            part_number="ACC-100",
+            revision="A",
+            description="Account Part",
+            attrs={"approvedby": "QA Person"},
+        ).save()
         job = Job(job_number="JOB-ACC-1", title="Assembly run", customer=customer, status="released").save()
         order = Order(order_number="ORD-ACC-1", description="Customer order", customer=customer, status="submitted").save()
     with app.app_context(), app.test_request_context():
@@ -248,6 +253,7 @@ def test_part_detail_exposes_resolved_identity_profiles(client, app):
         description="Identity Part",
         attrs={
             "uploaded_by": "owner@example.com",
+            "approvedby": "QA Person",
             "comments": [
                 {
                     "author": "owner@example.com",

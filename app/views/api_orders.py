@@ -13,6 +13,7 @@ from app.models.common import Address
 from app.services.api_auth import api_auth_required
 from app.services.authorization import (
     authorised_get,
+    authorised_part_pairs,
     has_permission,
     order_kind_allowed,
     order_relationship_allowed,
@@ -221,7 +222,24 @@ def _parse_lines(items) -> List[OrderLine]:
     return consolidate_order_lines(out)
 
 
-def _order_to_dict(o: Order, *, include_financial=True):
+def _order_to_dict(o: Order, *, include_financial=True, user=None):
+    allowed_parts = (
+        authorised_part_pairs(
+            user,
+            [(line.pn, clean_rev(line.rev)) for line in (o.lines or [])],
+        )
+        if user is not None
+        else None
+    )
+
+    def can_include(line) -> bool:
+        if allowed_parts is None:
+            return True
+        return (
+            str(line.pn or "").strip().casefold(),
+            clean_rev(line.rev).casefold(),
+        ) in allowed_parts
+
     payload = {
         "order_number": o.order_number,
         "kind": o.kind,
@@ -258,6 +276,7 @@ def _order_to_dict(o: Order, *, include_financial=True):
                 "qty_received": l.qty_received,
             }
             for l in (o.lines or [])
+            if can_include(l)
         ],
     }
     for field_name, value in (
@@ -341,7 +360,7 @@ def _list_orders(args, user):
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
     return jsonify({
         "ok": True,
-        "items": [_order_to_dict(o) for o in items],
+        "items": [_order_to_dict(o, user=user) for o in items],
         "page": page,
         "page_size": size,
         "total": total,
@@ -488,7 +507,7 @@ def create_order():
 
     order.updated_at = utc_now()
     order.save()
-    return jsonify({"ok": True, "order": _order_to_dict(order)})
+    return jsonify({"ok": True, "order": _order_to_dict(order, user=user)})
 
 
 @bp.get("/<order_number>")
@@ -500,7 +519,7 @@ def get_order(order_number):
     order = _scoped_order(user, order_number, "orders.read")
     if not order:
         return json_error("not_found", "Order not found.", 404)
-    return jsonify({"ok": True, "order": _order_to_dict(order)})
+    return jsonify({"ok": True, "order": _order_to_dict(order, user=user)})
 
 
 @bp.put("/<order_number>")
@@ -642,7 +661,7 @@ def update_order(order_number):
 
     order.updated_at = utc_now()
     order.save()
-    return jsonify({"ok": True, "order": _order_to_dict(order)})
+    return jsonify({"ok": True, "order": _order_to_dict(order, user=user)})
 
 
 @bp.delete("/<order_number>")
@@ -676,7 +695,7 @@ def order_submit(order_number):
     order.status = "submitted"
     order.updated_at = utc_now()
     order.save()
-    return jsonify({"ok": True, "order": _order_to_dict(order)})
+    return jsonify({"ok": True, "order": _order_to_dict(order, user=user)})
 
 
 @bp.post("/<order_number>/approve")
@@ -695,7 +714,7 @@ def order_approve(order_number):
     order.approved_at = utc_now()
     order.updated_at = utc_now()
     order.save()
-    return jsonify({"ok": True, "order": _order_to_dict(order)})
+    return jsonify({"ok": True, "order": _order_to_dict(order, user=user)})
 
 
 @bp.post("/<order_number>/ship")
@@ -722,7 +741,7 @@ def order_ship(order_number):
     order.actual_delivery = parse_datetime_param(data.get("actual_delivery")) or order.actual_delivery
     order.updated_at = utc_now()
     order.save()
-    return jsonify({"ok": True, "order": _order_to_dict(order)})
+    return jsonify({"ok": True, "order": _order_to_dict(order, user=user)})
 
 
 @bp.patch("/<order_number>/status")
@@ -747,7 +766,7 @@ def order_status(order_number):
     order.status = new_status
     order.updated_at = utc_now()
     order.save()
-    return jsonify({"ok": True, "order": _order_to_dict(order)})
+    return jsonify({"ok": True, "order": _order_to_dict(order, user=user)})
 
 
 @bp.get("/stats")
@@ -781,6 +800,12 @@ def order_dashboard():
     financial = has_permission(user, "orders.financial.read")
     return jsonify({
         "ok": True,
-        "recent": [_order_to_dict(o, include_financial=financial) for o in recent],
-        "pending": [_order_to_dict(o, include_financial=financial) for o in pending],
+        "recent": [
+            _order_to_dict(o, include_financial=financial, user=user)
+            for o in recent
+        ],
+        "pending": [
+            _order_to_dict(o, include_financial=financial, user=user)
+            for o in pending
+        ],
     })

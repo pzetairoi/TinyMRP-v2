@@ -380,7 +380,12 @@ def supplier_parts(code):
             filters |= Q(**{f"attrs__{key}__iexact": sup_code})
     if not filters:
         return jsonify({"ok": True, "items": []})
-    parts = Part.objects(filters).only("part_number", "revision", "description", "category", "uom", "attrs")[:200]
+    parts = (
+        scope_queryset(Part.objects, user, "parts")
+        .filter(filters)
+        .only("part_number", "revision", "description", "category", "uom", "attrs")
+        .limit(200)
+    )
     items = []
     for p in parts:
         attrs = harvest_part_attrs(p)

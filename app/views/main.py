@@ -7,7 +7,6 @@ from flask import Blueprint, render_template, send_file, abort, request, redirec
 from flask_login import login_required
 from flask_security import auth_required, current_user
 from flask_security.utils import hash_password
-from mongoengine.queryset.visitor import Q
 
 from app.models.audit import AuditLog
 from app.models.job import Job
@@ -15,12 +14,11 @@ from app.models.order import Order
 from app.models.part import Part
 from app.services.audit import log_action
 from app.services.acl import (
-    allowed_parts_for,
     permissions_required,
     user_can_view_items,
     user_has_permission,
 )
-from app.services.authorization import authorised_get
+from app.services.authorization import authorised_get, has_permission, scope_queryset
 from app.services.attrs import approval_field_values, harvest_part_attrs
 from app.services.password_policy import password_policy_summary, validate_password_change
 from app.services.user_profile import (
@@ -68,33 +66,10 @@ def _has_any_permission(user, *perms: str) -> bool:
     return any(_can_access(user, perm) for perm in perms)
 
 
-def _allowed_parts_q(user) -> Q | None:
-    allowed = allowed_parts_for(user)
-    if allowed is None:
-        return None
-    q = Q(id__in=[])
-    has_matches = False
-    for pn, rev in allowed:
-        pn_clean = (pn or "").strip()
-        if not pn_clean:
-            continue
-        has_matches = True
-        rev_clean = (rev or "").strip()
-        if rev_clean:
-            q = q | Q(part_number__iexact=pn_clean, revision__iexact=rev_clean)
-        else:
-            q = q | Q(part_number__iexact=pn_clean)
-    return q if has_matches else Q(id__in=[])
-
-
 def _parts_base_query(user):
-    if not user_can_view_items(user):
+    if not has_permission(user, "parts.read"):
         return None
-    qs = Part.objects
-    allowed_q = _allowed_parts_q(user)
-    if allowed_q is not None:
-        qs = qs.filter(allowed_q)
-    return qs
+    return scope_queryset(Part.objects, user, "parts")
 
 
 def _part_href(part_number: str, revision: str) -> str:

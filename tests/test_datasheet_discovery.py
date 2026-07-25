@@ -130,7 +130,10 @@ def test_part_detail_includes_datasheet_files_and_attr_url(client, app, user, tm
             part_number=pn,
             revision=rev,
             description="Detail part",
-            attrs={"datasheet": "https://example.com/file.pdf"},
+                attrs={
+                    "datasheet": "https://example.com/file.pdf",
+                    "approvedby": "QA Person",
+                },
         ).save()
         PartFile(
             part_number=pn,

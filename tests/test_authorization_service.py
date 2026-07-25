@@ -345,8 +345,18 @@ def test_part_access_uses_exact_revision_and_case_normalisation(app):
         role = _role("customer_portal", ["parts.read"])
         user = _user("part-scope@example.com", [role])
         customer = Customer(name="Part Customer", users=[user]).save()
-        Part(part_number="PART-1", revision="A", description="Allowed").save()
-        Part(part_number="PART-1", revision="B", description="Wrong revision").save()
+        Part(
+            part_number="PART-1",
+            revision="A",
+            description="Allowed",
+            attrs={"approvedby": "QA Person"},
+        ).save()
+        Part(
+            part_number="PART-1",
+            revision="B",
+            description="Wrong revision",
+            attrs={"approvedby": "QA Person"},
+        ).save()
         Job(
             job_number="PART-JOB",
             customer=customer,
@@ -366,8 +376,18 @@ def test_blank_revision_is_exact_not_family_wildcard(app, monkeypatch):
         role = _role("customer_portal", ["parts.read"])
         user = _user("blank-rev@example.com", [role])
         customer = Customer(name="Blank Rev Customer", users=[user]).save()
-        Part(part_number="BLANK-1", revision="", description="Blank").save()
-        Part(part_number="BLANK-1", revision="A", description="A").save()
+        Part(
+            part_number="BLANK-1",
+            revision="",
+            description="Blank",
+            attrs={"approvedby": "QA Person"},
+        ).save()
+        Part(
+            part_number="BLANK-1",
+            revision="A",
+            description="A",
+            attrs={"approvedby": "QA Person"},
+        ).save()
         Job(
             job_number="BLANK-JOB",
             customer=customer,

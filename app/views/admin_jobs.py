@@ -9,7 +9,12 @@ from app.services.acl import (
     supplier_scope_ids,
     user_has_permission,
 )
-from app.services.authorization import authorised_get, authorise, scope_queryset
+from app.services.authorization import (
+    authorised_get,
+    authorised_part_pairs,
+    authorise,
+    scope_queryset,
+)
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -319,12 +324,12 @@ def _merge_order_link(
     }
 
 
-def _job_required_structure(job: Job):
+def _job_required_structure(job: Job, bom_lines=None):
     required_map: Dict[Tuple[str, str], float] = {}
     display_map: Dict[Tuple[str, str], Tuple[str, str]] = {}
     occurrences: List[Dict[str, object]] = []
     root_idx = 0
-    for line in (job.bom or []):
+    for line in (job.bom or []) if bom_lines is None else bom_lines:
         pn = (line.pn or "").strip()
         if not pn:
             continue
@@ -401,8 +406,32 @@ def _job_order_coverage(
     return ordered_map, display_map, order_links
 
 
-def _build_job_bom_rollup(job: Job, can_manage_orders: bool):
-    required_map, display_map, occurrences = _job_required_structure(job)
+def _build_job_bom_rollup(
+    job: Job,
+    can_manage_orders: bool,
+    bom_lines=None,
+    user=None,
+):
+    required_map, display_map, occurrences = _job_required_structure(job, bom_lines)
+    if user is not None:
+        allowed_required = authorised_part_pairs(
+            user,
+            [display_map.get(key, key) for key in required_map],
+        )
+        required_map = {
+            key: value
+            for key, value in required_map.items()
+            if (
+                str(display_map.get(key, key)[0] or "").strip().casefold(),
+                str(display_map.get(key, key)[1] or "").strip().casefold(),
+            )
+            in allowed_required
+        }
+        occurrences = [
+            occurrence
+            for occurrence in occurrences
+            if occurrence.get("key") in required_map
+        ]
     required_keys = set(required_map.keys()) if required_map else None
     ordered_map, ordered_display, order_links_raw = _job_order_coverage(
         job,
@@ -628,10 +657,30 @@ def jobs_view(job_id):
     supp_ids = supplier_scope_ids(current_user)
     users = _eligible_job_users() if user_has_permission(current_user, "jobs.assign") else []
     suppliers, customers = _job_form_destinations()
-    bom_text = "\n".join([f"{l.pn},{l.rev},{l.qty:g}" for l in (j.bom or [])])
+    allowed_bom = authorised_part_pairs(
+        current_user,
+        [(line.pn, line.rev or "") for line in (j.bom or [])],
+    )
+    visible_bom = [
+        line
+        for line in (j.bom or [])
+        if (
+            str(line.pn or "").strip().casefold(),
+            str(line.rev or "").strip().casefold(),
+        )
+        in allowed_bom
+    ]
+    bom_text = "\n".join(
+        [f"{line.pn},{line.rev},{line.qty:g}" for line in visible_bom]
+    )
     orders = _orders_for_job(j)
     can_manage_orders = user_has_permission(current_user, "orders.manage")
-    rollup = _build_job_bom_rollup(j, can_manage_orders=can_manage_orders)
+    rollup = _build_job_bom_rollup(
+        j,
+        can_manage_orders=can_manage_orders,
+        bom_lines=visible_bom,
+        user=current_user,
+    )
     return render_template(
         "admin/jobs_form.html",
         users=users,
@@ -891,9 +940,29 @@ def jobs_edit(job_id):
     except Exception:
         j.customer = None
     # Recompose bom_text for editing
-    bom_text = "\n".join([f"{l.pn},{l.rev},{l.qty:g}" for l in (j.bom or [])])
+    allowed_bom = authorised_part_pairs(
+        current_user,
+        [(line.pn, line.rev or "") for line in (j.bom or [])],
+    )
+    visible_bom = [
+        line
+        for line in (j.bom or [])
+        if (
+            str(line.pn or "").strip().casefold(),
+            str(line.rev or "").strip().casefold(),
+        )
+        in allowed_bom
+    ]
+    bom_text = "\n".join(
+        [f"{line.pn},{line.rev},{line.qty:g}" for line in visible_bom]
+    )
     orders = _orders_for_job(j)
-    rollup = _build_job_bom_rollup(j, can_manage_orders=True)
+    rollup = _build_job_bom_rollup(
+        j,
+        can_manage_orders=True,
+        bom_lines=visible_bom,
+        user=current_user,
+    )
     return render_template(
         "admin/jobs_form.html",
         users=users,
