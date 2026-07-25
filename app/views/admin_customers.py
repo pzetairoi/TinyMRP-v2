@@ -1,7 +1,12 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import current_user
-from flask_security import roles_required
-from app.services.acl import permissions_required, apply_customer_scope, is_external_scoped_user
+from app.services.acl import permissions_required, is_external_scoped_user
+from app.services.authorization import (
+    authorised_get,
+    authorise,
+    has_permission,
+    scope_queryset,
+)
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
 
@@ -14,11 +19,76 @@ from app.services.biz_utils import generate_customer_code
 
 bp = Blueprint("admin_customers", __name__, url_prefix="/admin/customers")
 
+_CUSTOMER_FORM_FIELDS = {
+    "csrf_token",
+    "code",
+    "name",
+    "description",
+    "status",
+    "customer_type",
+    "is_company",
+    "segment",
+    "contact",
+    "email",
+    "website",
+    "phone",
+    "tax_id",
+    "payment_terms",
+    "currency",
+    "credit_limit",
+    "discount_pct",
+    "sales_rep",
+    "industry",
+    "billing_label",
+    "billing_line1",
+    "billing_line2",
+    "billing_city",
+    "billing_state",
+    "billing_postal",
+    "billing_country",
+    "shipping_text",
+    "contacts_text",
+    "users",
+    "tags",
+}
+_CUSTOMER_FINANCIAL_FORM_FIELDS = {
+    "customer_type",
+    "segment",
+    "tax_id",
+    "payment_terms",
+    "currency",
+    "credit_limit",
+    "discount_pct",
+    "sales_rep",
+    "industry",
+    "billing_label",
+    "billing_line1",
+    "billing_line2",
+    "billing_city",
+    "billing_state",
+    "billing_postal",
+    "billing_country",
+}
+
+
+def _require(permission):
+    if not authorise(current_user, permission).allowed:
+        abort(403)
+
+
+def _require_customer_form_permissions():
+    if set(request.form) - _CUSTOMER_FORM_FIELDS:
+        abort(400)
+    if set(request.form) & _CUSTOMER_FINANCIAL_FORM_FIELDS:
+        _require("customers.financial.update")
+    if "users" in request.form:
+        _require("customers.portal_users.manage")
+
 
 @bp.get("/")
-@permissions_required("customers.view")
+@permissions_required("customers.read")
 def customers_list():
-    cs = Customer.objects()
+    cs = scope_queryset(Customer.objects, current_user, "customers")
     q_text = (request.args.get("q") or "").strip()
     code_q = (request.args.get("code_q") or "").strip()
     name_q = (request.args.get("name_q") or "").strip()
@@ -36,6 +106,7 @@ def customers_list():
         cs = cs.filter(status=status)
     cust_type = (request.args.get("type") or "").strip()
     if cust_type:
+        _require("customers.financial.read")
         cs = cs.filter(customer_type=cust_type)
     if contact_q:
         cs = cs.filter(contact__icontains=contact_q)
@@ -45,7 +116,7 @@ def customers_list():
         tag_tokens = [t.strip() for t in tags_q.split(",") if t.strip()]
         if tag_tokens:
             cs = cs.filter(tags__in=tag_tokens)
-    cs = apply_customer_scope(cs, current_user).order_by("name")
+    cs = cs.order_by("name")
     return render_template(
         "admin/customers_list.html",
         customers=cs,
@@ -61,38 +132,58 @@ def customers_list():
     )
 
 @bp.post("/<cust_id>/delete")
-@permissions_required("customers.manage")
+@permissions_required("customers.archive")
 def customers_delete(cust_id):
     try:
-        c = apply_customer_scope(Customer.objects(id=cust_id), current_user).first()
+        c = authorised_get(
+            Customer.objects,
+            current_user,
+            cust_id,
+            resource_type="customers",
+            permission="customers.archive",
+        )
         if not c:
             flash("Customer not found.", "error")
             return redirect(url_for("admin_customers.customers_list"))
-        Job.objects(customer=c).update(customer=None)
-        Order.objects(customer=c).update(customer=None)
-        c.delete()
-        flash("Customer deleted.", "success")
+        c.status = "inactive"
+        c.save()
+        flash("Customer archived.", "success")
     except Exception:
         flash("Delete failed.", "error")
     return redirect(url_for("admin_customers.customers_list"))
 
 
 @bp.get("/<cust_id>")
-@permissions_required("customers.view")
+@permissions_required("customers.read")
 def customers_view(cust_id):
     try:
-        c = apply_customer_scope(Customer.objects(id=cust_id), current_user).first()
+        c = authorised_get(
+            Customer.objects,
+            current_user,
+            cust_id,
+            resource_type="customers",
+        )
         if not c:
             abort(404)
     except (DoesNotExist, ValidationError):
         abort(404)
-    users = User.objects().order_by("email")
-    jobs = list(Job.objects(customer=c).order_by("job_number"))
+    users = (
+        User.objects().order_by("email")
+        if has_permission(current_user, "customers.portal_users.manage")
+        else []
+    )
+    jobs = list(
+        scope_queryset(Job.objects(customer=c), current_user, "jobs").order_by(
+            "job_number"
+        )
+    )
     job_ids = [j.id for j in jobs]
     q_orders = Q(customer=c)
     if job_ids:
         q_orders = q_orders | Q(job__in=job_ids)
-    orders = Order.objects(q_orders).order_by("-order_date")
+    orders = scope_queryset(Order.objects(q_orders), current_user, "orders").order_by(
+        "-order_date"
+    )
     return render_template(
         "admin/customers_form.html",
         users=users,
@@ -203,9 +294,10 @@ def _default_shipping_label(addresses):
 
 
 @bp.route("/new", methods=["GET","POST"])
-@permissions_required("customers.manage")
+@permissions_required("customers.update")
 def customers_new():
     if request.method == "POST":
+        _require_customer_form_permissions()
         name = (request.form.get("name") or "").strip()
         if not name:
             flash("Customer name is required.", "error"); return redirect(url_for("admin_customers.customers_new"))
@@ -267,20 +359,31 @@ def customers_new():
         c.save()
         flash("Customer created.", "success")
         return redirect(url_for("admin_customers.customers_list"))
-    users = User.objects().order_by("email")
+    users = (
+        User.objects().order_by("email")
+        if has_permission(current_user, "customers.portal_users.manage")
+        else []
+    )
     return render_template("admin/customers_form.html", users=users, customer=None)
 
 
 @bp.route("/<cust_id>/edit", methods=["GET","POST"])
-@permissions_required("customers.manage")
+@permissions_required("customers.update")
 def customers_edit(cust_id):
     try:
-        c = apply_customer_scope(Customer.objects(id=cust_id), current_user).first()
+        c = authorised_get(
+            Customer.objects,
+            current_user,
+            cust_id,
+            resource_type="customers",
+            permission="customers.update",
+        )
         if not c:
             abort(404)
     except (DoesNotExist, ValidationError):
         abort(404)
     if request.method == "POST":
+        _require_customer_form_permissions()
         if "name" in request.form:
             c.name = (request.form.get("name") or c.name).strip()
         if "code" in request.form:
@@ -334,12 +437,17 @@ def customers_edit(cust_id):
                     c.phone = primary.phone or c.phone
         if "tags" in request.form:
             c.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
-        user_ids = request.form.getlist("users")
-        c.users = list(User.objects(id__in=user_ids)) if user_ids else []
+        if "users" in request.form:
+            user_ids = request.form.getlist("users")
+            c.users = list(User.objects(id__in=user_ids)) if user_ids else []
         c.save()
         flash("Customer updated.", "success")
         return redirect(url_for("admin_customers.customers_list"))
-    users = User.objects().order_by("email")
+    users = (
+        User.objects().order_by("email")
+        if has_permission(current_user, "customers.portal_users.manage")
+        else []
+    )
     shipping_text = ""
     if c.shipping_addresses:
         lines = []
@@ -369,12 +477,18 @@ def customers_edit(cust_id):
             ])
             lines.append(line)
         contacts_text = "\n".join(lines)
-    jobs = list(Job.objects(customer=c).order_by("job_number"))
+    jobs = list(
+        scope_queryset(Job.objects(customer=c), current_user, "jobs").order_by(
+            "job_number"
+        )
+    )
     job_ids = [j.id for j in jobs]
     q_orders = Q(customer=c)
     if job_ids:
         q_orders = q_orders | Q(job__in=job_ids)
-    orders = Order.objects(q_orders).order_by("-order_date")
+    orders = scope_queryset(Order.objects(q_orders), current_user, "orders").order_by(
+        "-order_date"
+    )
     return render_template(
         "admin/customers_form.html",
         users=users,

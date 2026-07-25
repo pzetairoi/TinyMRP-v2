@@ -41,9 +41,9 @@ def test_customer_viewer_scoping_api(client, app):
         job1 = Job(job_number="JOB-1", customer=cust1).save()
         job2 = Job(job_number="JOB-2", customer=cust2).save()
 
-        order1 = Order(order_number="PO-1", job=job1).save()
+        order1 = Order(order_number="SO-1", kind="sales", job=job1).save()
         order2 = Order(order_number="PO-2", job=job2, customer=cust2).save()
-        order3 = Order(order_number="PO-3", customer=cust1).save()
+        order3 = Order(order_number="SO-3", kind="sales", customer=cust1).save()
 
         _, token = create_token(user, "cust")
 
@@ -59,8 +59,8 @@ def test_customer_viewer_scoping_api(client, app):
     r = client.get("/api/orders", headers=_auth_headers(token))
     assert r.status_code == 200
     orders = [i["order_number"] for i in r.json["items"]]
-    assert "PO-1" in orders
-    assert "PO-3" in orders
+    assert "SO-1" in orders
+    assert "SO-3" in orders
     assert "PO-2" not in orders
 
     with app.app_context():
@@ -92,7 +92,7 @@ def test_supplier_viewer_scoping_api(client, app):
     r = client.get("/api/jobs", headers=_auth_headers(token))
     assert r.status_code == 200
     jobs = [i["job_number"] for i in r.json["items"]]
-    assert jobs == []
+    assert jobs == ["JOB-20"]
 
     r = client.get("/api/jobs/JOB-10", headers=_auth_headers(token))
     assert r.status_code == 404

@@ -16,12 +16,11 @@ from app.models.part import Part
 from app.services.audit import log_action
 from app.services.acl import (
     allowed_parts_for,
-    apply_job_scope,
-    apply_order_scope,
     permissions_required,
     user_can_view_items,
     user_has_permission,
 )
+from app.services.authorization import authorised_get
 from app.services.attrs import approval_field_values, harvest_part_attrs
 from app.services.password_policy import password_policy_summary, validate_password_change
 from app.services.user_profile import (
@@ -189,7 +188,7 @@ def _recent_parts(user, limit: int = 5) -> list[dict[str, object]]:
 
 
 def _recent_jobs(user, limit: int = 5) -> list[dict[str, object]]:
-    if not _has_any_permission(user, "jobs.view", "jobs.manage"):
+    if not _has_any_permission(user, "jobs.read"):
         return []
 
     rows: list[dict[str, object]] = []
@@ -198,10 +197,19 @@ def _recent_jobs(user, limit: int = 5) -> list[dict[str, object]]:
             job_oid = ObjectId(resource)
         except (InvalidId, TypeError):
             continue
-        job = (
-            apply_job_scope(Job.objects(id=job_oid, is_deleted=False), user)
-            .only("job_number", "title", "description", "status", "customer", "updated_at", "created_at")
-            .first()
+        job = authorised_get(
+            Job.objects(is_deleted=False).only(
+                "job_number",
+                "title",
+                "description",
+                "status",
+                "customer",
+                "updated_at",
+                "created_at",
+            ),
+            user,
+            job_oid,
+            resource_type="jobs",
         )
         if not job:
             continue
@@ -222,7 +230,7 @@ def _recent_jobs(user, limit: int = 5) -> list[dict[str, object]]:
 
 
 def _recent_orders(user, limit: int = 5) -> list[dict[str, object]]:
-    if not _has_any_permission(user, "orders.view", "orders.manage"):
+    if not _has_any_permission(user, "orders.read"):
         return []
 
     rows: list[dict[str, object]] = []
@@ -231,10 +239,20 @@ def _recent_orders(user, limit: int = 5) -> list[dict[str, object]]:
             order_oid = ObjectId(resource)
         except (InvalidId, TypeError):
             continue
-        order = (
-            apply_order_scope(Order.objects(id=order_oid), user)
-            .only("order_number", "description", "kind", "status", "customer", "supplier", "updated_at", "order_date")
-            .first()
+        order = authorised_get(
+            Order.objects.only(
+                "order_number",
+                "description",
+                "kind",
+                "status",
+                "customer",
+                "supplier",
+                "updated_at",
+                "order_date",
+            ),
+            user,
+            order_oid,
+            resource_type="orders",
         )
         if not order:
             continue

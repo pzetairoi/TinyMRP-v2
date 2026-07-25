@@ -10,6 +10,7 @@ from app.services.docpacks import DocPackOptions, build_docpack
 from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.acl import require_items_view, permissions_required
 from app.services.audit import log_action
+from app.services.authorization import authorised_get
 
 bp = Blueprint("docpacks_api", __name__, url_prefix="/api/docpacks")
 
@@ -277,7 +278,7 @@ def _multi_docpack_zip(roots: List[tuple[str, str]], base_kwargs: dict, fab_enab
 @bp.post("/build_job", endpoint="build_job")
 @login_required
 @require_items_view
-@permissions_required("jobs.view")
+@permissions_required("jobs.read")
 def build_job_docpack():
     parsed = _parse_docpack_request()
     if parsed and parsed[0] is None:
@@ -290,10 +291,20 @@ def build_job_docpack():
         return jsonify({"error": "Missing job_id"}), 400
 
     from app.models.job import Job
-    from app.services.acl import apply_job_scope
-    job = apply_job_scope(Job.objects(id=job_id), current_user).first()
+    job = authorised_get(
+        Job.objects,
+        current_user,
+        job_id,
+        resource_type="jobs",
+    )
     if not job:
-        job = apply_job_scope(Job.objects(job_number=job_id), current_user).first()
+        job = authorised_get(
+            Job.objects,
+            current_user,
+            job_id,
+            resource_type="jobs",
+            identifier_field="job_number",
+        )
     if not job:
         return jsonify({"error": "Job not found"}), 404
 
@@ -320,7 +331,7 @@ def build_job_docpack():
 @bp.post("/build_order", endpoint="build_order")
 @login_required
 @require_items_view
-@permissions_required("orders.view")
+@permissions_required("orders.read")
 def build_order_docpack():
     parsed = _parse_docpack_request()
     if parsed and parsed[0] is None:
@@ -333,10 +344,20 @@ def build_order_docpack():
         return jsonify({"error": "Missing order_id"}), 400
 
     from app.models.order import Order
-    from app.services.acl import apply_order_scope
-    order = apply_order_scope(Order.objects(id=order_id), current_user).first()
+    order = authorised_get(
+        Order.objects,
+        current_user,
+        order_id,
+        resource_type="orders",
+    )
     if not order:
-        order = apply_order_scope(Order.objects(order_number=order_id), current_user).first()
+        order = authorised_get(
+            Order.objects,
+            current_user,
+            order_id,
+            resource_type="orders",
+            identifier_field="order_number",
+        )
     if not order:
         return jsonify({"error": "Order not found"}), 404
 

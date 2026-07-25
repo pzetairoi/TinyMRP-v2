@@ -44,9 +44,8 @@ from app.services.acl import (
     part_is_allowed,
     user_has_permission,
     permissions_required,
-    apply_job_scope,
-    apply_order_scope,
 )
+from app.services.authorization import authorised_get, scope_queryset
 from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
@@ -424,21 +423,12 @@ def _group_file_overview_rows(rows: list[dict[str, Any]], current_rev: str) -> d
 
 def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
     paths = _ancestor_paths(pn, rev)
-    is_admin = "admin" in {getattr(r, "name", "") for r in (user.roles or [])}
-    can_jobs = is_admin or user_has_permission(user, "jobs.view")
-    can_orders = is_admin or user_has_permission(user, "orders.view")
-
-    job_q = Job.objects(is_deleted=False)
-    if not can_jobs:
-        job_q = Job.objects(id__in=[])
-    else:
-        job_q = apply_job_scope(job_q, user)
-
-    order_q = Order.objects(status__ne="cancelled")
-    if not can_orders:
-        order_q = Order.objects(id__in=[])
-    else:
-        order_q = apply_order_scope(order_q, user)
+    job_q = scope_queryset(Job.objects(is_deleted=False), user, "jobs")
+    order_q = scope_queryset(
+        Order.objects(status__ne="cancelled"),
+        user,
+        "orders",
+    )
 
     rows: list[dict] = []
     seen = set()
@@ -871,7 +861,12 @@ def parts_lazy():
     job_id = body.get("job") or request.args.get("job")
     job_filter_enabled = bool(job_id) and str(body.get("job_only", "true")).lower() != "false"
     if job_filter_enabled and job_id:
-        job = Job.objects(id=job_id).first()
+        job = authorised_get(
+            Job.objects,
+            current_user,
+            job_id,
+            resource_type="jobs",
+        )
         if job and job.bom:
             pairs = {
                 ((line.pn or "").strip(), _clean_rev_value(line.rev))
@@ -1311,8 +1306,8 @@ def part_detail():
     except Exception:
         pass
 
-    can_jobs_manage = user_has_permission(current_user, "jobs.manage")
-    can_orders_manage = user_has_permission(current_user, "orders.manage")
+    can_jobs_manage = user_has_permission(current_user, "jobs.update")
+    can_orders_manage = user_has_permission(current_user, "orders.update")
     can_parts_delete = user_has_permission(current_user, "items.edit")
     can_parts_edit = can_parts_delete
     can_parts_note = user_has_permission(current_user, "items.view")
