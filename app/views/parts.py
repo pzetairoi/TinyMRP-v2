@@ -5,8 +5,10 @@ from datetime import datetime, timedelta
 from flask_login import login_required, current_user
 from mongoengine.queryset.visitor import Q
 from io import BytesIO
+import logging
 import re
 import os
+import time
 from urllib.parse import urlsplit
 
 from app.models.part import Part
@@ -99,6 +101,8 @@ from app.services.user_profile import (
 )
 
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
+
+_timing_logger = logging.getLogger("tinymrp.parts_lazy")
 
 def _parse_bool(value: object) -> bool:
     if isinstance(value, bool):
@@ -544,6 +548,7 @@ def _context_field_values(
 @bp.route("/parts_lazy", methods=["GET", "POST"])
 @csrf.exempt
 def parts_lazy():
+    _t_start = time.perf_counter()
     body = request.get_json(force=True, silent=True) or {}
     try:
         first = max(0, int(body.get("first", 0)))
@@ -565,6 +570,7 @@ def parts_lazy():
     materialized_filter_ids = {field_id for field_id in parts_context_ids if field_uses_materialized_value(field_id, field_config)}
     sortable_ids = {field_id for field_id in parts_context_ids if field_meta.get(field_id, {}).get("sortable")}
     filterable_ids = {field_id for field_id in parts_context_ids if field_meta.get(field_id, {}).get("filterable")}
+    _t_config = time.perf_counter()
 
     if sort_field not in sortable_ids:
         sort_field = "part_number"
@@ -892,6 +898,7 @@ def parts_lazy():
         q = q & allowed_q
         fallback_base_q = fallback_base_q & allowed_q
 
+    _t_filters = time.perf_counter()
     qs = Part.objects(q)
     fallback_qs = Part.objects(fallback_base_q)
 
@@ -1081,9 +1088,12 @@ def parts_lazy():
                 docs = combined[first:first + rows]
                 coverage = {}
 
+    _t_query = time.perf_counter()
     thumb_map = thumb_urls_map([(part.part_number, _normalized_revision(part, harvest_part_attrs(part))) for part in docs])
+    _t_thumbs = time.perf_counter()
     if review_statuses is None:
         review_statuses = part_review_status_map()
+    _t_review = time.perf_counter()
 
     out = []
     for part in docs:
@@ -1141,6 +1151,27 @@ def parts_lazy():
                 **values,
             }
         )
+
+    _t_rows = time.perf_counter()
+
+    try:
+        _timing_logger.debug(
+            "parts_lazy timing (ms): config=%.1f filters=%.1f query=%.1f thumbs=%.1f "
+            "review=%.1f rows=%.1f total=%.1f | needs_scan=%s page_rows=%d total_records=%d sort=%s",
+            (_t_config - _t_start) * 1000,
+            (_t_filters - _t_config) * 1000,
+            (_t_query - _t_filters) * 1000,
+            (_t_thumbs - _t_query) * 1000,
+            (_t_review - _t_thumbs) * 1000,
+            (_t_rows - _t_review) * 1000,
+            (_t_rows - _t_start) * 1000,
+            needs_scan,
+            len(out),
+            filtered,
+            sort_field,
+        )
+    except Exception:
+        pass
 
     try:
         log_action("parts.list", resource_type="parts", resource=f"first={first},rows={rows}")

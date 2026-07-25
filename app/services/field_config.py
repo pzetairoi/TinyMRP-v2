@@ -1613,7 +1613,12 @@ def resolve_part_field_value(
     field = field_index(config).get(field_id)
     if not field:
         return ""
-    attrs = normalize_props(attrs or (harvest_part_attrs(part) if part else {}))
+    # Callers resolving multiple fields for the same part (the common case,
+    # via resolve_part_field_values) already pass a pre-normalized attrs dict
+    # here — re-running normalize_props() per field was the dominant cost of
+    # /api/parts_lazy (it walks the whole canonical/approval alias pipeline).
+    if attrs is None:
+        attrs = normalize_props(harvest_part_attrs(part) if part else {})
     extra = dict(extra or {})
     data_type = field.get("data_type", "text")
 
@@ -1687,7 +1692,7 @@ def resolve_part_field_values(
     coverage: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     config = config or get_field_config()
-    attrs = dict(attrs or (harvest_part_attrs(part) if part else {}))
+    attrs = normalize_props(attrs or (harvest_part_attrs(part) if part else {}))
     values: Dict[str, Any] = {}
     for field_id in field_ids:
         values[field_id] = resolve_part_field_value(
