@@ -12,9 +12,11 @@ import {
   formatFieldValue,
   loadFieldConfig,
   requiredFieldIds,
+  reviewColumnVisible,
   saveFieldPreferences,
   selectedFieldIds,
   updateContextSelection,
+  updateReviewColumnVisibility,
   type FieldConfigPayload,
   type FieldDefinition,
   type FieldPreferences,
@@ -242,6 +244,7 @@ export default function PartsPage() {
       .map((fieldId) => byId.get(fieldId))
       .filter((field): field is FieldDefinition => Boolean(field))
   }, [partsFields, selectedPartsFieldIds])
+  const showReviewColumn = reviewColumnVisible(fieldPreferences, 'parts_list')
   const tableFilters = useMemo(
     () => ensureColumnFilters(lazy.filters, selectedPartsFields),
     [lazy.filters, selectedPartsFields],
@@ -261,6 +264,15 @@ export default function PartsPage() {
   async function persistPartsFieldSelection(fieldIds: string[]) {
     if (!fieldConfig) return
     const nextPrefs = updateContextSelection(fieldConfig, fieldPreferences, 'parts_list', fieldIds)
+    setFieldPreferences(nextPrefs)
+    try {
+      const resp = await saveFieldPreferences(nextPrefs)
+      setFieldPreferences(resp.settings.field_preferences || nextPrefs)
+    } catch {}
+  }
+
+  async function persistReviewColumnVisibility(visible: boolean) {
+    const nextPrefs = updateReviewColumnVisibility(fieldPreferences, 'parts_list', visible)
     setFieldPreferences(nextPrefs)
     try {
       const resp = await saveFieldPreferences(nextPrefs)
@@ -632,11 +644,20 @@ export default function PartsPage() {
         filterDisplay="row" removableSort rowsPerPageOptions={[10,25,50,100]}
         stripedRows responsiveLayout="scroll"
         resizableColumns
+        stateKey="tinymrp-parts-inventory-layout-v1"
+        stateStorage="local"
+        reorderableColumns
+        onColReorder={(event) => {
+          const order = event.columns
+            .map((column: any) => String(column?.props?.field || ''))
+            .filter((fieldId) => selectedPartsFieldIds.includes(fieldId))
+          if (order.length === selectedPartsFieldIds.length) persistPartsFieldSelection(order)
+        }}
         columnResizeMode="expand"
         tableStyle={{ tableLayout: 'fixed' }}
         rowClassName={reviewRowClass}
       >
-        <Column
+        {showReviewColumn && <Column
           field="pending_reviews"
           header="Reviews"
           body={reviewIndicator}
@@ -658,7 +679,8 @@ export default function PartsPage() {
             </select>
           )}
           style={{ width: 105 }}
-        />
+          reorderable={false}
+        />}
         {selectedPartsFields.map((field) => {
           const isThumbnail = field.id === 'thumbnail'
           const showColumnSelector = field.id === columnSelectorFieldId && partsFields.length > 0
@@ -682,6 +704,18 @@ export default function PartsPage() {
                       requiredIds={requiredPartsFieldIds}
                       onChange={persistPartsFieldSelection}
                       onReset={() => persistPartsFieldSelection(defaultPartsFieldIds)}
+                      extraOptions={(
+                        <div className="form-check">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            id="parts-list-reviews-column"
+                            checked={showReviewColumn}
+                            onChange={(e) => persistReviewColumnVisibility(e.target.checked)}
+                          />
+                          <label className="form-check-label small" htmlFor="parts-list-reviews-column">Reviews</label>
+                        </div>
+                      )}
                     />
                   </div>
                 ) : (

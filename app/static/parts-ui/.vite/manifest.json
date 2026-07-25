@@ -1,6 +1,6 @@
 {
   "index.html": {
-    "file": "assets/index--IK0XGOB.js",
+    "file": "assets/index-D9hAK_Y5.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -49,7 +49,7 @@
     "src": "node_modules/primereact/resources/themes/lara-light-blue/fonts/InterVariable.woff2"
   },
   "src/components/ThreeMFViewer.tsx": {
-    "file": "assets/ThreeMFViewer-16WUuMzR.js",
+    "file": "assets/ThreeMFViewer-C2wULZpW.js",
     "name": "ThreeMFViewer",
     "src": "src/components/ThreeMFViewer.tsx",
     "isDynamicEntry": true,

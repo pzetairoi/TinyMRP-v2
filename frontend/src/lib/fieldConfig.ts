@@ -45,6 +45,7 @@ export type ApprovalRules = {
 
 export type FieldPreferences = {
   contexts: Record<string, { field_ids: string[]; use_default?: boolean }>
+  review_columns?: Record<string, boolean>
 }
 
 export type FieldConfigPayload = {
@@ -180,6 +181,24 @@ function containsAllTerms(value: any, filterValue: any) {
   const hay = normalizeText(value)
   const terms = text.split(/\s+/).filter(Boolean)
   return terms.every((term) => hay.includes(term))
+}
+
+export function reviewColumnVisible(prefs: FieldPreferences | null | undefined, contextName: string) {
+  return prefs?.review_columns?.[contextName] !== false
+}
+
+export function updateReviewColumnVisibility(
+  prefs: FieldPreferences | null | undefined,
+  contextName: string,
+  visible: boolean,
+): FieldPreferences {
+  return {
+    contexts: { ...(prefs?.contexts || {}) },
+    review_columns: {
+      ...(prefs?.review_columns || {}),
+      [contextName]: visible,
+    },
+  }
 }
 
 function unwrapFilterValue(filterValue: any): any {

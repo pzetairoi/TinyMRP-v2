@@ -1430,7 +1430,13 @@ def sanitize_user_field_preferences(raw: Dict[str, Any] | None, config: Optional
         if "use_default" in raw_ctx:
             ctx_out["use_default"] = bool(raw_ctx.get("use_default"))
         contexts[name] = ctx_out
-    return {"contexts": contexts}
+    raw_review_columns = raw.get("review_columns") if isinstance(raw.get("review_columns"), dict) else {}
+    review_columns = {
+        name: bool(raw_review_columns.get(name))
+        for name in ("parts_list", "bom_tree")
+        if name in raw_review_columns
+    }
+    return {"contexts": contexts, "review_columns": review_columns}
 
 
 def _get_nested(source: Any, path: List[str]) -> Any:
