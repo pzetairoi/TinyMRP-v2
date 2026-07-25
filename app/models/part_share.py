@@ -15,6 +15,8 @@ class PartShareLink(Document):
     allow_children = BooleanField(default=False)
     allow_docpacks = BooleanField(default=False)
     allow_attributes = BooleanField(default=False)
+    allow_unreleased = BooleanField(default=False)
+    enabled = BooleanField(default=True)
     created_at = DateTimeField(default=utc_now)
     created_by_user_id = StringField()
     created_by_email = StringField()

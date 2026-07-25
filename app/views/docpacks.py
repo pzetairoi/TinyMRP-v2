@@ -7,17 +7,30 @@ import re
 import zipfile
 
 from app.services.docpacks import DocPackOptions, build_docpack
-from app.services.acl import allowed_parts_for, part_is_allowed
-from app.services.acl import require_items_view, permissions_required
+from app.services.acl import permissions_required
 from app.services.audit import log_action
-from app.services.authorization import authorised_get
+from app.services.authorization import (
+    authorised_get,
+    has_permission,
+    require_permission,
+    scope_queryset,
+)
+from app.services.export_security import (
+    ExportSecurityError,
+    exact_bom_pairs,
+    preflight_docpack,
+    preflight_export_plan,
+)
 
 bp = Blueprint("docpacks_api", __name__, url_prefix="/api/docpacks")
 
 
 @bp.get("/options")
 @login_required
-@require_items_view
+@require_permission("exports.run")
+@require_permission("parts.read")
+@require_permission("bom.read")
+@require_permission("files.read")
 def options():
     from app.models.part import Part
     from app.models.bom import BOMLink
@@ -32,13 +45,28 @@ def options():
     if not pn:
         return jsonify({"error":"missing pn"}), 400
 
-    # ACL: enforce root access
     try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, pn, rev or ""):
-            return jsonify({"error":"forbidden"}), 403
-    except Exception:
-        pass
+        scoped = scope_queryset(Part.objects, current_user, "parts").filter(
+            part_number__iexact=pn
+        )
+        if rev is None:
+            root_part = scoped.order_by("-updated_at").first()
+        else:
+            root_part = scoped.filter(revision__iexact=rev or "").first()
+        if not root_part:
+            return jsonify({"error": "not found"}), 404
+        pn = root_part.part_number
+        rev = root_part.revision or ""
+        pairs = exact_bom_pairs(pn, rev, full=(depth != "top"))
+        preflight_export_plan(
+            current_user,
+            pairs,
+            require_bom=True,
+            include_files=True,
+            file_groups=None,
+        )
+    except ExportSecurityError:
+        return jsonify({"error": "forbidden"}), 403
     flat = _flatten_bom(pn, rev, full=(depth != "top"))
     # include the root itself for artifacts
     flat.append((pn, rev or "", 1.0))
@@ -65,7 +93,13 @@ def options():
     return jsonify({
         "file_types": sorted(groups),
         "processes": sorted(procs),
-        "markup_document_count": markup_document_count_for_pairs([(p, r) for p, r, _qty in flat]),
+        "markup_document_count": (
+            markup_document_count_for_pairs(
+                [(p, r) for p, r, _qty in flat]
+            )
+            if has_permission(current_user, "markups.read")
+            else 0
+        ),
     })
 
 def _parse_docpack_request():
@@ -141,7 +175,7 @@ def _parse_docpack_request():
 
 @bp.post("/build")
 @login_required
-@require_items_view
+@require_permission("exports.run")
 def build():
     parsed = _parse_docpack_request()
     if parsed and parsed[0] is None:
@@ -165,13 +199,26 @@ def build():
         current_app.logger.warning("/api/docpacks/build missing pn. payload=%s form=%s args=%s", payload, dict(data), dict(args))
         return jsonify({"error": "Missing parameter 'pn' (also accepted: part_number, partnumber, root_pn)"}), 400
 
-    # ACL: enforce root access
     try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, opts.root_pn, opts.root_rev or ""):
-            return jsonify({"error":"forbidden"}), 403
-    except Exception:
-        pass
+        from app.models.part import Part
+        from app.services.authorization import scope_queryset
+
+        scoped = scope_queryset(Part.objects, current_user, "parts").filter(
+            part_number__iexact=opts.root_pn
+        )
+        if _rev is None:
+            root_part = scoped.order_by("-updated_at").first()
+        else:
+            root_part = scoped.filter(
+                revision__iexact=str(_rev or "").strip()
+            ).first()
+        if not root_part:
+            return jsonify({"error": "not found"}), 404
+        opts.root_pn = root_part.part_number
+        opts.root_rev = root_part.revision or ""
+        preflight_docpack(current_user, opts)
+    except ExportSecurityError:
+        return jsonify({"error": "forbidden"}), 403
     try:
         name, data, mime = build_docpack(opts)
     except RuntimeError as exc:
@@ -188,6 +235,12 @@ def build():
                 "excel": bool(opts.want_excel_bom),
                 "binder": bool(opts.want_pdf_binder),
                 "visual": bool(opts.want_visual_list),
+                "included_categories": "parts,bom,files",
+                "financial_content": False,
+                "file_content": bool(
+                    opts.want_selected_files or opts.want_pdf_binder
+                ),
+                "outcome": "success",
             },
         )
     except Exception:
@@ -203,7 +256,7 @@ def _safe_slug(text: str) -> str:
 
 
 def _resolve_root_rev(pn: str, rev: str | None) -> str:
-    if rev is not None and str(rev).strip():
+    if rev is not None:
         return str(rev).strip()
     from app.models.part import Part
     from app.services.attrs import harvest_part_attrs
@@ -251,7 +304,11 @@ def _order_roots(order) -> List[tuple[str, str]]:
     return roots
 
 
-def _multi_docpack_zip(roots: List[tuple[str, str]], base_kwargs: dict, fab_enabled: bool) -> tuple[bytes, List[str]]:
+def _multi_docpack_zip(
+    roots: List[tuple[str, str]],
+    base_kwargs: dict,
+    fab_enabled: bool,
+) -> tuple[bytes, List[str]]:
     errors: List[str] = []
     out = BytesIO()
     added = 0
@@ -261,9 +318,12 @@ def _multi_docpack_zip(roots: List[tuple[str, str]], base_kwargs: dict, fab_enab
                 opts = DocPackOptions(root_pn=pn, root_rev=rev, **{**base_kwargs, "output_name": None})
                 if fab_enabled:
                     setattr(opts, "fabrication_pack", True)
+                preflight_docpack(current_user, opts)
                 name, data, mime = build_docpack(opts)
-            except RuntimeError as exc:
-                errors.append(f"{pn}:{rev or ''} -> {exc}")
+            except ExportSecurityError:
+                raise
+            except RuntimeError:
+                errors.append(f"{pn}:{rev or ''} -> generation failed")
                 continue
             slug = _safe_slug(f"{pn}_{rev}" if rev else pn)
             zf.writestr(f"{slug}/{name}", data)
@@ -277,8 +337,8 @@ def _multi_docpack_zip(roots: List[tuple[str, str]], base_kwargs: dict, fab_enab
 
 @bp.post("/build_job", endpoint="build_job")
 @login_required
-@require_items_view
 @permissions_required("jobs.read")
+@require_permission("exports.run")
 def build_job_docpack():
     parsed = _parse_docpack_request()
     if parsed and parsed[0] is None:
@@ -312,26 +372,38 @@ def build_job_docpack():
     if not roots:
         return jsonify({"error": "Job has no BOM lines to export"}), 400
 
-    allowed = allowed_parts_for(current_user)
-    if isinstance(allowed, set):
-        for pn, rev in roots:
-            if not part_is_allowed(allowed, pn, rev or ""):
-                return jsonify({"error": "forbidden"}), 403
-
-    zip_bytes, errors = _multi_docpack_zip(roots, base_kwargs, fab_enabled)
+    try:
+        zip_bytes, errors = _multi_docpack_zip(
+            roots,
+            base_kwargs,
+            fab_enabled,
+        )
+    except ExportSecurityError:
+        return jsonify({"error": "forbidden"}), 403
     if not zip_bytes:
         return jsonify({"error": "Failed to build docpack"}), 400
 
     name = (output_name or f"{job.job_number}_docpack").strip()
     if not name.lower().endswith(".zip"):
         name = f"{name}.zip"
+    log_action(
+        "docpack.build.job",
+        resource_type="job",
+        resource=str(job.job_number or job.id),
+        meta={
+            "root_count": len(roots),
+            "financial_content": False,
+            "file_content": True,
+            "outcome": "success",
+        },
+    )
     return send_file(BytesIO(zip_bytes), mimetype="application/zip", as_attachment=True, download_name=name)
 
 
 @bp.post("/build_order", endpoint="build_order")
 @login_required
-@require_items_view
 @permissions_required("orders.read")
+@require_permission("exports.run")
 def build_order_docpack():
     parsed = _parse_docpack_request()
     if parsed and parsed[0] is None:
@@ -365,17 +437,29 @@ def build_order_docpack():
     if not roots:
         return jsonify({"error": "Order has no lines to export"}), 400
 
-    allowed = allowed_parts_for(current_user)
-    if isinstance(allowed, set):
-        for pn, rev in roots:
-            if not part_is_allowed(allowed, pn, rev or ""):
-                return jsonify({"error": "forbidden"}), 403
-
-    zip_bytes, errors = _multi_docpack_zip(roots, base_kwargs, fab_enabled)
+    try:
+        zip_bytes, errors = _multi_docpack_zip(
+            roots,
+            base_kwargs,
+            fab_enabled,
+        )
+    except ExportSecurityError:
+        return jsonify({"error": "forbidden"}), 403
     if not zip_bytes:
         return jsonify({"error": "Failed to build docpack"}), 400
 
     name = (output_name or f"{order.order_number}_docpack").strip()
     if not name.lower().endswith(".zip"):
         name = f"{name}.zip"
+    log_action(
+        "docpack.build.order",
+        resource_type="order",
+        resource=str(order.order_number or order.id),
+        meta={
+            "root_count": len(roots),
+            "financial_content": False,
+            "file_content": True,
+            "outcome": "success",
+        },
+    )
     return send_file(BytesIO(zip_bytes), mimetype="application/zip", as_attachment=True, download_name=name)

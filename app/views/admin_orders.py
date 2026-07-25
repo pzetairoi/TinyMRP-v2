@@ -17,6 +17,7 @@ from app.services.authorization import (
     has_permission,
     order_kind_allowed,
     order_relationship_allowed,
+    require_permission,
     scope_queryset,
 )
 from mongoengine.errors import DoesNotExist, ValidationError
@@ -35,6 +36,11 @@ from app.services.biz_utils import (
     generate_order_number,
 )
 from app.services.order_scope import build_scope_pdf, build_scope_zip
+from app.services.export_security import (
+    ExportSecurityError,
+    exact_bom_pairs,
+    preflight_export_plan,
+)
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import parse_user_datetime, utc_now
 from app.services.audit import log_action
@@ -340,6 +346,7 @@ def orders_view(order_id):
 
 @bp.post("/<order_id>/scope_pdf")
 @permissions_required("orders.read")
+@require_permission("exports.run")
 def order_scope_pdf(order_id):
     order = _scoped_order(order_id, "orders.read")
     if not order:
@@ -347,6 +354,10 @@ def order_scope_pdf(order_id):
         return redirect(url_for("admin_orders.orders_list"))
     if is_external_scoped_user(current_user):
         abort(404)
+    if order.customer and not has_permission(current_user, "customers.read"):
+        abort(403)
+    if order.supplier and not has_permission(current_user, "suppliers.read"):
+        abort(403)
 
     attach_docs = (request.form.get("attach_docs") or "").lower() in ("1", "true", "yes", "on")
     include_children = (request.form.get("include_children") or "").lower() in ("1", "true", "yes", "on")
@@ -356,7 +367,45 @@ def order_scope_pdf(order_id):
         attach_docs = True
     if include_children and not (attach_docs or include_binder):
         attach_docs = True
+    try:
+        pairs: set[tuple[str, str]] = set()
+        for line in order.lines or []:
+            pn = str(line.pn or "").strip()
+            rev = str(line.rev or "").strip()
+            if not pn:
+                continue
+            if include_children:
+                pairs.update(exact_bom_pairs(pn, rev, full=True))
+            else:
+                pairs.add((pn, rev))
+        groups = set(file_types) if file_types else None
+        if not (attach_docs or include_binder):
+            groups = {"png"}
+        preflight_export_plan(
+            current_user,
+            pairs,
+            require_bom=include_children,
+            include_files=True,
+            file_groups=groups,
+        )
+    except ExportSecurityError:
+        abort(403)
     pdf_bytes = build_scope_pdf(order)
+    log_action(
+        "order.scope.export",
+        resource_type="order",
+        resource=str(order.order_number or order.id),
+        meta={
+            "included_categories": "order,parts,bom"
+            if include_children
+            else "order,parts",
+            "financial_content": False,
+            "file_content": bool(
+                attach_docs or include_binder
+            ),
+            "outcome": "success",
+        },
+    )
     if attach_docs or include_children or include_binder:
         zip_bytes = build_scope_zip(
             order,

@@ -91,6 +91,11 @@ from app.services.part_query import (
     terms,
 )
 from app.services.arena_export import build_arena_bom_csv, build_arena_file_links_csv
+from app.services.export_security import (
+    ExportSecurityError,
+    exact_bom_pairs,
+    preflight_export_plan,
+)
 from app.services.parts_delete import (
     delete_part_and_refs_cascade,
     plan_part_delete_pairs,
@@ -1385,7 +1390,7 @@ def _request_list_value(payload: dict[str, Any], key: str) -> list[str]:
 @bp.post("/parts/<path:pn>/export/arena_bom")
 @csrf.exempt
 @login_required
-@require_items_view
+@require_permission("exports.run")
 def export_arena_bom(pn: str):
     payload = request.get_json(silent=True) or {}
     rev = payload.get("rev")
@@ -1394,27 +1399,48 @@ def export_arena_bom(pn: str):
     if rev is None and "rev" in request.args:
         rev = request.args.get("rev")
 
-    part = _find_part_doc(pn, rev)
+    query = scope_queryset(Part.objects, current_user, "parts").filter(
+        part_number__iexact=pn
+    )
+    if rev is not None:
+        query = query.filter(revision__iexact=_clean_rev_value(rev))
+    else:
+        query = query.order_by("-updated_at")
+    part = query.first()
     if not part:
         return jsonify({"error": "not found"}), 404
-
-    allowed = None
+    field_ids = _request_list_value(payload, "field_ids")
+    export_file_groups = {
+        group
+        for field_id in field_ids
+        for group in [file_field_group(field_id)]
+        if group
+    }
+    if "datasheet" in field_ids:
+        export_file_groups.add("datasheet")
     try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, part.part_number, part.revision or ""):
-            return jsonify({"error": "forbidden"}), 403
-    except Exception:
-        allowed = None
+        pairs = exact_bom_pairs(
+            part.part_number,
+            part.revision,
+            full=True,
+        )
+        preflight_export_plan(
+            current_user,
+            pairs,
+            require_bom=True,
+            include_files=bool(export_file_groups),
+            file_groups=export_file_groups,
+        )
+    except ExportSecurityError:
+        return jsonify({"error": "forbidden"}), 403
 
     attrs = harvest_part_attrs(part)
     norm_rev = _normalized_revision(part, attrs)
-    field_ids = _request_list_value(payload, "field_ids")
     try:
         name, data = build_arena_bom_csv(
             part.part_number,
             norm_rev,
             field_ids=field_ids,
-            is_allowed=(lambda child_pn, child_rev: part_is_allowed(allowed, child_pn, child_rev or "")) if isinstance(allowed, set) else None,
         )
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -1424,7 +1450,14 @@ def export_arena_bom(pn: str):
             "arena.export.bom",
             resource_type="part",
             resource=f"{part.part_number}:{norm_rev}",
-            meta={"field_count": len(field_ids)},
+            meta={
+                "field_count": len(field_ids),
+                "revision": norm_rev,
+                "included_categories": "parts,bom",
+                "financial_content": False,
+                "file_content": False,
+                "outcome": "success",
+            },
         )
     except Exception:
         pass
@@ -1440,7 +1473,7 @@ def export_arena_bom(pn: str):
 @bp.post("/parts/<path:pn>/export/arena_file_links")
 @csrf.exempt
 @login_required
-@require_items_view
+@require_permission("exports.run")
 def export_arena_file_links(pn: str):
     payload = request.get_json(silent=True) or {}
     rev = payload.get("rev")
@@ -1449,17 +1482,31 @@ def export_arena_file_links(pn: str):
     if rev is None and "rev" in request.args:
         rev = request.args.get("rev")
 
-    part = _find_part_doc(pn, rev)
+    query = scope_queryset(Part.objects, current_user, "parts").filter(
+        part_number__iexact=pn
+    )
+    if rev is not None:
+        query = query.filter(revision__iexact=_clean_rev_value(rev))
+    else:
+        query = query.order_by("-updated_at")
+    part = query.first()
     if not part:
         return jsonify({"error": "not found"}), 404
-
-    allowed = None
     try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, part.part_number, part.revision or ""):
-            return jsonify({"error": "forbidden"}), 403
-    except Exception:
-        allowed = None
+        pairs = exact_bom_pairs(
+            part.part_number,
+            part.revision,
+            full=True,
+        )
+        preflight_export_plan(
+            current_user,
+            pairs,
+            require_bom=True,
+            include_files=True,
+            file_groups={"pdf", "dxf", "step"},
+        )
+    except ExportSecurityError:
+        return jsonify({"error": "forbidden"}), 403
 
     attrs = harvest_part_attrs(part)
     norm_rev = _normalized_revision(part, attrs)
@@ -1484,7 +1531,6 @@ def export_arena_file_links(pn: str):
             norm_rev,
             base_url=base_url,
             author=author,
-            is_allowed=(lambda child_pn, child_rev: part_is_allowed(allowed, child_pn, child_rev or "")) if isinstance(allowed, set) else None,
         )
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -1494,7 +1540,14 @@ def export_arena_file_links(pn: str):
             "arena.export.files",
             resource_type="part",
             resource=f"{part.part_number}:{norm_rev}",
-            meta={"base_url": base_url},
+            meta={
+                "base_url": base_url,
+                "revision": norm_rev,
+                "included_categories": "parts,bom,file_metadata",
+                "financial_content": False,
+                "file_content": False,
+                "outcome": "success",
+            },
         )
     except Exception:
         pass
