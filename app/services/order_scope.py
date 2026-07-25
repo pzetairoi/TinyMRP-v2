@@ -464,7 +464,9 @@ def build_scope_zip(
                 for pf in files:
                     pth = _file_abs_path(pf)
                     if not pth or not os.path.exists(pth):
-                        missing.append(f"{pn},{pf.revision or rev}: {pf.rel_path or pf.path or 'missing path'}")
+                        missing.append(
+                            f"{pn},{pf.revision or rev}: file unavailable"
+                        )
                         continue
                     if pth in seen:
                         continue

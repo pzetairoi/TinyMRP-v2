@@ -115,7 +115,7 @@ def test_admin_can_create_public_share_and_revoke_it(client, app, tmp_path):
     revoked_detail = public_client.get(
         f"/api/share/part/{share_id}/{share_token}/part_detail?pn={part.part_number}&rev={part.revision}"
     )
-    assert revoked_detail.status_code == 410
+    assert revoked_detail.status_code == 404
 
 
 def test_public_share_can_include_children_and_docpacks(client, app, tmp_path):

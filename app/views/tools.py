@@ -1,11 +1,23 @@
 from flask import Blueprint, render_template, request, send_file, current_app, redirect, url_for, abort, flash
 import os
+import secrets
 import tempfile
 from io import BytesIO
 from datetime import datetime, timezone
-from flask_login import login_required
+from flask_login import current_user, login_required
 from app.services.acl import permissions_required
+from app.services.authorization import has_permission, require_permission
+from app.services.export_artifacts import (
+    load_export_artifact,
+    store_export_artifact,
+)
+from app.services.export_security import (
+    ExportSecurityError,
+    exact_bom_pairs,
+    preflight_export_plan,
+)
 from app.services.filenames import build_output_name
+from app.services.audit import log_action
 from app.services.timezone_utils import format_display_ts, utc_now
 
 
@@ -14,6 +26,10 @@ def _excel_compile_root() -> str:
     # the tmpfs-backed system temp dir always is.
     root = os.path.join(tempfile.gettempdir(), "tinymrp_excelcompile")
     os.makedirs(root, exist_ok=True)
+    try:
+        os.chmod(root, 0o700)
+    except OSError:
+        pass
     return root
 
 bp = Blueprint("tools", __name__, url_prefix="/tools")
@@ -118,8 +134,17 @@ def _excel_compile_options():
     meta = current_app.config.get("PROCESS_META", {}) or {}
     processes = sorted([k for k in meta.keys() if not str(k).startswith("_")])
 
-    from app.models.artifact import PartFile
-    file_types = sorted([g for g in PartFile.objects().distinct("ext_group") if g])
+    file_types = [
+        "png",
+        "pdf",
+        "dxf",
+        "step",
+        "edr",
+        "3mf",
+        "ply",
+        "stl",
+        "datasheet",
+    ]
 
     return excel_fields, processes, file_types
 
@@ -136,6 +161,8 @@ def excel_compile():
     default_title = _default_compile_title()
 
     if request.method == "POST":
+        if not has_permission(current_user, "exports.run"):
+            abort(403)
         up = request.files.get("file")
         if not up or not up.filename:
             flash("Select an Excel file to upload.")
@@ -158,7 +185,7 @@ def excel_compile():
 
         # Save a temporary copy for parsing (tmpfs-backed, writable under the hardened container)
         temp_root = _excel_compile_root()
-        stamp = utc_now().strftime("%Y%m%d_%H%M%S_%f")
+        stamp = secrets.token_hex(16)
         temp_input = os.path.join(temp_root, f"upload_{stamp}.xlsx")
         with open(temp_input, "wb") as f:
             f.write(raw)
@@ -168,6 +195,10 @@ def excel_compile():
         if thumb_up and thumb_up.filename:
             thumb_ext = os.path.splitext(thumb_up.filename)[1].lower()
             if thumb_ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+                try:
+                    os.remove(temp_input)
+                except OSError:
+                    pass
                 flash("Top-level image must be PNG, JPEG, GIF, or WEBP.")
                 return render_template("tools/excel_compile.html", upload=False, filepath=None, missing=[], excel_fields=excel_fields, processes=processes, default_title=default_title, file_types=file_types_available)
             thumb_raw = thumb_up.read()
@@ -228,6 +259,52 @@ def excel_compile():
                 flash("No valid rows found. Ensure the sheet is named COMPILE and has a PartNumber column.")
                 return render_template("tools/excel_compile.html", upload=False, filepath=None, missing=[], excel_fields=excel_fields, processes=processes, default_title=default_title, file_types=file_types_available)
 
+            from app.models.part import Part
+
+            exact_parts = []
+            for row in rows:
+                part = Part.objects(
+                    part_number__iexact=row.part_number,
+                    revision__iexact=row.revision,
+                ).first()
+                if part:
+                    exact_parts.append(part)
+            planned_pairs: set[tuple[str, str]] = set()
+            expand = bool(docpack_kwargs["expand_subassemblies"])
+            for part in exact_parts:
+                if expand:
+                    planned_pairs.update(
+                        exact_bom_pairs(
+                            part.part_number,
+                            part.revision,
+                            full=True,
+                        )
+                    )
+                else:
+                    planned_pairs.add(
+                        (part.part_number, part.revision or "")
+                    )
+            requested_groups = docpack_kwargs["file_groups"] or [
+                "pdf",
+                "dxf",
+                "step",
+                "datasheet",
+            ]
+            include_markups = bool(
+                docpack_kwargs["want_markup_files"]
+                or docpack_kwargs["want_markup_report"]
+                or docpack_kwargs["binder_add_markups"]
+            )
+            if planned_pairs:
+                preflight_export_plan(
+                    current_user,
+                    planned_pairs,
+                    require_bom=expand,
+                    include_files=True,
+                    file_groups=set(requested_groups),
+                    include_markups=include_markups,
+                )
+
             file_root = (current_app.config.get("FILE_ROOT_LOCAL") or "").strip()
             if not file_root:
                 flash("FILE_ROOT_LOCAL is not configured; compiled ZIP will only include the input sheet and summary.")
@@ -241,12 +318,30 @@ def excel_compile():
 
             name_base = docpack_kwargs["title"]
             out_name = build_output_name(name_base, "zip", max_len=96, include_time=False, now=utc_now())
-            out_path = os.path.join(temp_root, out_name)
-            if os.path.exists(out_path):
-                out_name = build_output_name(name_base, "zip", max_len=96, include_time=True, now=utc_now())
-                out_path = os.path.join(temp_root, out_name)
-            with open(out_path, "wb") as f:
-                f.write(zip_bytes)
+            artifact_token = store_export_artifact(
+                zip_bytes,
+                owner_id=getattr(current_user, "id", ""),
+                display_name=out_name,
+                pairs=sorted(planned_pairs),
+                file_groups=sorted(requested_groups),
+                include_markups=include_markups,
+                require_bom=expand,
+            )
+            out_name = artifact_token
+            log_action(
+                "excel_compile.export",
+                resource_type="parts",
+                resource="compile",
+                meta={
+                    "part_count": len(planned_pairs),
+                    "included_categories": "parts,bom,files",
+                    "financial_content": False,
+                    "file_content": True,
+                    "outcome": "success",
+                },
+            )
+        except ExportSecurityError:
+            abort(403)
         finally:
             try:
                 os.remove(temp_input)
@@ -266,11 +361,37 @@ def excel_compile():
 @bp.get("/excelcompile/download/<path:filename>")
 @login_required
 @permissions_required("tools.view")
+@require_permission("exports.run")
 def excel_compile_download(filename):
-    root = _excel_compile_root()
-    target = os.path.abspath(os.path.join(root, filename))
-    if not target.startswith(os.path.abspath(root) + os.sep):
+    try:
+        target, metadata = load_export_artifact(
+            filename,
+            owner_id=getattr(current_user, "id", ""),
+        )
+        stored_pairs = [
+            (str(pair[0]), str(pair[1]))
+            for pair in metadata.get("pairs", [])
+            if isinstance(pair, list) and len(pair) == 2
+        ]
+        if stored_pairs:
+            preflight_export_plan(
+                current_user,
+                stored_pairs,
+                require_bom=bool(metadata.get("require_bom", True)),
+                include_files=True,
+                file_groups=(
+                    set(metadata["file_groups"])
+                    if metadata.get("file_groups") is not None
+                    else None
+                ),
+                include_markups=bool(metadata.get("include_markups")),
+            )
+    except (ExportSecurityError, ValueError):
         abort(404)
-    if not os.path.isfile(target):
-        abort(404)
-    return send_file(target, as_attachment=True, download_name=os.path.basename(target))
+    return send_file(
+        target,
+        as_attachment=True,
+        download_name=os.path.basename(
+            str(metadata.get("display_name") or "export.zip")
+        ),
+    )

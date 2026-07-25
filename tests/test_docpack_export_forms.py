@@ -103,7 +103,15 @@ def test_build_job_docpack_endpoint_end_to_end(app, client, tmp_path):
     root_dir = tmp_path
     app.config["FILE_ROOT_LOCAL"] = str(root_dir)
 
-    user = _make_user("jobs-build@example.com", ["jobs.view", "items.view"])
+    user = _make_user(
+        "jobs-build@example.com",
+        [
+            "jobs.view",
+            "items.view",
+            "exports.run",
+            "parts.read_unreleased",
+        ],
+    )
     part = Part(part_number="JOB-PN-1", revision="1", description="Job Part", processes=["machine"]).save()
     pdf_path = os.path.join(root_dir, "JOB-PN-1.pdf")
     _write_pdf(pdf_path, "JOB PART PDF")
@@ -128,7 +136,15 @@ def test_build_order_docpack_endpoint_end_to_end(app, client, tmp_path):
     root_dir = tmp_path
     app.config["FILE_ROOT_LOCAL"] = str(root_dir)
 
-    user = _make_user("orders-build@example.com", ["orders.view", "items.view"])
+    user = _make_user(
+        "orders-build@example.com",
+        [
+            "orders.view",
+            "items.view",
+            "exports.run",
+            "parts.read_unreleased",
+        ],
+    )
     part = Part(part_number="ORD-PN-1", revision="1", description="Order Part", processes=["machine"]).save()
     pdf_path = os.path.join(root_dir, "ORD-PN-1.pdf")
     _write_pdf(pdf_path, "ORDER PART PDF")
@@ -157,10 +173,25 @@ def test_order_scope_pdf_endpoint_still_works(app, client, tmp_path):
     root_dir = tmp_path
     app.config["FILE_ROOT_LOCAL"] = str(root_dir)
 
-    user = _make_user("scope-build@example.com", ["orders.view", "orders.manage", "items.view"])
+    user = _make_user(
+        "scope-build@example.com",
+        [
+            "orders.view",
+            "orders.manage",
+            "customers.view",
+            "items.view",
+            "exports.run",
+            "parts.read_unreleased",
+        ],
+    )
     customer = Customer(name="Acme").save()
     order = Order(order_number="ORD-SCOPE-1", customer=customer, status="submitted", kind="sales",
                   lines=[OrderLine(pn="ORD-SCOPE-PN", rev="1", qty=1)]).save()
+    Part(
+        part_number="ORD-SCOPE-PN",
+        revision="1",
+        description="Scope Part",
+    ).save()
 
     _login(client, user)
     resp = client.post(f"/admin/orders/{order.id}/scope_pdf", data={})

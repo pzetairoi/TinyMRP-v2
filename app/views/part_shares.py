@@ -12,20 +12,29 @@ from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.models.part import Part
 from app.models.part_share import PartShareLink
-from app.services.attrs import approval_field_values, approved_value, harvest_part_attrs
-from app.services.part_annotations import filtered_part_attrs
+from app.services.attrs import approval_field_values, harvest_part_attrs
 from app.services.audit import log_action
-from app.services.extra_files import extra_abs_path, extra_file_token_for, extra_root, resolve_extra_file_token
+from app.services.extra_files import extra_file_token_for, resolve_extra_file_token
 from app.services.field_config import get_field_config
 from app.services.files_access import file_token_for, resolve_file_token
-from app.services.docpacks import DocPackOptions, _flatten_bom, build_docpack
+from app.services.docpacks import DocPackOptions, build_docpack
+from app.services.export_security import (
+    ExportSecurityError,
+    docpack_file_groups,
+    exact_bom_pairs,
+    preflight_export_plan,
+)
+from app.services.file_security import FileSecurityError
 from app.services.part_shares import (
+    PUBLIC_MANAGED_FILE_GROUPS,
     create_part_share,
     normalize_share_revision,
+    public_associated_file_path,
+    public_managed_file_path,
     public_part_share_url,
     public_response_headers,
     record_part_share_access,
-    resolve_part_share,
+    resolve_public_part_share_scope,
     share_dict,
 )
 from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
@@ -41,36 +50,93 @@ from app.views.bom_tree import (
     _process_label,
 )
 from app.views.parts import (
-    _attr_identity,
     _context_field_values,
-    _extra_file_overview_row,
-    _find_part_doc,
     _group_file_overview_rows,
     _normalized_revision,
-    _part_file_overview_row,
 )
 from app.views.ui import vite_assets
-from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
-from app.services.acl import user_has_permission
+from app.services.acl import is_external_scoped_user
+from app.services.authorization import (
+    authorised_part_pairs,
+    has_any_permission,
+    has_permission,
+    scope_queryset,
+)
 
 
 bp = Blueprint("part_shares", __name__)
 
-
-def _role_names(user) -> set[str]:
-    names = set()
-    for role in (getattr(user, "roles", []) or []):
-        if getattr(role, "name", None):
-            names.add(str(role.name))
-    return names
-
-
-def _is_admin(user) -> bool:
-    if not user:
-        return False
-    if "admin" in _role_names(user):
-        return True
-    return user_has_permission(user, "admin")
+_PUBLIC_ATTRIBUTE_KEYS = frozenset(
+    {
+        "category",
+        "description",
+        "finish",
+        "manufacturer",
+        "mass",
+        "material",
+        "mfr_part",
+        "oem",
+        "oem_partnumber",
+        "process",
+        "processes",
+        "revision",
+        "status",
+        "uom",
+    }
+)
+_PUBLIC_FIELD_IDS = frozenset(
+    {
+        "thumbnail",
+        "part_number",
+        "revision",
+        "description",
+        "display_code",
+        "category",
+        "material",
+        "finish",
+        "mass",
+        "process",
+        "processes",
+        "uom",
+        "status",
+        "oem",
+        "oem_partnumber",
+        "manufacturer",
+        "mfr_part",
+        "datasheet",
+        "approved",
+        "approved_by",
+        "approved_date",
+        "qty",
+        "alt_group",
+        "level",
+        "level_qty",
+        "total_qty",
+        "has_pdf",
+        "has_png",
+        "has_dxf",
+        "has_step",
+        "has_edr",
+        "has_3mf",
+        "has_ply",
+        "has_stl",
+        "has_datasheet",
+    }
+)
+_PUBLIC_DOCPACK_EXCEL_FIELDS = frozenset(
+    {
+        "thumbnail",
+        "part_number",
+        "revision",
+        "description",
+        "qty",
+        "material",
+        "finish",
+        "process",
+        "uom",
+    }
+)
+_PUBLIC_CONFIG_FIELD_IDS = _PUBLIC_FIELD_IDS - {"approved_by"}
 
 
 def _part_share_scope(share) -> tuple[str, str]:
@@ -90,16 +156,25 @@ def _share_allows_attributes(share) -> bool:
 
 
 def _share_or_abort(share_id: str, token: str):
-    share, status = resolve_part_share(share_id, token)
-    if share and status == "ok":
-        return share
-    if status in {"expired", "revoked"}:
-        abort(410)
+    scope, status = resolve_public_part_share_scope(share_id, token)
+    if scope and status == "ok":
+        scope.share._resolved_public_scope = scope
+        return scope.share
     abort(404)
 
 
+def _resolved_scope(share):
+    scope = getattr(share, "_resolved_public_scope", None)
+    if scope is None:
+        raise RuntimeError("public share scope was not resolved")
+    return scope
+
+
 def _part_or_404(part_number: str, revision: str) -> Part:
-    part = _find_part_doc(part_number, revision)
+    part = Part.objects(
+        part_number__iexact=part_number,
+        revision__iexact=normalize_share_revision(revision),
+    ).first()
     if not part:
         abort(404)
     return part
@@ -115,30 +190,8 @@ def _flag_enabled(value) -> bool:
     return value in (True, 1, "1", "true", "True", "on", "yes", "Yes")
 
 
-def _same_shared_part_number(share, pn: str) -> bool:
-    share_pn, _share_rev = _part_share_scope(share)
-    return str(pn or "").strip().lower() == share_pn.lower()
-
-
 def _share_allows_part_key(share, pn: str, rev: str | None) -> bool:
-    key = (str(pn or "").strip(), normalize_share_revision(rev))
-    if not key[0]:
-        return False
-    if key == _part_share_scope(share):
-        return True
-    return _share_allows_children(share) and key in _share_descendant_keys(share)
-
-
-def _allowed_part_number_for_share(share, pn: str) -> bool:
-    share_pn, _share_rev = _part_share_scope(share)
-    target = str(pn or "").strip().lower()
-    if not target:
-        return False
-    if target == share_pn.lower():
-        return True
-    if not _share_allows_children(share):
-        return False
-    return any(str(child_pn or "").strip().lower() == target for child_pn, _child_rev in _share_descendant_keys(share))
+    return _resolved_scope(share).allows_part(pn, rev)
 
 
 def _requested_shared_part_key(share) -> tuple[str, str]:
@@ -165,9 +218,21 @@ def _share_preview_urls_for(share, raw_token: str, pn: str, rev: str, *, is_dwg:
     if not rows:
         return []
     pf = rows[0]
+    if not _allowed_file_for_share(share, pf):
+        return []
+    try:
+        public_managed_file_path(_resolved_scope(share), pf)
+    except FileSecurityError:
+        return []
     urls: list[str] = []
     if not is_dwg and getattr(pf, "thumb_rel_path", None):
-        urls.append(_shared_part_file_url(share, raw_token, pf, kind="thumb"))
+        try:
+            public_managed_file_path(_resolved_scope(share), pf, kind="thumb")
+            urls.append(
+                _shared_part_file_url(share, raw_token, pf, kind="thumb")
+            )
+        except FileSecurityError:
+            pass
     urls.append(_shared_part_file_url(share, raw_token, pf))
     return _dedup_urls(urls)
 
@@ -196,57 +261,123 @@ def _rewrite_share_thumbs(share, raw_token: str, payload: dict) -> dict:
     return data
 
 
-def _share_descendant_keys(share) -> set[tuple[str, str]]:
-    root = _part_share_scope(share)
-    seen = {root}
-    queue = [root]
-    while queue:
-        parent_pn, parent_rev = queue.pop(0)
-        for link in _child_links(parent_pn, parent_rev):
-            child_pn = getattr(link, "child_pn", None)
-            if not child_pn:
-                continue
-            child_rev = _bom_clean_rev(getattr(link, "child_rev", "") or "")
-            key = (child_pn, child_rev)
-            if key in seen:
-                continue
-            seen.add(key)
-            queue.append(key)
-    return seen
+def _public_bom_node(share, raw_token: str, node: dict) -> dict:
+    source = dict((node or {}).get("data") or {})
+    rewritten = _rewrite_share_thumbs(share, raw_token, source)
+    safe_keys = {
+        "pn",
+        "desc",
+        "rev",
+        "qty",
+        "uom",
+        "alt_group",
+        "process",
+        "thumb_urls",
+        "thumbnail",
+        "part_number",
+        "revision",
+        "description",
+        "level",
+        "level_qty",
+        "total_qty",
+    }
+    if _share_allows_attributes(share):
+        safe_keys.update({"category", "material", "finish", "mass", "status"})
+    data = {key: value for key, value in rewritten.items() if key in safe_keys}
+    pn = str(data.get("pn") or data.get("part_number") or "").strip()
+    rev = normalize_share_revision(data.get("rev") or data.get("revision"))
+    return {
+        "key": f"{pn}::{rev}",
+        "leaf": (
+            True
+            if not _share_allows_children(share)
+            else bool((node or {}).get("leaf", True))
+        ),
+        "data": data,
+    }
 
 
-def _allowed_file_for_share(share, part_number: str) -> bool:
-    return _allowed_part_number_for_share(share, part_number)
-
-
-def _allowed_path(abs_path: str, base_root: str) -> bool:
-    try:
-        ap = os.path.abspath(abs_path)
-        base = os.path.abspath(base_root)
-        ap_norm, base_norm = os.path.normcase(ap), os.path.normcase(base)
-        try:
-            return os.path.commonpath([ap_norm, base_norm]) == base_norm
-        except Exception:
-            return ap_norm.startswith(base_norm)
-    except Exception:
-        return False
-
-
-def _part_file_overview_row_for_share(share, raw_token: str, pf: PartFile) -> dict:
-    row = _part_file_overview_row(pf)
-    row["url"] = _shared_part_file_url(share, raw_token, pf)
-    return row
+def _allowed_file_for_share(share, file_record) -> bool:
+    scope = _resolved_scope(share)
+    if isinstance(file_record, PartFile):
+        return scope.allows_managed_file(file_record)
+    return scope.allows_associated_file(file_record)
 
 
 def _extra_file_overview_row_for_share(share, raw_token: str, ef: PartExtraFile) -> dict:
-    row = _extra_file_overview_row(ef)
-    row["url"] = _shared_extra_file_url(share, raw_token, ef)
-    return row
+    filename = (ef.original_name or "").strip() or "file"
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        "id": "",
+        "db_id": "",
+        "collection": "",
+        "kind": "extra",
+        "part_number": ef.part_number,
+        "revision": normalize_share_revision(ef.revision),
+        "display_revision": normalize_share_revision(ef.revision) or "(no revision)",
+        "name": filename,
+        "label": ef.label or "",
+        "ext_group": "extra",
+        "ext": extension,
+        "mime": ef.mime or "",
+        "rel_path": "",
+        "size": ef.size,
+        "source": "",
+        "recorded_by": "",
+        "recorded_at": utc_iso(ef.uploaded_at) or "",
+        "recorded_at_display": format_display_ts(
+            ef.uploaded_at,
+            fmt="%Y-%m-%d %H:%M:%S %Z",
+        )
+        or "",
+        "recorded_at_local": local_input_value(ef.uploaded_at) or "",
+        "url": _shared_extra_file_url(share, raw_token, ef),
+    }
+
+
+def _public_part_file_row(share, raw_token: str, pf: PartFile) -> dict:
+    name = os.path.basename(pf.rel_path or pf.path or "") or "file"
+    recorded_at = pf.mtime_iso or pf.mtime or pf.discovered_at
+    return {
+        "id": "",
+        "db_id": "",
+        "collection": "",
+        "kind": "scanned",
+        "part_number": pf.part_number,
+        "revision": normalize_share_revision(pf.revision),
+        "display_revision": normalize_share_revision(pf.revision)
+        or "(no revision)",
+        "name": name,
+        "label": "",
+        "ext_group": str(pf.ext_group or "").strip().lower(),
+        "ext": str(pf.ext or "").strip().lower(),
+        "mime": pf.content_type or "",
+        "rel_path": "",
+        "size": pf.size,
+        "source": "",
+        "recorded_by": "",
+        "recorded_at": utc_iso(recorded_at) or "",
+        "recorded_at_display": format_display_ts(
+            recorded_at,
+            fmt="%Y-%m-%d %H:%M:%S %Z",
+        )
+        or "",
+        "recorded_at_local": local_input_value(recorded_at) or "",
+        "url": _shared_part_file_url(share, raw_token, pf),
+    }
 
 
 def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
     attrs = harvest_part_attrs(part)
-    public_attrs = filtered_part_attrs(part, attrs)
+    public_attrs = (
+        {
+            key: value
+            for key, value in attrs.items()
+            if key in _PUBLIC_ATTRIBUTE_KEYS
+        }
+        if _share_allows_attributes(share)
+        else {}
+    )
     norm_rev = _normalized_revision(part, attrs)
 
     preview_urls = _share_preview_urls_for(share, raw_token, part.part_number, norm_rev, is_dwg=False)
@@ -261,32 +392,46 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
         ext_group = str(getattr(pf, "ext_group", "") or "").strip().lower()
         if ext_group not in files:
             continue
+        if not _allowed_file_for_share(share, pf):
+            continue
+        try:
+            public_managed_file_path(
+                _resolved_scope(share),
+                pf,
+                must_exist=False,
+            )
+        except FileSecurityError:
+            continue
         name = os.path.basename(pf.rel_path or pf.path or "") or "file"
-        files[ext_group].append({"url": _shared_part_file_url(share, raw_token, pf), "rel": pf.rel_path or "", "name": name})
+        files[ext_group].append(
+            {
+                "url": _shared_part_file_url(share, raw_token, pf),
+                "rel": "",
+                "name": name,
+            }
+        )
     datasheet_summary_url = files["datasheet"][0]["url"] if files["datasheet"] else ""
     _config, _attrs, summary_field_values = _context_field_values(
         part,
         "part_detail_summary",
         extra={"part_number": part.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
     )
-    summary_field_values.update(approval_field_values(attrs))
+    approval_values = approval_field_values(attrs)
+    summary_field_values.update(
+        {
+            "approved": bool(approval_values.get("approved")),
+            "approved_by": "",
+            "approved_date": approval_values.get("approved_date") or "",
+        }
+    )
+    summary_field_values["datasheet"] = datasheet_summary_url
     summary_field_values["notes"] = ""
     summary_field_values["comments"] = ""
-
-    uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
-    approver_identity = str(approval_field_values(attrs).get("approved_by") or "").strip()
-    raw_comments = attrs.get("comments")
-    if not isinstance(raw_comments, list):
-        raw_comments = []
-    identity_keys = [uploader_identity, approver_identity]
-    identity_keys.extend(str((comment or {}).get("author") or "").strip() for comment in raw_comments)
-    resolved_profiles = resolve_identity_profiles(identity_keys)
-    uploader_profile = resolved_profiles.get(uploader_identity.lower()) if uploader_identity else None
-    if not uploader_profile and uploader_identity:
-        uploader_profile = resolve_identity_profile(uploader_identity)
-    approver_profile = resolved_profiles.get(approver_identity.lower()) if approver_identity else None
-    if not approver_profile and approver_identity:
-        approver_profile = resolve_identity_profile(approver_identity)
+    summary_field_values = {
+        key: value
+        for key, value in summary_field_values.items()
+        if key in _PUBLIC_FIELD_IDS or key in {"notes", "comments"}
+    }
 
     return {
         "part": {
@@ -307,8 +452,8 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
         "images": preview_urls,
         "drawing_urls": drawing_urls,
         "files": files,
-        "uploader_profile": uploader_profile,
-        "approver_profile": approver_profile,
+        "uploader_profile": None,
+        "approver_profile": None,
         "comments": [],
         "whereused": [],
         "other_versions": [],
@@ -361,18 +506,25 @@ def public_part_share_ui(share_id: str, token: str):
 @bp.get("/share/part/<share_id>/<token>/files/<file_token>")
 def public_part_share_file(share_id: str, token: str, file_token: str):
     share = _share_or_abort(share_id, token)
-    resolved = resolve_file_token(file_token)
+    try:
+        resolved = resolve_file_token(file_token)
+    except Exception:
+        resolved = None
     if not resolved:
         abort(404)
     pf, kind = resolved
-    if not _allowed_file_for_share(share, pf.part_number):
+    if not _allowed_file_for_share(share, pf):
         abort(404)
-    from app.views.fileserve import _allowed_path as files_allowed_path, _path_for_pf
-
-    path, _rel = _path_for_pf(pf, kind)
-    if not path or not os.path.isfile(path) or not files_allowed_path(path):
+    try:
+        path = public_managed_file_path(
+            _resolved_scope(share),
+            pf,
+            kind=kind,
+        )
+    except FileSecurityError:
         abort(404)
-    ct, _encoding = mimetypes.guess_type(path)
+    ct, _encoding = mimetypes.guess_type(str(path))
+    record_part_share_access(share, kind="managed_file")
     resp = send_file(path, mimetype=ct or "application/octet-stream", conditional=True, max_age=0)
     return public_response_headers(resp)
 
@@ -380,19 +532,21 @@ def public_part_share_file(share_id: str, token: str, file_token: str):
 @bp.get("/share/part/<share_id>/<token>/extra/<extra_token>")
 def public_part_share_extra_file(share_id: str, token: str, extra_token: str):
     share = _share_or_abort(share_id, token)
-    resolved = resolve_extra_file_token(extra_token)
+    try:
+        resolved = resolve_extra_file_token(extra_token)
+    except Exception:
+        resolved = None
     if not resolved:
         abort(404)
     ef, _kind = resolved
-    if not _allowed_file_for_share(share, ef.part_number):
+    if not _allowed_file_for_share(share, ef):
         abort(404)
-    base_root = extra_root()
-    if not base_root:
+    try:
+        abs_path = public_associated_file_path(_resolved_scope(share), ef)
+    except FileSecurityError:
         abort(404)
-    abs_path = extra_abs_path(ef.rel_path or "")
-    if not abs_path or not _allowed_path(abs_path, base_root) or not os.path.isfile(abs_path):
-        abort(404)
-    ct = ef.mime or mimetypes.guess_type(abs_path)[0] or "application/octet-stream"
+    ct = ef.mime or mimetypes.guess_type(str(abs_path))[0] or "application/octet-stream"
+    record_part_share_access(share, kind="associated_file")
     resp = send_file(abs_path, mimetype=ct, conditional=True, max_age=0)
     return public_response_headers(resp)
 
@@ -400,10 +554,45 @@ def public_part_share_extra_file(share_id: str, token: str, extra_token: str):
 @bp.get("/api/share/part/<share_id>/<token>/field-config")
 def public_share_field_config(share_id: str, token: str):
     _share_or_abort(share_id, token)
+    config = get_field_config()
+    fields = [
+        field
+        for field in config.get("fields", [])
+        if field.get("id") in _PUBLIC_CONFIG_FIELD_IDS
+    ]
+    contexts = {}
+    for name in ("part_detail_summary", "bom_tree"):
+        source = dict(config.get("contexts", {}).get(name, {}))
+        source["allowed_field_ids"] = [
+            field_id
+            for field_id in source.get("allowed_field_ids", [])
+            if field_id in _PUBLIC_CONFIG_FIELD_IDS
+        ]
+        source["default_field_ids"] = [
+            field_id
+            for field_id in source.get("default_field_ids", [])
+            if field_id in _PUBLIC_CONFIG_FIELD_IDS
+        ]
+        source["required_field_ids"] = [
+            field_id
+            for field_id in source.get("required_field_ids", [])
+            if field_id in _PUBLIC_CONFIG_FIELD_IDS
+        ]
+        source["available_fields"] = [
+            field
+            for field in source.get("available_fields", [])
+            if field.get("id") in _PUBLIC_CONFIG_FIELD_IDS
+        ]
+        contexts[name] = source
     resp = jsonify(
         {
             "ok": True,
-            "config": get_field_config(),
+            "config": {
+                "fields": fields,
+                "contexts": contexts,
+                "canonical_aliases": [],
+                "approval_rules": {},
+            },
             "user_preferences": {"contexts": {}},
             "permissions": {"can_admin": False},
         }
@@ -431,7 +620,10 @@ def public_share_files_overview(share_id: str, token: str):
     rows: list[dict] = []
 
     for pf in (
-        PartFile.objects(part_number__iexact=part.part_number)
+        PartFile.objects(
+            part_number__iexact=part.part_number,
+            revision__iexact=current_rev,
+        )
         .only(
             "part_number",
             "revision",
@@ -450,10 +642,22 @@ def public_share_files_overview(share_id: str, token: str):
         )
         .order_by("revision", "ext_group", "rel_path")
     ):
-        rows.append(_part_file_overview_row_for_share(share, token, pf))
+        if _allowed_file_for_share(share, pf):
+            try:
+                public_managed_file_path(
+                    _resolved_scope(share),
+                    pf,
+                    must_exist=False,
+                )
+                rows.append(_public_part_file_row(share, token, pf))
+            except FileSecurityError:
+                continue
 
     for ef in (
-        PartExtraFile.objects(part_number__iexact=part.part_number)
+        PartExtraFile.objects(
+            part_number__iexact=part.part_number,
+            revision__iexact=current_rev,
+        )
         .only(
             "part_number",
             "revision",
@@ -468,7 +672,14 @@ def public_share_files_overview(share_id: str, token: str):
         )
         .order_by("revision", "-uploaded_at", "original_name")
     ):
-        rows.append(_extra_file_overview_row_for_share(share, token, ef))
+        if _allowed_file_for_share(share, ef):
+            try:
+                public_associated_file_path(_resolved_scope(share), ef)
+                rows.append(
+                    _extra_file_overview_row_for_share(share, token, ef)
+                )
+            except FileSecurityError:
+                continue
 
     grouped = _group_file_overview_rows(rows, current_rev)
     resp = jsonify(
@@ -505,9 +716,25 @@ def public_share_part_images(share_id: str, token: str):
 
     payload = []
     for pf in rows:
+        if not _allowed_file_for_share(share, pf):
+            continue
+        try:
+            public_managed_file_path(_resolved_scope(share), pf)
+        except FileSecurityError:
+            continue
         urls: list[str] = []
         if not is_dwg and getattr(pf, "thumb_rel_path", None):
-            urls.append(_shared_part_file_url(share, token, pf, kind="thumb"))
+            try:
+                public_managed_file_path(
+                    _resolved_scope(share),
+                    pf,
+                    kind="thumb",
+                )
+                urls.append(
+                    _shared_part_file_url(share, token, pf, kind="thumb")
+                )
+            except FileSecurityError:
+                pass
         urls.append(_shared_part_file_url(share, token, pf))
         payload.append({"urls": _dedup_urls(urls), "revision": pf.revision})
     resp = jsonify(payload)
@@ -530,12 +757,17 @@ def public_share_bom_tree(share_id: str, token: str):
         root_part = _part_or_404(pn, rev)
         root = _node(root_part.part_number, rev=rev, config=config)
         root["children"] = []
-        root["data"] = _rewrite_share_thumbs(share, token, root.get("data") or {})
+        root = _public_bom_node(share, token, root)
+        root["children"] = []
         resp = jsonify([root])
         return public_response_headers(resp)
 
     if parent:
-        if (parent, parent_rev) not in _share_descendant_keys(share):
+        if not _share_allows_children(share) or not _share_allows_part_key(
+            share,
+            parent,
+            parent_rev,
+        ):
             resp = jsonify([])
             return public_response_headers(resp)
         kids = []
@@ -544,9 +776,10 @@ def public_share_bom_tree(share_id: str, token: str):
             if not child_pn or child_pn == parent:
                 continue
             child_rev = _bom_clean_rev(getattr(link, "child_rev", None)) if hasattr(link, "child_rev") else None
+            if not _share_allows_part_key(share, child_pn, child_rev):
+                continue
             node = _node(child_pn, link, rev=child_rev, config=config)
-            node["data"] = _rewrite_share_thumbs(share, token, node.get("data") or {})
-            kids.append(node)
+            kids.append(_public_bom_node(share, token, node))
         kids.sort(key=lambda item: 1 if _is_hardware_node(item) else 0)
         resp = jsonify(kids)
         return public_response_headers(resp)
@@ -561,6 +794,8 @@ def public_share_bom_flat(share_id: str, token: str):
     config = get_field_config()
     root_pn, root_rev = _requested_shared_part_key(share)
     root_part = _part_or_404(root_pn, root_rev)
+    if not _share_allows_children(share):
+        return public_response_headers(jsonify([]))
 
     rows_by_key: dict[tuple[str, str], dict] = {}
     part_cache: dict[tuple[str, str], tuple[Part | None, dict, str, list[str], set[str], dict]] = {}
@@ -611,8 +846,20 @@ def public_share_bom_flat(share_id: str, token: str):
             "alt_group": "",
             "process": proc_label,
             "thumb_urls": thumbs,
-            "attrs": attrs,
-            **values,
+            "attrs": (
+                {
+                    key: value
+                    for key, value in attrs.items()
+                    if key in _PUBLIC_ATTRIBUTE_KEYS
+                }
+                if _share_allows_attributes(share)
+                else {}
+            ),
+            **{
+                key: value
+                for key, value in values.items()
+                if key in _PUBLIC_FIELD_IDS
+            },
         }
         if thumbs:
             row["thumbnail"] = thumbs[0]
@@ -687,18 +934,42 @@ def public_share_bom_flat(share_id: str, token: str):
     return public_response_headers(resp)
 
 
-def _share_docpack_options_payload(part_number: str, revision: str, depth: str) -> dict:
-    flat = _flatten_bom(part_number, revision, full=(depth != "top"))
-    flat.append((part_number, revision or "", 1.0))
+def _public_docpack_pairs(share, part_number: str, revision: str, depth: str):
+    if not _share_allows_children(share):
+        return {(part_number, normalize_share_revision(revision))}
+    pairs = set(
+        exact_bom_pairs(
+            part_number,
+            revision,
+            full=depth != "top",
+        )
+    )
+    if any(not _share_allows_part_key(share, pn, rev) for pn, rev in pairs):
+        raise ValueError("share unavailable")
+    return pairs
+
+
+def _share_docpack_options_payload(
+    share,
+    part_number: str,
+    revision: str,
+    depth: str,
+) -> dict:
+    pairs = _public_docpack_pairs(share, part_number, revision, depth)
 
     groups = set()
-    for pnr, rev, _qty in flat:
-        q = PartFile.objects(part_number__iexact=pnr)
-        if rev is not None:
-            q = q.filter(revision__iexact=(rev or ""))
-        for pf in q.only("ext_group"):
-            if pf.ext_group:
-                groups.add(str(pf.ext_group))
+    for pnr, rev in pairs:
+        q = PartFile.objects(
+            part_number__iexact=pnr,
+            revision__iexact=rev,
+        )
+        for pf in q.only("part_number", "revision", "ext_group"):
+            if (
+                pf.ext_group
+                and str(pf.ext_group).lower() in PUBLIC_MANAGED_FILE_GROUPS
+                and _allowed_file_for_share(share, pf)
+            ):
+                groups.add(str(pf.ext_group).lower())
 
     meta = current_app.config.get("PROCESS_META", {}) or {}
     processes = [key for key in meta.keys() if not str(key).startswith("_")]
@@ -722,7 +993,6 @@ def public_share_docpack_options(share_id: str, token: str):
             resource=f"{share.part_number}:{share.revision or ''}",
             meta={
                 "share_id": str(share.id),
-                "token_prefix": share.token_prefix or "",
                 "pn": part_number,
                 "rev": revision,
                 "depth": depth,
@@ -730,7 +1000,16 @@ def public_share_docpack_options(share_id: str, token: str):
         )
     except Exception:
         pass
-    return _public_json(_share_docpack_options_payload(part_number, revision, depth))
+    try:
+        payload = _share_docpack_options_payload(
+            share,
+            part_number,
+            revision,
+            depth,
+        )
+    except Exception:
+        abort(404)
+    return _public_json(payload)
 
 
 @bp.post("/api/share/part/<share_id>/<token>/docpacks/build")
@@ -762,11 +1041,70 @@ def public_share_docpack_build(share_id: str, token: str):
     opts.binder_add_markups = False
     if fab_enabled:
         setattr(opts, "fabrication_pack", True)
+    requested_groups = {
+        str(group or "").strip().lower()
+        for group in (opts.file_types or [])
+        if str(group or "").strip()
+    }
+    if not requested_groups.issubset(PUBLIC_MANAGED_FILE_GROUPS):
+        return _public_json({"error": "invalid_options"}, 400)
+    if (
+        opts.depth not in {"top", "full"}
+        or opts.classified_filter != "show"
+        or opts.process_mode not in {"all", "selected"}
+        or bool(opts.want_whereused_report)
+        or bool(opts.binder_add_whereused)
+        or bool(opts.excel_all_fields)
+    ):
+        return _public_json({"error": "invalid_options"}, 400)
+    process_names = {
+        str(name).strip()
+        for name in (current_app.config.get("PROCESS_META", {}) or {})
+        if not str(name).startswith("_")
+    }
+    if any(process not in process_names for process in (opts.processes or [])):
+        return _public_json({"error": "invalid_options"}, 400)
+    if not _share_allows_attributes(share) and (
+        bool(opts.want_excel_bom) or bool(fab_enabled)
+    ):
+        return _public_json({"error": "invalid_options"}, 400)
+    if opts.want_excel_bom or fab_enabled:
+        requested_fields = set(opts.excel_field_ids or [])
+        if not requested_fields.issubset(_PUBLIC_DOCPACK_EXCEL_FIELDS):
+            return _public_json({"error": "invalid_options"}, 400)
+        opts.excel_field_ids = sorted(
+            requested_fields or _PUBLIC_DOCPACK_EXCEL_FIELDS
+        )
+    try:
+        planned_pairs = _public_docpack_pairs(
+            share,
+            part_number,
+            revision,
+            opts.depth,
+        )
+        groups_to_check = docpack_file_groups(opts)
+        if groups_to_check is None:
+            groups_to_check = set(PUBLIC_MANAGED_FILE_GROUPS)
+        for planned_pn, planned_rev in planned_pairs:
+            for pf in PartFile.objects(
+                part_number__iexact=planned_pn,
+                revision__iexact=planned_rev,
+                ext_group__in=sorted(groups_to_check),
+            ):
+                public_managed_file_path(
+                    _resolved_scope(share),
+                    pf,
+                    must_exist=False,
+                )
+    except (FileSecurityError, ValueError):
+        abort(404)
+    if not _share_allows_children(share):
+        opts.flat_override = []
 
     try:
         name, blob, mime = build_docpack(opts)
-    except RuntimeError as exc:
-        return _public_json({"error": str(exc)}, 400)
+    except RuntimeError:
+        return _public_json({"error": "Unable to generate document pack"}, 400)
 
     record_part_share_access(share, kind="docpack_build")
     try:
@@ -776,7 +1114,6 @@ def public_share_docpack_build(share_id: str, token: str):
             resource=f"{share.part_number}:{share.revision or ''}",
             meta={
                 "share_id": str(share.id),
-                "token_prefix": share.token_prefix or "",
                 "pn": opts.root_pn,
                 "rev": opts.root_rev or "",
                 "depth": opts.depth,
@@ -797,10 +1134,20 @@ def public_share_docpack_build(share_id: str, token: str):
 @bp.get("/api/parts/<path:pn>/shares")
 @login_required
 def list_part_shares(pn: str):
-    if not _is_admin(current_user):
+    if (
+        is_external_scoped_user(current_user)
+        or not has_any_permission(
+            current_user,
+            ("shares.create", "shares.revoke"),
+        )
+    ):
         return jsonify({"ok": False, "error": "forbidden"}), 403
     rev = normalize_share_revision(request.args.get("rev"))
-    part = _find_part_doc(pn, rev)
+    part = (
+        scope_queryset(Part.objects, current_user, "parts")
+        .filter(part_number__iexact=pn, revision__iexact=rev)
+        .first()
+    )
     if not part:
         return jsonify({"ok": False, "error": "not_found"}), 404
     rows = [
@@ -817,19 +1164,62 @@ def list_part_shares(pn: str):
 @login_required
 @csrf.exempt
 def create_part_share_api(pn: str):
-    if not _is_admin(current_user):
+    if (
+        is_external_scoped_user(current_user)
+        or not has_permission(current_user, "shares.create")
+        or not has_permission(current_user, "files.read")
+    ):
         return jsonify({"ok": False, "error": "forbidden"}), 403
     payload = request.get_json(force=True, silent=True) or {}
     rev = normalize_share_revision(payload.get("rev") if "rev" in payload else request.args.get("rev"))
-    part = _find_part_doc(pn, rev)
+    try:
+        part = (
+            scope_queryset(Part.objects, current_user, "parts")
+            .filter(part_number__iexact=pn, revision__iexact=rev)
+            .first()
+        )
+    except Exception:
+        part = None
     if not part:
         return jsonify({"ok": False, "error": "not_found"}), 404
-    expires_in_days = int(payload.get("expires_in_days") or 30)
+    try:
+        expires_in_days = int(payload.get("expires_in_days") or 30)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "invalid_expiry"}), 400
     if expires_in_days < 1 or expires_in_days > 365:
         return jsonify({"ok": False, "error": "invalid_expiry"}), 400
     allow_children = _flag_enabled(payload.get("allow_children"))
     allow_docpacks = _flag_enabled(payload.get("allow_docpacks"))
     allow_attributes = _flag_enabled(payload.get("allow_attributes"))
+    try:
+        shared_pairs = (
+            exact_bom_pairs(
+                part.part_number,
+                part.revision,
+                full=True,
+            )
+            if allow_children
+            else {(part.part_number, normalize_share_revision(part.revision))}
+        )
+        required_pairs = frozenset(
+            (pair_pn.casefold(), pair_rev.casefold())
+            for pair_pn, pair_rev in shared_pairs
+        )
+        if allow_children:
+            if not has_permission(current_user, "bom.read"):
+                raise ExportSecurityError("share unavailable")
+            if authorised_part_pairs(current_user, shared_pairs) != required_pairs:
+                raise ExportSecurityError("share unavailable")
+        if allow_docpacks:
+            preflight_export_plan(
+                current_user,
+                shared_pairs,
+                require_bom=True,
+                include_files=True,
+                file_groups=None,
+            )
+    except Exception:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     share, raw_token = create_part_share(
         part.part_number,
         part.revision or "",
@@ -838,6 +1228,10 @@ def create_part_share_api(pn: str):
         allow_children=allow_children,
         allow_docpacks=allow_docpacks,
         allow_attributes=allow_attributes,
+        allow_unreleased=has_permission(
+            current_user,
+            "parts.read_unreleased",
+        ),
     )
     try:
         log_action(
@@ -847,10 +1241,13 @@ def create_part_share_api(pn: str):
             meta={
                 "share_id": str(share.id),
                 "expires_in_days": expires_in_days,
-                "token_prefix": share.token_prefix,
                 "allow_children": allow_children,
                 "allow_docpacks": allow_docpacks,
                 "allow_attributes": allow_attributes,
+                "allow_unreleased": has_permission(
+                    current_user,
+                    "parts.read_unreleased",
+                ),
             },
         )
     except Exception:
@@ -870,12 +1267,31 @@ def create_part_share_api(pn: str):
 @login_required
 @csrf.exempt
 def revoke_part_share_api(pn: str, share_id: str):
-    if not _is_admin(current_user):
+    if (
+        is_external_scoped_user(current_user)
+        or not has_permission(current_user, "shares.revoke")
+    ):
         return jsonify({"ok": False, "error": "forbidden"}), 403
-    share = PartShareLink.objects(id=share_id).first()
+    try:
+        share = PartShareLink.objects(id=share_id).first()
+    except Exception:
+        share = None
     if not share:
         return jsonify({"ok": False, "error": "not_found"}), 404
     if str(share.part_number or "").strip().lower() != str(pn or "").strip().lower():
+        return jsonify({"ok": False, "error": "not_found"}), 404
+    try:
+        root = (
+            scope_queryset(Part.objects, current_user, "parts")
+            .filter(
+                part_number__iexact=share.part_number,
+                revision__iexact=normalize_share_revision(share.revision),
+            )
+            .first()
+        )
+    except Exception:
+        root = None
+    if not root:
         return jsonify({"ok": False, "error": "not_found"}), 404
     now = utc_now()
     share.update(
@@ -888,7 +1304,7 @@ def revoke_part_share_api(pn: str, share_id: str):
             "part.share.revoke",
             resource_type="part_share",
             resource=f"{share.part_number}:{share.revision or ''}",
-            meta={"share_id": str(share.id), "token_prefix": share.token_prefix},
+            meta={"share_id": str(share.id)},
         )
     except Exception:
         pass

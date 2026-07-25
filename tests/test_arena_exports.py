@@ -233,7 +233,13 @@ def test_arena_bom_export_uses_admin_defaults_and_alias_headers(client):
     assert rows[1]["Legacy Arena Code"] == "LEG-CHILD"
 
 
-def test_arena_file_links_export_builds_base_prefixed_rows(client):
+def test_arena_file_links_export_builds_base_prefixed_rows(
+    client,
+    app,
+    tmp_path,
+):
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILE_SOURCES"] = [{"local_root": str(tmp_path)}]
     admin = _admin_user()
     _login(client, admin)
 
@@ -241,13 +247,20 @@ def test_arena_file_links_export_builds_base_prefixed_rows(client):
     child = Part(part_number="CMP-LINK", revision="B", description="Child").save()
     BOMLink(parent_pn=root.part_number, parent_rev=root.revision, child_pn=child.part_number, child_rev=child.revision, qty=1).save()
 
+    root_pdf = tmp_path / "deliverables" / "ASM-LINK_REV_A.pdf"
+    root_pdf.parent.mkdir(parents=True)
+    root_pdf.write_bytes(b"pdf")
+    child_dxf = tmp_path / "deliverables" / "CMP-LINK_REV_B.dxf"
+    child_dxf.write_bytes(b"dxf")
+    child_step = tmp_path / "deliverables" / "CMP-LINK_REV_B.stp"
+    child_step.write_bytes(b"step")
     PartFile(
         part_number=root.part_number,
         revision=root.revision,
         ext_group="pdf",
         ext="pdf",
         rel_path="deliverables/ASM-LINK_REV_A.pdf",
-        path="C:/arena/ASM-LINK_REV_A.pdf",
+        path=str(root_pdf),
     ).save()
     PartFile(
         part_number=child.part_number,
@@ -255,7 +268,7 @@ def test_arena_file_links_export_builds_base_prefixed_rows(client):
         ext_group="dxf",
         ext="dxf",
         rel_path="deliverables/CMP-LINK_REV_B.dxf",
-        path="C:/arena/CMP-LINK_REV_B.dxf",
+        path=str(child_dxf),
     ).save()
     PartFile(
         part_number=child.part_number,
@@ -263,7 +276,7 @@ def test_arena_file_links_export_builds_base_prefixed_rows(client):
         ext_group="step",
         ext="stp",
         rel_path="deliverables/CMP-LINK_REV_B.stp",
-        path="C:/arena/CMP-LINK_REV_B.stp",
+        path=str(child_step),
     ).save()
 
     resp = client.post(

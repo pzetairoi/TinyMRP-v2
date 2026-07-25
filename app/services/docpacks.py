@@ -14,7 +14,7 @@ from app.services.canonical_fields import canonical_processes_for_part
 from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.processmeta import normalize_processes
 from app.services.filenames import build_output_name
-from app.services.part_norm import clean_rev as _clean_rev, clean_rev_or_none as _rev_or_none
+from app.services.part_norm import clean_rev as _clean_rev
 from app.services.app_settings import format_display_ts, get_display_dt, resolve_brand_logo_path
 from app.services.insights import classify_part
 from app.services.markup_documents import combine_markup_documents, markup_documents_for_pairs
@@ -139,9 +139,9 @@ def _flatten_bom(
     terminals: Set[str] = set([str(x).strip().lower() for x in (terminal_processes or [])])
 
     def children(pn: str, rev: Optional[str]):
-        rev_val = _rev_or_none(rev)
+        rev_val = _clean_rev(rev)
         if "parent_rev" in BOMLink._fields:
-            if rev_val is not None:
+            if rev is not None:
                 return BOMLink.objects(parent_pn=pn, parent_rev=rev_val)
         return BOMLink.objects(parent_pn=pn)
 
@@ -222,7 +222,11 @@ def _file_coverage_report(flat: Iterable[Tuple[str, str, float]], file_root: str
             return "no record"
         rel = pf.rel_path.replace("\\", "/") if pf.rel_path else ""
         abs_path = pf.path if os.path.isabs(pf.path) else os.path.join(file_root, rel.replace("/", os.sep))
-        return "OK" if os.path.isfile(abs_path) else f"record exists but file missing on disk ({abs_path})"
+        return (
+            "OK"
+            if os.path.isfile(abs_path)
+            else "record exists but file missing on disk"
+        )
 
     lines = ["part_number\trevision\tpdf\tany_file"]
     for pn, rev, _qty in sorted(flat, key=lambda t: (t[0] or "", t[1] or "")):
@@ -614,9 +618,9 @@ def _bom_occurrences(
     terminals: Set[str] = set([str(x).strip().lower() for x in (terminal_processes or [])])
 
     def children(pn: str, rev: Optional[str]):
-        rev_val = _rev_or_none(rev)
+        rev_val = _clean_rev(rev)
         if "parent_rev" in BOMLink._fields:
-            if rev_val is not None:
+            if rev is not None:
                 return BOMLink.objects(parent_pn=pn, parent_rev=rev_val)
         return BOMLink.objects(parent_pn=pn)
 
@@ -1850,9 +1854,8 @@ def _whereused_rows(root_pn: str, root_rev: Optional[str]) -> List[Dict[str, obj
     try:
         if "child_pn" in BOMLink._fields:
             q = BOMLink.objects(child_pn=root_pn)
-            root_rev_clean = _rev_or_none(root_rev)
-            if root_rev_clean is not None and "child_rev" in BOMLink._fields:
-                q = q.filter(child_rev=root_rev_clean)
+            if root_rev is not None and "child_rev" in BOMLink._fields:
+                q = q.filter(child_rev=_clean_rev(root_rev))
             links = q
         else:
             child_part = Part.objects(part_number=root_pn).only("id").first()
@@ -2751,8 +2754,10 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     opts.root_pn, opts.root_rev or "",
                 )
     markup_tmpdir: Optional[str] = None
+    markup_tmpctx: Optional[tempfile.TemporaryDirectory] = None
     if opts.want_pdf_binder and opts.binder_add_markups and markup_documents:
-        markup_tmpdir = tempfile.mkdtemp(prefix="tinymrp-markups-")
+        markup_tmpctx = tempfile.TemporaryDirectory(prefix="tinymrp-markups-")
+        markup_tmpdir = markup_tmpctx.name
         markup_by_pair = {(doc.part_number.lower(), _norm_rev(doc.revision)): doc for doc in markup_documents}
         reordered_items: List[Dict[str, object]] = []
         reordered_paths: List[str] = []
@@ -3289,8 +3294,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         final_pdf: bytes = b""
         if all_segments:
             seg_paths = []
-            tmpdir = tempfile.mkdtemp()
-            try:
+            with tempfile.TemporaryDirectory(prefix="tinymrp-binder-") as tmpdir:
                 for i, b in enumerate(all_segments):
                     p = os.path.join(tmpdir, f"seg_{i}.pdf")
                     with open(p, 'wb') as fh:
@@ -3298,8 +3302,6 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
                     seg_paths.append(p)
                 merged_pdf, _ = _merge_pdfs(seg_paths)
                 final_pdf = merged_pdf or b""
-            finally:
-                pass
 
         # Always apply page numbers (skip cover page); include stamps if requested
         stamps = []

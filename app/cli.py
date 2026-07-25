@@ -36,6 +36,34 @@ def role():
     """Role management commands"""
 
 
+@click.group()
+def share():
+    """Public-share maintenance commands."""
+
+
+@share.command("migrate-legacy")
+@click.option(
+    "--apply",
+    is_flag=True,
+    help="Backfill only unambiguous legacy share revisions.",
+)
+@with_appcontext
+def migrate_legacy_shares(apply):
+    """Report legacy shares without exposing bearer-token material."""
+
+    import json
+
+    from app.services.part_shares import migrate_legacy_part_shares
+
+    click.echo(
+        json.dumps(
+            migrate_legacy_part_shares(apply=apply),
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+
 @role.command("list")
 @with_appcontext
 def list_roles():
@@ -789,6 +817,7 @@ def init_app(app):
     app.cli.add_command(files)
     app.cli.add_command(user)
     app.cli.add_command(role)
+    app.cli.add_command(share)
     app.cli.add_command(data)
     app.cli.add_command(attrs)
     app.cli.add_command(annotations)

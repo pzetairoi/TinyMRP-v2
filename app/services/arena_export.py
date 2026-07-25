@@ -18,7 +18,7 @@ from app.services.field_config import (
     get_field_config,
     resolve_part_field_values,
 )
-from app.services.part_norm import clean_rev, clean_rev_or_none
+from app.services.part_norm import clean_rev
 
 import re
 from flask import current_app, has_app_context
@@ -60,9 +60,9 @@ def _root_part_or_raise(root_pn: str, root_rev: Optional[str]) -> tuple[Part, st
 
 
 def _child_links(parent_pn: str, parent_rev: Optional[str]) -> list[BOMLink]:
-    rev_clean = clean_rev_or_none(parent_rev)
+    rev_clean = _clean_rev(parent_rev)
     query = BOMLink.objects(parent_pn=parent_pn)
-    if rev_clean is not None and "parent_rev" in BOMLink._fields:
+    if parent_rev is not None and "parent_rev" in BOMLink._fields:
         query = query.filter(parent_rev=rev_clean)
     return list(query.order_by("child_pn", "child_rev"))
 
@@ -254,7 +254,7 @@ def build_arena_bom_csv(
             if child_key in ancestry:
                 continue
             if is_allowed and not is_allowed(child_pn, child_rev):
-                continue
+                raise RuntimeError("Export scope is incomplete.")
             child_part = _part_by(child_pn, child_rev)
             child_attrs = harvest_part_attrs(child_part) if child_part else {}
             effective_rev = _clean_rev(child_attrs.get("revision") or (child_part.revision if child_part else "") or child_rev)
@@ -324,7 +324,7 @@ def _collect_unique_parts(
             if child_key in ancestry:
                 continue
             if is_allowed and not is_allowed(child_pn, child_rev):
-                continue
+                raise RuntimeError("Export scope is incomplete.")
             walk(child_pn, child_rev, ancestry + (child_key,))
 
     if not is_allowed or is_allowed(root_pn, root_rev):
