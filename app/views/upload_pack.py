@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import List
 
 from flask import Blueprint, current_app, jsonify, request
@@ -9,24 +8,22 @@ from werkzeug.utils import secure_filename
 
 from app.extensions import csrf
 from app.models.extra_file import PartExtraFile
-from app.services.acl import (
-    allowed_parts_for,
-    part_is_allowed,
-    permissions_required,
-    require_items_view,
-)
+from app.services.acl import permissions_required
 from app.services.extra_files import (
-    extra_abs_path,
     extra_file_url_for,
     extra_rel_path,
-    extra_root,
-    guess_mime,
-    hash_file,
+    purge_associated_file,
     rev_from_token,
+    store_associated_uploads,
+    validated_upload_filename,
+)
+from app.services.file_security import (
+    associated_file_category_allowed,
+    associated_file_path_allowed,
+    exact_file_part,
 )
 from app.services.part_norm import clean_pn, clean_rev
 from app.services.upload_pack import import_upload_pack
-from app.services.timezone_utils import utc_now
 from app.views.api_helpers import add_datetime_fields
 
 
@@ -62,29 +59,6 @@ def _parse_bool(value: object) -> bool:
 
 def _uploaded_by() -> str:
     return (getattr(current_user, "email", None) or str(getattr(current_user, "id", ""))).strip()
-
-
-def _allowed_path(abs_path: str, base_root: str) -> bool:
-    try:
-        ap = os.path.abspath(abs_path)
-        base = os.path.abspath(base_root)
-        ap_norm, base_norm = os.path.normcase(ap), os.path.normcase(base)
-        try:
-            return os.path.commonpath([ap_norm, base_norm]) == base_norm
-        except Exception:
-            return ap_norm.startswith(base_norm)
-    except Exception:
-        return False
-
-
-def _check_acl(pn: str, rev: str):
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, pn, rev):
-            return False
-    except Exception:
-        return True
-    return True
 
 
 @bp.post("/upload/pack")
@@ -159,14 +133,13 @@ def upload_pack():
 
 @bp.get("/parts/<path:pn>/<path:rev>/extra")
 @login_required
-@require_items_view
 def list_extra_files(pn: str, rev: str):
     pn_clean = clean_pn(pn)
     rev_clean = clean_rev(rev_from_token(rev))
     if not pn_clean:
         return jsonify({"error": "pn required"}), 400
-    if not _check_acl(pn_clean, rev_clean):
-        return jsonify({"error": "forbidden"}), 403
+    if exact_file_part(current_user, pn_clean, rev_clean) is None:
+        return jsonify({"error": "not found"}), 404
 
     rows = []
     for ef in (
@@ -185,14 +158,29 @@ def list_extra_files(pn: str, rev: str):
             "uploaded_at",
         )
     ):
+        if (
+            not associated_file_category_allowed(current_user, ef)
+            or not associated_file_path_allowed(ef)
+        ):
+            continue
         rows.append(_extra_file_payload(ef))
+    try:
+        from app.services.audit import log_action
+
+        log_action(
+            "file.list",
+            resource_type="part",
+            resource=f"{pn_clean}:{rev_clean}",
+            meta={"associated_files": len(rows)},
+        )
+    except Exception:
+        pass
     return jsonify(rows)
 
 
 @bp.post("/parts/<path:pn>/<path:rev>/extra")
 @csrf.exempt
 @login_required
-@permissions_required("items.edit")
 def upload_extra_files(pn: str, rev: str):
     if not current_app.config.get("EXTRA_FILES_ALLOWED", True):
         return jsonify({"error": "extra files disabled"}), 403
@@ -200,8 +188,6 @@ def upload_extra_files(pn: str, rev: str):
     rev_clean = clean_rev(rev_from_token(rev))
     if not pn_clean:
         return jsonify({"error": "pn required"}), 400
-    if not _check_acl(pn_clean, rev_clean):
-        return jsonify({"error": "forbidden"}), 403
 
     files = request.files.getlist("file")
     if not files:
@@ -209,62 +195,62 @@ def upload_extra_files(pn: str, rev: str):
     if not files:
         return jsonify({"error": "file required"}), 400
 
+    max_files = int(current_app.config.get("UPLOAD_PACK_MAX_FILES") or 0)
+    if max_files and len(files) > max_files:
+        return jsonify({"error": "too many files"}), 413
+
+    try:
+        targets = []
+        for upload in files:
+            filename = validated_upload_filename(getattr(upload, "filename", ""))
+            rel_path = extra_rel_path(pn_clean, rev_clean, filename)
+            existing = PartExtraFile.objects(
+                part_number__iexact=pn_clean,
+                revision__iexact=rev_clean,
+                rel_path=rel_path,
+            ).first()
+            targets.append(existing)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    requires_add = any(record is None for record in targets)
+    requires_replace = any(record is not None for record in targets)
+    required = []
+    if requires_add:
+        required.append("files.add")
+    if requires_replace:
+        required.append("files.replace")
+    if not required or any(
+        exact_file_part(
+            current_user,
+            pn_clean,
+            rev_clean,
+            permission=permission,
+            mutable=True,
+        )
+        is None
+        for permission in required
+    ):
+        return jsonify({"error": "not found"}), 404
+
     max_file_mb = int(current_app.config.get("UPLOAD_PACK_MAX_FILE_MB") or 0)
     max_bytes = max_file_mb * 1024 * 1024 if max_file_mb else 0
-    base_root = extra_root()
     uploaded_by = _uploaded_by()
-    created: List[dict] = []
+    try:
+        records = store_associated_uploads(
+            files,
+            part_number=pn_clean,
+            revision=rev_clean,
+            uploaded_by=uploaded_by,
+            max_bytes=max_bytes,
+        )
+    except ValueError as exc:
+        status = 413 if str(exc) == "file too large" else 400
+        return jsonify({"error": str(exc)}), status
+    except Exception:
+        return jsonify({"error": "upload failed"}), 500
+    created: List[dict] = [_extra_file_payload(record) for record in records]
     errors: List[str] = []
-
-    for f in files:
-        if not f or not f.filename:
-            continue
-        filename = os.path.basename(f.filename)
-        rel_path = extra_rel_path(pn_clean, rev_clean, filename)
-        abs_path = extra_abs_path(rel_path)
-        if not base_root or not _allowed_path(abs_path, base_root):
-            errors.append(f"blocked path: {filename}")
-            continue
-        try:
-            os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-            f.save(abs_path)
-            size = float(os.path.getsize(abs_path))
-            if max_bytes and size > max_bytes:
-                os.remove(abs_path)
-                errors.append(f"file too large: {filename}")
-                continue
-            mime = guess_mime(abs_path)
-            sha = hash_file(abs_path)
-            existing = PartExtraFile.objects(
-                part_number=pn_clean, revision=rev_clean, rel_path=rel_path
-            ).first()
-            if existing:
-                existing.original_name = filename
-                existing.size = size
-                existing.mime = mime
-                existing.sha256 = sha
-                existing.uploaded_by = uploaded_by or existing.uploaded_by
-                existing.uploaded_at = utc_now()
-                existing.source = "upload"
-                existing.save()
-                ef = existing
-            else:
-                ef = PartExtraFile(
-                    part_number=pn_clean,
-                    revision=rev_clean,
-                    original_name=filename,
-                    rel_path=rel_path,
-                    size=size,
-                    mime=mime,
-                    sha256=sha,
-                    uploaded_by=uploaded_by,
-                    uploaded_at=utc_now(),
-                    source="upload",
-                )
-                ef.save()
-            created.append(_extra_file_payload(ef))
-        except Exception:
-            errors.append(f"failed to save: {filename}")
 
     try:
         from app.services.audit import log_action
@@ -273,7 +259,13 @@ def upload_extra_files(pn: str, rev: str):
             "upload.extra_files",
             resource_type="part",
             resource=f"{pn_clean}:{rev_clean}",
-            meta={"files_uploaded": len(created), "errors": len(errors)},
+            meta={
+                "files_uploaded": len(created),
+                "files_added": sum(record is None for record in targets),
+                "files_replaced": sum(record is not None for record in targets),
+                "logical_file_ids": [f"extra:{record.id}" for record in records],
+                "errors": len(errors),
+            },
         )
     except Exception:
         pass
@@ -283,14 +275,21 @@ def upload_extra_files(pn: str, rev: str):
 @bp.delete("/parts/<path:pn>/<path:rev>/extra/<file_id>")
 @csrf.exempt
 @login_required
-@permissions_required("items.edit")
 def delete_extra_file(pn: str, rev: str, file_id: str):
     pn_clean = clean_pn(pn)
     rev_clean = clean_rev(rev_from_token(rev))
     if not pn_clean:
         return jsonify({"error": "pn required"}), 400
-    if not _check_acl(pn_clean, rev_clean):
-        return jsonify({"error": "forbidden"}), 403
+    if (
+        exact_file_part(
+            current_user,
+            pn_clean,
+            rev_clean,
+            permission="files.purge",
+        )
+        is None
+    ):
+        return jsonify({"error": "not found"}), 404
 
     ef = PartExtraFile.objects(id=file_id).first()
     if not ef:
@@ -301,13 +300,30 @@ def delete_extra_file(pn: str, rev: str, file_id: str):
     ):
         return jsonify({"error": "not found"}), 404
 
-    base_root = extra_root()
-    if ef.rel_path and base_root:
-        abs_path = extra_abs_path(ef.rel_path)
-        if abs_path and _allowed_path(abs_path, base_root) and os.path.isfile(abs_path):
-            try:
-                os.remove(abs_path)
-            except Exception:
-                pass
-    ef.delete()
+    try:
+        from app.services.audit import log_action
+
+        log_action(
+            "file.purge.requested",
+            resource_type="file",
+            resource=f"extra:{ef.id}",
+            meta={"part": f"{pn_clean}:{rev_clean}"},
+        )
+    except Exception:
+        pass
+    try:
+        purge_associated_file(ef)
+    except Exception:
+        return jsonify({"error": "delete failed"}), 500
+    try:
+        from app.services.audit import log_action
+
+        log_action(
+            "file.purge.completed",
+            resource_type="file",
+            resource=f"extra:{file_id}",
+            meta={"part": f"{pn_clean}:{rev_clean}"},
+        )
+    except Exception:
+        pass
     return jsonify({"ok": True})

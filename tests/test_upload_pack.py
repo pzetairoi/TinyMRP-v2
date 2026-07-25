@@ -73,7 +73,15 @@ def test_upload_pack_accepts_flatbom_with_bom(client, app, user, tmp_path):
 
 
 def test_upload_pack_imports_extra_with_rev(client, app, user, tmp_path):
-    role = Role(name="importer", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(
+        name="importer",
+        permissions=[
+            "import.bom",
+            "items.view",
+            "items.edit",
+            "parts.read_unreleased",
+        ],
+    ).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -286,7 +294,10 @@ def test_upload_pack_scans_attr_named_datasheet_when_other_deliverables_are_pars
 
 
 def test_direct_extra_upload_empty_rev(client, app, user, tmp_path):
-    role = Role(name="editor", permissions=["items.view", "items.edit"]).save()
+    role = Role(
+        name="editor",
+        permissions=["items.view", "items.edit", "parts.read_unreleased"],
+    ).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -298,6 +309,7 @@ def test_direct_extra_upload_empty_rev(client, app, user, tmp_path):
 
     pn = "PN-4"
     rev = "__no_rev__"
+    Part(part_number=pn, revision="", description="Blank revision").save()
     resp = client.post(
         f"/api/parts/{pn}/{rev}/extra",
         data={"file": (io.BytesIO(b"data"), "sample.txt")},
@@ -320,6 +332,12 @@ def test_extra_delete_requires_permission(client, app, user, tmp_path):
         app.config["EXTRA_FILES_ALLOWED"] = True
 
     pn = "PN-5"
+    Part(
+        part_number=pn,
+        revision="",
+        description="Released blank revision",
+        attrs={"approvedby": "QA"},
+    ).save()
     ef = PartExtraFile(
         part_number=pn,
         revision="",
@@ -332,7 +350,7 @@ def test_extra_delete_requires_permission(client, app, user, tmp_path):
     ef.save()
 
     resp = client.delete(f"/api/parts/{pn}/__no_rev__/extra/{ef.id}")
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
 
 def test_upload_pack_zip_slip_rejected(client, app, user, tmp_path):
@@ -358,7 +376,10 @@ def test_upload_pack_zip_slip_rejected(client, app, user, tmp_path):
 
 
 def test_files_overview_separates_current_and_other_revisions(client, app, user, tmp_path):
-    role = Role(name="files_overview", permissions=["items.view", "items.edit"]).save()
+    role = Role(
+        name="files_overview",
+        permissions=["items.view", "items.edit", "parts.read_unreleased"],
+    ).save()
     user.roles = [role]
     user.save()
     _login(client, user)

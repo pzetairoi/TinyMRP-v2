@@ -1,4 +1,6 @@
 from app.models.artifact import PartFile
+from app.models.auth import Role
+from app.models.part import Part
 from app.services.files_access import file_token_for
 
 
@@ -15,6 +17,18 @@ def test_fileserve_allows_secondary_source_absolute_paths(client, app, user, tmp
     file_path.write_bytes(b"secondary-source")
 
     with app.app_context():
+        user.roles = [
+            Role(
+                name="file_source_reader",
+                permissions=["parts.read", "files.read"],
+            ).save()
+        ]
+        user.save()
+        Part(
+            part_number="SRC-200",
+            revision="A",
+            attrs={"approvedby": "QA"},
+        ).save()
         app.config["FILE_SOURCES"] = [
             {
                 "id": "released",
@@ -54,6 +68,18 @@ def test_fileserve_thumb_kind_serves_thumbnail_not_original(client, app, user, t
     thumb_path.write_bytes(b"small-thumb")
 
     with app.app_context():
+        user.roles = [
+            Role(
+                name="thumbnail_reader",
+                permissions=["parts.read", "files.read"],
+            ).save()
+        ]
+        user.save()
+        Part(
+            part_number="SRC-201",
+            revision="A",
+            attrs={"approvedby": "QA"},
+        ).save()
         app.config["FILE_ROOT_LOCAL"] = str(root)
         app.config["FILE_SOURCES"] = []
         pf = PartFile(

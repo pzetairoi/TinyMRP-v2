@@ -3,6 +3,8 @@ import os
 from datetime import datetime, timezone
 from typing import Iterable, Tuple
 import io
+import uuid
+from types import SimpleNamespace
 from PIL import Image, ImageOps, ImageFilter
 from flask import current_app
 from app.models.artifact import PartFile
@@ -190,19 +192,38 @@ def generate_thumbs_for_artifacts(docs: Iterable[PartFile]) -> int:
     for d in docs:
         if (d.ext_group or "").lower() != "png":
             continue
-        # Compute absolute source path from rel_path (preferred). Fallback to path.
-        if not d.rel_path and not d.path:
+        if not d.rel_path:
             continue
-        rel = d.rel_path or d.path
-        # If stored path is absolute, keep it; otherwise resolve against FILE_ROOT_LOCAL
-        src_abs = d.path if (d.path and os.path.isabs(d.path)) else _abs(rel)
-        thumb_rel = _thumb_rel_for(rel)  # thumbs/png/...
-        thumb_abs = _abs(thumb_rel)
+        try:
+            from app.services.file_security import resolve_managed_path
+
+            src_path = resolve_managed_path(d, must_exist=True)
+            thumb_rel = _thumb_rel_for(d.rel_path)
+            target = SimpleNamespace(thumb_rel_path=thumb_rel, source="")
+            thumb_path = resolve_managed_path(
+                target,
+                kind="thumb",
+                must_exist=False,
+            )
+        except Exception:
+            continue
+        src_abs = str(src_path)
+        thumb_abs = str(thumb_path)
         if _needs_rebuild(src_abs, thumb_abs):
+            staged = f"{thumb_abs}.{uuid.uuid4().hex}.tmp"
             try:
-                _gen_one(src_abs, thumb_abs, remove_bg=not bool(getattr(d, "is_dwg", False)))
-            except Exception as ex:
-                # optionally log ex
+                _gen_one(
+                    src_abs,
+                    staged,
+                    remove_bg=not bool(getattr(d, "is_dwg", False)),
+                )
+                os.replace(staged, thumb_abs)
+            except Exception:
+                try:
+                    if os.path.isfile(staged):
+                        os.remove(staged)
+                except OSError:
+                    pass
                 continue
             # set bookkeeping
             d.thumb_rel_path = thumb_rel

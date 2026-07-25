@@ -481,8 +481,15 @@ def test_missing_sha256_uses_deterministic_metadata_fingerprint(client):
 # part_images metadata
 # ---------------------------------------------------------------------------
 
-def test_part_images_drawing_rows_expose_safe_metadata(client):
+def test_part_images_drawing_rows_expose_safe_metadata(client, app, tmp_path):
     part, pf, viewer = _setup(client)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    drawing_path = tmp_path / pf.rel_path
+    drawing_path.parent.mkdir(parents=True, exist_ok=True)
+    drawing_path.write_bytes(b"drawing")
+    pf.path = str(drawing_path)
+    pf.save()
     resp = client.get("/api/part_images?pn=PN-500&rev=A&mode=drawing")
     assert resp.status_code == 200
     rows = resp.get_json()
@@ -500,6 +507,12 @@ def test_part_images_drawing_rows_expose_safe_metadata(client):
 
     # Preview rows also expose the metadata (preview-PNG markup fallback) and
     # full-size image URLs that skip the thumbnail.
+    preview_path = tmp_path / "previews" / "PN-500.png"
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    preview_path.write_bytes(b"preview")
+    thumbnail_path = tmp_path / "thumbs" / "png" / "PN-500.png"
+    thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+    thumbnail_path.write_bytes(b"thumbnail")
     PartFile(
         part_number="PN-500",
         revision="A",
@@ -507,7 +520,7 @@ def test_part_images_drawing_rows_expose_safe_metadata(client):
         ext="png",
         is_dwg=False,
         rel_path="previews/PN-500.png",
-        path="C:/store/previews/PN-500.png",
+        path=str(preview_path),
         thumb_rel_path="thumbs/png/PN-500.png",
         sha256="previewsha",
     ).save()

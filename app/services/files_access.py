@@ -49,14 +49,21 @@ def public_file_urls_enabled() -> bool:
 
 
 def file_token_for(pf: PartFile, kind: str = "file") -> str:
+    identity = PartFile.objects(id=getattr(pf, "id", None)).only(
+        "part_number",
+        "revision",
+        "rel_path",
+    ).first()
+    if identity is None:
+        raise ValueError("file unavailable")
     payload = {
-        "id": str(pf.id),
+        "id": str(identity.id),
         "kind": kind or "file",
-        "pn": pf.part_number or "",
-        "rev": pf.revision or "",
+        "pn": identity.part_number or "",
+        "rev": identity.revision or "",
     }
-    if pf.rel_path:
-        payload["rel"] = pf.rel_path
+    if identity.rel_path:
+        payload["rel"] = identity.rel_path
     return _serializer().dumps(payload)
 
 
@@ -88,11 +95,13 @@ def resolve_file_token(token: str) -> Optional[Tuple[PartFile, str]]:
     pf = PartFile.objects(id=file_id).first()
     if not pf:
         return None
-    pn = (data.get("pn") or "").strip()
-    if pn and pf.part_number and pn != pf.part_number:
+    if "pn" not in data or "rev" not in data:
         return None
-    rev = (data.get("rev") or "").strip()
-    if rev and (pf.revision or "") != rev:
+    pn = str(data.get("pn") or "").strip()
+    if pn != str(pf.part_number or "").strip():
+        return None
+    rev = str(data.get("rev") or "").strip()
+    if rev != str(pf.revision or "").strip():
         return None
     rel = (data.get("rel") or "").strip()
     if rel and pf.rel_path:
@@ -100,7 +109,9 @@ def resolve_file_token(token: str) -> Optional[Tuple[PartFile, str]]:
         pf_norm = os.path.normpath(pf.rel_path).replace("\\", "/").lstrip("/").casefold()
         if rel_norm != pf_norm:
             return None
-    kind = data.get("kind") or "file"
+    kind = str(data.get("kind") or "file")
+    if kind not in {"file", "thumb", "preview"}:
+        return None
     return pf, kind
 
 

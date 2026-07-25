@@ -74,75 +74,62 @@ def _delete_physical_files_for(pn: str, rev: str) -> Dict[str, int]:
         "deleted_extra_records": 0,
     }
 
-    source_roots: List[str] = []
-    try:
-        from app.services.filescan import _sources
+    from app.models.extra_file import PartExtraFile
+    from app.services.extra_files import purge_associated_file
+    from app.services.file_security import (
+        resolve_associated_path,
+        resolve_managed_path,
+    )
 
-        for src in _sources(None):
-            root = str(src.get("local_root") or "").strip()
-            if root:
-                source_roots.append(root)
-    except Exception:
-        pass
+    for doc in PartFile.objects(part_number__iexact=pn, revision__iexact=rev):
+        file_path = resolve_managed_path(doc, must_exist=False)
+        if file_path.exists():
+            file_path.unlink()
+            counts["deleted_physical_files"] += 1
+        if str(getattr(doc, "thumb_rel_path", "") or "").strip():
+            thumb_path = resolve_managed_path(
+                doc,
+                kind="thumb",
+                must_exist=False,
+            )
+            if thumb_path.exists():
+                thumb_path.unlink()
+                counts["deleted_thumb_files"] += 1
 
-    file_root_local = ""
-    try:
-        from flask import current_app, has_app_context
-
-        if has_app_context():
-            file_root_local = str(
-                current_app.config.get("FILE_ROOT_LOCAL")
-                or current_app.config.get("FILES_LOCAL_ROOT")
-                or ""
-            ).strip()
-    except Exception:
-        file_root_local = ""
-
-    allowed_roots = list(source_roots)
-    if file_root_local:
-        allowed_roots.append(file_root_local)
-
-    if allowed_roots:
-        for doc in PartFile.objects(part_number__iexact=pn, revision__iexact=rev):
-            candidates: List[str] = []
-            abs_path = str(getattr(doc, "path", "") or "").strip()
-            if abs_path and os.path.isabs(abs_path):
-                candidates.append(abs_path)
-            rel = str(getattr(doc, "rel_path", "") or "").strip().replace("\\", "/").lstrip("/")
-            if rel:
-                for root in source_roots or ([file_root_local] if file_root_local else []):
-                    candidates.append(os.path.join(root, rel.replace("/", os.sep)))
-            counts["deleted_physical_files"] += _remove_existing(candidates, allowed_roots)
-
-            thumb_rel = str(getattr(doc, "thumb_rel_path", "") or "").strip()
-            if thumb_rel and file_root_local:
-                thumb_abs = os.path.join(file_root_local, thumb_rel.replace("/", os.sep))
-                counts["deleted_thumb_files"] += _remove_existing([thumb_abs], [file_root_local])
-
-    try:
-        from app.models.extra_file import PartExtraFile
-        from app.services.extra_files import extra_abs_path, extra_root
-
-        base_root = ""
-        try:
-            base_root = extra_root()
-        except Exception:
-            base_root = ""
-        for ef in PartExtraFile.objects(part_number__iexact=pn, revision__iexact=rev):
-            rel_path = str(getattr(ef, "rel_path", "") or "").strip()
-            if rel_path and base_root:
-                try:
-                    abs_extra = extra_abs_path(rel_path)
-                except Exception:
-                    abs_extra = ""
-                if abs_extra:
-                    counts["deleted_extra_files"] += _remove_existing([abs_extra], [base_root])
-            ef.delete()
-            counts["deleted_extra_records"] += 1
-    except Exception:
-        pass
+    for extra in PartExtraFile.objects(
+        part_number__iexact=pn,
+        revision__iexact=rev,
+    ):
+        path_existed = resolve_associated_path(extra, must_exist=False).exists()
+        purge_associated_file(extra)
+        counts["deleted_extra_files"] += int(path_existed)
+        counts["deleted_extra_records"] += 1
 
     return counts
+
+
+def validate_physical_delete_plan(pairs: List[Tuple[str, str]]) -> None:
+    """Resolve every requested physical effect before any deletion starts."""
+
+    from app.models.extra_file import PartExtraFile
+    from app.services.file_security import (
+        resolve_associated_path,
+        resolve_managed_path,
+    )
+
+    for pn, rev in pairs:
+        for doc in PartFile.objects(
+            part_number__iexact=pn,
+            revision__iexact=rev,
+        ):
+            resolve_managed_path(doc, must_exist=False)
+            if str(getattr(doc, "thumb_rel_path", "") or "").strip():
+                resolve_managed_path(doc, kind="thumb", must_exist=False)
+        for extra in PartExtraFile.objects(
+            part_number__iexact=pn,
+            revision__iexact=rev,
+        ):
+            resolve_associated_path(extra, must_exist=False)
 
 
 def delete_part_and_refs(pn: str, rev: str | None, *, delete_files: bool = False) -> Dict[str, int]:
@@ -170,10 +157,7 @@ def delete_part_and_refs(pn: str, rev: str | None, *, delete_files: bool = False
         "deleted_extra_records": 0,
     }
     if delete_files:
-        try:
-            physical = _delete_physical_files_for(pn_clean, rev_clean)
-        except Exception:
-            pass
+        physical = _delete_physical_files_for(pn_clean, rev_clean)
 
     deleted_drawing_markups = 0
     try:
@@ -303,6 +287,30 @@ def _safe_deletable_subtree(root_key: tuple[str, str], key_to_pair: dict[tuple[s
                 deletable.discard(key)
                 changed = True
     return deletable
+
+
+def plan_part_delete_pairs(
+    pn: str,
+    rev: str | None,
+    *,
+    delete_children: bool = False,
+) -> list[tuple[str, str]]:
+    """Return the complete exact part deletion plan without mutating anything."""
+
+    pn_clean = (pn or "").strip()
+    rev_clean = clean_rev(rev)
+    if not pn_clean:
+        return []
+    if not delete_children:
+        return [(pn_clean, rev_clean)]
+    root_key, key_to_pair = _collect_bom_descendants(pn_clean, rev_clean)
+    deletable_keys = _safe_deletable_subtree(root_key, key_to_pair)
+    child_pairs = [
+        key_to_pair[key]
+        for key in sorted(deletable_keys)
+        if key != root_key and key in key_to_pair
+    ]
+    return [*child_pairs, (pn_clean, rev_clean)]
 
 
 def delete_part_and_refs_cascade(
