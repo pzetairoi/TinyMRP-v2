@@ -597,6 +597,15 @@ def create_app(config_object=None):
         ensure_presets()
     except Exception:
         pass
+
+    # Ensure Parts-list custom/materialized-field indexes exist once at boot
+    # instead of on every /api/parts_lazy request (was adding create_index
+    # round-trips to the first search after every process start/restart).
+    try:
+        from app.services.field_config import ensure_active_part_field_indexes
+        ensure_active_part_field_indexes()
+    except Exception:
+        pass
     
     # Load manifest ONCE at startup
     _load_vite_manifest(app)
