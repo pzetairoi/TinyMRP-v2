@@ -34,6 +34,10 @@ _NUMBER_RANGE_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*(?:\.\.|to|-)\s*(-?\d+(?
 _NUMBER_COMPARE_RE = re.compile(r"^\s*(<=|>=|=|<|>)?\s*(-?\d+(?:\.\d+)?)\s*$")
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 _FIELD_CANDIDATE_EXCLUDED_IDS = {"process", "process2", "process3", "processes", "comments_search"}
+# Date fields backed directly by a native Part timestamp (not attrs-derived) already store a
+# real, consistently-typed BSON date on every document, so they don't need the
+# field_values materialization pass that normalizes messy attrs-sourced date strings.
+_NATIVE_DATE_FIELD_IDS = {"created_at"}
 _ARENA_BOM_FIXED_FIELD_IDS = {"thumbnail", "part_number", "description", "qty", "level"}
 _FINAL_APPROVAL_CONTEXTS = {"parts_list", "part_detail_summary", "bom_tree", "where_used"}
 _DEFAULT_ARENA_HEADERS = {
@@ -94,6 +98,17 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "source_path": "part.description",
         "fallback_paths": ["part.description", "attrs.description"],
         "source_locked": False,
+        "sortable": True,
+        "filterable": True,
+    },
+    {
+        "id": "created_at",
+        "label": "Added",
+        "kind": "builtin",
+        "data_type": "date",
+        "source_path": "part.created_at",
+        "fallback_paths": ["part.created_at"],
+        "source_locked": True,
         "sortable": True,
         "filterable": True,
     },
@@ -465,12 +480,14 @@ DEFAULT_CONTEXTS: Dict[str, Dict[str, Any]] = {
             "link",
             "oem",
             "oem_partnumber",
+            "created_at",
             *[field_id for field_id, _label, _group in FILE_AVAILABILITY_FIELDS],
         ],
         "default_field_ids": [
             "thumbnail",
             "part_number",
             "revision",
+            "created_at",
             "description",
             "material",
             "finish",
@@ -1516,6 +1533,8 @@ def field_uses_materialized_value(field_id: str, config: Optional[Dict[str, Any]
     config = config or get_field_config()
     field = field_index(config).get(field_id)
     if not field:
+        return False
+    if field_id in _NATIVE_DATE_FIELD_IDS:
         return False
     if str(field.get("kind") or "") == "custom":
         return True
