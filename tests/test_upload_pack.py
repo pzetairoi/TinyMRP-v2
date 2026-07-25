@@ -7,6 +7,7 @@ from app.models.auth import Role
 from app.models.part import Part
 from app.models.extra_file import PartExtraFile
 from app.models.artifact import PartFile
+from app.services.standard_roles import STANDARD_ROLES
 
 
 def _login(client, user):
@@ -458,6 +459,49 @@ def test_upload_pack_low_risk_user_cannot_override_released_part(
     assert not (tmp_path / "pdf" / f"{part.part_number}_REV_A.pdf").exists()
 
 
+def test_upload_pack_override_authority_can_intentionally_update_released_part(
+    client,
+    app,
+    user,
+    tmp_path,
+):
+    role = Role(
+        name="import_approver",
+        permissions=list(STANDARD_ROLES["import_approver"].permissions),
+    ).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    part = Part(
+        part_number="APPROVED-OVERRIDE",
+        revision="A",
+        description="Released",
+        attrs={"approvedby": "QA"},
+    ).save()
+    assert client.get("/ui/upload-pack").status_code == 200
+    zip_bytes = _make_bom_zip(
+        part.part_number,
+        part.revision,
+        {},
+        flat_overrides={"description": "Authorized replacement"},
+    )
+
+    response = client.post(
+        "/api/upload/pack",
+        data={
+            "file": (io.BytesIO(zip_bytes), "approved-override.zip"),
+            "override_mode": "always",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    part.reload()
+    assert part.description == "Authorized replacement"
+
+
 def test_upload_pack_preserve_mode_does_not_replace_existing_files(
     client,
     app,
@@ -473,6 +517,7 @@ def test_upload_pack_preserve_mode_does_not_replace_existing_files(
     _login(client, user)
     app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
     app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    app.config["EXTRA_FILES_ALLOWED"] = True
     pn = "PRESERVE-FILE"
     Part(part_number=pn, revision="A", description="Existing").save()
     pdf_path = tmp_path / "pdf" / f"{pn}_REV_A.pdf"
@@ -486,10 +531,25 @@ def test_upload_pack_preserve_mode_does_not_replace_existing_files(
         rel_path=f"pdf/{pn}_REV_A.pdf",
         path=str(pdf_path),
     ).save()
+    associated_path = tmp_path / "extra" / pn / "A" / "inspection.txt"
+    associated_path.parent.mkdir(parents=True)
+    associated_path.write_bytes(b"original associated")
+    PartExtraFile(
+        part_number=pn,
+        revision="A",
+        original_name="inspection.txt",
+        rel_path=f"extra/{pn}/A/inspection.txt",
+        size=float(associated_path.stat().st_size),
+        mime="text/plain",
+        sha256="original-hash",
+    ).save()
     zip_bytes = _make_bom_zip(
         pn,
         "A",
-        {f"deliverables/pdf/{pn}_REV_A.pdf": b"replacement"},
+        {
+            f"deliverables/pdf/{pn}_REV_A.pdf": b"replacement",
+            f"extra/{pn}/A/inspection.txt": b"replacement associated",
+        },
         flat_overrides={"description": "Incoming"},
     )
 
@@ -504,7 +564,9 @@ def test_upload_pack_preserve_mode_does_not_replace_existing_files(
 
     assert response.status_code == 200
     assert pdf_path.read_bytes() == b"original"
+    assert associated_path.read_bytes() == b"original associated"
     assert PartFile.objects(part_number=pn, revision="A").count() == 1
+    assert PartExtraFile.objects(part_number=pn, revision="A").count() == 1
     part = Part.objects(part_number=pn, revision="A").first()
     assert part.description == "Existing"
 

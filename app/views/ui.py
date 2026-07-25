@@ -3,7 +3,7 @@ import json, os
 from flask import Blueprint, render_template, abort, current_app, request
 from flask_login import login_required
 from flask_security import current_user
-from app.services.acl import user_has_permission
+from app.services.authorization import has_any_permission
 
 bp = Blueprint("ui", __name__, url_prefix="/ui")
 
@@ -79,7 +79,14 @@ def addin_tokens_ui():
 @bp.get("/admin/addin")
 @login_required
 def admin_addin_ui():
-    if not getattr(current_user, "has_role", None) or not current_user.has_role("admin"):
+    if not has_any_permission(
+        current_user,
+        (
+            "security.users.read",
+            "security.tokens.revoke",
+            "numbering.manage",
+        ),
+    ):
         abort(403)
     assets = vite_assets()
     if not assets["js"]:
@@ -90,7 +97,10 @@ def admin_addin_ui():
 @bp.get("/admin/fields")
 @login_required
 def admin_fields_ui():
-    if not getattr(current_user, "has_role", None) or not current_user.has_role("admin"):
+    if not has_any_permission(
+        current_user,
+        ("system.config.read", "system.config.manage", "system.rebuild"),
+    ):
         abort(403)
     assets = vite_assets()
     if not assets["js"]:
@@ -100,9 +110,15 @@ def admin_fields_ui():
 @bp.get("/upload-pack")
 @login_required
 def upload_pack_ui():
-    if not (getattr(current_user, "has_role", None) and current_user.has_role("admin")):
-        if not user_has_permission(current_user, "import.bom"):
-            abort(403)
+    if not has_any_permission(
+        current_user,
+        (
+            "imports.preview",
+            "imports.execute_low_risk",
+            "imports.execute_approved",
+        ),
+    ):
+        abort(403)
     assets = vite_assets()
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")

@@ -435,6 +435,109 @@ def test_denial_audit_is_structured_and_deduplicated(app):
     assert "password" not in logs[0].extra
 
 
+def test_security_administrator_can_use_existing_admin_routes_without_self_escalation(
+    client,
+    app,
+):
+    with app.app_context():
+        security_role = _role(
+            "security_administrator",
+            [
+                "security.users.read",
+                "security.users.manage",
+                "security.roles.read",
+                "security.roles.manage",
+                "security.assignments.manage",
+                "security.tokens.revoke",
+                "audit.read",
+            ],
+        )
+        break_glass = _role("break_glass_administrator")
+        planner = _role("planner", ["jobs.read"])
+        legacy_admin = _role("admin")
+        actor = _user("security-admin@example.com", [security_role])
+        target = _user("role-target@example.com")
+    _login(client, actor)
+
+    assert client.get("/admin/users").status_code == 200
+    assert client.get("/admin/roles/").status_code == 200
+    assert client.get("/admin/audit/").status_code == 200
+    assert client.get("/ui/admin/addin").status_code == 200
+    assert client.get("/api/admin/users").status_code == 200
+
+    self_assignment = client.post(
+        f"/admin/users/{actor.id}/edit",
+        data={"roles": [str(security_role.id), str(break_glass.id)]},
+    )
+    assert self_assignment.status_code == 403
+    actor.reload()
+    assert [role.name for role in actor.roles] == ["security_administrator"]
+
+    own_role_escalation = client.post(
+        f"/admin/roles/{security_role.id}/edit",
+        data={
+            "name": security_role.name,
+            "description": security_role.description or "",
+            "permissions": list(security_role.permissions) + ["parts.purge"],
+        },
+    )
+    assert own_role_escalation.status_code == 403
+    security_role.reload()
+    assert "parts.purge" not in security_role.permissions
+
+    assert client.post(
+        f"/admin/users/{target.id}/edit",
+        data={"roles": [str(legacy_admin.id)]},
+    ).status_code == 403
+    target.reload()
+    assert target.roles == []
+
+    assigned = client.post(
+        f"/admin/users/{target.id}/edit",
+        data={"roles": [str(planner.id)]},
+    )
+    assert assigned.status_code == 302
+    target.reload()
+    assert [role.name for role in target.roles] == ["planner"]
+
+
+def test_system_administrator_uses_existing_system_routes_only(client, app):
+    with app.app_context():
+        role = _role(
+            "system_administrator",
+            [
+                "system.config.read",
+                "system.config.manage",
+                "system.storage.manage",
+                "system.rebuild",
+                "system.maintenance",
+                "audit.read",
+            ],
+        )
+        actor = _user("system-admin@example.com", [role])
+    _login(client, actor)
+
+    assert client.get("/admin/settings").status_code == 200
+    assert client.get("/admin/metrics").status_code == 200
+    assert client.get("/ui/admin/fields").status_code == 200
+    assert client.get("/api/admin/field-config/candidates").status_code == 200
+    assert client.post(
+        "/api/admin/field-config/rebuild-search-fields",
+    ).status_code == 200
+    assert client.get("/admin/users").status_code == 403
+    assert client.get("/api/jobs").status_code == 403
+
+
+def test_auditor_reads_audit_without_gaining_audit_mutation(client, app):
+    with app.app_context():
+        role = _role("auditor", ["audit.read"])
+        actor = _user("auditor-admin-page@example.com", [role])
+    _login(client, actor)
+
+    assert client.get("/admin/audit/").status_code == 200
+    assert client.post("/admin/audit/test").status_code == 403
+
+
 def test_permissions_required_preserves_http_and_all_required_semantics(client, app):
     @app.get("/_stage2/all")
     @permissions_required("parts.read", "bom.read")

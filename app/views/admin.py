@@ -2,10 +2,14 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask import abort
 from mongoengine.errors import DoesNotExist, ValidationError
-from flask_security import roles_required, current_user
+from flask_security import auth_required, current_user
 from flask_security.utils import hash_password
 from app.services.audit import log_action
-from app.services.authorization import require_permission
+from app.services.authorization import (
+    has_any_permission,
+    has_permission,
+    require_permission,
+)
 from ..models.auth import User, Role
 from ..models.job import Job
 from ..models.supplier import Supplier
@@ -143,12 +147,17 @@ def _process_rows_from_meta(process_meta: dict) -> list[dict]:
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
 @bp.get("/")
-@roles_required("admin")
+@auth_required()
 def admin_index():
+    if not has_any_permission(
+        current_user,
+        ("security.users.read", "system.config.read", "audit.read"),
+    ):
+        abort(403)
     return render_template("admin/index.html")
 
 @bp.get("/metrics")
-@roles_required("admin")
+@require_permission("system.maintenance")
 def admin_metrics():
     try:
         from app.services.metrics import get_metrics_store
@@ -160,8 +169,13 @@ def admin_metrics():
 
 
 @bp.route("/settings", methods=["GET", "POST"])
-@roles_required("admin")
+@require_permission("system.config.read")
 def admin_settings():
+    if request.method == "POST" and not has_permission(
+        current_user,
+        "system.config.manage",
+    ):
+        abort(403)
     settings = get_app_settings(create=True)
     valid_timezones = set(timezone_choices())
     if request.method == "POST":
@@ -368,7 +382,7 @@ def admin_settings():
     )
 
 @bp.route("/users")
-@roles_required("admin")
+@require_permission("security.users.read")
 def users_list():
     users = User.objects().order_by("-id").limit(200)
     return render_template("admin/users_list.html", users=users)
@@ -398,7 +412,7 @@ def _cleanup_user_references(u: User):
 
 
 @bp.post("/users/bulk-delete")
-@roles_required("admin")
+@require_permission("security.users.manage")
 def users_bulk_delete():
     ids = request.form.getlist("user_ids")
     if not ids:
@@ -440,7 +454,8 @@ def users_bulk_delete():
     return redirect(url_for("admin.users_list"))
 
 @bp.route("/users/new", methods=["GET", "POST"])
-@roles_required("admin")
+@require_permission("security.users.manage")
+@require_permission("security.assignments.manage")
 def users_create():
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
@@ -465,7 +480,13 @@ def users_create():
         # initial roles from form
         role_ids = request.form.getlist("roles")
         if role_ids:
-            u.roles = list(Role.objects(id__in=role_ids))
+            selected_roles = list(Role.objects(id__in=role_ids))
+            if (
+                any(role.name == "admin" for role in selected_roles)
+                and not current_user.has_role("admin")
+            ):
+                abort(403)
+            u.roles = selected_roles
         u.save()
         try:
             log_action("admin.user.create", resource_type="user", resource=email)
@@ -477,7 +498,8 @@ def users_create():
     return render_template("admin/users_form.html", roles=roles)
 
 @bp.route("/users/<user_id>/edit", methods=["GET", "POST"])
-@roles_required("admin")
+@require_permission("security.users.manage")
+@require_permission("security.assignments.manage")
 def users_edit(user_id):
     # robust fetch: 404 if id is invalid or user doesn't exist
     try:
@@ -487,12 +509,23 @@ def users_edit(user_id):
 
     if request.method == "POST":
         role_ids = request.form.getlist("roles")
-        # optional: filter out invalid ids so we don't error on bad input
         try:
-            u.roles = list(Role.objects(id__in=role_ids))
+            selected_roles = list(Role.objects(id__in=role_ids))
         except ValidationError:
-            # if any id is malformed, ignore them (or flash an error if you prefer)
-            u.roles = list(Role.objects(id__in=[rid for rid in role_ids if len(rid) == 24]))
+            selected_roles = list(
+                Role.objects(id__in=[rid for rid in role_ids if len(rid) == 24])
+            )
+        if (
+            any(role.name == "admin" for role in selected_roles)
+            and not current_user.has_role("admin")
+        ):
+            abort(403)
+        if str(u.id) == str(current_user.id):
+            current_role_ids = {str(role.id) for role in (u.roles or [])}
+            requested_role_ids = {str(role.id) for role in selected_roles}
+            if requested_role_ids - current_role_ids:
+                abort(403)
+        u.roles = selected_roles
 
         # Optional password reset
         new_pw = (request.form.get("new_password") or "").strip()

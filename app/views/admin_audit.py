@@ -1,11 +1,11 @@
 from datetime import datetime
 from flask import Blueprint, request, render_template, redirect, url_for, flash, current_app
-from flask_security import roles_required
 from mongoengine.queryset.visitor import Q
 
 from app.models.audit import AuditLog
 from app.models.auth import User
 from app.services.audit import log_action
+from app.services.authorization import require_permission
 from app.services.timezone_utils import local_input_value, parse_user_datetime, resolve_timezone_name
 from mongoengine import get_connection
 
@@ -92,7 +92,7 @@ def _parse_dt(value: str | None, end: bool = False) -> datetime | None:
 
 
 @bp.get("/")
-@roles_required("admin")
+@require_permission("audit.read")
 def audit_list():
     qtext = (request.args.get("q") or "").strip().lower()
     limit = int(request.args.get("limit") or 200)
@@ -197,7 +197,7 @@ def audit_list():
 
 
 @bp.post("/test")
-@roles_required("admin")
+@require_permission("system.maintenance")
 def audit_test():
     try:
         log_action("admin.audit.test", resource_type="system", resource="manual-test")

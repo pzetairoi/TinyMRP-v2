@@ -8,28 +8,12 @@ from app.models.api_token import ApiToken
 from app.models.user_settings import UserSettings
 from app.services.api_auth import api_auth_required, get_request_user
 from app.services.api_tokens import create_token
+from app.services.authorization import has_permission
 from app.services.user_settings import get_or_create_settings, settings_to_dict, apply_settings_payload
-from app.services.acl import user_has_permission
 from app.services.timezone_utils import resolve_timezone_name, utc_now
 from app.views.api_helpers import add_datetime_fields, app_timezone_payload
 
 bp = Blueprint("me_api", __name__, url_prefix="/api")
-
-
-def _role_names(user) -> set[str]:
-    names = set()
-    for r in (getattr(user, "roles", []) or []):
-        if getattr(r, "name", None):
-            names.add(str(r.name))
-    return names
-
-
-def _is_admin(user) -> bool:
-    if not user:
-        return False
-    if "admin" in _role_names(user):
-        return True
-    return user_has_permission(user, "admin")
 
 
 def _token_dict(token: ApiToken) -> dict:
@@ -102,7 +86,7 @@ def save_settings():
 @api_auth_required
 def list_users():
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "security.users.read"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     users = User.objects().order_by("email")
     return jsonify({
@@ -115,7 +99,7 @@ def list_users():
 @api_auth_required
 def admin_list_tokens(user_id: str):
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "security.tokens.revoke"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     target = User.objects(id=user_id).first()
     if not target:
@@ -128,7 +112,7 @@ def admin_list_tokens(user_id: str):
 @api_auth_required
 def admin_revoke_token(user_id: str, token_id: str):
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "security.tokens.revoke"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     token = ApiToken.objects(id=token_id, user_id=user_id).first()
     if not token:
@@ -141,7 +125,7 @@ def admin_revoke_token(user_id: str, token_id: str):
 @api_auth_required
 def admin_get_settings(user_id: str):
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "security.users.manage"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     target = User.objects(id=user_id).first()
     if not target:
@@ -154,7 +138,7 @@ def admin_get_settings(user_id: str):
 @api_auth_required
 def admin_save_settings(user_id: str):
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "security.users.manage"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     target = User.objects(id=user_id).first()
     if not target:

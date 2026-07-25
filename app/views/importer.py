@@ -34,10 +34,16 @@ def upload_post():
         or request.args.get("override_mode")
         or "unless_existing_approved"
     )
-    if not has_permission(current_user, "imports.execute_low_risk"):
+    high_risk = override_mode in {"always", "approved_only"}
+    execute_permission = (
+        "imports.execute_approved"
+        if high_risk
+        else "imports.execute_low_risk"
+    )
+    if not has_permission(current_user, execute_permission):
         abort(403)
     can_override = has_permission(current_user, "imports.override_approved")
-    if override_mode in {"always", "approved_only"} and not can_override:
+    if high_risk and not can_override:
         abort(403)
     file_bytes = f.read()
     try:
@@ -96,10 +102,16 @@ def upload_api():
         or request.args.get("override_mode")
         or "unless_existing_approved"
     )
-    if not has_permission(current_user, "imports.execute_low_risk"):
+    high_risk = override_mode in {"always", "approved_only"}
+    execute_permission = (
+        "imports.execute_approved"
+        if high_risk
+        else "imports.execute_low_risk"
+    )
+    if not has_permission(current_user, execute_permission):
         return jsonify({"error": "forbidden"}), 403
     can_override = has_permission(current_user, "imports.override_approved")
-    if override_mode in {"always", "approved_only"} and not can_override:
+    if high_risk and not can_override:
         return jsonify({"error": "forbidden"}), 403
     file_bytes = f.read()
     try:

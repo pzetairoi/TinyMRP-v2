@@ -2,7 +2,8 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask import abort
 from mongoengine.errors import DoesNotExist, ValidationError
-from flask_security import roles_required
+from flask_security import current_user
+from app.services.authorization import require_permission
 from ..models.auth import Role
 
 bp = Blueprint("admin_roles", __name__, url_prefix="/admin/roles")
@@ -33,18 +34,20 @@ PERMISSIONS = [
 ]
 
 @bp.route("/")
-@roles_required("admin")
+@require_permission("security.roles.read")
 def roles_list():
     roles = Role.objects().order_by("name")
     return render_template("admin/roles_list.html", roles=roles)
 
 @bp.route("/new", methods=["GET", "POST"])
-@roles_required("admin")
+@require_permission("security.roles.manage")
 def roles_create():
     if request.method == "POST":
         name = (request.form.get("name") or "").strip()
         desc = (request.form.get("description") or "").strip()
         perms = request.form.getlist("permissions")
+        if name == "admin" and not current_user.has_role("admin"):
+            abort(403)
         if not name:
             flash("Role name is required.", "error")
             return redirect(url_for("admin_roles.roles_create"))
@@ -57,7 +60,7 @@ def roles_create():
     return render_template("admin/roles_form.html", permissions=PERMISSIONS, role=None)
 
 @bp.route("/<role_id>/edit", methods=["GET", "POST"])
-@roles_required("admin")
+@require_permission("security.roles.manage")
 def roles_edit(role_id):
     try:
         r = Role.objects.get(id=role_id)
@@ -65,9 +68,21 @@ def roles_edit(role_id):
         abort(404)
 
     if request.method == "POST":
-        r.name = (request.form.get("name") or "").strip()
+        name = (request.form.get("name") or "").strip()
+        permissions = request.form.getlist("permissions")
+        assigned_to_actor = any(
+            str(role.id) == str(r.id)
+            for role in (getattr(current_user, "roles", None) or [])
+        )
+        if assigned_to_actor and (
+            name != r.name or set(permissions) - set(r.permissions or [])
+        ):
+            abort(403)
+        if name == "admin" and r.name != "admin" and not current_user.has_role("admin"):
+            abort(403)
+        r.name = name
         r.description = (request.form.get("description") or "").strip()
-        r.permissions = request.form.getlist("permissions")
+        r.permissions = permissions
         r.save()
         flash("Role updated.", "success")
         return redirect(url_for("admin_roles.roles_list"))
