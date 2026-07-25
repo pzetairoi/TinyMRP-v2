@@ -31,9 +31,9 @@ cffi==1.17.1
 pycparser==2.22
 
 # --- Database ---
-mongoengine==0.29.1
-pymongo==4.14.0
-dnspython==2.7.0
+mongoengine==0.29.3
+pymongo==4.17.0
+dnspython==2.8.0
 
 # --- Documents / images (docpacks, thumbnails, labels) ---
 pillow==11.3.0
