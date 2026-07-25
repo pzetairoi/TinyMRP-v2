@@ -7,7 +7,7 @@ cache of users, roles, or permissions.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any
@@ -38,14 +38,6 @@ class AuthorizationDecision:
     resource_id: str = ""
     used_legacy_expansion: bool = False
     used_legacy_admin_bypass: bool = False
-    conflict_code: str = ""
-
-
-@dataclass(frozen=True)
-class ConflictDecision:
-    allowed: bool
-    reason_code: str = ""
-    conflict_code: str = ""
 
 
 @dataclass(frozen=True)
@@ -85,21 +77,6 @@ _RESOURCE_ALIASES = {
     "customer": "customers",
     "supplier": "suppliers",
 }
-
-TRANSACTION_CONFLICT_ACTIONS = frozenset(
-    {
-        "import_self_approval",
-        "order_self_approval",
-        "design_self_approval",
-        "security_self_escalation",
-        "last_security_admin_removal",
-        "last_system_admin_removal",
-    }
-)
-_TRANSACTION_CONFLICT_RULES: dict[
-    str, Callable[[Any, Any, Mapping[str, Any]], str | bool | None] | None
-] = {action: None for action in TRANSACTION_CONFLICT_ACTIONS}
-
 
 def _is_authenticated(user: Any) -> bool:
     try:
@@ -241,22 +218,6 @@ def has_permission(
         return False
 
 
-def has_all_permissions(
-    user: Any,
-    permissions: Iterable[str],
-    *,
-    include_legacy: bool = True,
-) -> bool:
-    try:
-        values = tuple(permissions)
-        return all(
-            has_permission(user, permission, include_legacy=include_legacy)
-            for permission in values
-        )
-    except Exception:
-        return False
-
-
 def has_any_permission(
     user: Any,
     permissions: Iterable[str],
@@ -302,7 +263,6 @@ def _denied(
     resource_id: str = "",
     used_legacy_expansion: bool = False,
     used_legacy_admin_bypass: bool = False,
-    conflict_code: str = "",
 ) -> AuthorizationDecision:
     decision = AuthorizationDecision(
         allowed=False,
@@ -312,7 +272,6 @@ def _denied(
         resource_id=resource_id,
         used_legacy_expansion=used_legacy_expansion,
         used_legacy_admin_bypass=used_legacy_admin_bypass,
-        conflict_code=conflict_code,
     )
     try:
         log_authorization_denial(user, decision)
@@ -360,26 +319,6 @@ def authorise(
                 resource_type=resource_type,
                 resource_id=resource_id,
             )
-
-        conflict_action = str((context or {}).get("conflict_action") or "")
-        if conflict_action:
-            conflict = check_transaction_conflict(
-                user,
-                conflict_action,
-                resource=resource,
-                context=context,
-            )
-            if not conflict.allowed:
-                return _denied(
-                    user,
-                    reason_code="transaction_conflict",
-                    permission=permission,
-                    resource_type=resource_type,
-                    resource_id=resource_id,
-                    used_legacy_expansion=used_legacy,
-                    used_legacy_admin_bypass=used_admin,
-                    conflict_code=conflict.conflict_code,
-                )
 
         return AuthorizationDecision(
             allowed=True,
@@ -441,7 +380,6 @@ def log_authorization_denial(user: Any, decision: AuthorizationDecision) -> None
                 "method": method,
                 "used_legacy_expansion": decision.used_legacy_expansion,
                 "used_legacy_admin_bypass": decision.used_legacy_admin_bypass,
-                "conflict_code": decision.conflict_code,
             },
         )
     except Exception:
@@ -942,110 +880,18 @@ def authorise_part_access(
     )
 
 
-def _is_external_field_context(user: Any) -> tuple[bool, bool]:
-    if _uses_legacy_admin_bypass(user):
-        return True, False
-    try:
-        scope = _scope_context(user)
-        if not scope.valid:
-            return False, True
-        external = not any(
-            "global" in _scope_modes(scope, resource_type, permission)
-            for resource_type, permission in _RESOURCE_PERMISSIONS.items()
-        )
-        return True, external
-    except Exception:
-        return False, True
-
-
-def filter_response_fields(
-    resource_type: str,
-    user: Any,
-    payload: Mapping[str, Any],
-    *,
-    context: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Apply the central explicit Stage 3C1 response-property policy."""
-
-    from app.services.field_policies import filter_response_fields as apply_policy
-
-    policy_context = context
-    if context and bool(context.get("force_external")):
-        policy_context = dict(context)
-        policy_context.setdefault("policy_context", "customer_portal")
-    return apply_policy(
-        resource_type,
-        user,
-        payload,
-        context=policy_context,
-    )
-
-
-def check_transaction_conflict(
-    user: Any,
-    action: str,
-    resource: Any = None,
-    context: Mapping[str, Any] | None = None,
-) -> ConflictDecision:
-    """Run a registered transaction rule; unknown/error cases deny."""
-
-    if action not in TRANSACTION_CONFLICT_ACTIONS:
-        return ConflictDecision(
-            allowed=False,
-            reason_code="transaction_conflict",
-            conflict_code="unknown_transaction_action",
-        )
-    rule = _TRANSACTION_CONFLICT_RULES.get(action)
-    if rule is None:
-        return ConflictDecision(allowed=True, reason_code="no_conflict")
-    try:
-        result = rule(user, resource, context or {})
-        if not result:
-            return ConflictDecision(allowed=True, reason_code="no_conflict")
-        code = result if isinstance(result, str) else action
-        return ConflictDecision(
-            allowed=False,
-            reason_code="transaction_conflict",
-            conflict_code=str(code),
-        )
-    except Exception:
-        return ConflictDecision(
-            allowed=False,
-            reason_code="transaction_conflict",
-            conflict_code="conflict_check_error",
-        )
-
-
-def require_permission(
-    permission: str,
-    *,
-    resource_loader: Callable[..., Any] | None = None,
-    scope_resolver: Callable[[Any, Any], bool] | None = None,
-):
-    """Decorator for future route migration without changing route contracts."""
+def require_permission(permission: str):
+    """Require one canonical permission for a route."""
 
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if not _is_authenticated(current_user):
                 abort(401)
-            resource = None
             try:
-                if resource_loader is not None:
-                    resource = resource_loader(*args, **kwargs)
-                decision = authorise(current_user, permission, resource=resource)
+                decision = authorise(current_user, permission)
                 if not decision.allowed:
                     abort(403)
-                if scope_resolver is not None and not scope_resolver(current_user, resource):
-                    denied = _denied(
-                        current_user,
-                        reason_code="resource_out_of_scope",
-                        permission=permission,
-                        resource_type=decision.resource_type,
-                        resource_id=decision.resource_id,
-                    )
-                    if not denied.allowed:
-                        abort(404)
             except AuthorizationScopeError:
                 abort(404)
             except Exception as exc:

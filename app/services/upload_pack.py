@@ -15,7 +15,7 @@ from flask import current_app
 
 from app.models.extra_file import PartExtraFile
 from app.models.part import Part
-from app.services.import_zip import import_bom_zip
+from app.services.import_zip import import_bom_zip, normalize_override_mode
 from app.services.filescan import upsert_part_files_detailed
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.part_norm import clean_pn, clean_rev
@@ -144,6 +144,21 @@ def _existing_part_pairs(pairs: set[Tuple[str, str]]) -> set[Tuple[str, str]]:
         if Part.objects(part_number=pn_clean, revision=rev_clean).only("id").first() is not None:
             existing.add((pn_clean, rev_clean))
     return existing
+
+
+def released_upload_targets(preflight: Dict[str, Any]) -> list[str]:
+    """Return existing approved/released part identities in a dry-run report."""
+
+    from app.services.authorization import part_is_released
+
+    released = []
+    for item in preflight.get("items") or []:
+        pn = _base_pn(item.get("pn") or "")
+        rev = clean_rev(item.get("rev") or "")
+        part = Part.objects(part_number__iexact=pn, revision__iexact=rev).first()
+        if part is not None and part_is_released(part):
+            released.append(f"{pn}:{rev}")
+    return released
 
 
 def _ensure_modified_part_entry(report: Dict[str, Any], pn: str, rev: str) -> Dict[str, Any]:
@@ -297,6 +312,7 @@ def import_upload_pack(
     seed_tag: str = "upload-pack",
     override_mode: str = _PART_OVERRIDE_MODE_DEFAULT,
 ) -> Dict[str, Any]:
+    override_mode = normalize_override_mode(override_mode)
     timings: Dict[str, Any] = {}
     resources_start = _snapshot_resources()
     total_start = _stage_start()
@@ -408,15 +424,23 @@ def import_upload_pack(
                         raise ValueError(msg)
                     warnings.append(msg)
                     continue
-                if not dry_run:
+                parsed = _try_parse_pn_rev_from_deliverable_filename(filename_only)
+                if parsed:
+                    pn_parsed, rev_parsed, is_dwg = parsed
+                    deliverable_pairs.add((pn_parsed, rev_parsed))
+                preserve_existing = bool(
+                    override_mode == "preserve"
+                    and (
+                        parsed is None
+                        or _existing_part_pairs({(pn_parsed, rev_parsed)})
+                    )
+                )
+                if not dry_run and not preserve_existing:
                     _write_zip_entry(zf, info, dest_abs)
                     try:
-                        parsed = _try_parse_pn_rev_from_deliverable_filename(filename_only)
                         if parsed:
-                            pn_parsed, rev_parsed, is_dwg = parsed
                             ext = os.path.splitext(filename_only)[1].lstrip(".").lower()
                             if ext:
-                                deliverable_pairs.add((pn_parsed, rev_parsed))
                                 deliverable_artifact_recs.append(
                                     {
                                         "part_number": pn_parsed,
@@ -433,7 +457,8 @@ def import_upload_pack(
                             needs_datasheet_storage_scan = True
                     except Exception:
                         pass
-                deliverables_written += 1
+                if not preserve_existing:
+                    deliverables_written += 1
                 continue
 
             if head == "extra":
@@ -479,6 +504,7 @@ def import_upload_pack(
                     rev = clean_rev(mapped or "")
                 if rev_token == REV_EMPTY_TOKEN:
                     rev = ""
+                extra_pairs.add((pn, rev))
 
                 file_name = rel_parts[-1]
                 subpath = "/".join(rel_parts[:-1])
@@ -497,7 +523,11 @@ def import_upload_pack(
                 if meta:
                     label = (meta.get("label") or "").strip()
 
-                if not dry_run:
+                preserve_existing = bool(
+                    override_mode == "preserve"
+                    and _existing_part_pairs({(pn, rev)})
+                )
+                if not dry_run and not preserve_existing:
                     _write_zip_entry(zf, info, abs_path)
                     size = float(os.path.getsize(abs_path))
                     mime = guess_mime(abs_path)
@@ -544,9 +574,9 @@ def import_upload_pack(
                             "label": label,
                         }
                     )
-                extras_written += 1
-                extra_pairs.add((pn, rev))
-                extra_counts[(pn, rev)] = extra_counts.get((pn, rev), 0) + 1
+                if not preserve_existing:
+                    extras_written += 1
+                    extra_counts[(pn, rev)] = extra_counts.get((pn, rev), 0) + 1
                 continue
 
             msg = f"Unknown ZIP entry: {safe_name}"
@@ -561,7 +591,10 @@ def import_upload_pack(
         bom_start = _stage_start()
         # If the ZIP has no deliverables (or we couldn't parse any deliverable filenames into PN/REV),
         # fall back to scanning storage so BOM-only uploads still register all available files.
-        scan_storage = len(deliverable_artifact_recs) == 0 or needs_datasheet_storage_scan
+        scan_storage = (
+            override_mode != "preserve"
+            and (len(deliverable_artifact_recs) == 0 or needs_datasheet_storage_scan)
+        )
         bom_result = import_bom_zip(
             file_bytes,
             filename,
@@ -617,7 +650,7 @@ def import_upload_pack(
             bom_result["modified_parts_count"] = len(bom_result["modified_parts"])
 
     items: List[Dict[str, Any]] = []
-    pairs = set(bom_pairs) | set(extra_pairs)
+    pairs = set(bom_pairs) | set(deliverable_pairs) | set(extra_pairs)
     for pn, rev in sorted(pairs, key=lambda t: (t[0], t[1])):
         items.append(
             {

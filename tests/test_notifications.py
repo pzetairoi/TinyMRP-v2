@@ -27,7 +27,10 @@ def test_extract_mentions_uses_complete_email_tokens():
 
 
 def test_part_comment_notifies_mention_and_part_uploader(client):
-    viewer = Role(name="notification_viewer", permissions=["items.view"]).save()
+    viewer = Role(
+        name="notification_viewer",
+        permissions=["items.view", "parts.read_unreleased", "comments.write"],
+    ).save()
     actor = _user("actor@example.com", viewer)
     mentioned = _user("mentioned@example.com", viewer)
     uploader = _user("uploader@example.com", viewer)
@@ -93,7 +96,10 @@ def test_notification_api_read_state_and_mentionable_users(client):
 
 
 def test_markup_thread_mentions_and_uploader_notifications(client):
-    viewer = Role(name="notification_markup_viewer", permissions=["items.view"]).save()
+    viewer = Role(
+        name="notification_markup_viewer",
+        permissions=["items.view", "parts.read_unreleased", "markups.write"],
+    ).save()
     actor = _user("markup-actor@example.com", viewer)
     mentioned = _user("markup-mentioned@example.com", viewer)
     uploader = _user("markup-uploader@example.com", viewer)

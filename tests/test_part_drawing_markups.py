@@ -25,7 +25,16 @@ def _make_user(email: str, roles=None):
 
 
 def _viewer_user(email="markup-viewer@example.com"):
-    role = Role(name=f"viewer-{uuid.uuid4()}", permissions=["items.view"]).save()
+    role = Role(
+        name=f"viewer-{uuid.uuid4()}",
+        permissions=[
+            "items.view",
+            "parts.read_unreleased",
+            "comments.write",
+            "markups.write",
+            "markups.moderate",
+        ],
+    ).save()
     return _make_user(email, [role])
 
 
@@ -113,6 +122,21 @@ def test_unauthenticated_request_rejected(client):
     pf = _make_drawing()
     resp = _get(client, pf)
     assert resp.status_code in (301, 302, 401)
+
+
+def test_markup_read_permission_cannot_mutate(client):
+    _make_part()
+    pf = _make_drawing()
+    role = Role(
+        name="markup-read-only",
+        permissions=["parts.read", "markups.read"],
+    ).save()
+    reader = _make_user("markup-read-only@example.com", [role])
+    _login(client, reader)
+
+    assert _get(client, pf).status_code == 200
+    assert _put(client, pf, _canvas("obj-1"), expected_version=0).status_code == 403
+    assert PartDrawingMarkup.objects.count() == 0
 
 
 def test_user_without_part_access_gets_403(client, app):
