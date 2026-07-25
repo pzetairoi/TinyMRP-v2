@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
 from flask import current_app, g, has_app_context
@@ -180,10 +181,17 @@ _DEFAULT_NORMALIZED_ATTR_ALIASES: Dict[str, str] = {
 }
 
 
+@lru_cache(maxsize=4096)
+def _canonical_attr_key_normalized(text: str) -> str:
+    return _NON_ALNUM.sub("_", text).strip("_")
+
+
 def canonical_attr_key(value: Any) -> str:
+    # Hot path: called per (attrs key x alias) pair while resolving approval/
+    # canonical fields for every row. The regex substitution is memoized on
+    # the coerced string so callers can still pass any value.
     text = str(value or "").strip().lower()
-    text = _NON_ALNUM.sub("_", text)
-    return text.strip("_")
+    return _canonical_attr_key_normalized(text)
 
 
 def is_blankish_approval(value: Any) -> bool:
@@ -372,34 +380,58 @@ def set_runtime_canonical_aliases(config: Optional[Dict[str, Any]]) -> List[Dict
     aliases = canonical_alias_entries_from_field_config(config)
     if has_app_context():
         g._canonical_field_aliases = deepcopy(aliases)
-        g._approval_rules = deepcopy(approval_rules_from_field_config(config))
+        g._canonical_field_aliases_snapshot = aliases
+        approval_rules = approval_rules_from_field_config(config)
+        g._approval_rules = deepcopy(approval_rules)
+        g._approval_rules_snapshot = approval_rules
     return aliases
 
 
 def get_runtime_canonical_aliases() -> List[Dict[str, Any]]:
+    # Every caller of this function only reads the returned list (verified: no
+    # mutation anywhere in this module). Re-deepcopying on every call was
+    # previously the dominant cost of resolving fields for a page of parts
+    # (called ~3-4x per row via resolve_approval()). Deepcopy once per
+    # request/app-context and hand out that same read-only snapshot to every
+    # caller within it.
     if has_app_context():
+        snapshot = getattr(g, "_canonical_field_aliases_snapshot", None)
+        if isinstance(snapshot, list) and snapshot:
+            return snapshot
         cached = getattr(g, "_canonical_field_aliases", None)
         if isinstance(cached, list) and cached:
-            return deepcopy(cached)
+            snapshot = deepcopy(cached)
+            g._canonical_field_aliases_snapshot = snapshot
+            return snapshot
 
     settings = _settings_doc(create=False)
     stored = getattr(settings, "field_config", None) if settings else None
     aliases = canonical_alias_entries_from_field_config(stored if isinstance(stored, dict) else {})
     if has_app_context():
         g._canonical_field_aliases = deepcopy(aliases)
+        g._canonical_field_aliases_snapshot = aliases
         g._approval_rules = deepcopy(approval_rules_from_field_config(stored if isinstance(stored, dict) else {}))
     return aliases
 
 
 def get_runtime_approval_rules() -> Dict[str, List[str]]:
+    # Same read-only-caller reasoning as get_runtime_canonical_aliases() above:
+    # deepcopy once per request and reuse, instead of once per call.
     if has_app_context():
+        snapshot = getattr(g, "_approval_rules_snapshot", None)
+        if isinstance(snapshot, dict):
+            return snapshot
         cached = getattr(g, "_approval_rules", None)
         if isinstance(cached, dict):
-            return deepcopy(cached)
+            snapshot = deepcopy(cached)
+            g._approval_rules_snapshot = snapshot
+            return snapshot
         get_runtime_canonical_aliases()
         cached = getattr(g, "_approval_rules", None)
         if isinstance(cached, dict):
-            return deepcopy(cached)
+            snapshot = deepcopy(cached)
+            g._approval_rules_snapshot = snapshot
+            return snapshot
     settings = _settings_doc(create=False)
     stored = getattr(settings, "field_config", None) if settings else None
     return approval_rules_from_field_config(stored if isinstance(stored, dict) else {})
