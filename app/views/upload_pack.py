@@ -82,7 +82,13 @@ def upload_pack():
         or "unless_existing_approved"
     )
     required_permission = (
-        "imports.preview" if dry_run else "imports.execute_low_risk"
+        "imports.preview"
+        if dry_run
+        else (
+            "imports.execute_approved"
+            if override_mode in {"always", "approved_only"}
+            else "imports.execute_low_risk"
+        )
     )
     if not has_permission(current_user, required_permission):
         return jsonify({"error": "forbidden"}), 403

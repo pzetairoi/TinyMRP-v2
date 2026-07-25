@@ -328,7 +328,11 @@ def test_security_and_system_administrators_have_no_implicit_business_access(
     client,
 ):
     Job(job_number="JOB-ADMIN-DENY").save()
-    for role_name in ("security_administrator", "system_administrator"):
+    for role_name in (
+        "security_administrator",
+        "system_administrator",
+        "break_glass_administrator",
+    ):
         user = _user(
             f"{role_name}@stage3a.test",
             _standard_role(role_name),
@@ -391,6 +395,27 @@ def test_multiple_roles_union_only_permissions_that_grant_the_operation(client):
     ) == {"JOB-MULTI-LINKED", "JOB-MULTI-GLOBAL"}
 
 
+def test_engineering_quality_permissions_union_without_destructive_authority():
+    user = _user(
+        "multi.engineering-quality@stage3a.test",
+        _standard_role("engineering_data_steward"),
+        _standard_role("quality_reviewer"),
+    )
+    permissions = {
+        permission
+        for role in user.roles
+        for permission in (role.permissions or [])
+    }
+
+    assert {"parts.update", "reviews.approve"} <= permissions
+    assert {
+        "parts.purge",
+        "files.purge",
+        "orders.approve",
+        "imports.override_approved",
+    }.isdisjoint(permissions)
+
+
 def test_supplier_portal_plus_procurement_keeps_purchase_scope(client):
     portal = _user(
         "multi.supplier@stage3a.test",
@@ -409,6 +434,27 @@ def test_supplier_portal_plus_procurement_keeps_purchase_scope(client):
         client.get("/api/orders", headers=_headers(portal)),
         "order_number",
     ) == {"PO-MULTI-LINKED", "PO-MULTI-OTHER"}
+
+
+def test_customer_portal_plus_sales_keeps_sales_scope(client):
+    portal = _user(
+        "multi.customer-sales@stage3a.test",
+        _standard_role("customer_portal"),
+        _standard_role("sales_customer_service"),
+    )
+    customer = Customer(code="C-SALES-MULTI", name="Customer Multi", users=[portal]).save()
+    Order(
+        order_number="SO-MULTI-LINKED",
+        kind="sales",
+        customer=customer,
+    ).save()
+    Order(order_number="SO-MULTI-OTHER", kind="sales").save()
+    Order(order_number="PO-MULTI", kind="purchase").save()
+
+    assert _numbers(
+        client.get("/api/orders", headers=_headers(portal)),
+        "order_number",
+    ) == {"SO-MULTI-LINKED", "SO-MULTI-OTHER"}
 
 
 def test_financial_permissions_deny_reads_and_mixed_writes_without_partial_save(

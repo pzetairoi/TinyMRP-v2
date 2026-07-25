@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request
 
 from app.services.api_auth import api_auth_required, get_request_user
 from app.services.acl import user_has_permission
+from app.services.authorization import has_any_permission, has_permission
 from app.services.canonical_fields import rebuild_all_part_canonical_fields
 from app.services.field_config import (
     discover_part_attr_fields,
@@ -19,21 +20,11 @@ from app.services.user_settings import get_or_create_settings, settings_to_dict
 bp = Blueprint("field_config_api", __name__, url_prefix="/api")
 
 
-def _role_names(user) -> set[str]:
-    names = set()
-    for role in (getattr(user, "roles", []) or []):
-        name = getattr(role, "name", None)
-        if name:
-            names.add(str(name))
-    return names
-
-
-def _is_admin(user) -> bool:
-    if not user:
-        return False
-    if "admin" in _role_names(user):
-        return True
-    return user_has_permission(user, "admin")
+def _can_admin(user) -> bool:
+    return has_any_permission(
+        user,
+        ("system.config.manage", "system.rebuild"),
+    )
 
 
 @bp.get("/field-config")
@@ -71,7 +62,7 @@ def field_config_get():
             "ok": True,
             "config": config,
             "user_preferences": safe_preferences,
-            "permissions": {"can_admin": _is_admin(user)},
+            "permissions": {"can_admin": _can_admin(user)},
         }
     )
 
@@ -80,7 +71,7 @@ def field_config_get():
 @api_auth_required
 def field_config_save():
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "system.config.manage"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     payload = request.get_json(force=True, silent=True) or {}
     config = save_field_config(payload)
@@ -98,7 +89,7 @@ def field_config_save():
 @api_auth_required
 def field_config_candidates():
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "system.config.manage"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     return jsonify({"ok": True, "candidates": discover_part_attr_fields()})
 
@@ -107,7 +98,7 @@ def field_config_candidates():
 @api_auth_required
 def field_config_reset():
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "system.config.manage"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     config = reset_field_config()
     rebuild = rebuild_part_materialized_fields(config=config)
@@ -124,7 +115,7 @@ def field_config_reset():
 @api_auth_required
 def field_config_rebuild_canonical_fields():
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "system.rebuild"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     report = rebuild_all_part_canonical_fields()
     try:
@@ -139,7 +130,7 @@ def field_config_rebuild_canonical_fields():
 @api_auth_required
 def field_config_rebuild_search_fields():
     user = get_request_user()
-    if not _is_admin(user):
+    if not has_permission(user, "system.rebuild"):
         return jsonify({"ok": False, "error": {"code": "forbidden", "message": "Not authorized.", "details": []}}), 403
     report = rebuild_part_materialized_fields()
     try:
