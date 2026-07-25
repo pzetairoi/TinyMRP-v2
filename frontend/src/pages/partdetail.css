@@ -159,12 +159,17 @@
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .02em;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .pd-attr-v {
   flex: 1;
   font-size: 14px;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 

@@ -1,0 +1,16 @@
+# Test and coverage map
+
+263 pytest tests collect across 51 files. The Python 3.12.4 baseline run passed all 263 tests (280 warnings) in 285.98 s with 61.27% line coverage and 49.78% branch coverage. Python 3.11 was unavailable on this host.
+
+Strong unit/integration protection: authentication/security/RLS, API tokens, parts filtering/custom fields, import/upload packs, BOM import/traversal, docpacks/binders, markups, numbering, file materialization and user-facing template smoke tests.
+
+Weak or unprotected areas:
+
+* Flask factory registration, every blueprint/route and every CLI command are not enumerated by an integration route inventory (**dynamic entry point**). `app/wsgi.py` has zero coverage.
+* `docpacks.py` (134,698 bytes), `import_zip.py`, `field_config.py`, `numbering.py`, `parts.py` and `admin_jobs.py` are large; tests cover selected behaviour rather than all error/rollback paths (**missing test**).
+* React has lint/build commands but no test command; lint and an external-output production build pass, but the committed production bundle is not source-mapped in pytest (**frontend behaviour**). The build warns about 1.29 MB and 551 kB chunks.
+* Shell, Docker, Caddy/Nextcloud and Windows deployment are documentation/manual workflows (**manual/operator workflow**).
+* C# has 44 tests but COM registration, SolidWorks event callbacks and installer operation require an installed SolidWorks/manual matrix (**environment-dependent/dynamic entry point**).
+* Mongo indexes, persisted setting variants and migrations have indirect coverage only (**critical unprotected behaviour**). Low-covered critical route/service candidates include `admin_customers` (14.71%), supplier/customer APIs (15.05%/17.78%), `thumbs_gen` (21.19%), `parts_delete` (23.26%), and order APIs/services (25.68%–33.27%).
+
+Potential static findings must therefore be classified `UNKNOWN` until route/CLI/template/COM/operator evidence is checked. No coverage gap is itself proof of dead code.
