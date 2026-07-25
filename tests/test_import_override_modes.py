@@ -2,6 +2,7 @@ import io
 import json
 import zipfile
 
+from app.models.bom import BOMLink
 from app.models.part import Part
 from app.services.import_zip import import_bom_zip
 from app.services.field_config import save_field_config
@@ -51,6 +52,52 @@ def test_import_preserve_mode_keeps_existing_values(app):
     assert part.description == "Existing Description"
     assert part.attrs.get("material") == "Steel"
     assert part.attrs.get("notes") == "Keep this note"
+
+
+def test_import_preserve_mode_keeps_existing_bom(app):
+    Part(part_number="OVR-BOM", revision="A", description="Existing").save()
+    Part(part_number="OVR-OLD-CHILD", revision="A").save()
+    BOMLink(
+        parent_pn="OVR-BOM",
+        parent_rev="A",
+        child_pn="OVR-OLD-CHILD",
+        child_rev="A",
+        qty=7,
+    ).save()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "PRESERVE_FLATBOM.txt",
+            "\n".join(
+                [
+                    json.dumps({"partnumber": "OVR-BOM", "revision": "A"}),
+                    json.dumps({"partnumber": "OVR-NEW-CHILD", "revision": "A"}),
+                ]
+            ),
+        )
+        zf.writestr(
+            "PRESERVE_TREEBOM.txt",
+            "\n".join(
+                [
+                    "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+                    "1\tOVR-BOM\tA\t1",
+                    "1.1\tOVR-NEW-CHILD\tA\t2",
+                ]
+            ),
+        )
+
+    import_bom_zip(
+        buf.getvalue(),
+        "preserve-bom.zip",
+        scan_artifacts=False,
+        generate_thumbs=False,
+        override_mode="preserve",
+    )
+
+    links = list(BOMLink.objects(parent_pn="OVR-BOM", parent_rev="A"))
+    assert [(link.child_pn, link.child_rev, link.qty) for link in links] == [
+        ("OVR-OLD-CHILD", "A", 7),
+    ]
 
 
 def test_import_override_modes_upgrade_approved_and_preserve_notes(app):

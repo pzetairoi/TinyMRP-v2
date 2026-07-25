@@ -81,7 +81,7 @@ _PART_OVERRIDE_MODES = {_PART_OVERRIDE_MODE_DEFAULT, "preserve", "approved_only"
 _REPORT_ATTR_EXCLUDE_KEYS = {"seed", "comments_search"}
 
 
-def _override_mode(value: object) -> str:
+def normalize_override_mode(value: object) -> str:
     mode = str(value or _PART_OVERRIDE_MODE_DEFAULT).strip().lower()
     mode = _PART_OVERRIDE_MODE_ALIASES.get(mode, mode)
     return mode if mode in _PART_OVERRIDE_MODES else _PART_OVERRIDE_MODE_DEFAULT
@@ -110,7 +110,7 @@ def _merge_attrs_replace(existing: Dict[str, Any], incoming: Dict[str, Any]) -> 
 
 
 def _should_replace_existing(existing_attrs: Dict[str, Any], incoming_attrs: Dict[str, Any], override_mode: str) -> bool:
-    mode = _override_mode(override_mode)
+    mode = normalize_override_mode(override_mode)
     existing_approved = bool(approved_value(existing_attrs or {}))
     incoming_approved = bool(approved_value(incoming_attrs or {}))
     if mode == "always":
@@ -991,6 +991,7 @@ def import_bom_zip(
     Creates/updates Parts from FLATBOM and links from TREEBOM.
     Stores all properties under Part.attrs.
     """
+    override_mode = normalize_override_mode(override_mode)
     report: Dict[str, Any] = {
         "zip": filename,
         "flatbom_file": "",
@@ -1011,7 +1012,7 @@ def import_bom_zip(
         "artifacts_found_by_type": {},
         "thumbnails_built": 0,
         "thumbnails_generated": 0,
-        "override_mode": _override_mode(override_mode),
+        "override_mode": override_mode,
         # diagnostics / best-effort counters
         "rows_skipped_blank_part": 0,
         "flat_lines_failed_parse": 0,
@@ -1274,11 +1275,20 @@ def import_bom_zip(
 
                 parent_pairs = {(p, clean_rev(r)) for p, r, _, _, _, _ in links if p}
                 existing_parent_pairs = {pair for pair in parent_pairs if part_existed_before.get(pair)}
-                bom_before = _snapshot_bom_children(existing_parent_pairs) if existing_parent_pairs else {}
-                if parent_pairs:
+                preserved_parent_pairs = (
+                    existing_parent_pairs if override_mode == "preserve" else set()
+                )
+                changed_existing_parents = existing_parent_pairs - preserved_parent_pairs
+                bom_before = (
+                    _snapshot_bom_children(changed_existing_parents)
+                    if changed_existing_parents
+                    else {}
+                )
+                replace_parent_pairs = parent_pairs - preserved_parent_pairs
+                if replace_parent_pairs:
                     try:
                         clear_links_start = _stage_start()
-                        removed_links = _clear_existing_links(parent_pairs)
+                        removed_links = _clear_existing_links(replace_parent_pairs)
                         _stage_end(report, "links.clear", clear_links_start)
                     except Exception as exc:
                         _report_issue(
@@ -1301,6 +1311,9 @@ def import_bom_zip(
                         parent_rev = clean_rev(parent_rev)
                         child_rev = clean_rev(child_rev)
                         if not parent_pn or not child_pn:
+                            skipped_links += 1
+                            continue
+                        if (parent_pn, parent_rev) in preserved_parent_pairs:
                             skipped_links += 1
                             continue
 
@@ -1365,10 +1378,10 @@ def import_bom_zip(
                             )
                 _stage_end(report, "links.save", links_save_start)
 
-                if parent_pairs:
+                if replace_parent_pairs:
                     try:
                         dedupe_start = _stage_start()
-                        removed_links += _dedupe_links_for_parents(parent_pairs)
+                        removed_links += _dedupe_links_for_parents(replace_parent_pairs)
                         _stage_end(report, "links.dedupe", dedupe_start)
                     except Exception as exc:
                         _report_issue(
@@ -1379,9 +1392,9 @@ def import_bom_zip(
                             exc=exc,
                         )
 
-                if existing_parent_pairs:
+                if changed_existing_parents:
                     bom_after = _children_from_links(links)
-                    for parent_key in sorted(existing_parent_pairs):
+                    for parent_key in sorted(changed_existing_parents):
                         diff = _diff_bom_children(
                             bom_before.get(parent_key, {}),
                             bom_after.get(parent_key, {}),

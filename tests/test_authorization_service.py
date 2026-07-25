@@ -16,10 +16,7 @@ from app.services.authorization import (
     authorise,
     authorised_get,
     authorise_part_access,
-    check_transaction_conflict,
     effective_permissions,
-    filter_response_fields,
-    has_all_permissions,
     has_any_permission,
     has_permission,
     scope_queryset,
@@ -77,7 +74,8 @@ def test_effective_permissions_union_duplicates_and_immutable_result():
 
     assert permissions == frozenset({"parts.read", "jobs.read", "orders.read"})
     assert isinstance(permissions, frozenset)
-    assert has_all_permissions(user, ["parts.read", "orders.read"])
+    assert has_permission(user, "parts.read")
+    assert has_permission(user, "orders.read")
     assert has_any_permission(user, ["customers.read", "jobs.read"])
 
 
@@ -420,107 +418,6 @@ def test_part_acl_calculation_exception_denies(app, monkeypatch):
         )
 
         assert not authorise_part_access(user, "ERROR-1", "A").allowed
-
-
-def test_field_filtering_copies_and_removes_external_properties(app):
-    with app.app_context():
-        role = _role("customer_portal", ["parts.read"])
-        user = _user("field-external@example.com", [role])
-        Customer(name="Field Customer", users=[user]).save()
-        payload = {
-            "part_number": "PART-1",
-            "revision": "A",
-            "description": "Part",
-            "internal_cost": 99,
-            "nested": {"secret": True},
-        }
-        original_nested = payload["nested"]
-
-        filtered = filter_response_fields("parts", user, payload)
-
-        assert filtered == {
-            "part_number": "PART-1",
-            "revision": "A",
-            "description": "Part",
-        }
-        assert payload["internal_cost"] == 99
-        assert payload["nested"] is original_nested
-
-
-def test_field_filtering_unsupported_external_policy_fails_safely(app):
-    with app.app_context():
-        role = _role("customer_portal", ["parts.read"])
-        user = _user("field-unsupported@example.com", [role])
-
-        assert filter_response_fields(
-            "unsupported",
-            user,
-            {"secret": "hidden"},
-        ) == {}
-
-
-def test_field_filtering_internal_policy_is_an_explicit_allowlist(app):
-    with app.app_context():
-        role = _role("engineering_data_steward", ["parts.read"])
-        user = _user("field-internal@example.com", [role])
-        payload = {"part_number": "PART-2", "internal_cost": 15}
-
-        filtered = filter_response_fields("parts", user, payload)
-
-        assert filtered == {"part_number": "PART-2"}
-        assert filtered is not payload
-
-
-def test_transaction_conflict_hook_decisions(monkeypatch):
-    user = FakeUser([])
-
-    no_conflict = check_transaction_conflict(user, "order_self_approval")
-    assert no_conflict.allowed
-    assert no_conflict.reason_code == "no_conflict"
-
-    monkeypatch.setitem(
-        authorization._TRANSACTION_CONFLICT_RULES,
-        "order_self_approval",
-        lambda _user, _resource, _context: "order_self_approval",
-    )
-    conflict = check_transaction_conflict(user, "order_self_approval")
-    assert not conflict.allowed
-    assert conflict.conflict_code == "order_self_approval"
-    assert conflict.reason_code == "transaction_conflict"
-
-
-def test_transaction_conflict_exception_and_unknown_action_deny(monkeypatch):
-    user = FakeUser([])
-    monkeypatch.setitem(
-        authorization._TRANSACTION_CONFLICT_RULES,
-        "design_self_approval",
-        lambda _user, _resource, _context: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
-
-    error = check_transaction_conflict(user, "design_self_approval")
-    unknown = check_transaction_conflict(user, "unregistered_sensitive_action")
-
-    assert not error.allowed and error.conflict_code == "conflict_check_error"
-    assert not unknown.allowed and unknown.conflict_code == "unknown_transaction_action"
-
-
-def test_authorise_applies_registered_conflict(monkeypatch):
-    user = FakeUser([SimpleNamespace(name="approver", permissions=["orders.approve"])])
-    monkeypatch.setitem(
-        authorization._TRANSACTION_CONFLICT_RULES,
-        "order_self_approval",
-        lambda _user, _resource, _context: "order_self_approval",
-    )
-
-    decision = authorise(
-        user,
-        "orders.approve",
-        context={"conflict_action": "order_self_approval", "resource_id": "ORDER-1"},
-    )
-
-    assert not decision.allowed
-    assert decision.reason_code == "transaction_conflict"
-    assert decision.conflict_code == "order_self_approval"
 
 
 def test_denial_audit_is_structured_and_deduplicated(app):

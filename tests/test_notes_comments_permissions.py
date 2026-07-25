@@ -15,9 +15,39 @@ def _make_user(email: str):
     return user
 
 
+def test_comment_read_permission_cannot_mutate(client, user):
+    role = Role(
+        name="comment-read-only",
+        permissions=["parts.read", "parts.read_unreleased", "comments.read"],
+    ).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+    part = Part(part_number="PN-READ-ONLY", revision="A").save()
+
+    response = client.post(
+        f"/api/parts/{part.part_number}/comments",
+        json={"rev": "A", "text": "must not persist"},
+    )
+
+    assert response.status_code == 403
+    assert PartAnnotation.objects.count() == 0
+
+
 def test_notes_update_permissions(client, user):
-    viewer_role = Role(name="viewer", permissions=["items.view"]).save()
-    editor_role = Role(name="editor", permissions=["items.view", "items.edit"]).save()
+    viewer_role = Role(
+        name="viewer",
+        permissions=["items.view", "parts.read_unreleased", "comments.write"],
+    ).save()
+    editor_role = Role(
+        name="editor",
+        permissions=[
+            "items.view",
+            "items.edit",
+            "parts.read_unreleased",
+            "comments.write",
+        ],
+    ).save()
 
     part = Part(part_number="PN-900", revision="", description="Notes Part").save()
 
@@ -49,7 +79,10 @@ def test_notes_update_permissions(client, user):
 
 
 def test_notes_and_comments_preserve_attrs_and_keep_search_indexes(client, user):
-    viewer_role = Role(name="viewer_notes", permissions=["items.view"]).save()
+    viewer_role = Role(
+        name="viewer_notes",
+        permissions=["items.view", "parts.read_unreleased", "comments.write"],
+    ).save()
     user.roles = [viewer_role]
     user.save()
     _login(client, user)
@@ -116,7 +149,15 @@ def test_notes_and_comments_preserve_attrs_and_keep_search_indexes(client, user)
 
 
 def test_comment_priority_id_and_delete_endpoint(client, user):
-    viewer_role = Role(name="viewer_comment_delete", permissions=["items.view"]).save()
+    viewer_role = Role(
+        name="viewer_comment_delete",
+        permissions=[
+            "items.view",
+            "parts.read_unreleased",
+            "comments.write",
+            "comments.moderate",
+        ],
+    ).save()
     user.roles = [viewer_role]
     user.save()
     _login(client, user)
@@ -161,7 +202,15 @@ def test_comment_priority_id_and_delete_endpoint(client, user):
 
 
 def test_parts_table_exposes_and_filters_pending_review_severity(client, user):
-    viewer_role = Role(name="viewer_review_filter", permissions=["items.view"]).save()
+    viewer_role = Role(
+        name="viewer_review_filter",
+        permissions=[
+            "items.view",
+            "parts.read_unreleased",
+            "comments.write",
+            "comments.moderate",
+        ],
+    ).save()
     user.roles = [viewer_role]
     user.save()
     _login(client, user)
@@ -234,7 +283,15 @@ def test_parts_table_exposes_and_filters_pending_review_severity(client, user):
 def test_comment_reply_and_priority_edit_endpoints(client, user):
     from app.models.notification import UserNotification
 
-    viewer_role = Role(name="viewer_reply", permissions=["items.view"]).save()
+    viewer_role = Role(
+        name="viewer_reply",
+        permissions=[
+            "items.view",
+            "parts.read_unreleased",
+            "comments.write",
+            "comments.moderate",
+        ],
+    ).save()
     user.roles = [viewer_role]
     user.save()
     _login(client, user)

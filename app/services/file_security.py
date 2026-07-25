@@ -342,16 +342,6 @@ def associated_file_read_allowed(user: Any, file_record: Any) -> bool:
     )
 
 
-def associated_file_metadata_allowed(user: Any, file_record: Any) -> bool:
-    if not associated_file_read_allowed(user, file_record):
-        return False
-    try:
-        resolve_associated_path(file_record, must_exist=False)
-        return True
-    except FileSecurityError:
-        return False
-
-
 def associated_file_path_allowed(file_record: Any) -> bool:
     try:
         resolve_associated_path(file_record, must_exist=False)

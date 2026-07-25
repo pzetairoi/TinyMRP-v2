@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 
 from app.extensions import csrf
 from app.models.extra_file import PartExtraFile
-from app.services.acl import permissions_required
+from app.services.authorization import has_permission
 from app.services.extra_files import (
     extra_file_url_for,
     extra_rel_path,
@@ -23,7 +23,8 @@ from app.services.file_security import (
     exact_file_part,
 )
 from app.services.part_norm import clean_pn, clean_rev
-from app.services.upload_pack import import_upload_pack
+from app.services.import_zip import normalize_override_mode
+from app.services.upload_pack import import_upload_pack, released_upload_targets
 from app.views.api_helpers import add_datetime_fields
 
 
@@ -64,7 +65,6 @@ def _uploaded_by() -> str:
 @bp.post("/upload/pack")
 @csrf.exempt
 @login_required
-@permissions_required("import.bom")
 def upload_pack():
     f = request.files.get("file")
     if not f or not f.filename:
@@ -76,17 +76,57 @@ def upload_pack():
     filename = secure_filename(f.filename)
     dry_run = _parse_bool(request.form.get("dry_run") or request.args.get("dry_run"))
     strict = _parse_bool(request.form.get("strict_structure") or request.args.get("strict_structure"))
-    override_mode = str(request.form.get("override_mode") or request.args.get("override_mode") or "unless_existing_approved").strip().lower()
+    override_mode = normalize_override_mode(
+        request.form.get("override_mode")
+        or request.args.get("override_mode")
+        or "unless_existing_approved"
+    )
+    required_permission = (
+        "imports.preview" if dry_run else "imports.execute_low_risk"
+    )
+    if not has_permission(current_user, required_permission):
+        return jsonify({"error": "forbidden"}), 403
+    can_override_approved = has_permission(
+        current_user,
+        "imports.override_approved",
+    )
+    if override_mode in {"always", "approved_only"} and not can_override_approved:
+        return jsonify({"error": "forbidden"}), 403
     allow_extra = bool(current_app.config.get("EXTRA_FILES_ALLOWED", True))
+    file_bytes = f.read()
     try:
-        result = import_upload_pack(
-            f.read(),
+        preflight = import_upload_pack(
+            file_bytes,
             filename,
             uploaded_by=_uploaded_by(),
-            dry_run=dry_run,
+            dry_run=True,
             strict_structure=strict,
             allow_extra=allow_extra,
             override_mode=override_mode,
+        )
+        released_targets = released_upload_targets(preflight)
+        if released_targets and not can_override_approved:
+            return (
+                jsonify(
+                    {
+                        "error": "forbidden",
+                        "detail": "import would modify approved or released parts",
+                    }
+                ),
+                403,
+            )
+        result = (
+            preflight
+            if dry_run
+            else import_upload_pack(
+                file_bytes,
+                filename,
+                uploaded_by=_uploaded_by(),
+                dry_run=False,
+                strict_structure=strict,
+                allow_extra=allow_extra,
+                override_mode=override_mode,
+            )
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

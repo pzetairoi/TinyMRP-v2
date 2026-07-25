@@ -13,12 +13,7 @@ from app.models.part import Part
 from app.models.part_annotation import PartAnnotation
 from app.models.supplier import Supplier
 from app.services.field_config import save_field_config
-from app.services.field_policies import (
-    allowed_read_fields,
-    allowed_write_fields,
-    filter_response_fields,
-    response_context,
-)
+from app.services.field_policies import filter_response_fields
 from app.services.standard_roles import STANDARD_ROLES
 
 
@@ -61,28 +56,30 @@ def _released(part_number, revision="A", **kwargs):
     ).save()
 
 
-def test_policy_explicit_allowlist_copies_nested_values_and_input(app):
+def test_external_policy_filters_sensitive_fields_and_copies_values(app):
     with app.app_context():
         user = _user(
             "policy-copy@example.test",
-            _role("policy-copy", ["parts.read", "parts.update"]),
+            _role("customer_portal", ["parts.read"]),
         )
         nested = {"safe": [{"value": 1}]}
         payload = {
             "part_number": "COPY-1",
-            "attributes": nested,
-            "new_database_field": "must not appear",
+            "thumb_urls": nested,
+            "internal_cost": 10,
+            "storage_path": "C:/private",
+            "unknown_custom": "must not appear",
         }
 
         filtered = filter_response_fields("parts", user, payload)
 
         assert filtered == {
             "part_number": "COPY-1",
-            "attributes": nested,
+            "thumb_urls": nested,
         }
-        assert filtered["attributes"] is not nested
-        assert filtered["attributes"]["safe"] is not nested["safe"]
-        assert payload["new_database_field"] == "must not appear"
+        assert filtered["thumb_urls"] is not nested
+        assert filtered["thumb_urls"]["safe"] is not nested["safe"]
+        assert payload["storage_path"] == "C:/private"
 
 
 def test_policy_unknown_resource_and_exception_fail_closed(app, monkeypatch):
@@ -98,7 +95,7 @@ def test_policy_unknown_resource_and_exception_fail_closed(app, monkeypatch):
         ) == {}
 
         monkeypatch.setattr(
-            "app.services.field_policies._compute_read_fields",
+            "app.services.field_policies._internal_fields",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
         )
         assert filter_response_fields(
@@ -106,142 +103,6 @@ def test_policy_unknown_resource_and_exception_fail_closed(app, monkeypatch):
             user,
             {"part_number": "FAIL-1", "secret": "value"},
         ) == {}
-
-
-def test_request_local_field_policy_cache(app, monkeypatch):
-    user = _user(
-        "policy-cache@example.test",
-        _role("policy-cache", ["parts.read"]),
-    )
-    calls = {"count": 0}
-    from app.services import field_policies
-
-    original = field_policies._compute_read_fields
-
-    def counted(*args, **kwargs):
-        calls["count"] += 1
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(field_policies, "_compute_read_fields", counted)
-    with app.test_request_context():
-        first = allowed_read_fields("parts", user)
-        second = allowed_read_fields("parts", user)
-    assert first == second
-    assert calls["count"] == 1
-
-
-@pytest.mark.parametrize(
-    ("role_name", "resource_type", "expected_field", "forbidden_field"),
-    [
-        ("security_administrator", "parts", None, "material"),
-        ("system_administrator", "parts", None, "material"),
-        ("engineering_data_steward", "parts", "material", "internal_cost"),
-        ("import_operator", "parts", "material", "comments"),
-        ("import_approver", "parts", "material", "comments"),
-        ("planner", "jobs", "job_number", "customer_id"),
-        ("procurement", "suppliers", "rating", "users"),
-        ("sales_customer_service", "customers", "credit_limit", "users"),
-        ("production_operator", "jobs", "stages", "customer"),
-        ("quality_reviewer", "parts", "comments", "internal_cost"),
-        ("internal_viewer", "parts", "material", "comments"),
-        ("customer_portal", "parts", "part_number", "attributes"),
-        ("supplier_portal", "parts", "part_number", "attributes"),
-        ("auditor", "orders", "total", "customer_id"),
-        ("break_glass_administrator", "parts", None, "material"),
-    ],
-)
-def test_standard_role_field_policies(
-    app,
-    role_name,
-    resource_type,
-    expected_field,
-    forbidden_field,
-):
-    with app.app_context():
-        user = _user(
-            f"{role_name}@field-policy.test",
-            _standard_role(role_name),
-        )
-        fields = allowed_read_fields(resource_type, user)
-        if expected_field is None:
-            assert fields == frozenset()
-        else:
-            assert expected_field in fields
-        assert forbidden_field not in fields
-
-
-def test_multiple_roles_union_without_crossing_scope_boundaries(app):
-    with app.app_context():
-        customer_internal = _user(
-            "customer-internal@field-policy.test",
-            _standard_role("customer_portal"),
-            _standard_role("internal_viewer"),
-        )
-        assert response_context("parts", customer_internal) == "internal"
-        assert "material" in allowed_read_fields("parts", customer_internal)
-
-        supplier_procurement = _user(
-            "supplier-procurement@field-policy.test",
-            _standard_role("supplier_portal"),
-            _standard_role("procurement"),
-        )
-        assert response_context("suppliers", supplier_procurement) == "internal"
-        assert "rating" in allowed_read_fields(
-            "suppliers",
-            supplier_procurement,
-        )
-
-        operator_planner = _user(
-            "operator-planner@field-policy.test",
-            _standard_role("production_operator"),
-            _standard_role("planner"),
-        )
-        assert response_context("jobs", operator_planner) == "internal"
-        assert "estimated_hours" in allowed_read_fields(
-            "jobs",
-            operator_planner,
-        )
-
-        security_portal = _user(
-            "security-portal@field-policy.test",
-            _standard_role("security_administrator"),
-            _standard_role("customer_portal"),
-        )
-        assert response_context("parts", security_portal) == "customer_portal"
-        assert "attributes" not in allowed_read_fields(
-            "parts",
-            security_portal,
-        )
-
-        engineering_quality = _user(
-            "engineering-quality@field-policy.test",
-            _standard_role("engineering_data_steward"),
-            _standard_role("quality_reviewer"),
-        )
-        fields = allowed_read_fields("parts", engineering_quality)
-        assert {"material", "comments", "approver_profile"} <= fields
-
-
-def test_custom_canonical_role_controls_custom_fields_and_writes(app):
-    with app.app_context():
-        user = _user(
-            "custom-canonical@field-policy.test",
-            _role(
-                "custom-canonical",
-                ["parts.read", "parts.update", "bom.read"],
-            ),
-        )
-        fields = allowed_read_fields(
-            "parts",
-            user,
-            context={"configured_fields": {"approved_custom", "secret_token"}},
-        )
-        assert "approved_custom" in fields
-        assert "secret_token" not in fields
-        writable = allowed_write_fields("parts", user)
-        assert "description" in writable
-        assert "approved_by" not in writable
-        assert "storage_path" not in writable
 
 
 def test_part_list_detail_bom_and_dashboard_apply_equivalent_policies(

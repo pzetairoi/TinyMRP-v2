@@ -375,6 +375,140 @@ def test_upload_pack_zip_slip_rejected(client, app, user, tmp_path):
     assert resp.status_code == 400
 
 
+def test_upload_pack_preview_and_execution_permissions_are_separate(
+    client,
+    app,
+    user,
+    tmp_path,
+):
+    role = Role(name="preview-only", permissions=["imports.preview"]).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    zip_bytes = _make_bom_zip("PREVIEW-ONLY", "A", {})
+
+    preview = client.post(
+        "/api/upload/pack",
+        data={
+            "file": (io.BytesIO(zip_bytes), "preview.zip"),
+            "dry_run": "true",
+        },
+        content_type="multipart/form-data",
+    )
+    execute = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(zip_bytes), "execute.zip")},
+        content_type="multipart/form-data",
+    )
+
+    assert preview.status_code == 200
+    assert preview.get_json()["dry_run"] is True
+    assert execute.status_code == 403
+    assert Part.objects(part_number="PREVIEW-ONLY", revision="A").first() is None
+
+
+def test_upload_pack_low_risk_user_cannot_override_released_part(
+    client,
+    app,
+    user,
+    tmp_path,
+):
+    role = Role(
+        name="low-risk-only",
+        permissions=["imports.preview", "imports.execute_low_risk"],
+    ).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    part = Part(
+        part_number="APPROVED-IMPORT",
+        revision="A",
+        description="Released",
+        attrs={"approvedby": "QA"},
+    ).save()
+    zip_bytes = _make_bom_zip(
+        part.part_number,
+        part.revision,
+        {f"deliverables/pdf/{part.part_number}_REV_A.pdf": b"new"},
+        flat_overrides={"description": "Overwritten"},
+    )
+
+    always = client.post(
+        "/api/upload/pack",
+        data={
+            "file": (io.BytesIO(zip_bytes), "always.zip"),
+            "override_mode": "always",
+        },
+        content_type="multipart/form-data",
+    )
+    default = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(zip_bytes), "default.zip")},
+        content_type="multipart/form-data",
+    )
+
+    assert always.status_code == 403
+    assert default.status_code == 403
+    part.reload()
+    assert part.description == "Released"
+    assert not (tmp_path / "pdf" / f"{part.part_number}_REV_A.pdf").exists()
+
+
+def test_upload_pack_preserve_mode_does_not_replace_existing_files(
+    client,
+    app,
+    user,
+    tmp_path,
+):
+    role = Role(
+        name="preserve-importer",
+        permissions=["imports.preview", "imports.execute_low_risk"],
+    ).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    pn = "PRESERVE-FILE"
+    Part(part_number=pn, revision="A", description="Existing").save()
+    pdf_path = tmp_path / "pdf" / f"{pn}_REV_A.pdf"
+    pdf_path.parent.mkdir(parents=True)
+    pdf_path.write_bytes(b"original")
+    PartFile(
+        part_number=pn,
+        revision="A",
+        ext_group="pdf",
+        ext="pdf",
+        rel_path=f"pdf/{pn}_REV_A.pdf",
+        path=str(pdf_path),
+    ).save()
+    zip_bytes = _make_bom_zip(
+        pn,
+        "A",
+        {f"deliverables/pdf/{pn}_REV_A.pdf": b"replacement"},
+        flat_overrides={"description": "Incoming"},
+    )
+
+    response = client.post(
+        "/api/upload/pack",
+        data={
+            "file": (io.BytesIO(zip_bytes), "preserve.zip"),
+            "override_mode": "preserve",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert pdf_path.read_bytes() == b"original"
+    assert PartFile.objects(part_number=pn, revision="A").count() == 1
+    part = Part.objects(part_number=pn, revision="A").first()
+    assert part.description == "Existing"
+
+
 def test_files_overview_separates_current_and_other_revisions(client, app, user, tmp_path):
     role = Role(
         name="files_overview",

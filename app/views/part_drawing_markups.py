@@ -5,11 +5,10 @@ from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
 from app.models.part import Part
-from app.services.acl import (
-    allowed_parts_for,
-    part_is_allowed,
-    require_items_view,
-    user_has_permission,
+from app.services.authorization import (
+    authorise_part_access,
+    has_permission,
+    require_permission,
 )
 from app.services.audit import log_action
 from app.services.part_drawing_markups import (
@@ -53,23 +52,15 @@ def _find_part(pn: str, rev: str | None) -> Part | None:
 
 
 def _part_allowed(part: Part) -> bool:
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, part.part_number, part.revision or ""):
-            return False
-    except Exception:
-        pass
-    return True
+    return authorise_part_access(
+        current_user,
+        part.part_number,
+        part.revision or "",
+    ).allowed
 
 
 def _can_edit_markups() -> bool:
-    try:
-        for role in getattr(current_user, "roles", []) or []:
-            if getattr(role, "name", "") == "admin":
-                return True
-    except Exception:
-        pass
-    return user_has_permission(current_user, "items.view")
+    return has_permission(current_user, "markups.write")
 
 
 def _user_email() -> str:
@@ -164,7 +155,7 @@ def _conflict_response(exc: MarkupConflictError, *, part: Part, pf, fingerprint:
 
 @bp.get("/parts/<path:pn>/drawing-markups")
 @login_required
-@require_items_view
+@require_permission("markups.read")
 def drawing_markups_get(pn: str):
     part, pf, fingerprint, page_number, err = _resolve_context(pn, {})
     if err:
@@ -180,7 +171,7 @@ def drawing_markups_get(pn: str):
 
 @bp.put("/parts/<path:pn>/drawing-markups")
 @login_required
-@require_items_view
+@require_permission("markups.write")
 def drawing_markups_put(pn: str):
     if (request.content_length or 0) > MAX_CANVAS_BYTES:
         return _error(413, "too_large", "markup payload exceeds the 2 MiB limit")
@@ -241,8 +232,6 @@ def _load_layer_or_error(pn: str, data: dict):
     part, pf, fingerprint, page_number, err = _resolve_context(pn, data)
     if err:
         return None, None, None, "", 1, err
-    if not _can_edit_markups():
-        return None, None, None, "", 1, _error(403, "forbidden", "markup editing not permitted")
     doc = get_markup_layer(part.part_number, part.revision or "", str(pf.id), fingerprint, page_number)
     if not doc:
         return None, None, None, "", 1, _error(404, "not_found", "no markup layer exists for this drawing yet")
@@ -251,7 +240,7 @@ def _load_layer_or_error(pn: str, data: dict):
 
 @bp.post("/parts/<path:pn>/drawing-markups/threads")
 @login_required
-@require_items_view
+@require_permission("markups.write")
 def drawing_markup_thread_create(pn: str):
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -299,7 +288,7 @@ def drawing_markup_thread_create(pn: str):
 
 @bp.post("/parts/<path:pn>/drawing-markups/threads/<thread_id>/messages")
 @login_required
-@require_items_view
+@require_permission("markups.write")
 def drawing_markup_thread_reply(pn: str, thread_id: str):
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -344,7 +333,7 @@ def drawing_markup_thread_reply(pn: str, thread_id: str):
 
 @bp.patch("/parts/<path:pn>/drawing-markups/threads/<thread_id>")
 @login_required
-@require_items_view
+@require_permission("markups.moderate")
 def drawing_markup_thread_patch(pn: str, thread_id: str):
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -396,7 +385,7 @@ def drawing_markup_thread_patch(pn: str, thread_id: str):
 
 @bp.delete("/parts/<path:pn>/drawing-markups/threads/<thread_id>")
 @login_required
-@require_items_view
+@require_permission("markups.moderate")
 def drawing_markup_thread_delete(pn: str, thread_id: str):
     data = request.get_json(silent=True)
     if not isinstance(data, dict):

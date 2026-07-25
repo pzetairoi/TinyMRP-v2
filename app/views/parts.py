@@ -38,13 +38,13 @@ from app.services.filescan import (
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.extra_files import extra_file_url_for
 from app.services.acl import (
-    require_items_view,
     allowed_parts_for,
     part_is_allowed,
     user_has_permission,
 )
 from app.services.authorization import (
     authorised_get,
+    authorise_part_access,
     has_permission,
     part_is_released,
     require_permission,
@@ -168,6 +168,19 @@ def _find_part_doc(pn: str, rev: str | None) -> Part | None:
     if rev_clean is not None:
         return Part.objects(part_number__iexact=pn, revision__iexact=rev_clean).first()
     return Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+
+
+def _find_authorised_part_doc(pn: str, rev: str | None) -> Part | None:
+    part = _find_part_doc(pn, rev)
+    if part is None:
+        return None
+    if not authorise_part_access(
+        current_user,
+        part.part_number,
+        part.revision or "",
+    ).allowed:
+        return None
+    return part
 
 
 def _deliverables_present(pn: str, rev: str | None) -> dict:
@@ -1499,7 +1512,7 @@ def part_detail():
     can_orders_manage = user_has_permission(current_user, "orders.update")
     can_parts_delete = has_permission(current_user, "parts.purge")
     can_parts_edit = has_permission(current_user, "parts.update")
-    can_parts_note = user_has_permission(current_user, "items.view")
+    can_parts_note = has_permission(current_user, "comments.write")
     review_status = compute_part_review_status(p)
 
     part_payload = filter_response_fields(
@@ -1945,22 +1958,16 @@ def part_insights(pn):
 
 @bp.post("/parts/<pn>/notes")
 @login_required
-@require_items_view
+@require_permission("comments.write")
 @csrf.exempt
 def part_notes_update(pn):
     pn = (pn or "").strip()
     data = request.get_json(silent=True) or {}
     rev = data.get("rev") if "rev" in data else request.args.get("rev")
     notes = (data.get("notes") or "").strip()
-    p = _find_part_doc(pn, rev)
+    p = _find_authorised_part_doc(pn, rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            return jsonify({"ok": False, "error": "forbidden"}), 403
-    except Exception:
-        pass
     try:
         migrate_legacy_annotations(p)
     except Exception:
@@ -1980,7 +1987,7 @@ def part_notes_update(pn):
 
 @bp.post("/parts/<pn>/comments")
 @login_required
-@require_items_view
+@require_permission("comments.write")
 @csrf.exempt
 def part_comments_add(pn):
     pn = (pn or "").strip()
@@ -1989,15 +1996,9 @@ def part_comments_add(pn):
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"ok": False, "error": "missing text"}), 400
-    p = _find_part_doc(pn, rev)
+    p = _find_authorised_part_doc(pn, rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            return jsonify({"ok": False, "error": "forbidden"}), 403
-    except Exception:
-        pass
     migrate_legacy_annotations(p)
     priority = str(data.get("priority") or "").strip().lower()
     comment = add_part_comment(
@@ -2031,7 +2032,7 @@ def part_comments_add(pn):
 
 @bp.post("/parts/<pn>/comments/delete")
 @login_required
-@require_items_view
+@require_permission("comments.moderate")
 @csrf.exempt
 def part_comments_delete(pn):
     pn = (pn or "").strip()
@@ -2042,15 +2043,9 @@ def part_comments_delete(pn):
     text = str(data.get("text") or "").strip()
     if not comment_id and not ts:
         return jsonify({"ok": False, "error": "missing id or ts"}), 400
-    p = _find_part_doc(pn, rev)
+    p = _find_authorised_part_doc(pn, rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            return jsonify({"ok": False, "error": "forbidden"}), 403
-    except Exception:
-        pass
     removed = remove_part_comment(p, comment_id=comment_id or None, ts=ts or None, text=text or None)
     if removed is None:
         return jsonify({"ok": False, "error": "comment not found"}), 404
@@ -2084,7 +2079,7 @@ def part_comments_delete(pn):
 
 @bp.post("/parts/<pn>/comments/status")
 @login_required
-@require_items_view
+@require_permission("comments.moderate")
 @csrf.exempt
 def part_comments_status(pn):
     data = request.get_json(silent=True) or {}
@@ -2093,15 +2088,9 @@ def part_comments_status(pn):
     status = str(data.get("status") or "").strip().lower()
     if not comment_id or status not in {"open", "resolved"}:
         return jsonify({"ok": False, "error": "id and a valid status are required"}), 400
-    p = _find_part_doc((pn or "").strip(), rev)
+    p = _find_authorised_part_doc((pn or "").strip(), rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            return jsonify({"ok": False, "error": "forbidden"}), 403
-    except Exception:
-        pass
     updated = set_part_comment_status(p, comment_id=comment_id, status=status)
     if updated is None:
         return jsonify({"ok": False, "error": "comment not found"}), 404
@@ -2130,7 +2119,7 @@ def part_comments_status(pn):
 
 @bp.post("/parts/<pn>/comments/reply")
 @login_required
-@require_items_view
+@require_permission("comments.write")
 @csrf.exempt
 def part_comments_reply(pn):
     data = request.get_json(silent=True) or {}
@@ -2139,15 +2128,9 @@ def part_comments_reply(pn):
     text = str(data.get("text") or "").strip()
     if not comment_id or not text:
         return jsonify({"ok": False, "error": "id and text are required"}), 400
-    p = _find_part_doc((pn or "").strip(), rev)
+    p = _find_authorised_part_doc((pn or "").strip(), rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            return jsonify({"ok": False, "error": "forbidden"}), 403
-    except Exception:
-        pass
     result = add_part_comment_reply(
         p,
         comment_id=comment_id,
@@ -2186,7 +2169,7 @@ def part_comments_reply(pn):
 
 @bp.post("/parts/<pn>/comments/priority")
 @login_required
-@require_items_view
+@require_permission("comments.moderate")
 @csrf.exempt
 def part_comments_priority(pn):
     data = request.get_json(silent=True) or {}
@@ -2195,15 +2178,9 @@ def part_comments_priority(pn):
     priority = str(data.get("priority") or "").strip().lower()
     if not comment_id or priority not in {"", "none", *COMMENT_PRIORITIES}:
         return jsonify({"ok": False, "error": "id and a valid priority are required"}), 400
-    p = _find_part_doc((pn or "").strip(), rev)
+    p = _find_authorised_part_doc((pn or "").strip(), rev)
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            return jsonify({"ok": False, "error": "forbidden"}), 403
-    except Exception:
-        pass
     updated = set_part_comment_priority(p, comment_id=comment_id, priority=priority)
     if updated is None:
         return jsonify({"ok": False, "error": "comment not found"}), 404
