@@ -308,13 +308,19 @@ export default function PartsPage() {
   function renderImageCell(p: Part) {
     const urls = p.thumb_urls || []
     const src = urls[0] || fallbackLogo
-    return (
+    const image = (
       <img
         src={src}
         onError={(ev: any) => urls[1] ? (ev.currentTarget.src = urls[1]) : (ev.currentTarget.src = fallbackLogo)}
         alt=""
         style={{ maxHeight: 32, maxWidth: 48, objectFit: 'contain', border: '1px solid #eee', borderRadius: 6, padding: 2, background: '#fff' }}
       />
+    )
+    if (pickMode) return image
+    return (
+      <a href={`/ui/part/${encodeURIComponent(p.part_number)}?rev=${encodeURIComponent(p.revision || '')}`} aria-label={`Open ${p.part_number} details`}>
+        {image}
+      </a>
     )
   }
 
