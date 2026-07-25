@@ -53,7 +53,6 @@ from app.services.field_config import (
     context_field_ids,
     date_filter_value,
     effective_source_paths,
-    ensure_active_part_field_indexes,
     field_requires_runtime_scan,
     file_field_group,
     field_uses_materialized_value,
@@ -93,8 +92,6 @@ from app.services.part_annotations import (
 )
 from app.services.part_review_status import compute_part_review_status, part_review_status_map
 from app.services.notifications import create_notifications, notify_part_activity, part_url
-#from app.services.user_profile import resolve_identity_profile, resolve_identity_profiles
-
 from app.services.user_profile import (
     resolve_identity_profile,
     resolve_identity_profiles,
@@ -562,7 +559,6 @@ def parts_lazy():
     filters = body.get("filters", {}) or {}
 
     field_config = get_field_config()
-    ensure_active_part_field_indexes(field_config)
     parts_context_ids = context_field_ids("parts_list", field_config)
     field_meta = field_config_index(field_config)
     runtime_filter_ids = {field_id for field_id in parts_context_ids if field_requires_runtime_scan(field_id, field_config)}

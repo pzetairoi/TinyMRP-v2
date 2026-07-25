@@ -5,7 +5,7 @@ from app.models.app_settings import AppSettings
 from app.models.auth import Role, User
 from app.models.bom import BOMLink
 from app.models.part import Part
-from app.services.field_config import save_field_config
+from app.services.field_config import ensure_active_part_field_indexes, save_field_config
 
 
 def _login(client, user):
@@ -200,7 +200,7 @@ def test_parts_lazy_honors_match_modes_and_multiple_constraints(client):
 def test_parts_lazy_filters_typed_custom_dates_and_creates_active_index(client):
     admin = _admin_user()
     _login(client, admin)
-    save_field_config(
+    config = save_field_config(
         {
             "custom_fields": [
                 {"id": "eta_date", "label": "ETA Date", "source_path": "attrs.eta_date", "data_type": "date"},
@@ -213,6 +213,9 @@ def test_parts_lazy_filters_typed_custom_dates_and_creates_active_index(client):
             },
         }
     )
+    # Index creation is now the responsibility of the field-config save/reset
+    # flow (and app startup), not a side effect of every /api/parts_lazy call.
+    ensure_active_part_field_indexes(config)
     Part(part_number="DATE-100", revision="A", attrs={"eta_date": "2026-07-01"}).save()
     Part(part_number="DATE-200", revision="A", attrs={"eta_date": "2026-07-15"}).save()
     Part(part_number="DATE-300", revision="A", attrs={}).save()
