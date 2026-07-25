@@ -15,6 +15,13 @@ venv/
 env/
 ENV/
 
+# Python coverage output
+.coverage
+.coverage.*
+coverage.json
+coverage.xml
+htmlcov/
+
 __pycache__/
 *.py[cod]
 *$py.class
