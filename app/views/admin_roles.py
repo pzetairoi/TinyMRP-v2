@@ -1,89 +1,646 @@
-# app/views/admin_roles.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash
-from flask import abort
-from mongoengine.errors import DoesNotExist, ValidationError
+from __future__ import annotations
+
+import re
+
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_security import current_user
+from mongoengine.errors import DoesNotExist, ValidationError
+
+from app.models.auth import Role, User
+from app.services.audit import log_action
 from app.services.authorization import require_permission
-from ..models.auth import Role
+from app.services.permissions import (
+    CANONICAL_PERMISSION_GROUPS,
+    LEGACY_PERMISSION_IDENTIFIERS,
+    duplicate_permissions,
+    unknown_permissions,
+)
+from app.services.rls_demo import (
+    reset_permission_test_environment,
+    seed_permission_test_environment,
+)
+from app.services.standard_roles import (
+    STANDARD_ROLES,
+    reconcile_standard_roles,
+)
+
 
 bp = Blueprint("admin_roles", __name__, url_prefix="/admin/roles")
 
-PERMISSIONS = [
-  # Core admin
-  "users.manage", "roles.manage", "settings.manage",
+GROUP_LABELS = {
+    "security_and_administration": "Security & administration",
+    "parts_bom_and_files": "Parts, BOM & files",
+    "imports": "Imports",
+    "comments_markups_and_reviews": "Comments, markups & reviews",
+    "jobs": "Jobs",
+    "orders": "Orders",
+    "customers": "Customers",
+    "suppliers": "Suppliers",
+}
 
-  # Items/BOM (existing)
-  "items.view", "items.edit",
-  "bom.view", "bom.edit",
+NOUN_LABELS = {
+    "assignments": "assignments",
+    "audit": "audit records",
+    "bom": "BOM",
+    "comments": "comments",
+    "config": "configuration",
+    "customers": "customers",
+    "exports": "exports",
+    "files": "files",
+    "imports": "imports",
+    "jobs": "jobs",
+    "markups": "markups",
+    "numbering": "part numbers",
+    "orders": "orders",
+    "parts": "parts",
+    "reviews": "reviews",
+    "roles": "roles",
+    "shares": "shares",
+    "storage": "storage",
+    "suppliers": "suppliers",
+    "system": "system",
+    "tokens": "tokens",
+    "users": "users",
+}
 
-  # Jobs / Suppliers / Customers / Orders (new granular perms)
-  "jobs.view", "jobs.manage",
-  "suppliers.view", "suppliers.manage",
-  "customers.view", "customers.manage",
-  "orders.view", "orders.manage",
+ACTION_LABELS = {
+    "add": "Add",
+    "allocate": "Allocate",
+    "approve": "Approve",
+    "archive": "Archive",
+    "assign": "Assign",
+    "cancel": "Cancel",
+    "create": "Create",
+    "execute": "Execute",
+    "fulfil": "Fulfil",
+    "issue": "Issue",
+    "manage": "Manage",
+    "moderate": "Moderate",
+    "preview": "Preview",
+    "purge": "Purge",
+    "read": "Read",
+    "receive": "Receive",
+    "replace": "Replace",
+    "restore": "Restore",
+    "revise": "Revise",
+    "revoke": "Revoke",
+    "rollback": "Roll back",
+    "run": "Run",
+    "ship": "Ship",
+    "submit": "Submit",
+    "update": "Update",
+    "write": "Write",
+}
 
-  # Work orders / inventory / reports / mrp (placeholders)
-  "workorders.view", "workorders.edit", "workorders.close",
-  "inventory.issue", "inventory.receive",
-  "mrp.run",
-  "reports.view",
-  "numbering.manage",
-  # Tools / imports
-  "tools.view",
-  "import.bom",
-]
 
-@bp.route("/")
+def _permission_label(permission: str) -> str:
+    pieces = permission.split(".")
+    action = pieces[-1]
+    subjects = pieces[:-1]
+    if permission == "imports.execute_low_risk":
+        return "Execute low-risk imports"
+    if permission == "imports.review_high_risk":
+        return "Review high-risk imports"
+    if permission == "imports.approve_high_risk":
+        return "Approve high-risk imports"
+    if permission == "imports.execute_approved":
+        return "Execute approved imports"
+    if permission == "imports.override_approved":
+        return "Override approved import data"
+    if len(subjects) == 2 and subjects[0] == "security":
+        subject = NOUN_LABELS.get(subjects[1], subjects[1].replace("_", " "))
+    elif "financial" in subjects:
+        owner = NOUN_LABELS.get(subjects[0], subjects[0].replace("_", " "))
+        subject = f"{owner.rstrip('s')} financial data"
+    elif subjects[:2] == ["parts", "release"]:
+        subject = "part release"
+    elif subjects[:2] == ["customers", "portal_users"]:
+        subject = "customer portal users"
+    elif subjects[:2] == ["suppliers", "portal_users"]:
+        subject = "supplier portal users"
+    elif len(subjects) > 1:
+        subject = " ".join(
+            NOUN_LABELS.get(piece, piece.replace("_", " ")) for piece in subjects
+        )
+    else:
+        subject = NOUN_LABELS.get(
+            subjects[0] if subjects else "",
+            (subjects[0] if subjects else permission).replace("_", " "),
+        )
+    verb = ACTION_LABELS.get(action, action.replace("_", " ").title())
+    return f"{verb} {subject}".strip()
+
+
+def _permission_action(permission: str) -> str:
+    if permission.endswith(".purge"):
+        return "Destructive"
+    if ".financial." in permission:
+        return "Financial"
+    if permission.endswith(".approve") or "approve_" in permission:
+        return "Approval"
+    if (
+        permission.endswith(".read")
+        or permission.endswith(".view")
+        or permission.rsplit(".", 1)[-1].startswith("read_")
+    ):
+        return "Read"
+    if permission.startswith(("security.", "system.")) or permission == "audit.read":
+        return "Administration"
+    return "Write"
+
+
+def _permission_item(permission: str) -> dict[str, str]:
+    return {
+        "id": permission,
+        "label": _permission_label(permission),
+        "action": _permission_action(permission),
+    }
+
+
+def _canonical_catalogue() -> list[dict[str, object]]:
+    return [
+        {
+            "slug": slug,
+            "label": GROUP_LABELS.get(slug, slug.replace("_", " ").title()),
+            "permissions": [_permission_item(value) for value in permissions],
+        }
+        for slug, permissions in CANONICAL_PERMISSION_GROUPS.items()
+    ]
+
+
+def _legacy_catalogue() -> list[dict[str, str]]:
+    return [_permission_item(value) for value in LEGACY_PERMISSION_IDENTIFIERS]
+
+
+def _permission_group_summary(permissions: list[str]) -> list[dict[str, object]]:
+    selected = set(permissions or [])
+    summary = []
+    for slug, group_permissions in CANONICAL_PERMISSION_GROUPS.items():
+        count = len(selected.intersection(group_permissions))
+        if count:
+            summary.append(
+                {
+                    "label": GROUP_LABELS.get(
+                        slug,
+                        slug.replace("_", " ").title(),
+                    ),
+                    "count": count,
+                }
+            )
+    legacy_count = len(selected.intersection(LEGACY_PERMISSION_IDENTIFIERS))
+    if legacy_count:
+        summary.append({"label": "Legacy compatibility", "count": legacy_count})
+    return summary
+
+
+def _standard_status_report() -> dict[str, object]:
+    report = reconcile_standard_roles(dry_run=True)
+    return {
+        **report,
+        "current_count": len(report["unchanged"]),
+        "missing_count": len(report["missing"]),
+        "drifted_count": len(report["drifted"]),
+        "invalid_count": len(report["invalid_permissions"]),
+    }
+
+
+def _role_rows(
+    report: dict[str, object],
+    *,
+    query: str = "",
+    role_filter: str = "all",
+) -> list[dict[str, object]]:
+    drifted = {
+        item["slug"]: item["fields"]
+        for item in report.get("drifted", [])
+    }
+    invalid = {
+        item["slug"]: item
+        for item in report.get("invalid_permissions", [])
+    }
+    rows: list[dict[str, object]] = []
+    existing_slugs: set[str] = set()
+    for role in Role.objects().order_by("name"):
+        existing_slugs.add(role.name)
+        definition = STANDARD_ROLES.get(role.name)
+        invalid_detail = invalid.get(role.name)
+        drift_fields = drifted.get(role.name, [])
+        if invalid_detail:
+            status = "Invalid permissions"
+            tone = "danger"
+        elif definition and drift_fields:
+            status = "Customised/drifted"
+            tone = "warning"
+        elif definition:
+            status = "Current"
+            tone = "active"
+        else:
+            status = "Custom"
+            tone = "neutral"
+        rows.append(
+            {
+                "role": role,
+                "slug": role.name,
+                "display_name": (
+                    role.display_name
+                    or (definition.display_name if definition else "")
+                    or role.name.replace("_", " ").title()
+                ),
+                "description": role.description or (
+                    definition.description if definition else ""
+                ),
+                "is_standard": bool(definition),
+                "is_missing": False,
+                "permission_count": len(role.permissions or []),
+                "assigned_count": User.objects(roles=role).count(),
+                "status": status,
+                "status_tone": tone,
+                "drift_fields": drift_fields,
+                "invalid": invalid_detail,
+                "permission_summary": _permission_group_summary(role.permissions or []),
+                "permissions": list(role.permissions or []),
+            }
+        )
+    for slug, definition in STANDARD_ROLES.items():
+        if slug in existing_slugs:
+            continue
+        rows.append(
+            {
+                "role": None,
+                "slug": slug,
+                "display_name": definition.display_name,
+                "description": definition.description,
+                "is_standard": True,
+                "is_missing": True,
+                "permission_count": len(definition.permissions),
+                "assigned_count": 0,
+                "status": "Missing",
+                "status_tone": "warning",
+                "drift_fields": [],
+                "invalid": None,
+                "permission_summary": _permission_group_summary(
+                    list(definition.permissions)
+                ),
+                "permissions": list(definition.permissions),
+            }
+        )
+
+    query_text = query.casefold()
+    if query_text:
+        rows = [
+            row
+            for row in rows
+            if query_text
+            in " ".join(
+                [
+                    str(row["display_name"]),
+                    str(row["slug"]),
+                    str(row["description"]),
+                    " ".join(row["permissions"]),
+                ]
+            ).casefold()
+        ]
+    filters = {
+        "standard": lambda row: row["is_standard"],
+        "custom": lambda row: not row["is_standard"],
+        "drifted": lambda row: row["status"] == "Customised/drifted",
+        "invalid": lambda row: row["status"] == "Invalid permissions",
+    }
+    if role_filter in filters:
+        rows = [row for row in rows if filters[role_filter](row)]
+    return sorted(
+        rows,
+        key=lambda row: (
+            not bool(row["is_standard"]),
+            str(row["display_name"]).casefold(),
+        ),
+    )
+
+
+def _render_roles_page(
+    *,
+    permission_test_result: dict[str, object] | None = None,
+    status_code: int = 200,
+):
+    report = _standard_status_report()
+    query = (request.args.get("q") or "").strip()
+    role_filter = (request.args.get("filter") or "all").strip().lower()
+    if role_filter not in {"all", "standard", "custom", "drifted", "invalid"}:
+        role_filter = "all"
+    response = make_response(
+        render_template(
+            "admin/roles_list.html",
+            role_rows=_role_rows(report, query=query, role_filter=role_filter),
+            standard_report=report,
+            query=query,
+            role_filter=role_filter,
+            permission_test_enabled=bool(
+                current_app.config.get("ALLOW_PERMISSION_TEST_DATA", False)
+            ),
+            permission_test_result=permission_test_result,
+        ),
+        status_code,
+    )
+    if permission_test_result:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _role_form_context(
+    role: Role | None,
+    *,
+    selected_permissions: list[str] | None = None,
+    submitted: dict[str, str] | None = None,
+) -> dict[str, object]:
+    definition = STANDARD_ROLES.get(role.name) if role else None
+    drift_fields = []
+    if role and definition:
+        if role.display_name != definition.display_name:
+            drift_fields.append("display_name")
+        if role.description != definition.description:
+            drift_fields.append("description")
+        if tuple(role.permissions or ()) != definition.permissions:
+            drift_fields.append("permissions")
+    return {
+        "role": role,
+        "standard_definition": definition,
+        "drift_fields": drift_fields,
+        "canonical_groups": _canonical_catalogue(),
+        "legacy_permissions": _legacy_catalogue(),
+        "selected_permissions": (
+            selected_permissions
+            if selected_permissions is not None
+            else list(role.permissions or [])
+            if role
+            else []
+        ),
+        "submitted": submitted or {},
+    }
+
+
+@bp.get("/")
 @require_permission("security.roles.read")
 def roles_list():
-    roles = Role.objects().order_by("name")
-    return render_template("admin/roles_list.html", roles=roles)
+    return _render_roles_page()
+
+
+@bp.post("/standard-roles/seed")
+@require_permission("security.roles.manage")
+def standard_roles_seed():
+    report = reconcile_standard_roles()
+    log_action(
+        "admin.roles.seed_standard",
+        resource_type="role",
+        resource="standard_roles",
+        meta={"created": list(report["created"])},
+    )
+    if report["created"]:
+        flash(
+            f"Seeded {len(report['created'])} missing standard role(s).",
+            "success",
+        )
+    else:
+        flash("All standard roles already exist. No changes were made.", "info")
+    return redirect(url_for("admin_roles.roles_list"))
+
+
+@bp.post("/standard-roles/restore")
+@require_permission("security.roles.manage")
+def standard_roles_restore():
+    report = reconcile_standard_roles(apply=True)
+    log_action(
+        "admin.roles.restore_standard",
+        resource_type="role",
+        resource="standard_roles",
+        meta={"updated": list(report["updated"])},
+    )
+    if report["updated"]:
+        flash(
+            f"Restored {len(report['updated'])} standard role definition(s).",
+            "success",
+        )
+    else:
+        flash("No standard role drift was found.", "info")
+    return redirect(url_for("admin_roles.roles_list"))
+
+
+@bp.post("/permission-test/seed")
+@require_permission("security.roles.manage")
+@require_permission("security.users.manage")
+@require_permission("security.assignments.manage")
+@require_permission("system.maintenance")
+def permission_test_seed():
+    if not current_app.config.get("ALLOW_PERMISSION_TEST_DATA", False):
+        abort(403)
+    domain = str(
+        current_app.config.get("PERMISSION_TEST_DATA_DOMAIN") or "demo.com"
+    )
+    result = seed_permission_test_environment(domain=domain)
+    log_action(
+        "admin.permission_test.seed",
+        resource_type="system",
+        resource="permission_test_environment",
+        meta={
+            "users_created": int(result["counts"]["users_created"]),
+            "users_updated": int(result["counts"]["users_updated"]),
+            "domain": result["domain"],
+        },
+    )
+    return _render_roles_page(permission_test_result={"seed": result})
+
+
+@bp.post("/permission-test/reset")
+@require_permission("security.roles.manage")
+@require_permission("security.users.manage")
+@require_permission("security.assignments.manage")
+@require_permission("system.maintenance")
+def permission_test_reset():
+    if not current_app.config.get("ALLOW_PERMISSION_TEST_DATA", False):
+        abort(403)
+    domain = str(
+        current_app.config.get("PERMISSION_TEST_DATA_DOMAIN") or "demo.com"
+    )
+    result = reset_permission_test_environment(domain=domain)
+    log_action(
+        "admin.permission_test.reset",
+        resource_type="system",
+        resource="permission_test_environment",
+        meta={"removed": dict(result)},
+    )
+    return _render_roles_page(permission_test_result={"reset": result})
+
 
 @bp.route("/new", methods=["GET", "POST"])
 @require_permission("security.roles.manage")
 def roles_create():
     if request.method == "POST":
         name = (request.form.get("name") or "").strip()
-        desc = (request.form.get("description") or "").strip()
-        perms = request.form.getlist("permissions")
+        display_name = (request.form.get("display_name") or "").strip()
+        description = (request.form.get("description") or "").strip()
+        permissions = request.form.getlist("permissions")
+        submitted = {
+            "name": name,
+            "display_name": display_name,
+            "description": description,
+        }
         if name == "admin" and not current_user.has_role("admin"):
             abort(403)
-        if not name:
-            flash("Role name is required.", "error")
-            return redirect(url_for("admin_roles.roles_create"))
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", name):
+            flash(
+                "Machine slug must use lowercase letters, numbers and underscores.",
+                "error",
+            )
+            return (
+                render_template(
+                    "admin/roles_form.html",
+                    **_role_form_context(
+                        None,
+                        selected_permissions=permissions,
+                        submitted=submitted,
+                    ),
+                ),
+                400,
+            )
+        if name in STANDARD_ROLES:
+            flash(
+                "Use Seed missing standard roles for catalogue role slugs.",
+                "error",
+            )
+            return (
+                render_template(
+                    "admin/roles_form.html",
+                    **_role_form_context(
+                        None,
+                        selected_permissions=permissions,
+                        submitted=submitted,
+                    ),
+                ),
+                400,
+            )
         if Role.objects(name=name).first():
             flash("Role already exists.", "error")
             return redirect(url_for("admin_roles.roles_create"))
-        Role(name=name, description=desc, permissions=perms).save()
-        flash("Role created.", "success")
+        role = Role(
+            name=name,
+            display_name=display_name,
+            description=description,
+            permissions=permissions,
+        )
+        try:
+            role.save()
+        except ValidationError as exc:
+            flash(str(exc), "error")
+            return (
+                render_template(
+                    "admin/roles_form.html",
+                    **_role_form_context(
+                        None,
+                        selected_permissions=permissions,
+                        submitted=submitted,
+                    ),
+                ),
+                400,
+            )
+        log_action(
+            "admin.role.create",
+            resource_type="role",
+            resource=role.name,
+        )
+        flash("Custom role created.", "success")
         return redirect(url_for("admin_roles.roles_list"))
-    return render_template("admin/roles_form.html", permissions=PERMISSIONS, role=None)
+    return render_template(
+        "admin/roles_form.html",
+        **_role_form_context(None),
+    )
+
 
 @bp.route("/<role_id>/edit", methods=["GET", "POST"])
 @require_permission("security.roles.manage")
 def roles_edit(role_id):
     try:
-        r = Role.objects.get(id=role_id)
+        role = Role.objects.get(id=role_id)
     except (DoesNotExist, ValidationError):
         abort(404)
 
     if request.method == "POST":
-        name = (request.form.get("name") or "").strip()
+        definition = STANDARD_ROLES.get(role.name)
+        name = role.name if definition else (request.form.get("name") or "").strip()
+        display_name = (request.form.get("display_name") or "").strip()
+        description = (request.form.get("description") or "").strip()
         permissions = request.form.getlist("permissions")
+        submitted = {
+            "name": name,
+            "display_name": display_name,
+            "description": description,
+        }
         assigned_to_actor = any(
-            str(role.id) == str(r.id)
-            for role in (getattr(current_user, "roles", None) or [])
+            str(assigned.id) == str(role.id)
+            for assigned in (getattr(current_user, "roles", None) or [])
         )
         if assigned_to_actor and (
-            name != r.name or set(permissions) - set(r.permissions or [])
+            name != role.name
+            or set(permissions) - set(role.permissions or [])
         ):
             abort(403)
-        if name == "admin" and r.name != "admin" and not current_user.has_role("admin"):
+        if (
+            name == "admin"
+            and role.name != "admin"
+            and not current_user.has_role("admin")
+        ):
             abort(403)
-        r.name = name
-        r.description = (request.form.get("description") or "").strip()
-        r.permissions = permissions
-        r.save()
+        if not definition and not re.fullmatch(r"[a-z0-9][a-z0-9_]*", name):
+            flash(
+                "Machine slug must use lowercase letters, numbers and underscores.",
+                "error",
+            )
+            return (
+                render_template(
+                    "admin/roles_form.html",
+                    **_role_form_context(
+                        role,
+                        selected_permissions=permissions,
+                        submitted=submitted,
+                    ),
+                ),
+                400,
+            )
+        role.name = name
+        role.display_name = display_name
+        role.description = description
+        role.permissions = permissions
+        try:
+            role.save()
+        except ValidationError as exc:
+            flash(str(exc), "error")
+            return (
+                render_template(
+                    "admin/roles_form.html",
+                    **_role_form_context(
+                        role,
+                        selected_permissions=permissions,
+                        submitted=submitted,
+                    ),
+                ),
+                400,
+            )
+        log_action(
+            "admin.role.update",
+            resource_type="role",
+            resource=role.name,
+        )
         flash("Role updated.", "success")
         return redirect(url_for("admin_roles.roles_list"))
-    return render_template("admin/roles_form.html", permissions=PERMISSIONS, role=r)
+    return render_template(
+        "admin/roles_form.html",
+        **_role_form_context(role),
+    )

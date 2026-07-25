@@ -13,6 +13,7 @@
     <div class="tm-admin-link-grid">
       {{ admin_link("Users", "Create accounts, assign roles, and reset access.", url_for('admin.users_list'), "U") }}
       {{ admin_link("Roles & permissions", "Define reusable permission sets for your teams.", url_for('admin_roles.roles_list'), "R") }}
+      {{ admin_link("Permission test setup", "Create a guarded canonical-role test matrix on disposable instances.", url_for('admin_roles.roles_list') ~ "#permission-test-setup", "T") }}
       {{ admin_link("Audit log", "Review sign-ins, changes, and operational events.", url_for('admin_audit.audit_list'), "A") }}
     </div>
   </section>

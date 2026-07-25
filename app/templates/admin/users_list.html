@@ -1,76 +1,137 @@
 {% extends "security/base.html" %}
 {% from "ui/_components.html" import page_header, action_bar, empty_state, status_badge %}
-{% block title %}Users - Admin{% endblock %}
+{% block title %}Users · Admin{% endblock %}
 {% block content %}
-{% call page_header("Users", "Manage user accounts and role assignments.", "Admin") %}
+{% call page_header("Users", "Manage account status and role assignments.", "People & access") %}
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Roles</a>
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Roles & permissions</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a>
     <a class="btn btn-primary" href="{{ url_for('admin.users_create') }}">New user</a>
   </div>
 {% endcall %}
 
-<form method="post" action="{{ url_for('admin.users_bulk_delete') }}">
+<form class="card tm-card mb-3" method="get">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label" for="userSearch">Email search</label>
+        <input class="form-control" id="userSearch" type="search" name="q" value="{{ query }}" placeholder="person@example.com">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="userRoleFilter">Role</label>
+        <select class="form-select" id="userRoleFilter" name="role">
+          <option value="">All roles</option>
+          {% for option in roles %}
+          <option value="{{ option.role.name }}" {% if role_filter == option.role.name %}selected{% endif %}>{{ option.display_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="userActiveFilter">Status</label>
+        <select class="form-select" id="userActiveFilter" name="active">
+          {% for value, label in [('all', 'All'), ('active', 'Active'), ('inactive', 'Inactive')] %}
+          <option value="{{ value }}" {% if active_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2 d-flex gap-2">
+        <button class="btn btn-outline-primary flex-grow-1" type="submit">Apply</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('admin.users_list') }}">Clear</a>
+      </div>
+    </div>
+  </div>
+</form>
+
+<form method="post" data-user-selection>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  {% call action_bar("Admin and current user accounts cannot be deleted.", "danger") %}
-    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAllUsers()">Select all</button>
-    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectNonAdmin()">Select non-admin</button>
-    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">Clear</button>
-    <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete selected users?');">Delete selected</button>
+  {% call action_bar(total ~ " matching account(s). Select accounts to change their status.", "default") %}
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-user-select-all>Select page</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-user-select-clear>Clear</button>
+    <button type="submit" class="btn btn-sm btn-outline-success"
+            formaction="{{ url_for('admin.users_bulk_status') }}" name="action" value="activate">Activate selected</button>
+    <button type="submit" class="btn btn-sm btn-outline-warning"
+            formaction="{{ url_for('admin.users_bulk_status') }}" name="action" value="deactivate"
+            data-confirm="Deactivate the selected accounts? Your own account and the only usable legacy administrator are protected.">Deactivate selected</button>
   {% endcall %}
+
   <div class="table-responsive tm-table-shell">
     <table class="table align-middle mb-0">
       <thead>
         <tr>
-          <th style="width:36px;"></th>
+          <th style="width:36px;"><span class="visually-hidden">Select</span></th>
           <th>Email</th>
-          <th>Active</th>
+          <th>Status</th>
           <th>Roles</th>
+          <th>Last login</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        {% if users %}
-          {% for u in users %}
-            {% set role_names = (u.roles | map(attribute='name') | list) if u.roles else [] %}
-            {% set is_admin = 'admin' in role_names %}
-            {% set is_self = current_user and u.id == current_user.id %}
-            <tr>
-              <td>
-                <input class="form-check-input user-select" type="checkbox" name="user_ids" value="{{ u.id }}"
-                  {% if is_admin or is_self %}disabled data-admin="1"{% endif %}>
-              </td>
-              <td>{{ u.email }}</td>
-              <td>{{ status_badge('Active' if u.active else 'Inactive', 'active' if u.active else 'inactive') }}</td>
-              <td>{{ role_names | join(', ') if role_names else '-' }}</td>
-              <td>
-                <div class="d-flex flex-wrap gap-1">
-                  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_audit.audit_list', user_id=u.id) }}">Activity</a>
-                  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_edit', user_id=u.id) }}">Edit</a>
-                </div>
-              </td>
-            </tr>
-          {% endfor %}
+        {% for u in users %}
+        <tr>
+          <td><input class="form-check-input user-select" type="checkbox" name="user_ids" value="{{ u.id }}"></td>
+          <td>
+            <strong>{{ u.email }}</strong>
+            {% if current_user and u.id == current_user.id %}<span class="badge text-bg-light">You</span>{% endif %}
+          </td>
+          <td>{{ status_badge("Active" if u.active else "Inactive", "active" if u.active else "inactive") }}</td>
+          <td>
+            <div class="d-flex flex-wrap gap-1">
+              {% for role in u.roles or [] %}
+                {% set definition = roles|selectattr('role.name', 'equalto', role.name)|first %}
+                <span class="badge rounded-pill text-bg-light" title="{{ role.name }}">
+                  {{ definition.display_name if definition else (role.display_name or role.name) }}
+                </span>
+              {% else %}
+                <span class="text-muted">No roles</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td class="text-nowrap">{{ display_ts(u.last_login_at, "%Y-%m-%d %H:%M") if u.last_login_at else "Never" }}</td>
+          <td>
+            <div class="d-flex flex-wrap gap-1">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_audit.audit_list', user_id=u.id) }}">Activity</a>
+              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_edit', user_id=u.id) }}">Edit</a>
+            </div>
+          </td>
+        </tr>
         {% else %}
-          <tr>
-            <td colspan="5" class="py-3">{{ empty_state("No users found", "Create a user to grant access to the application.", url_for('admin.users_create'), "Create user") }}</td>
-          </tr>
-        {% endif %}
+        <tr>
+          <td colspan="6" class="py-3">
+            {{ empty_state("No users match", "Clear the search or filters, or create an account.", url_for('admin.users_create'), "Create user") }}
+          </td>
+        </tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
+
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+    <span class="small text-muted">
+      Page {{ page }} of {{ page_count }} · up to {{ page_size }} users per page
+    </span>
+    <nav aria-label="User pages">
+      <ul class="pagination pagination-sm mb-0">
+        <li class="page-item{% if page <= 1 %} disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('admin.users_list', q=query, role=role_filter, active=active_filter, page=page-1) }}">Previous</a>
+        </li>
+        <li class="page-item disabled"><span class="page-link">{{ page }}</span></li>
+        <li class="page-item{% if page >= page_count %} disabled{% endif %}">
+          <a class="page-link" href="{{ url_for('admin.users_list', q=query, role=role_filter, active=active_filter, page=page+1) }}">Next</a>
+        </li>
+      </ul>
+    </nav>
+  </div>
+
+  <details class="tm-danger-zone mt-4">
+    <summary>Permanent deletion</summary>
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
+      <p class="small text-muted mb-0">Permanent deletion is secondary to deactivation. Legacy administrators and your own account are protected.</p>
+      <button type="submit" class="btn btn-sm btn-outline-danger"
+              formaction="{{ url_for('admin.users_bulk_delete') }}"
+              data-confirm="Permanently delete the selected eligible users? This cannot be undone.">Delete selected permanently</button>
+    </div>
+  </details>
 </form>
-<script>
-  function selectAllUsers(){
-    document.querySelectorAll('input.user-select:not(:disabled)').forEach(cb => cb.checked = true);
-  }
-  function selectNonAdmin(){
-    document.querySelectorAll('input.user-select:not(:disabled)').forEach(cb => {
-      cb.checked = cb.getAttribute('data-admin') !== '1';
-    });
-  }
-  function clearSelection(){
-    document.querySelectorAll('input.user-select').forEach(cb => cb.checked = false);
-  }
-</script>
+<script src="{{ url_for('static', filename='admin-access.js') }}" defer></script>
 {% endblock %}

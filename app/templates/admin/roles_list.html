@@ -1,33 +1,215 @@
 {% extends "security/base.html" %}
-{% from "ui/_components.html" import page_header, empty_state %}
-{% block title %}Roles Â· Admin{% endblock %}
+{% from "ui/_components.html" import page_header, card_header, section_header, empty_state, status_badge %}
+{% block title %}Roles & permissions · Admin{% endblock %}
 {% block content %}
-{% call page_header("Roles", "Permission bundles used across the application.", "Admin") %}
+{% call page_header("Roles & permissions", "Define reusable access bundles and check the standard catalogue.", "People & access") %}
   <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-outline-secondary" href="{{ url_for('admin.users_list') }}">Users</a>
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit Log</a>
-    <a class="btn btn-primary" href="{{ url_for('admin_roles.roles_create') }}">New role</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a>
+    <a class="btn btn-primary" href="{{ url_for('admin_roles.roles_create') }}">New custom role</a>
   </div>
 {% endcall %}
-<div class="table-responsive tm-table-shell">
+
+<section class="card tm-card mb-4" aria-labelledby="standardRolesHeading">
+  <div class="card-body">
+    {% call card_header("Standard roles", "A read-only comparison with the canonical role catalogue runs whenever this page opens.") %}
+      <form method="post" action="{{ url_for('admin_roles.standard_roles_seed') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-primary" type="submit">Seed missing standard roles</button>
+      </form>
+    {% endcall %}
+    <div class="tm-access-stats" id="standardRolesHeading">
+      <div><strong>{{ standard_report.current_count }}</strong><span>Current</span></div>
+      <div><strong>{{ standard_report.missing_count }}</strong><span>Missing</span></div>
+      <div><strong>{{ standard_report.drifted_count }}</strong><span>Drifted</span></div>
+      <div><strong>{{ standard_report.invalid_count }}</strong><span>Invalid</span></div>
+    </div>
+    {% if standard_report.drifted_count %}
+    <details class="tm-access-advanced mt-3">
+      <summary>Advanced: restore canonical definitions</summary>
+      <p class="small text-muted mt-2 mb-2">
+        This restores display name, description and permissions for drifted standard roles.
+        User assignments are not changed.
+      </p>
+      <form method="post" action="{{ url_for('admin_roles.standard_roles_restore') }}"
+            data-confirm="Restore every drifted standard-role definition? User assignments will remain unchanged.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-outline-warning" type="submit">Restore standard definitions</button>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+</section>
+
+<form class="card tm-card mb-3" method="get">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-6">
+        <label class="form-label" for="roleSearch">Search roles or permissions</label>
+        <input class="form-control" id="roleSearch" type="search" name="q" value="{{ query }}"
+               placeholder="Display name, slug, description or permission">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="roleFilter">Filter</label>
+        <select class="form-select" id="roleFilter" name="filter">
+          {% for value, label in [('all', 'All'), ('standard', 'Standard'), ('custom', 'Custom'), ('drifted', 'Drifted'), ('invalid', 'Invalid')] %}
+          <option value="{{ value }}" {% if role_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3 d-flex gap-2">
+        <button class="btn btn-outline-primary flex-grow-1" type="submit">Apply</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Clear</a>
+      </div>
+    </div>
+  </div>
+</form>
+
+<div class="table-responsive tm-table-shell mb-4">
   <table class="table align-middle mb-0">
-    <thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Actions</th></tr></thead>
+    <thead>
+      <tr>
+        <th>Role</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th class="text-nowrap">Permissions</th>
+        <th class="text-nowrap">Users</th>
+        <th>Details</th>
+        <th>Action</th>
+      </tr>
+    </thead>
     <tbody>
-      {% if roles %}
-        {% for r in roles %}
-        <tr>
-          <td>{{ r.name }}</td>
-          <td>{{ r.description or '-' }}</td>
-          <td>{{ (r.permissions | join(', ')) or '-' }}</td>
-          <td><a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_roles.roles_edit', role_id=r.id) }}">Edit</a></td>
-        </tr>
-        {% endfor %}
+      {% for row in role_rows %}
+      <tr>
+        <td>
+          <strong>{{ row.display_name }}</strong>
+          <code class="d-block mt-1">{{ row.slug }}</code>
+          <span class="small text-muted">{{ row.description or "No description" }}</span>
+        </td>
+        <td>
+          <span class="badge rounded-pill {{ 'text-bg-primary' if row.is_standard else 'text-bg-light' }}">
+            {{ "Standard" if row.is_standard else "Custom" }}
+          </span>
+        </td>
+        <td>{{ status_badge(row.status, row.status_tone) }}</td>
+        <td>{{ row.permission_count }}</td>
+        <td>{{ row.assigned_count }}</td>
+        <td>
+          <details class="tm-role-details">
+            <summary>Permission summary</summary>
+            {% if row.permission_summary %}
+            <ul class="small mb-0 mt-2 ps-3">
+              {% for group in row.permission_summary %}
+              <li>{{ group.label }}: {{ group.count }}</li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <span class="small text-muted d-block mt-2">No permissions assigned.</span>
+            {% endif %}
+            {% if row.drift_fields %}
+            <span class="small text-warning d-block mt-2">Drifted fields: {{ row.drift_fields|join(', ') }}</span>
+            {% endif %}
+            {% if row.invalid %}
+            <span class="small text-danger d-block mt-2">
+              Unknown: {{ row.invalid.unknown|join(', ') or 'none' }};
+              duplicates: {{ row.invalid.duplicates|join(', ') or 'none' }}
+            </span>
+            {% endif %}
+          </details>
+        </td>
+        <td>
+          {% if row.role %}
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_roles.roles_edit', role_id=row.role.id) }}">Edit</a>
+          {% else %}
+          <span class="small text-muted">Seed to edit</span>
+          {% endif %}
+        </td>
+      </tr>
       {% else %}
-        <tr>
-          <td colspan="4" class="py-3">{{ empty_state("No roles created", "Add a role before assigning permissions to users.", url_for('admin_roles.roles_create'), "Create role") }}</td>
-        </tr>
-      {% endif %}
+      <tr>
+        <td colspan="7" class="py-3">
+          {{ empty_state("No roles match", "Clear the search or filters to see the complete catalogue.") }}
+        </td>
+      </tr>
+      {% endfor %}
     </tbody>
   </table>
 </div>
+
+<section class="card tm-card" id="permission-test-setup" aria-labelledby="permissionTestHeading">
+  <div class="card-body">
+    {% call section_header("Permission test setup", "Create a small canonical-role and RLS test matrix.") %}{% endcall %}
+    <div class="alert alert-warning" id="permissionTestHeading">
+      <strong>For development, staging and disposable test instances only.</strong>
+      Test users and business records use reserved <code>permtest.*</code> and <code>DEMO-*</code> namespaces.
+    </div>
+    {% if permission_test_enabled %}
+    <div class="d-flex flex-wrap gap-2">
+      <form method="post" action="{{ url_for('admin_roles.permission_test_seed') }}"
+            data-confirm="Create or refresh the reserved permission test environment? New random passwords will be generated.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-primary" type="submit">Create permission test environment</button>
+      </form>
+      <form method="post" action="{{ url_for('admin_roles.permission_test_reset') }}"
+            data-confirm="Remove only permtest.* users and DEMO-* records? This cannot be undone.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-danger" type="submit">Reset permission test environment</button>
+      </form>
+    </div>
+    {% else %}
+    <p class="small text-muted mb-0">
+      Test-data actions are disabled. Set <code>ALLOW_PERMISSION_TEST_DATA=true</code> only on an appropriate instance.
+    </p>
+    {% endif %}
+
+    {% if permission_test_result and permission_test_result.seed %}
+      {% set seed = permission_test_result.seed %}
+      <div class="tm-credential-result mt-4" role="status">
+        <div class="d-flex flex-wrap justify-content-between gap-2">
+          <div>
+            <h3 class="h6 mb-1">Permission test environment ready</h3>
+            <p class="small mb-0">Credentials are shown only in this immediate response. Store them securely now.</p>
+          </div>
+          <button class="btn btn-sm btn-outline-primary" type="button" data-copy-credentials>Copy all</button>
+        </div>
+        <div class="table-responsive mt-3">
+          <table class="table table-sm align-middle mb-0">
+            <thead><tr><th>Scenario / roles</th><th>Email</th><th>Password</th><th>Links</th></tr></thead>
+            <tbody>
+              {% for item in seed.users %}
+              <tr data-credential-row>
+                <td><strong>{{ item.scenario }}</strong><small class="d-block">{{ item.roles|join(' + ') }}</small></td>
+                <td data-credential-email>{{ item.email }}</td>
+                <td><code data-credential-password>{{ item.password }}</code></td>
+                <td>
+                  {% for kind, value in item.linked.items() %}
+                  <span class="badge text-bg-light">{{ kind }}: {{ value }}</span>
+                  {% endfor %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="small mt-3 mb-0">
+          Users: {{ seed.counts.users_created }} created, {{ seed.counts.users_updated }} updated.
+          Created this run — customers {{ seed.counts.customers }}, suppliers {{ seed.counts.suppliers }},
+          jobs {{ seed.counts.jobs }}, orders {{ seed.counts.orders }},
+          parts {{ seed.counts.parts }}, BOM links {{ seed.counts.bom_links }}.
+          Current totals — customers {{ seed.counts.customers_total }}, suppliers {{ seed.counts.suppliers_total }},
+          jobs {{ seed.counts.jobs_total }}, orders {{ seed.counts.orders_total }},
+          parts {{ seed.counts.parts_total }}, BOM links {{ seed.counts.bom_links_total }}.
+        </p>
+      </div>
+    {% elif permission_test_result and permission_test_result.reset %}
+      <div class="alert alert-success mt-4 mb-0" role="status">
+        Test environment reset:
+        {% for kind, count in permission_test_result.reset.items() %}
+        <span class="text-nowrap">{{ kind }} {{ count }}{% if not loop.last %},{% endif %}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</section>
+<script src="{{ url_for('static', filename='admin-access.js') }}" defer></script>
 {% endblock %}

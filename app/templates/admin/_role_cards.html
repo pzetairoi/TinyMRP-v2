@@ -1,0 +1,48 @@
+<div data-role-editor>
+  <div class="row g-2 align-items-end mb-3">
+    <div class="col-md-7">
+      <label class="form-label" for="roleCardSearch">Search roles</label>
+      <input class="form-control" id="roleCardSearch" type="search" data-role-search
+             placeholder="Display name, slug or description">
+    </div>
+    <div class="col-md-5">
+      <div class="tm-role-summary" aria-live="polite">
+        <strong data-selected-role-count>0</strong> selected ·
+        <strong data-selected-permission-count>0</strong> unique permissions
+      </div>
+    </div>
+  </div>
+  {% if role_options %}
+  <div class="tm-role-card-grid">
+    {% for option in role_options %}
+    <label class="tm-role-card" data-role-card
+           data-role-search-value="{{ option.display_name }} {{ option.role.name }} {{ option.description }}"
+           data-role-permissions="{{ option.permissions|tojson|forceescape }}">
+      <input class="form-check-input" type="checkbox" name="roles" value="{{ option.role.id }}"
+             {% if option.role.id|string in assigned_ids %}checked{% endif %}>
+      <span class="tm-role-card__body">
+        <span class="d-flex flex-wrap align-items-center gap-2">
+          <strong>{{ option.display_name }}</strong>
+          <span class="badge rounded-pill {{ 'text-bg-primary' if option.is_standard else 'text-bg-light' }}">
+            {{ "Standard" if option.is_standard else "Custom" }}
+          </span>
+        </span>
+        <code>{{ option.role.name }}</code>
+        <small>{{ option.description or "No description" }}</small>
+        <span class="tm-role-card__count">{{ option.permission_count }} permissions</span>
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+  <details class="tm-effective-preview mt-3">
+    <summary>Effective permission preview (<span data-selected-permission-count>0</span>)</summary>
+    <p class="small text-muted mt-2 mb-2">Informational union of the checked roles. Server-side authorisation remains authoritative.</p>
+    <div class="d-flex flex-wrap gap-1" data-permission-union></div>
+  </details>
+  {% else %}
+  <div class="alert alert-info mb-0">
+    No roles are available. <a href="{{ url_for('admin_roles.roles_create') }}">Create a custom role</a>
+    or seed the standard catalogue first.
+  </div>
+  {% endif %}
+</div>
