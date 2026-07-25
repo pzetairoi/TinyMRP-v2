@@ -203,3 +203,16 @@ body.wide-page main.container {
 .p-treetable .p-treetable-tbody > tr.parts-review-row:hover > td {
   filter: brightness(0.98);
 }
+
+/*
+ * Long cell values (description, notes, link URLs, etc.) should wrap onto
+ * multiple lines once they hit the column's width instead of forcing the
+ * column wider or overflowing past its resize handle.
+ */
+.p-datatable .p-datatable-thead > tr > th,
+.p-datatable .p-datatable-tbody > tr > td,
+.p-treetable .p-treetable-thead > tr > th,
+.p-treetable .p-treetable-tbody > tr > td {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}

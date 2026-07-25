@@ -365,6 +365,8 @@ export default function BomPage() {
     scrollable
     scrollHeight="60vh"
     resizableColumns
+    columnResizeMode="expand"
+    tableStyle={{ tableLayout: 'fixed' }}
     showGridlines
     size="small"
     rowClassName={reviewRowClass}
@@ -410,6 +412,8 @@ export default function BomPage() {
               ? { width: 100 }
               : field.id === 'alt_group'
               ? { width: 140 }
+              : field.id === 'description'
+              ? { minWidth: '28ch', width: '32%' }
               : undefined
           }
         />
