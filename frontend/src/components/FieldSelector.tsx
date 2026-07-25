@@ -1,7 +1,39 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import type { FieldDefinition } from '../lib/fieldConfig'
+
+const MENU_MARGIN = 8
+const MENU_DEFAULT_WIDTH = 320
+const MENU_MIN_HEIGHT = 160
+
+type MenuPosition = { top: number; left: number; maxHeight: number }
+
+function computeMenuPosition(
+  triggerRect: DOMRect,
+  menuAlign: 'start' | 'end',
+  menuSize: { width: number; height: number } | null,
+): MenuPosition {
+  const viewportW = window.innerWidth
+  const viewportH = window.innerHeight
+  const width = menuSize?.width ?? MENU_DEFAULT_WIDTH
+
+  let left = menuAlign === 'start' ? triggerRect.left : triggerRect.right - width
+  left = Math.max(MENU_MARGIN, Math.min(left, viewportW - width - MENU_MARGIN))
+
+  const spaceBelow = viewportH - triggerRect.bottom - MENU_MARGIN
+  const spaceAbove = triggerRect.top - MENU_MARGIN
+  // Only flip upward once we know the menu's real height (post-mount) and it
+  // would genuinely fit better above the trigger than below it.
+  const openUpward = !!menuSize && menuSize.height > spaceBelow && spaceAbove > spaceBelow
+
+  const maxHeight = Math.max(MENU_MIN_HEIGHT, openUpward ? spaceAbove : spaceBelow)
+  const top = openUpward
+    ? Math.max(MENU_MARGIN, triggerRect.top - 4 - Math.min(menuSize!.height, maxHeight))
+    : triggerRect.bottom + 4
+
+  return { top, left, maxHeight }
+}
 
 type Props = {
   title: string
@@ -42,20 +74,20 @@ function SelectorBody({
   }
 
   return (
-    <div className="card shadow-sm">
-      <div className="card-body p-3">
-        <div className="d-flex align-items-center justify-content-between gap-2 mb-2">
+    <div className="card shadow-sm" style={{ display: 'flex', flexDirection: 'column', maxHeight: '100%' }}>
+      <div className="card-body p-3" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+        <div className="d-flex align-items-center justify-content-between gap-2 mb-2" style={{ flex: '0 0 auto' }}>
           <div className="fw-semibold small">{title}</div>
           <button type="button" className="btn btn-sm btn-outline-secondary" onClick={onReset}>
             Reset
           </button>
         </div>
-        <div className="d-flex gap-2 mb-2">
+        <div className="d-flex gap-2 mb-2" style={{ flex: '0 0 auto' }}>
           <button type="button" className="btn btn-sm btn-outline-secondary" onClick={selectAll}>
             Select all
           </button>
         </div>
-        <div className="row g-2">
+        <div className="row g-2" style={{ overflowY: 'auto', minHeight: 0, margin: 0 }}>
           {availableFields.map((field) => (
             <div key={field.id} className="col-12 col-md-6">
               <div className="form-check">
@@ -91,19 +123,27 @@ export default function FieldSelector(props: Props) {
     menuAlign = 'end',
   } = props
   const [open, setOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState<{ top: number; left?: number; right?: number } | null>(null)
+  const [menuPos, setMenuPos] = useState<MenuPosition | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
 
   function updateMenuPosition() {
     const rect = triggerRef.current?.getBoundingClientRect()
     if (!rect) return
-    if (menuAlign === 'start') {
-      setMenuPos({ top: rect.bottom + 4, left: Math.max(8, rect.left) })
-    } else {
-      setMenuPos({ top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) })
-    }
+    const menuRect = menuRef.current?.getBoundingClientRect()
+    setMenuPos(computeMenuPosition(rect, menuAlign, menuRect ? { width: menuRect.width, height: menuRect.height } : null))
   }
+
+  // First pass (on click, before mount) places the menu using a guessed width
+  // and caps it to the space below the trigger, so it's always at least
+  // scrollable-accessible. This second pass re-measures the mounted menu's
+  // real size and corrects the position/flip before the browser paints, so
+  // there's no visible jump.
+  useLayoutEffect(() => {
+    if (!open) return
+    updateMenuPosition()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -154,10 +194,11 @@ export default function FieldSelector(props: Props) {
             position: 'fixed',
             top: menuPos.top,
             left: menuPos.left,
-            right: menuPos.right,
             zIndex: 2000,
             minWidth: 320,
             maxWidth: 520,
+            maxHeight: menuPos.maxHeight,
+            overflow: 'hidden',
           }}
         >
           <SelectorBody {...props} />
