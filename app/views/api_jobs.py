@@ -17,6 +17,10 @@ from app.services.authorization import (
     scope_queryset,
 )
 from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW
+from app.services.field_policies import (
+    filter_response_fields,
+    response_context,
+)
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import utc_now
 from app.views.api_helpers import (
@@ -224,6 +228,20 @@ def _parse_bom(items) -> List[JobBOMLine]:
     return out
 
 
+def _part_references_allowed(user, pairs) -> bool:
+    expected = {
+        (
+            str(part_number or "").strip().casefold(),
+            clean_rev(revision).casefold(),
+        )
+        for part_number, revision in pairs
+        if str(part_number or "").strip()
+    }
+    if not expected:
+        return True
+    return authorised_part_pairs(user, pairs) == expected
+
+
 def _job_to_dict(job: Job, user=None):
     requested_pairs = [
         (line.pn, line.rev or "")
@@ -245,6 +263,40 @@ def _job_to_dict(job: Job, user=None):
         ) in allowed_parts
 
     primary_allowed = can_include(job.part_number, job.part_revision)
+    boundary = response_context("jobs", user)
+    stage_payloads = []
+    for stage in job.stages or []:
+        stage_payload = {
+            "stage_id": stage.stage_id,
+            "name": stage.name,
+            "sequence": stage.sequence,
+            "status": stage.status,
+            "assigned_to": stage.assigned_to,
+            "department": stage.department,
+            "estimated_hours": stage.estimated_hours,
+            "actual_hours": stage.actual_hours,
+            "note": stage.note,
+        }
+        add_datetime_fields(stage_payload, "started_at", stage.started_at)
+        add_datetime_fields(stage_payload, "completed_at", stage.completed_at)
+        stage_payloads.append(
+            filter_response_fields(
+                "job_stage",
+                user,
+                stage_payload,
+                context={"policy_context": boundary, "surface": "embedded"},
+            )
+        )
+    bom_payloads = [
+        filter_response_fields(
+            "job_bom_line",
+            user,
+            {"pn": line.pn, "rev": line.rev or "", "qty": float(line.qty or 0.0)},
+            context={"policy_context": boundary, "surface": "embedded"},
+        )
+        for line in (job.bom or [])
+        if can_include(line.pn, line.rev or "")
+    ]
     payload = {
         "job_number": job.job_number,
         "title": job.title,
@@ -262,25 +314,8 @@ def _job_to_dict(job: Job, user=None):
         "customer": getattr(job.customer, "name", None),
         "customer_id": str(job.customer.id) if job.customer else None,
         "order_number": job.order_number,
-        "stages": [
-            {
-                "stage_id": s.stage_id,
-                "name": s.name,
-                "sequence": s.sequence,
-                "status": s.status,
-                "assigned_to": s.assigned_to,
-                "department": s.department,
-                "estimated_hours": s.estimated_hours,
-                "actual_hours": s.actual_hours,
-                "note": s.note,
-            }
-            for s in (job.stages or [])
-        ],
-        "bom": [
-            {"pn": line.pn, "rev": line.rev or "", "qty": float(line.qty or 0.0)}
-            for line in (job.bom or [])
-            if can_include(line.pn, line.rev or "")
-        ],
+        "stages": stage_payloads,
+        "bom": bom_payloads,
     }
     for field_name, value in (
         ("scheduled_start", job.scheduled_start),
@@ -291,10 +326,12 @@ def _job_to_dict(job: Job, user=None):
         ("updated_at", job.updated_at),
     ):
         add_datetime_fields(payload, field_name, value)
-    for stage_payload, stage in zip(payload["stages"], job.stages or []):
-        add_datetime_fields(stage_payload, "started_at", stage.started_at)
-        add_datetime_fields(stage_payload, "completed_at", stage.completed_at)
-    return payload
+    return filter_response_fields(
+        "jobs",
+        user,
+        payload,
+        context={"policy_context": boundary},
+    )
 
 
 @bp.get("")
@@ -398,7 +435,16 @@ def create_job():
 
     part_number = (data.get("part_number") or "").strip()
     part_revision = (data.get("part_revision") or "").strip()
-    if part_number and not Part.objects(part_number=part_number).first():
+    requested_pairs = [(part_number, part_revision)] if part_number else []
+    requested_pairs.extend(
+        (
+            str(raw.get("pn") or raw.get("part_number") or "").strip(),
+            clean_rev(raw.get("rev") or raw.get("revision") or ""),
+        )
+        for raw in (data.get("bom") or [])
+        if isinstance(raw, dict)
+    )
+    if not _part_references_allowed(user, requested_pairs):
         return json_error("invalid_part", "Part number not found.", 400)
 
     status = (data.get("status") or "draft").strip()
@@ -508,14 +554,39 @@ def update_job(job_number):
     if not job:
         return json_error("not_found", "Job not found.", 404)
 
+    target_part_number = (
+        str(data.get("part_number") or "").strip()
+        if "part_number" in data
+        else str(job.part_number or "").strip()
+    )
+    target_part_revision = (
+        clean_rev(data.get("part_revision"))
+        if "part_revision" in data
+        else clean_rev(job.part_revision)
+    )
+    requested_pairs = (
+        [(target_part_number, target_part_revision)]
+        if target_part_number
+        else []
+    )
+    if "bom" in data:
+        requested_pairs.extend(
+            (
+                str(raw.get("pn") or raw.get("part_number") or "").strip(),
+                clean_rev(raw.get("rev") or raw.get("revision") or ""),
+            )
+            for raw in (data.get("bom") or [])
+            if isinstance(raw, dict)
+        )
+    if not _part_references_allowed(user, requested_pairs):
+        return json_error("invalid_part", "Part number not found.", 400)
+
     if "title" in data:
         job.title = (data.get("title") or "").strip()
     if "description" in data:
         job.description = (data.get("description") or "").strip()
     if "part_number" in data:
         pn = (data.get("part_number") or "").strip()
-        if pn and not Part.objects(part_number=pn).first():
-            return json_error("invalid_part", "Part number not found.", 400)
         job.part_number = pn
     if "part_revision" in data:
         job.part_revision = (data.get("part_revision") or "").strip()
@@ -690,12 +761,27 @@ def job_stats():
     if err:
         return err
     base = scope_queryset(Job.objects(is_deleted=False), user, "jobs")
-    return jsonify({
-        "ok": True,
-        "status_counts": {s: base.filter(status=s).count() for s in JOB_STATUS_FLOW.keys()},
-        "overdue": base.filter(status__in=["released", "in_progress"], scheduled_end__lt=utc_now()).count(),
-        "active": base.filter(status__in=["released", "in_progress"]).count(),
-    })
+    return jsonify(
+        filter_response_fields(
+            "job_stats",
+            user,
+            {
+                "ok": True,
+                "status_counts": {
+                    status: base.filter(status=status).count()
+                    for status in JOB_STATUS_FLOW
+                },
+                "overdue": base.filter(
+                    status__in=["released", "in_progress"],
+                    scheduled_end__lt=utc_now(),
+                ).count(),
+                "active": base.filter(
+                    status__in=["released", "in_progress"]
+                ).count(),
+            },
+            context={"policy_context": response_context("jobs", user)},
+        )
+    )
 
 
 @bp.get("/dashboard")

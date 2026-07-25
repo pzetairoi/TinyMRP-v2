@@ -9,7 +9,6 @@ import logging
 import re
 import os
 import time
-from urllib.parse import urlsplit
 
 from app.models.part import Part
 from app.models.job import Job
@@ -31,7 +30,6 @@ from app.services.insights import (
 from app.services.thumbs import preview_png_urls_for, drawing_png_urls_for
 from app.services.filescan import (
     datasheet_attr_present,
-    datasheet_url_from_attrs,
     discover_part_files,
     plan_part_file_refresh,
     remove_stale_part_files,
@@ -95,6 +93,12 @@ from app.services.export_security import (
     ExportSecurityError,
     exact_bom_pairs,
     preflight_export_plan,
+)
+from app.services.field_policies import (
+    allowed_read_fields,
+    filter_part_custom_fields,
+    filter_response_fields,
+    response_context,
 )
 from app.services.parts_delete import (
     delete_part_and_refs_cascade,
@@ -548,6 +552,65 @@ def _context_field_values(
     return config, attrs, values
 
 
+def _configured_custom_fields(config: dict) -> tuple[set[str], dict[str, str]]:
+    field_ids: set[str] = set()
+    attr_keys: dict[str, str] = {}
+    for field in config.get("fields") or []:
+        if not isinstance(field, dict) or field.get("kind") != "custom":
+            continue
+        field_id = str(field.get("id") or "").strip()
+        source_path = str(field.get("source_path") or "").strip()
+        if field_id:
+            field_ids.add(field_id)
+        if source_path.lower().startswith("attrs.") and len(source_path) > 6:
+            attr_keys[source_path[6:].lower()] = source_path[6:]
+    return field_ids, attr_keys
+
+
+def _safe_identity_profile(profile: dict | None, boundary: str) -> dict:
+    if not isinstance(profile, dict):
+        return {}
+    safe = filter_response_fields(
+        "profile",
+        current_user,
+        profile,
+        context={"policy_context": boundary, "surface": "embedded"},
+    )
+    label = str(safe.get("display_name") or safe.get("label") or "").strip()
+    if not label or "@" in label:
+        label = "User"
+    safe["label"] = label
+    return safe
+
+
+def _safe_comment_payload(comment: dict, boundary: str) -> dict:
+    payload = dict(comment or {})
+    payload["author_profile"] = _safe_identity_profile(
+        payload.get("author_profile"),
+        boundary,
+    )
+    payload["author_display"] = (
+        payload["author_profile"].get("label")
+        or (
+            str(payload.get("author_display") or "")
+            if "@" not in str(payload.get("author_display") or "")
+            else "User"
+        )
+        or "User"
+    )
+    payload["replies"] = [
+        _safe_comment_payload(reply, boundary)
+        for reply in (payload.get("replies") or [])
+        if isinstance(reply, dict)
+    ]
+    return filter_response_fields(
+        "comment",
+        current_user,
+        payload,
+        context={"policy_context": boundary, "surface": "embedded"},
+    )
+
+
 @bp.route("/parts_lazy", methods=["GET", "POST"])
 @login_required
 @require_permission("parts.read")
@@ -569,7 +632,20 @@ def parts_lazy():
     filters = body.get("filters", {}) or {}
 
     field_config = get_field_config()
-    parts_context_ids = context_field_ids("parts_list", field_config)
+    custom_field_ids, _custom_attr_keys = _configured_custom_fields(field_config)
+    visible_policy_fields = allowed_read_fields(
+        "parts",
+        current_user,
+        context={
+            "surface": "list",
+            "configured_fields": custom_field_ids,
+        },
+    )
+    parts_context_ids = [
+        field_id
+        for field_id in context_field_ids("parts_list", field_config)
+        if field_id in visible_policy_fields
+    ]
     field_meta = field_config_index(field_config)
     runtime_filter_ids = {field_id for field_id in parts_context_ids if field_requires_runtime_scan(field_id, field_config)}
     materialized_filter_ids = {field_id for field_id in parts_context_ids if field_uses_materialized_value(field_id, field_config)}
@@ -828,12 +904,18 @@ def parts_lazy():
             if path and path not in global_paths:
                 global_paths.append(path)
 
-        for field_id, fallback_path in (
+        searchable_fields = [
             ("part_number", "part_number"),
             ("description", "description"),
-            ("notes", "notes_search"),
-            ("comments", "comments_search"),
-        ):
+        ]
+        if has_permission(current_user, "comments.read"):
+            searchable_fields.extend(
+                [
+                    ("notes", "notes_search"),
+                    ("comments", "comments_search"),
+                ]
+            )
+        for field_id, fallback_path in searchable_fields:
             for path in query_paths_for_field(field_id, field_config):
                 _append_search_path(path)
             for source_path in effective_source_paths(field_id, field_config):
@@ -848,7 +930,12 @@ def parts_lazy():
             fallback_base_q = fallback_base_q & or_q
 
     review_statuses: dict[tuple[str, str], dict[str, object]] | None = None
-    review_filter = str(filter_value(filters, "pending_reviews", "") or "").strip().lower()
+    review_filter = (
+        str(filter_value(filters, "pending_reviews", "") or "").strip().lower()
+        if has_permission(current_user, "comments.read")
+        or has_permission(current_user, "markups.read")
+        else ""
+    )
     if review_filter:
         review_statuses = part_review_status_map()
         pending_pairs = [key for key, status in review_statuses.items() if bool(status.get("pending"))]
@@ -1131,7 +1218,10 @@ def parts_lazy():
         values.pop("comments", None)
         review_status = review_statuses.get((pn, rev), {"count": 0, "severity": "", "pending": False})
         out.append(
-            {
+            filter_response_fields(
+                "parts",
+                current_user,
+                {
                 "id": f"{pn}::{rev}",
                 "part_number": values.get("part_number", pn),
                 "revision": values.get("revision", rev),
@@ -1157,7 +1247,12 @@ def parts_lazy():
                 "pending_review_severity": str(review_status.get("severity") or ""),
                 "has_pending_reviews": bool(review_status.get("pending")),
                 **values,
-            }
+                },
+                context={
+                    "surface": "list",
+                    "configured_fields": custom_field_ids,
+                },
+            )
         )
 
     _t_rows = time.perf_counter()
@@ -1210,7 +1305,15 @@ def part_detail():
 
     attrs = harvest_part_attrs(p)
     notes_comments = annotation_payload(p, attrs)
-    visible_attrs = filtered_part_attrs(p)
+    field_config = get_field_config()
+    custom_field_ids, custom_attr_keys = _configured_custom_fields(field_config)
+    boundary = response_context("parts", current_user)
+    visible_attrs = filter_part_custom_fields(
+        current_user,
+        filtered_part_attrs(p),
+        configured_fields=custom_attr_keys,
+        context={"policy_context": boundary},
+    )
     norm_rev = _normalized_revision(p, attrs)
     meta = current_app.config.get("PROCESS_META", {})
     proc_list = normalize_process_list(attrs, list(p.processes or []), meta)
@@ -1250,16 +1353,20 @@ def part_detail():
             and managed_file_path_allowed(f)
         ):
             files[f.ext_group].append(
-                {
+                filter_response_fields(
+                    "file_metadata",
+                    current_user,
+                    {
                     "url": datasheet_file_url(f) if f.ext_group == "datasheet" else to_url(f),
                     "rel": f.rel_path or "",
                     "name": file_label(f),
-                }
+                    },
+                    context={
+                        "policy_context": boundary,
+                        "surface": "embedded",
+                    },
+                )
             )
-    datasheet_url = datasheet_url_from_attrs(attrs) if can_read_files else None
-    if datasheet_url:
-        datasheet_name = os.path.basename(urlsplit(datasheet_url).path) or "datasheet"
-        files["datasheet"].append({"url": datasheet_url, "rel": "", "name": datasheet_name})
     datasheet_summary_url = files["datasheet"][0]["url"] if files["datasheet"] else ""
     _, _, summary_field_values = _context_field_values(
         p,
@@ -1268,6 +1375,16 @@ def part_detail():
     )
     summary_field_values.update(approval_field_values(attrs))
     summary_field_values = serialize_field_values(summary_field_values)
+    summary_field_values = filter_response_fields(
+        "parts",
+        current_user,
+        summary_field_values,
+        context={
+            "policy_context": boundary,
+            "surface": "embedded",
+            "configured_fields": custom_field_ids,
+        },
+    )
 
     uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
     approver_identity = str(approval_field_values(attrs).get("approved_by") or "").strip()
@@ -1278,13 +1395,39 @@ def part_detail():
         for reply in (comment or {}).get("replies") or []:
             identity_keys.append(str((reply or {}).get("author") or "").strip())
     resolved_profiles = resolve_identity_profiles(identity_keys)
-    comments = [_comment_payload(comment, resolved_profiles) for comment in raw_comments]
+    comments = (
+        [
+            _safe_comment_payload(
+                _comment_payload(comment, resolved_profiles),
+                boundary,
+            )
+            for comment in raw_comments
+        ]
+        if boundary == "internal"
+        and has_permission(current_user, "comments.read")
+        else []
+    )
     uploader_profile = resolve_identity_profile(uploader_identity) if uploader_identity else None
     if uploader_identity:
         uploader_profile = resolved_profiles.get(uploader_identity.lower(), uploader_profile)
     approver_profile = resolve_identity_profile(approver_identity) if approver_identity else None
     if approver_identity:
         approver_profile = resolved_profiles.get(approver_identity.lower(), approver_profile)
+    uploader_profile = (
+        _safe_identity_profile(uploader_profile, boundary)
+        if boundary == "internal"
+        and has_permission(current_user, "markups.read")
+        else {}
+    )
+    approver_profile = (
+        _safe_identity_profile(approver_profile, boundary)
+        if boundary == "internal"
+        and (
+            has_permission(current_user, "reviews.approve")
+            or has_permission(current_user, "audit.read")
+        )
+        else {}
+    )
 
     wu_rows = _rows_for_child_pn(
         p.part_number,
@@ -1301,8 +1444,13 @@ def part_detail():
     ):
         attrs_v = harvest_part_attrs(op)
         rev_v = _normalized_revision(op, attrs_v)
+        if boundary != "internal":
+            break
         other_versions.append(
-            {
+            filter_response_fields(
+                "parts",
+                current_user,
+                {
                 "id": f"{pn_key}::{rev_v}",
                 "part_number": pn_key,
                 "revision": rev_v,
@@ -1311,10 +1459,32 @@ def part_detail():
                 "thumb_urls": thumb_urls_for(pn_key, rev_v, user=current_user)
                 if can_read_files
                 else [],
-            }
+                },
+                context={
+                    "policy_context": boundary,
+                    "surface": "embedded",
+                },
+            )
         )
 
-    jobs_orders = _jobs_orders_summary(p.part_number, norm_rev, current_user)
+    jobs_orders = [
+        filter_response_fields(
+            "whereused",
+            current_user,
+            row,
+            context={"policy_context": boundary, "surface": "embedded"},
+        )
+        for row in _jobs_orders_summary(p.part_number, norm_rev, current_user)
+    ]
+    wu_rows = [
+        filter_response_fields(
+            "whereused",
+            current_user,
+            row,
+            context={"policy_context": boundary, "surface": "embedded"},
+        )
+        for row in wu_rows
+    ]
 
     try:
         log_action(
@@ -1332,9 +1502,10 @@ def part_detail():
     can_parts_note = user_has_permission(current_user, "items.view")
     review_status = compute_part_review_status(p)
 
-    return jsonify(
+    part_payload = filter_response_fields(
+        "parts",
+        current_user,
         {
-            "part": {
                 "part_number": p.part_number,
                 "description": summary_field_values.get("description", p.description or attrs.get("description", "")),
                 "revision": norm_rev,
@@ -1351,7 +1522,17 @@ def part_detail():
                 "pending_review_count": int(review_status.get("count") or 0),
                 "pending_review_severity": str(review_status.get("severity") or ""),
                 "has_pending_reviews": bool(review_status.get("pending")),
-            },
+        },
+        context={
+            "policy_context": boundary,
+            "surface": "detail",
+            "configured_fields": custom_field_ids,
+        },
+    )
+
+    return jsonify(
+        {
+            "part": part_payload,
             "images": preview_urls,
             "drawing_urls": drawing_urls,
             "files": files,
@@ -1366,7 +1547,6 @@ def part_detail():
             "can_parts_delete": can_parts_delete,
             "can_parts_edit": can_parts_edit,
             "can_parts_note": can_parts_note,
-            "arena_file_link_base_url": current_app.config.get("ARENA_FILE_LINK_BASE_URL", ""),
         }
     )
 
@@ -1582,6 +1762,9 @@ def part_files_overview(pn: str):
 
     attrs = harvest_part_attrs(p)
     current_rev = _normalized_revision(p, attrs)
+    boundary = response_context("parts", current_user)
+    if boundary != "internal":
+        scoped_revisions = {current_rev.casefold()}
     rows: list[dict[str, Any]] = []
 
     for pf in (
@@ -1649,6 +1832,19 @@ def part_files_overview(pn: str):
         pass
 
     grouped = _group_file_overview_rows(rows, current_rev)
+    for section in [grouped["current_revision"], *grouped["other_revisions"]]:
+        section["files"] = [
+            filter_response_fields(
+                "file_metadata",
+                current_user,
+                row,
+                context={
+                    "policy_context": boundary,
+                    "surface": "detail",
+                },
+            )
+            for row in section.get("files") or []
+        ]
     return jsonify(
         {
             "part_number": p.part_number,
@@ -1725,7 +1921,10 @@ def part_insights(pn):
     missing_recommended = recommended_deliverables(classification, deliverables_present, attrs, has_bom)
 
     return jsonify(
-        {
+        filter_response_fields(
+            "part_insight",
+            current_user,
+            {
             "part_number": p.part_number,
             "revision": norm_rev,
             "classification": classification,
@@ -1735,7 +1934,12 @@ def part_insights(pn):
             "deliverables_missing_recommended": missing_recommended,
             "where_used_count": where_used_count,
             "total_qty_used": total_qty,
-        }
+            },
+            context={
+                "policy_context": response_context("parts", current_user),
+                "surface": "detail",
+            },
+        )
     )
 
 

@@ -11,6 +11,10 @@ from app.models.common import Contact, Address
 from app.services.api_auth import api_auth_required
 from app.services.authorization import authorised_get, has_permission, scope_queryset
 from app.services.biz_utils import generate_customer_code
+from app.services.field_policies import (
+    filter_response_fields,
+    response_context,
+)
 from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
 
 bp = Blueprint("customers_api", __name__, url_prefix="/api/customers")
@@ -84,6 +88,17 @@ _CUSTOMER_FINANCIAL_FIELDS = {
     "sales_rep",
     "industry",
 }
+_ADDRESS_FIELDS = {
+    "label",
+    "line1",
+    "line2",
+    "city",
+    "state",
+    "postal",
+    "country",
+    "is_default",
+}
+_CONTACT_FIELDS = {"name", "title", "email", "phone", "is_primary"}
 
 
 def _invalid_payload_fields(data, allowed):
@@ -94,6 +109,36 @@ def _invalid_payload_fields(data, allowed):
             f"Unsupported fields: {', '.join(invalid)}.",
             400,
         )
+    return None
+
+
+def _invalid_nested_fields(data):
+    for key in ("billing_address",):
+        value = data.get(key)
+        if value is not None and not isinstance(value, dict):
+            return json_error("invalid_address", "Address must be an object.", 400)
+        if isinstance(value, dict):
+            invalid = _invalid_payload_fields(value, _ADDRESS_FIELDS)
+            if invalid:
+                return invalid
+    addresses = data.get("shipping_addresses")
+    if addresses is not None and not isinstance(addresses, list):
+        return json_error("invalid_addresses", "Shipping addresses must be a list.", 400)
+    for value in addresses or []:
+        if not isinstance(value, dict):
+            return json_error("invalid_address", "Address must be an object.", 400)
+        invalid = _invalid_payload_fields(value, _ADDRESS_FIELDS)
+        if invalid:
+            return invalid
+    contacts = data.get("contacts")
+    if contacts is not None and not isinstance(contacts, list):
+        return json_error("invalid_contacts", "Contacts must be a list.", 400)
+    for value in contacts or []:
+        if not isinstance(value, dict):
+            return json_error("invalid_contact", "Contacts must be objects.", 400)
+        invalid = _invalid_payload_fields(value, _CONTACT_FIELDS)
+        if invalid:
+            return invalid
     return None
 
 
@@ -117,36 +162,68 @@ def _scoped_customer(user, code, permission):
     )
 
 
-def _customer_to_dict(c: Customer, *, include_financial=True):
-    return {
+def _address_to_dict(value, user, boundary):
+    if value is None:
+        return None
+    return filter_response_fields(
+        "address",
+        user,
+        {field: getattr(value, field, None) for field in _ADDRESS_FIELDS},
+        context={"policy_context": boundary, "surface": "embedded"},
+    )
+
+
+def _contact_to_dict(value, user, boundary):
+    return filter_response_fields(
+        "contact",
+        user,
+        {field: getattr(value, field, None) for field in _CONTACT_FIELDS},
+        context={"policy_context": boundary, "surface": "embedded"},
+    )
+
+
+def _customer_to_dict(c: Customer, *, user):
+    boundary = response_context("customers", user)
+    payload = {
         "code": c.code,
         "name": c.name,
         "description": c.description,
         "is_company": bool(c.is_company),
         "status": c.status,
-        "customer_type": c.customer_type if include_financial else None,
-        "segment": c.segment if include_financial else None,
+        "customer_type": c.customer_type,
+        "segment": c.segment,
         "tags": c.tags or [],
         "primary_contact": c.contact or "",
         "email": c.email,
         "website": c.website,
         "phone": c.phone,
-        "billing_address": (
-            c.billing_address.to_mongo()
-            if include_financial and c.billing_address
-            else None
-        ),
-        "shipping_addresses": [a.to_mongo() for a in (c.shipping_addresses or [])],
+        "billing_address": _address_to_dict(c.billing_address, user, boundary),
+        "shipping_addresses": [
+            _address_to_dict(address, user, boundary)
+            for address in (c.shipping_addresses or [])
+        ],
         "default_shipping_label": c.default_shipping_label,
-        "tax_id": c.tax_id if include_financial else None,
-        "payment_terms": c.payment_terms if include_financial else None,
-        "credit_limit": c.credit_limit if include_financial else None,
-        "discount_pct": c.discount_pct if include_financial else None,
-        "currency": c.currency if include_financial else None,
-        "sales_rep": c.sales_rep if include_financial else None,
-        "industry": c.industry if include_financial else None,
-        "contacts": [ct.to_mongo() for ct in (c.contacts or [])],
+        "tax_id": c.tax_id,
+        "payment_terms": c.payment_terms,
+        "credit_limit": c.credit_limit,
+        "discount_pct": c.discount_pct,
+        "currency": c.currency,
+        "sales_rep": c.sales_rep,
+        "industry": c.industry,
+        "contacts": [
+            _contact_to_dict(contact, user, boundary)
+            for contact in (c.contacts or [])
+        ],
     }
+    return filter_response_fields(
+        "customers",
+        user,
+        payload,
+        context={
+            "policy_context": boundary,
+            "preserve_null_fields": _CUSTOMER_FINANCIAL_FIELDS,
+        },
+    )
 
 
 @bp.get("")
@@ -182,10 +259,9 @@ def list_customers():
 
     total = q.count()
     items = q.order_by(sort_key).skip((page - 1) * size).limit(size)
-    financial = has_permission(user, "customers.financial.read")
     return jsonify({
         "ok": True,
-        "items": [_customer_to_dict(c, include_financial=financial) for c in items],
+        "items": [_customer_to_dict(c, user=user) for c in items],
         "page": page,
         "page_size": size,
         "total": total,
@@ -200,6 +276,9 @@ def create_customer():
         return err
     data = get_json()
     invalid = _invalid_payload_fields(data, _CUSTOMER_FIELDS)
+    if invalid:
+        return invalid
+    invalid = _invalid_nested_fields(data)
     if invalid:
         return invalid
     if set(data) & _CUSTOMER_FINANCIAL_FIELDS:
@@ -240,10 +319,7 @@ def create_customer():
     c.save()
     return jsonify({
         "ok": True,
-        "customer": _customer_to_dict(
-            c,
-            include_financial=has_permission(user, "customers.financial.read"),
-        ),
+        "customer": _customer_to_dict(c, user=user),
     })
 
 
@@ -258,10 +334,7 @@ def get_customer(code):
         return json_error("not_found", "Customer not found.", 404)
     return jsonify({
         "ok": True,
-        "customer": _customer_to_dict(
-            c,
-            include_financial=has_permission(user, "customers.financial.read"),
-        ),
+        "customer": _customer_to_dict(c, user=user),
     })
 
 
@@ -276,6 +349,9 @@ def update_customer(code):
         return json_error("not_found", "Customer not found.", 404)
     data = get_json()
     invalid = _invalid_payload_fields(data, _CUSTOMER_FIELDS - {"code"})
+    if invalid:
+        return invalid
+    invalid = _invalid_nested_fields(data)
     if invalid:
         return invalid
     if set(data) & _CUSTOMER_FINANCIAL_FIELDS:
@@ -304,10 +380,7 @@ def update_customer(code):
     c.save()
     return jsonify({
         "ok": True,
-        "customer": _customer_to_dict(
-            c,
-            include_financial=has_permission(user, "customers.financial.read"),
-        ),
+        "customer": _customer_to_dict(c, user=user),
     })
 
 
@@ -336,6 +409,9 @@ def add_shipping_address(code):
     )
     if invalid:
         return invalid
+    invalid = _invalid_nested_fields({"shipping_addresses": [data]})
+    if invalid:
+        return invalid
     addr = _parse_address(data)
     if not addr:
         return json_error("missing_address", "Address payload required.")
@@ -343,10 +419,7 @@ def add_shipping_address(code):
     c.save()
     return jsonify({
         "ok": True,
-        "customer": _customer_to_dict(
-            c,
-            include_financial=has_permission(user, "customers.financial.read"),
-        ),
+        "customer": _customer_to_dict(c, user=user),
     })
 
 
@@ -364,16 +437,25 @@ def customer_orders(code):
         .order_by("-order_date")
         .limit(50)
     )
-    financial = has_permission(user, "orders.financial.read")
+    boundary = response_context("customers", user)
     return jsonify({
         "ok": True,
         "orders": [
-            {
-                "order_number": o.order_number,
-                "status": o.status,
-                "total": o.total if financial else None,
-                "order_date": iso(o.order_date),
-            }
+            filter_response_fields(
+                "customer_order",
+                user,
+                {
+                    "order_number": o.order_number,
+                    "status": o.status,
+                    "total": o.total,
+                    "order_date": iso(o.order_date),
+                },
+                context={
+                    "policy_context": boundary,
+                    "surface": "embedded",
+                    "preserve_null_fields": {"total"},
+                },
+            )
             for o in orders
         ]
     })
@@ -393,12 +475,20 @@ def customer_stats(code):
     financial = has_permission(user, "orders.financial.read")
     revenue = float(orders.sum("total") or 0.0) if financial else None
     last = orders.order_by("-order_date").first()
-    return jsonify({
+    return jsonify(filter_response_fields(
+        "customer_stats",
+        user,
+        {
         "ok": True,
         "orders_count": total,
         "total_revenue": revenue,
         "last_order_date": iso(last.order_date) if last else None,
-    })
+        },
+        context={
+            "policy_context": response_context("customers", user),
+            "preserve_null_fields": {"total_revenue"},
+        },
+    ))
 
 
 @bp.get("/dashboard")
@@ -408,11 +498,10 @@ def customer_dashboard():
     if err:
         return err
     recent = scope_queryset(Customer.objects, user, "customers").order_by("-id").limit(10)
-    financial = has_permission(user, "customers.financial.read")
     return jsonify({
         "ok": True,
         "recent": [
-            _customer_to_dict(c, include_financial=financial)
+            _customer_to_dict(c, user=user)
             for c in recent
         ],
     })

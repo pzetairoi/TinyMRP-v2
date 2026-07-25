@@ -13,7 +13,12 @@ from app.services.authorization import (
     authorised_get,
     authorised_part_pairs,
     authorise,
+    authorise_part_access,
     scope_queryset,
+)
+from app.services.field_policies import (
+    filter_response_fields,
+    response_context,
 )
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
@@ -1057,6 +1062,21 @@ def job_bom_json(job_id):
     if not j:
         abort(404)
     rows = []
+    requested_pairs = [
+        (line.pn, _clean_rev(line.rev))
+        for line in (j.bom or [])
+        if str(line.pn or "").strip()
+    ]
+    expected_pairs = {
+        (
+            str(part_number or "").strip().casefold(),
+            _clean_rev(revision).casefold(),
+        )
+        for part_number, revision in requested_pairs
+    }
+    if authorised_part_pairs(current_user, requested_pairs) != expected_pairs:
+        abort(403)
+    boundary = response_context("jobs", current_user)
     can_manage = user_has_permission(current_user, "jobs.manage")
     orders = _orders_for_job(j)
     for line in (j.bom or []):
@@ -1076,14 +1096,43 @@ def job_bom_json(job_id):
                     qty_in_o += float(l.qty or 0)
             if qty_in_o > 0:
                 ordered += qty_in_o
-                links.append({"order_number": o.order_number, "href": url_for("admin_orders.orders_edit", order_id=str(o.id))})
-        rows.append({
-            "pn": pn, "rev": rev, "line_rev": stored_rev, "qty": req,
-            "ordered_qty": ordered,
-            "remaining_qty": max(req - ordered, 0.0),
-            "orders": links,
-            "can_manage": can_manage,
-        })
+                links.append(
+                    filter_response_fields(
+                        "order_reference",
+                        current_user,
+                        {
+                            "order_number": o.order_number,
+                            "href": url_for(
+                                "admin_orders.orders_edit",
+                                order_id=str(o.id),
+                            ),
+                        },
+                        context={
+                            "policy_context": response_context(
+                                "orders",
+                                current_user,
+                            ),
+                            "surface": "embedded",
+                        },
+                    )
+                )
+        rows.append(
+            filter_response_fields(
+                "job_bom_admin_line",
+                current_user,
+                {
+                    "pn": pn,
+                    "rev": rev,
+                    "line_rev": stored_rev,
+                    "qty": req,
+                    "ordered_qty": ordered,
+                    "remaining_qty": max(req - ordered, 0.0),
+                    "orders": links,
+                    "can_manage": can_manage,
+                },
+                context={"policy_context": boundary, "surface": "embedded"},
+            )
+        )
     return jsonify(rows)
 
 @bp.post("/<job_id>/bom_update")
@@ -1101,6 +1150,8 @@ def job_bom_update(job_id):
         qty = 1.0
     if not pn:
         return jsonify({"error":"missing pn"}), 400
+    if not authorise_part_access(current_user, pn, rev).allowed:
+        abort(404)
     updated = False
     if j.bom is None:
         j.bom = []
@@ -1138,6 +1189,8 @@ def job_bom_replace(job_id):
     npn = _canonical_pn(d.get("new_pn") or ""); nrev = _clean_rev(d.get("new_rev") or "")
     if not npn:
         return jsonify({"error":"missing new_pn"}), 400
+    if not authorise_part_access(current_user, npn, nrev).allowed:
+        abort(404)
     for line in (j.bom or []):
         if line.pn.lower() == opn.lower() and _clean_rev(line.rev) == orev:
             line.pn = npn; line.rev = nrev or ""; j.save(); return jsonify({"ok": True})

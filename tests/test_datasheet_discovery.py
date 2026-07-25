@@ -115,7 +115,7 @@ def test_refresh_files_recursive_discovers_attr_named_datasheets(client, app, us
     assert child_datasheet is not None
 
 
-def test_part_detail_includes_datasheet_files_and_attr_url(client, app, user, tmp_path):
+def test_part_detail_uses_protected_datasheet_metadata_only(client, app, user, tmp_path):
     role = Role(name="datasheet_viewer", permissions=["items.view"]).save()
     user.roles = [role]
     user.save()
@@ -154,10 +154,17 @@ def test_part_detail_includes_datasheet_files_and_attr_url(client, app, user, tm
     payload = resp.get_json() or {}
     datasheets = payload.get("files", {}).get("datasheet")
     assert isinstance(datasheets, list)
-    local_item = next((item for item in datasheets if item.get("rel") == "datasheet/vendor-file.pdf"), None)
+    local_item = next(
+        (item for item in datasheets if item.get("name") == "vendor-file.pdf"),
+        None,
+    )
     assert local_item is not None
     assert "/files/view/" in (local_item.get("url") or "")
-    assert any(item.get("url") == "https://example.com/file.pdf" for item in datasheets)
+    assert "rel" not in local_item
+    assert not any(
+        item.get("url") == "https://example.com/file.pdf"
+        for item in datasheets
+    )
     assert payload["part"]["field_values"]["datasheet"] == local_item["url"]
 
     local_preview = client.get(local_item["url"])

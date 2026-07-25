@@ -8,7 +8,6 @@ cache of users, roles, or permissions.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from copy import deepcopy
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any
@@ -85,26 +84,6 @@ _RESOURCE_ALIASES = {
     "order": "orders",
     "customer": "customers",
     "supplier": "suppliers",
-}
-
-# Stage 2 proves the hook. Complete portal/customer/supplier policies are
-# deliberately deferred to Stage 3.
-FIELD_FILTER_POLICIES: dict[str, frozenset[str]] = {
-    "parts": frozenset({"part_number", "revision", "description", "status"}),
-    "jobs": frozenset(
-        {
-            "id",
-            "job_number",
-            "title",
-            "description",
-            "part_number",
-            "part_revision",
-            "status",
-        }
-    ),
-    "orders": frozenset({"id", "order_number", "description", "kind", "status"}),
-    "customers": frozenset({"id", "code", "name", "description", "status"}),
-    "suppliers": frozenset({"id", "code", "name", "description", "status"}),
 }
 
 TRANSACTION_CONFLICT_ACTIONS = frozenset(
@@ -986,27 +965,20 @@ def filter_response_fields(
     *,
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Copy and minimally filter a response payload.
+    """Apply the central explicit Stage 3C1 response-property policy."""
 
-    Stage 3 will replace the example external allowlists with complete domain
-    policies. Unsupported or failed external policies return no fields.
-    """
+    from app.services.field_policies import filter_response_fields as apply_policy
 
-    if not isinstance(payload, Mapping):
-        return {}
-    copied = deepcopy(dict(payload))
-    normalized = _normalise_resource_type(resource_type)
-    valid, external = _is_external_field_context(user)
+    policy_context = context
     if context and bool(context.get("force_external")):
-        external = True
-    if not valid:
-        return {}
-    policy = FIELD_FILTER_POLICIES.get(normalized)
-    if policy is None:
-        return {}
-    if not external:
-        return copied
-    return {key: value for key, value in copied.items() if key in policy}
+        policy_context = dict(context)
+        policy_context.setdefault("policy_context", "customer_portal")
+    return apply_policy(
+        resource_type,
+        user,
+        payload,
+        context=policy_context,
+    )
 
 
 def check_transaction_conflict(

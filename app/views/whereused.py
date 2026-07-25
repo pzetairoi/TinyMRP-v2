@@ -17,9 +17,16 @@ from app.services.field_config import (
 from flask_login import current_user
 from app.services.authorization import (
     authorised_part_pairs,
+    has_permission,
     require_permission,
     scope_queryset,
 )
+from app.services.field_policies import (
+    allowed_read_fields,
+    filter_response_fields,
+    response_context,
+)
+from app.services.file_security import managed_file_group_allowed
 from app.services.part_norm import clean_rev
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
@@ -29,9 +36,11 @@ def _clean_rev(value: object) -> str:
 
 
 def _coverage_groups(pn: str, rev: str) -> set[str]:
+    if not has_permission(current_user, "files.read"):
+        return set()
     groups: set[str] = set()
     for row in PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev)).only("ext_group"):
-        if row.ext_group:
+        if row.ext_group and managed_file_group_allowed(current_user, row.ext_group):
             groups.add(str(row.ext_group).lower())
     return groups
 
@@ -112,7 +121,11 @@ def _rows_for_child_pn(
             continue
         attrs = harvest_part_attrs(parent_part) if parent_part else {}
         resolved_parent_rev = _clean_rev(attrs.get("revision", "") or parent_rev or "")
-        thumbs = thumb_urls_for(parent_pn, resolved_parent_rev)
+        thumbs = (
+            thumb_urls_for(parent_pn, resolved_parent_rev, user=user)
+            if user is not None and has_permission(user, "files.read")
+            else []
+        )
         coverage = _coverage_groups(parent_pn, resolved_parent_rev)
         values = resolve_part_field_values(
             parent_part,
@@ -162,10 +175,25 @@ def whereused_lazy():
     sort_order = int(p.get("sortOrder") or 1)
     filters = p.get("filters") or {}
     config = get_field_config()
+    custom_field_ids = {
+        str(field.get("id") or "").strip()
+        for field in config.get("fields") or []
+        if isinstance(field, dict)
+        and field.get("kind") == "custom"
+        and str(field.get("id") or "").strip()
+    }
+    visible_fields = allowed_read_fields(
+        "whereused",
+        current_user,
+        context={
+            "surface": "list",
+            "configured_fields": custom_field_ids,
+        },
+    )
 
     rows = _rows_for_child_pn(pn, rev, config=config, user=current_user)
 
-    filterable_ids = set(context_field_ids("where_used", config))
+    filterable_ids = set(context_field_ids("where_used", config)) & visible_fields
     field_meta = field_index(config)
     alias_map = {"parent_pn": "part_number", "parent_rev": "revision", "parent_desc": "description"}
     for raw_key, payload in filters.items():
@@ -188,7 +216,20 @@ def whereused_lazy():
         rows.sort(key=lambda r: (str(r.get(sort_field) or "")).lower(), reverse=reverse)
 
     total = len(rows)
-    page = rows[first:first+rows_per_page]
+    boundary = response_context("parts", current_user)
+    page = [
+        filter_response_fields(
+            "whereused",
+            current_user,
+            row,
+            context={
+                "policy_context": boundary,
+                "surface": "list",
+                "configured_fields": custom_field_ids,
+            },
+        )
+        for row in rows[first:first+rows_per_page]
+    ]
     try:
         log_action("whereused.view", resource_type="whereused", resource=f"{pn}:{rev or ''}")
     except Exception:

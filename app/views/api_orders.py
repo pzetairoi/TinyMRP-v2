@@ -20,6 +20,10 @@ from app.services.authorization import (
     scope_queryset,
 )
 from app.services.biz_utils import generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines
+from app.services.field_policies import (
+    filter_response_fields,
+    response_context,
+)
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import utc_now
 from app.views.api_helpers import (
@@ -222,7 +226,7 @@ def _parse_lines(items) -> List[OrderLine]:
     return consolidate_order_lines(out)
 
 
-def _order_to_dict(o: Order, *, include_financial=True, user=None):
+def _order_to_dict(o: Order, *, user=None):
     allowed_parts = (
         authorised_part_pairs(
             user,
@@ -240,6 +244,44 @@ def _order_to_dict(o: Order, *, include_financial=True, user=None):
             clean_rev(line.rev).casefold(),
         ) in allowed_parts
 
+    boundary = response_context("orders", user)
+    line_payloads = []
+    for line in o.lines or []:
+        if not can_include(line):
+            continue
+        line_payload = {
+            "pn": line.pn,
+            "rev": clean_rev(line.rev),
+            "qty": float(line.qty or 0.0),
+            "uom": line.uom,
+            "note": line.note,
+            "description": line.description,
+            "unit_price": line.unit_price,
+            "discount_pct": line.discount_pct,
+            "tax_pct": line.tax_pct,
+            "line_total": line.line_total,
+            "qty_shipped": line.qty_shipped,
+            "qty_received": line.qty_received,
+        }
+        add_datetime_fields(
+            line_payload,
+            "requested_delivery",
+            line.requested_delivery,
+        )
+        line_payloads.append(
+            filter_response_fields(
+                "order_line",
+                user,
+                line_payload,
+                context={
+                    "policy_context": boundary,
+                    "surface": "embedded",
+                    "order_kind": o.kind,
+                    "preserve_null_fields": _LINE_FINANCIAL_FIELDS
+                    | {"line_total"},
+                },
+            )
+        )
     payload = {
         "order_number": o.order_number,
         "kind": o.kind,
@@ -260,24 +302,7 @@ def _order_to_dict(o: Order, *, include_financial=True, user=None):
         "tracking_number": o.tracking_number,
         "approved_by": o.approved_by,
         "rejection_reason": o.rejection_reason,
-        "lines": [
-            {
-                "pn": l.pn,
-                "rev": clean_rev(l.rev),
-                "qty": float(l.qty or 0.0),
-                "uom": l.uom,
-                "note": l.note,
-                "description": l.description,
-                "unit_price": l.unit_price,
-                "discount_pct": l.discount_pct,
-                "tax_pct": l.tax_pct,
-                "line_total": l.line_total,
-                "qty_shipped": l.qty_shipped,
-                "qty_received": l.qty_received,
-            }
-            for l in (o.lines or [])
-            if can_include(l)
-        ],
+        "lines": line_payloads,
     }
     for field_name, value in (
         ("order_date", o.order_date),
@@ -289,15 +314,17 @@ def _order_to_dict(o: Order, *, include_financial=True, user=None):
         ("updated_at", o.updated_at),
     ):
         add_datetime_fields(payload, field_name, value)
-    for line_payload, line in zip(payload["lines"], o.lines or []):
-        add_datetime_fields(line_payload, "requested_delivery", line.requested_delivery)
-    if not include_financial:
-        for key in ("subtotal", "tax_amount", "shipping_cost", "discount_amount", "total"):
-            payload[key] = None
-        for line_payload in payload["lines"]:
-            for key in ("unit_price", "discount_pct", "tax_pct", "line_total"):
-                line_payload[key] = None
-    return payload
+    return filter_response_fields(
+        "orders",
+        user,
+        payload,
+        context={
+            "policy_context": boundary,
+            "order_kind": o.kind,
+            "preserve_null_fields": _ORDER_FINANCIAL_FIELDS
+            | {"subtotal", "tax_amount", "total"},
+        },
+    )
 
 
 def _list_orders(args, user):
@@ -780,12 +807,31 @@ def order_stats():
     month = base.filter(order_date__gte=utc_now().replace(day=1))
     count = base.count()
     total_value = float(base.sum("total") or 0.0) if financial else None
-    return jsonify({
-        "ok": True,
-        "status_counts": {s: base.filter(status=s).count() for s in ORDER_STATUS_FLOW.keys()},
-        "revenue_month": float(month.sum("total") or 0.0) if financial else None,
-        "avg_order_value": (total_value / count) if financial and count else (0.0 if financial else None),
-    })
+    return jsonify(
+        filter_response_fields(
+            "order_stats",
+            user,
+            {
+                "ok": True,
+                "status_counts": {
+                    status: base.filter(status=status).count()
+                    for status in ORDER_STATUS_FLOW
+                },
+                "revenue_month": (
+                    float(month.sum("total") or 0.0) if financial else None
+                ),
+                "avg_order_value": (
+                    (total_value / count)
+                    if financial and count
+                    else (0.0 if financial else None)
+                ),
+            },
+            context={
+                "policy_context": response_context("orders", user),
+                "preserve_null_fields": {"revenue_month", "avg_order_value"},
+            },
+        )
+    )
 
 
 @bp.get("/dashboard")
@@ -797,15 +843,14 @@ def order_dashboard():
     base = scope_queryset(Order.objects, user, "orders")
     recent = base.order_by("-order_date").limit(10)
     pending = base.filter(status__in=["draft", "submitted"]).order_by("-order_date").limit(10)
-    financial = has_permission(user, "orders.financial.read")
     return jsonify({
         "ok": True,
         "recent": [
-            _order_to_dict(o, include_financial=financial, user=user)
+            _order_to_dict(o, user=user)
             for o in recent
         ],
         "pending": [
-            _order_to_dict(o, include_financial=financial, user=user)
+            _order_to_dict(o, user=user)
             for o in pending
         ],
     })

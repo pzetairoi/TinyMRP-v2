@@ -14,11 +14,16 @@ from app.services.authorization import (
     authorised_get,
     authorised_part_pairs,
     authorise,
+    authorise_part_access,
     has_permission,
     order_kind_allowed,
     order_relationship_allowed,
     require_permission,
     scope_queryset,
+)
+from app.services.field_policies import (
+    filter_response_fields,
+    response_context,
 )
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
@@ -851,6 +856,21 @@ def order_lines_json(order_id):
             o.tax_amount = tax_total
             o.discount_amount = discount_total
             o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
+    requested_pairs = [
+        (line.pn, clean_rev(line.rev))
+        for line in (o.lines or [])
+        if str(line.pn or "").strip()
+    ]
+    expected_pairs = {
+        (
+            str(part_number or "").strip().casefold(),
+            clean_rev(revision).casefold(),
+        )
+        for part_number, revision in requested_pairs
+    }
+    if authorised_part_pairs(current_user, requested_pairs) != expected_pairs:
+        abort(403)
+    boundary = response_context("orders", current_user)
     rows = []
     for l in (o.lines or []):
         rev = clean_rev(l.rev)
@@ -859,7 +879,18 @@ def order_lines_json(order_id):
             req = _job_required_qty(o.job, l.pn, rev)
             tot_ord = _total_ordered_for_job(o.job, l.pn, rev)
             row.update(job_required_qty=req, total_ordered_for_job=tot_ord)
-        rows.append(row)
+        rows.append(
+            filter_response_fields(
+                "order_line",
+                current_user,
+                row,
+                context={
+                    "policy_context": boundary,
+                    "surface": "embedded",
+                    "order_kind": o.kind,
+                },
+            )
+        )
     return jsonify(rows)
 
 @bp.post("/<order_id>/lines_update")
@@ -877,6 +908,8 @@ def order_lines_update(order_id):
     uom = (d.get('uom') or 'EA').strip(); note = (d.get('note') or '').strip()
     if not pn:
         return jsonify({"error":"missing pn"}), 400
+    if not authorise_part_access(current_user, pn, rev).allowed:
+        abort(404)
     found = False
     if o.lines is None:
         o.lines = []
@@ -897,7 +930,17 @@ def order_lines_update(order_id):
     o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
     o.updated_at = utc_now()
     o.save()
-    return jsonify({"ok": True, "total": o.total})
+    return jsonify(
+        filter_response_fields(
+            "order_mutation",
+            current_user,
+            {"ok": True, "total": o.total},
+            context={
+                "policy_context": response_context("orders", current_user),
+                "preserve_null_fields": {"total"},
+            },
+        )
+    )
 
 @bp.post("/<order_id>/lines_remove")
 @permissions_required("orders.update")
@@ -918,4 +961,18 @@ def order_lines_remove(order_id):
         o.total = max(subtotal - discount_total + tax_total + float(o.shipping_cost or 0.0), 0.0)
         o.updated_at = utc_now()
         o.save()
-    return jsonify({"ok": True, "removed": before - len(o.lines), "total": o.total})
+    return jsonify(
+        filter_response_fields(
+            "order_mutation",
+            current_user,
+            {
+                "ok": True,
+                "removed": before - len(o.lines),
+                "total": o.total,
+            },
+            context={
+                "policy_context": response_context("orders", current_user),
+                "preserve_null_fields": {"total"},
+            },
+        )
+    )
