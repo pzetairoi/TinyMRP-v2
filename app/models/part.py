@@ -43,6 +43,7 @@ class Part(Document):
             { "fields": ["part_number"], "name": "part_number_idx" },
             { "fields": ["revision"], "name": "parts_revision_idx" },
             { "fields": ["updated_at"], "name": "parts_updated_at_idx" },
+            { "fields": ["created_at"], "name": "parts_created_at_idx" },
             { "fields": ["processes"], "name": "parts_processes_idx" },
             { "fields": ["description"], "name": "parts_description_idx" },
             { "fields": ["notes_search"], "name": "parts_notes_search_idx" },

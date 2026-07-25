@@ -28,6 +28,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         private TextBox _bomTemplateText;
         private TextBox _blankTemplateText;
         private TextBox _dxfSheetNamesText;
+        private TextBox _quickDxfSheetNamesText;
         private CheckBox _removeModifiedNotesCheck;
         private CheckBox _topLevelOnlyCheck;
         private CheckBox _overwriteCheck;
@@ -981,6 +982,28 @@ namespace TinyMRP.SolidWorksAddin.UI
             });
             AddSection(panel, CreateGroupBox("Connection", connectionWrap));
 
+            var drawingExport = CreateFormLayout();
+            _quickDxfSheetNamesText = new TextBox { Width = 220 };
+            AddField(drawingExport, "DXF sheet names", _quickDxfSheetNamesText);
+            var dxfSheetNamesNote = new Label
+            {
+                Text = "Separate multiple names with ; , or |. Matching ignores case, spaces, and punctuation, and matches partial names (e.g. \"dxf\" also matches \"DXF Sheet\" and \"DXF_Page_1\").",
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                MaximumSize = new Size(520, 0),
+                Padding = new Padding(0, 4, 0, 0)
+            };
+            var drawingExportWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            drawingExportWrap.Controls.Add(drawingExport);
+            drawingExportWrap.Controls.Add(dxfSheetNamesNote);
+            AddSection(panel, CreateGroupBox("Drawing export", drawingExportWrap));
+
             var actions = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
@@ -1100,7 +1123,24 @@ namespace TinyMRP.SolidWorksAddin.UI
             var drawingExport = CreateFormLayout();
             _dxfSheetNamesText = new TextBox { Width = 200 };
             AddField(drawingExport, "DXF sheet names", _dxfSheetNamesText);
-            AddSection(panel, CreateGroupBox("Drawing export", drawingExport));
+            var dxfSheetNamesNote = new Label
+            {
+                Text = "Separate multiple names with ; , or |. Matching ignores case, spaces, and punctuation, and matches partial names (e.g. \"dxf\" also matches \"DXF Sheet\" and \"DXF_Page_1\").",
+                AutoSize = true,
+                MaximumSize = new Size(320, 0),
+                ForeColor = SystemColors.GrayText,
+                Padding = new Padding(0, 4, 0, 0)
+            };
+            var drawingExportWrap = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.TopDown,
+                AutoSize = true,
+                WrapContents = false,
+                Dock = DockStyle.Fill
+            };
+            drawingExportWrap.Controls.Add(drawingExport);
+            drawingExportWrap.Controls.Add(dxfSheetNamesNote);
+            AddSection(panel, CreateGroupBox("Drawing export", drawingExportWrap));
 
             var web = CreateFormLayout();
             _weblinkText = new TextBox { Width = 200 };
@@ -1982,6 +2022,10 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 _dxfSheetNamesText.Text = config.DxfSheetNames ?? string.Empty;
             }
+            if (_quickDxfSheetNamesText != null)
+            {
+                _quickDxfSheetNamesText.Text = config.DxfSheetNames ?? string.Empty;
+            }
 
             if (_removeModifiedNotesCheck != null)
             {
@@ -2078,9 +2122,10 @@ namespace TinyMRP.SolidWorksAddin.UI
                 config.RemoveModifiedNotes = _removeModifiedNotesCheck.Checked;
             }
 
-            if (_dxfSheetNamesText != null)
+            if (_quickDxfSheetNamesText != null || _dxfSheetNamesText != null)
             {
-                config.DxfSheetNames = _dxfSheetNamesText.Text;
+                config.DxfSheetNames = GetPreferredText(
+                    _quickDxfSheetNamesText, _dxfSheetNamesText, config.DxfSheetNames ?? string.Empty);
             }
 
             string schemeId = GetDefaultSchemeId();

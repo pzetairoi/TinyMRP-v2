@@ -51,6 +51,7 @@ const FALLBACK_PART_FIELDS: FieldDefinition[] = [
   { id: 'thumbnail', label: 'Thumbnail', kind: 'special', filterable: false, sortable: false },
   { id: 'part_number', label: 'Part Number', kind: 'builtin', filterable: true, sortable: true },
   { id: 'revision', label: 'Revision', kind: 'builtin', filterable: true, sortable: true },
+  { id: 'created_at', label: 'Added', kind: 'builtin', data_type: 'date', filterable: true, sortable: true },
   { id: 'description', label: 'Description', kind: 'builtin', filterable: true, sortable: true },
   { id: 'material', label: 'Material', kind: 'builtin', filterable: true, sortable: true },
   { id: 'finish', label: 'Finish', kind: 'builtin', filterable: true, sortable: true },
@@ -117,11 +118,12 @@ export default function PartsPage() {
   const [fieldConfig, setFieldConfig] = useState<FieldConfigPayload | null>(null)
   const [fieldPreferences, setFieldPreferences] = useState<FieldPreferences | null>(null)
   const [lazy, setLazy] = useState({
-    first: 0, rows: 25, sortField: 'part_number', sortOrder: 1 as 1|-1,
+    first: 0, rows: 25, sortField: 'created_at', sortOrder: -1 as 1|-1,
     filters: {
       global:      { value: initialQ, matchMode: FilterMatchMode.CONTAINS },
       part_number: { value: '', matchMode: FilterMatchMode.CONTAINS },
       revision:    { value: '', matchMode: FilterMatchMode.CONTAINS },
+      created_at:  { value: '', matchMode: FilterMatchMode.DATE_IS },
       description: { value: '', matchMode: FilterMatchMode.CONTAINS },
       category:    { value: '', matchMode: FilterMatchMode.CONTAINS },
       material:    { value: '', matchMode: FilterMatchMode.CONTAINS },
@@ -393,7 +395,10 @@ export default function PartsPage() {
     if (fieldId === 'thumbnail') return { width: 110 }
     if (fieldId === 'part_number') return { minWidth: '12ch', width: '12ch' }
     if (fieldId === 'revision') return { width: 90 }
+    if (fieldId === 'created_at') return { minWidth: '11ch', width: 120 }
     if (fieldId === 'description') return { minWidth: '32ch', width: '40%' }
+    if (fieldId === 'notes' || fieldId === 'comments') return { minWidth: '24ch', width: '28%' }
+    if (fieldId === 'link') return { minWidth: '8ch', width: 90 }
     return undefined
   }
 
@@ -619,7 +624,7 @@ export default function PartsPage() {
         onSort={(e) =>
            setLazy(s => ({
              ...s,
-             sortField: e.sortField || 'part_number',
+             sortField: e.sortField || 'created_at',
              sortOrder: (e.sortOrder === -1 ? -1 : 1) as 1 | -1
            }))
          }
@@ -627,6 +632,7 @@ export default function PartsPage() {
         filterDisplay="row" removableSort rowsPerPageOptions={[10,25,50,100]}
         stripedRows responsiveLayout="scroll"
         resizableColumns
+        columnResizeMode="expand"
         tableStyle={{ tableLayout: 'fixed' }}
         rowClassName={reviewRowClass}
       >

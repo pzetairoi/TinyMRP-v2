@@ -3941,6 +3941,8 @@ function isExternalDatasheetUrl(url: string): boolean {
             scrollable
             scrollHeight="55vh"
             resizableColumns
+            columnResizeMode="expand"
+            tableStyle={{ tableLayout: 'fixed' }}
             size="small"
           >
             <Column
@@ -3978,6 +3980,8 @@ function isExternalDatasheetUrl(url: string): boolean {
                   ? { width: 90 }
                   : field.id === "qty"
                   ? { width: 110 }
+                  : field.id === "description"
+                  ? { minWidth: "28ch", width: "32%" }
                   : undefined
               return (
                 <Column
@@ -4021,6 +4025,8 @@ function isExternalDatasheetUrl(url: string): boolean {
             scrollable
             scrollHeight="55vh"
             resizableColumns
+            columnResizeMode="expand"
+            tableStyle={{ tableLayout: 'fixed' }}
             size="small"
             rowClassName={flatReviewRowClassName}
           >
@@ -4048,6 +4054,8 @@ function isExternalDatasheetUrl(url: string): boolean {
                   ? { width: 90 }
                   : field.id === "qty"
                   ? { width: 110 }
+                  : field.id === "description"
+                  ? { minWidth: "28ch", width: "32%" }
                   : undefined
               const label = isThumbnail ? "" : field.id === "qty" ? "Total Qty" : field.label
               return (
