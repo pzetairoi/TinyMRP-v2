@@ -955,7 +955,15 @@ function isExternalDatasheetUrl(url: string): boolean {
   const thumbOnlyBody = (row: any) => {
     const data = bomData(row);
     const urls: string[] = Array.isArray(data?.thumb_urls) ? data.thumb_urls : [];
-    return <ThumbImg urls={urls} maxH={32} maxW={48} />;
+    const bomPn = data?.part_number || data?.pn || "";
+    const bomRev = data?.revision || data?.rev || "";
+    const image = <ThumbImg urls={urls} maxH={32} maxW={48} />;
+    if (isSharedView) {
+      return sharedAllowsChildren
+        ? <Link to={sharedPartHref(bomPn, bomRev)} aria-label={`Open ${bomPn} details`}>{image}</Link>
+        : image;
+    }
+    return <a href={`/ui/part/${encodeURIComponent(bomPn)}?rev=${encodeURIComponent(bomRev)}`} aria-label={`Open ${bomPn} details`}>{image}</a>;
   };
 
   const pnBody = (row: any) => {
@@ -1009,7 +1017,10 @@ function isExternalDatasheetUrl(url: string): boolean {
   function renderWhereUsedCell(field: FieldDefinition, row: WURow & Record<string, any>) {
     const value = row?.[field.id];
     if (field.id === "thumbnail") {
-      return <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />;
+      const image = <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />;
+      return isSharedView
+        ? image
+        : <Link to={`/ui/part/${encodeURIComponent(row.part_number)}?rev=${encodeURIComponent(row.revision || "")}`} aria-label={`Open ${row.part_number} details`}>{image}</Link>;
     }
     if (field.id === "part_number") {
       return isSharedView
@@ -3443,7 +3454,7 @@ function isExternalDatasheetUrl(url: string): boolean {
           {!isSharedView && versions.length > 1 && (
             <TabPanel header={tabHeader("Other versions", "pi-history")}>
               <DataTable value={versions} dataKey="id" responsiveLayout="scroll" stripedRows>
-                <Column header="" body={(r: VersionRow) => <ThumbImg urls={r.thumb_urls || []} maxH={32} maxW={48} />} style={{width:60}} />
+                <Column header="" body={(r: VersionRow) => <a href={`/ui/part/${encodeURIComponent(r.part_number)}?rev=${encodeURIComponent(r.revision || "")}`} aria-label={`Open ${r.part_number} details`}><ThumbImg urls={r.thumb_urls || []} maxH={32} maxW={48} /></a>} style={{width:60}} />
                 <Column field="part_number" header="Part Number" body={(r: VersionRow) => <a href={`/ui/part/${encodeURIComponent(r.part_number)}?rev=${encodeURIComponent(r.revision||"")}`}>{r.part_number}</a>} sortable />
                 <Column field="revision" header="Rev" sortable />
                 <Column field="description" header="Description" sortable />
@@ -3982,8 +3993,6 @@ function isExternalDatasheetUrl(url: string): boolean {
             scrollable
             scrollHeight="55vh"
             resizableColumns
-            stateKey="tinymrp-part-detail-bom-tree-layout-v1"
-            stateStorage="local"
             reorderableColumns
             onColReorder={(event) => persistDraggedColumnOrder("bom_tree", selectedBomIds, event.columns)}
             columnResizeMode="expand"

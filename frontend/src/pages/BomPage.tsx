@@ -322,7 +322,9 @@ export default function BomPage() {
     const value = node?.data?.[field.id]
     if (field.id === 'thumbnail') {
       const urls = node?.data?.thumb_urls || []
-      return <ThumbImg urls={urls} maxH={32} maxW={48} />
+      const cpn = node?.data?.part_number || node?.data?.pn || ''
+      const crev = node?.data?.revision || node?.data?.rev || ''
+      return <a href={`/ui/part/${encodeURIComponent(cpn)}?rev=${encodeURIComponent(crev)}`} aria-label={`Open ${cpn} details`}><ThumbImg urls={urls} maxH={32} maxW={48} /></a>
     }
     if (field.id === 'part_number') {
       const cpn = node?.data?.part_number || node?.data?.pn || ''
@@ -334,8 +336,10 @@ export default function BomPage() {
 
   function renderWhereUsedCell(field: FieldDefinition, row: WURow) {
     const value = row?.[field.id]
-    if (field.id === 'thumbnail') return <ThumbImg urls={row.parent_thumb_urls || []} maxH={28} maxW={44} />
-    if (field.id === 'part_number') return formatFieldValue(row.part_number || row.parent_pn)
+    const partNumber = row.part_number || row.parent_pn
+    const revision = row.revision || ''
+    if (field.id === 'thumbnail') return <a href={`/ui/part/${encodeURIComponent(partNumber)}?rev=${encodeURIComponent(revision)}`} aria-label={`Open ${partNumber} details`}><ThumbImg urls={row.parent_thumb_urls || []} maxH={28} maxW={44} /></a>
+    if (field.id === 'part_number') return <a href={`/ui/part/${encodeURIComponent(partNumber)}?rev=${encodeURIComponent(revision)}`}>{partNumber}</a>
     return formatFieldValue(value)
   }
 
@@ -389,8 +393,6 @@ export default function BomPage() {
     scrollable
     scrollHeight="60vh"
     resizableColumns
-    stateKey="tinymrp-bom-browser-tree-layout-v1"
-    stateStorage="local"
     columnResizeMode="expand"
     tableStyle={{ tableLayout: 'fixed' }}
     showGridlines
