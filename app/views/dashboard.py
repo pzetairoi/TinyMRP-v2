@@ -13,7 +13,7 @@ from app.models.part import Part
 from app.models.artifact import PartFile
 from app.models.bom import BOMLink
 from app.services.attrs import approval_filter_raw, harvest_part_attrs
-from app.services.acl import allowed_parts_for, require_items_view
+from app.services.authorization import require_permission, scope_queryset
 from app.services.insights import classify_part
 from app.services.timezone_utils import utc_now
 from app.views.api_helpers import add_datetime_fields
@@ -155,10 +155,30 @@ def _top_processes(allowed: Optional[set[Tuple[str, str]]]) -> List[Dict[str, ob
 
 
 def _top_hardware_usage(allowed: Optional[set[Tuple[str, str]]]) -> List[Dict[str, object]]:
-    match_stage = _allowed_match_stage(allowed, "child_pn", "child_rev")
     pipeline: List[Dict] = []
-    if match_stage:
-        pipeline.append(match_stage)
+    if allowed is not None:
+        child_pairs = [
+            {"child_pn": pn, "child_rev": rev}
+            for pn, rev in allowed
+            if pn
+        ]
+        parent_pairs = [
+            {"parent_pn": pn, "parent_rev": rev}
+            for pn, rev in allowed
+            if pn
+        ]
+        if not child_pairs or not parent_pairs:
+            return []
+        pipeline.append(
+            {
+                "$match": {
+                    "$and": [
+                        {"$or": child_pairs},
+                        {"$or": parent_pairs},
+                    ]
+                }
+            }
+        )
     pipeline.extend(
         [
             {
@@ -194,7 +214,7 @@ def _top_hardware_usage(allowed: Optional[set[Tuple[str, str]]]) -> List[Dict[st
     for row in rows:
         pn = row.get("_id", {}).get("pn") or ""
         rev = row.get("_id", {}).get("rev") or ""
-        p = part_map.get((pn, rev)) or part_map.get((pn, "")) or Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+        p = part_map.get((pn, rev))
         if not p:
             continue
         attrs = harvest_part_attrs(p)
@@ -217,21 +237,21 @@ def _top_hardware_usage(allowed: Optional[set[Tuple[str, str]]]) -> List[Dict[st
 
 @bp.get("/summary")
 @login_required
-@require_items_view
+@require_permission("parts.read")
 def dashboard_summary():
     cache_key = _cache_key()
     cached = _get_cache(cache_key)
     if cached is not None:
         return jsonify(cached)
 
-    allowed = allowed_parts_for(current_user)
-    allowed_q = _allowed_q(allowed)
-    base = Part.objects
-    if allowed_q is not None:
-        base = base.filter(allowed_q)
+    base = scope_queryset(Part.objects, current_user, "parts")
+    allowed = {
+        (str(pn or "").strip(), str(rev or "").strip())
+        for pn, rev in base.scalar("part_number", "revision")
+    }
 
     total_parts = base.count()
-    if allowed is not None and not allowed:
+    if not allowed:
         empty = {
             "counts": {"total_parts": 0, "updated_7d": 0, "approved": 0},
             "doc_coverage": {"pdf": 0, "png": 0, "dxf": 0, "step": 0, "datasheet": 0},

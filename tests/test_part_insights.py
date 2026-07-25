@@ -16,7 +16,19 @@ def test_part_insights_shape(client, user):
     user.save()
     _login(client, user)
 
-    part = Part(part_number="HW-55", revision="", description="Washer", processes=["hardware"], attrs={"material": "Steel"}).save()
+    part = Part(
+        part_number="HW-55",
+        revision="",
+        description="Washer",
+        processes=["hardware"],
+        attrs={"material": "Steel", "approvedby": "QA Person"},
+    ).save()
+    Part(
+        part_number="ASM-500",
+        revision="",
+        description="Assembly",
+        attrs={"approvedby": "QA Person"},
+    ).save()
     BOMLink(parent_pn="ASM-500", parent_rev="", child_pn=part.part_number, child_rev="", qty=3).save()
     PartFile(
         part_number=part.part_number,
@@ -47,7 +59,11 @@ def test_datasheet_url_counts_as_present_in_parts_list_and_insights(client, user
         revision="A",
         description="Purchased component",
         processes=["hardware"],
-        attrs={"material": "Steel", "datasheet": "https://example.com/file.pdf"},
+        attrs={
+            "material": "Steel",
+            "datasheet": "https://example.com/file.pdf",
+            "approvedby": "QA Person",
+        },
     ).save()
 
     list_resp = client.post("/api/parts_lazy", json={"first": 0, "rows": 25, "filters": {}})

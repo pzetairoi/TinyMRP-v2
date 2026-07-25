@@ -5,6 +5,7 @@ from mongoengine.errors import DoesNotExist, ValidationError
 from flask_security import roles_required, current_user
 from flask_security.utils import hash_password
 from app.services.audit import log_action
+from app.services.authorization import require_permission
 from ..models.auth import User, Role
 from ..models.job import Job
 from ..models.supplier import Supplier
@@ -527,7 +528,7 @@ def users_edit(user_id):
 
 
 @bp.route("/purge-parts", methods=["GET", "POST"])
-@roles_required("admin")
+@require_permission("parts.purge")
 def purge_parts():
     """Dangerous action: delete all Parts, BOM links, and PartFiles.
     Requires admin and explicit POST with CSRF.

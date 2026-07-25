@@ -2,6 +2,7 @@ from datetime import datetime
 
 from app.models.app_settings import AppSettings
 from app.models.api_token import ApiToken
+from app.models.auth import Role
 from app.models.numbering import NumberingScheme
 from app.models.user_settings import UserSettings
 from app.services.api_tokens import create_token
@@ -57,6 +58,12 @@ def test_auth_check_requires_token_without_session_fallback(client):
 
 
 def test_settings_and_numbering_with_bearer(client, user):
+    role = Role(
+        name="number_allocator",
+        permissions=["numbering.allocate"],
+    ).save()
+    user.roles = [role]
+    user.save()
     token_doc, raw = create_token(user, "settings")
     headers = _auth_headers(raw)
 

@@ -619,23 +619,49 @@ def _scope_orders(queryset: Any, scope: _ScopeContext, modes: frozenset[str]) ->
     return queryset.filter(query) if has_clause else _deny_all(queryset)
 
 
-def _scope_parts(queryset: Any, user: Any) -> Any:
+def _scope_parts(
+    queryset: Any,
+    user: Any,
+    modes: frozenset[str],
+) -> Any:
     from mongoengine.queryset.visitor import Q
+    from app.services.attrs import approval_filter_raw
+
+    scoped = queryset
+    if "global" not in modes:
+        allowed = _relationship_part_pairs(user)
+        if allowed is None or not allowed:
+            return _deny_all(queryset)
+        query = Q()
+        has_clause = False
+        for part_number, revision in allowed:
+            pn = str(part_number or "").strip()
+            rev = str(revision or "").strip()
+            if not pn:
+                continue
+            query |= Q(part_number__iexact=pn, revision__iexact=rev)
+            has_clause = True
+        if not has_clause:
+            return _deny_all(queryset)
+        scoped = scoped.filter(query)
+    if not has_permission(user, "parts.read_unreleased"):
+        scoped = scoped.filter(__raw__=approval_filter_raw(approved=True))
+    return scoped
+
+
+def _relationship_part_pairs(user: Any) -> Any:
+    """Request-cache the exact relationship-derived part identities."""
+
+    cache = _request_cache("part_scope_pairs")
+    key = _cache_key(user)
+    if cache is not None and key in cache:
+        return cache[key]
     from app.services.acl import allowed_parts_for
 
     allowed = allowed_parts_for(user)
-    if allowed is None or not allowed:
-        return _deny_all(queryset)
-    query = Q()
-    has_clause = False
-    for part_number, revision in allowed:
-        pn = str(part_number or "").strip()
-        rev = str(revision or "").strip()
-        if not pn:
-            continue
-        query |= Q(part_number__iexact=pn, revision__iexact=rev)
-        has_clause = True
-    return queryset.filter(query) if has_clause else _deny_all(queryset)
+    if cache is not None:
+        cache[key] = allowed
+    return allowed
 
 
 def scope_queryset(
@@ -663,12 +689,14 @@ def scope_queryset(
         if not scope.valid:
             return _deny_all(queryset)
         modes = _scope_modes(scope, normalized, required_permission)
+        if normalized == "parts":
+            if not modes:
+                return _deny_all(queryset)
+            return _scope_parts(queryset, user, modes)
         if "global" in modes:
             return queryset
         if not modes:
             return _deny_all(queryset)
-        if normalized == "parts":
-            return _scope_parts(queryset, user)
         if normalized == "jobs":
             return _scope_jobs(queryset, scope, modes)
         if normalized == "orders":
@@ -786,6 +814,52 @@ def authorised_get(
 
 def _part_resource_id(part_number: Any, revision: Any) -> str:
     return f"{str(part_number or '').strip().casefold()}:{str(revision or '').strip().casefold()}"
+
+
+def part_is_released(part: Any) -> bool:
+    """Return the application's canonical approval/release state for a part."""
+
+    try:
+        from app.services.attrs import approved_value, harvest_part_attrs
+
+        return bool(approved_value(harvest_part_attrs(part)))
+    except Exception:
+        return False
+
+
+def authorised_part_pairs(
+    user: Any,
+    pairs: Iterable[tuple[Any, Any]],
+    *,
+    permission: str = "parts.read",
+) -> frozenset[tuple[str, str]]:
+    """Return only exact requested identities present in the caller's part scope."""
+
+    from mongoengine.queryset.visitor import Q
+
+    normalized: dict[tuple[str, str], tuple[str, str]] = {}
+    query = Q()
+    for part_number, revision in pairs:
+        pn = str(part_number or "").strip()
+        rev = str(revision or "").strip()
+        if not pn:
+            continue
+        key = (pn.casefold(), rev.casefold())
+        normalized[key] = (pn, rev)
+        query |= Q(part_number__iexact=pn, revision__iexact=rev)
+    if not normalized:
+        return frozenset()
+    try:
+        from app.models.part import Part
+
+        scoped = scope_queryset(Part.objects, user, "parts", permission=permission)
+        found = scoped.filter(query).only("part_number", "revision")
+        return frozenset(
+            (str(part.part_number or "").strip().casefold(), str(part.revision or "").strip().casefold())
+            for part in found
+        )
+    except Exception:
+        return frozenset()
 
 
 def authorise_part_access(

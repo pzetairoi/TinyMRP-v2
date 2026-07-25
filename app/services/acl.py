@@ -278,8 +278,6 @@ def part_is_allowed(allowed: Optional[Set[Tuple[str, str]]], pn: str, rev: str |
         apn_l = (apn or "").strip().lower()
         if apn_l != pn_l:
             continue
-        if not arev:
-            return True
         if (arev or "").strip().lower() == rev_l:
             return True
     return False
@@ -302,38 +300,40 @@ def allowed_parts_for(user) -> Optional[Set[Tuple[str, str]]]:
         if not is_external_scoped_user(user):
             return None
 
-        from app.models.part import Part
-        from app.services.attrs import harvest_part_attrs
-        from app.services.docpacks import _flatten_bom
+        from app.models.bom import BOMLink
         from app.models.customer import Customer
         from app.models.supplier import Supplier
         from app.models.job import Job
         from app.models.order import Order
 
-        def resolve_rev(pn: str, rev: str) -> str:
-            rev = (rev or "").strip()
-            if rev:
-                return rev
-            p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
-            if not p:
-                return ""
-            attrs = harvest_part_attrs(p)
-            return (attrs.get("revision") or p.revision or "").strip()
-
         def add_with_children(pn: str, rev: str):
             pn_clean = (pn or "").strip()
             if not pn_clean:
                 return
-            rev_clean = resolve_rev(pn_clean, rev)
-            allowed.add((pn_clean, rev_clean))
-            if not rev:
-                allowed.add((pn_clean, ""))  # wildcard for unknown rev
-            try:
-                flat = _flatten_bom(pn_clean, rev_clean, full=True, include_consumed=True)
-                for cpn, crev, _ in flat:
-                    allowed.add((cpn, (crev or "")))
-            except Exception:
-                pass
+            root = (pn_clean, (rev or "").strip())
+            queue = [root]
+            visited: Set[Tuple[str, str]] = set()
+            while queue:
+                current_pn, current_rev = queue.pop()
+                key = (current_pn, current_rev)
+                if key in visited:
+                    continue
+                visited.add(key)
+                allowed.add(key)
+                links = BOMLink.objects(
+                    parent_pn__iexact=current_pn,
+                    parent_rev__iexact=current_rev,
+                ).only("child_pn", "child_rev")
+                for link in links:
+                    child_pn = str(getattr(link, "child_pn", "") or "").strip()
+                    if not child_pn:
+                        continue
+                    queue.append(
+                        (
+                            child_pn,
+                            str(getattr(link, "child_rev", "") or "").strip(),
+                        )
+                    )
 
         allowed: Set[Tuple[str, str]] = set()
         customer_ids = [c.id for c in Customer.objects(users=user).only("id")]

@@ -459,6 +459,7 @@ def allocate_number(
     user_email: str | None,
     cad_ref: Dict[str, Any] | None,
     sequence_values: Any = None,
+    existing_revision: str | None = None,
 ) -> Tuple[Dict[str, Any], List[str]]:
     errors: List[str] = []
     now = utc_now()
@@ -474,7 +475,14 @@ def allocate_number(
         if not pn:
             errors.append("existing_part_number is required for revision actions.")
             return {}, errors
-        part = Part.objects(part_number=pn).order_by("-updated_at").first()
+        part_query = Part.objects(part_number__iexact=pn)
+        if existing_revision is not None:
+            part_query = part_query.filter(
+                revision__iexact=str(existing_revision or "").strip()
+            )
+        else:
+            part_query = part_query.order_by("-updated_at")
+        part = part_query.first()
         if not part:
             errors.append("part not found.")
             return {}, errors
@@ -949,6 +957,27 @@ def _increment_numeric_revision(current: str, start: str) -> str:
 
 def _clone_part_with_revision(part: Part, revision: str, cad_ref: Dict[str, Any] | None) -> Part:
     attrs = dict(getattr(part, "attrs", {}) or {})
+    protected_tokens = {
+        "approved",
+        "approvedby",
+        "approveddate",
+        "approvalactor",
+        "approvaltimestamp",
+        "released",
+        "releasedby",
+        "releasedat",
+        "releaseactor",
+        "releasetimestamp",
+        "createdby",
+        "updatedby",
+        "auditactor",
+    }
+    attrs = {
+        key: value
+        for key, value in attrs.items()
+        if "".join(ch for ch in str(key).casefold() if ch.isalnum())
+        not in protected_tokens
+    }
     attrs["revision"] = revision
     if cad_ref:
         attrs["cad_ref"] = cad_ref
@@ -962,7 +991,7 @@ def _clone_part_with_revision(part: Part, revision: str, cad_ref: Dict[str, Any]
         manufacturer=part.manufacturer or "",
         mfr_part=part.mfr_part or "",
         status=part.status or "active",
-        docs=list(part.docs or []),
+        docs=[],
         attrs=attrs,
     )
 

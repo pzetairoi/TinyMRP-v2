@@ -45,7 +45,13 @@ from app.services.acl import (
     user_has_permission,
     permissions_required,
 )
-from app.services.authorization import authorised_get, scope_queryset
+from app.services.authorization import (
+    authorised_get,
+    has_permission,
+    legacy_admin_bypass_enabled,
+    require_permission,
+    scope_queryset,
+)
 from app.services.audit import log_action
 from app.services.files_access import file_url_for, public_file_urls_enabled
 from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
@@ -533,9 +539,9 @@ def _context_field_values(
     return config, attrs, values
 
 
-@login_required
-@require_items_view
 @bp.route("/parts_lazy", methods=["GET", "POST"])
+@login_required
+@require_permission("parts.read")
 @csrf.exempt
 def parts_lazy():
     _t_start = time.perf_counter()
@@ -877,25 +883,10 @@ def parts_lazy():
                 q = q & pairs_query(pairs)
                 fallback_base_q = fallback_base_q & pairs_query(pairs)
 
-    allowed_scope = allowed_parts_for(current_user)
-    if isinstance(allowed_scope, set):
-        if not allowed_scope:
-            return jsonify({"data": [], "totalRecords": 0})
-        allowed_q = Q()
-        for pn, rev in allowed_scope:
-            pn_clean = str(pn or "").strip()
-            if not pn_clean:
-                continue
-            if rev:
-                allowed_q = allowed_q | Q(part_number__iexact=pn_clean, revision__iexact=rev)
-            else:
-                allowed_q = allowed_q | Q(part_number__iexact=pn_clean)
-        q = q & allowed_q
-        fallback_base_q = fallback_base_q & allowed_q
-
     _t_filters = time.perf_counter()
-    qs = Part.objects(q)
-    fallback_qs = Part.objects(fallback_base_q)
+    authorised_parts = scope_queryset(Part.objects, current_user, "parts")
+    qs = authorised_parts.filter(q)
+    fallback_qs = authorised_parts.filter(fallback_base_q)
 
     def _missing_materialized_q(field_ids: set[str]) -> Q:
         out = Q()
@@ -1178,29 +1169,22 @@ def parts_lazy():
 
 @bp.get("/part_detail")
 @login_required
-@require_items_view
+@require_permission("parts.read")
 def part_detail():
     pn = (request.args.get("pn") or "").strip()
+    scoped_parts = scope_queryset(Part.objects, current_user, "parts")
     p = None
     if "rev" in request.args:
         rev = request.args.get("rev")
         rev_clean = _clean_rev_input(rev)
-        p = Part.objects(part_number__iexact=pn, revision__iexact=(rev_clean or "")).first()
+        p = scoped_parts.filter(
+            part_number__iexact=pn,
+            revision__iexact=(rev_clean or ""),
+        ).first()
     else:
-        p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
+        p = scoped_parts.filter(part_number__iexact=pn).order_by("-updated_at").first()
     if not p:
         return jsonify({"error": "not found"}), 404
-
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            try:
-                log_action("part.view.deny", resource_type="part", resource=f"{p.part_number}:{p.revision or ''}")
-            except Exception:
-                pass
-            return jsonify({"error": "forbidden"}), 403
-    except Exception:
-        pass
 
     attrs = harvest_part_attrs(p)
     notes_comments = annotation_payload(p, attrs)
@@ -1273,12 +1257,16 @@ def part_detail():
     if approver_identity:
         approver_profile = resolved_profiles.get(approver_identity.lower(), approver_profile)
 
-    wu_rows = _rows_for_child_pn(p.part_number, p.revision)
+    wu_rows = _rows_for_child_pn(
+        p.part_number,
+        p.revision,
+        user=current_user,
+    )
 
     other_versions = []
     pn_key = p.part_number
     for op in (
-        Part.objects(part_number__iexact=pn)
+        scoped_parts.filter(part_number__iexact=pn)
         .only("part_number", "revision", "description", "category", "attrs", "updated_at")
         .order_by("-updated_at")
     ):
@@ -1308,8 +1296,8 @@ def part_detail():
 
     can_jobs_manage = user_has_permission(current_user, "jobs.update")
     can_orders_manage = user_has_permission(current_user, "orders.update")
-    can_parts_delete = user_has_permission(current_user, "items.edit")
-    can_parts_edit = can_parts_delete
+    can_parts_delete = has_permission(current_user, "parts.purge")
+    can_parts_edit = has_permission(current_user, "parts.update")
     can_parts_note = user_has_permission(current_user, "items.view")
     review_status = compute_part_review_status(p)
 
@@ -1580,20 +1568,20 @@ def part_files_overview(pn: str):
 
 @bp.get("/parts/<pn>/insights")
 @login_required
-@require_items_view
+@require_permission("parts.read")
 def part_insights(pn):
     pn = (pn or "").strip()
     rev = request.args.get("rev")
-    p = _find_part_doc(pn, rev)
+    part_query = scope_queryset(Part.objects, current_user, "parts").filter(
+        part_number__iexact=pn
+    )
+    if rev is not None:
+        part_query = part_query.filter(revision__iexact=_clean_rev_input(rev))
+    else:
+        part_query = part_query.order_by("-updated_at")
+    p = part_query.first()
     if not p:
         return jsonify({"error": "not found"}), 404
-
-    try:
-        allowed = allowed_parts_for(current_user)
-        if isinstance(allowed, set) and not part_is_allowed(allowed, p.part_number, p.revision or ""):
-            return jsonify({"error": "forbidden"}), 403
-    except Exception:
-        pass
 
     attrs = harvest_part_attrs(p)
     norm_rev = _normalized_revision(p, attrs)
@@ -1602,8 +1590,42 @@ def part_insights(pn):
     classification = classify_part(attrs, list(p.processes or []), meta, category=p.category or "")
     missing = insights_missing_fields(attrs, p.description or "", list(p.processes or []), meta)
     deliverables_present = _deliverables_present(p.part_number, norm_rev)
-    where_used_count, total_qty = _where_used_stats(p.part_number, norm_rev)
-    has_bom = _has_bom_children(p.part_number, norm_rev)
+    where_used_count = 0
+    total_qty = 0.0
+    has_bom = False
+    if has_permission(current_user, "bom.read"):
+        where_used_rows = _rows_for_child_pn(
+            p.part_number,
+            norm_rev,
+            user=current_user,
+        )
+        where_used_count = len(where_used_rows)
+        total_qty = sum(float(row.get("qty") or 0.0) for row in where_used_rows)
+        child_pairs = [
+            (
+                getattr(link, "child_pn", "") or "",
+                getattr(link, "child_rev", "") or "",
+            )
+            for link in BOMLink.objects(
+                parent_pn__iexact=p.part_number,
+                parent_rev__iexact=norm_rev,
+            ).only("child_pn", "child_rev")
+            if getattr(link, "child_pn", None)
+        ]
+        from app.services.authorization import authorised_part_pairs
+
+        has_bom = bool(child_pairs) and len(
+            authorised_part_pairs(current_user, child_pairs)
+        ) == len(
+            {
+                (
+                    str(child_pn or "").strip().casefold(),
+                    str(child_rev or "").strip().casefold(),
+                )
+                for child_pn, child_rev in child_pairs
+                if str(child_pn or "").strip()
+            }
+        )
     missing_recommended = recommended_deliverables(classification, deliverables_present, attrs, has_bom)
 
     return jsonify(
@@ -2024,7 +2046,7 @@ def part_refresh_files(pn):
 
 @bp.post("/part_delete")
 @login_required
-@permissions_required("items.edit")
+@require_permission("parts.purge")
 @csrf.exempt
 def part_delete():
     body = request.get_json(force=True, silent=True) or {}
@@ -2035,19 +2057,24 @@ def part_delete():
     if rev is None:
         rev = ""
     rev = (rev or "").strip()
-    target = Part.objects(part_number__iexact=pn, revision__iexact=rev).first()
-    if not target and rev:
-        for cand in Part.objects(part_number__iexact=pn):
-            attrs = harvest_part_attrs(cand)
-            if _normalized_revision(cand, attrs).lower() == rev.lower():
-                target = cand
-                rev = (cand.revision or "").strip()
-                break
+    target = scope_queryset(
+        Part.objects,
+        current_user,
+        "parts",
+        permission="parts.purge",
+    ).filter(part_number__iexact=pn, revision__iexact=rev).first()
     if not target:
         return jsonify({"ok": False, "error": "not found"}), 404
 
     delete_children = _parse_bool(body.get("delete_children") or request.form.get("delete_children"))
     delete_files = _parse_bool(body.get("delete_files") or request.form.get("delete_files"))
+    role_names = {
+        str(getattr(role, "name", "") or "").strip()
+        for role in (getattr(current_user, "roles", None) or [])
+    }
+    legacy_admin = "admin" in role_names and legacy_admin_bypass_enabled()
+    if delete_files and not legacy_admin:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     result = delete_part_and_refs_cascade(pn, rev, delete_children=delete_children, delete_files=delete_files)
     try:
         log_action(

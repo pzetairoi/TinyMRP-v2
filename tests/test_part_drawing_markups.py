@@ -30,7 +30,12 @@ def _viewer_user(email="markup-viewer@example.com"):
 
 
 def _make_part(pn="PN-500", rev="A"):
-    return Part(part_number=pn, revision=rev, description="Markup Part").save()
+    return Part(
+        part_number=pn,
+        revision=rev,
+        description="Markup Part",
+        attrs={"approvedby": "QA Person"},
+    ).save()
 
 
 def _make_drawing(pn="PN-500", rev="A", sha256="a1b2c3", rel="drawings/PN-500_DWG.png"):

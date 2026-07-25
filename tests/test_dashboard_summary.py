@@ -74,6 +74,7 @@ def test_dashboard_recent_parts_include_display_timestamp(client, user):
         part_number="DSP-100",
         revision="A",
         description="Display Timestamp",
+        attrs={"approvedby": "QA Person"},
         updated_at=datetime(2024, 1, 1, 0, 0, 0),
     ).save()
 

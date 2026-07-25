@@ -54,12 +54,12 @@ def test_supplier_viewer_allowed_parts(app):
         Order(
             order_number="PO-1",
             supplier=supp,
-            lines=[OrderLine(pn="CMP-3000", rev="", qty=3, uom="EA")],
+            lines=[OrderLine(pn="CMP-3000", rev="B", qty=3, uom="EA")],
         ).save()
 
         allowed = allowed_parts_for(user)
         assert allowed is not None
         assert part_is_allowed(allowed, "CMP-3000", "B")
-        assert part_is_allowed(allowed, "CMP-3000", "")
+        assert not part_is_allowed(allowed, "CMP-3000", "")
         assert part_is_allowed(allowed, "MAT-9999", "A")
         assert not part_is_allowed(allowed, "NOPE-2", "A")

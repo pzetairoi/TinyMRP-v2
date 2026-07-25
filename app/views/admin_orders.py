@@ -12,6 +12,7 @@ from app.services.acl import (
 )
 from app.services.authorization import (
     authorised_get,
+    authorised_part_pairs,
     authorise,
     has_permission,
     order_kind_allowed,
@@ -305,9 +306,22 @@ def orders_view(order_id):
     jobs = []
     suppliers = []
     customers = []
+    allowed_lines = authorised_part_pairs(
+        current_user,
+        [(line.pn, clean_rev(line.rev)) for line in (o.lines or [])],
+    )
+    visible_lines = [
+        line
+        for line in (o.lines or [])
+        if (
+            str(line.pn or "").strip().casefold(),
+            clean_rev(line.rev).casefold(),
+        )
+        in allowed_lines
+    ]
     lines = "\n".join([
         f"{l.pn},{l.rev},{l.qty:g},{l.uom},{l.note or ''},{l.unit_price or 0},{l.discount_pct or 0},{l.tax_pct or 0}"
-        for l in (o.lines or [])
+        for l in visible_lines
     ])
     return render_template(
         "admin/orders_form.html",
@@ -647,7 +661,25 @@ def orders_edit(order_id):
         except Exception:
             cust_id = ""
         jobs.append({"id": j.id, "job_number": j.job_number, "customer_id": cust_id})
-    lines = "\n".join([f"{l.pn},{l.rev},{l.qty:g},{l.uom},{l.note or ''},{l.unit_price or 0},{l.discount_pct or 0},{l.tax_pct or 0}" for l in (o.lines or [])])
+    allowed_lines = authorised_part_pairs(
+        current_user,
+        [(line.pn, clean_rev(line.rev)) for line in (o.lines or [])],
+    )
+    visible_lines = [
+        line
+        for line in (o.lines or [])
+        if (
+            str(line.pn or "").strip().casefold(),
+            clean_rev(line.rev).casefold(),
+        )
+        in allowed_lines
+    ]
+    lines = "\n".join(
+        [
+            f"{line.pn},{line.rev},{line.qty:g},{line.uom},{line.note or ''},{line.unit_price or 0},{line.discount_pct or 0},{line.tax_pct or 0}"
+            for line in visible_lines
+        ]
+    )
     return render_template("admin/orders_form.html", order=o, jobs=jobs, suppliers=sups, customers=custs, lines=lines)
 
 
