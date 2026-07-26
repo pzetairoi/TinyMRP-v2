@@ -62,7 +62,7 @@ def field_config_get():
             "ok": True,
             "config": config,
             "user_preferences": safe_preferences,
-            "permissions": {"can_admin": _can_admin(user)},
+            "permissions": {"can_admin": _can_admin(user), "imports": {permission: has_permission(user, permission) for permission in ("imports.preview", "imports.execute_low_risk", "imports.execute_approved", "imports.override_approved")}},
         }
     )
 

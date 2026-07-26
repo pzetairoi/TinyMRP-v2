@@ -1,14 +1,11 @@
 from __future__ import annotations
-
 from typing import List
-
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
-
 from app.extensions import csrf
 from app.models.extra_file import PartExtraFile
-from app.services.authorization import has_permission
+from app.services.authorization import effective_permissions, has_permission
 from app.services.extra_files import (
     extra_file_url_for,
     extra_rel_path,
@@ -23,14 +20,10 @@ from app.services.file_security import (
     exact_file_part,
 )
 from app.services.part_norm import clean_pn, clean_rev
-from app.services.import_zip import normalize_override_mode
-from app.services.upload_pack import import_upload_pack, released_upload_targets
+from app.services.import_zip import DEFAULT_OVERRIDE_MODE
+from app.services.upload_pack import ImportPermissionError, import_upload_pack
 from app.views.api_helpers import add_datetime_fields
-
-
 bp = Blueprint("upload_pack_api", __name__, url_prefix="/api")
-
-
 def _extra_file_payload(ef: PartExtraFile) -> dict:
     payload = {
         "id": str(ef.id),
@@ -47,8 +40,6 @@ def _extra_file_payload(ef: PartExtraFile) -> dict:
     }
     add_datetime_fields(payload, "uploaded_at", ef.uploaded_at)
     return payload
-
-
 def _parse_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
@@ -56,12 +47,27 @@ def _parse_bool(value: object) -> bool:
         return False
     text = str(value).strip().lower()
     return text in ("1", "true", "yes", "on")
-
-
 def _uploaded_by() -> str:
     return (getattr(current_user, "email", None) or str(getattr(current_user, "id", ""))).strip()
-
-
+def _import_options() -> dict:
+    source = request.form if request.form else request.args
+    values = {
+        "override_mode": source.get("override_mode") or DEFAULT_OVERRIDE_MODE,
+        "data_mode": source.get("data_mode") or None,
+        "bom_mode": source.get("bom_mode") or None,
+        "file_mode": source.get("file_mode") or None,
+        "approval_mode": source.get("approval_mode") or None,
+    }
+    if not source.get("override_mode") and not any(
+        source.get(name) for name in ("data_mode", "bom_mode", "file_mode", "approval_mode")
+    ):
+        values.update(
+            data_mode="fill_blanks",
+            bom_mode="fill_if_empty",
+            file_mode="add_missing",
+            approval_mode="preserve",
+        )
+    return values
 @bp.post("/upload/pack")
 @csrf.exempt
 @login_required
@@ -76,63 +82,35 @@ def upload_pack():
     filename = secure_filename(f.filename)
     dry_run = _parse_bool(request.form.get("dry_run") or request.args.get("dry_run"))
     strict = _parse_bool(request.form.get("strict_structure") or request.args.get("strict_structure"))
-    override_mode = normalize_override_mode(
-        request.form.get("override_mode")
-        or request.args.get("override_mode")
-        or "unless_existing_approved"
-    )
-    required_permission = (
-        "imports.preview"
-        if dry_run
-        else (
-            "imports.execute_approved"
-            if override_mode in {"always", "approved_only"}
-            else "imports.execute_low_risk"
-        )
-    )
-    if not has_permission(current_user, required_permission):
-        return jsonify({"error": "forbidden"}), 403
-    can_override_approved = has_permission(
-        current_user,
-        "imports.override_approved",
-    )
-    if override_mode in {"always", "approved_only"} and not can_override_approved:
+    legacy_mode = request.form.get("override_mode") or request.args.get("override_mode")
+    if legacy_mode in {"always", "approved_only"} and (
+        not has_permission(current_user, "imports.execute_approved")
+        or not has_permission(current_user, "imports.override_approved")
+    ):
         return jsonify({"error": "forbidden"}), 403
     allow_extra = bool(current_app.config.get("EXTRA_FILES_ALLOWED", True))
     file_bytes = f.read()
     try:
-        preflight = import_upload_pack(
+        result = import_upload_pack(
             file_bytes,
             filename,
             uploaded_by=_uploaded_by(),
-            dry_run=True,
+            dry_run=dry_run,
             strict_structure=strict,
             allow_extra=allow_extra,
-            override_mode=override_mode,
+            actor_permissions=set(effective_permissions(current_user)),
+            **_import_options(),
         )
-        released_targets = released_upload_targets(preflight)
-        if released_targets and not can_override_approved:
-            return (
-                jsonify(
-                    {
-                        "error": "forbidden",
-                        "detail": "import would modify approved or released parts",
-                    }
-                ),
-                403,
-            )
-        result = (
-            preflight
-            if dry_run
-            else import_upload_pack(
-                file_bytes,
-                filename,
-                uploaded_by=_uploaded_by(),
-                dry_run=False,
-                strict_structure=strict,
-                allow_extra=allow_extra,
-                override_mode=override_mode,
-            )
+    except ImportPermissionError as exc:
+        return (
+            jsonify(
+                {
+                    "error": "forbidden",
+                    "detail": str(exc),
+                    "missing_permissions": exc.missing_permissions,
+                }
+            ),
+            403,
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -153,7 +131,6 @@ def upload_pack():
         )
     try:
         from app.services.audit import log_action
-
         def metric_count(value):
             if isinstance(value, (list, tuple, set, dict)):
                 return len(value)
@@ -161,7 +138,6 @@ def upload_pack():
                 return int(value or 0)
             except (TypeError, ValueError):
                 return 0
-
         log_action(
             "upload.pack",
             resource_type="import",
@@ -175,8 +151,6 @@ def upload_pack():
     except Exception:
         pass
     return jsonify(result)
-
-
 @bp.get("/parts/<path:pn>/<path:rev>/extra")
 @login_required
 def list_extra_files(pn: str, rev: str):
@@ -186,7 +160,6 @@ def list_extra_files(pn: str, rev: str):
         return jsonify({"error": "pn required"}), 400
     if exact_file_part(current_user, pn_clean, rev_clean) is None:
         return jsonify({"error": "not found"}), 404
-
     rows = []
     for ef in (
         PartExtraFile.objects(part_number__iexact=pn_clean, revision__iexact=rev_clean)
@@ -212,7 +185,6 @@ def list_extra_files(pn: str, rev: str):
         rows.append(_extra_file_payload(ef))
     try:
         from app.services.audit import log_action
-
         log_action(
             "file.list",
             resource_type="part",
@@ -222,8 +194,6 @@ def list_extra_files(pn: str, rev: str):
     except Exception:
         pass
     return jsonify(rows)
-
-
 @bp.post("/parts/<path:pn>/<path:rev>/extra")
 @csrf.exempt
 @login_required
@@ -234,17 +204,14 @@ def upload_extra_files(pn: str, rev: str):
     rev_clean = clean_rev(rev_from_token(rev))
     if not pn_clean:
         return jsonify({"error": "pn required"}), 400
-
     files = request.files.getlist("file")
     if not files:
         files = list(request.files.values())
     if not files:
         return jsonify({"error": "file required"}), 400
-
     max_files = int(current_app.config.get("UPLOAD_PACK_MAX_FILES") or 0)
     if max_files and len(files) > max_files:
         return jsonify({"error": "too many files"}), 413
-
     try:
         targets = []
         for upload in files:
@@ -258,7 +225,6 @@ def upload_extra_files(pn: str, rev: str):
             targets.append(existing)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-
     requires_add = any(record is None for record in targets)
     requires_replace = any(record is not None for record in targets)
     required = []
@@ -278,7 +244,6 @@ def upload_extra_files(pn: str, rev: str):
         for permission in required
     ):
         return jsonify({"error": "not found"}), 404
-
     max_file_mb = int(current_app.config.get("UPLOAD_PACK_MAX_FILE_MB") or 0)
     max_bytes = max_file_mb * 1024 * 1024 if max_file_mb else 0
     uploaded_by = _uploaded_by()
@@ -297,10 +262,8 @@ def upload_extra_files(pn: str, rev: str):
         return jsonify({"error": "upload failed"}), 500
     created: List[dict] = [_extra_file_payload(record) for record in records]
     errors: List[str] = []
-
     try:
         from app.services.audit import log_action
-
         log_action(
             "upload.extra_files",
             resource_type="part",
@@ -316,8 +279,6 @@ def upload_extra_files(pn: str, rev: str):
     except Exception:
         pass
     return jsonify({"files": created, "errors": errors})
-
-
 @bp.delete("/parts/<path:pn>/<path:rev>/extra/<file_id>")
 @csrf.exempt
 @login_required
@@ -336,7 +297,6 @@ def delete_extra_file(pn: str, rev: str, file_id: str):
         is None
     ):
         return jsonify({"error": "not found"}), 404
-
     ef = PartExtraFile.objects(id=file_id).first()
     if not ef:
         return jsonify({"error": "not found"}), 404
@@ -345,10 +305,8 @@ def delete_extra_file(pn: str, rev: str, file_id: str):
         or (ef.revision or "") != rev_clean
     ):
         return jsonify({"error": "not found"}), 404
-
     try:
         from app.services.audit import log_action
-
         log_action(
             "file.purge.requested",
             resource_type="file",
@@ -363,7 +321,6 @@ def delete_extra_file(pn: str, rev: str, file_id: str):
         return jsonify({"error": "delete failed"}), 500
     try:
         from app.services.audit import log_action
-
         log_action(
             "file.purge.completed",
             resource_type="file",

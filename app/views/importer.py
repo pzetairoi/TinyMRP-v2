@@ -1,141 +1,90 @@
-# app/views/importer.py
-from flask import Blueprint, abort, current_app, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from app.extensions import csrf
-from app.services.authorization import has_permission, require_permission
-from app.services.import_zip import import_bom_zip, normalize_override_mode
-from app.services.upload_pack import import_upload_pack, released_upload_targets
-
+from app.services.authorization import effective_permissions, require_permission
+from app.services.import_zip import DEFAULT_OVERRIDE_MODE
+from app.services.upload_pack import ImportPermissionError, import_upload_pack
 bp = Blueprint("importer", __name__, url_prefix="/import")
-
+def _options():
+    source = request.form if request.form else request.args
+    values = {
+        "override_mode": source.get("override_mode") or DEFAULT_OVERRIDE_MODE,
+        **{
+            name: source.get(name) or None
+            for name in ("data_mode", "bom_mode", "file_mode", "approval_mode")
+        },
+    }
+    if not source.get("override_mode") and not any(
+        values[name] for name in ("data_mode", "bom_mode", "file_mode", "approval_mode")
+    ):
+        values.update(
+            data_mode="fill_blanks",
+            bom_mode="fill_if_empty",
+            file_mode="add_missing",
+            approval_mode="preserve",
+        )
+    return values
+def _uploaded_file():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        raise ValueError("file required")
+    limit = int(current_app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 0) * 1024 * 1024
+    if limit and request.content_length and request.content_length > limit:
+        raise OverflowError("file too large")
+    return upload, secure_filename(upload.filename)
+def _execute(seed: str):
+    upload, filename = _uploaded_file()
+    return (
+        import_upload_pack(
+            upload.read(),
+            filename,
+            allow_extra=False,
+            seed_tag=seed,
+            actor_permissions=set(effective_permissions(current_user)),
+            **_options(),
+        ).get("import")
+        or {}
+    )
 @bp.get("/")
 @login_required
 @require_permission("imports.preview")
 def upload_form():
     return redirect("/ui/upload-pack")
-
 @bp.post("/")
-@csrf.exempt  # keep it simple; remove if you wire a WTForm with CSRF token
+@csrf.exempt
 @login_required
 def upload_post():
-    f = request.files.get("file")
-    if not f or not f.filename:
-        flash("Please choose a .zip file.", "warning")
-        return redirect(url_for("importer.upload_form"))
-    max_zip_mb = int(current_app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 0)
-    if max_zip_mb and request.content_length:
-        if request.content_length > max_zip_mb * 1024 * 1024:
-            flash("File too large.", "warning")
-            return redirect(url_for("importer.upload_form"))
-    fn = secure_filename(f.filename)
-    override_mode = normalize_override_mode(
-        request.form.get("override_mode")
-        or request.args.get("override_mode")
-        or "unless_existing_approved"
-    )
-    high_risk = override_mode in {"always", "approved_only"}
-    execute_permission = (
-        "imports.execute_approved"
-        if high_risk
-        else "imports.execute_low_risk"
-    )
-    if not has_permission(current_user, execute_permission):
-        abort(403)
-    can_override = has_permission(current_user, "imports.override_approved")
-    if high_risk and not can_override:
-        abort(403)
-    file_bytes = f.read()
     try:
-        preflight = import_upload_pack(
-            file_bytes,
-            fn,
-            dry_run=True,
-            allow_extra=False,
-            override_mode=override_mode,
-        )
-        if released_upload_targets(preflight) and not can_override:
-            abort(403)
-        result = import_bom_zip(
-            file_bytes,
-            fn,
-            seed_tag="upload",
-            override_mode=override_mode,
-        )
-    except ValueError as exc:
+        result = _execute("upload")
+    except ImportPermissionError:
+        abort(403)
+    except (ValueError, OverflowError) as exc:
         flash(f"Import failed: {exc}", "danger")
         return redirect(url_for("importer.upload_form"))
     except Exception as exc:
-        if getattr(exc, "code", None) == 403:
-            raise
-        try:
-            current_app.logger.exception("Import failed: %s", fn)
-        except Exception:
-            pass
+        current_app.logger.exception("Import failed")
         flash(f"Import failed: {exc}", "danger")
         return redirect(url_for("importer.upload_form"))
-
-    err_count = len(result.get("errors") or [])
-    warn_count = len(result.get("warnings") or [])
-    thumbs = result.get('thumbnails_generated') or result.get('thumbnails_built') or 0
+    errors, warnings = len(result.get("errors") or []), len(result.get("warnings") or [])
     flash(
-        f"Imported {result['zip']} - root={result['root']} - parts+{result['parts_created']} links+{result['links_created']} - thumbs={thumbs} - errors={err_count} warnings={warn_count}",
-        "warning" if err_count else ("info" if warn_count else "success"),
+        f"Imported {result['zip']} - root={result['root']} - parts+{result['parts_created']} "
+        f"links+{result['links_created']} - errors={errors} warnings={warnings}",
+        "warning" if errors else ("info" if warnings else "success"),
     )
     return render_template("import/result.html", result=result)
-
-# Optional: JSON API endpoint for programmatic uploads
 @bp.post("/api")
 @csrf.exempt
 @login_required
 def upload_api():
-    f = request.files.get("file")
-    if not f or not f.filename:
-        return jsonify({"error": "file required"}), 400
-    max_zip_mb = int(current_app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 0)
-    if max_zip_mb and request.content_length:
-        if request.content_length > max_zip_mb * 1024 * 1024:
-            return jsonify({"error": "file too large"}), 413
-    fn = secure_filename(f.filename)
-    override_mode = normalize_override_mode(
-        request.form.get("override_mode")
-        or request.args.get("override_mode")
-        or "unless_existing_approved"
-    )
-    high_risk = override_mode in {"always", "approved_only"}
-    execute_permission = (
-        "imports.execute_approved"
-        if high_risk
-        else "imports.execute_low_risk"
-    )
-    if not has_permission(current_user, execute_permission):
-        return jsonify({"error": "forbidden"}), 403
-    can_override = has_permission(current_user, "imports.override_approved")
-    if high_risk and not can_override:
-        return jsonify({"error": "forbidden"}), 403
-    file_bytes = f.read()
     try:
-        preflight = import_upload_pack(
-            file_bytes,
-            fn,
-            dry_run=True,
-            allow_extra=False,
-            override_mode=override_mode,
-        )
-        if released_upload_targets(preflight) and not can_override:
-            return jsonify({"error": "forbidden"}), 403
-        result = import_bom_zip(
-            file_bytes,
-            fn,
-            seed_tag="upload-api",
-            override_mode=override_mode,
-        )
+        return jsonify(_execute("upload-api"))
+    except ImportPermissionError as exc:
+        return jsonify(error="forbidden", missing_permissions=exc.missing_permissions), 403
+    except OverflowError as exc:
+        return jsonify(error=str(exc)), 413
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify(error=str(exc)), 400
     except Exception as exc:
-        try:
-            current_app.logger.exception("Import API failed: %s", fn)
-        except Exception:
-            pass
-        return jsonify({"error": "import failed", "detail": str(exc), "exception_type": type(exc).__name__}), 500
-    return jsonify(result)
+        current_app.logger.exception("Import API failed")
+        return jsonify(error="import failed", detail=str(exc), exception_type=type(exc).__name__), 500
