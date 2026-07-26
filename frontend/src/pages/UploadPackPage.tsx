@@ -58,6 +58,8 @@ type UploadResult = {
   dry_run?: boolean;
   plan?: Plan;
   import?: {
+    root?: string;
+    root_rev?: string;
     parts_created?: number;
     parts_updated?: number;
     links_created?: number;
@@ -78,6 +80,16 @@ type DataMode = "skip" | "fill_blanks" | "replace_unapproved" | "replace_all";
 type BomMode = "skip" | "fill_if_empty" | "replace_unapproved" | "replace_all";
 type FileMode = "skip" | "add_missing" | "replace_unapproved" | "replace_all";
 type ApprovalMode = "preserve" | "import_unapproved" | "replace_all";
+type Preset = "preserve" | "unless_existing_approved" | "always" | "custom";
+
+// Same three tiers as the backend's legacy override_mode (app/services/import_zip.py):
+// quick presets that set all four independent policies at once. Touching an
+// individual policy below detaches it from the preset ("Custom").
+const PRESETS: Record<Exclude<Preset, "custom">, [DataMode, BomMode, FileMode, ApprovalMode]> = {
+  preserve: ["fill_blanks", "fill_if_empty", "add_missing", "preserve"],
+  unless_existing_approved: ["replace_unapproved", "replace_unapproved", "replace_unapproved", "preserve"],
+  always: ["replace_all", "replace_all", "replace_all", "replace_all"],
+};
 
 const stateLabels: Record<PlanPart["target_state"], string> = {
   new: "New",
@@ -255,6 +267,8 @@ export default function UploadPackPage() {
   const [bomMode, setBomMode] = useState<BomMode>("fill_if_empty");
   const [fileMode, setFileMode] = useState<FileMode>("add_missing");
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>("preserve");
+  const [rootPreviewUrl, setRootPreviewUrl] = useState<string | null>(null);
+  const [rootPreviewStatus, setRootPreviewStatus] = useState("");
 
   useEffect(() => {
     fetch("/api/field-config")
@@ -263,10 +277,64 @@ export default function UploadPackPage() {
       .catch(() => setCapabilities({}));
   }, []);
 
+  const rootPn = result?.import?.root || "";
+  const rootRev = result?.import?.root_rev || "";
+  const rootHref = rootPn
+    ? `/ui/part/${encodeURIComponent(rootPn)}?rev=${encodeURIComponent(rootRev)}`
+    : "";
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!rootPn) {
+      setRootPreviewUrl(null);
+      setRootPreviewStatus("");
+      return () => {
+        cancelled = true;
+      };
+    }
+    setRootPreviewUrl(null);
+    setRootPreviewStatus("Loading preview…");
+    const qs = new URLSearchParams({ pn: rootPn, rev: rootRev, mode: "preview" });
+    fetch(`/api/part_images?${qs.toString()}`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(response)))
+      .then((rows) => {
+        if (cancelled) return;
+        const url = Array.isArray(rows) && rows.length ? rows[0]?.urls?.[0] : "";
+        if (url) {
+          setRootPreviewUrl(url);
+          setRootPreviewStatus("");
+        } else {
+          setRootPreviewStatus("No preview image found for the top-level part.");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRootPreviewStatus("Failed to load preview image.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rootPn, rootRev]);
+
   const canPreview = !!capabilities["imports.preview"];
   const canLowRisk = !!capabilities["imports.execute_low_risk"];
   const canAdvanced = !!capabilities["imports.execute_approved"];
   const canOverride = canAdvanced && !!capabilities["imports.override_approved"];
+
+  const preset = useMemo<Preset>(() => {
+    const match = (Object.entries(PRESETS) as Array<[Exclude<Preset, "custom">, typeof PRESETS[Exclude<Preset, "custom">]]>).find(
+      ([, tuple]) => tuple[0] === dataMode && tuple[1] === bomMode && tuple[2] === fileMode && tuple[3] === approvalMode,
+    );
+    return match ? match[0] : "custom";
+  }, [dataMode, bomMode, fileMode, approvalMode]);
+
+  function applyPreset(name: Exclude<Preset, "custom">) {
+    const [nextData, nextBom, nextFile, nextApproval] = PRESETS[name];
+    setDataMode(nextData);
+    setBomMode(nextBom);
+    setFileMode(nextFile);
+    setApprovalMode(nextApproval);
+  }
+
   const plan = result?.plan;
   const visibleParts = useMemo(
     () =>
@@ -337,17 +405,14 @@ export default function UploadPackPage() {
     fileMode.includes("replace") ||
     approvalMode !== "preserve";
   const overrideSelected =
-    dataMode === "replace_all" ||
-    bomMode === "replace_all" ||
-    fileMode === "replace_all" ||
-    approvalMode === "replace_all";
+    dataMode === "replace_all" || bomMode === "replace_all" || fileMode === "replace_all" || approvalMode === "replace_all";
 
   return (
     <div className="container-xxl py-3">
       <div className="border-bottom mb-3 pb-2">
         <h4 className="mb-1">Import upload pack</h4>
         <div className="text-muted small">
-          Select a ZIP, choose independent policies, preview the exact redline, then apply it.
+          Select a ZIP, choose an import policy, preview the exact redline, then apply it.
         </div>
       </div>
 
@@ -383,60 +448,95 @@ export default function UploadPackPage() {
           onChange={(event) => chooseFile(event.target.files)}
         />
 
-        <h6 className="mt-4">2. Select import policies</h6>
+        <h6 className="mt-4">2. Select import policy</h6>
         <div className="row g-3">
-          <PolicySelect
-            id="dataMode"
-            label="Properties"
-            help="Control ordinary and configured custom fields. Approval is governed separately."
-            value={dataMode}
-            onChange={setDataMode}
-            options={[
-              { value: "skip", label: "Skip properties" },
-              { value: "fill_blanks", label: "Fill blank values", disabled: !canLowRisk },
-              { value: "replace_unapproved", label: "Replace on unapproved targets", disabled: !canAdvanced },
-              { value: "replace_all", label: "Replace on all targets", disabled: !canOverride },
-            ]}
-          />
-          <PolicySelect
-            id="bomMode"
-            label="BOM"
-            help="Fill creates a whole BOM only when the exact parent/revision has none."
-            value={bomMode}
-            onChange={setBomMode}
-            options={[
-              { value: "skip", label: "Skip BOM" },
-              { value: "fill_if_empty", label: "Fill only if empty", disabled: !canLowRisk },
-              { value: "replace_unapproved", label: "Replace unapproved BOMs", disabled: !canAdvanced },
-              { value: "replace_all", label: "Replace all BOMs", disabled: !canOverride },
-            ]}
-          />
-          <PolicySelect
-            id="fileMode"
-            label="Files"
-            help="The same policy applies to managed deliverables and associated files."
-            value={fileMode}
-            onChange={setFileMode}
-            options={[
-              { value: "skip", label: "Skip files" },
-              { value: "add_missing", label: "Add missing files", disabled: !canLowRisk },
-              { value: "replace_unapproved", label: "Replace files on unapproved targets", disabled: !canAdvanced },
-              { value: "replace_all", label: "Replace files on all targets", disabled: !canOverride },
-            ]}
-          />
-          <PolicySelect
-            id="approvalMode"
-            label="Approval"
-            help="Approval aliases are resolved through the configured canonical field rules."
-            value={approvalMode}
-            onChange={setApprovalMode}
-            options={[
-              { value: "preserve", label: "Preserve existing approval" },
-              { value: "import_unapproved", label: "Import on unapproved targets", disabled: !canAdvanced },
-              { value: "replace_all", label: "Replace approval on all targets", disabled: !canOverride },
-            ]}
-          />
+          <div className="col-md-6">
+            <label className="form-label fw-semibold mb-1" htmlFor="importPreset">
+              Properties, BOM, files and approval
+            </label>
+            <select
+              id="importPreset"
+              className="form-select form-select-sm"
+              value={preset}
+              onChange={(event) => {
+                const value = event.target.value as Preset;
+                if (value !== "custom") applyPreset(value);
+              }}
+            >
+              <option value="preserve">Fill safely (default)</option>
+              <option value="unless_existing_approved" disabled={!canAdvanced}>
+                Override if not approved
+              </option>
+              <option value="always" disabled={!canOverride}>
+                Override for admin users
+              </option>
+              {preset === "custom" ? <option value="custom">Custom (see advanced options below)</option> : null}
+            </select>
+            <div className="form-text">
+              Fill only adds blanks, empty BOMs and missing files without touching approval. Override if not
+              approved replaces unapproved targets. Override for admin users also replaces approved targets and
+              their approval status. Approved targets can never be filled or replaced without admin permissions,
+              no matter which policy is selected.
+            </div>
+          </div>
         </div>
+
+        <details className="mt-3">
+          <summary className="fw-semibold">Advanced: adjust properties, BOM and files individually</summary>
+          <div className="row g-3 mt-1">
+            <PolicySelect
+              id="dataMode"
+              label="Properties"
+              help="Control ordinary and configured custom fields. Approval is governed separately."
+              value={dataMode}
+              onChange={setDataMode}
+              options={[
+                { value: "skip", label: "Skip properties" },
+                { value: "fill_blanks", label: "Fill blank values", disabled: !canLowRisk },
+                { value: "replace_unapproved", label: "Replace on unapproved targets", disabled: !canAdvanced },
+                { value: "replace_all", label: "Replace on all targets (admin)", disabled: !canOverride },
+              ]}
+            />
+            <PolicySelect
+              id="bomMode"
+              label="BOM"
+              help="Fill creates a whole BOM only when the exact parent/revision has none."
+              value={bomMode}
+              onChange={setBomMode}
+              options={[
+                { value: "skip", label: "Skip BOM" },
+                { value: "fill_if_empty", label: "Fill only if empty", disabled: !canLowRisk },
+                { value: "replace_unapproved", label: "Replace unapproved BOMs", disabled: !canAdvanced },
+                { value: "replace_all", label: "Replace all BOMs (admin)", disabled: !canOverride },
+              ]}
+            />
+            <PolicySelect
+              id="fileMode"
+              label="Files"
+              help="The same policy applies to managed deliverables and associated files."
+              value={fileMode}
+              onChange={setFileMode}
+              options={[
+                { value: "skip", label: "Skip files" },
+                { value: "add_missing", label: "Add missing files", disabled: !canLowRisk },
+                { value: "replace_unapproved", label: "Replace files on unapproved targets", disabled: !canAdvanced },
+                { value: "replace_all", label: "Replace files on all targets (admin)", disabled: !canOverride },
+              ]}
+            />
+            <PolicySelect
+              id="approvalMode"
+              label="Approval"
+              help="Approval aliases are resolved through the configured canonical field rules."
+              value={approvalMode}
+              onChange={setApprovalMode}
+              options={[
+                { value: "preserve", label: "Preserve existing approval" },
+                { value: "import_unapproved", label: "Import on unapproved targets", disabled: !canAdvanced },
+                { value: "replace_all", label: "Replace approval on all targets (admin)", disabled: !canOverride },
+              ]}
+            />
+          </div>
+        </details>
         {advancedSelected && !canAdvanced ? (
           <div className="alert alert-warning small mt-3 mb-0">
             Your roles cannot execute replacement effects. Preview remains available and will identify any
@@ -518,6 +618,35 @@ export default function UploadPackPage() {
               Download JSON report
             </button>
           </div>
+
+          {rootPn ? (
+            <a
+              href={rootHref}
+              className="d-flex align-items-center gap-2 mt-3 p-2 border rounded text-decoration-none"
+            >
+              {rootPreviewUrl ? (
+                <img
+                  src={rootPreviewUrl}
+                  alt={`${rootPn} preview`}
+                  className="rounded border flex-shrink-0"
+                  style={{ width: 48, height: 48, objectFit: "cover" }}
+                />
+              ) : (
+                <div
+                  className="rounded border bg-light flex-shrink-0"
+                  style={{ width: 48, height: 48 }}
+                  aria-hidden="true"
+                />
+              )}
+              <div className="small">
+                <div className="fw-semibold">
+                  Top-level part: {rootPn}
+                  {rootRev ? ` — REV ${rootRev}` : ""}
+                </div>
+                <div className="text-muted">{rootPreviewStatus || "Open part details"}</div>
+              </div>
+            </a>
+          ) : null}
 
           {plan.required_permissions.length ? (
             <div className={`alert ${plan.allowed ? "alert-info" : "alert-warning"} small mt-3`}>
