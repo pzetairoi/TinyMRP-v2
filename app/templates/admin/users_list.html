@@ -4,9 +4,9 @@
 {% block content %}
 {% call page_header("Users", "Manage account status and role assignments.", "People & access") %}
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Roles & permissions</a>
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a>
-    <a class="btn btn-primary" href="{{ url_for('admin.users_create') }}">New user</a>
+    {% if has_perm('security.roles.read') %}<a class="btn btn-outline-secondary" href="{{ url_for('admin_roles.roles_list') }}">Roles & permissions</a>{% endif %}
+    {% if has_perm('audit.read') %}<a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a>{% endif %}
+    {% if has_perm('security.users.manage') and has_perm('security.assignments.manage') %}<a class="btn btn-primary" href="{{ url_for('admin.users_create') }}">New user</a>{% endif %}
   </div>
 {% endcall %}
 
@@ -44,6 +44,7 @@
 
 <form method="post" data-user-selection>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if has_perm('security.users.manage') %}
   {% call action_bar(total ~ " matching account(s). Select accounts to change their status.", "default") %}
     <button type="button" class="btn btn-sm btn-outline-secondary" data-user-select-all>Select page</button>
     <button type="button" class="btn btn-sm btn-outline-secondary" data-user-select-clear>Clear</button>
@@ -53,12 +54,13 @@
             formaction="{{ url_for('admin.users_bulk_status') }}" name="action" value="deactivate"
             data-confirm="Deactivate the selected accounts? Your own account and the only usable legacy administrator are protected.">Deactivate selected</button>
   {% endcall %}
+  {% endif %}
 
   <div class="table-responsive tm-table-shell">
     <table class="table align-middle mb-0">
       <thead>
         <tr>
-          <th style="width:36px;"><span class="visually-hidden">Select</span></th>
+          {% if has_perm('security.users.manage') %}<th style="width:36px;"><span class="visually-hidden">Select</span></th>{% endif %}
           <th>Email</th>
           <th>Status</th>
           <th>Roles</th>
@@ -69,7 +71,7 @@
       <tbody>
         {% for u in users %}
         <tr>
-          <td><input class="form-check-input user-select" type="checkbox" name="user_ids" value="{{ u.id }}"></td>
+          {% if has_perm('security.users.manage') %}<td><input class="form-check-input user-select" type="checkbox" name="user_ids" value="{{ u.id }}"></td>{% endif %}
           <td>
             <strong>{{ u.email }}</strong>
             {% if current_user and u.id == current_user.id %}<span class="badge text-bg-light">You</span>{% endif %}
@@ -90,15 +92,19 @@
           <td class="text-nowrap">{{ display_ts(u.last_login_at, "%Y-%m-%d %H:%M") if u.last_login_at else "Never" }}</td>
           <td>
             <div class="d-flex flex-wrap gap-1">
-              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_audit.audit_list', user_id=u.id) }}">Activity</a>
-              <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_edit', user_id=u.id) }}">Edit</a>
+              {% if has_perm('audit.read') %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_audit.audit_list', user_id=u.id) }}">Activity</a>{% endif %}
+              {% if has_perm('security.users.manage') and has_perm('security.assignments.manage') %}<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_edit', user_id=u.id) }}">Edit</a>{% endif %}
             </div>
           </td>
         </tr>
         {% else %}
         <tr>
           <td colspan="6" class="py-3">
-            {{ empty_state("No users match", "Clear the search or filters, or create an account.", url_for('admin.users_create'), "Create user") }}
+            {% if has_perm('security.users.manage') and has_perm('security.assignments.manage') %}
+              {{ empty_state("No users match", "Clear the search or filters, or create an account.", url_for('admin.users_create'), "Create user") }}
+            {% else %}
+              {{ empty_state("No users match", "Clear the search or filters to see the account directory.") }}
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -123,7 +129,7 @@
     </nav>
   </div>
 
-  <details class="tm-danger-zone mt-4">
+  {% if has_perm('security.users.manage') %}<details class="tm-danger-zone mt-4">
     <summary>Permanent deletion</summary>
     <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-2">
       <p class="small text-muted mb-0">Permanent deletion is secondary to deactivation. Legacy administrators and your own account are protected.</p>
@@ -131,7 +137,7 @@
               formaction="{{ url_for('admin.users_bulk_delete') }}"
               data-confirm="Permanently delete the selected eligible users? This cannot be undone.">Delete selected permanently</button>
     </div>
-  </details>
+  </details>{% endif %}
 </form>
 <script src="{{ url_for('static', filename='admin-access.js') }}" defer></script>
 {% endblock %}

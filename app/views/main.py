@@ -15,10 +15,13 @@ from app.models.part import Part
 from app.services.audit import log_action
 from app.services.acl import (
     permissions_required,
-    user_can_view_items,
-    user_has_permission,
 )
-from app.services.authorization import authorised_get, has_permission, scope_queryset
+from app.services.authorization import (
+    authorised_get,
+    has_any_permission,
+    has_permission,
+    scope_queryset,
+)
 from app.services.attrs import approval_field_values, harvest_part_attrs
 from app.services.password_policy import password_policy_summary, validate_password_change
 from app.services.user_profile import (
@@ -37,25 +40,31 @@ bp = Blueprint("main", __name__)
 
 
 def _can_access(user, perm: str) -> bool:
-    roles = {getattr(role, "name", "") for role in (getattr(user, "roles", []) or [])}
-    return "admin" in roles or user_has_permission(user, perm)
+    return has_permission(user, perm)
 
 
 def _quick_links(user) -> list[dict[str, str]]:
     links: list[dict[str, str]] = []
-    if _can_access(user, "items.view"):
+    if _can_access(user, "parts.read"):
         links.append({"title": "Inventory", "href": "/ui/parts", "description": "Browse parts, files, and part detail."})
-    if _can_access(user, "jobs.view"):
+    if _can_access(user, "jobs.read"):
         links.append({"title": "Jobs", "href": url_for("admin_jobs.jobs_list"), "description": "Review jobs, BOM requirements, and scope."})
-    if _can_access(user, "orders.view"):
+    if _can_access(user, "orders.read"):
         links.append({"title": "Orders", "href": url_for("admin_orders.orders_list"), "description": "Open purchase and sales orders."})
-    if _can_access(user, "suppliers.view"):
+    if _can_access(user, "suppliers.read"):
         links.append({"title": "Suppliers", "href": url_for("admin_suppliers.suppliers_list"), "description": "Manage supplier records and contacts."})
-    if _can_access(user, "customers.view"):
+    if _can_access(user, "customers.read"):
         links.append({"title": "Customers", "href": url_for("admin_customers.customers_list"), "description": "Manage customer records and scope."})
-    if _can_access(user, "tools.view"):
+    if has_any_permission(user, ("exports.run", "tools.view")):
         links.append({"title": "Tools", "href": url_for("tools.tools_index"), "description": "Open utilities, exports, and admin helpers."})
-    if _can_access(user, "import.bom"):
+    if has_any_permission(
+        user,
+        (
+            "imports.preview",
+            "imports.execute_low_risk",
+            "imports.execute_approved",
+        ),
+    ):
         links.append({"title": "Import", "href": "/ui/upload-pack", "description": "Import BOM packs and associated files."})
     links.append({"title": "Tokens", "href": "/ui/addin/tokens", "description": "Manage API tokens for the add-in and scripts."})
     links.append({"title": "Help", "href": "/help", "description": "Read operator help and troubleshooting notes."})
@@ -81,18 +90,14 @@ def _part_href(part_number: str, revision: str) -> str:
 
 
 def _job_href(user, job_id: str) -> str | None:
-    if _can_access(user, "jobs.view"):
+    if _can_access(user, "jobs.read"):
         return url_for("admin_jobs.jobs_view", job_id=job_id)
-    if _can_access(user, "jobs.manage"):
-        return url_for("admin_jobs.jobs_edit", job_id=job_id)
     return None
 
 
 def _order_href(user, order_id: str) -> str | None:
-    if _can_access(user, "orders.view"):
+    if _can_access(user, "orders.read"):
         return url_for("admin_orders.orders_view", order_id=order_id)
-    if _can_access(user, "orders.manage"):
-        return url_for("admin_orders.orders_edit", order_id=order_id)
     return None
 
 
@@ -277,9 +282,9 @@ def _home_prefs_for_user(settings) -> dict[str, object]:
 
 def _home_dashboard_context(user, permissions: list[str], home_prefs: dict[str, object]) -> dict[str, object]:
     limit = int(home_prefs.get("items_limit") or _DEFAULT_HOME_PREFS["items_limit"])
-    can_view_parts = user_can_view_items(user)
-    can_view_jobs = _has_any_permission(user, "jobs.view", "jobs.manage")
-    can_view_orders = _has_any_permission(user, "orders.view", "orders.manage")
+    can_view_parts = _can_access(user, "parts.read")
+    can_view_jobs = _can_access(user, "jobs.read")
+    can_view_orders = _can_access(user, "orders.read")
     show_parts = can_view_parts and bool(home_prefs.get("show_parts", True))
     show_jobs = can_view_jobs and bool(home_prefs.get("show_jobs", True))
     show_orders = can_view_orders and bool(home_prefs.get("show_orders", True))

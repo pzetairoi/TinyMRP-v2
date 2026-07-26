@@ -133,8 +133,8 @@ def test_engineering_reads_unreleased_revises_and_does_not_inherit_approval(clie
     assert not revised.attrs.get("released_by")
     assert not has_permission(engineer, "parts.release.approve")
     assert not has_permission(engineer, "parts.purge")
-    assert has_permission(engineer, "parts.archive")
-    assert has_permission(engineer, "parts.restore")
+    assert not has_permission(engineer, "parts.archive")
+    assert not has_permission(engineer, "parts.restore")
     assert has_permission(engineer, "bom.update")
 
 
@@ -153,7 +153,7 @@ def test_quality_and_auditor_have_unreleased_read_without_design_write():
         assert not has_permission(user, "files.replace")
 
     quality = User.objects.get(email="quality_reviewer@stage3b1.test")
-    assert has_permission(quality, "parts.release.approve")
+    assert has_permission(quality, "reviews.approve")
     # Stage 6 will add the creator/approver transaction-conflict check.
 
 
@@ -444,7 +444,7 @@ def test_multiple_roles_combine_only_contributing_part_scopes():
         draft.revision,
     ).allowed
     assert has_permission(engineer_quality, "parts.update")
-    assert has_permission(engineer_quality, "parts.release.approve")
+    assert has_permission(engineer_quality, "reviews.approve")
     # Deliberately allowed until the Stage 6 self-approval conflict is activated.
 
     planner_operator = _user(

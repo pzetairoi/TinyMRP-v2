@@ -3,7 +3,7 @@
 {% block title %}Orders - Admin{% endblock %}
 {% block content %}
 {% call page_header("Orders", "Sales and purchase orders.", "Admin") %}
-  <a class="btn btn-primary" href="{{ url_for('admin_orders.orders_new') }}">New order</a>
+  {% if has_perm('orders.create') %}<a class="btn btn-primary" href="{{ url_for('admin_orders.orders_new') }}">New order</a>{% endif %}
 {% endcall %}
 
 <form id="orders-filter" method="get"></form>
@@ -59,10 +59,12 @@
           </div>
         </th>
         <th>
+          {% if has_perm('orders.financial.read') %}
           <div class="d-flex flex-column gap-1">
             <input class="form-control form-control-sm" type="number" step="0.01" min="0" name="total_min" value="{{ filters.total_min }}" placeholder="Min" form="orders-filter">
             <input class="form-control form-control-sm" type="number" step="0.01" min="0" name="total_max" value="{{ filters.total_max }}" placeholder="Max" form="orders-filter">
           </div>
+          {% else %}<span class="text-muted small">Restricted</span>{% endif %}
         </th>
         <th>
           <div class="d-flex gap-1">
@@ -77,9 +79,7 @@
         {% for o in orders %}
         <tr>
           <td class="fw-semibold">
-            {% if has_perm('orders.manage') %}
-              <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
-            {% elif has_perm('orders.view') %}
+            {% if has_perm('orders.read') %}
               <a href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">{{ o.order_number }}</a>
             {% else %}
               {{ o.order_number }}
@@ -87,27 +87,21 @@
           </td>
           <td>{{ o.kind }}</td>
           <td>
-            {% if has_perm('jobs.manage') and o.job_id %}
-              <a href="{{ url_for('admin_jobs.jobs_edit', job_id=o.job_id) }}">{{ o.job }}</a>
-            {% elif has_perm('jobs.view') and o.job_id %}
+            {% if has_perm('jobs.read') and o.job_id %}
               <a href="{{ url_for('admin_jobs.jobs_view', job_id=o.job_id) }}">{{ o.job }}</a>
             {% else %}
               {{ o.job }}
             {% endif %}
           </td>
           <td>
-            {% if has_perm('suppliers.manage') and o.supplier_id %}
-              <a href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=o.supplier_id) }}">{{ o.supplier }}</a>
-            {% elif has_perm('suppliers.view') and o.supplier_id %}
+            {% if has_perm('suppliers.read') and o.supplier_id %}
               <a href="{{ url_for('admin_suppliers.suppliers_view', sup_id=o.supplier_id) }}">{{ o.supplier }}</a>
             {% else %}
               {{ o.supplier }}
             {% endif %}
           </td>
           <td>
-            {% if has_perm('customers.manage') and o.customer_id %}
-              <a href="{{ url_for('admin_customers.customers_edit', cust_id=o.customer_id) }}">{{ o.customer }}</a>
-            {% elif has_perm('customers.view') and o.customer_id %}
+            {% if has_perm('customers.read') and o.customer_id %}
               <a href="{{ url_for('admin_customers.customers_view', cust_id=o.customer_id) }}">{{ o.customer }}</a>
             {% else %}
               {{ o.customer }}
@@ -117,14 +111,16 @@
           <td>{{ display_ts(o.order_date, '%Y-%m-%d') if o.order_date else '-' }}</td>
           <td>{{ '%.2f' % o.total if o.total is not none else '-' }}</td>
           <td class="d-flex gap-1">
-            {% if has_perm('orders.manage') %}
+            {% if has_perm('orders.update') %}
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">Edit</a>
+            {% elif has_perm('orders.read') %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">View</a>
+            {% endif %}
+            {% if has_perm('orders.archive') %}
             <form method="post" action="{{ url_for('admin_orders.orders_delete', order_id=o.id) }}" onsubmit="return confirm('Delete this order?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>
-            {% elif has_perm('orders.view') %}
-            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">View</a>
             {% endif %}
           </td>
         </tr>

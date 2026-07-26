@@ -80,63 +80,17 @@ def _acl_enforced() -> bool:
 def apply_job_scope(qs, user):
     if not _acl_enforced():
         return qs
-    if not is_external_scoped_user(user):
-        return qs
-    cust_ids = customer_scope_ids(user)
-    supp_ids = supplier_scope_ids(user)
-    job_ids = participant_job_ids(user)
-    if not cust_ids and not supp_ids and not job_ids:
-        return qs.filter(id__in=[])
-    if supp_ids and not cust_ids and not job_ids:
-        return qs.filter(id__in=[])
+    from app.services.authorization import scope_queryset
 
-    from mongoengine.queryset.visitor import Q
-    from app.models.order import Order
-
-    q = Q()
-    if cust_ids:
-        q = q | Q(customer__in=cust_ids)
-    if job_ids:
-        q = q | Q(id__in=job_ids)
-    if supp_ids:
-        q = q | Q(vendors__in=supp_ids)
-        supplier_job_ids = []
-        for o in Order.objects(supplier__in=supp_ids).only("job"):
-            try:
-                if o.job:
-                    supplier_job_ids.append(o.job.id)
-            except Exception:
-                continue
-        if supplier_job_ids:
-            q = q | Q(id__in=list(set(supplier_job_ids)))
-    return qs.filter(q)
+    return scope_queryset(qs, user, "jobs")
 
 
 def apply_order_scope(qs, user):
     if not _acl_enforced():
         return qs
-    if not is_external_scoped_user(user):
-        return qs
-    cust_ids = customer_scope_ids(user)
-    supp_ids = supplier_scope_ids(user)
-    participant_ids = participant_job_ids(user)
-    if not cust_ids and not supp_ids and not participant_ids:
-        return qs.filter(id__in=[])
+    from app.services.authorization import scope_queryset
 
-    from mongoengine.queryset.visitor import Q
-    from app.models.job import Job
-
-    q = Q()
-    if supp_ids:
-        q = q | Q(supplier__in=supp_ids)
-    if cust_ids:
-        q = q | Q(customer__in=cust_ids)
-        cust_job_ids = [j.id for j in Job.objects(customer__in=cust_ids, is_deleted=False).only("id")]
-        if cust_job_ids:
-            q = q | Q(job__in=cust_job_ids)
-    if participant_ids:
-        q = q | Q(job__in=participant_ids)
-    return qs.filter(q)
+    return scope_queryset(qs, user, "orders")
 
 
 def apply_customer_scope(qs, user):
@@ -297,70 +251,139 @@ def allowed_parts_for(user) -> Optional[Set[Tuple[str, str]]]:
         # Allow opt-out
         if not _acl_enforced():
             return None
+        from app.services.authorization import has_permission, permission_scope_modes
+
+        modes = permission_scope_modes(
+            user,
+            "parts.read",
+            resource_type="parts",
+        )
+        if "global" in modes:
+            return None
         if not is_external_scoped_user(user):
             return None
 
         from app.models.bom import BOMLink
         from app.models.customer import Customer
+        from app.models.part import Part
         from app.models.supplier import Supplier
         from app.models.job import Job
         from app.models.order import Order
+
+        def resolve_revision(pn: str, rev: str) -> str:
+            rev_clean = str(rev or "").strip()
+            if rev_clean:
+                return rev_clean
+            parts = Part.objects(part_number__iexact=str(pn or "").strip())
+            if not has_permission(user, "parts.read_unreleased"):
+                from app.services.attrs import approval_filter_raw
+
+                parts = parts.filter(__raw__=approval_filter_raw(approved=True))
+            part = parts.only("revision", "updated_at").order_by("-updated_at").first()
+            return str(getattr(part, "revision", "") or "").strip() if part else ""
 
         def add_with_children(pn: str, rev: str):
             pn_clean = (pn or "").strip()
             if not pn_clean:
                 return
-            root = (pn_clean, (rev or "").strip())
+            root = (pn_clean, resolve_revision(pn_clean, rev))
             queue = [root]
             visited: Set[Tuple[str, str]] = set()
             while queue:
                 current_pn, current_rev = queue.pop()
+                current_rev = resolve_revision(current_pn, current_rev)
                 key = (current_pn, current_rev)
                 if key in visited:
                     continue
                 visited.add(key)
                 allowed.add(key)
-                links = BOMLink.objects(
-                    parent_pn__iexact=current_pn,
-                    parent_rev__iexact=current_rev,
-                ).only("child_pn", "child_rev")
+                links = BOMLink.objects(parent_pn__iexact=current_pn).only(
+                    "parent_rev",
+                    "child_pn",
+                    "child_rev",
+                )
                 for link in links:
+                    link_parent_rev = str(
+                        getattr(link, "parent_rev", "") or ""
+                    ).strip()
+                    if (
+                        resolve_revision(current_pn, link_parent_rev).casefold()
+                        != current_rev.casefold()
+                    ):
+                        continue
                     child_pn = str(getattr(link, "child_pn", "") or "").strip()
                     if not child_pn:
                         continue
                     queue.append(
                         (
                             child_pn,
-                            str(getattr(link, "child_rev", "") or "").strip(),
+                            resolve_revision(
+                                child_pn,
+                                str(
+                                    getattr(link, "child_rev", "") or ""
+                                ).strip(),
+                            ),
                         )
                     )
 
         allowed: Set[Tuple[str, str]] = set()
         customer_ids = [c.id for c in Customer.objects(users=user).only("id")]
         supplier_ids = [s.id for s in Supplier.objects(users=user).only("id")]
-        participant_ids = participant_job_ids(user)
-
-        job_ids = set(participant_ids)
+        assigned_job_ids = set(participant_job_ids(user))
+        customer_job_ids = set()
         if customer_ids:
-            job_ids.update([j.id for j in Job.objects(customer__in=customer_ids, is_deleted=False).only("id")])
+            customer_job_ids.update(
+                j.id
+                for j in Job.objects(
+                    customer__in=customer_ids,
+                    is_deleted=False,
+                ).only("id")
+            )
+        supplier_job_ids = set()
+        if supplier_ids:
+            supplier_job_ids.update(
+                j.id
+                for j in Job.objects(
+                    vendors__in=supplier_ids,
+                    is_deleted=False,
+                ).only("id")
+            )
+            supplier_job_ids.update(
+                order.job.id
+                for order in Order.objects(
+                    kind="purchase",
+                    supplier__in=supplier_ids,
+                ).only("job")
+                if getattr(order, "job", None)
+            )
 
+        job_ids = assigned_job_ids | customer_job_ids | supplier_job_ids
         if job_ids:
             for j in Job.objects(id__in=list(job_ids), is_deleted=False):
                 for line in (j.bom or []):
                     add_with_children(line.pn or "", line.rev or "")
 
         if customer_ids:
-            for o in Order.objects(customer__in=customer_ids):
+            from mongoengine.queryset.visitor import Q
+
+            customer_orders = Order.objects(
+                Q(kind="sales", customer__in=customer_ids)
+                | Q(kind="sales", job__in=list(customer_job_ids))
+            )
+            for o in customer_orders:
                 for line in (o.lines or []):
                     add_with_children(line.pn or "", line.rev or "")
 
-        if job_ids:
-            for o in Order.objects(job__in=list(job_ids)):
+        if assigned_job_ids:
+            for o in Order.objects(job__in=list(assigned_job_ids)):
                 for line in (o.lines or []):
                     add_with_children(line.pn or "", line.rev or "")
 
         if supplier_ids:
-            for o in Order.objects(supplier__in=supplier_ids):
+            for o in Order.objects(
+                kind="purchase",
+                supplier__in=supplier_ids,
+            ):
                 for line in (o.lines or []):
                     add_with_children(line.pn or "", line.rev or "")
 

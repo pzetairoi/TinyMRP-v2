@@ -156,7 +156,7 @@
             <div class="col-lg-{% if dashboard.show_orders %}6{% else %}12{% endif %}">
               <section class="account-panel h-100">
                 {% call card_header("Recently Visited Jobs", "Jobs you've opened recently.") %}
-                  {% if has_perm('jobs.view') %}
+                  {% if has_perm('jobs.read') %}
                     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">All Jobs</a>
                   {% endif %}
                 {% endcall %}
@@ -203,7 +203,7 @@
             <div class="col-lg-{% if dashboard.show_jobs %}6{% else %}12{% endif %}">
               <section class="account-panel h-100">
                 {% call card_header("Recently Visited Orders", "Orders you've opened recently.") %}
-                  {% if has_perm('orders.view') %}
+                  {% if has_perm('orders.read') %}
                     <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_list') }}">All Orders</a>
                   {% endif %}
                 {% endcall %}

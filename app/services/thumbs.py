@@ -69,7 +69,19 @@ def preview_png_urls_map(
     pn_list = sorted({pn for pn, _rev in requested.values()})
     rows = (
         PartFile.objects(part_number__in=pn_list, ext_group="png", is_dwg=False)
-        .only("part_number", "revision", "rel_path", "http_url", "thumb_rel_path", "mtime", "mtime_iso")
+        .only(
+            "part_number",
+            "revision",
+            "ext_group",
+            "is_dwg",
+            "path",
+            "rel_path",
+            "source",
+            "http_url",
+            "thumb_rel_path",
+            "mtime",
+            "mtime_iso",
+        )
         .order_by("-mtime_iso", "-mtime", "rel_path")
     )
     for row in rows:

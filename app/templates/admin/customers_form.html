@@ -77,7 +77,7 @@
             </div>
           </div>
 
-          {% if not hide_user_links %}
+          {% if not hide_user_links and has_perm('customers.portal_users.manage') %}
           <div class="mt-4">
             {{ card_header("Linked Users", "Users linked here can be scoped to customer-related work.") }}
             {% set linked = (customer.users | map(attribute='id') | map('string') | list) if customer else [] %}
@@ -106,7 +106,7 @@
           {% endif %}
         </form>
 
-        {% if customer and has_perm('jobs.view') %}
+        {% if customer and has_perm('jobs.read') %}
         <div class="mt-4">
           {{ card_header("Jobs", "Jobs currently linked to this customer.") }}
           <div class="table-responsive tm-table-shell">
@@ -125,9 +125,7 @@
                   {% for j in jobs %}
                   <tr>
                     <td>
-                      {% if has_perm('jobs.manage') %}
-                        <a href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">{{ j.job_number }}</a>
-                      {% elif has_perm('jobs.view') %}
+                      {% if has_perm('jobs.read') %}
                         <a href="{{ url_for('admin_jobs.jobs_view', job_id=j.id) }}">{{ j.job_number }}</a>
                       {% else %}
                         {{ j.job_number }}
@@ -150,7 +148,7 @@
         </div>
         {% endif %}
 
-        {% if customer and has_perm('orders.view') %}
+        {% if customer and has_perm('orders.read') %}
         <div class="mt-4">
           {{ card_header("Orders", "Orders currently linked to this customer.") }}
           <div class="table-responsive tm-table-shell">
@@ -170,9 +168,7 @@
                   {% for o in orders %}
                   <tr>
                     <td>
-                      {% if has_perm('orders.manage') %}
-                        <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
-                      {% elif has_perm('orders.view') %}
+                      {% if has_perm('orders.read') %}
                         <a href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">{{ o.order_number }}</a>
                       {% else %}
                         {{ o.order_number }}

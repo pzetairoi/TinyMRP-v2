@@ -831,6 +831,29 @@ def create_app(config_object=None):
             return local_date_value(value)
         def local_dt_input(value):
             return local_input_value(value)
+        def permission_boundary(resource_type: str) -> str:
+            try:
+                from app.services.field_policies import response_context
+                from flask_login import current_user
+
+                return response_context(resource_type, current_user)
+            except Exception:
+                return ""
+        def can_use_order_kind(kind: str, permission: str) -> bool:
+            try:
+                from app.services.authorization import order_kind_allowed
+                from flask_login import current_user
+
+                return order_kind_allowed(current_user, kind, permission)
+            except Exception:
+                return False
+        def can_transition_order_status(current: str, target: str) -> bool:
+            try:
+                from app.services.biz_utils import can_transition_order
+
+                return target == current or can_transition_order(current, target)
+            except Exception:
+                return False
         return dict(
             files_base=fb,
             has_perm=has_perm,
@@ -840,6 +863,9 @@ def create_app(config_object=None):
             display_ts=display_ts,
             local_date_input=local_date_input,
             local_dt_input=local_dt_input,
+            permission_boundary=permission_boundary,
+            can_use_order_kind=can_use_order_kind,
+            can_transition_order_status=can_transition_order_status,
             app_timezone_name=resolve_timezone_name(),
         )
 

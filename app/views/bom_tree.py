@@ -31,11 +31,24 @@ bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 def _clean_rev(value: object) -> str:
     return clean_rev(value)
 
+
+def _resolve_scoped_revision(pn: str, revision: object, user=None) -> str:
+    revision_clean = _clean_rev(revision)
+    if revision_clean:
+        return revision_clean
+    query = Part.objects(part_number__iexact=str(pn or "").strip())
+    if user is not None:
+        query = scope_queryset(query, user, "parts")
+    part = query.order_by("-updated_at").first()
+    if not part:
+        return ""
+    attrs = harvest_part_attrs(part)
+    return _clean_rev(attrs.get("revision") or part.revision or "")
+
+
 def _has_children(pn: str, rev: str | None = None) -> bool:
     if "parent_pn" in BOMLink._fields:
-        if rev is not None and "parent_rev" in BOMLink._fields:
-            return BOMLink.objects(parent_pn=pn, parent_rev=_clean_rev(rev)).limit(1).count() > 0
-        return BOMLink.objects(parent_pn=pn).limit(1).count() > 0
+        return bool(_child_links(pn, rev, current_user))
     p = Part.objects(part_number=pn).only("id").first()
     if not p:
         return False
@@ -52,22 +65,49 @@ def _coverage_groups(pn: str, rev: str) -> set[str]:
     return groups
 
 
-def _child_links(parent_pn: str, parent_rev: str | None):
+def _child_links(parent_pn: str, parent_rev: str | None, user=None):
     if "parent_pn" not in BOMLink._fields:
         p = Part.objects(part_number=parent_pn).only("id").first()
         if not p:
             return []
         return list(BOMLink.objects(parent=p).only("child", "qty", "uom", "alt_group"))
-    if parent_rev is not None and "parent_rev" in BOMLink._fields:
-        return list(
-            BOMLink.objects(parent_pn=parent_pn, parent_rev=_clean_rev(parent_rev)).only(
-                "child_pn", "qty", "uom", "alt_group", "child_rev", "occurrences"
-            )
-        )
-    return list(
+    links = list(
         BOMLink.objects(parent_pn=parent_pn).only(
-            "child_pn", "qty", "uom", "alt_group", "child_rev", "occurrences"
+            "parent_rev",
+            "child_pn",
+            "qty",
+            "uom",
+            "alt_group",
+            "child_rev",
+            "occurrences",
         )
+    )
+    if parent_rev is None:
+        return links
+    expected_rev = _resolve_scoped_revision(parent_pn, parent_rev, user)
+    return [
+        link
+        for link in links
+        if _resolve_scoped_revision(
+            parent_pn,
+            getattr(link, "parent_rev", ""),
+            user,
+        ).casefold()
+        == expected_rev.casefold()
+    ]
+
+
+def _resolved_child_pair(link, user=None) -> tuple[str, str]:
+    child_pn = str(getattr(link, "child_pn", "") or "").strip()
+    return (
+        child_pn,
+        _resolve_scoped_revision(
+            child_pn,
+            getattr(link, "child_rev", ""),
+            user,
+        )
+        if child_pn
+        else "",
     )
 
 
@@ -82,12 +122,9 @@ def _bom_is_fully_authorised(user, parent_pn: str, parent_rev: str) -> bool:
         if normalized in visited:
             continue
         visited.add(normalized)
-        links = _child_links(*current)
+        links = _child_links(*current, user)
         pairs = [
-            (
-                str(getattr(link, "child_pn", "") or "").strip(),
-                _clean_rev(getattr(link, "child_rev", "") or ""),
-            )
+            _resolved_child_pair(link, user)
             for link in links
             if str(getattr(link, "child_pn", "") or "").strip()
         ]
@@ -289,12 +326,13 @@ def bom_tree():
             return jsonify([]), 403
         # children
         if "parent_pn" in BOMLink._fields:
-            links = _child_links(parent_part.part_number, exact_parent_rev)
+            links = _child_links(
+                parent_part.part_number,
+                exact_parent_rev,
+                current_user,
+            )
             child_pairs = [
-                (
-                    getattr(link, "child_pn", "") or "",
-                    getattr(link, "child_rev", "") or "",
-                )
+                _resolved_child_pair(link, current_user)
                 for link in links
                 if getattr(link, "child_pn", None)
             ]
@@ -314,7 +352,7 @@ def bom_tree():
             for l in links:
                 child_pn = getattr(l, "child_pn", None)
                 if child_pn and child_pn != parent:
-                    c_rev = _clean_rev(getattr(l, "child_rev", None)) if hasattr(l, "child_rev") else None
+                    _, c_rev = _resolved_child_pair(l, current_user)
                     kids.append(_node(child_pn, l, rev=c_rev, config=config, review_statuses=review_statuses))
             try:
                 log_action("bom.view", resource_type="bom", resource=f"children:{parent}:{(parent_rev or '')}")
@@ -482,12 +520,9 @@ def bom_flat():
 
     root_key = (root_part.part_number, root_rev)
     stack: list[tuple[str, str, float, str, str, tuple[tuple[str, str], ...]]] = []
-    root_links = _child_links(root_part.part_number, root_rev)
+    root_links = _child_links(root_part.part_number, root_rev, current_user)
     root_child_pairs = [
-        (
-            getattr(link, "child_pn", "") or "",
-            getattr(link, "child_rev", "") or "",
-        )
+        _resolved_child_pair(link, current_user)
         for link in root_links
         if getattr(link, "child_pn", None)
     ]
@@ -507,7 +542,7 @@ def bom_flat():
         child_pn = getattr(link, "child_pn", None)
         if not child_pn:
             continue
-        child_rev = _clean_rev(getattr(link, "child_rev", "") or "")
+        _, child_rev = _resolved_child_pair(link, current_user)
         child_key = (child_pn, child_rev)
         if child_key == root_key:
             continue
@@ -539,12 +574,9 @@ def bom_flat():
             alt_set.add(str(alt_group))
         row["alt_group"] = ", ".join(sorted(alt_set)) if alt_set else ""
 
-        child_links = _child_links(child_pn, child_rev)
+        child_links = _child_links(child_pn, child_rev, current_user)
         descendant_pairs = [
-            (
-                getattr(link, "child_pn", "") or "",
-                getattr(link, "child_rev", "") or "",
-            )
+            _resolved_child_pair(link, current_user)
             for link in child_links
             if getattr(link, "child_pn", None)
         ]
@@ -564,7 +596,7 @@ def bom_flat():
             next_pn = getattr(link, "child_pn", None)
             if not next_pn:
                 continue
-            next_rev = _clean_rev(getattr(link, "child_rev", "") or "")
+            _, next_rev = _resolved_child_pair(link, current_user)
             next_key = (next_pn, next_rev)
             if next_key in lineage:
                 continue

@@ -4,6 +4,8 @@
 {% set mask_customer = mask_customer if mask_customer is defined else false %}
 {% set mask_job = mask_job if mask_job is defined else false %}
 {% set show_scope_download = show_scope_download if show_scope_download is defined else true %}
+{% set can_read_financial = has_perm('orders.financial.read') %}
+{% set can_update_financial = has_perm('orders.financial.update') %}
 {% block title %}{{ 'View order' if is_readonly else ('Edit order' if order else 'New order') }} - Admin{% endblock %}
 {% block content %}
 <div class="row">
@@ -28,16 +30,30 @@
             <div class="col-md-3">
               <label class="form-label">Type</label>
               <select class="form-select" name="kind">
-                {% set k = order.kind if order else 'purchase' %}
+                {% set k = order.kind if order else ('purchase' if can_use_order_kind('purchase', 'orders.create') else 'sales') %}
+                {% set kind_permission = 'orders.update' if order else 'orders.create' %}
+                {% if k == 'purchase' or can_use_order_kind('purchase', kind_permission) %}
                 <option value="purchase" {% if k=='purchase' %}selected{% endif %}>Purchase</option>
+                {% endif %}
+                {% if k == 'sales' or can_use_order_kind('sales', kind_permission) %}
                 <option value="sales" {% if k=='sales' %}selected{% endif %}>Sales</option>
+                {% endif %}
               </select>
             </div>
             <div class="col-md-3">
               <label class="form-label">Status</label>
               {% set st = order.status if order else 'draft' %}
               <select class="form-select" name="status">
-                {% for s in ['draft','submitted','confirmed','in_production','ready_to_ship','shipped','delivered','cancelled'] %}
+                {% for s, permission in [
+                  ('draft','orders.update'),
+                  ('submitted','orders.submit'),
+                  ('confirmed','orders.approve'),
+                  ('in_production','orders.fulfil'),
+                  ('ready_to_ship','orders.fulfil'),
+                  ('shipped','orders.ship'),
+                  ('delivered','orders.fulfil'),
+                  ('cancelled','orders.cancel')
+                ] if s == st or (has_perm(permission) and (not order or can_transition_order_status(st, s))) %}
                 <option value="{{ s }}" {% if st==s %}selected{% endif %}>{{ s.replace('_',' ').title() }}</option>
                 {% endfor %}
               </select>
@@ -48,7 +64,13 @@
             </div>
             <div class="col-md-3">
               <label class="form-label">Currency</label>
+              {% if can_update_financial %}
               <input class="form-control" type="text" name="currency" value="{{ order.currency if order else 'USD' }}">
+              {% elif can_read_financial %}
+              <div class="form-control-plaintext">{{ order.currency if order else 'USD' }}</div>
+              {% else %}
+              <div class="form-control-plaintext text-muted">Restricted</div>
+              {% endif %}
             </div>
           </div>
 
@@ -64,8 +86,8 @@
                 <option value="{{ j.id }}" data-customer-id="{{ j.customer_id }}" {% if (order and order.job and j.id==order.job.id) or (prefill_job and j.id|string==prefill_job|string) %}selected{% endif %}>{{ j.job_number }}</option>
                 {% endfor %}
               </select>
-              {% if order and order.job and has_perm('jobs.manage') %}
-              <div class="small mt-1"><a href="{{ url_for('admin_jobs.jobs_edit', job_id=order.job.id) }}">Open job</a></div>
+              {% if order and order.job and has_perm('jobs.read') %}
+              <div class="small mt-1"><a href="{{ url_for('admin_jobs.jobs_view', job_id=order.job.id) }}">Open job</a></div>
               {% endif %}
               {% endif %}
             </div>
@@ -128,12 +150,16 @@
             </div>
           </div>
 
-          <div class="row g-3 mt-2">
+          {% if can_update_financial or can_read_financial %}<div class="row g-3 mt-2">
             <div class="col-md-4">
               <label class="form-label">Shipping cost</label>
+              {% if can_update_financial %}
               <input class="form-control" type="number" step="0.01" min="0" id="shipping_cost" name="shipping_cost" value="{{ order.shipping_cost if order else 0 }}">
+              {% else %}
+              <div class="form-control-plaintext">{{ '%.2f' % order.shipping_cost if order and order.shipping_cost is not none else '0.00' }}</div>
+              {% endif %}
             </div>
-          </div>
+          </div>{% endif %}
 
           <div class="mt-3">
             <label class="form-label fw-bold">Order Lines</label>
@@ -147,10 +173,10 @@
                     <th style="width:12%;">Rev</th>
                     <th style="width:12%;">Qty</th>
                     <th style="width:10%;">UoM</th>
-                    <th style="width:12%;">Unit price</th>
+                    {% if can_read_financial %}<th style="width:12%;">Unit price</th>
                     <th style="width:10%;">Disc %</th>
                     <th style="width:10%;">Tax %</th>
-                    <th style="width:12%;">Line total</th>
+                    <th style="width:12%;">Line total</th>{% endif %}
                     <th style="width:15%;">Note</th>
                     <th style="width:18%;">Actions</th>
                   </tr>
@@ -171,10 +197,10 @@
                         <input id="ol-filter-qty-max" class="form-control form-control-sm" type="number" step="1" min="0" placeholder="Qty max">
                       </div>
                     </th>
+                    {% if can_read_financial %}<th></th>
                     <th></th>
                     <th></th>
-                    <th></th>
-                    <th></th>
+                    <th></th>{% endif %}
                     <th></th>
                     <th></th>
                     <th>
@@ -193,7 +219,7 @@
             <textarea id="order_lines" class="form-control d-none" name="lines" rows="8">{{ lines if lines is defined else '' }}</textarea>
           </div>
 
-          <div class="row g-3 mt-3">
+          {% if can_read_financial %}<div class="row g-3 mt-3">
             <div class="col-md-4 ms-auto">
               <div class="border rounded-3 p-3 bg-light">
                 <div class="d-flex justify-content-between small"><span>Subtotal</span><span id="order-subtotal">{{ '%.2f' % order.subtotal if order and order.subtotal is not none else '0.00' }}</span></div>
@@ -204,13 +230,13 @@
                 <div class="d-flex justify-content-between fw-semibold"><span>Total</span><span id="order-total">{{ '%.2f' % order.total if order and order.total is not none else '0.00' }}</span></div>
               </div>
             </div>
-          </div>
+          </div>{% endif %}
 
           {% if not is_readonly %}
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
           {% endif %}
         </form>
-        {% if order %}
+        {% if order and has_perm('exports.run') and has_perm('parts.read') and has_perm('bom.read') and has_perm('files.read') %}
         <div class="mt-4">
           <h2 class="h6 mb-3 fw-bold">Docpack export</h2>
           <form method="post" action="{{ url_for('docpacks_api.build_order') }}" class="docpack-export-form" data-prefix="order">
@@ -316,14 +342,14 @@
                   <input class="form-check-input" type="checkbox" id="order_whereused" name="whereused_report">
                   <label class="form-check-label" for="order_whereused">Where-used report (standalone)</label>
                 </div></div>
-                <div class="col-md-6 col-lg-4"><div class="form-check">
+                {% if has_perm('markups.read') %}<div class="col-md-6 col-lg-4"><div class="form-check">
                   <input class="form-check-input" type="checkbox" id="order_markup_files" name="markup_files">
                   <label class="form-check-label" for="order_markup_files">Markup drawings in selected files</label>
                 </div></div>
                 <div class="col-md-6 col-lg-4"><div class="form-check">
                   <input class="form-check-input" type="checkbox" id="order_markup_report" name="markup_report">
                   <label class="form-check-label" for="order_markup_report">Markup drawings report</label>
-                </div></div>
+                </div></div>{% endif %}
                 <div class="col-md-6 col-lg-4"><div class="form-check">
                   <input class="form-check-input" type="checkbox" id="order_fab_pack" name="fabrication_pack">
                   <label class="form-check-label" for="order_fab_pack">Fabrication pack (preset)</label>
@@ -352,7 +378,7 @@
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_where" name="binder_add_whereused"><label class="form-check-label" for="order_binder_where">Where-used report section</label></div>
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_hw" name="binder_add_hardware_summary" checked><label class="form-check-label" for="order_binder_hw">Hardware summary</label></div>
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_datasheets" name="binder_add_datasheets"><label class="form-check-label" for="order_binder_datasheets">Datasheets</label></div>
-                  <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_markups" name="binder_add_markups"><label class="form-check-label" for="order_binder_markups">Markup drawings</label></div>
+                  {% if has_perm('markups.read') %}<div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_markups" name="binder_add_markups"><label class="form-check-label" for="order_binder_markups">Markup drawings</label></div>{% endif %}
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_flat" name="binder_include_flat_patterns"><label class="form-check-label" for="order_binder_flat">Flat pattern PDFs</label></div>
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="order_binder_pages" name="binder_page_numbers" checked><label class="form-check-label" for="order_binder_pages">Page numbers</label></div>
                 </div>
@@ -381,7 +407,7 @@
           </form>
         </div>
         {% endif %}
-        {% if order and show_scope_download %}
+        {% if order and show_scope_download and has_perm('exports.run') and has_perm('parts.read') and has_perm('bom.read') and has_perm('files.read') %}
         <div class="mt-4">
           <h2 class="h6 mb-3 fw-bold">Scope of supply</h2>
           <form method="post" action="{{ url_for('admin_orders.order_scope_pdf', order_id=order.id) }}" class="docpack-export-form" data-prefix="scope">
@@ -450,9 +476,10 @@
   let orderRows = [];
   let replaceIdx = null;
   const thumbCache = {};
-  const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
+  const canViewParts = {{ 'true' if has_perm('parts.read') else 'false' }};
   const fallbackLogo = "{{ url_for('branding.logo') }}";
   const isReadOnly = {{ 'true' if is_readonly else 'false' }};
+  const canUpdateFinancial = {{ 'true' if can_update_financial else 'false' }};
 
   function parseOrderLines(txt){
     const out = [];
@@ -574,7 +601,7 @@
         <td style="max-width:100px;">
           <input type="text" class="form-control form-control-sm ol-uom" value="${row.uom || 'EA'}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
-        <td style="max-width:120px;">
+        {% if can_read_financial %}<td style="max-width:120px;">
           <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-price" value="${row.unit_price || 0}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
         <td style="max-width:90px;">
@@ -583,7 +610,7 @@
         <td style="max-width:90px;">
           <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-tax" value="${row.tax_pct || 0}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>
-        <td class="small text-muted ol-total" data-idx="${idx}">${totals.total.toFixed(2)}</td>
+        <td class="small text-muted ol-total" data-idx="${idx}">${totals.total.toFixed(2)}</td>{% endif %}
         <td>
           <input type="text" class="form-control form-control-sm ol-note" value="${row.note || ''}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
         </td>

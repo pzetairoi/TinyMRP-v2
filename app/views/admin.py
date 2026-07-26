@@ -152,7 +152,19 @@ bp = Blueprint("admin", __name__, url_prefix="/admin")
 def admin_index():
     if not has_any_permission(
         current_user,
-        ("security.users.read", "system.config.read", "audit.read"),
+        (
+            "security.users.read",
+            "security.roles.read",
+            "system.config.read",
+            "system.config.manage",
+            "system.storage.manage",
+            "system.rebuild",
+            "system.maintenance",
+            "numbering.manage",
+            "parts.purge",
+            "files.purge",
+            "audit.read",
+        ),
     ):
         abort(403)
     return render_template("admin/index.html")
@@ -717,6 +729,7 @@ def users_edit(user_id):
 
 @bp.route("/purge-parts", methods=["GET", "POST"])
 @require_permission("parts.purge")
+@require_permission("files.purge")
 def purge_parts():
     """Dangerous action: delete all Parts, BOM links, and PartFiles.
     Requires admin and explicit POST with CSRF.

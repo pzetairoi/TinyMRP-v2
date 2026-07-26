@@ -7,6 +7,7 @@ import pytest
 
 from app.models.artifact import PartFile
 from app.models.auth import Role, User
+from app.models.bom import BOMLink
 from app.models.customer import Customer
 from app.models.extra_file import PartExtraFile
 from app.models.job import Job, JobBOMLine
@@ -160,6 +161,136 @@ def test_customer_portal_file_list_is_exact_and_hides_internal_cad(
     assert client.get("/api/parts/PORTAL-FILE/files_overview?rev=B").status_code == 404
 
 
+def test_customer_portal_job_updates_refresh_parts_and_thumbnail_access(
+    client, app, tmp_path
+):
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    app.config["FILES_PUBLIC_URLS"] = False
+    first = _part("PORTAL-FIRST", "A", released=True)
+    added = _part("PORTAL-ADDED", "A", released=True)
+    child = _part("PORTAL-CHILD", "A", released=True)
+    BOMLink(
+        parent_pn=added.part_number,
+        parent_rev=added.revision,
+        child_pn=child.part_number,
+        child_rev="",
+        qty=2,
+    ).save()
+    preview = _managed(
+        tmp_path,
+        added.part_number,
+        added.revision,
+        "png",
+        content=b"full-preview",
+    )
+    thumb_path = tmp_path / "thumbs" / "png" / "PORTAL-ADDED_REV_A.png"
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+    thumb_path.write_bytes(b"small-preview")
+    preview.thumb_rel_path = "thumbs/png/PORTAL-ADDED_REV_A.png"
+    preview.save()
+
+    portal = _user("updated-portal@files.test", _standard_role("customer_portal"))
+    customer = Customer(name="Updated File Customer", users=[portal]).save()
+    job = Job(
+        job_number="UPDATED-FILE-JOB",
+        customer=customer,
+        bom=[JobBOMLine(pn=first.part_number, rev="A", qty=1)],
+    ).save()
+    job.bom.append(JobBOMLine(pn=added.part_number, rev="", qty=1))
+    job.save()
+    sales_order = Order(
+        order_number="UPDATED-CUSTOMER-SO",
+        kind="sales",
+        status="submitted",
+        customer=customer,
+        job=job,
+        lines=[OrderLine(pn=first.part_number, rev="A", qty=1)],
+    ).save()
+    hidden_purchase_part = _part("HIDDEN-CUSTOMER-PO-PART", "A", released=True)
+    hidden_purchase_order = Order(
+        order_number="HIDDEN-CUSTOMER-PO",
+        kind="purchase",
+        status="submitted",
+        job=job,
+        lines=[
+            OrderLine(
+                pn=hidden_purchase_part.part_number,
+                rev=hidden_purchase_part.revision,
+                qty=1,
+            )
+        ],
+    ).save()
+    _login(client, portal)
+
+    job_page = client.get(f"/admin/jobs/{job.id}")
+    assert job_page.status_code == 200
+    job_body = job_page.get_data(as_text=True)
+    assert "Related Orders" in job_body
+    assert sales_order.order_number in job_body
+    assert hidden_purchase_order.order_number not in job_body
+    assert "Parts in Orders" in job_body
+    assert "Parts Not Yet Ordered" in job_body
+    assert first.part_number in job_body
+    assert added.part_number in job_body
+    assert child.part_number in job_body
+    assert hidden_purchase_part.part_number not in job_body
+    order_page = client.get(f"/admin/orders/{sales_order.id}")
+    assert order_page.status_code == 200
+    assert first.part_number in order_page.get_data(as_text=True)
+    assert client.get(f"/admin/orders/{hidden_purchase_order.id}").status_code == 404
+    children = client.get(
+        f"/api/bom_tree?parent={added.part_number}&parent_rev={added.revision}"
+    )
+    assert children.status_code == 200
+    assert {
+        row["data"]["part_number"] for row in children.get_json()
+    } == {child.part_number}
+    child_detail = client.get(
+        f"/api/part_detail?pn={child.part_number}&rev={child.revision}"
+    )
+    assert child_detail.status_code == 200
+    related_jobs = child_detail.get_json()["jobs_orders"]
+    assert {
+        (row["job_id"], row["job_number"])
+        for row in related_jobs
+        if row["source"] == "job"
+    } == {(str(job.id), job.job_number)}
+    assert {
+        (row["parent_pn"], row["parent_rev"])
+        for row in child_detail.get_json()["whereused"]
+    } == {(added.part_number, added.revision)}
+    where_used = client.post(
+        "/api/whereused_lazy",
+        json={
+            "pn": child.part_number,
+            "rev": child.revision,
+            "first": 0,
+            "rows": 25,
+        },
+    )
+    assert where_used.status_code == 200
+    assert {
+        (row["parent_pn"], row["parent_rev"])
+        for row in where_used.get_json()["data"]
+    } == {(added.part_number, added.revision)}
+
+    listing = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {}},
+    )
+    assert listing.status_code == 200
+    rows = listing.get_json()["data"]
+    assert {first.part_number, added.part_number, child.part_number} <= {
+        row["part_number"] for row in rows
+    }
+    added_row = next(row for row in rows if row["part_number"] == added.part_number)
+    assert added_row["thumb_urls"]
+    thumbnail = client.get(added_row["thumb_urls"][0])
+    assert thumbnail.status_code == 200
+    assert thumbnail.data == b"small-preview"
+
+
 def test_supplier_and_production_file_access_follow_exact_relationships(
     client, app, tmp_path
 ):
@@ -190,6 +321,92 @@ def test_supplier_and_production_file_access_follow_exact_relationships(
     _login(client, operator)
     assert client.get(f"/files/view/{_token(app, allowed_file)}").status_code == 200
     assert client.get(f"/files/view/{_token(app, denied_file)}").status_code == 404
+
+
+def test_supplier_portal_can_read_parts_from_vendor_linked_job(client, app):
+    allowed = _part("SUPPLIER-JOB-PART", "A", released=True)
+    child = _part("SUPPLIER-JOB-CHILD", "A", released=True)
+    remaining = _part("SUPPLIER-JOB-REMAINING", "A", released=True)
+    BOMLink(
+        parent_pn=allowed.part_number,
+        parent_rev=allowed.revision,
+        child_pn=child.part_number,
+        child_rev=child.revision,
+        qty=1,
+    ).save()
+    supplier_user = _user(
+        "vendor-job-supplier@files.test",
+        _standard_role("supplier_portal"),
+    )
+    supplier = Supplier(name="Vendor Job Supplier", users=[supplier_user]).save()
+    job = Job(
+        job_number="VENDOR-PART-JOB",
+        vendors=[supplier],
+        bom=[
+            JobBOMLine(pn=allowed.part_number, rev="", qty=1),
+            JobBOMLine(pn=remaining.part_number, rev="A", qty=1),
+        ],
+    ).save()
+    purchase_order = Order(
+        order_number="VENDOR-JOB-PO",
+        kind="purchase",
+        status="submitted",
+        supplier=supplier,
+        job=job,
+        lines=[OrderLine(pn=allowed.part_number, rev="", qty=1)],
+    ).save()
+    hidden_sales_part = _part("HIDDEN-SUPPLIER-SO-PART", "A", released=True)
+    hidden_sales_order = Order(
+        order_number="HIDDEN-SUPPLIER-SO",
+        kind="sales",
+        status="submitted",
+        job=job,
+        lines=[
+            OrderLine(
+                pn=hidden_sales_part.part_number,
+                rev=hidden_sales_part.revision,
+                qty=1,
+            )
+        ],
+    ).save()
+    _login(client, supplier_user)
+
+    response = client.get(f"/admin/jobs/{job.id}")
+    assert response.status_code == 200
+    job_body = response.get_data(as_text=True)
+    assert "Related Orders" in job_body
+    assert purchase_order.order_number in job_body
+    assert hidden_sales_order.order_number not in job_body
+    assert "Parts in Orders" in job_body
+    assert "Parts Not Yet Ordered" in job_body
+    assert allowed.part_number in job_body
+    assert child.part_number in job_body
+    assert remaining.part_number in job_body
+    assert hidden_sales_part.part_number not in job_body
+    order_page = client.get(f"/admin/orders/{purchase_order.id}")
+    assert order_page.status_code == 200
+    assert allowed.part_number in order_page.get_data(as_text=True)
+    assert client.get(f"/admin/orders/{hidden_sales_order.id}").status_code == 404
+    children = client.get(
+        f"/api/bom_tree?parent={allowed.part_number}&parent_rev={allowed.revision}"
+    )
+    assert children.status_code == 200
+    assert {
+        row["data"]["part_number"] for row in children.get_json()
+    } == {child.part_number}
+    child_detail = client.get(
+        f"/api/part_detail?pn={child.part_number}&rev={child.revision}"
+    )
+    assert child_detail.status_code == 200
+    assert {
+        (row["job_id"], row["job_number"])
+        for row in child_detail.get_json()["jobs_orders"]
+        if row["source"] == "job"
+    } == {(str(job.id), job.job_number)}
+    assert {
+        (row["parent_pn"], row["parent_rev"])
+        for row in child_detail.get_json()["whereused"]
+    } == {(allowed.part_number, allowed.revision)}
 
 
 @pytest.mark.parametrize(

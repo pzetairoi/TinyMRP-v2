@@ -473,6 +473,12 @@ def _scope_modes(
         if resource_type == "orders" and role_name == "sales_customer_service":
             modes.add("sales")
             continue
+        if resource_type == "jobs" and role_name == "procurement":
+            modes.add("purchasing")
+            continue
+        if resource_type == "jobs" and role_name == "sales_customer_service":
+            modes.add("customer_business")
+            continue
         modes.add("global")
     return frozenset(modes)
 
@@ -491,6 +497,8 @@ def _scope_jobs(queryset: Any, scope: _ScopeContext, modes: frozenset[str]) -> A
     if "supplier" in modes and scope.supplier_ids:
         from app.models.order import Order
 
+        query |= Q(vendors__in=scope.supplier_ids)
+        has_clause = True
         order_job_ids = tuple(
             order.job.id
             for order in Order.objects(supplier__in=scope.supplier_ids).only("job")
@@ -499,6 +507,21 @@ def _scope_jobs(queryset: Any, scope: _ScopeContext, modes: frozenset[str]) -> A
         if order_job_ids:
             query |= Q(id__in=order_job_ids)
             has_clause = True
+    if "purchasing" in modes:
+        from app.models.order import Order
+
+        purchase_job_ids = tuple(
+            order.job.id
+            for order in Order.objects(kind="purchase").only("job")
+            if getattr(order, "job", None)
+        )
+        query |= Q(vendors__ne=[])
+        has_clause = True
+        if purchase_job_ids:
+            query |= Q(id__in=purchase_job_ids)
+    if "customer_business" in modes:
+        query |= Q(customer__ne=None)
+        has_clause = True
     return queryset.filter(query) if has_clause else _deny_all(queryset)
 
 
@@ -658,6 +681,22 @@ def permission_scope_modes(
         return _scope_modes(scope, normalized, permission)
     except Exception:
         return frozenset()
+
+
+def uses_portal_presentation(
+    user: Any,
+    permission: str,
+    *,
+    resource_type: str,
+) -> bool:
+    """Return whether only portal roles contribute the requested authority."""
+
+    modes = permission_scope_modes(
+        user,
+        permission,
+        resource_type=resource_type,
+    )
+    return bool(modes) and modes <= {"customer", "supplier"}
 
 
 def order_kind_allowed(user: Any, kind: str, permission: str) -> bool:

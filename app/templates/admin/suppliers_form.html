@@ -77,7 +77,7 @@
             </div>
           </div>
 
-          {% if not hide_user_links %}
+          {% if not hide_user_links and has_perm('suppliers.portal_users.manage') %}
           <div class="mt-4">
             {{ card_header("Linked Users", "Users linked here can be scoped to supplier-related work.") }}
             {% set linked = (supplier.users | map(attribute='id') | map('string') | list) if supplier else [] %}
@@ -106,7 +106,7 @@
           {% endif %}
         </form>
 
-        {% if supplier and has_perm('orders.view') %}
+        {% if supplier and has_perm('orders.read') %}
         <div class="mt-4">
           {{ card_header("Orders", "Orders currently linked to this supplier.") }}
           <div class="table-responsive tm-table-shell">
@@ -125,9 +125,7 @@
                   {% for o in orders %}
                   <tr>
                     <td>
-                      {% if has_perm('orders.manage') %}
-                        <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
-                      {% elif has_perm('orders.view') %}
+                      {% if has_perm('orders.read') %}
                         <a href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">{{ o.order_number }}</a>
                       {% else %}
                         {{ o.order_number }}

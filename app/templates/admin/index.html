@@ -3,46 +3,58 @@
 {% block title %}Admin Dashboard{% endblock %}
 {% block content %}
 {% call page_header("Administration", "Manage access, application configuration, business records, and system health from one workspace.", "Admin workspace") %}
+  {% if has_perm('audit.read') %}
   <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Review activity</a>
+  {% endif %}
+  {% if has_perm('security.users.manage') and has_perm('security.assignments.manage') %}
   <a class="btn btn-primary" href="{{ url_for('admin.users_create') }}">Add user</a>
+  {% endif %}
 {% endcall %}
 
 <div class="tm-admin-hub">
+  {% if has_perm('security.users.read') or has_perm('security.roles.read') or has_perm('audit.read') %}
   <section class="tm-admin-hub__section">
     {% call section_header("People & access", "Control who can sign in and what they are allowed to do.") %}{% endcall %}
     <div class="tm-admin-link-grid">
-      {{ admin_link("Users", "Create accounts, assign roles, and reset access.", url_for('admin.users_list'), "U") }}
-      {{ admin_link("Roles & permissions", "Define reusable permission sets for your teams.", url_for('admin_roles.roles_list'), "R") }}
-      {{ admin_link("Permission test setup", "Create a guarded canonical-role test matrix on disposable instances.", url_for('admin_roles.roles_list') ~ "#permission-test-setup", "T") }}
-      {{ admin_link("Audit log", "Review sign-ins, changes, and operational events.", url_for('admin_audit.audit_list'), "A") }}
+      {% if has_perm('security.users.read') %}{{ admin_link("Users", "Review accounts and access state.", url_for('admin.users_list'), "U") }}{% endif %}
+      {% if has_perm('security.roles.read') %}{{ admin_link("Roles & permissions", "Review reusable permission sets.", url_for('admin_roles.roles_list'), "R") }}{% endif %}
+      {% if has_perm('security.roles.read') and config.ALLOW_PERMISSION_TEST_DATA %}{{ admin_link("Permission test setup", "Open the guarded canonical-role test matrix.", url_for('admin_roles.roles_list') ~ "#permission-test-setup", "T") }}{% endif %}
+      {% if has_perm('audit.read') %}{{ admin_link("Audit log", "Review sign-ins, changes, and operational events.", url_for('admin_audit.audit_list'), "A") }}{% endif %}
     </div>
   </section>
+  {% endif %}
 
+  {% if has_perm('system.config.read') or has_perm('system.config.manage') or has_perm('system.rebuild') or has_perm('system.storage.manage') or has_perm('numbering.manage') %}
   <section class="tm-admin-hub__section">
     {% call section_header("Configuration", "Set instance-wide defaults and engineering conventions.") %}{% endcall %}
     <div class="tm-admin-link-grid">
-      {{ admin_link("Application settings", "Branding, timezone, imports, file sources, and processes.", url_for('admin.admin_settings'), "S") }}
-      {{ admin_link("Fields & exports", "Configure field mappings and defaults for tables and exports.", url_for('ui.admin_fields_ui'), "F") }}
-      {{ admin_link("SolidWorks add-in", "Manage add-in tokens and part-numbering schemes.", url_for('ui.admin_addin_ui'), "SW") }}
+      {% if has_perm('system.config.read') %}{{ admin_link("Application settings", "Branding, timezone, imports, file sources, and processes.", url_for('admin.admin_settings'), "S") }}{% endif %}
+      {% if has_perm('system.config.manage') or has_perm('system.rebuild') %}{{ admin_link("Fields & exports", "Configure field mappings and defaults for tables and exports.", url_for('ui.admin_fields_ui'), "F") }}{% endif %}
+      {% if has_perm('system.config.manage') or has_perm('system.storage.manage') or has_perm('numbering.manage') %}{{ admin_link("SolidWorks add-in", "Manage add-in configuration and storage.", url_for('ui.admin_addin_ui'), "SW") }}{% endif %}
     </div>
   </section>
+  {% endif %}
 
+  {% if has_perm('jobs.read') or has_perm('orders.read') or has_perm('customers.read') or has_perm('suppliers.read') %}
   <section class="tm-admin-hub__section">
     {% call section_header("Business records", "Open the operational registers used by purchasing and production.") %}{% endcall %}
     <div class="tm-admin-link-grid tm-admin-link-grid--compact">
-      {{ admin_link("Jobs", "Projects, BOM assignments, and job activity.", url_for('admin_jobs.jobs_list'), "J") }}
-      {{ admin_link("Orders", "Sales and purchase order records.", url_for('admin_orders.orders_list'), "O") }}
-      {{ admin_link("Customers", "Customer organisations and linked users.", url_for('admin_customers.customers_list'), "C") }}
-      {{ admin_link("Suppliers", "Supplier organisations and linked users.", url_for('admin_suppliers.suppliers_list'), "S") }}
+      {% if has_perm('jobs.read') %}{{ admin_link("Jobs", "Projects, BOM assignments, and job activity.", url_for('admin_jobs.jobs_list'), "J") }}{% endif %}
+      {% if has_perm('orders.read') %}{{ admin_link("Orders", "Sales and purchase order records.", url_for('admin_orders.orders_list'), "O") }}{% endif %}
+      {% if has_perm('customers.read') %}{{ admin_link("Customers", "Customer organisations and linked users.", url_for('admin_customers.customers_list'), "C") }}{% endif %}
+      {% if has_perm('suppliers.read') %}{{ admin_link("Suppliers", "Supplier organisations and linked users.", url_for('admin_suppliers.suppliers_list'), "S") }}{% endif %}
     </div>
   </section>
+  {% endif %}
 
+  {% if has_perm('system.maintenance') or (has_perm('parts.purge') and has_perm('files.purge')) %}
   <section class="tm-admin-hub__section">
     {% call section_header("System & danger zone", "Monitor the instance and access controlled maintenance actions.") %}{% endcall %}
     <div class="tm-admin-link-grid">
-      {{ admin_link("System metrics", "Inspect request performance, storage, and resource use.", url_for('admin.admin_metrics'), "M") }}
-      {{ admin_link("Purge parts data", "Permanently clear parts, BOM links, and part files.", url_for('admin.purge_parts'), "!", "danger") }}
+      {% if has_perm('system.maintenance') %}{{ admin_link("System metrics", "Inspect request performance, storage, and resource use.", url_for('admin.admin_metrics'), "M") }}{% endif %}
+      {% if has_perm('parts.purge') and has_perm('files.purge') %}{{ admin_link("Purge parts data", "Permanently clear parts, BOM links, and part files.", url_for('admin.purge_parts'), "!", "danger") }}{% endif %}
     </div>
   </section>
+  {% endif %}
 </div>
 {% endblock %}

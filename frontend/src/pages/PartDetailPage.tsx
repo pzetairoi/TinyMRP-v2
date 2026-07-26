@@ -597,6 +597,8 @@ export default function PartDetailPage() {
   const [jobsOrders, setJobsOrders] = useState<JobsOrdersRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
+  const [canJobsRead, setCanJobsRead] = useState(false);
+  const [canOrdersRead, setCanOrdersRead] = useState(false);
   const [canJobsManage, setCanJobsManage] = useState(false);
   const [canOrdersManage, setCanOrdersManage] = useState(false);
   const [canAdmin, setCanAdmin] = useState(false);
@@ -1141,6 +1143,8 @@ function isExternalDatasheetUrl(url: string): boolean {
         setImages(asArr<string>(j.images));
         setVersions(asArr<VersionRow>(j.other_versions));
         setJobsOrders(asArr<JobsOrdersRow>(j.jobs_orders));
+        setCanJobsRead(!!j.can_jobs_read);
+        setCanOrdersRead(!!j.can_orders_read);
         setCanJobsManage(!!j.can_jobs_manage);
         setCanOrdersManage(!!j.can_orders_manage);
         setCanPartsDelete(!!j.can_parts_delete);
@@ -1163,6 +1167,10 @@ function isExternalDatasheetUrl(url: string): boolean {
             setUploaderProfile(null);
             setApproverProfile(null);
             setPublicShareInfo(null);
+            setCanJobsRead(false);
+            setCanOrdersRead(false);
+            setCanJobsManage(false);
+            setCanOrdersManage(false);
             setCanPartsEdit(false);
             setCanPartsNote(false);
           }
@@ -3476,6 +3484,8 @@ function isExternalDatasheetUrl(url: string): boolean {
                     r.job_number ? (
                       canJobsManage ? (
                         <a href={`/admin/jobs/${encodeURIComponent(r.job_id || "")}/edit`}>{r.job_number}</a>
+                      ) : canJobsRead ? (
+                        <a href={`/admin/jobs/${encodeURIComponent(r.job_id || "")}`}>{r.job_number}</a>
                       ) : (
                         r.job_number
                       )
@@ -3491,6 +3501,8 @@ function isExternalDatasheetUrl(url: string): boolean {
                     r.order_number ? (
                       canOrdersManage ? (
                         <a href={`/admin/orders/${encodeURIComponent(r.order_id || "")}/edit`}>{r.order_number}</a>
+                      ) : canOrdersRead ? (
+                        <a href={`/admin/orders/${encodeURIComponent(r.order_id || "")}`}>{r.order_number}</a>
                       ) : (
                         r.order_number
                       )

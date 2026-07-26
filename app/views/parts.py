@@ -229,15 +229,30 @@ def _has_bom_children(pn: str, rev: str | None) -> bool:
 
 def _parent_candidates(child_pn: str, child_rev: str | None, max_rows: int = 50):
     q = BOMLink.objects(child_pn=child_pn)
-    if child_rev is not None and "child_rev" in BOMLink._fields:
-        q = q.filter(child_rev=_clean_rev_value(child_rev))
+    requested_child_rev = _resolve_rev_for_pn(child_pn, child_rev)
     parents = []
-    for l in q.limit(max_rows):
+    for l in q:
+        raw_child_rev = _clean_rev_value(
+            getattr(l, "child_rev", "") or ""
+        )
+        link_child_rev = _resolve_rev_for_pn(
+            child_pn,
+            raw_child_rev or None,
+        )
+        if link_child_rev.casefold() != requested_child_rev.casefold():
+            continue
         parent_pn = (getattr(l, "parent_pn", None) or "").strip()
         if not parent_pn:
             continue
         parent_rev = _clean_rev_value(getattr(l, "parent_rev", "") or "")
-        parents.append((parent_pn, _resolve_rev_for_pn(parent_pn, parent_rev)))
+        parents.append(
+            (
+                parent_pn,
+                _resolve_rev_for_pn(parent_pn, parent_rev or None),
+            )
+        )
+        if len(parents) >= max_rows:
+            break
     return parents
 
 
@@ -270,6 +285,8 @@ def _build_used_set(pairs: list[tuple[str, str | None]]):
         if not pn_clean:
             continue
         rev_clean = _clean_rev_value(rev)
+        if not rev_clean:
+            rev_clean = _resolve_rev_for_pn(pn_clean, None)
         used.add((pn_clean.lower(), rev_clean.lower()))
     return used
 
@@ -1510,6 +1527,8 @@ def part_detail():
 
     can_jobs_manage = user_has_permission(current_user, "jobs.update")
     can_orders_manage = user_has_permission(current_user, "orders.update")
+    can_jobs_read = has_permission(current_user, "jobs.read")
+    can_orders_read = has_permission(current_user, "orders.read")
     can_parts_delete = has_permission(current_user, "parts.purge")
     can_parts_edit = has_permission(current_user, "parts.update")
     can_parts_note = has_permission(current_user, "comments.write")
@@ -1557,6 +1576,8 @@ def part_detail():
             "jobs_orders": jobs_orders,
             "can_jobs_manage": can_jobs_manage,
             "can_orders_manage": can_orders_manage,
+            "can_jobs_read": can_jobs_read,
+            "can_orders_read": can_orders_read,
             "can_parts_delete": can_parts_delete,
             "can_parts_edit": can_parts_edit,
             "can_parts_note": can_parts_note,

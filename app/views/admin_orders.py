@@ -5,7 +5,6 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import current_user
 from app.services.acl import (
     permissions_required,
-    is_external_scoped_user,
     customer_scope_ids,
     supplier_scope_ids,
     user_has_permission,
@@ -20,6 +19,7 @@ from app.services.authorization import (
     order_relationship_allowed,
     require_permission,
     scope_queryset,
+    uses_portal_presentation,
 )
 from app.services.field_policies import (
     filter_response_fields,
@@ -104,17 +104,20 @@ def _status_permission(status):
 def _require_order_form_permissions(current_status=None):
     if set(request.form) - _ORDER_FORM_FIELDS:
         abort(400)
-    if set(request.form) & {
-        "shipping_cost",
-        "currency",
-        "lines",
-    }:
+    if set(request.form) & {"shipping_cost", "currency"}:
+        _require("orders.financial.update")
+    if "lines" in request.form and any(
+        float(getattr(line, field, 0.0) or 0.0) != 0.0
+        for line in _parse_lines(request.form.get("lines") or "")
+        for field in ("unit_price", "discount_pct", "tax_pct")
+    ):
         _require("orders.financial.update")
     status = (request.form.get("status") or "").strip()
     if status and status != current_status:
         if status not in ORDER_STATUS_FLOW:
             abort(400)
-        _require(_status_permission(status))
+        if current_status is not None or status != "draft":
+            _require(_status_permission(status))
         if current_status and not can_transition_order(current_status, status):
             abort(400)
 
@@ -222,7 +225,11 @@ def orders_list():
             qs = qs.filter(total__lte=float(total_max))
     except Exception:
         pass
-    is_external = is_external_scoped_user(current_user)
+    is_external = uses_portal_presentation(
+        current_user,
+        "orders.read",
+        resource_type="orders",
+    )
     cust_ids = customer_scope_ids(current_user)
     supp_ids = supplier_scope_ids(current_user)
     mask_supplier = bool(is_external and cust_ids)
@@ -308,7 +315,11 @@ def orders_view(order_id):
         log_action("order.view", resource_type="order", resource=str(o.id))
     except Exception:
         pass
-    is_external = is_external_scoped_user(current_user)
+    is_external = uses_portal_presentation(
+        current_user,
+        "orders.read",
+        resource_type="orders",
+    )
     cust_ids = customer_scope_ids(current_user)
     supp_ids = supplier_scope_ids(current_user)
     mask_supplier = bool(is_external and cust_ids)
@@ -319,21 +330,21 @@ def orders_view(order_id):
     customers = []
     allowed_lines = authorised_part_pairs(
         current_user,
-        [(line.pn, clean_rev(line.rev)) for line in (o.lines or [])],
+        [
+            (line.pn, _resolve_visible_part_rev(line.pn, line.rev))
+            for line in (o.lines or [])
+        ],
     )
     visible_lines = [
         line
         for line in (o.lines or [])
         if (
             str(line.pn or "").strip().casefold(),
-            clean_rev(line.rev).casefold(),
+            _resolve_visible_part_rev(line.pn, line.rev).casefold(),
         )
         in allowed_lines
     ]
-    lines = "\n".join([
-        f"{l.pn},{l.rev},{l.qty:g},{l.uom},{l.note or ''},{l.unit_price or 0},{l.discount_pct or 0},{l.tax_pct or 0}"
-        for l in visible_lines
-    ])
+    lines = _serialize_lines(visible_lines)
     return render_template(
         "admin/orders_form.html",
         order=o,
@@ -357,7 +368,11 @@ def order_scope_pdf(order_id):
     if not order:
         flash("Order not found.", "error")
         return redirect(url_for("admin_orders.orders_list"))
-    if is_external_scoped_user(current_user):
+    if uses_portal_presentation(
+        current_user,
+        "orders.read",
+        resource_type="orders",
+    ):
         abort(404)
     if order.customer and not has_permission(current_user, "customers.read"):
         abort(403)
@@ -442,6 +457,8 @@ def _parse_lines(text: str):
         parts = [x.strip() for x in s.split(",")]
         pn = _canonical_pn(parts[0] if parts else "")
         rev = clean_rev(parts[1] if len(parts) > 1 else "")
+        if not rev:
+            rev = _resolve_visible_part_rev(pn, None)
         qty = 1.0
         if len(parts) > 2:
             try:
@@ -482,12 +499,68 @@ def _parse_lines(text: str):
     return consolidate_order_lines(out)
 
 
+def _preserve_line_financials(lines, existing_lines):
+    """Keep stored prices when an editor is only changing non-financial line data."""
+
+    if has_permission(current_user, "orders.financial.update"):
+        return lines
+    financial_by_part = {
+        (str(line.pn or "").strip().casefold(), clean_rev(line.rev).casefold()): (
+            line.unit_price,
+            line.discount_pct,
+            line.tax_pct,
+        )
+        for line in (existing_lines or [])
+    }
+    for line in lines:
+        values = financial_by_part.get(
+            (
+                str(line.pn or "").strip().casefold(),
+                clean_rev(line.rev).casefold(),
+            )
+        )
+        if values:
+            line.unit_price, line.discount_pct, line.tax_pct = values
+    return lines
+
+
+def _serialize_lines(lines) -> str:
+    can_read_financial = has_permission(
+        current_user,
+        "orders.financial.read",
+    )
+    return "\n".join(
+        (
+            f"{line.pn},{_resolve_visible_part_rev(line.pn, line.rev)},"
+            f"{line.qty:g},{line.uom},"
+            f"{line.note or ''},"
+            f"{line.unit_price or 0 if can_read_financial else 0},"
+            f"{line.discount_pct or 0 if can_read_financial else 0},"
+            f"{line.tax_pct or 0 if can_read_financial else 0}"
+        )
+        for line in lines
+    )
+
+
 def _canonical_pn(pn: str) -> str:
     pn = (pn or "").strip()
     if not pn:
         return pn
     p = Part.objects(part_number__iexact=pn).only("part_number").first()
     return p.part_number if p else pn
+
+
+def _resolve_visible_part_rev(pn: str, rev: str | None) -> str:
+    rev_clean = clean_rev(rev)
+    if rev_clean:
+        return rev_clean
+    part = (
+        scope_queryset(Part.objects, current_user, "parts")
+        .filter(part_number__iexact=pn)
+        .order_by("-updated_at")
+        .first()
+    )
+    return clean_rev(getattr(part, "revision", "") if part else "")
 
 
 def _parse_date(value: str | None, *, end_of_day: bool = False):
@@ -515,8 +588,10 @@ def orders_new():
         o.order_date = _parse_date(request.form.get("order_date")) or utc_now()
         o.requested_delivery = _parse_date(request.form.get("requested_delivery"))
         o.promised_delivery = _parse_date(request.form.get("promised_delivery"))
-        o.shipping_cost = float(request.form.get("shipping_cost") or 0.0)
-        o.currency = (request.form.get("currency") or "USD").strip()
+        if "shipping_cost" in request.form:
+            o.shipping_cost = float(request.form.get("shipping_cost") or 0.0)
+        if "currency" in request.form:
+            o.currency = (request.form.get("currency") or "USD").strip()
         job_id = request.form.get("job")
         supp_id = request.form.get("supplier")
         cust_id = request.form.get("customer")
@@ -561,7 +636,11 @@ def orders_new():
                 abort(404)
         if o.job and o.job.customer:
             o.customer = o.job.customer
-        o.lines = _parse_lines(request.form.get("lines") or "")
+        existing_lines = list(o.lines or [])
+        o.lines = _preserve_line_financials(
+            _parse_lines(request.form.get("lines") or ""),
+            existing_lines,
+        )
         subtotal, tax_total, discount_total = calculate_order_totals(o.lines)
         o.subtotal = subtotal
         o.tax_amount = tax_total
@@ -642,8 +721,10 @@ def orders_edit(order_id):
         o.order_date = _parse_date(request.form.get("order_date")) or o.order_date
         o.requested_delivery = _parse_date(request.form.get("requested_delivery"))
         o.promised_delivery = _parse_date(request.form.get("promised_delivery"))
-        o.shipping_cost = float(request.form.get("shipping_cost") or 0.0)
-        o.currency = (request.form.get("currency") or "USD").strip()
+        if "shipping_cost" in request.form:
+            o.shipping_cost = float(request.form.get("shipping_cost") or 0.0)
+        if "currency" in request.form:
+            o.currency = (request.form.get("currency") or "USD").strip()
         job_id = request.form.get("job")
         supp_id = request.form.get("supplier")
         cust_id = request.form.get("customer")
@@ -697,7 +778,10 @@ def orders_edit(order_id):
             abort(404)
         if o.job and o.job.customer:
             o.customer = o.job.customer
-        o.lines = _parse_lines(request.form.get("lines") or "")
+        o.lines = _preserve_line_financials(
+            _parse_lines(request.form.get("lines") or ""),
+            list(o.lines or []),
+        )
         subtotal, tax_total, discount_total = calculate_order_totals(o.lines)
         o.subtotal = subtotal
         o.tax_amount = tax_total
@@ -717,23 +801,21 @@ def orders_edit(order_id):
         jobs.append({"id": j.id, "job_number": j.job_number, "customer_id": cust_id})
     allowed_lines = authorised_part_pairs(
         current_user,
-        [(line.pn, clean_rev(line.rev)) for line in (o.lines or [])],
+        [
+            (line.pn, _resolve_visible_part_rev(line.pn, line.rev))
+            for line in (o.lines or [])
+        ],
     )
     visible_lines = [
         line
         for line in (o.lines or [])
         if (
             str(line.pn or "").strip().casefold(),
-            clean_rev(line.rev).casefold(),
+            _resolve_visible_part_rev(line.pn, line.rev).casefold(),
         )
         in allowed_lines
     ]
-    lines = "\n".join(
-        [
-            f"{line.pn},{line.rev},{line.qty:g},{line.uom},{line.note or ''},{line.unit_price or 0},{line.discount_pct or 0},{line.tax_pct or 0}"
-            for line in visible_lines
-        ]
-    )
+    lines = _serialize_lines(visible_lines)
     return render_template("admin/orders_form.html", order=o, jobs=jobs, suppliers=sups, customers=custs, lines=lines)
 
 
@@ -968,7 +1050,11 @@ def order_lines_remove(order_id):
             {
                 "ok": True,
                 "removed": before - len(o.lines),
-                "total": o.total,
+                "total": (
+                    o.total
+                    if has_permission(current_user, "orders.financial.read")
+                    else None
+                ),
             },
             context={
                 "policy_context": response_context("orders", current_user),

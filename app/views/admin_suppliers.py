@@ -1,11 +1,12 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 from flask_login import current_user
-from app.services.acl import permissions_required, is_external_scoped_user
+from app.services.acl import permissions_required
 from app.services.authorization import (
     authorised_get,
     authorise,
     has_permission,
     scope_queryset,
+    uses_portal_presentation,
 )
 from mongoengine.errors import DoesNotExist, ValidationError
 from mongoengine.queryset.visitor import Q
@@ -190,7 +191,11 @@ def suppliers_view(sup_id):
         orders=orders,
         jobs=jobs,
         readonly=True,
-        hide_user_links=is_external_scoped_user(current_user),
+        hide_user_links=uses_portal_presentation(
+            current_user,
+            "suppliers.read",
+            resource_type="suppliers",
+        ),
     )
 
 
