@@ -25,6 +25,7 @@ NAV_HREFS = {
 }
 
 ROLE_NAVIGATION = {
+    "administrator": set(NAV_HREFS) | {"admin"},
     "security_administrator": {"admin"},
     "system_administrator": {"admin"},
     "engineering_data_steward": {"parts", "tools"},
@@ -46,10 +47,10 @@ ROLE_NAVIGATION = {
         "suppliers",
         "admin",
     },
-    "break_glass_administrator": set(),
 }
 
 ROLE_LANDING = {
+    "administrator": "/admin/",
     "security_administrator": "/admin/",
     "system_administrator": "/admin/",
     "engineering_data_steward": "/ui/parts",
@@ -64,7 +65,6 @@ ROLE_LANDING = {
     "customer_portal": "/admin/jobs/",
     "supplier_portal": "/admin/jobs/",
     "auditor": "/admin/",
-    "break_glass_administrator": "/app",
 }
 
 ROLE_FORBIDDEN = {
@@ -82,7 +82,6 @@ ROLE_FORBIDDEN = {
     "customer_portal": "/admin/suppliers/",
     "supplier_portal": "/admin/customers/",
     "auditor": "/admin/users/new",
-    "break_glass_administrator": "/ui/parts",
 }
 
 
@@ -144,7 +143,8 @@ def test_every_standard_role_has_canonical_navigation_and_direct_guards(
     assert ('id="navAdmin"' in body) is ("admin" in expected)
 
     assert client.get(ROLE_LANDING[role_name]).status_code == 200
-    assert client.get(ROLE_FORBIDDEN[role_name]).status_code == 403
+    if role_name in ROLE_FORBIDDEN:
+        assert client.get(ROLE_FORBIDDEN[role_name]).status_code == 403
 
 
 def test_permission_test_users_sign_in_and_open_expected_primary_navigation(

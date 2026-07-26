@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import wraps
+import re
 from typing import Any
 
 from flask import (
@@ -54,7 +55,6 @@ class _ScopeContext:
     customer_ids: tuple[Any, ...] = ()
     supplier_ids: tuple[Any, ...] = ()
     participant_job_ids: tuple[Any, ...] = ()
-    role_names: frozenset[str] = frozenset()
     role_permissions: tuple[tuple[str, frozenset[str]], ...] = ()
 
 
@@ -79,19 +79,13 @@ _RESOURCE_ALIASES = {
 }
 
 def _is_authenticated(user: Any) -> bool:
-    try:
-        return bool(user is not None and getattr(user, "is_authenticated", False))
-    except Exception:
-        return False
+    return bool(user is not None and getattr(user, "is_authenticated", False))
 
 
 def _cache_key(user: Any) -> str:
-    try:
-        user_id = getattr(user, "id", None)
-        if user_id is not None:
-            return f"id:{user_id}"
-    except Exception:
-        pass
+    user_id = getattr(user, "id", None)
+    if user_id is not None:
+        return f"id:{user_id}"
     return f"object:{id(user)}"
 
 
@@ -113,38 +107,25 @@ def _build_permission_snapshot(user: Any) -> _PermissionSnapshot:
     direct: set[str] = set()
     role_names: set[str] = set()
     role_permissions: list[tuple[str, frozenset[str]]] = []
-    try:
-        roles = tuple(getattr(user, "roles", None) or ())
-        for role in roles:
-            if role is None:
-                continue
-            try:
-                if getattr(role, "active", True) is False:
-                    continue
-                name = getattr(role, "name", None)
-                permissions = getattr(role, "permissions", None) or ()
-                if isinstance(permissions, (str, bytes)):
-                    continue
-                permission_values = tuple(permissions)
-                if isinstance(name, str) and name:
-                    role_names.add(name)
-                valid_permissions = {
-                    permission
-                    for permission in permission_values
-                    if isinstance(permission, str) and permission in PERMISSION_REGISTRY
-                }
-                role_expanded = set(valid_permissions)
-                for permission in valid_permissions & LEGACY_PERMISSIONS:
-                    role_expanded.update(LEGACY_PERMISSION_COMPATIBILITY.get(permission, ()))
-                if isinstance(name, str) and name:
-                    role_permissions.append((name, frozenset(role_expanded)))
-                for permission in permission_values:
-                    if isinstance(permission, str) and permission in PERMISSION_REGISTRY:
-                        direct.add(permission)
-            except Exception:
-                continue
-    except Exception:
-        return _EMPTY_SNAPSHOT
+    for role in tuple(getattr(user, "roles", None) or ()):
+        if role is None or getattr(role, "active", True) is False:
+            continue
+        name = getattr(role, "name", None)
+        permissions = getattr(role, "permissions", None) or ()
+        if isinstance(permissions, (str, bytes)):
+            continue
+        valid = {
+            permission
+            for permission in permissions
+            if isinstance(permission, str) and permission in PERMISSION_REGISTRY
+        }
+        direct.update(valid)
+        expanded = set(valid)
+        for permission in valid & LEGACY_PERMISSIONS:
+            expanded.update(LEGACY_PERMISSION_COMPATIBILITY.get(permission, ()))
+        if isinstance(name, str) and name:
+            role_names.add(name)
+            role_permissions.append((name, frozenset(expanded)))
 
     expanded = set(direct)
     for permission in direct & LEGACY_PERMISSIONS:
@@ -179,23 +160,19 @@ def effective_permissions(user: Any, *, include_legacy: bool = True) -> frozense
 
 
 def legacy_admin_bypass_enabled() -> bool:
-    """Return the temporary Stage 2 compatibility setting (remove in Stage 9)."""
+    """Return whether the exact legacy ``admin`` compatibility is enabled."""
 
-    try:
-        if has_app_context():
-            return bool(current_app.config.get("LEGACY_ADMIN_BYPASS_ENABLED", True))
-    except Exception:
-        return False
-    return True
+    return (
+        bool(current_app.config.get("LEGACY_ADMIN_BYPASS_ENABLED", True))
+        if has_app_context()
+        else True
+    )
 
 
 def _uses_legacy_admin_bypass(user: Any) -> bool:
     if not _is_authenticated(user) or not legacy_admin_bypass_enabled():
         return False
-    try:
-        return "admin" in _permission_snapshot(user).role_names
-    except Exception:
-        return False
+    return "admin" in _permission_snapshot(user).role_names
 
 
 def has_permission(
@@ -206,14 +183,17 @@ def has_permission(
 ) -> bool:
     """Return whether a registered permission is effective for the user."""
 
+    if (
+        not isinstance(permission, str)
+        or permission not in PERMISSION_REGISTRY
+        or not _is_authenticated(user)
+    ):
+        return False
     try:
-        if not isinstance(permission, str) or permission not in PERMISSION_REGISTRY:
-            return False
-        if not _is_authenticated(user):
-            return False
-        if _uses_legacy_admin_bypass(user):
-            return True
-        return permission in effective_permissions(user, include_legacy=include_legacy)
+        return _uses_legacy_admin_bypass(user) or permission in effective_permissions(
+            user,
+            include_legacy=include_legacy,
+        )
     except Exception:
         return False
 
@@ -224,33 +204,21 @@ def has_any_permission(
     *,
     include_legacy: bool = True,
 ) -> bool:
-    try:
-        values = tuple(permissions)
-        return any(
-            has_permission(user, permission, include_legacy=include_legacy)
-            for permission in values
-        )
-    except Exception:
-        return False
+    return any(
+        has_permission(user, permission, include_legacy=include_legacy)
+        for permission in permissions
+    )
 
 
 def _resource_identity(
     resource: Any,
     context: Mapping[str, Any] | None,
 ) -> tuple[str, str]:
-    resource_type = ""
-    resource_id = ""
-    try:
-        if context:
-            resource_type = str(context.get("resource_type") or "")
-            resource_id = str(context.get("resource_id") or "")
-        if resource is not None:
-            if not resource_type:
-                resource_type = type(resource).__name__.lower()
-            if not resource_id:
-                resource_id = str(getattr(resource, "id", "") or "")
-    except Exception:
-        return "", ""
+    resource_type = str((context or {}).get("resource_type") or "")
+    resource_id = str((context or {}).get("resource_id") or "")
+    if resource is not None:
+        resource_type = resource_type or type(resource).__name__.lower()
+        resource_id = resource_id or str(getattr(resource, "id", "") or "")
     return resource_type, resource_id
 
 
@@ -265,13 +233,8 @@ def _denied(
     used_legacy_admin_bypass: bool = False,
 ) -> AuthorizationDecision:
     decision = AuthorizationDecision(
-        allowed=False,
-        reason_code=reason_code,
-        permission=permission,
-        resource_type=resource_type,
-        resource_id=resource_id,
-        used_legacy_expansion=used_legacy_expansion,
-        used_legacy_admin_bypass=used_legacy_admin_bypass,
+        False, reason_code, permission, resource_type, resource_id,
+        used_legacy_expansion, used_legacy_admin_bypass,
     )
     try:
         log_authorization_denial(user, decision)
@@ -287,56 +250,38 @@ def authorise(
     resource: Any = None,
     context: Mapping[str, Any] | None = None,
 ) -> AuthorizationDecision:
-    """Make a structured, fail-closed permission and conflict decision."""
-
     resource_type, resource_id = _resource_identity(resource, context)
     if not isinstance(permission, str) or permission not in PERMISSION_REGISTRY:
-        return _denied(
-            user,
-            reason_code="invalid_permission",
-            permission=str(permission or ""),
-            resource_type=resource_type,
-            resource_id=resource_id,
-        )
-    if not _is_authenticated(user):
-        return _denied(
-            user,
-            reason_code="unauthenticated",
-            permission=permission,
-            resource_type=resource_type,
-            resource_id=resource_id,
-        )
-
+        reason = "invalid_permission"
+        permission = str(permission or "")
+    elif not _is_authenticated(user):
+        reason = "unauthenticated"
+    else:
+        reason = ""
     try:
-        snapshot = _permission_snapshot(user)
-        used_admin = _uses_legacy_admin_bypass(user)
-        used_legacy = permission not in snapshot.direct and permission in snapshot.expanded
-        if not used_admin and permission not in snapshot.expanded:
-            return _denied(
-                user,
-                reason_code="missing_permission",
-                permission=permission,
-                resource_type=resource_type,
-                resource_id=resource_id,
-            )
-
-        return AuthorizationDecision(
-            allowed=True,
-            reason_code="allowed",
-            permission=permission,
-            resource_type=resource_type,
-            resource_id=resource_id,
-            used_legacy_expansion=used_legacy,
-            used_legacy_admin_bypass=used_admin,
+        snapshot = _permission_snapshot(user) if not reason else _EMPTY_SNAPSHOT
+        used_admin = not reason and _uses_legacy_admin_bypass(user)
+        used_legacy = (
+            not reason
+            and permission not in snapshot.direct
+            and permission in snapshot.expanded
         )
+        if not reason and not used_admin and permission not in snapshot.expanded:
+            reason = "missing_permission"
     except Exception:
+        reason, used_admin, used_legacy = "authorisation_error", False, False
+    if reason:
         return _denied(
             user,
-            reason_code="authorisation_error",
+            reason_code=reason,
             permission=permission,
             resource_type=resource_type,
             resource_id=resource_id,
         )
+    return AuthorizationDecision(
+        True, "allowed", permission, resource_type, resource_id,
+        used_legacy, used_admin,
+    )
 
 
 def log_authorization_denial(user: Any, decision: AuthorizationDecision) -> None:
@@ -344,68 +289,60 @@ def log_authorization_denial(user: Any, decision: AuthorizationDecision) -> None
 
     if decision.allowed:
         return
-    try:
-        endpoint = ""
-        method = ""
-        if has_request_context():
-            endpoint = str(request.endpoint or request.path or "")
-            method = str(request.method or "")
-        actor_id = str(getattr(user, "id", "") or "") if user is not None else ""
-        fingerprint = (
-            actor_id,
-            decision.permission,
-            decision.resource_type,
-            decision.resource_id,
-            decision.reason_code,
-            endpoint,
-            method,
-        )
-        cache = _request_cache("denial_events")
-        if cache is not None and str(fingerprint) in cache:
-            return
-        if cache is not None:
-            cache[str(fingerprint)] = True
-
-        from app.services.audit import log_action
-
-        log_action(
-            "authorization.denied",
-            resource_type=decision.resource_type or "authorization",
-            resource=decision.resource_id,
-            meta={
-                "actor_id": actor_id,
-                "permission": decision.permission,
-                "reason_code": decision.reason_code,
-                "endpoint": endpoint,
-                "method": method,
-                "used_legacy_expansion": decision.used_legacy_expansion,
-                "used_legacy_admin_bypass": decision.used_legacy_admin_bypass,
-            },
-        )
-    except Exception:
+    endpoint = str(request.endpoint or request.path or "") if has_request_context() else ""
+    method = str(request.method or "") if has_request_context() else ""
+    actor_id = str(getattr(user, "id", "") or "") if user is not None else ""
+    fingerprint = str((
+        actor_id, decision.permission, decision.resource_type,
+        decision.resource_id, decision.reason_code, endpoint, method,
+    ))
+    cache = _request_cache("denial_events")
+    if cache is not None and fingerprint in cache:
         return
+    if cache is not None:
+        cache[fingerprint] = True
+    from app.services.audit import log_action
+
+    log_action(
+        "authorization.denied",
+        resource_type=decision.resource_type or "authorization",
+        resource=decision.resource_id,
+        meta={
+            "actor_id": actor_id, "permission": decision.permission,
+            "reason_code": decision.reason_code, "endpoint": endpoint,
+            "method": method,
+            "used_legacy_expansion": decision.used_legacy_expansion,
+            "used_legacy_admin_bypass": decision.used_legacy_admin_bypass,
+        },
+    )
 
 
 def _build_scope_context(user: Any) -> _ScopeContext:
     if not _is_authenticated(user):
         return _ScopeContext(valid=False)
     try:
+        snapshot = _permission_snapshot(user)
+        scoped_roles = {
+            "customer_portal", "customer_viewer", "supplier_portal",
+            "supplier_viewer", "production_operator", "operator", "viewer",
+        }
+        if not snapshot.role_names & scoped_roles:
+            return _ScopeContext(True, role_permissions=snapshot.role_permissions)
         from app.models.customer import Customer
         from app.models.job import Job
         from app.models.supplier import Supplier
 
-        customer_ids = tuple(c.id for c in Customer.objects(users=user).only("id"))
-        supplier_ids = tuple(s.id for s in Supplier.objects(users=user).only("id"))
+        customer_ids = tuple(Customer.objects(users=user).distinct("id"))
+        supplier_ids = tuple(Supplier.objects(users=user).distinct("id"))
         participant_ids = tuple(
-            j.id for j in Job.objects(participants=user, is_deleted=False).only("id")
+            Job.objects(participants=user, is_deleted=False).distinct("id")
         )
         return _ScopeContext(
-            valid=True,
+            True,
             customer_ids=customer_ids,
             supplier_ids=supplier_ids,
             participant_job_ids=participant_ids,
-            role_names=_permission_snapshot(user).role_names,
-            role_permissions=_permission_snapshot(user).role_permissions,
+            role_permissions=snapshot.role_permissions,
         )
     except Exception:
         return _ScopeContext(valid=False)
@@ -428,13 +365,7 @@ def _normalise_resource_type(resource_type: str) -> str:
 
 
 def _deny_all(queryset: Any) -> Any:
-    try:
-        return queryset.filter(id__in=[])
-    except Exception as exc:
-        try:
-            return queryset.none()
-        except Exception:
-            raise AuthorizationScopeError("Unable to construct a deny-all queryset") from exc
+    return queryset.filter(id__in=[])
 
 
 def _scope_modes(
@@ -445,17 +376,16 @@ def _scope_modes(
     """Return the union of scope contributions from roles granting permission."""
 
     modes: set[str] = set()
+    fixed = {
+        "customer_portal": "customer", "customer_viewer": "customer",
+        "supplier_portal": "supplier", "supplier_viewer": "supplier",
+        "production_operator": "assigned", "operator": "assigned",
+    }
     for role_name, permissions in scope.role_permissions:
         if permission not in permissions:
             continue
-        if role_name in {"customer_portal", "customer_viewer"}:
-            modes.add("customer")
-            continue
-        if role_name in {"supplier_portal", "supplier_viewer"}:
-            modes.add("supplier")
-            continue
-        if role_name in {"production_operator", "operator"}:
-            modes.add("assigned")
+        if role_name in fixed:
+            modes.add(fixed[role_name])
             continue
         if role_name == "viewer" and (
             scope.customer_ids or scope.supplier_ids or scope.participant_job_ids
@@ -467,17 +397,14 @@ def _scope_modes(
             if scope.participant_job_ids:
                 modes.add("assigned")
             continue
-        if resource_type == "orders" and role_name == "procurement":
-            modes.add("purchase")
-            continue
-        if resource_type == "orders" and role_name == "sales_customer_service":
-            modes.add("sales")
-            continue
-        if resource_type == "jobs" and role_name == "procurement":
-            modes.add("purchasing")
-            continue
-        if resource_type == "jobs" and role_name == "sales_customer_service":
-            modes.add("customer_business")
+        business_mode = {
+            ("orders", "procurement"): "purchase",
+            ("orders", "sales_customer_service"): "sales",
+            ("jobs", "procurement"): "purchasing",
+            ("jobs", "sales_customer_service"): "customer_business",
+        }.get((resource_type, role_name))
+        if business_mode:
+            modes.add(business_mode)
             continue
         modes.add("global")
     return frozenset(modes)
@@ -486,77 +413,65 @@ def _scope_modes(
 def _scope_jobs(queryset: Any, scope: _ScopeContext, modes: frozenset[str]) -> Any:
     from mongoengine.queryset.visitor import Q
 
-    query = Q()
-    has_clause = False
+    clauses = []
     if "customer" in modes and scope.customer_ids:
-        query |= Q(customer__in=scope.customer_ids)
-        has_clause = True
+        clauses.append(Q(customer__in=scope.customer_ids))
     if "assigned" in modes and scope.participant_job_ids:
-        query |= Q(id__in=scope.participant_job_ids)
-        has_clause = True
+        clauses.append(Q(id__in=scope.participant_job_ids))
     if "supplier" in modes and scope.supplier_ids:
         from app.models.order import Order
 
-        query |= Q(vendors__in=scope.supplier_ids)
-        has_clause = True
-        order_job_ids = tuple(
-            order.job.id
-            for order in Order.objects(supplier__in=scope.supplier_ids).only("job")
-            if getattr(order, "job", None)
+        clauses.append(Q(vendors__in=scope.supplier_ids))
+        order_job_ids = _distinct_ids(
+            Order.objects(supplier__in=scope.supplier_ids), "job"
         )
         if order_job_ids:
-            query |= Q(id__in=order_job_ids)
-            has_clause = True
+            clauses.append(Q(id__in=tuple(order_job_ids)))
     if "purchasing" in modes:
         from app.models.order import Order
 
-        purchase_job_ids = tuple(
-            order.job.id
-            for order in Order.objects(kind="purchase").only("job")
-            if getattr(order, "job", None)
-        )
-        query |= Q(vendors__ne=[])
-        has_clause = True
+        purchase_job_ids = _distinct_ids(Order.objects(kind="purchase"), "job")
+        clauses.append(Q(vendors__ne=[]))
         if purchase_job_ids:
-            query |= Q(id__in=purchase_job_ids)
+            clauses.append(Q(id__in=tuple(purchase_job_ids)))
     if "customer_business" in modes:
-        query |= Q(customer__ne=None)
-        has_clause = True
-    return queryset.filter(query) if has_clause else _deny_all(queryset)
+        clauses.append(Q(customer__ne=None))
+    if not clauses:
+        return _deny_all(queryset)
+    query = clauses[0]
+    for clause in clauses[1:]:
+        query |= clause
+    return queryset.filter(query)
 
 
 def _scope_orders(queryset: Any, scope: _ScopeContext, modes: frozenset[str]) -> Any:
     from mongoengine.queryset.visitor import Q
 
-    query = Q()
-    has_clause = False
+    clauses = []
     if "purchase" in modes:
-        query |= Q(kind="purchase")
-        has_clause = True
+        clauses.append(Q(kind="purchase"))
     if "sales" in modes:
-        query |= Q(kind="sales")
-        has_clause = True
+        clauses.append(Q(kind="sales"))
     if "supplier" in modes and scope.supplier_ids:
-        query |= Q(kind="purchase", supplier__in=scope.supplier_ids)
-        has_clause = True
+        clauses.append(Q(kind="purchase", supplier__in=scope.supplier_ids))
     if "customer" in modes and scope.customer_ids:
-        query |= Q(kind="sales", customer__in=scope.customer_ids)
-        has_clause = True
+        clauses.append(Q(kind="sales", customer__in=scope.customer_ids))
         from app.models.job import Job
 
-        customer_job_ids = tuple(
-            job.id
-            for job in Job.objects(
-                customer__in=scope.customer_ids,
-                is_deleted=False,
-            ).only("id")
+        customer_job_ids = _distinct_ids(
+            Job.objects(customer__in=scope.customer_ids, is_deleted=False),
+            "id",
         )
         if customer_job_ids:
-            query |= Q(kind="sales", job__in=customer_job_ids)
+            clauses.append(Q(kind="sales", job__in=tuple(customer_job_ids)))
     if "assigned" in modes and scope.participant_job_ids:
-        query |= Q(job__in=scope.participant_job_ids)
-        has_clause = True
-    return queryset.filter(query) if has_clause else _deny_all(queryset)
+        clauses.append(Q(job__in=scope.participant_job_ids))
+    if not clauses:
+        return _deny_all(queryset)
+    query = clauses[0]
+    for clause in clauses[1:]:
+        query |= clause
+    return queryset.filter(query)
 
 
 def _scope_parts(
@@ -569,38 +484,180 @@ def _scope_parts(
 
     scoped = queryset
     if "global" not in modes:
-        allowed = _relationship_part_pairs(user)
+        allowed = relationship_part_pairs(user)
         if allowed is None or not allowed:
             return _deny_all(queryset)
-        query = Q()
-        has_clause = False
-        for part_number, revision in allowed:
-            pn = str(part_number or "").strip()
-            rev = str(revision or "").strip()
-            if not pn:
-                continue
-            query |= Q(part_number__iexact=pn, revision__iexact=rev)
-            has_clause = True
-        if not has_clause:
+        clauses = [
+            {
+                "part_number": str(pn).strip(),
+                "revision": str(rev or "").strip(),
+            }
+            for pn, rev in allowed
+            if str(pn or "").strip()
+        ]
+        if not clauses:
             return _deny_all(queryset)
-        scoped = scoped.filter(query)
+        scoped = scoped.filter(Q(__raw__={"$or": clauses}))
     if not has_permission(user, "parts.read_unreleased"):
         scoped = scoped.filter(__raw__=approval_filter_raw(approved=True))
     return scoped
 
 
-def _relationship_part_pairs(user: Any) -> Any:
-    """Request-cache the exact relationship-derived part identities."""
+def relationship_ids(user: Any, relationship: str) -> tuple[Any, ...]:
+    """Return request-cached linked customer or supplier identifiers."""
+
+    scope = _scope_context(user)
+    if not scope.valid:
+        return ()
+    if relationship == "customer":
+        return scope.customer_ids
+    if relationship == "supplier":
+        return scope.supplier_ids
+    return ()
+
+
+def _distinct_ids(queryset: Any, field: str) -> set[Any]:
+    return {
+        getattr(value, "id", value)
+        for value in queryset.distinct(field)
+        if value is not None
+    }
+
+
+def relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
+    """Return exact relationship-derived parts, including recursive BOM children."""
 
     cache = _request_cache("part_scope_pairs")
     key = _cache_key(user)
     if cache is not None and key in cache:
         return cache[key]
-    from app.services.acl import allowed_parts_for
 
-    allowed = allowed_parts_for(user)
+    allowed = _build_relationship_part_pairs(user)
     if cache is not None:
         cache[key] = allowed
+    return allowed
+
+
+def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
+    if not _is_authenticated(user):
+        return set()
+    try:
+        if not current_app.config.get("ACL_ENFORCED", True):
+            return None
+    except Exception:
+        pass
+    scope = _scope_context(user)
+    if not scope.valid:
+        return set()
+    modes = _scope_modes(scope, "parts", "parts.read")
+    if "global" in modes or _uses_legacy_admin_bypass(user):
+        return None
+    if not (
+        scope.customer_ids
+        or scope.supplier_ids
+        or scope.participant_job_ids
+        or modes & {"customer", "supplier", "assigned"}
+    ):
+        return None
+
+    from mongoengine.queryset.visitor import Q
+    from app.models.bom import BOMLink
+    from app.models.job import Job
+    from app.models.order import Order
+    from app.models.part import Part
+    from app.services.attrs import approval_filter_raw
+
+    job_ids = set(scope.participant_job_ids)
+    customer_jobs: set[Any] = set()
+    if scope.customer_ids:
+        customer_jobs = _distinct_ids(
+            Job.objects(customer__in=scope.customer_ids, is_deleted=False),
+            "id",
+        )
+        job_ids |= customer_jobs
+    if scope.supplier_ids:
+        job_ids |= _distinct_ids(
+            Job.objects(vendors__in=scope.supplier_ids, is_deleted=False),
+            "id",
+        )
+        job_ids |= _distinct_ids(
+            Order.objects(kind="purchase", supplier__in=scope.supplier_ids),
+            "job",
+        )
+
+    roots: set[tuple[str, str]] = set()
+    if job_ids:
+        for job in Job.objects(id__in=tuple(job_ids), is_deleted=False).only("bom"):
+            roots.update(
+                (str(line.pn or "").strip(), str(line.rev or "").strip())
+                for line in job.bom or ()
+                if str(line.pn or "").strip()
+            )
+    order_query = Q(id__in=[])
+    if scope.customer_ids:
+        order_query |= Q(kind="sales", customer__in=scope.customer_ids)
+        if customer_jobs:
+            order_query |= Q(kind="sales", job__in=tuple(customer_jobs))
+    if scope.supplier_ids:
+        order_query |= Q(kind="purchase", supplier__in=scope.supplier_ids)
+    if scope.participant_job_ids:
+        order_query |= Q(job__in=scope.participant_job_ids)
+    for order in Order.objects(order_query).only("lines"):
+        roots.update(
+            (str(line.pn or "").strip(), str(line.rev or "").strip())
+            for line in order.lines or ()
+            if str(line.pn or "").strip()
+        )
+
+    revision_cache: dict[str, str] = {}
+
+    def resolve_blank_revisions(part_numbers: set[str]) -> None:
+        missing = {pn for pn in part_numbers if pn.casefold() not in revision_cache}
+        if not missing:
+            return
+        parts = Part.objects(part_number__in=tuple(missing))
+        if not has_permission(user, "parts.read_unreleased"):
+            parts = parts.filter(__raw__=approval_filter_raw(approved=True))
+        for part in parts.only("part_number", "revision", "updated_at").order_by("-updated_at"):
+            revision_cache.setdefault(
+                str(part.part_number or "").strip().casefold(),
+                str(part.revision or "").strip(),
+            )
+        for pn in missing:
+            revision_cache.setdefault(pn.casefold(), "")
+
+    allowed: set[tuple[str, str]] = set()
+    frontier = roots
+    while frontier:
+        resolve_blank_revisions({pn for pn, rev in frontier if not rev})
+        current = {
+            (pn, rev or revision_cache.get(pn.casefold(), ""))
+            for pn, rev in frontier
+            if pn
+        } - allowed
+        if not current:
+            break
+        allowed |= current
+        parent_numbers = {pn for pn, _rev in current}
+        links = BOMLink.objects(parent_pn__in=tuple(parent_numbers)).only(
+            "parent_pn",
+            "parent_rev",
+            "child_pn",
+            "child_rev",
+        )
+        frontier = set()
+        current_folded = {(pn.casefold(), rev.casefold()) for pn, rev in current}
+        for link in links:
+            parent_pn = str(link.parent_pn or "").strip()
+            parent_rev = str(link.parent_rev or "").strip()
+            if not parent_rev:
+                resolve_blank_revisions({parent_pn})
+                parent_rev = revision_cache.get(parent_pn.casefold(), "")
+            if (parent_pn.casefold(), parent_rev.casefold()) not in current_folded:
+                continue
+            child_pn = str(link.child_pn or "").strip()
+            if child_pn:
+                frontier.add((child_pn, str(link.child_rev or "").strip()))
     return allowed
 
 
@@ -820,10 +877,7 @@ def authorised_part_pairs(
 ) -> frozenset[tuple[str, str]]:
     """Return only exact requested identities present in the caller's part scope."""
 
-    from mongoengine.queryset.visitor import Q
-
     normalized: dict[tuple[str, str], tuple[str, str]] = {}
-    query = Q()
     for part_number, revision in pairs:
         pn = str(part_number or "").strip()
         rev = str(revision or "").strip()
@@ -831,14 +885,23 @@ def authorised_part_pairs(
             continue
         key = (pn.casefold(), rev.casefold())
         normalized[key] = (pn, rev)
-        query |= Q(part_number__iexact=pn, revision__iexact=rev)
     if not normalized:
         return frozenset()
     try:
+        from mongoengine.queryset.visitor import Q
         from app.models.part import Part
 
         scoped = scope_queryset(Part.objects, user, "parts", permission=permission)
-        found = scoped.filter(query).only("part_number", "revision")
+        clauses = [
+            {
+                "part_number": {"$regex": f"^{re.escape(pn)}$", "$options": "i"},
+                "revision": {"$regex": f"^{re.escape(rev)}$", "$options": "i"},
+            }
+            for pn, rev in normalized.values()
+        ]
+        found = scoped.filter(Q(__raw__={"$or": clauses})).only(
+            "part_number", "revision"
+        )
         return frozenset(
             (str(part.part_number or "").strip().casefold(), str(part.revision or "").strip().casefold())
             for part in found
@@ -854,12 +917,6 @@ def authorise_part_access(
     *,
     allow_part_family: bool = False,
 ) -> AuthorizationDecision:
-    """Authorise exact ``(part_number, revision)`` access.
-
-    ``allow_part_family`` is explicit and separate; a blank revision is never
-    treated as a wildcard by the default exact-revision path.
-    """
-
     pn = str(part_number or "").strip()
     rev = str(revision or "").strip()
     resource_id = _part_resource_id(pn, rev)
@@ -870,47 +927,27 @@ def authorise_part_access(
     )
     if not permission.allowed:
         return permission
-    if not pn:
-        return _denied(
-            user,
-            reason_code="resource_out_of_scope",
-            permission="parts.read",
-            resource_type="part",
-            resource_id=resource_id,
-            used_legacy_expansion=permission.used_legacy_expansion,
-            used_legacy_admin_bypass=permission.used_legacy_admin_bypass,
-        )
-
+    reason = "resource_out_of_scope"
     try:
         from app.models.part import Part
 
-        scoped = scope_queryset(Part.objects, user, "parts")
-        query = scoped.filter(part_number__iexact=pn)
-        if not allow_part_family:
-            query = query.filter(revision__iexact=rev)
-        if query.first() is not None:
-            return AuthorizationDecision(
-                allowed=True,
-                reason_code="allowed",
-                permission="parts.read",
-                resource_type="part",
-                resource_id=resource_id,
-                used_legacy_expansion=permission.used_legacy_expansion,
-                used_legacy_admin_bypass=permission.used_legacy_admin_bypass,
+        if pn:
+            query = scope_queryset(Part.objects, user, "parts").filter(
+                part_number__iexact=pn
             )
+            if not allow_part_family:
+                query = query.filter(revision__iexact=rev)
+            if query.only("id").first() is not None:
+                return AuthorizationDecision(
+                    True, "allowed", "parts.read", "part", resource_id,
+                    permission.used_legacy_expansion,
+                    permission.used_legacy_admin_bypass,
+                )
     except Exception:
-        return _denied(
-            user,
-            reason_code="authorisation_error",
-            permission="parts.read",
-            resource_type="part",
-            resource_id=resource_id,
-            used_legacy_expansion=permission.used_legacy_expansion,
-            used_legacy_admin_bypass=permission.used_legacy_admin_bypass,
-        )
+        reason = "authorisation_error"
     return _denied(
         user,
-        reason_code="resource_out_of_scope",
+        reason_code=reason,
         permission="parts.read",
         resource_type="part",
         resource_id=resource_id,
@@ -927,22 +964,8 @@ def require_permission(permission: str):
         def wrapper(*args, **kwargs):
             if not _is_authenticated(current_user):
                 abort(401)
-            try:
-                decision = authorise(current_user, permission)
-                if not decision.allowed:
-                    abort(403)
-            except AuthorizationScopeError:
-                abort(404)
-            except Exception as exc:
-                if getattr(exc, "code", None) in {401, 403, 404}:
-                    raise
-                denied = _denied(
-                    current_user,
-                    reason_code="authorisation_error",
-                    permission=permission,
-                )
-                if not denied.allowed:
-                    abort(403)
+            if not authorise(current_user, permission).allowed:
+                abort(403)
             return fn(*args, **kwargs)
 
         return wrapper

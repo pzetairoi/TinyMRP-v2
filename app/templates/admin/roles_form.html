@@ -25,6 +25,15 @@
 </div>
 {% endif %}
 
+{% if deletion_error %}
+<div class="alert alert-warning" role="alert">
+  <strong>Role not deleted.</strong> {{ deletion_error }}
+  {% if has_perm('security.users.read') %}
+  <a class="alert-link" href="{{ url_for('admin.users_list', role=role.name) }}">Review assigned users</a>.
+  {% endif %}
+</div>
+{% endif %}
+
 <form method="post" data-permission-editor>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <section class="card shadow-sm tm-card mb-4">
@@ -160,5 +169,29 @@
     <button class="btn btn-primary" type="submit">{{ "Save role" if role else "Create custom role" }}</button>
   </div>
 </form>
+
+{% if role and not standard_definition and role.name != 'admin' %}
+<section class="card border-danger mt-4">
+  <div class="card-body">
+    {% call card_header("Delete custom role", "Deletion is allowed only after every user assignment has been removed.") %}
+      {% if assigned_count and has_perm('security.users.read') %}
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.users_list', role=role.name) }}">Review {{ assigned_count }} assigned user{{ '' if assigned_count == 1 else 's' }}</a>
+      {% endif %}
+    {% endcall %}
+    {% if assigned_count %}
+    <p class="mb-0 text-muted">
+      This role is assigned to {{ assigned_count }} user{{ '' if assigned_count == 1 else 's' }}.
+      Remove those assignments before deleting it; TinyMRP will not create dangling role references.
+    </p>
+    {% else %}
+    <form method="post" action="{{ url_for('admin_roles.roles_delete', role_id=role.id) }}"
+          data-confirm="Delete this unassigned custom role? This cannot be undone.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-danger" type="submit">Delete custom role</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
 <script src="{{ url_for('static', filename='admin-access.js') }}" defer></script>
 {% endblock %}

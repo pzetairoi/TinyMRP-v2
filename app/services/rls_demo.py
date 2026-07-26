@@ -411,6 +411,7 @@ def seed_rls_demo(reset: bool = False, domain: str = "demo.com", password: str |
 
 PERMISSION_TEST_ROLE_SCENARIOS: dict[str, tuple[str, ...]] = {
     **{slug: (slug,) for slug in (
+        "administrator",
         "security_administrator",
         "system_administrator",
         "engineering_data_steward",
@@ -425,7 +426,6 @@ PERMISSION_TEST_ROLE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "customer_portal",
         "supplier_portal",
         "auditor",
-        "break_glass_administrator",
     )},
     "engineering_quality": (
         "engineering_data_steward",

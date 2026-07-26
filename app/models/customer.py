@@ -34,6 +34,6 @@ class Customer(Document):
 
     meta = {
         "collection": "customers",
-        "indexes": ["name", "code", "status", "customer_type"],
+        "indexes": ["name", "code", "status", "customer_type", "users"],
         "db_alias": DB_ALIAS,
     }

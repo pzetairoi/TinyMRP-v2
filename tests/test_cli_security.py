@@ -143,6 +143,9 @@ def test_reconciliation_reports_historical_invalid_permissions_without_rewriting
             "unknown": ["historical.unknown"],
         }
     ]
+    assert report["removed_permissions"] == [
+        {"permissions": ["historical.unknown"], "slug": "historical_custom"}
+    ]
     historical.reload()
     assert historical.permissions == ["items.view", "historical.unknown"]
     historical.description = "Attempted edit"

@@ -68,20 +68,16 @@ from app.services.field_config import (
     effective_source_paths,
     field_requires_runtime_scan,
     file_field_group,
-    field_uses_materialized_value,
     field_index as field_config_index,
     get_field_config,
     mongo_field_from_source,
-    matches_field_filter_constraints,
     number_filter_value,
     primary_query_path,
     query_paths_for_field,
     resolve_part_field_values,
     serialize_field_values,
 )
-from app.services.part_materialized import batch_file_groups_for_parts
 from app.services.part_query import (
-    exclude_pairs_query,
     filter_constraints,
     filter_value,
     or_contains,
@@ -118,7 +114,6 @@ from app.services.part_annotations import (
     set_part_comment_status,
     set_part_notes,
 )
-from app.services.part_review_status import compute_part_review_status, part_review_status_map
 from app.services.notifications import create_notifications, notify_part_activity, part_url
 from app.services.user_profile import (
     resolve_identity_profile,
@@ -472,12 +467,27 @@ def _group_file_overview_rows(rows: list[dict[str, Any]], current_rev: str) -> d
 
 def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
     paths = _ancestor_paths(pn, rev)
-    job_q = scope_queryset(Job.objects(is_deleted=False), user, "jobs")
+    related_pns = {
+        ancestor_pn
+        for path in paths
+        for ancestor_pn, _ancestor_rev in path
+        if ancestor_pn
+    }
+    if not related_pns:
+        return []
+    job_q = scope_queryset(
+        Job.objects(is_deleted=False, bom__pn__in=tuple(related_pns)),
+        user,
+        "jobs",
+    ).only("job_number", "bom")
     order_q = scope_queryset(
-        Order.objects(status__ne="cancelled"),
+        Order.objects(
+            status__ne="cancelled",
+            lines__pn__in=tuple(related_pns),
+        ),
         user,
         "orders",
-    )
+    ).only("order_number", "kind", "status", "job", "lines")
 
     rows: list[dict] = []
     seen = set()
@@ -566,11 +576,13 @@ def _context_field_values(
     part: Part | None,
     context_name: str,
     *,
+    config: dict | None = None,
+    attrs: dict | None = None,
     coverage: set[str] | None = None,
     extra: dict | None = None,
 ):
-    config = get_field_config()
-    attrs = harvest_part_attrs(part) if part else {}
+    config = config or get_field_config()
+    attrs = attrs if attrs is not None else (harvest_part_attrs(part) if part else {})
     values = resolve_part_field_values(
         part,
         context_field_ids(context_name, config),
@@ -677,17 +689,32 @@ def parts_lazy():
         if field_id in visible_policy_fields
     ]
     field_meta = field_config_index(field_config)
-    runtime_filter_ids = {field_id for field_id in parts_context_ids if field_requires_runtime_scan(field_id, field_config)}
-    materialized_filter_ids = {field_id for field_id in parts_context_ids if field_uses_materialized_value(field_id, field_config)}
-    sortable_ids = {field_id for field_id in parts_context_ids if field_meta.get(field_id, {}).get("sortable")}
-    filterable_ids = {field_id for field_id in parts_context_ids if field_meta.get(field_id, {}).get("filterable")}
+    queryable_ids = {
+        field_id
+        for field_id in parts_context_ids
+        if not field_requires_runtime_scan(field_id, field_config)
+        and (
+            primary_query_path(field_id, field_config)
+            or field_id == "approved"
+            or file_field_group(field_id)
+        )
+    }
+    sortable_ids = {
+        field_id
+        for field_id in queryable_ids
+        if field_meta.get(field_id, {}).get("sortable")
+    }
+    filterable_ids = {
+        field_id
+        for field_id in queryable_ids
+        if field_meta.get(field_id, {}).get("filterable")
+    }
     _t_config = time.perf_counter()
 
     if sort_field not in sortable_ids:
         sort_field = "part_number"
-    runtime_sort = field_requires_runtime_scan(sort_field, field_config)
-    mapped_sort = None if runtime_sort else primary_query_path(sort_field, field_config)
-    if not runtime_sort and not mapped_sort:
+    mapped_sort = primary_query_path(sort_field, field_config)
+    if not mapped_sort:
         sort_field = "part_number"
         mapped_sort = primary_query_path(sort_field, field_config) or "part_number"
     order_by = f"-{mapped_sort}" if mapped_sort and sort_order == -1 else (mapped_sort or "part_number")
@@ -895,10 +922,6 @@ def parts_lazy():
         return Q(__raw__=raw)
 
     q = Q()
-    fallback_base_q = Q()
-    typed_filter_specs: list[tuple[str, str, str, list[dict[str, Any]]]] = []
-    runtime_filter_specs: list[tuple[str, str, str, list[dict[str, Any]]]] = []
-    materialized_filter_specs: list[tuple[str, str, str, list[dict[str, Any]]]] = []
     for field_id in filterable_ids:
         data_type = str(field_meta.get(field_id, {}).get("data_type") or "text")
         if data_type == "image":
@@ -910,21 +933,9 @@ def parts_lazy():
         )
         if not constraints:
             continue
-        spec = (field_id, data_type, operator, constraints)
-        if field_id in runtime_filter_ids:
-            runtime_filter_specs.append(spec)
-            continue
         field_q = _field_constraints_q(field_id, data_type, operator, constraints)
-        if field_q is None:
-            typed_filter_specs.append(spec)
-            continue
-        q = q & field_q
-        if field_id in materialized_filter_ids:
-            # Keep the unfiltered base query for old rows that have not yet had
-            # this materialized field rebuilt.
-            materialized_filter_specs.append(spec)
-        else:
-            fallback_base_q = fallback_base_q & field_q
+        if field_q is not None:
+            q &= field_q
 
     global_value = filter_value(filters, "global", "")
     if global_value:
@@ -957,9 +968,7 @@ def parts_lazy():
             for path in global_paths:
                 or_q = or_q | Q(**{f"{path}__icontains": term})
             q = q & or_q
-            fallback_base_q = fallback_base_q & or_q
 
-    review_statuses: dict[tuple[str, str], dict[str, object]] | None = None
     review_filter = (
         str(filter_value(filters, "pending_reviews", "") or "").strip().lower()
         if has_permission(current_user, "comments.read")
@@ -967,28 +976,19 @@ def parts_lazy():
         else ""
     )
     if review_filter:
-        review_statuses = part_review_status_map()
-        pending_pairs = [key for key, status in review_statuses.items() if bool(status.get("pending"))]
         if review_filter in {"pending", "true", "yes", "1"}:
-            matching_pairs = pending_pairs
+            q &= Q(pending_review_count__gt=0)
         elif review_filter in {"high", "normal", "low"}:
-            matching_pairs = [key for key, status in review_statuses.items() if status.get("severity") == review_filter]
+            q &= Q(
+                pending_review_count__gt=0,
+                pending_review_severity=review_filter,
+            )
         elif review_filter in {"none", "false", "no", "0"}:
-            matching_pairs = []
-            excluded = exclude_pairs_query(pending_pairs)
-            q = q & excluded
-            fallback_base_q = fallback_base_q & excluded
+            q &= Q(pending_review_count__lte=0) | Q(
+                __raw__={"pending_review_count": {"$exists": False}}
+            )
         else:
-            matching_pairs = []
-        if review_filter not in {"none", "false", "no", "0"}:
-            if matching_pairs:
-                matched = pairs_query(matching_pairs)
-                q = q & matched
-                fallback_base_q = fallback_base_q & matched
-            else:
-                impossible = Q(__raw__={"_id": {"$exists": False}})
-                q = q & impossible
-                fallback_base_q = fallback_base_q & impossible
+            q &= Q(__raw__={"_id": {"$exists": False}})
 
     job_id = body.get("job") or request.args.get("job")
     job_filter_enabled = bool(job_id) and str(body.get("job_only", "true")).lower() != "false"
@@ -1007,246 +1007,67 @@ def parts_lazy():
             }
             if pairs:
                 q = q & pairs_query(pairs)
-                fallback_base_q = fallback_base_q & pairs_query(pairs)
 
     _t_filters = time.perf_counter()
     authorised_parts = scope_queryset(Part.objects, current_user, "parts")
     qs = authorised_parts.filter(q)
-    fallback_qs = authorised_parts.filter(fallback_base_q)
-
-    def _missing_materialized_q(field_ids: set[str]) -> Q:
-        out = Q()
-        for field_id in field_ids:
-            out = out | Q(__raw__={f"field_values.{field_id}": {"$exists": False}})
-        return out
-
-    def _sort_value(values: dict[str, Any], part: Part, rev: str, data_type: str):
-        value = values.get(sort_field)
-        if data_type == "number":
-            try:
-                return float(value)
-            except Exception:
-                return float("-inf") if sort_order == -1 else float("inf")
-        if data_type == "boolean":
-            return 1 if bool(value) else 0
-        if sort_field == "part_number":
-            return str(getattr(part, "part_number", "") or "").lower()
-        if sort_field == "revision":
-            return str(values.get("revision", rev) or rev or "").lower()
-        return str(value or "").lower()
-
-    def _coverage_map(parts_list: list[Part]) -> dict[tuple[str, str], set[str]]:
-        return batch_file_groups_for_parts(parts_list)
-
-    needs_scan = any(
-        [
-            bool(typed_filter_specs),
-            bool(runtime_filter_specs),
-            runtime_sort,
-        ]
-    )
-
-    if needs_scan:
-        scan_order_by = order_by if not runtime_sort else "part_number"
-        all_docs = list(qs.order_by(scan_order_by, "part_number", "revision").only("part_number", "revision", "description", "category", "attrs", "processes"))
-        scan_requires_values = bool(runtime_sort or typed_filter_specs or runtime_filter_specs)
-        coverage = _coverage_map(all_docs) if scan_requires_values else {}
-        filtered_docs: list[Part] = []
-        resolved_cache: dict[tuple[str, str], dict[str, Any]] = {}
-        for part in all_docs:
-            attrs = harvest_part_attrs(part)
-            rev = _normalized_revision(part, attrs)
-            groups = coverage.get((part.part_number, rev)) or set()
-            values: dict[str, Any] = {}
-            if scan_requires_values:
-                values = resolve_part_field_values(
-                    part,
-                    parts_context_ids,
-                    attrs=attrs,
-                    config=field_config,
-                    extra={"part_number": part.part_number, "revision": rev},
-                    coverage=groups,
-                )
-            if any(
-                not matches_field_filter_constraints(values.get(field_id), constraints, operator, data_type)
-                for field_id, data_type, operator, constraints in typed_filter_specs
-            ):
-                continue
-            if any(
-                not matches_field_filter_constraints(values.get(field_id), constraints, operator, data_type)
-                for field_id, data_type, operator, constraints in runtime_filter_specs
-            ):
-                continue
-            if values:
-                resolved_cache[(part.part_number, rev)] = values
-            filtered_docs.append(part)
-        if runtime_sort:
-            sort_type = str((field_meta.get(sort_field) or {}).get("data_type") or "text")
-            reverse = sort_order == -1
-
-            def _runtime_sort_key(doc: Part):
-                attrs = harvest_part_attrs(doc)
-                rev = _normalized_revision(doc, attrs)
-                value = (resolved_cache.get((doc.part_number, rev)) or {}).get(sort_field)
-                if sort_type == "number":
-                    try:
-                        return float(value)
-                    except Exception:
-                        return float("-inf") if reverse else float("inf")
-                if sort_type == "boolean":
-                    return 1 if bool(value) else 0
-                return str(value or "").lower()
-
-            filtered_docs.sort(key=_runtime_sort_key, reverse=reverse)
-        filtered = len(filtered_docs)
-        docs = filtered_docs[first:first + rows]
-    else:
-        filtered = qs.count()
-        docs = list(
-            qs.order_by(*order_fields)
-            .only(
-                "part_number", "revision", "description", "category", "attrs", "processes",
-                "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
-                "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
-            )
-            .skip(first)
-            .limit(rows)
+    filtered = qs.count()
+    docs = list(
+        qs.order_by(*order_fields)
+        .only(
+            "part_number", "revision", "description", "category", "attrs", "processes",
+            "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
+            "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
+            "pending_review_count", "pending_review_severity",
         )
-        coverage = {}
-        resolved_cache = {}
-
-        fallback_limit = max(first + rows, rows)
-        if materialized_filter_specs and filtered < fallback_limit:
-            stale_filter_ids = {field_id for field_id, _data_type, _operator, _constraints in materialized_filter_specs}
-            stale_candidates_qs = fallback_qs.filter(_missing_materialized_q(stale_filter_ids))
-            stale_candidates = list(
-                stale_candidates_qs.only(
-                    "part_number", "revision", "description", "category", "attrs", "processes",
-                    "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
-                    "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
-                )
-            )
-            fallback_docs: list[Part] = []
-            fallback_values_cache: dict[tuple[str, str], dict[str, Any]] = {}
-            fallback_sort_type = str((field_meta.get(sort_field) or {}).get("data_type") or "text")
-            fallback_field_ids = {field_id for field_id, _data_type, _operator, _constraints in materialized_filter_specs}
-            if sort_field:
-                fallback_field_ids.add(sort_field)
-            fallback_field_ids.update({"part_number", "revision"})
-
-            for part in stale_candidates:
-                attrs = harvest_part_attrs(part)
-                rev = _normalized_revision(part, attrs)
-                values = resolve_part_field_values(
-                    part,
-                    fallback_field_ids,
-                    attrs=attrs,
-                    config=field_config,
-                    extra={"part_number": part.part_number, "revision": rev},
-                )
-                if any(
-                    not matches_field_filter_constraints(values.get(field_id), constraints, operator, data_type)
-                    for field_id, data_type, operator, constraints in materialized_filter_specs
-                ):
-                    continue
-                fallback_values_cache[(part.part_number, rev)] = values
-                fallback_docs.append(part)
-
-            if fallback_docs:
-                db_prefix = list(
-                    qs.order_by(*order_fields)
-                    .only(
-                        "part_number", "revision", "description", "category", "attrs", "processes",
-                        "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
-                        "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
-                    )
-                    .limit(fallback_limit)
-                )
-                combined = db_prefix + fallback_docs
-                combined_sort_values = dict(fallback_values_cache)
-                for part in db_prefix:
-                    attrs = harvest_part_attrs(part)
-                    rev = _normalized_revision(part, attrs)
-                    key = (part.part_number, rev)
-                    if key in combined_sort_values:
-                        continue
-                    combined_sort_values[key] = resolve_part_field_values(
-                        part,
-                        fallback_field_ids,
-                        attrs=attrs,
-                        config=field_config,
-                        extra={"part_number": part.part_number, "revision": rev},
-                    )
-                combined.sort(
-                    key=lambda part: (
-                        _sort_value(
-                            combined_sort_values.get(
-                                (
-                                    part.part_number,
-                                    _normalized_revision(part, harvest_part_attrs(part)),
-                                ),
-                                {},
-                            ),
-                            part,
-                            _normalized_revision(part, harvest_part_attrs(part)),
-                            fallback_sort_type,
-                        ),
-                        str(getattr(part, "part_number", "") or "").lower(),
-                        str(_normalized_revision(part, harvest_part_attrs(part)) or "").lower(),
-                    ),
-                    reverse=sort_order == -1,
-                )
-                filtered += len(fallback_docs)
-                docs = combined[first:first + rows]
-                coverage = {}
+        .skip(first)
+        .limit(rows)
+    )
+    page_rows = [
+        (part, attrs, _normalized_revision(part, attrs))
+        for part in docs
+        for attrs in [harvest_part_attrs(part)]
+    ]
 
     _t_query = time.perf_counter()
     thumb_map = (
         thumb_urls_map(
-            [
-                (
-                    part.part_number,
-                    _normalized_revision(part, harvest_part_attrs(part)),
-                )
-                for part in docs
-            ],
+            [(part.part_number, revision) for part, _attrs, revision in page_rows],
             user=current_user,
+            authorised_pairs=True,
         )
         if has_permission(current_user, "files.read")
         else {}
     )
     _t_thumbs = time.perf_counter()
-    if review_statuses is None:
-        review_statuses = part_review_status_map()
     _t_review = time.perf_counter()
 
     out = []
-    for part in docs:
-        attrs = harvest_part_attrs(part)
+    allowed_file_groups = {
+        group
+        for group in ("pdf", "png", "dxf", "step", "edr", "3mf", "ply", "stl", "datasheet")
+        if managed_file_group_allowed(current_user, group)
+    }
+    for part, attrs, rev in page_rows:
         pn = part.part_number
-        rev = _normalized_revision(part, attrs)
-        groups = coverage.get((pn, rev)) or set()
         process_list = normalize_process_list(attrs, list(part.processes or []), current_app.config.get("PROCESS_META", {}))
         thumb_list = thumb_map.get((pn, rev)) or []
-        values = dict(resolved_cache.get((pn, rev)) or {})
-        if not values:
-            values = resolve_part_field_values(
-                part,
-                parts_context_ids,
-                attrs=attrs,
-                config=field_config,
-                extra={"part_number": pn, "revision": rev, "thumbnail": thumb_list[0] if thumb_list else ""},
-                coverage=groups,
-            )
-        elif thumb_list:
-            values["thumbnail"] = thumb_list[0]
+        values = resolve_part_field_values(
+            part,
+            parts_context_ids,
+            attrs=attrs,
+            config=field_config,
+            extra={"part_number": pn, "revision": rev, "thumbnail": thumb_list[0] if thumb_list else ""},
+            coverage=set(part.file_groups or ()),
+        )
         values["display_code"] = f"{pn}-{rev}" if rev else pn
         values = serialize_field_values(values, field_config)
         # Annotation text remains searchable, but list/search results expose only
         # the pending-review signal so private discussion content is not repeated
         # across general-purpose tables.
         values.pop("comments", None)
-        review_status = review_statuses.get((pn, rev), {"count": 0, "severity": "", "pending": False})
+        review_count = int(part.pending_review_count or 0)
+        review_severity = str(part.pending_review_severity or "") if review_count else ""
         out.append(
             filter_response_fields(
                 "parts",
@@ -1264,18 +1085,18 @@ def parts_lazy():
                 "process": values.get("process", ""),
                 "processes": process_list,
                 "thumb_urls": thumb_list,
-                "has_pdf": bool(managed_file_group_allowed(current_user, "pdf") and values.get("has_pdf", getattr(part, "has_pdf", False))),
-                "has_png": bool(managed_file_group_allowed(current_user, "png") and values.get("has_png", getattr(part, "has_png", False))),
-                "has_dxf": bool(managed_file_group_allowed(current_user, "dxf") and values.get("has_dxf", getattr(part, "has_dxf", False))),
-                "has_step": bool(managed_file_group_allowed(current_user, "step") and values.get("has_step", getattr(part, "has_step", False))),
-                "has_edr": bool(managed_file_group_allowed(current_user, "edr") and values.get("has_edr", getattr(part, "has_edr", False))),
-                "has_3mf": bool(managed_file_group_allowed(current_user, "3mf") and values.get("has_3mf", getattr(part, "has_3mf", False))),
-                "has_ply": bool(managed_file_group_allowed(current_user, "ply") and values.get("has_ply", getattr(part, "has_ply", False))),
-                "has_stl": bool(managed_file_group_allowed(current_user, "stl") and values.get("has_stl", getattr(part, "has_stl", False))),
-                "has_datasheet": bool(managed_file_group_allowed(current_user, "datasheet") and values.get("has_datasheet", getattr(part, "has_datasheet", False))),
-                "pending_review_count": int(review_status.get("count") or 0),
-                "pending_review_severity": str(review_status.get("severity") or ""),
-                "has_pending_reviews": bool(review_status.get("pending")),
+                "has_pdf": bool("pdf" in allowed_file_groups and values.get("has_pdf", part.has_pdf)),
+                "has_png": bool("png" in allowed_file_groups and values.get("has_png", part.has_png)),
+                "has_dxf": bool("dxf" in allowed_file_groups and values.get("has_dxf", part.has_dxf)),
+                "has_step": bool("step" in allowed_file_groups and values.get("has_step", part.has_step)),
+                "has_edr": bool("edr" in allowed_file_groups and values.get("has_edr", part.has_edr)),
+                "has_3mf": bool("3mf" in allowed_file_groups and values.get("has_3mf", part.has_3mf)),
+                "has_ply": bool("ply" in allowed_file_groups and values.get("has_ply", part.has_ply)),
+                "has_stl": bool("stl" in allowed_file_groups and values.get("has_stl", part.has_stl)),
+                "has_datasheet": bool("datasheet" in allowed_file_groups and values.get("has_datasheet", part.has_datasheet)),
+                "pending_review_count": review_count,
+                "pending_review_severity": review_severity,
+                "has_pending_reviews": review_count > 0,
                 **values,
                 },
                 context={
@@ -1290,7 +1111,7 @@ def parts_lazy():
     try:
         _timing_logger.debug(
             "parts_lazy timing (ms): config=%.1f filters=%.1f query=%.1f thumbs=%.1f "
-            "review=%.1f rows=%.1f total=%.1f | needs_scan=%s page_rows=%d total_records=%d sort=%s",
+            "review=%.1f rows=%.1f total=%.1f | page_rows=%d total_records=%d sort=%s",
             (_t_config - _t_start) * 1000,
             (_t_filters - _t_config) * 1000,
             (_t_query - _t_filters) * 1000,
@@ -1298,7 +1119,6 @@ def parts_lazy():
             (_t_review - _t_thumbs) * 1000,
             (_t_rows - _t_review) * 1000,
             (_t_rows - _t_start) * 1000,
-            needs_scan,
             len(out),
             filtered,
             sort_field,
@@ -1333,14 +1153,33 @@ def part_detail():
     if not p:
         return jsonify({"error": "not found"}), 404
 
-    attrs = harvest_part_attrs(p)
-    notes_comments = annotation_payload(p, attrs)
     field_config = get_field_config()
     custom_field_ids, custom_attr_keys = _configured_custom_fields(field_config)
     boundary = response_context("parts", current_user)
+    attrs = harvest_part_attrs(p)
+    can_read_comments = (
+        boundary in {"internal", "production_operator"}
+        and has_permission(current_user, "comments.read")
+    )
+    can_read_markups = (
+        boundary in {"internal", "production_operator"}
+        and has_permission(current_user, "markups.read")
+    )
+    can_read_approval_identity = (
+        boundary == "internal"
+        and (
+            has_permission(current_user, "reviews.approve")
+            or has_permission(current_user, "audit.read")
+        )
+    )
+    notes_comments = (
+        annotation_payload(p, attrs)
+        if can_read_comments
+        else {"notes": "", "comments": []}
+    )
     visible_attrs = filter_part_custom_fields(
         current_user,
-        filtered_part_attrs(p),
+        filtered_part_attrs(p, attrs),
         configured_fields=custom_attr_keys,
         context={"policy_context": boundary},
     )
@@ -1371,14 +1210,16 @@ def part_detail():
         return name or "file"
 
     files = {"pdf": [], "dxf": [], "step": [], "edr": [], "3mf": [], "ply": [], "stl": [], "datasheet": []}
-    for f in (
+    file_rows = (
         PartFile.objects(part_number__iexact=p.part_number, revision__iexact=norm_rev)
         .only("ext_group", "rel_path", "path", "http_url")
         .order_by("ext_group", "rel_path")
-    ):
+        if can_read_files
+        else ()
+    )
+    for f in file_rows:
         if (
-            can_read_files
-            and f.ext_group in files
+            f.ext_group in files
             and managed_file_category_allowed(current_user, f)
             and managed_file_path_allowed(f)
         ):
@@ -1401,6 +1242,8 @@ def part_detail():
     _, _, summary_field_values = _context_field_values(
         p,
         "part_detail_summary",
+        config=field_config,
+        attrs=attrs,
         extra={"part_number": p.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
     )
     summary_field_values.update(approval_field_values(attrs))
@@ -1416,15 +1259,23 @@ def part_detail():
         },
     )
 
-    uploader_identity = _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
-    approver_identity = str(approval_field_values(attrs).get("approved_by") or "").strip()
+    uploader_identity = (
+        _attr_identity(attrs, "uploader", "uploaded_by", "uploadedby", "author", "drawnby")
+        if can_read_markups
+        else ""
+    )
+    approver_identity = (
+        str(approval_field_values(attrs).get("approved_by") or "").strip()
+        if can_read_approval_identity
+        else ""
+    )
     raw_comments = list(notes_comments.get("comments") or [])
-    identity_keys = [uploader_identity, approver_identity]
+    identity_keys = [value for value in (uploader_identity, approver_identity) if value]
     identity_keys.extend(str((comment or {}).get("author") or "").strip() for comment in raw_comments)
     for comment in raw_comments:
         for reply in (comment or {}).get("replies") or []:
             identity_keys.append(str((reply or {}).get("author") or "").strip())
-    resolved_profiles = resolve_identity_profiles(identity_keys)
+    resolved_profiles = resolve_identity_profiles(identity_keys) if identity_keys else {}
     comments = (
         [
             _safe_comment_payload(
@@ -1433,8 +1284,7 @@ def part_detail():
             )
             for comment in raw_comments
         ]
-        if boundary == "internal"
-        and has_permission(current_user, "comments.read")
+        if can_read_comments
         else []
     )
     uploader_profile = resolve_identity_profile(uploader_identity) if uploader_identity else None
@@ -1445,17 +1295,12 @@ def part_detail():
         approver_profile = resolved_profiles.get(approver_identity.lower(), approver_profile)
     uploader_profile = (
         _safe_identity_profile(uploader_profile, boundary)
-        if boundary == "internal"
-        and has_permission(current_user, "markups.read")
+        if can_read_markups
         else {}
     )
     approver_profile = (
         _safe_identity_profile(approver_profile, boundary)
-        if boundary == "internal"
-        and (
-            has_permission(current_user, "reviews.approve")
-            or has_permission(current_user, "audit.read")
-        )
+        if can_read_approval_identity
         else {}
     )
 
@@ -1467,15 +1312,16 @@ def part_detail():
 
     other_versions = []
     pn_key = p.part_number
-    for op in (
+    revision_rows = (
         scoped_parts.filter(part_number__iexact=pn)
-        .only("part_number", "revision", "description", "category", "attrs", "updated_at")
+        .only("part_number", "revision", "description", "attrs", "updated_at")
         .order_by("-updated_at")
-    ):
+        if boundary == "internal"
+        else ()
+    )
+    for op in revision_rows:
         attrs_v = harvest_part_attrs(op)
         rev_v = _normalized_revision(op, attrs_v)
-        if boundary != "internal":
-            break
         other_versions.append(
             filter_response_fields(
                 "parts",
@@ -1532,7 +1378,8 @@ def part_detail():
     can_parts_delete = has_permission(current_user, "parts.purge")
     can_parts_edit = has_permission(current_user, "parts.update")
     can_parts_note = has_permission(current_user, "comments.write")
-    review_status = compute_part_review_status(p)
+    review_count = int(p.pending_review_count or 0)
+    review_severity = str(p.pending_review_severity or "") if review_count else ""
 
     part_payload = filter_response_fields(
         "parts",
@@ -1551,9 +1398,9 @@ def part_detail():
                 "notes": str(notes_comments.get("notes") or ""),
                 "field_values": summary_field_values,
                 "attributes": visible_attrs,
-                "pending_review_count": int(review_status.get("count") or 0),
-                "pending_review_severity": str(review_status.get("severity") or ""),
-                "has_pending_reviews": bool(review_status.get("pending")),
+                "pending_review_count": review_count,
+                "pending_review_severity": review_severity,
+                "has_pending_reviews": review_count > 0,
         },
         context={
             "policy_context": boundary,

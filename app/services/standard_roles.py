@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.services.permissions import (
+    CANONICAL_PERMISSION_IDENTIFIERS,
     duplicate_permissions,
     unknown_permissions,
     validate_permissions,
@@ -34,9 +35,15 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
     definition.slug: definition
     for definition in (
         _role(
+            "administrator",
+            "Administrator",
+            "Full application administration and business authority; includes purge and sensitive financial operations.",
+            CANONICAL_PERMISSION_IDENTIFIERS,
+        ),
+        _role(
             "security_administrator",
             "Security Administrator",
-            "Manages users, roles, assignments, token revocation, and security audit access.",
+            "Specialised users, roles, assignments, token revocation and audit administration; no business or system-maintenance authority.",
             (
                 "security.users.read",
                 "security.users.manage",
@@ -50,7 +57,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "system_administrator",
             "System Administrator",
-            "Manages system configuration, storage, rebuilds, and maintenance.",
+            "Specialised configuration, storage, rebuild and maintenance administration with audit access; no routine business authority.",
             (
                 "system.config.read",
                 "system.config.manage",
@@ -63,7 +70,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "engineering_data_steward",
             "Engineering/Data Steward",
-            "Maintains engineering parts, BOMs, managed files, numbering, and shares.",
+            "Maintains released/unreleased engineering data, BOMs, normal files, numbering, shares and exports; no purge, commercial approval or import override.",
             (
                 "parts.read",
                 "parts.read_unreleased",
@@ -88,7 +95,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "import_operator",
             "Import Operator",
-            "Previews and executes low-risk imports without approval or override authority.",
+            "Runs low-risk imports; cannot overwrite approved or released records.",
             (
                 "parts.read",
                 "parts.read_unreleased",
@@ -100,14 +107,15 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         ),
         _role(
             "import_approver",
-            "Import Approver",
-            "Previews and executes approved-data imports, including explicit override mode.",
+            "Import Manager",
+            "Runs ordinary imports and authorised approved-data override imports.",
             (
                 "parts.read",
                 "parts.read_unreleased",
                 "bom.read",
                 "files.read",
                 "imports.preview",
+                "imports.execute_low_risk",
                 "imports.execute_approved",
                 "imports.override_approved",
                 "audit.read",
@@ -116,11 +124,15 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "planner",
             "Planner",
-            "Plans jobs and orders without order approval or destructive authority.",
+            "Plans jobs and non-financial orders, with company planning context and engineering collaboration; can submit but cannot approve orders.",
             (
                 "parts.read",
                 "bom.read",
                 "files.read",
+                "comments.read",
+                "comments.write",
+                "markups.read",
+                "markups.write",
                 "jobs.read",
                 "jobs.create",
                 "jobs.update",
@@ -139,11 +151,15 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "procurement",
             "Procurement",
-            "Manages supplier records and purchase-order commercial workflows.",
+            "Manages suppliers, purchase orders, purchasing-related jobs and engineering collaboration; no sales or customer-financial authority.",
             (
                 "parts.read",
                 "bom.read",
                 "files.read",
+                "comments.read",
+                "comments.write",
+                "markups.read",
+                "markups.write",
                 "jobs.read",
                 "suppliers.read",
                 "suppliers.update",
@@ -166,11 +182,15 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "sales_customer_service",
             "Sales/Customer Service",
-            "Manages customer records and sales-order commercial workflows.",
+            "Manages customers, sales orders, customer-related jobs and engineering collaboration; no purchase or supplier-financial authority.",
             (
                 "parts.read",
                 "bom.read",
                 "files.read",
+                "comments.read",
+                "comments.write",
+                "markups.read",
+                "markups.write",
                 "jobs.read",
                 "customers.read",
                 "customers.update",
@@ -193,7 +213,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "production_operator",
             "Production Operator",
-            "Updates assigned production stages and material movements.",
+            "Works only on assigned jobs, exact related parts, stages, material issue, comments and drawing markups.",
             (
                 "parts.read",
                 "bom.read",
@@ -203,12 +223,14 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
                 "jobs.material.issue",
                 "comments.read",
                 "comments.write",
+                "markups.read",
+                "markups.write",
             ),
         ),
         _role(
             "quality_reviewer",
             "Quality Reviewer",
-            "Reviews engineering work and moderates review comments and markups.",
+            "Reviews unreleased engineering data and moderates comments/markups without design, BOM or part-release mutation.",
             (
                 "parts.read",
                 "parts.read_unreleased",
@@ -227,7 +249,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "internal_viewer",
             "Internal Viewer",
-            "Reads released internal business data without notes, financial fields, or writes.",
+            "Reads released, non-financial internal business data without annotations, exports or mutations.",
             (
                 "parts.read",
                 "bom.read",
@@ -241,7 +263,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "customer_portal",
             "Customer Portal",
-            "Read-only access scoped to linked customer organisations and allowed records.",
+            "Read-only linked-customer jobs, sales orders and exact released part revisions; excludes internal and supplier data.",
             (
                 "parts.read",
                 "bom.read",
@@ -254,7 +276,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "supplier_portal",
             "Supplier Portal",
-            "Read-only access scoped to linked supplier organisations and allowed records.",
+            "Read-only linked-supplier purchase orders, related jobs and exact released part revisions; excludes customer and internal data.",
             (
                 "parts.read",
                 "bom.read",
@@ -267,7 +289,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "auditor",
             "Auditor",
-            "Reads audit, configuration, security, business, financial, and review records.",
+            "Broad read-only audit, configuration, financial, business and unreleased visibility; no export, mutation, approval or purge.",
             (
                 "audit.read",
                 "system.config.read",
@@ -286,12 +308,6 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
                 "comments.read",
                 "markups.read",
             ),
-        ),
-        _role(
-            "break_glass_administrator",
-            "Break-glass Administrator",
-            "Identifies users eligible for a separate time-limited emergency grant.",
-            (),
         ),
     )
 }
@@ -331,6 +347,7 @@ def reconcile_standard_roles(*, dry_run: bool = False, apply: bool = False) -> d
         "drifted": [],
         "unchanged": [],
         "invalid_permissions": [],
+        "removed_permissions": [],
     }
 
     for role in Role.objects.only("name", "permissions"):
@@ -342,6 +359,13 @@ def reconcile_standard_roles(*, dry_run: bool = False, apply: bool = False) -> d
                     "slug": str(getattr(role, "name", "") or ""),
                     "unknown": unknown,
                     "duplicates": duplicates,
+                }
+            )
+        if unknown:
+            report["removed_permissions"].append(
+                {
+                    "slug": str(getattr(role, "name", "") or ""),
+                    "permissions": unknown,
                 }
             )
 

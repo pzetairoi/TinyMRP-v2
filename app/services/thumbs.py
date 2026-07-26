@@ -48,6 +48,7 @@ def preview_png_urls_map(
     pairs: Iterable[tuple[str, str | None]],
     *,
     user=None,
+    authorised_pairs: bool = False,
 ) -> dict[tuple[str, str], List[str]]:
     requested: dict[tuple[str, str], tuple[str, str]] = {}
     for pn, rev in pairs:
@@ -60,10 +61,14 @@ def preview_png_urls_map(
         return {}
 
     authorised = None
-    if user is not None:
+    if user is not None and not authorised_pairs:
         from app.services.authorization import authorised_part_pairs
 
         authorised = authorised_part_pairs(user, requested.values())
+    elif user is not None:
+        authorised = frozenset(
+            (pn.casefold(), rev.casefold()) for pn, rev in requested.values()
+        )
     http_base = (current_app.config.get("FILE_ROOT_HTTP") or "").rstrip("/")
     out: dict[tuple[str, str], List[str]] = {}
     pn_list = sorted({pn for pn, _rev in requested.values()})
@@ -104,8 +109,13 @@ def thumb_urls_map(
     pairs: Iterable[tuple[str, str | None]],
     *,
     user=None,
+    authorised_pairs: bool = False,
 ) -> dict[tuple[str, str], List[str]]:
-    return preview_png_urls_map(pairs, user=user)
+    return preview_png_urls_map(
+        pairs,
+        user=user,
+        authorised_pairs=authorised_pairs,
+    )
 
 
 # helper: build URL list for a single PartFile doc

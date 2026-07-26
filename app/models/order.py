@@ -58,6 +58,9 @@ class Order(Document):
 
     meta = {
         "collection": "orders",
-        "indexes": ["order_number", "kind", "status", "order_date"],
+        "indexes": [
+            "order_number", "kind", "status", "order_date", "job",
+            ("kind", "customer"), ("kind", "supplier"),
+        ],
         "db_alias": DB_ALIAS,
     }

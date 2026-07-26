@@ -31,17 +31,12 @@ CANONICAL_PERMISSION_GROUPS: dict[str, tuple[str, ...]] = {
         "parts.create",
         "parts.update",
         "parts.revise",
-        "parts.release.approve",
-        "parts.archive",
-        "parts.restore",
         "parts.purge",
         "bom.read",
         "bom.update",
         "files.read",
         "files.add",
         "files.replace",
-        "files.archive",
-        "files.restore",
         "files.purge",
         "numbering.allocate",
         "numbering.manage",
@@ -52,11 +47,8 @@ CANONICAL_PERMISSION_GROUPS: dict[str, tuple[str, ...]] = {
     "imports": (
         "imports.preview",
         "imports.execute_low_risk",
-        "imports.review_high_risk",
-        "imports.approve_high_risk",
         "imports.execute_approved",
         "imports.override_approved",
-        "imports.rollback",
     ),
     "comments_markups_and_reviews": (
         "comments.read",
@@ -75,7 +67,6 @@ CANONICAL_PERMISSION_GROUPS: dict[str, tuple[str, ...]] = {
         "jobs.bom.update",
         "jobs.stages.update",
         "jobs.material.issue",
-        "jobs.material.receive",
         "jobs.cancel",
         "jobs.archive",
     ),
@@ -203,7 +194,6 @@ LEGACY_PERMISSION_COMPATIBILITY: dict[str, frozenset[str]] = {
             "jobs.bom.update",
             "jobs.stages.update",
             "jobs.material.issue",
-            "jobs.material.receive",
             "jobs.cancel",
             "jobs.archive",
         }
@@ -212,7 +202,6 @@ LEGACY_PERMISSION_COMPATIBILITY: dict[str, frozenset[str]] = {
     "workorders.edit": frozenset({"jobs.stages.update"}),
     "workorders.close": frozenset({"jobs.stages.update"}),
     "inventory.issue": frozenset({"jobs.material.issue"}),
-    "inventory.receive": frozenset({"jobs.material.receive"}),
     "orders.view": frozenset({"orders.read"}),
     "orders.manage": frozenset(
         {

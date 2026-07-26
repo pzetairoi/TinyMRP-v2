@@ -78,7 +78,7 @@ def test_admin_permission_editor_uses_complete_registry_and_separates_legacy(
 
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert len(CANONICAL_PERMISSION_IDENTIFIERS) == 81
+    assert len(CANONICAL_PERMISSION_IDENTIFIERS) == 72
     for permission in CANONICAL_PERMISSION_IDENTIFIERS:
         assert (
             f'value="{permission}" data-permission-kind="canonical"' in body
@@ -143,6 +143,73 @@ def test_admin_role_form_preserves_standard_slug_and_validates_custom_permission
     )
     assert invalid.status_code == 400
     assert Role.objects(name="invalid_role").first() is None
+
+
+def test_custom_role_delete_blocks_assignments_and_protects_catalogue_roles(
+    client,
+    app,
+):
+    with app.app_context():
+        actor = _access_actor(
+            "security.roles.read",
+            "security.roles.manage",
+            "security.users.read",
+        )
+        assigned_role = _role(
+            "assigned_custom_role",
+            ["parts.read"],
+            display_name="Assigned Custom Role",
+        )
+        assigned_user = _user("role-assignment@example.com", [assigned_role])
+        empty_role = _role(
+            "empty_custom_role",
+            ["parts.read"],
+            display_name="Empty Custom Role",
+        )
+        reconcile_standard_roles()
+        standard = Role.objects.get(name="planner")
+        legacy_admin = _role("admin")
+    _login(client, actor)
+
+    edit = client.get(f"/admin/roles/{assigned_role.id}/edit")
+    assert edit.status_code == 200
+    body = edit.get_data(as_text=True)
+    assert "Review 1 assigned user" in body
+    assert "will not create dangling role references" in body
+
+    blocked = client.post(f"/admin/roles/{assigned_role.id}/delete")
+    assert blocked.status_code == 409
+    assert "Role not deleted" in blocked.get_data(as_text=True)
+    assigned_user.reload()
+    assert [role.name for role in assigned_user.roles] == ["assigned_custom_role"]
+    assert Role.objects(id=assigned_role.id).count() == 1
+    assert AuditLog.objects(
+        action="admin.role.delete_blocked",
+        resource="assigned_custom_role",
+    ).count() == 1
+
+    deleted = client.post(f"/admin/roles/{empty_role.id}/delete")
+    assert deleted.status_code == 302
+    assert Role.objects(id=empty_role.id).count() == 0
+    assert AuditLog.objects(
+        action="admin.role.delete",
+        resource="empty_custom_role",
+    ).count() == 1
+
+    assert client.post(f"/admin/roles/{standard.id}/delete").status_code == 403
+    assert client.post(f"/admin/roles/{legacy_admin.id}/delete").status_code == 403
+    assert Role.objects(id=standard.id).count() == 1
+    assert Role.objects(id=legacy_admin.id).count() == 1
+
+
+def test_custom_role_delete_requires_role_management_permission(client, app):
+    with app.app_context():
+        reader = _access_actor("security.roles.read")
+        role = _role("protected_custom_role", ["parts.read"])
+    _login(client, reader)
+
+    assert client.post(f"/admin/roles/{role.id}/delete").status_code == 403
+    assert Role.objects(id=role.id).count() == 1
 
 
 def test_admin_role_list_reports_status_counts_and_reconciliation_is_safe(
