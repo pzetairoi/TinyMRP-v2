@@ -1,156 +1,92 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./uploadpack.css";
 
-type UploadItem = {
-  pn: string;
-  rev: string;
-  imported?: boolean;
-  extra_files_added?: number;
-  warnings?: string[];
-};
-
-type ImportIssue = {
-  stage?: string;
-  file?: string;
-  line_number?: number;
-  part_number?: string;
-  path?: string;
-  message?: string;
-  exception_type?: string;
-  exception_message?: string;
-  traceback?: string;
-};
-
-type ImportDataChange = {
-  scope?: string;
-  field?: string;
-  before?: any;
-  after?: any;
-};
-
-type ImportBomItem = {
-  part_number?: string;
-  revision?: string;
-  qty?: number;
-  before_qty?: number;
-  after_qty?: number;
-};
-
-type ImportFileChange = {
-  part_number?: string;
-  revision?: string;
-  kind?: string;
-  action?: string;
-  name?: string;
-  rel_path?: string;
-  ext_group?: string;
-  ext?: string;
-  changed_fields?: string[];
+type Capability = Record<string, boolean>;
+type Change = {
+  field_id?: string;
   label?: string;
+  source_key?: string;
+  before?: unknown;
+  after?: unknown;
+  action: string;
+  reason?: string;
 };
-
-type ModifiedPartSummary = {
-  part_number?: string;
-  revision?: string;
-  data_changes?: ImportDataChange[];
-  bom_changes?: {
-    before_children?: number;
-    after_children?: number;
-    added?: ImportBomItem[];
-    removed?: ImportBomItem[];
-    qty_changed?: ImportBomItem[];
-  } | null;
-  file_changes?: ImportFileChange[];
+type BomChange = {
+  part_number: string;
+  revision: string;
+  before_qty?: number | null;
+  after_qty?: number | null;
+  action: string;
+  planned_action?: string;
 };
-
-type ImportReport = {
-  zip?: string;
-  flatbom_file?: string;
-  treebom_file?: string;
-  root?: string;
-  root_revision?: string;
-  parts_created?: number;
-  parts_updated?: number;
-  modified_parts_count?: number;
-  modified_parts?: ModifiedPartSummary[];
-  links_created?: number;
-  links_skipped?: number;
-  links_removed?: number;
-  parts_seeded?: number;
-  parts_seeded_list?: Array<{ part_number?: string; revision?: string }>;
-  parts_with_props?: number;
-  artifacts_added?: number;
-  artifacts_found_by_type?: Record<string, number>;
-  thumbnails_built?: number;
-  thumbnails_generated?: number;
-  rows_skipped_blank_part?: number;
-  flat_lines_failed_parse?: number;
-  flat_lines_skipped_not_dict?: number;
-  flat_lines_failed_normalize?: number;
-  tree_rows_failed_qty?: number;
-  approval_integrity_warnings?: number;
-  bom_integrity_status?: "ok" | "warning" | "conflict";
-  bom_repeated_subassemblies?: number;
-  bom_repeated_subassembly_copies_collapsed?: number;
-  bom_definition_conflicts?: number;
-  tree_links_skipped_integrity?: number;
-  errors?: ImportIssue[];
-  warnings?: ImportIssue[];
-  timings?: Record<string, { elapsed_s?: number; cpu_s?: number; idle_s?: number }>;
-  resources_start?: any;
-  resources_end?: any;
+type FileChange = {
+  kind: string;
+  name: string;
+  category: string;
+  action: string;
+  reason?: string;
 };
-
+type PlanPart = {
+  part_number: string;
+  revision: string;
+  target_state: "new" | "existing_unapproved" | "existing_approved";
+  properties: Change[];
+  approval: Change[];
+  bom: { action: string; reason?: string; changes: BomChange[] };
+  files: FileChange[];
+  changed: boolean;
+  blocked: boolean;
+  allowed: boolean;
+  blocked_change_count: number;
+};
+type Plan = {
+  parts: PlanPart[];
+  required_permissions: string[];
+  missing_permissions: string[];
+  allowed: boolean;
+  blocked_change_count: number;
+  summary: {
+    parts: number;
+    new: number;
+    changed: number;
+    blocked: number;
+    approved_targets: number;
+  };
+};
 type UploadResult = {
   zip?: string;
   dry_run?: boolean;
-  items?: UploadItem[];
-  warnings?: string[];
-  deliverables_written?: number;
-  extra_files_written?: number;
-  import?: ImportReport | null;
-  timings?: Record<string, { elapsed_s?: number; cpu_s?: number; idle_s?: number }>;
-  resources_start?: any;
-  resources_end?: any;
+  plan?: Plan;
+  import?: {
+    parts_created?: number;
+    parts_updated?: number;
+    links_created?: number;
+    artifacts_added?: number;
+    extra_files_written?: number;
+    thumbnails_generated?: number;
+    warnings?: Array<{ stage?: string; message?: string }>;
+    errors?: Array<{ stage?: string; message?: string }>;
+  };
+  timings?: Record<string, number>;
+  diagnostics?: Record<string, number | boolean>;
+  capabilities?: Capability;
+  warnings?: Array<string | { stage?: string; message?: string }>;
 };
 
-function formatBytes(value?: number): string {
-  const num = Number(value || 0);
-  if (!num) return "-";
-  const units = ["B", "KB", "MB", "GB"];
-  let i = 0;
-  let n = num;
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024;
-    i += 1;
-  }
-  return `${n.toFixed(n >= 10 ? 0 : 1)} ${units[i]}`;
-}
+type Filter = "all" | "changed" | "blocked" | "approved";
+type DataMode = "skip" | "fill_blanks" | "replace_unapproved" | "replace_all";
+type BomMode = "skip" | "fill_if_empty" | "replace_unapproved" | "replace_all";
+type FileMode = "skip" | "add_missing" | "replace_unapproved" | "replace_all";
+type ApprovalMode = "preserve" | "import_unapproved" | "replace_all";
 
-function parseJsonResponse(xhr: XMLHttpRequest): any {
-  if (xhr.response && typeof xhr.response === "object") return xhr.response;
-  try {
-    return JSON.parse(xhr.responseText || "{}");
-  } catch {
-    return {};
-  }
-}
+const stateLabels: Record<PlanPart["target_state"], string> = {
+  new: "New",
+  existing_unapproved: "Existing unapproved",
+  existing_approved: "Existing approved",
+};
 
-function formatImportIssue(issue: ImportIssue): string {
-  const bits: string[] = [];
-  if (issue.stage) bits.push(issue.stage);
-  if (issue.file) bits.push(issue.file);
-  if (issue.line_number) bits.push(`line ${issue.line_number}`);
-  if (issue.part_number) bits.push(`pn ${issue.part_number}`);
-  if (issue.path) bits.push(issue.path);
-  const head = bits.length ? `[${bits.join(" | ")}] ` : "";
-  const msg = issue.message || "";
-  const exc = issue.exception_message ? ` (${issue.exception_message})` : "";
-  return `${head}${msg}${exc}`.trim() || "Unknown issue";
-}
-
-function formatChangeValue(value: any): string {
-  if (value === null || value === undefined || value === "") return "-";
+function valueText(value: unknown) {
+  if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "string") return value;
   try {
     return JSON.stringify(value);
@@ -159,990 +95,476 @@ function formatChangeValue(value: any): string {
   }
 }
 
-function formatPartRef(pn?: string, rev?: string): string {
-  const partNumber = String(pn || "").trim() || "(blank PN)";
-  const revision = String(rev || "").trim();
-  return revision ? `${partNumber} REV ${revision}` : partNumber;
+function actionClass(action: string) {
+  if (action === "add") return "text-success";
+  if (["remove", "replace", "clear"].includes(action)) return "text-danger";
+  if (["blocked", "skipped"].includes(action)) return "text-warning";
+  if (["change", "quantity_change"].includes(action)) return "text-primary";
+  return "text-muted";
 }
 
-function downloadJson(filename: string, data: unknown) {
-  try {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  } catch {
-    // ignore
-  }
+function saveJson(name: string, data: unknown) {
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
-function formatSeconds(value: any): string {
-  const n = Number(value || 0);
-  if (!isFinite(n) || n <= 0) return "0.00s";
-  if (n < 1) return `${(n * 1000).toFixed(0)}ms`;
-  return `${n.toFixed(2)}s`;
+function PolicySelect<T extends string>({
+  id,
+  label,
+  help,
+  value,
+  onChange,
+  options,
+}: {
+  id: string;
+  label: string;
+  help: string;
+  value: T;
+  onChange: (value: T) => void;
+  options: Array<{ value: T; label: string; disabled?: boolean }>;
+}) {
+  return (
+    <div className="col-md-6">
+      <label className="form-label fw-semibold mb-1" htmlFor={id}>
+        {label}
+      </label>
+      <select
+        id={id}
+        className="form-select form-select-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value as T)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value} disabled={option.disabled}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <div className="form-text">{help}</div>
+    </div>
+  );
+}
+
+function ChangeTable({ rows }: { rows: Change[] }) {
+  if (!rows.length) return <div className="text-muted small">No incoming values.</div>;
+  return (
+    <div className="table-responsive">
+      <table className="table table-sm align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Before</th>
+            <th>After</th>
+            <th>Action</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.field_id || row.label}-${index}`}>
+              <td>
+                <div>{row.label || row.field_id}</div>
+                {row.source_key ? <small className="text-muted">from {row.source_key}</small> : null}
+              </td>
+              <td className={row.action === "replace" ? "text-danger" : ""}>{valueText(row.before)}</td>
+              <td className={["add", "replace", "change"].includes(row.action) ? "text-primary" : ""}>
+                {valueText(row.after)}
+              </td>
+              <td className={`text-capitalize ${actionClass(row.action)}`}>{row.action.replaceAll("_", " ")}</td>
+              <td className="small">{row.reason || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PartRedline({ part }: { part: PlanPart }) {
+  return (
+    <details className="border rounded p-2 bg-white">
+      <summary className="d-flex flex-wrap align-items-center gap-2">
+        <strong>
+          {part.part_number} — {part.revision || "No revision"}
+        </strong>
+        <span className={`badge ${part.target_state === "existing_approved" ? "text-bg-warning" : "text-bg-secondary"}`}>
+          {stateLabels[part.target_state]}
+        </span>
+        <span className={`badge ${part.allowed ? "text-bg-success" : "text-bg-danger"}`}>
+          {part.allowed ? "Allowed" : "Blocked"}
+        </span>
+      </summary>
+      <div className="mt-3">
+        <h6>Properties</h6>
+        <ChangeTable rows={part.properties} />
+        <h6 className="mt-3">Approval</h6>
+        <ChangeTable rows={part.approval} />
+        <h6 className="mt-3">BOM</h6>
+        <div className={`small mb-1 ${actionClass(part.bom.action)}`}>
+          <strong className="text-capitalize">{part.bom.action.replaceAll("_", " ")}</strong>
+          {part.bom.reason ? ` — ${part.bom.reason}` : ""}
+        </div>
+        {part.bom.changes.length ? (
+          <ul className="small mb-0">
+            {part.bom.changes.map((change, index) => (
+              <li className={actionClass(change.action)} key={`${change.part_number}:${change.revision}:${index}`}>
+                {change.part_number} {change.revision ? `REV ${change.revision}` : ""}:{" "}
+                {change.before_qty ?? "—"} → {change.after_qty ?? "—"} ({change.action.replaceAll("_", " ")})
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-muted small">No incoming BOM definition.</div>
+        )}
+        <h6 className="mt-3">Files</h6>
+        {part.files.length ? (
+          <ul className="small mb-0">
+            {part.files.map((file, index) => (
+              <li className={actionClass(file.action)} key={`${file.kind}:${file.name}:${index}`}>
+                <strong>{file.action.toUpperCase()}</strong> {file.category}: {file.name}
+                {file.reason ? ` — ${file.reason}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-muted small">No files for this part/revision.</div>
+        )}
+      </div>
+    </details>
+  );
 }
 
 export default function UploadPackPage() {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const progressTimer = useRef<number | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [dragOver, setDragOver] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
-  const [dryRun, setDryRun] = useState(false);
-  const [strictStructure, setStrictStructure] = useState(false);
-  const [overrideMode, setOverrideMode] = useState<
-    "unless_existing_approved" | "preserve" | "approved_only" | "always"
-  >("unless_existing_approved");
-  const [progressPct, setProgressPct] = useState(0);
-  const [progressLabel, setProgressLabel] = useState("Waiting to start...");
-  const [showProgress, setShowProgress] = useState(false);
-  const [uploadPct, setUploadPct] = useState(0);
-  const [uploadBytes, setUploadBytes] = useState(0);
-  const [uploadTotal, setUploadTotal] = useState(0);
-  const [processingSeconds, setProcessingSeconds] = useState(0);
-  const processingTimer = useRef<number | null>(null);
-  const [rootPreviewUrl, setRootPreviewUrl] = useState<string | null>(null);
-  const [rootPreviewStatus, setRootPreviewStatus] = useState("Preview will appear after import.");
-
-  const items = useMemo(() => result?.items || [], [result]);
-  const importSummary = result?.import || null;
-  const importErrors = useMemo(
-    () => (Array.isArray(importSummary?.errors) ? importSummary?.errors || [] : []),
-    [importSummary],
-  );
-  const importWarnings = useMemo(
-    () => (Array.isArray(importSummary?.warnings) ? importSummary?.warnings || [] : []),
-    [importSummary],
-  );
-  const importErrorCount = importErrors.length;
-  const importWarningCount = importWarnings.length;
-  const importHasIssues = importErrorCount > 0 || importWarningCount > 0;
-
-  const skippedBlankParts = Number(importSummary?.rows_skipped_blank_part ?? 0);
-  const flatParseFailures = Number(importSummary?.flat_lines_failed_parse ?? 0);
-  const flatNormalizeFailures = Number(importSummary?.flat_lines_failed_normalize ?? 0);
-  const treeQtyFailures = Number(importSummary?.tree_rows_failed_qty ?? 0);
-  const approvalIntegrityWarnings = Number(importSummary?.approval_integrity_warnings ?? 0);
-  const repeatedSubassemblies = Number(importSummary?.bom_repeated_subassemblies ?? 0);
-  const repeatedCopiesCollapsed = Number(importSummary?.bom_repeated_subassembly_copies_collapsed ?? 0);
-  const bomDefinitionConflicts = Number(importSummary?.bom_definition_conflicts ?? 0);
-  const integrityLinksSkipped = Number(importSummary?.tree_links_skipped_integrity ?? 0);
-  const hasBomIntegrityNotice =
-    importSummary?.bom_integrity_status === "warning" ||
-    importSummary?.bom_integrity_status === "conflict" ||
-    repeatedSubassemblies > 0 ||
-    bomDefinitionConflicts > 0 ||
-    integrityLinksSkipped > 0;
-  const reportHasDiagnostics =
-    skippedBlankParts > 0 || flatParseFailures > 0 || flatNormalizeFailures > 0 || treeQtyFailures > 0 || approvalIntegrityWarnings > 0;
-
-  const rootPn = importSummary?.root || "";
-  const rootRev = importSummary?.root_revision || "";
-  const rootHref = rootPn
-    ? `/ui/part/${encodeURIComponent(rootPn)}?rev=${encodeURIComponent(rootRev)}`
-    : "";
-
-  const filesByTypeEntries = useMemo(() => {
-    const map = importSummary?.artifacts_found_by_type;
-    if (!map || typeof map !== "object") return [] as Array<[string, number]>;
-    return Object.keys(map)
-      .sort()
-      .map((key) => [key, Number(map[key] || 0)] as [string, number]);
-  }, [importSummary]);
-
-  const seededParts = useMemo(() => {
-    const list = importSummary?.parts_seeded_list || [];
-    return Array.isArray(list) ? list : [];
-  }, [importSummary]);
-  const modifiedParts = useMemo(() => {
-    const list = importSummary?.modified_parts || [];
-    return Array.isArray(list) ? list : [];
-  }, [importSummary]);
-
-  const topTimings = useMemo(() => {
-    const t = result?.timings;
-    if (!t || typeof t !== "object") return [] as Array<[string, any]>;
-    return Object.entries(t).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [result]);
-
-  const bomTimings = useMemo(() => {
-    const t = importSummary?.timings;
-    if (!t || typeof t !== "object") return [] as Array<[string, any]>;
-    return Object.entries(t).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [importSummary]);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [strict, setStrict] = useState(false);
+  const [capabilities, setCapabilities] = useState<Capability>({});
+  const [dataMode, setDataMode] = useState<DataMode>("fill_blanks");
+  const [bomMode, setBomMode] = useState<BomMode>("fill_if_empty");
+  const [fileMode, setFileMode] = useState<FileMode>("add_missing");
+  const [approvalMode, setApprovalMode] = useState<ApprovalMode>("preserve");
 
   useEffect(() => {
-    return () => {
-      if (progressTimer.current) {
-        window.clearInterval(progressTimer.current);
-        progressTimer.current = null;
-      }
-      if (processingTimer.current) {
-        window.clearInterval(processingTimer.current);
-        processingTimer.current = null;
-      }
-    };
+    fetch("/api/field-config")
+      .then((response) => (response.ok ? response.json() : Promise.reject(response)))
+      .then((payload) => setCapabilities(payload?.permissions?.imports || {}))
+      .catch(() => setCapabilities({}));
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!rootPn) {
-      setRootPreviewUrl(null);
-      setRootPreviewStatus(importSummary ? "No root part reported." : "Preview will appear after import.");
-      return () => {
-        cancelled = true;
-      };
-    }
-    setRootPreviewUrl(null);
-    setRootPreviewStatus("Loading preview...");
+  const canPreview = !!capabilities["imports.preview"];
+  const canLowRisk = !!capabilities["imports.execute_low_risk"];
+  const canAdvanced = !!capabilities["imports.execute_approved"];
+  const canOverride = canAdvanced && !!capabilities["imports.override_approved"];
+  const plan = result?.plan;
+  const visibleParts = useMemo(
+    () =>
+      (plan?.parts || []).filter((part) => {
+        if (filter === "changed") return part.changed;
+        if (filter === "blocked") return part.blocked || !part.allowed;
+        if (filter === "approved") return part.target_state === "existing_approved";
+        return true;
+      }),
+    [plan, filter],
+  );
 
-    const qs = new URLSearchParams({ pn: rootPn, mode: "preview" });
-    qs.set("rev", rootRev || "");
-    fetch(`/api/part_images?${qs.toString()}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-      .then((rows) => {
-        if (cancelled) return;
-        const urls = Array.isArray(rows) && rows.length ? rows[0].urls : [];
-        const url = urls && urls.length ? urls[0] : "";
-        if (url) {
-          setRootPreviewUrl(url);
-          setRootPreviewStatus("");
-        } else {
-          setRootPreviewStatus("No preview image found for the root part.");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setRootPreviewStatus("Failed to load preview image.");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [rootPn, rootRev, importSummary]);
-
-  function onPickFile(files: FileList | null) {
-    if (!files || !files.length) return;
-    const next = files[0];
-    setFile(next);
+  function chooseFile(files: FileList | null) {
+    const chosen = files?.[0] || null;
+    setFile(chosen);
     setResult(null);
-    setError(null);
-    setShowProgress(false);
-    setProgressPct(0);
-    setProgressLabel("Waiting to start...");
-    setUploadPct(0);
-    setUploadBytes(0);
-    setUploadTotal(0);
-    setProcessingSeconds(0);
+    setError("");
+    setProgress(0);
   }
 
-  function stopProgressTimer() {
-    if (progressTimer.current) {
-      window.clearInterval(progressTimer.current);
-      progressTimer.current = null;
-    }
-  }
-
-  function stopProcessingTimer() {
-    if (processingTimer.current) {
-      window.clearInterval(processingTimer.current);
-      processingTimer.current = null;
-    }
-  }
-
-  function setProgress(pct: number, label?: string) {
-    const clamped = Math.max(1, Math.min(100, pct));
-    setProgressPct(clamped);
-    if (label) setProgressLabel(label);
-  }
-
-  function startIndeterminate(from: number) {
-    stopProgressTimer();
-    let p = from;
-    progressTimer.current = window.setInterval(() => {
-      if (p < 90) p += Math.max(1, Math.round((90 - p) * 0.08));
-      setProgress(p, "Processing import...");
-    }, 700);
-  }
-
-  function startProcessingTimer() {
-    stopProcessingTimer();
-    setProcessingSeconds(0);
-    processingTimer.current = window.setInterval(() => {
-      setProcessingSeconds((s) => s + 1);
-    }, 1000);
-  }
-
-  function runImport() {
+  function submit(dryRun: boolean) {
     if (!file) {
       setError("Select a ZIP file first.");
       return;
     }
     setBusy(true);
-    setError(null);
-    setResult(null);
-    setShowProgress(true);
-    setProgress(2, "Starting upload...");
-    setUploadPct(0);
-    setUploadBytes(0);
-    setUploadTotal(0);
-    setProcessingSeconds(0);
-
+    setError("");
+    setProgress(1);
     const form = new FormData();
     form.append("file", file);
+    form.append("data_mode", dataMode);
+    form.append("bom_mode", bomMode);
+    form.append("file_mode", fileMode);
+    form.append("approval_mode", approvalMode);
     if (dryRun) form.append("dry_run", "1");
-    if (strictStructure) form.append("strict_structure", "1");
-    form.append("override_mode", overrideMode);
+    if (strict) form.append("strict_structure", "1");
 
-    let lastPct = 2;
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload/pack");
     xhr.responseType = "json";
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.min(95, Math.round((e.loaded / e.total) * 80));
-        lastPct = pct;
-        setProgress(pct, `Uploading... ${pct}%`);
-        const uploadP = Math.min(100, Math.round((e.loaded / e.total) * 100));
-        setUploadPct(uploadP);
-        setUploadBytes(e.loaded);
-        setUploadTotal(e.total);
-      }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) setProgress(Math.min(85, Math.round((event.loaded / event.total) * 85)));
     };
-
     xhr.onload = () => {
-      stopProgressTimer();
-      stopProcessingTimer();
-      const ok = xhr.status >= 200 && xhr.status < 300;
-      const data = parseJsonResponse(xhr) || {};
-      if (!ok || data?.error) {
-        const base = data?.error || `HTTP ${xhr.status}`;
-        const detail = data?.detail ? ` (${data.detail})` : "";
-        const msg = `${base}${detail}`;
-        setError(msg);
-        setProgress(100, `Failed: ${msg}`);
+      const payload = xhr.response || {};
+      if (xhr.status < 200 || xhr.status >= 300 || payload.error) {
+        const missing = Array.isArray(payload.missing_permissions)
+          ? ` Missing: ${payload.missing_permissions.join(", ")}.`
+          : "";
+        setError(`${payload.detail || payload.error || `HTTP ${xhr.status}`}.${missing}`);
       } else {
-        setResult(data || {});
-        const imp = data?.import;
-        const errCount = Array.isArray(imp?.errors) ? imp.errors.length : 0;
-        const warnCount = Array.isArray(imp?.warnings) ? imp.warnings.length : 0;
-        if (errCount > 0) setProgress(100, `Done (errors: ${errCount})`);
-        else if (warnCount > 0) setProgress(100, `Done (warnings: ${warnCount})`);
-        else setProgress(100, "Done");
+        setResult(payload);
+        if (payload.capabilities) setCapabilities(payload.capabilities);
       }
+      setProgress(100);
       setBusy(false);
     };
-
     xhr.onerror = () => {
-      stopProgressTimer();
-      stopProcessingTimer();
-      setError("Network error.");
-      setProgress(100, "Network error");
+      setError("Network error while uploading the package.");
       setBusy(false);
     };
-
-    xhr.upload.onloadend = () => {
-      if (uploadPct < 100) setUploadPct(100);
-      startIndeterminate(Math.min(85, lastPct || 70));
-      startProcessingTimer();
-    };
-
     xhr.send(form);
   }
 
-  const thumbCount = importSummary?.thumbnails_generated ?? importSummary?.thumbnails_built ?? 0;
-  const processingStages = [
-    "Validating ZIP",
-    "Scanning BOM",
-    "Writing deliverables",
-    "Writing extra files",
-    "Importing BOM",
-    "Finalizing",
-  ];
-  const stageIndex = Math.min(Math.floor(processingSeconds / 4), processingStages.length - 1);
-  const processingStage = showProgress && busy ? processingStages[stageIndex] : "";
+  const advancedSelected =
+    dataMode.includes("replace") ||
+    bomMode.includes("replace") ||
+    fileMode.includes("replace") ||
+    approvalMode !== "preserve";
+  const overrideSelected =
+    dataMode === "replace_all" ||
+    bomMode === "replace_all" ||
+    fileMode === "replace_all" ||
+    approvalMode === "replace_all";
 
   return (
     <div className="container-xxl py-3">
-      <div className="pb-2 border-bottom mb-3">
-        <h4 className="mb-0">Import</h4>
+      <div className="border-bottom mb-3 pb-2">
+        <h4 className="mb-1">Import upload pack</h4>
         <div className="text-muted small">
-          Upload a ZIP with BOM + deliverables + associated files. The system assigns files by Part Number + Revision.
+          Select a ZIP, choose independent policies, preview the exact redline, then apply it.
         </div>
       </div>
 
-      <div className="row g-3">
-        <div className="col-lg-7">
-          <div className="card p-3">
-            <h6 className="mb-2">Step 1: Select ZIP</h6>
-            <div
-              className={`upload-pack-drop ${dragOver ? "drag-over" : ""}`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                onPickFile(e.dataTransfer.files);
-              }}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  fileInputRef.current?.click();
-                }
-              }}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <div className="fw-semibold">Drag and drop the ZIP here</div>
-              <div className="text-muted small">or click to browse</div>
-              {file ? (
-                <div className="mt-2 small">
-                  <strong>{file.name}</strong> ({formatBytes(file.size)})
-                </div>
-              ) : null}
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".zip"
-              className="d-none"
-              disabled={busy}
-              onChange={(e) => onPickFile(e.target.files)}
-            />
+      <div className="card p-3 mb-3">
+        <h6>1. Select ZIP</h6>
+        <div
+          className={`upload-pack-drop ${dragging ? "drag-over" : ""}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") inputRef.current?.click();
+          }}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragging(false);
+            chooseFile(event.dataTransfer.files);
+          }}
+        >
+          <strong>{file?.name || "Drag a ZIP here or click to browse"}</strong>
+          {file ? <div className="small text-muted">{(file.size / 1024 / 1024).toFixed(2)} MB</div> : null}
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".zip"
+          className="d-none"
+          onChange={(event) => chooseFile(event.target.files)}
+        />
 
-            <div className="mt-3">
-              <h6 className="mb-2">Step 2: Import</h6>
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="dryRunCheck"
-                  checked={dryRun}
-                  onChange={(e) => setDryRun(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="dryRunCheck">
-                  Dry run (preview only)
-                </label>
-              </div>
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="strictCheck"
-                  checked={strictStructure}
-                  onChange={(e) => setStrictStructure(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="strictCheck">
-                  Strict structure checks
-                </label>
-              </div>
-              <div className="mt-3">
-                <div className="fw-semibold small">Existing part data</div>
-                <div className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="radio"
-                    id="overrideDefault"
-                    name="overrideMode"
-                    checked={overrideMode === "unless_existing_approved"}
-                    onChange={() => setOverrideMode("unless_existing_approved")}
-                  />
-                  <label className="form-check-label" htmlFor="overrideDefault">
-                    Override data unless existing part is approved
-                  </label>
-                </div>
-                <div className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="radio"
-                    id="overridePreserve"
-                    name="overrideMode"
-                    checked={overrideMode === "preserve"}
-                    onChange={() => setOverrideMode("preserve")}
-                  />
-                  <label className="form-check-label" htmlFor="overridePreserve">
-                    Keep existing data, only fill blanks
-                  </label>
-                </div>
-                <div className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="radio"
-                    id="overrideApproved"
-                    name="overrideMode"
-                    checked={overrideMode === "approved_only"}
-                    onChange={() => setOverrideMode("approved_only")}
-                  />
-                  <label className="form-check-label" htmlFor="overrideApproved">
-                    Override only when the incoming part is approved
-                  </label>
-                </div>
-                <div className="form-check">
-                  <input
-                    className="form-check-input"
-                    type="radio"
-                    id="overrideAlways"
-                    name="overrideMode"
-                    checked={overrideMode === "always"}
-                    onChange={() => setOverrideMode("always")}
-                  />
-                  <label className="form-check-label" htmlFor="overrideAlways">
-                    Always override importable part data
-                  </label>
-                </div>
-                <div className="text-muted small mt-1">
-                  Internal notes and comments are preserved even when import data overrides other fields.
-                </div>
-              </div>
-              <button className="btn btn-primary mt-3" onClick={runImport} disabled={busy}>
-                {busy ? "Importing..." : "Import"}
-              </button>
-              {error && <div className="text-danger small mt-2">{error}</div>}
-            </div>
-
-            {showProgress && (
-              <div className="mt-3">
-                {uploadTotal > 0 ? (
-                  <>
-                    <div className="small text-muted mb-1">Upload progress</div>
-                    <div className="progress" style={{ height: 10 }}>
-                      <div
-                        className="progress-bar"
-                        role="progressbar"
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-valuenow={uploadPct}
-                        style={{ width: `${Math.max(1, uploadPct)}%` }}
-                      />
-                    </div>
-                    <div className="small text-muted mt-1">
-                      {formatBytes(uploadBytes)} / {formatBytes(uploadTotal)} ({uploadPct}%)
-                    </div>
-                  </>
-                ) : null}
-                <div className="progress" style={{ height: 10 }}>
-                  <div
-                    className="progress-bar progress-bar-striped progress-bar-animated"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={progressPct}
-                    style={{ width: `${Math.max(1, progressPct)}%` }}
-                  />
-                </div>
-                <div className="small text-muted mt-2">
-                  {processingStage
-                    ? `${processingStage} • ${processingSeconds}s`
-                    : progressLabel}
-                </div>
-              </div>
-            )}
+        <h6 className="mt-4">2. Select import policies</h6>
+        <div className="row g-3">
+          <PolicySelect
+            id="dataMode"
+            label="Properties"
+            help="Control ordinary and configured custom fields. Approval is governed separately."
+            value={dataMode}
+            onChange={setDataMode}
+            options={[
+              { value: "skip", label: "Skip properties" },
+              { value: "fill_blanks", label: "Fill blank values", disabled: !canLowRisk },
+              { value: "replace_unapproved", label: "Replace on unapproved targets", disabled: !canAdvanced },
+              { value: "replace_all", label: "Replace on all targets", disabled: !canOverride },
+            ]}
+          />
+          <PolicySelect
+            id="bomMode"
+            label="BOM"
+            help="Fill creates a whole BOM only when the exact parent/revision has none."
+            value={bomMode}
+            onChange={setBomMode}
+            options={[
+              { value: "skip", label: "Skip BOM" },
+              { value: "fill_if_empty", label: "Fill only if empty", disabled: !canLowRisk },
+              { value: "replace_unapproved", label: "Replace unapproved BOMs", disabled: !canAdvanced },
+              { value: "replace_all", label: "Replace all BOMs", disabled: !canOverride },
+            ]}
+          />
+          <PolicySelect
+            id="fileMode"
+            label="Files"
+            help="The same policy applies to managed deliverables and associated files."
+            value={fileMode}
+            onChange={setFileMode}
+            options={[
+              { value: "skip", label: "Skip files" },
+              { value: "add_missing", label: "Add missing files", disabled: !canLowRisk },
+              { value: "replace_unapproved", label: "Replace files on unapproved targets", disabled: !canAdvanced },
+              { value: "replace_all", label: "Replace files on all targets", disabled: !canOverride },
+            ]}
+          />
+          <PolicySelect
+            id="approvalMode"
+            label="Approval"
+            help="Approval aliases are resolved through the configured canonical field rules."
+            value={approvalMode}
+            onChange={setApprovalMode}
+            options={[
+              { value: "preserve", label: "Preserve existing approval" },
+              { value: "import_unapproved", label: "Import on unapproved targets", disabled: !canAdvanced },
+              { value: "replace_all", label: "Replace approval on all targets", disabled: !canOverride },
+            ]}
+          />
+        </div>
+        {advancedSelected && !canAdvanced ? (
+          <div className="alert alert-warning small mt-3 mb-0">
+            Your roles cannot execute replacement effects. Preview remains available and will identify any
+            required permissions.
           </div>
+        ) : null}
+        {overrideSelected && !canOverride ? (
+          <div className="alert alert-warning small mt-2 mb-0">
+            Your roles cannot modify existing approved targets.
+          </div>
+        ) : null}
+        <div className="form-check mt-3">
+          <input
+            id="strictImport"
+            type="checkbox"
+            className="form-check-input"
+            checked={strict}
+            onChange={(event) => setStrict(event.target.checked)}
+          />
+          <label className="form-check-label" htmlFor="strictImport">
+            Reject unknown package entries
+          </label>
         </div>
 
-        <div className="col-lg-5">
-          {importSummary ? (
-            <div className="card p-3">
-              <h6 className="mb-2">Root part preview</h6>
-              {rootPreviewUrl ? (
-                <img
-                  src={rootPreviewUrl}
-                  alt={rootPn ? `${rootPn} preview` : "Root preview"}
-                  className="img-fluid border rounded"
-                />
-              ) : (
-                <div className="text-muted small">{rootPreviewStatus}</div>
-              )}
-              {rootPn ? (
-                <div className="small mt-2">
-                  <div>
-                    Root: <code>{rootPn}</code>
-                    {rootRev ? <span className="ms-2">REV {rootRev}</span> : null}
-                  </div>
-                  <a href={rootHref}>Open part details</a>
-                </div>
-              ) : null}
+        <h6 className="mt-4">3. Preview changes &nbsp; 4. Apply import</h6>
+        <div className="d-flex gap-2 flex-wrap">
+          <button
+            className="btn btn-outline-primary"
+            type="button"
+            disabled={busy || !file || !canPreview}
+            onClick={() => submit(true)}
+          >
+            Preview changes
+          </button>
+          <button
+            className="btn btn-primary"
+            type="button"
+            disabled={
+              busy ||
+              !file ||
+              !(canLowRisk || canAdvanced) ||
+              (advancedSelected && !canAdvanced) ||
+              (overrideSelected && !canOverride)
+            }
+            onClick={() => submit(false)}
+          >
+            Apply import
+          </button>
+          {busy ? <span className="align-self-center text-muted small">Validating and planning…</span> : null}
+        </div>
+        {busy || progress ? (
+          <div className="progress mt-3" role="progressbar" aria-valuenow={progress}>
+            <div className="progress-bar" style={{ width: `${progress}%` }}>
+              {progress}%
+            </div>
+          </div>
+        ) : null}
+        {!canPreview && Object.keys(capabilities).length ? (
+          <div className="text-danger small mt-2">Your roles do not include import preview access.</div>
+        ) : null}
+        {error ? <div className="alert alert-danger mt-3 mb-0">{error}</div> : null}
+      </div>
+
+      {plan ? (
+        <div className="card p-3">
+          <div className="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+              <h5 className="mb-1">{result?.dry_run ? "Preview redline" : "Applied import redline"}</h5>
+              <div className="small text-muted">
+                {plan.summary.parts} exact part/revisions · {plan.summary.changed} changed ·{" "}
+                {plan.summary.blocked} blocked
+              </div>
+            </div>
+            <button
+              className="btn btn-sm btn-outline-secondary"
+              type="button"
+              onClick={() => saveJson(`import-redline-${result?.zip || "report"}.json`, result)}
+            >
+              Download JSON report
+            </button>
+          </div>
+
+          {plan.required_permissions.length ? (
+            <div className={`alert ${plan.allowed ? "alert-info" : "alert-warning"} small mt-3`}>
+              Required: {plan.required_permissions.join(", ")}
+              {plan.missing_permissions.length
+                ? `. Missing: ${plan.missing_permissions.join(", ")}`
+                : ". Current roles satisfy the planned effects."}
             </div>
           ) : (
-            <div className="card p-3">
-              <h6 className="mb-2">Expected ZIP structure</h6>
-              <pre className="small mb-0">
-{`bom/
-  *_FLATBOM.txt
-  *_TREEBOM.txt
-deliverables/
-  pdf/PN_REV_A.pdf
-  step/PN_REV_A.step
-extra/
-  PN/A/scan.e57
-  PN/__no_rev__/photo.jpg`}
-              </pre>
-              <div className="text-muted small mt-2">
-                If revision is empty, use the <code>__no_rev__</code> token in paths.
-              </div>
-            </div>
+            <div className="alert alert-secondary small mt-3">No permanent changes are planned.</div>
           )}
-        </div>
-      </div>
 
-      <div className="card p-3 mt-3">
-        <h6 className="mb-2">Results</h6>
-        {result ? (
-          <>
-            <div className="small text-muted mb-2">
-              {result.dry_run ? "Dry run only." : "Import complete."}{" "}
-              {result.deliverables_written !== undefined
-                ? `Deliverables: ${result.deliverables_written}.`
-                : ""}
-              {result.extra_files_written !== undefined
-                ? ` Extra files: ${result.extra_files_written}.`
-                : ""}
-            </div>
-
-            <div className="small">
-              <div>
-                ZIP: <code>{result.zip || "-"}</code>
-              </div>
-            {importSummary ? (
-              <>
-                  <div>
-                    Root: <code>{rootPn || "-"}</code>
-                    {rootPn ? (
-                      <a className="ms-2" href={rootHref}>
-                        Open part details
-                      </a>
-                    ) : null}
-                  </div>
-                  <div>
-                    Parts created: <b>{importSummary.parts_created ?? 0}</b>, updated:{" "}
-                    <b>{importSummary.parts_updated ?? 0}</b>
-                  </div>
-                  <div>
-                    Existing parts modified: <b>{importSummary.modified_parts_count ?? modifiedParts.length}</b>
-                  </div>
-                  <div>
-                    Parts seeded: <b>{importSummary.parts_seeded ?? 0}</b>
-                  </div>
-                  <div>
-                    Links created: <b>{importSummary.links_created ?? 0}</b>, skipped:{" "}
-                    <b>{importSummary.links_skipped ?? 0}</b>
-                  </div>
-                  <div>
-                    Parts with properties: <b>{importSummary.parts_with_props ?? 0}</b>
-                  </div>
-                  <div>
-                    Artifacts added: <b>{importSummary.artifacts_added ?? 0}</b>, thumbnails:{" "}
-                    <b>{thumbCount}</b>
-                  </div>
-                </>
-              ) : (
-                <div className="text-muted">Import summary is available after a non-dry run upload.</div>
-              )}
-            </div>
-
-            {(topTimings.length > 0 || bomTimings.length > 0) && (
-              <div className="mt-2">
-                <details>
-                  <summary>Timing diagnostics</summary>
-                  {topTimings.length > 0 && (
-                    <div className="mt-2">
-                      <div className="fw-semibold">Upload pack</div>
-                      <table className="table table-sm w-auto mb-0">
-                        <thead>
-                          <tr>
-                            <th>Stage</th>
-                            <th>Elapsed</th>
-                            <th>CPU</th>
-                            <th>Idle</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {topTimings.map(([k, v]) => (
-                            <tr key={k}>
-                              <td>{k}</td>
-                              <td>{formatSeconds(v?.elapsed_s)}</td>
-                              <td>{formatSeconds(v?.cpu_s)}</td>
-                              <td>{formatSeconds(v?.idle_s)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  {bomTimings.length > 0 && (
-                    <div className="mt-2">
-                      <div className="fw-semibold">BOM import</div>
-                      <table className="table table-sm w-auto mb-0">
-                        <thead>
-                          <tr>
-                            <th>Stage</th>
-                            <th>Elapsed</th>
-                            <th>CPU</th>
-                            <th>Idle</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {bomTimings.map(([k, v]) => (
-                            <tr key={k}>
-                              <td>{k}</td>
-                              <td>{formatSeconds(v?.elapsed_s)}</td>
-                              <td>{formatSeconds(v?.cpu_s)}</td>
-                              <td>{formatSeconds(v?.idle_s)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </details>
-              </div>
-            )}
-
-            {seededParts.length > 0 && (
-              <div className="mt-2">
-                <details>
-                  <summary>Seeded parts</summary>
-                  <ul className="small mb-0">
-                    {seededParts.map((item: any) => (
-                      <li key={`${item.part_number || ""}:${item.revision || ""}`}>
-                        {item.part_number || ""}
-                        {item.revision ? ` REV ${item.revision}` : ""}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              </div>
-            )}
-
-            {filesByTypeEntries.length > 0 && (
-              <div className="mt-3">
-                <h6 className="mb-2">Files found by type</h6>
-                <table className="table table-sm w-auto mb-0">
-                  <thead>
-                    <tr>
-                      <th>Type</th>
-                      <th>Count</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filesByTypeEntries.map(([key, count]) => (
-                      <tr key={key}>
-                        <td>{key}</td>
-                        <td>{count}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {modifiedParts.length > 0 && (
-              <div className="mt-3">
-                <h6 className="mb-2">Modified existing parts</h6>
-                <div className="text-muted small mb-2">
-                  Field, BOM, and file changes detected while updating existing part records.
-                </div>
-                <div className="d-flex flex-column gap-2">
-                  {modifiedParts.map((part) => {
-                    const dataChanges = Array.isArray(part.data_changes) ? part.data_changes : [];
-                    const bomChanges = part.bom_changes || null;
-                    const fileChanges = Array.isArray(part.file_changes) ? part.file_changes : [];
-                    return (
-                      <details
-                        key={`${part.part_number || ""}:${part.revision || ""}`}
-                        className="border rounded p-2"
-                      >
-                        <summary className="fw-semibold">
-                          {formatPartRef(part.part_number, part.revision)}
-                          <span className="text-muted ms-2 small">
-                            {dataChanges.length ? `${dataChanges.length} field change${dataChanges.length === 1 ? "" : "s"}` : ""}
-                            {dataChanges.length && (bomChanges || fileChanges.length) ? " · " : ""}
-                            {bomChanges ? "BOM updated" : ""}
-                            {bomChanges && fileChanges.length ? " · " : ""}
-                            {fileChanges.length ? `${fileChanges.length} file change${fileChanges.length === 1 ? "" : "s"}` : ""}
-                          </span>
-                        </summary>
-
-                        {dataChanges.length > 0 && (
-                          <div className="mt-2">
-                            <div className="fw-semibold small">Field changes</div>
-                            <ul className="small mb-0">
-                              {dataChanges.map((change, idx) => (
-                                <li key={`data-${idx}`}>
-                                  {change.scope === "attribute" ? "Attribute" : "Part"} <code>{change.field || "-"}</code>:{" "}
-                                  <span className="text-muted">{formatChangeValue(change.before)}</span> to{" "}
-                                  <span>{formatChangeValue(change.after)}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-
-                        {bomChanges && (
-                          <div className="mt-2">
-                            <div className="fw-semibold small">
-                              BOM changes ({bomChanges.before_children ?? 0} to {bomChanges.after_children ?? 0} children)
-                            </div>
-                            {Array.isArray(bomChanges.added) && bomChanges.added.length > 0 && (
-                              <div className="small">
-                                Added:{" "}
-                                {bomChanges.added
-                                  .map((item) => `${formatPartRef(item.part_number, item.revision)} x ${item.qty ?? 0}`)
-                                  .join(", ")}
-                              </div>
-                            )}
-                            {Array.isArray(bomChanges.removed) && bomChanges.removed.length > 0 && (
-                              <div className="small">
-                                Removed:{" "}
-                                {bomChanges.removed
-                                  .map((item) => `${formatPartRef(item.part_number, item.revision)} x ${item.qty ?? 0}`)
-                                  .join(", ")}
-                              </div>
-                            )}
-                            {Array.isArray(bomChanges.qty_changed) && bomChanges.qty_changed.length > 0 && (
-                              <div className="small">
-                                Qty changed:{" "}
-                                {bomChanges.qty_changed
-                                  .map(
-                                    (item) =>
-                                      `${formatPartRef(item.part_number, item.revision)} ${item.before_qty ?? 0} to ${item.after_qty ?? 0}`,
-                                  )
-                                  .join(", ")}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {fileChanges.length > 0 && (
-                          <div className="mt-2">
-                            <div className="fw-semibold small">File changes</div>
-                            <ul className="small mb-0">
-                              {fileChanges.map((change, idx) => (
-                                <li key={`file-${idx}`}>
-                                  {String(change.action || "updated").toUpperCase()} {change.kind || "file"}:{" "}
-                                  {change.name || change.rel_path || `${change.ext_group || "file"}.${change.ext || ""}`}
-                                  {change.changed_fields && change.changed_fields.length
-                                    ? ` (${change.changed_fields.join(", ")})`
-                                    : ""}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </details>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {importSummary && approvalIntegrityWarnings > 0 ? (
-              <div className="alert alert-danger mt-3" role="alert">
-                <div className="d-flex align-items-start gap-2">
-                  <i className="pi pi-exclamation-triangle fs-3" aria-hidden="true" />
-                  <div>
-                    <h5 className="alert-heading mb-1">Approval integrity warning</h5>
-                    <p className="mb-1 fw-semibold">
-                      {approvalIntegrityWarnings} imported part{approvalIntegrityWarnings === 1 ? " has" : "s have"} conflicting approval fields.
-                      The conservative unapproved result was used. Review the import issues before treating these parts as released.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {importSummary && hasBomIntegrityNotice ? (
-              <div
-                className={`alert ${bomDefinitionConflicts || integrityLinksSkipped ? "alert-danger" : "alert-warning"} mt-3`}
-                role="alert"
+          <div className="btn-group btn-group-sm mb-3" role="group" aria-label="Redline filter">
+            {(["all", "changed", "blocked", "approved"] as Filter[]).map((name) => (
+              <button
+                key={name}
+                type="button"
+                className={`btn ${filter === name ? "btn-secondary" : "btn-outline-secondary"}`}
+                onClick={() => setFilter(name)}
               >
-                <div className="d-flex align-items-start gap-2">
-                  <i className="pi pi-exclamation-triangle fs-3" aria-hidden="true" />
-                  <div>
-                    <h5 className="alert-heading mb-1">BOM quantity integrity warning</h5>
-                    {bomDefinitionConflicts || integrityLinksSkipped ? (
-                      <p className="mb-2 fw-semibold">
-                        Conflicting repeated subassembly definitions were found. Ambiguous child BOMs were not
-                        replaced. Do not rely on this import for production quantities until the TREEBOM issues are
-                        reviewed.
-                      </p>
-                    ) : (
-                      <p className="mb-2">
-                        Repeated expanded subassemblies were detected. Their identical child definitions were
-                        canonicalized so descendants are not multiplied once for every repeated occurrence. Please
-                        verify the BOM summary before using it for production.
-                      </p>
-                    )}
-                    <div className="small">
-                      Repeated subassemblies: <b>{repeatedSubassemblies}</b>. Duplicate expanded copies collapsed:{" "}
-                      <b>{repeatedCopiesCollapsed}</b>. Conflicting definitions: <b>{bomDefinitionConflicts}</b>.
-                      Integrity-skipped links: <b>{integrityLinksSkipped}</b>.
-                    </div>
-                    <details className="mt-2">
-                      <summary>Show BOM integrity details</summary>
-                      <ul className="mb-0 mt-2">
-                        {[...importErrors, ...importWarnings]
-                          .filter((issue) => issue.stage === "treebom.integrity")
-                          .slice(0, 50)
-                          .map((issue, idx) => (
-                            <li key={`integrity-${idx}`}>{formatImportIssue(issue)}</li>
-                          ))}
-                      </ul>
-                    </details>
-                  </div>
-                </div>
-              </div>
-            ) : null}
+                {name === "approved" ? "Approved targets" : name[0].toUpperCase() + name.slice(1)}
+              </button>
+            ))}
+          </div>
 
-            {importSummary && (
-              <div className="mt-3">
-                {rootPreviewStatus ? (
-                  <div className="text-muted small mb-2">{rootPreviewStatus}</div>
-                ) : null}
-                {rootPreviewUrl && rootHref ? (
-                  <a className="d-inline-block" href={rootHref}>
-                    <img
-                      src={rootPreviewUrl}
-                      className="img-fluid border rounded"
-                      alt="Root preview"
-                      style={{ maxWidth: "40vw" }}
-                    />
-                  </a>
-                ) : null}
-              </div>
-            )}
+          <div className="d-flex flex-column gap-2">
+            {visibleParts.map((part) => (
+              <PartRedline key={`${part.part_number}:${part.revision}`} part={part} />
+            ))}
+            {!visibleParts.length ? <div className="text-muted small">No redline entries match this filter.</div> : null}
+          </div>
 
-            {importSummary && (importHasIssues || reportHasDiagnostics) ? (
-              <div className={`alert ${importErrorCount ? "alert-danger" : "alert-warning"} small mt-3`}>
-                <div className="fw-semibold mb-1">
-                  Import completed
-                  {importErrorCount ? ` with ${importErrorCount} error${importErrorCount === 1 ? "" : "s"}` : ""}
-                  {importWarningCount
-                    ? `${importErrorCount ? " and " : " with "}${importWarningCount} warning${
-                        importWarningCount === 1 ? "" : "s"
-                      }`
-                    : ""}
-                  {!importErrorCount && !importWarningCount ? " (with warnings)" : ""}.
-                </div>
-                {reportHasDiagnostics ? (
-                  <div className="text-muted">
-                    Skipped blank PN rows: <b>{skippedBlankParts}</b>. FLATBOM parse failures:{" "}
-                    <b>{flatParseFailures}</b>. FLATBOM normalize failures: <b>{flatNormalizeFailures}</b>. TREEBOM qty
-                    failures: <b>{treeQtyFailures}</b>.
-                    Approval integrity warnings: <b>{approvalIntegrityWarnings}</b>.
-                  </div>
-                ) : null}
-                <div className="mt-2">
-                  <button
-                    className="btn btn-sm btn-outline-secondary"
-                    type="button"
-                    onClick={() => downloadJson(`import_report_${result?.zip || "report"}.json`, importSummary)}
-                  >
-                    Download report JSON
-                  </button>
-                </div>
-                {importHasIssues ? (
-                  <div className="mt-2">
-                    <details>
-                      <summary>Show import issues</summary>
-                      {importErrorCount ? (
-                        <div className="mt-2">
-                          <div className="fw-semibold">Errors</div>
-                          <ul className="mb-0">
-                            {importErrors.slice(0, 50).map((it, idx) => (
-                              <li key={`err-${idx}`}>{formatImportIssue(it)}</li>
-                            ))}
-                          </ul>
-                          {importErrorCount > 50 ? (
-                            <div className="text-muted mt-1">Showing first 50 errors.</div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {importWarningCount ? (
-                        <div className="mt-2">
-                          <div className="fw-semibold">Warnings</div>
-                          <ul className="mb-0">
-                            {importWarnings.slice(0, 50).map((it, idx) => (
-                              <li key={`warn-${idx}`}>{formatImportIssue(it)}</li>
-                            ))}
-                          </ul>
-                          {importWarningCount > 50 ? (
-                            <div className="text-muted mt-1">Showing first 50 warnings.</div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </details>
-                  </div>
-                ) : null}
+          <details className="mt-3 border-top pt-3">
+            <summary className="fw-semibold">Advanced details</summary>
+            <div className="row g-3 small mt-1">
+              <div className="col-md-6">
+                <strong>Timing</strong>
+                <pre className="bg-light rounded p-2 mt-1">{JSON.stringify(result?.timings || {}, null, 2)}</pre>
               </div>
-            ) : null}
-
-            {result.warnings && result.warnings.length ? (
-              <div className="alert alert-warning small mt-3">
-                <div className="fw-semibold mb-1">Warnings</div>
-                <ul className="mb-0">
-                  {result.warnings.map((w, idx) => (
-                    <li key={`${idx}-${w}`}>{w}</li>
-                  ))}
-                </ul>
+              <div className="col-md-6">
+                <strong>Diagnostics</strong>
+                <pre className="bg-light rounded p-2 mt-1">{JSON.stringify(result?.diagnostics || {}, null, 2)}</pre>
               </div>
-            ) : null}
-
-            {items.length ? (
-              <div className="table-responsive mt-2">
-                <table className="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>Part Number</th>
-                      <th>Rev</th>
-                      <th>Imported</th>
-                      <th>Extra files</th>
-                      <th>Warnings</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((item) => (
-                      <tr key={`${item.pn}:${item.rev}`}>
-                        <td>{item.pn}</td>
-                        <td>{item.rev || "-"}</td>
-                        <td>{item.imported ? "Yes" : "No"}</td>
-                        <td>{item.extra_files_added ?? 0}</td>
-                        <td>
-                          {item.warnings && item.warnings.length ? (
-                            <ul className="mb-0 small">
-                              {item.warnings.map((w, idx) => (
-                                <li key={`${idx}-${w}`}>{w}</li>
-                              ))}
-                            </ul>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="text-muted small mt-2">No results yet.</div>
-            )}
-          </>
-        ) : (
-          <div className="text-muted small">No results yet.</div>
-        )}
-      </div>
+            </div>
+          </details>
+        </div>
+      ) : null}
     </div>
   );
 }
