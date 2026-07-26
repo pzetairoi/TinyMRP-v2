@@ -81,7 +81,7 @@ def _scheme(name="Stage3B1"):
 
 
 def test_released_visibility_and_read_only_permissions(client):
-    viewer = _user("viewer@stage3b1.test", _standard_role("internal_viewer"))
+    viewer = _user("viewer@stage3b1.test", _standard_role("internal"))
     released = _released("VIS-100", "A")
     draft = _draft("VIS-200", "A")
     _login(client, viewer)
@@ -108,7 +108,7 @@ def test_released_visibility_and_read_only_permissions(client):
 def test_engineering_reads_unreleased_revises_and_does_not_inherit_approval(client):
     engineer = _user(
         "engineer@stage3b1.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     source = _released("REV-100", "A")
     source.docs = ["released/drawing.pdf"]
@@ -138,23 +138,30 @@ def test_engineering_reads_unreleased_revises_and_does_not_inherit_approval(clie
     assert has_permission(engineer, "bom.update")
 
 
-def test_quality_and_auditor_have_unreleased_read_without_design_write():
+def test_auditor_reads_unreleased_without_any_design_write():
     draft = _draft("QA-100", "A")
-    for role_name in ("quality_reviewer", "auditor"):
-        user = _user(
-            f"{role_name}@stage3b1.test",
-            _standard_role(role_name),
-        )
-        assert authorise_part_access(user, draft.part_number, draft.revision).allowed
-        assert not has_permission(user, "parts.update")
-        assert not has_permission(user, "bom.update")
-        assert not has_permission(user, "numbering.allocate")
-        assert not has_permission(user, "parts.purge")
-        assert not has_permission(user, "files.replace")
+    auditor = _user("auditor@stage3b1.test", _standard_role("auditor"))
 
-    quality = User.objects.get(email="quality_reviewer@stage3b1.test")
-    assert has_permission(quality, "reviews.approve")
-    # Stage 6 will add the creator/approver transaction-conflict check.
+    assert authorise_part_access(auditor, draft.part_number, draft.revision).allowed
+    assert not has_permission(auditor, "parts.update")
+    assert not has_permission(auditor, "bom.update")
+    assert not has_permission(auditor, "numbering.allocate")
+    assert not has_permission(auditor, "parts.purge")
+    assert not has_permission(auditor, "files.replace")
+
+
+def test_engineering_manager_reviews_unreleased_data_without_purge():
+    draft = _draft("QA-200", "A")
+    manager = _user(
+        "engineering_manager@stage3b1.test",
+        _standard_role("engineering_manager"),
+    )
+
+    assert authorise_part_access(manager, draft.part_number, draft.revision).allowed
+    assert has_permission(manager, "reviews.approve")
+    assert has_permission(manager, "imports.override_approved")
+    assert not has_permission(manager, "parts.purge")
+    assert not has_permission(manager, "files.purge")
 
 
 def test_portal_and_production_scopes_are_exact_and_released_only(client):
@@ -164,7 +171,7 @@ def test_portal_and_production_scopes_are_exact_and_released_only(client):
 
     customer_user = _user(
         "customer@stage3b1.test",
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     customer = Customer(name="Scoped Customer", users=[customer_user]).save()
     Job(
@@ -204,15 +211,22 @@ def test_portal_and_production_scopes_are_exact_and_released_only(client):
 
     operator = _user(
         "operator@stage3b1.test",
-        _standard_role("production_operator"),
+        _standard_role("workshop"),
     )
     Job(
         job_number="PRODUCTION-PARTS",
         participants=[operator],
         bom=[JobBOMLine(pn=part_a.part_number, rev=part_a.revision, qty=1)],
     ).save()
+    # Workshop is shop-wide, so every released revision is readable.
     assert authorise_part_access(operator, "SCOPE-100", "A").allowed
-    assert not authorise_part_access(operator, "SCOPE-100", "B").allowed
+    assert authorise_part_access(operator, "SCOPE-100", "B").allowed
+    # Unreleased engineering data and design writes stay closed.
+    assert not authorise_part_access(
+        operator,
+        draft.part_number,
+        draft.revision,
+    ).allowed
     assert not has_permission(operator, "parts.update")
     assert not has_permission(operator, "bom.update")
 
@@ -222,7 +236,7 @@ def test_supplier_portal_scope_is_exact():
     _released("SUP-100", "B")
     supplier_user = _user(
         "supplier@stage3b1.test",
-        _standard_role("supplier_portal"),
+        _standard_role("supplier"),
     )
     supplier = Supplier(name="Scoped Supplier", users=[supplier_user]).save()
     Order(
@@ -256,7 +270,7 @@ def test_bom_reads_deny_inaccessible_descendants_and_scope_where_used(client):
         qty=2,
     ).save()
 
-    portal = _user("bom-portal@stage3b1.test", _standard_role("customer_portal"))
+    portal = _user("bom-portal@stage3b1.test", _standard_role("customer"))
     customer = Customer(name="BOM Customer", users=[portal]).save()
     Job(
         job_number="BOM-SCOPE",
@@ -297,7 +311,7 @@ def test_authorised_bom_read_keeps_exact_child_revision(client):
     ).save()
     engineer = _user(
         "bom-engineer@stage3b1.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     _login(client, engineer)
 
@@ -330,7 +344,7 @@ def test_numbering_permissions_preview_side_effects_and_manager_shortcut(client)
     ).status_code == 403
     assert NumberingCounter.objects.count() == before
 
-    planner = _user("planner@stage3b1.test", _standard_role("planner"))
+    planner = _user("planner@stage3b1.test", _standard_role("commercial"))
     _login(client, planner)
     preview = client.post(
         "/api/numbering/preview",
@@ -362,7 +376,7 @@ def test_numbering_permissions_preview_side_effects_and_manager_shortcut(client)
 
 
 def test_purge_requires_canonical_or_exact_legacy_admin(client, app):
-    for role_name in ("engineering_data_steward", "planner", "quality_reviewer"):
+    for role_name in ("engineering", "commercial", "engineering_manager"):
         part = _released(f"PURGE-{role_name}", "A")
         user = _user(f"{role_name}-purge@stage3b1.test", _standard_role(role_name))
         _login(client, user)
@@ -399,7 +413,7 @@ def test_purge_requires_canonical_or_exact_legacy_admin(client, app):
 
 
 def test_non_part_administrators_do_not_gain_part_or_numbering_authority():
-    for role_name in ("security_administrator", "system_administrator"):
+    for role_name in ("security_administrator",):
         user = _user(f"{role_name}@stage3b1.test", _standard_role(role_name))
         for permission in (
             "parts.read",
@@ -414,8 +428,8 @@ def test_non_part_administrators_do_not_gain_part_or_numbering_authority():
 def test_multiple_roles_combine_only_contributing_part_scopes():
     released = _released("MULTI-100", "A")
     draft = _draft("MULTI-200", "A")
-    portal = _standard_role("customer_portal")
-    internal = _standard_role("internal_viewer")
+    portal = _standard_role("customer")
+    internal = _standard_role("internal")
     user = _user("multi@stage3b1.test", portal, internal)
     Customer(name="Multi Customer", users=[user]).save()
 
@@ -424,7 +438,7 @@ def test_multiple_roles_combine_only_contributing_part_scopes():
     security_portal = _user(
         "security-portal@stage3b1.test",
         _standard_role("security_administrator"),
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     Customer(name="Security Portal Customer", users=[security_portal]).save()
     assert not authorise_part_access(
@@ -435,8 +449,8 @@ def test_multiple_roles_combine_only_contributing_part_scopes():
 
     engineer_quality = _user(
         "engineer-quality@stage3b1.test",
-        _standard_role("engineering_data_steward"),
-        _standard_role("quality_reviewer"),
+        _standard_role("engineering"),
+        _standard_role("engineering_manager"),
     )
     assert authorise_part_access(
         engineer_quality,
@@ -449,8 +463,8 @@ def test_multiple_roles_combine_only_contributing_part_scopes():
 
     planner_operator = _user(
         "planner-operator@stage3b1.test",
-        _standard_role("planner"),
-        _standard_role("production_operator"),
+        _standard_role("commercial"),
+        _standard_role("workshop"),
     )
     assert authorise_part_access(
         planner_operator,

@@ -29,7 +29,7 @@ class StorageRoot:
     path: Path
 
 
-_CUSTOMER_FILE_GROUPS = frozenset({"png", "pdf", "datasheet"})
+_CUSTOMER_FILE_GROUPS = frozenset({"png", "pdf", "datasheet", "3mf", "ply", "stl"})
 _SUPPLIER_FILE_GROUPS = frozenset(
     {"png", "pdf", "dxf", "step", "edr", "3mf", "ply", "stl", "datasheet"}
 )

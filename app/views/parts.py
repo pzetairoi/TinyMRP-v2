@@ -1378,6 +1378,8 @@ def part_detail():
     can_parts_delete = has_permission(current_user, "parts.purge")
     can_parts_edit = has_permission(current_user, "parts.update")
     can_parts_note = has_permission(current_user, "comments.write")
+    can_export = has_permission(current_user, "exports.run")
+    can_bom_read = has_permission(current_user, "bom.read")
     review_count = int(p.pending_review_count or 0)
     review_severity = str(p.pending_review_severity or "") if review_count else ""
 
@@ -1428,6 +1430,11 @@ def part_detail():
             "can_parts_delete": can_parts_delete,
             "can_parts_edit": can_parts_edit,
             "can_parts_note": can_parts_note,
+            "can_files_read": can_read_files,
+            "can_comments_read": can_read_comments,
+            "can_markups_read": can_read_markups,
+            "can_export": can_export,
+            "can_bom_read": can_bom_read,
         }
     )
 

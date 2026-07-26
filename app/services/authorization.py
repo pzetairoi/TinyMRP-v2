@@ -322,7 +322,10 @@ def _build_scope_context(user: Any) -> _ScopeContext:
         return _ScopeContext(valid=False)
     try:
         snapshot = _permission_snapshot(user)
+        # Superseded slugs stay listed so users still holding one remain
+        # scoped instead of falling through to global visibility.
         scoped_roles = {
+            "customer", "supplier",
             "customer_portal", "customer_viewer", "supplier_portal",
             "supplier_viewer", "production_operator", "operator", "viewer",
         }
@@ -376,7 +379,11 @@ def _scope_modes(
     """Return the union of scope contributions from roles granting permission."""
 
     modes: set[str] = set()
+    # Any role absent from this map contributes "global" below, so every
+    # deliberately scoped standard role must appear here. Superseded slugs stay
+    # listed so users still holding one remain scoped.
     fixed = {
+        "customer": "customer", "supplier": "supplier",
         "customer_portal": "customer", "customer_viewer": "customer",
         "supplier_portal": "supplier", "supplier_viewer": "supplier",
         "production_operator": "assigned", "operator": "assigned",
@@ -964,7 +971,9 @@ def require_permission(permission: str):
         def wrapper(*args, **kwargs):
             if not _is_authenticated(current_user):
                 abort(401)
-            if not authorise(current_user, permission).allowed:
+            decision = authorise(current_user, permission)
+            if not decision.allowed:
+                g.authz_denial = decision
                 abort(403)
             return fn(*args, **kwargs)
 

@@ -101,13 +101,13 @@ def test_admin_role_form_preserves_standard_slug_and_validates_custom_permission
     with app.app_context():
         actor = _access_actor("security.roles.manage")
         reconcile_standard_roles()
-        standard = Role.objects.get(name="planner")
+        standard = Role.objects.get(name="commercial")
     _login(client, actor)
 
     renamed = client.post(
         f"/admin/roles/{standard.id}/edit",
         data={
-            "name": "renamed_planner",
+            "name": "renamed_commercial",
             "display_name": standard.display_name,
             "description": standard.description,
             "permissions": list(standard.permissions),
@@ -115,8 +115,8 @@ def test_admin_role_form_preserves_standard_slug_and_validates_custom_permission
     )
     assert renamed.status_code == 302
     standard.reload()
-    assert standard.name == "planner"
-    assert Role.objects(name="renamed_planner").first() is None
+    assert standard.name == "commercial"
+    assert Role.objects(name="renamed_commercial").first() is None
 
     created = client.post(
         "/admin/roles/new",
@@ -167,7 +167,7 @@ def test_custom_role_delete_blocks_assignments_and_protects_catalogue_roles(
             display_name="Empty Custom Role",
         )
         reconcile_standard_roles()
-        standard = Role.objects.get(name="planner")
+        standard = Role.objects.get(name="commercial")
         legacy_admin = _role("admin")
     _login(client, actor)
 
@@ -222,11 +222,11 @@ def test_admin_role_list_reports_status_counts_and_reconciliation_is_safe(
             "security.roles.manage",
         )
         reconcile_standard_roles()
-        planner = Role.objects.get(name="planner")
-        assigned = _user("assigned@example.com", [planner])
+        commercial = Role.objects.get(name="commercial")
+        assigned = _user("assigned@example.com", [commercial])
         original_role_ids = [str(role.id) for role in assigned.roles]
-        Role.objects(id=planner.id).update(
-            set__display_name="Drifted Planner",
+        Role.objects(id=commercial.id).update(
+            set__display_name="Drifted Commercial",
         )
         custom = _role(
             "custom_reader",
@@ -245,10 +245,10 @@ def test_admin_role_list_reports_status_counts_and_reconciliation_is_safe(
         Role.objects(name="auditor").delete()
     _login(client, actor)
 
-    response = client.get("/admin/roles/?q=planner&filter=drifted")
+    response = client.get("/admin/roles/?q=commercial&filter=drifted")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "Drifted Planner" in body
+    assert "Drifted Commercial" in body
     assert "Customised/drifted" in body
     assert "New custom role" in client.get("/admin/roles/").get_data(as_text=True)
     all_roles = client.get("/admin/roles/").get_data(as_text=True)
@@ -261,16 +261,16 @@ def test_admin_role_list_reports_status_counts_and_reconciliation_is_safe(
     second_seed = client.post("/admin/roles/standard-roles/seed")
     assert first_seed.status_code == second_seed.status_code == 302
     assert Role.objects(name="auditor").count() == 1
-    planner.reload()
-    assert planner.display_name == "Drifted Planner"
+    commercial.reload()
+    assert commercial.display_name == "Drifted Commercial"
     assigned.reload()
     assert [str(role.id) for role in assigned.roles] == original_role_ids
 
     restored = client.post("/admin/roles/standard-roles/restore")
     assert restored.status_code == 302
-    planner.reload()
+    commercial.reload()
     assigned.reload()
-    assert planner.display_name == STANDARD_ROLES["planner"].display_name
+    assert commercial.display_name == STANDARD_ROLES["commercial"].display_name
     assert [str(role.id) for role in assigned.roles] == original_role_ids
 
 
@@ -415,7 +415,7 @@ def test_permission_test_seed_uses_only_curated_canonical_matrix(client, app, tm
         test_users = list(
             User.objects(email__regex=r"^permtest\..+@test\.example\.com$")
         )
-        assert len(test_users) == len(PERMISSION_TEST_ROLE_SCENARIOS) == 20
+        assert len(test_users) == len(PERMISSION_TEST_ROLE_SCENARIOS)
         assert {
             user.email.split("@", 1)[0].removeprefix("permtest.")
             for user in test_users
@@ -430,17 +430,17 @@ def test_permission_test_seed_uses_only_curated_canonical_matrix(client, app, tm
         )
         assert ApiToken.objects(user_id__in=[user.id for user in test_users]).count() == 0
         production = User.objects.get(
-            email="permtest.production_operator@test.example.com"
+            email="permtest.workshop@test.example.com"
         )
         assert Job.objects(
             job_number="DEMO-JOB-A1",
             participants=production,
         ).count() == 1
         customer_portal = User.objects.get(
-            email="permtest.customer_portal@test.example.com"
+            email="permtest.customer@test.example.com"
         )
         supplier_portal = User.objects.get(
-            email="permtest.supplier_portal@test.example.com"
+            email="permtest.supplier@test.example.com"
         )
         assert Customer.objects(code="DEMO-CUST-A", users=customer_portal).count() == 1
         assert Supplier.objects(code="DEMO-SUP-X", users=supplier_portal).count() == 1
@@ -472,9 +472,9 @@ def test_permission_test_seed_is_idempotent_and_reset_is_namespace_limited(
         first_emails = {row["email"] for row in first["users"]}
         first_passwords = {row["password"] for row in first["users"]}
         second = seed_permission_test_environment("seed.example.com")
-        assert first["counts"]["users_created"] == 20
+        assert first["counts"]["users_created"] == len(PERMISSION_TEST_ROLE_SCENARIOS)
         assert second["counts"]["users_created"] == 0
-        assert second["counts"]["users_updated"] == 20
+        assert second["counts"]["users_updated"] == len(PERMISSION_TEST_ROLE_SCENARIOS)
         assert {row["email"] for row in second["users"]} == first_emails
         assert {row["password"] for row in second["users"]}.isdisjoint(
             first_passwords
@@ -489,7 +489,7 @@ def test_permission_test_seed_is_idempotent_and_reset_is_namespace_limited(
             label="old test token",
         ).save()
         removed = reset_permission_test_environment("seed.example.com")
-        assert removed["users"] == 20
+        assert removed["users"] == len(PERMISSION_TEST_ROLE_SCENARIOS)
         assert removed["tokens"] == 1
         assert User.objects(email__regex=r"^permtest\.").count() == 0
         assert Customer.objects(code__startswith="DEMO-").count() == 0

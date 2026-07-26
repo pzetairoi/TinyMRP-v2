@@ -604,6 +604,11 @@ export default function PartDetailPage() {
   const [canAdmin, setCanAdmin] = useState(false);
   const [canPartsDelete, setCanPartsDelete] = useState(false);
   const [canPartsNote, setCanPartsNote] = useState(false);
+  const [canFilesRead, setCanFilesRead] = useState(false);
+  const [canCommentsRead, setCanCommentsRead] = useState(false);
+  const [canMarkupsRead, setCanMarkupsRead] = useState(false);
+  const [canExport, setCanExport] = useState(false);
+  const [canBomRead, setCanBomRead] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteChildren, setDeleteChildren] = useState(false);
@@ -1150,6 +1155,11 @@ function isExternalDatasheetUrl(url: string): boolean {
         setCanPartsDelete(!!j.can_parts_delete);
         setCanPartsEdit(!!j.can_parts_edit);
         setCanPartsNote(j.can_parts_note !== undefined ? !!j.can_parts_note : !!j.can_parts_edit);
+        setCanFilesRead(!!j.can_files_read);
+        setCanCommentsRead(!!j.can_comments_read);
+        setCanMarkupsRead(!!j.can_markups_read);
+        setCanExport(!!j.can_export);
+        setCanBomRead(!!j.can_bom_read);
       } catch (e) {
         console.error("part_detail failed", e);
           if (!canceled) {
@@ -3036,6 +3046,11 @@ function isExternalDatasheetUrl(url: string): boolean {
 
             <TabPanel header={tabHeader("Files", "pi-paperclip")}>
               <div className="d-flex flex-column gap-3">
+                {!canFilesRead && (
+                  <div className="alert alert-secondary mb-0">
+                    You need the files.read permission to view files for this part.
+                  </div>
+                )}
                 <div className="pd-card p-3">
                   <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
                     <div>
@@ -3140,7 +3155,19 @@ function isExternalDatasheetUrl(url: string): boolean {
             </TabPanel>
 
             {(!isSharedView || sharedAllowsDocpacks) && <TabPanel header={tabHeader("Doc Packs", "pi-folder")}>
-
+              {(() => {
+                const docpackMissing: string[] = [];
+                if (!canExport) docpackMissing.push("exports.run");
+                if (!canBomRead) docpackMissing.push("bom.read");
+                if (!canFilesRead) docpackMissing.push("files.read");
+                if (docpackMissing.length === 0) return null;
+                return (
+                  <div className="alert alert-secondary mt-3 mb-0">
+                    You're missing permission(s): {docpackMissing.join(", ")}. Contact an admin to request access.
+                  </div>
+                );
+              })()}
+              {canExport && canBomRead && canFilesRead && <>
               <div className="pd-card p-3 mt-3">
                 <h6 className="mb-3">Scope</h6>
                 <div className="row g-4">
@@ -3457,6 +3484,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                   )}
                 </div>
               </div>
+              </>}
             </TabPanel>}
 
           {!isSharedView && versions.length > 1 && (
@@ -3552,6 +3580,12 @@ function isExternalDatasheetUrl(url: string): boolean {
             headerClassName={reviewIndicator ? `pd-tab-indicator pd-tab-indicator--${reviewIndicator}` : undefined}
           >
             <div className="pd-card p-3 mt-3">
+              {(!canCommentsRead || !canMarkupsRead) && (
+                <div className="alert alert-secondary mb-2">
+                  {!canCommentsRead && <div>You need the comments.read permission to view comments.</div>}
+                  {!canMarkupsRead && <div>You need the markups.read permission to view drawing markups.</div>}
+                </div>
+              )}
               <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-2">
                 <h6 className="mb-0 d-flex align-items-center gap-2">
                   Comments & drawing markups

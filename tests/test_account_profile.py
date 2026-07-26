@@ -34,7 +34,7 @@ def _make_user(app, email: str, password: str, roles=None):
 def test_account_home_shows_permissions_and_security_summary(client, app):
     viewer = Role(
         name="account_viewer",
-        permissions=["items.view", "jobs.view", "orders.view", "tools.view", "import.bom"],
+        permissions=["items.view", "jobs.view", "orders.view", "exports.run", "import.bom"],
     ).save()
     user = _make_user(app, "account@example.com", "current-password-123", [viewer])
     with app.app_context():
@@ -118,7 +118,7 @@ def test_account_home_shows_dashboard_empty_states(client, app):
 def test_account_home_respects_dashboard_permissions_and_links(client, app):
     role = Role(
         name="account_tools_importor",
-        permissions=["items.view", "tools.view", "import.bom", "jobs.manage", "orders.manage", "customers.view", "suppliers.view"],
+        permissions=["items.view", "exports.run", "import.bom", "jobs.manage", "orders.manage", "customers.view", "suppliers.view"],
     ).save()
     user = _make_user(app, "actions@example.com", "current-password-123", [role])
 

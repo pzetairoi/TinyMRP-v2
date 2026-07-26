@@ -5,7 +5,6 @@
 {% call page_header("Tools", "Utilities and downloads for the TinyMRP toolchain.", "Tools") %}{% endcall %}
 <div class="row">
   <div class="col-lg-6">
-    {% if has_perm('tools.view') %}
     <div class="card shadow-sm tm-card mb-3">
       <div class="card-body">
         {{ card_header("SolidWorks Setup", "Installer downloads and SolidWorks property tabs.") }}
@@ -40,8 +39,6 @@
         </div>
       </div>
     </div>
-    {% endif %}
-    {% if has_perm('exports.run') %}
     <div class="card shadow-sm tm-card mb-3">
       <div class="card-body">
         {{ card_header("Excel Compile", "Upload a compile list and bundle documents.") }}
@@ -51,7 +48,6 @@
         </div>
       </div>
     </div>
-    {% endif %}
   </div>
 </div>
 {% endblock %}

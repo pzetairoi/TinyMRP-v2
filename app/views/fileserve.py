@@ -1,5 +1,4 @@
 import os, mimetypes
-from pathlib import Path
 from urllib.parse import unquote
 from flask import Blueprint, current_app, send_file, abort, request, g
 from flask_login import login_required, current_user
@@ -20,22 +19,6 @@ def _configured_roots() -> list[str]:
         return [str(root.path) for root in managed_storage_roots()]
     except Exception:
         return []
-
-def _allowed_path(abs_path: str) -> bool:
-    try:
-        resolved = Path(abs_path).resolve(strict=True)
-        if not resolved.is_file():
-            return False
-        for root in managed_storage_roots():
-            try:
-                resolved.relative_to(root.path)
-            except (ValueError, OSError):
-                continue
-            else:
-                return True
-        return False
-    except (OSError, RuntimeError, ValueError):
-        return False
 
 def _safe_rel_path(rel: str) -> str | None:
     if not rel:

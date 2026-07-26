@@ -19,7 +19,7 @@ def test_seed_roles_creates_all_standard_roles_with_exact_contents(app):
 
     assert report["mode"] == "create-missing"
     assert report["created"] == list(STANDARD_ROLE_SLUGS)
-    assert Role.objects.count() == 15
+    assert Role.objects.count() == len(STANDARD_ROLE_SLUGS)
 
     for slug, definition in STANDARD_ROLES.items():
         role = Role.objects.get(name=slug)
@@ -49,7 +49,7 @@ def test_seed_roles_is_idempotent_and_does_not_assign_users(app):
 
 def test_seed_roles_reports_drift_without_overwriting_customisation(app):
     custom = Role(
-        name="planner",
+        name="commercial",
         display_name="Custom Planner",
         description="Locally customised",
         permissions=["jobs.read"],
@@ -59,12 +59,12 @@ def test_seed_roles_reports_drift_without_overwriting_customisation(app):
     report = _result_json(runner.invoke(args=["user", "seed-roles"]))
 
     assert report["created"] == [
-        slug for slug in STANDARD_ROLE_SLUGS if slug != "planner"
+        slug for slug in STANDARD_ROLE_SLUGS if slug != "commercial"
     ]
     assert report["drifted"] == [
         {
             "fields": ["display_name", "description", "permissions"],
-            "slug": "planner",
+            "slug": "commercial",
         }
     ]
     assert report["updated"] == []
@@ -86,7 +86,7 @@ def test_seed_roles_dry_run_performs_no_writes(app):
 
 def test_seed_roles_apply_replaces_only_canonical_role_fields(app):
     custom = Role(
-        name="planner",
+        name="commercial",
         display_name="Custom Planner",
         description="Locally customised",
         permissions=["jobs.read"],
@@ -103,14 +103,14 @@ def test_seed_roles_apply_replaces_only_canonical_role_fields(app):
     report = _result_json(runner.invoke(args=["user", "seed-roles", "--apply"]))
 
     assert report["mode"] == "apply"
-    assert report["updated"] == ["planner"]
+    assert report["updated"] == ["commercial"]
     custom.reload()
-    definition = STANDARD_ROLES["planner"]
+    definition = STANDARD_ROLES["commercial"]
     assert custom.display_name == definition.display_name
     assert custom.description == definition.description
     assert tuple(custom.permissions) == definition.permissions
     user.reload()
-    assert [role.name for role in user.roles] == ["planner"]
+    assert [role.name for role in user.roles] == ["commercial"]
 
 
 def test_seed_roles_rejects_conflicting_modes(app):

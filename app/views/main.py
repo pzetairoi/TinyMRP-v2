@@ -55,7 +55,7 @@ def _quick_links(user) -> list[dict[str, str]]:
         links.append({"title": "Suppliers", "href": url_for("admin_suppliers.suppliers_list"), "description": "Manage supplier records and contacts."})
     if _can_access(user, "customers.read"):
         links.append({"title": "Customers", "href": url_for("admin_customers.customers_list"), "description": "Manage customer records and scope."})
-    if has_any_permission(user, ("exports.run", "tools.view")):
+    if _can_access(user, "exports.run"):
         links.append({"title": "Tools", "href": url_for("tools.tools_index"), "description": "Open utilities, exports, and admin helpers."})
     if has_any_permission(
         user,
@@ -473,7 +473,7 @@ def app_password_change():
 
 @bp.get("/downloads/macro")
 @login_required
-@permissions_required("tools.view")
+@permissions_required("exports.run")
 def download_macro():
     roots = []
     env_root = os.getenv("MACRO_FILES_ROOT") or ""
@@ -492,7 +492,7 @@ def download_macro():
 
 @bp.get("/downloads/addin")
 @login_required
-@permissions_required("tools.view")
+@permissions_required("exports.run")
 def download_addin():
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "solidworks-addin", "Windows Installer latest"))
     path = _latest_file(root, [".exe", ".msi"])

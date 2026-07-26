@@ -1,4 +1,4 @@
-from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from app.extensions import csrf
@@ -57,8 +57,9 @@ def upload_form():
 def upload_post():
     try:
         result = _execute("upload")
-    except ImportPermissionError:
-        abort(403)
+    except ImportPermissionError as exc:
+        flash(f"Import blocked: missing permission(s): {', '.join(exc.missing_permissions)}", "danger")
+        return redirect(url_for("importer.upload_form"))
     except (ValueError, OverflowError) as exc:
         flash(f"Import failed: {exc}", "danger")
         return redirect(url_for("importer.upload_form"))

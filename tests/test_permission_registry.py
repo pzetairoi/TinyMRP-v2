@@ -1,7 +1,10 @@
+import inspect
+
 import pytest
 from mongoengine.errors import ValidationError
 
 from app.models.auth import Role
+from app.services import authorization
 from app.services.permissions import (
     CANONICAL_PERMISSION_GROUPS,
     CANONICAL_PERMISSION_IDENTIFIERS,
@@ -93,6 +96,31 @@ EXPECTED_CANONICAL_PERMISSIONS = {
     "suppliers.archive",
 }
 
+EXPECTED_ENGINEERING_PERMISSIONS = {
+    "parts.read",
+    "parts.read_unreleased",
+    "parts.create",
+    "parts.update",
+    "parts.revise",
+    "bom.read",
+    "bom.update",
+    "files.read",
+    "files.add",
+    "files.replace",
+    "numbering.allocate",
+    "exports.run",
+    "shares.create",
+    "shares.revoke",
+    "imports.preview",
+    "imports.execute_low_risk",
+    "comments.read",
+    "comments.write",
+    "markups.read",
+    "markups.write",
+    "jobs.read",
+    "orders.read",
+}
+
 EXPECTED_ROLE_PERMISSIONS = {
     "administrator": EXPECTED_CANONICAL_PERMISSIONS,
     "security_administrator": {
@@ -104,57 +132,23 @@ EXPECTED_ROLE_PERMISSIONS = {
         "security.tokens.revoke",
         "audit.read",
     },
-    "system_administrator": {
-        "system.config.read",
-        "system.config.manage",
-        "system.storage.manage",
-        "system.rebuild",
-        "system.maintenance",
-        "audit.read",
-    },
-    "engineering_data_steward": {
-        "parts.read",
-        "parts.read_unreleased",
-        "parts.create",
-        "parts.update",
-        "parts.revise",
-        "bom.read",
-        "bom.update",
-        "files.read",
-        "files.add",
-        "files.replace",
-        "numbering.allocate",
-        "exports.run",
-        "shares.create",
-        "shares.revoke",
-        "comments.read",
-        "comments.write",
-        "markups.read",
-        "markups.write",
-    },
-    "import_operator": {
-        "parts.read",
-        "parts.read_unreleased",
-        "bom.read",
-        "files.read",
-        "imports.preview",
-        "imports.execute_low_risk",
-    },
-    "import_approver": {
-        "parts.read",
-        "parts.read_unreleased",
-        "bom.read",
-        "files.read",
-        "imports.preview",
-        "imports.execute_low_risk",
+    "engineering_manager": EXPECTED_ENGINEERING_PERMISSIONS
+    | {
         "imports.execute_approved",
         "imports.override_approved",
+        "comments.moderate",
+        "markups.moderate",
+        "reviews.approve",
+        "numbering.manage",
         "audit.read",
     },
-    "planner": {
+    "engineering": EXPECTED_ENGINEERING_PERMISSIONS,
+    "commercial": {
         "parts.read",
         "bom.read",
         "files.read",
+        "exports.run",
+        "numbering.allocate",
         "comments.read",
         "comments.write",
         "markups.read",
@@ -164,28 +158,8 @@ EXPECTED_ROLE_PERMISSIONS = {
         "jobs.update",
         "jobs.assign",
         "jobs.bom.update",
-        "orders.read",
-        "orders.create",
-        "orders.update",
-        "orders.submit",
-        "customers.read",
-        "suppliers.read",
-        "numbering.allocate",
-        "exports.run",
-    },
-    "procurement": {
-        "parts.read",
-        "bom.read",
-        "files.read",
-        "comments.read",
-        "comments.write",
-        "markups.read",
-        "markups.write",
-        "jobs.read",
-        "suppliers.read",
-        "suppliers.update",
-        "suppliers.financial.read",
-        "suppliers.financial.update",
+        "jobs.cancel",
+        "jobs.archive",
         "orders.read",
         "orders.create",
         "orders.update",
@@ -197,35 +171,31 @@ EXPECTED_ROLE_PERMISSIONS = {
         "orders.ship",
         "orders.cancel",
         "orders.archive",
-        "exports.run",
-    },
-    "sales_customer_service": {
-        "parts.read",
-        "bom.read",
-        "files.read",
-        "comments.read",
-        "comments.write",
-        "markups.read",
-        "markups.write",
-        "jobs.read",
         "customers.read",
         "customers.update",
         "customers.financial.read",
         "customers.financial.update",
-        "orders.read",
-        "orders.create",
-        "orders.update",
-        "orders.financial.read",
-        "orders.financial.update",
-        "orders.submit",
-        "orders.approve",
-        "orders.fulfil",
-        "orders.ship",
-        "orders.cancel",
-        "orders.archive",
-        "exports.run",
+        "customers.archive",
+        "suppliers.read",
+        "suppliers.update",
+        "suppliers.financial.read",
+        "suppliers.financial.update",
+        "suppliers.archive",
     },
-    "production_operator": {
+    "internal": {
+        "parts.read",
+        "bom.read",
+        "files.read",
+        "exports.run",
+        "jobs.read",
+        "orders.read",
+        "customers.read",
+        "suppliers.read",
+        "comments.read",
+        "comments.write",
+        "markups.read",
+    },
+    "workshop": {
         "parts.read",
         "bom.read",
         "files.read",
@@ -237,30 +207,7 @@ EXPECTED_ROLE_PERMISSIONS = {
         "markups.read",
         "markups.write",
     },
-    "quality_reviewer": {
-        "parts.read",
-        "parts.read_unreleased",
-        "bom.read",
-        "files.read",
-        "comments.read",
-        "comments.write",
-        "comments.moderate",
-        "markups.read",
-        "markups.write",
-        "markups.moderate",
-        "reviews.approve",
-        "audit.read",
-    },
-    "internal_viewer": {
-        "parts.read",
-        "bom.read",
-        "files.read",
-        "jobs.read",
-        "orders.read",
-        "customers.read",
-        "suppliers.read",
-    },
-    "customer_portal": {
+    "customer": {
         "parts.read",
         "bom.read",
         "files.read",
@@ -268,7 +215,7 @@ EXPECTED_ROLE_PERMISSIONS = {
         "orders.read",
         "customers.read",
     },
-    "supplier_portal": {
+    "supplier": {
         "parts.read",
         "bom.read",
         "files.read",
@@ -299,19 +246,20 @@ EXPECTED_ROLE_PERMISSIONS = {
 EXPECTED_ROLE_DISPLAY_NAMES = {
     "administrator": "Administrator",
     "security_administrator": "Security Administrator",
-    "system_administrator": "System Administrator",
-    "engineering_data_steward": "Engineering/Data Steward",
-    "import_operator": "Import Operator",
-    "import_approver": "Import Manager",
-    "planner": "Planner",
-    "procurement": "Procurement",
-    "sales_customer_service": "Sales/Customer Service",
-    "production_operator": "Production Operator",
-    "quality_reviewer": "Quality Reviewer",
-    "internal_viewer": "Internal Viewer",
-    "customer_portal": "Customer Portal",
-    "supplier_portal": "Supplier Portal",
+    "engineering_manager": "Engineering Manager",
+    "engineering": "Engineering",
+    "commercial": "Commercial (Sales & Procurement)",
+    "internal": "Internal (Other Department)",
+    "workshop": "Workshop",
+    "customer": "Customer",
+    "supplier": "Supplier",
     "auditor": "Auditor",
+}
+
+# Standard roles whose visibility must stay narrowed to linked companies.
+EXPECTED_SCOPED_ROLES = {
+    "customer": "customer",
+    "supplier": "supplier",
 }
 
 
@@ -329,12 +277,43 @@ def test_canonical_registry_is_exact_and_has_no_duplicates():
     assert PERMISSION_REGISTRY == CANONICAL_PERMISSIONS | LEGACY_PERMISSIONS
 
 
+def test_no_permission_is_both_canonical_and_legacy():
+    """The role editor renders the two catalogues separately.
+
+    An identifier in both is posted twice and fails duplicate validation, so
+    editing any role holding it becomes impossible.
+    """
+
+    assert CANONICAL_PERMISSIONS.isdisjoint(LEGACY_PERMISSIONS)
+
+
 def test_standard_roles_have_exact_permissions():
     assert set(STANDARD_ROLES) == set(EXPECTED_ROLE_PERMISSIONS)
     for slug, expected in EXPECTED_ROLE_PERMISSIONS.items():
         assert set(STANDARD_ROLES[slug].permissions) == expected
         assert STANDARD_ROLES[slug].display_name == EXPECTED_ROLE_DISPLAY_NAMES[slug]
         assert STANDARD_ROLES[slug].description
+
+
+def test_scoped_standard_roles_are_registered_in_the_scope_map():
+    """A scoped role missing from the scope map silently gains global visibility.
+
+    ``_scope_modes`` ends its role dispatch with ``modes.add("global")``, so an
+    unrecognised role name widens access instead of failing closed.
+    """
+
+    source = inspect.getsource(authorization._scope_modes)
+    for slug, mode in EXPECTED_SCOPED_ROLES.items():
+        assert f'"{slug}": "{mode}"' in source, (
+            f"standard role {slug!r} must map to scope mode {mode!r} in "
+            "_scope_modes, otherwise it falls through to global scope"
+        )
+    context_source = inspect.getsource(authorization._build_scope_context)
+    for slug in EXPECTED_SCOPED_ROLES:
+        assert f'"{slug}"' in context_source, (
+            f"standard role {slug!r} must be listed in _build_scope_context's "
+            "scoped_roles, otherwise its company links are never loaded"
+        )
 
 
 def test_unknown_permissions_are_rejected_by_registry_and_role_model():

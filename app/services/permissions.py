@@ -135,12 +135,20 @@ LEGACY_PERMISSION_IDENTIFIERS = (
     "inventory.receive",
     "mrp.run",
     "reports.view",
-    "numbering.manage",
     "tools.view",
     "import.bom",
 )
 if len(LEGACY_PERMISSION_IDENTIFIERS) != len(set(LEGACY_PERMISSION_IDENTIFIERS)):
     raise RuntimeError("Legacy permission registry contains duplicate identifiers")
+# A permission must live in exactly one registry: the role editor renders the
+# canonical groups and the legacy catalogue separately, so an overlapping
+# identifier is submitted twice and fails duplicate validation on save.
+_OVERLAPPING_REGISTRIES = CANONICAL_PERMISSIONS.intersection(LEGACY_PERMISSION_IDENTIFIERS)
+if _OVERLAPPING_REGISTRIES:
+    raise RuntimeError(
+        "Permission identifiers registered as both canonical and legacy: "
+        + ", ".join(sorted(_OVERLAPPING_REGISTRIES))
+    )
 LEGACY_PERMISSIONS = frozenset(LEGACY_PERMISSION_IDENTIFIERS)
 
 PERMISSION_REGISTRY = CANONICAL_PERMISSIONS | LEGACY_PERMISSIONS
@@ -216,7 +224,6 @@ LEGACY_PERMISSION_COMPATIBILITY: dict[str, frozenset[str]] = {
     "customers.manage": frozenset({"customers.read", "customers.update"}),
     "suppliers.view": frozenset({"suppliers.read"}),
     "suppliers.manage": frozenset({"suppliers.read", "suppliers.update"}),
-    "numbering.manage": frozenset({"numbering.allocate", "numbering.manage"}),
 }
 
 

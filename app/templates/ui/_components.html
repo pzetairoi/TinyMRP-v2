@@ -98,6 +98,12 @@
 </div>
 {%- endmacro %}
 
+{% macro permission_gap_notice(missing) -%}
+{% if missing %}
+<div class="alert alert-warning py-2 px-3 small mb-2" role="alert">You're missing permission(s): {{ missing|join(', ') }}. Contact an admin to request access.</div>
+{% endif %}
+{%- endmacro %}
+
 {% macro status_badge(label, tone=None, kind='status') -%}
 {% set resolved = tone or (label|string|lower|replace(' ', '_')) %}
 {% if kind == 'priority' %}

@@ -138,7 +138,7 @@
               </li>
               {% endif %}
 
-              {% if has_perm('exports.run') or has_perm('tools.view') %}
+              {% if has_perm('exports.run') %}
               <li class="nav-item"><a class="nav-link{% if tools_active %} active{% endif %}" href="{{ url_for('tools.tools_index') }}"{% if tools_active %} aria-current="page"{% endif %}>Tools</a></li>
               {% endif %}
               {% if has_perm('imports.preview') or has_perm('imports.execute_low_risk') or has_perm('imports.execute_approved') %}

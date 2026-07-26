@@ -449,7 +449,28 @@ def create_app(config_object=None):
     def handle_csrf_error(e):
         return render_template("csrf_error.html", reason=e.description), 400
     app.register_error_handler(CSRFError, handle_csrf_error)
-    
+
+    # Register a 403 handler that names the missing permission when the
+    # denial came from require_permission()/permissions_required() (which
+    # stash the AuthorizationDecision on g.authz_denial before aborting).
+    # Object-level/scope denials never reach this - those stay non-disclosing
+    # 404s at their own call sites, by design.
+    def handle_forbidden(e):
+        from app.services.security_mode import is_api_request
+
+        decision = getattr(g, "authz_denial", None)
+        if decision is not None and getattr(decision, "reason_code", None) == "missing_permission":
+            message = f"Missing permission: {decision.permission}"
+        else:
+            message = "You don't have access to this action."
+        if is_api_request(request.path):
+            payload = {"error": "forbidden"}
+            if decision is not None and getattr(decision, "reason_code", None) == "missing_permission":
+                payload["missing_permission"] = decision.permission
+            return jsonify(payload), 403
+        return render_template("access_denied.html", message=message), 403
+    app.register_error_handler(403, handle_forbidden)
+
     # CSRF
     csrf.init_app(app)
 

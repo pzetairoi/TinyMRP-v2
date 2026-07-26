@@ -1,4 +1,5 @@
 ﻿{% extends "security/base.html" %}
+{% from "ui/_components.html" import permission_gap_notice %}
 {% set is_readonly = readonly if readonly is defined else false %}
 {% set mask_supplier = mask_supplier if mask_supplier is defined else false %}
 {% set mask_customer = mask_customer if mask_customer is defined else false %}
@@ -236,9 +237,15 @@
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
           {% endif %}
         </form>
-        {% if order and has_perm('exports.run') and has_perm('parts.read') and has_perm('bom.read') and has_perm('files.read') %}
+        {% if order and has_perm('exports.run') %}
         <div class="mt-4">
           <h2 class="h6 mb-3 fw-bold">Docpack export</h2>
+          {% set docpack_missing = [] %}
+          {% if not has_perm('parts.read') %}{% set _ = docpack_missing.append('parts.read') %}{% endif %}
+          {% if not has_perm('bom.read') %}{% set _ = docpack_missing.append('bom.read') %}{% endif %}
+          {% if not has_perm('files.read') %}{% set _ = docpack_missing.append('files.read') %}{% endif %}
+          {{ permission_gap_notice(docpack_missing) }}
+          {% if not docpack_missing %}
           <form method="post" action="{{ url_for('docpacks_api.build_order') }}" class="docpack-export-form" data-prefix="order">
             <input type="hidden" name="order_id" value="{{ order.id }}">
 
@@ -405,11 +412,18 @@
               </div>
             </div>
           </form>
+          {% endif %}
         </div>
         {% endif %}
-        {% if order and show_scope_download and has_perm('exports.run') and has_perm('parts.read') and has_perm('bom.read') and has_perm('files.read') %}
+        {% if order and show_scope_download and has_perm('exports.run') %}
         <div class="mt-4">
           <h2 class="h6 mb-3 fw-bold">Scope of supply</h2>
+          {% set scope_missing = [] %}
+          {% if not has_perm('parts.read') %}{% set _ = scope_missing.append('parts.read') %}{% endif %}
+          {% if not has_perm('bom.read') %}{% set _ = scope_missing.append('bom.read') %}{% endif %}
+          {% if not has_perm('files.read') %}{% set _ = scope_missing.append('files.read') %}{% endif %}
+          {{ permission_gap_notice(scope_missing) }}
+          {% if not scope_missing %}
           <form method="post" action="{{ url_for('admin_orders.order_scope_pdf', order_id=order.id) }}" class="docpack-export-form" data-prefix="scope">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="pd-card p-3 mb-3">
@@ -464,6 +478,7 @@
               </div>
             </div>
           </form>
+          {% endif %}
         </div>
         {% endif %}
       </div>
