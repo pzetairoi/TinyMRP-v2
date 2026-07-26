@@ -281,7 +281,12 @@ def response_context(
         modes = permission_scope_modes(user, permission, resource_type=parent)
     except Exception:
         return ""
-    if "global" in modes or modes & {"purchase", "sales"}:
+    if "global" in modes or modes & {
+        "purchase",
+        "sales",
+        "purchasing",
+        "customer_business",
+    }:
         return "internal"
     if "customer" in modes:
         return "customer_portal"
@@ -334,6 +339,7 @@ def _external_fields(normalized: str, boundary: str) -> frozenset[str]:
             parent_pn parent_rev parent_desc parent_thumb_urls child_pn child_rev
             immediate_pn immediate_rev immediate_desc top_pn top_rev top_desc
             parent_part_number parent_revision parent_description qty
+            source job_id job_number order_id order_number order_kind order_status
             """.split()
         )
     return policies.get(normalized, frozenset())
@@ -427,21 +433,23 @@ def _internal_fields(
         if not (_has(user, "reviews.approve") or _has(user, "audit.read")):
             fields -= {"approver_profile", "approved", "approved_date", "approved_by"}
     elif normalized == "jobs":
-        fields -= {"customer_id", "vendor_ids", "participant_ids"}
         if not _has(user, "customers.read"):
-            fields.discard("customer")
+            fields -= {"customer", "customer_id"}
+        if not _has(user, "suppliers.read"):
+            fields.discard("vendor_ids")
+        if not _has(user, "jobs.assign"):
+            fields.discard("participant_ids")
         if not _has(user, "orders.read"):
             fields.discard("order_number")
     elif normalized == "orders":
-        fields -= {"customer_id", "supplier_id", "job_id"}
         if not _has(user, "orders.financial.read"):
             fields -= _ORDER_FINANCIAL
         if not _has(user, "customers.read"):
-            fields.discard("customer")
+            fields -= {"customer", "customer_id"}
         if not _has(user, "suppliers.read"):
-            fields.discard("supplier")
+            fields -= {"supplier", "supplier_id"}
         if not _has(user, "jobs.read"):
-            fields.discard("job")
+            fields -= {"job", "job_id"}
         if not (_has(user, "orders.approve") or _has(user, "audit.read")):
             fields -= _ORDER_REVIEW
     elif normalized == "order_line" and not _has(user, "orders.financial.read"):

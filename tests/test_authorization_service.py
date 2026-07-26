@@ -462,7 +462,7 @@ def test_security_administrator_can_use_existing_admin_routes_without_self_escal
     assert client.get("/admin/users").status_code == 200
     assert client.get("/admin/roles/").status_code == 200
     assert client.get("/admin/audit/").status_code == 200
-    assert client.get("/ui/admin/addin").status_code == 200
+    assert client.get("/ui/admin/addin").status_code == 403
     assert client.get("/api/admin/users").status_code == 200
 
     self_assignment = client.post(

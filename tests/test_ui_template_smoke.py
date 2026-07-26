@@ -4,6 +4,7 @@ import uuid
 from flask import render_template, render_template_string, url_for
 
 from app.models.auth import Role, User
+from app.models.part import Part
 
 
 def _login(client, user):
@@ -73,7 +74,7 @@ def test_base_layout_authenticated_render_shows_account_nav_without_admin_clutte
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
     assert 'data-bs-target="#navbarMain"' in body
-    assert ">Parts<" in body
+    assert ">Parts<" not in body
     assert "Logout" in body
     assert 'id="navAdmin"' not in body
     user_menu = _menu_html(body, "navUser")
@@ -164,6 +165,7 @@ def test_stage1_empty_states_and_warning_pages_render(client, app, tmp_path):
 
 def test_stage1_server_rendered_pages_and_shell_routes_render(client, app, tmp_path):
     admin = _admin_user()
+    Part(part_number="TEST-100", revision="A").save()
     _login(client, admin)
     app.config["HELP_STATIC_DIR"] = str(tmp_path)
     csrf_pages = {
@@ -257,7 +259,7 @@ def test_navigation_permission_groupings_and_active_states(client, app):
     resp = client.get("/app")
     assert resp.status_code == 200
     body = resp.get_data(as_text=True)
-    assert 'href="/ui/parts"' in body
+    assert 'href="/ui/parts"' not in body
     assert f'href="{tools_href}"' in body
     assert f'href="{import_href}"' in body
     assert ">Jobs<" not in body

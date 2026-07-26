@@ -4,8 +4,8 @@
 {% block content %}
 {% call page_header("Customers", "Client directory and sales segmentation.", "Admin") %}
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_orders.orders_list') }}">Orders</a>
-    {% if has_perm('customers.manage') %}
+    {% if has_perm('orders.read') %}<a class="btn btn-outline-secondary" href="{{ url_for('admin_orders.orders_list') }}">Orders</a>{% endif %}
+    {% if has_perm('customers.update') %}
     <a class="btn btn-primary" href="{{ url_for('admin_customers.customers_new') }}">New customer</a>
     {% endif %}
   </div>
@@ -41,12 +41,14 @@
           </select>
         </th>
         <th>
+          {% if has_perm('customers.financial.read') %}
           <select class="form-select form-select-sm" name="type" form="customers-filter">
             <option value="">Any</option>
             {% for s in ['retail','wholesale','oem','distributor'] %}
             <option value="{{ s }}" {% if filters.type==s %}selected{% endif %}>{{ s.title() }}</option>
             {% endfor %}
           </select>
+          {% else %}<span class="text-muted small">Restricted</span>{% endif %}
         </th>
         <th>
           <input class="form-control form-control-sm" type="search" name="contact_q" value="{{ filters.contact_q }}" placeholder="Contact" form="customers-filter">
@@ -71,28 +73,28 @@
         <tr>
           <td>{{ c.code or '-' }}</td>
           <td class="fw-semibold">
-            {% if has_perm('customers.manage') %}
-              <a href="{{ url_for('admin_customers.customers_edit', cust_id=c.id) }}">{{ c.name }}</a>
-            {% elif has_perm('customers.view') %}
+            {% if has_perm('customers.read') %}
               <a href="{{ url_for('admin_customers.customers_view', cust_id=c.id) }}">{{ c.name }}</a>
             {% else %}
               {{ c.name }}
             {% endif %}
           </td>
           <td>{{ status_badge(c.status or 'active', c.status|default('active')) }}</td>
-          <td>{{ c.customer_type or '-' }}</td>
+          <td>{{ (c.customer_type or '-') if has_perm('customers.financial.read') else '-' }}</td>
           <td>{{ c.contact or '-' }}</td>
           <td>{{ c.email or '-' }}</td>
           <td>{{ (c.tags | join(', ')) if c.tags else '-' }}</td>
           <td class="d-flex gap-1">
-            {% if has_perm('customers.manage') %}
+            {% if has_perm('customers.update') %}
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_customers.customers_edit', cust_id=c.id) }}">Edit</a>
+            {% elif has_perm('customers.read') %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_customers.customers_view', cust_id=c.id) }}">View</a>
+            {% endif %}
+            {% if has_perm('customers.archive') %}
             <form method="post" action="{{ url_for('admin_customers.customers_delete', cust_id=c.id) }}" onsubmit="return confirm('Delete this customer?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>
-            {% elif has_perm('customers.view') %}
-            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_customers.customers_view', cust_id=c.id) }}">View</a>
             {% endif %}
           </td>
         </tr>

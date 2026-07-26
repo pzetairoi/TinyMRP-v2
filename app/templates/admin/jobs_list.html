@@ -4,8 +4,8 @@
 {% block content %}
 {% call page_header("Jobs", "Work orders and production tracking.", "Admin") %}
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>
-    {% if has_perm('jobs.manage') %}
+    {% if has_perm('suppliers.read') %}<a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>{% endif %}
+    {% if has_perm('jobs.archive') and has_perm('orders.update') %}
     <form method="post" action="{{ url_for('admin_jobs.jobs_purge_deleted') }}" onsubmit="return confirm('Permanently delete all deleted jobs? This cannot be undone.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-outline-danger" type="submit" {% if (deleted_count or 0) <= 0 %}disabled{% endif %}>
@@ -13,7 +13,7 @@
       </button>
     </form>
     {% endif %}
-    <a class="btn btn-primary" href="{{ url_for('admin_jobs.jobs_new') }}">Create job</a>
+    {% if has_perm('jobs.create') %}<a class="btn btn-primary" href="{{ url_for('admin_jobs.jobs_new') }}">Create job</a>{% endif %}
   </div>
 {% endcall %}
 
@@ -111,9 +111,7 @@
         {% for j in jobs %}
         <tr>
           <td class="fw-semibold">
-            {% if has_perm('jobs.manage') %}
-              <a href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">{{ j.job_number }}</a>
-            {% elif has_perm('jobs.view') %}
+            {% if has_perm('jobs.read') %}
               <a href="{{ url_for('admin_jobs.jobs_view', job_id=j.id) }}">{{ j.job_number }}</a>
             {% else %}
               {{ j.job_number }}
@@ -149,24 +147,22 @@
             {% endif %}
           </td>
           <td>
-            {% if has_perm('customers.manage') and j.customer_id %}
-              <a href="{{ url_for('admin_customers.customers_edit', cust_id=j.customer_id) }}">{{ j.customer_name }}</a>
-            {% elif has_perm('customers.view') and j.customer_id %}
+            {% if has_perm('customers.read') and j.customer_id %}
               <a href="{{ url_for('admin_customers.customers_view', cust_id=j.customer_id) }}">{{ j.customer_name }}</a>
             {% else %}
               {{ j.customer_name }}
             {% endif %}
           </td>
           <td class="d-flex gap-1">
-            {% if has_perm('jobs.manage') %}
+            {% if has_perm('jobs.update') %}
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_edit', job_id=j.id) }}">Edit</a>
-            {% elif has_perm('jobs.view') %}
+            {% elif has_perm('jobs.read') %}
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_view', job_id=j.id) }}">View</a>
             {% endif %}
-            {% if has_perm('orders.view') or has_perm('orders.manage') %}
+            {% if has_perm('orders.read') %}
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
             {% endif %}
-            {% if has_perm('jobs.manage') %}
+            {% if has_perm('jobs.archive') and has_perm('orders.update') %}
             <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=j.id) }}" onsubmit="return confirm('Delete job {{ j.job_number }}? This will unlink related orders and hide the job.');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>

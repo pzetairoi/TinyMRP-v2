@@ -55,11 +55,11 @@ from app.views.parts import (
     _normalized_revision,
 )
 from app.views.ui import vite_assets
-from app.services.acl import is_external_scoped_user
 from app.services.authorization import (
     authorised_part_pairs,
     has_any_permission,
     has_permission,
+    uses_portal_presentation,
     scope_queryset,
 )
 
@@ -1135,7 +1135,9 @@ def public_share_docpack_build(share_id: str, token: str):
 @login_required
 def list_part_shares(pn: str):
     if (
-        is_external_scoped_user(current_user)
+        uses_portal_presentation(
+            current_user, "parts.read", resource_type="parts"
+        )
         or not has_any_permission(
             current_user,
             ("shares.create", "shares.revoke"),
@@ -1165,7 +1167,9 @@ def list_part_shares(pn: str):
 @csrf.exempt
 def create_part_share_api(pn: str):
     if (
-        is_external_scoped_user(current_user)
+        uses_portal_presentation(
+            current_user, "parts.read", resource_type="parts"
+        )
         or not has_permission(current_user, "shares.create")
         or not has_permission(current_user, "files.read")
     ):
@@ -1268,7 +1272,9 @@ def create_part_share_api(pn: str):
 @csrf.exempt
 def revoke_part_share_api(pn: str, share_id: str):
     if (
-        is_external_scoped_user(current_user)
+        uses_portal_presentation(
+            current_user, "parts.read", resource_type="parts"
+        )
         or not has_permission(current_user, "shares.revoke")
     ):
         return jsonify({"ok": False, "error": "forbidden"}), 403

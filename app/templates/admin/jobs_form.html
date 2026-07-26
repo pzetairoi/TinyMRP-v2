@@ -67,7 +67,7 @@
             {% if not hide_participants %}
             <div class="col-md-6">
               <label class="form-label">Participants (users)</label>
-              {% if is_readonly %}
+              {% if is_readonly or not has_perm('jobs.assign') %}
                 <div class="form-control-plaintext">
                   {{ (job.participants | map(attribute='email') | join(', ')) if job and job.participants else '-' }}
                 </div>
@@ -94,7 +94,7 @@
             {% if not hide_vendors %}
             <div class="col-md-3">
               <label class="form-label">Vendors (suppliers)</label>
-              {% if is_readonly %}
+              {% if is_readonly or not has_perm('jobs.assign') %}
                 <div class="form-control-plaintext">
                   {{ (job.vendors | map(attribute='name') | join(', ')) if job and job.vendors else '-' }}
                 </div>
@@ -121,7 +121,7 @@
             {% if not hide_customer %}
             <div class="col-md-3">
               <label class="form-label">Customer</label>
-              {% if is_readonly %}
+              {% if is_readonly or not has_perm('jobs.assign') %}
                 <div class="form-control-plaintext">{{ job.customer.name if job and job.customer else '-' }}</div>
               {% else %}
                 <select class="form-select" name="customer">
@@ -167,7 +167,7 @@
                   </th>
                   <th>
                     <div class="d-flex gap-1">
-                      {% if not is_readonly %}
+                      {% if not is_readonly and has_perm('jobs.bom.update') %}
                       <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForJob()">Add part(s)</button>
                       {% endif %}
                       <button class="btn btn-sm btn-outline-secondary" type="button" onclick="clearBomFilters()">Clear</button>
@@ -178,14 +178,14 @@
                 <tbody></tbody>
               </table>
             </div>
-            <textarea id="bom_text" class="form-control d-none" name="bom_text" rows="6">{{ bom_text if bom_text is defined else '' }}</textarea>
+            <textarea id="bom_text" class="form-control d-none" {% if has_perm('jobs.bom.update') %}name="bom_text"{% endif %} rows="6">{{ bom_text if bom_text is defined else '' }}</textarea>
           </div>
 
           {% if not is_readonly %}
           <button class="btn btn-primary w-100 mt-3" type="submit">Save</button>
           {% endif %}
           {% if job %}
-          {% if not is_readonly %}
+          {% if not is_readonly and has_perm('jobs.archive') and has_perm('orders.update') %}
           <div class="mt-3">
             <button class="btn btn-outline-danger w-100" type="submit"
               formaction="{{ url_for('admin_jobs.jobs_delete', job_id=job.id) }}"
@@ -214,9 +214,9 @@
                   {% for o in orders %}
                   <tr>
                     <td>
-                      {% if has_perm('orders.manage') %}
+                      {% if has_perm('orders.update') %}
                         <a href="{{ url_for('admin_orders.orders_edit', order_id=o.id) }}">{{ o.order_number }}</a>
-                      {% elif has_perm('orders.view') %}
+                      {% elif has_perm('orders.read') %}
                         <a href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">{{ o.order_number }}</a>
                       {% else %}
                         {{ o.order_number }}
@@ -263,7 +263,7 @@
                       {% endif %}
                     </td>
                     <td>
-                      {% if has_perm('items.view') %}
+                      {% if has_perm('parts.read') %}
                         <a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a>
                       {% else %}
                         {{ p.pn }}
@@ -324,7 +324,7 @@
                       {% endif %}
                     </td>
                     <td>
-                      {% if has_perm('items.view') %}
+                      {% if has_perm('parts.read') %}
                         <a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a>
                       {% else %}
                         {{ p.pn }}
@@ -381,7 +381,7 @@
                     Tree BOM
                   </button>
                 </div>
-                <button type="button" class="btn btn-sm btn-primary" onclick="submitRemainingOrder()">Create order from selected</button>
+                {% if can_use_order_kind('purchase', 'orders.create') %}<button type="button" class="btn btn-sm btn-primary" onclick="submitRemainingOrder()">Create purchase order from selected</button>{% endif %}
               </div>
             </div>
             <div class="row g-2 mb-2">
@@ -444,7 +444,7 @@
                       {% endif %}
                     </td>
                     <td>
-                      {% if has_perm('items.view') %}
+                      {% if has_perm('parts.read') %}
                         <a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a>
                       {% else %}
                         {{ p.pn }}
@@ -518,7 +518,7 @@
                     </td>
                     <td>
                       <span style="display:inline-block;padding-left:{{ (p.depth or 0) * 1.15 }}rem;">
-                        {% if has_perm('items.view') %}
+                        {% if has_perm('parts.read') %}
                           <a href="/ui/part/{{ p.pn|urlencode }}?rev={{ p.rev|urlencode }}">{{ p.pn }}</a>
                         {% else %}
                           {{ p.pn }}
@@ -550,7 +550,7 @@
           </div>
         {% endif %}
         </form>
-        {% if job %}
+        {% if job and has_perm('exports.run') and has_perm('parts.read') and has_perm('bom.read') and has_perm('files.read') %}
         <div class="mt-4">
           <h2 class="h6 mb-3 fw-bold">Docpack export</h2>
           <form method="post" action="{{ url_for('docpacks_api.build_job') }}" class="docpack-export-form" data-prefix="job">
@@ -656,14 +656,14 @@
                   <input class="form-check-input" type="checkbox" id="job_whereused" name="whereused_report">
                   <label class="form-check-label" for="job_whereused">Where-used report (standalone)</label>
                 </div></div>
-                <div class="col-md-6 col-lg-4"><div class="form-check">
+                {% if has_perm('markups.read') %}<div class="col-md-6 col-lg-4"><div class="form-check">
                   <input class="form-check-input" type="checkbox" id="job_markup_files" name="markup_files">
                   <label class="form-check-label" for="job_markup_files">Markup drawings in selected files</label>
                 </div></div>
                 <div class="col-md-6 col-lg-4"><div class="form-check">
                   <input class="form-check-input" type="checkbox" id="job_markup_report" name="markup_report">
                   <label class="form-check-label" for="job_markup_report">Markup drawings report</label>
-                </div></div>
+                </div></div>{% endif %}
                 <div class="col-md-6 col-lg-4"><div class="form-check">
                   <input class="form-check-input" type="checkbox" id="job_fab_pack" name="fabrication_pack">
                   <label class="form-check-label" for="job_fab_pack">Fabrication pack (preset)</label>
@@ -692,7 +692,7 @@
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="job_binder_where" name="binder_add_whereused"><label class="form-check-label" for="job_binder_where">Where-used report section</label></div>
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="job_binder_hw" name="binder_add_hardware_summary" checked><label class="form-check-label" for="job_binder_hw">Hardware summary</label></div>
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="job_binder_datasheets" name="binder_add_datasheets"><label class="form-check-label" for="job_binder_datasheets">Datasheets</label></div>
-                  <div class="form-check"><input class="form-check-input" type="checkbox" id="job_binder_markups" name="binder_add_markups"><label class="form-check-label" for="job_binder_markups">Markup drawings</label></div>
+                  {% if has_perm('markups.read') %}<div class="form-check"><input class="form-check-input" type="checkbox" id="job_binder_markups" name="binder_add_markups"><label class="form-check-label" for="job_binder_markups">Markup drawings</label></div>{% endif %}
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="job_binder_flat" name="binder_include_flat_patterns"><label class="form-check-label" for="job_binder_flat">Flat pattern PDFs</label></div>
                   <div class="form-check"><input class="form-check-input" type="checkbox" id="job_binder_pages" name="binder_page_numbers" checked><label class="form-check-label" for="job_binder_pages">Page numbers</label></div>
                 </div>
@@ -721,7 +721,7 @@
           </form>
         </div>
         {% endif %}
-        {% if has_remaining_flat or has_remaining_tree %}
+        {% if (has_remaining_flat or has_remaining_tree) and can_use_order_kind('purchase', 'orders.create') %}
         <form id="remaining-order-form" method="post" action="{{ url_for('admin_orders.orders_from_job', job_id=job.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="parts_json" id="remaining-parts-json" value="">
@@ -738,7 +738,7 @@
   let replaceIdx = null;
   let remainingView = 'flat';
   const thumbCache = {};
-  const canViewParts = {{ 'true' if has_perm('items.view') else 'false' }};
+  const canViewParts = {{ 'true' if has_perm('parts.read') else 'false' }};
   const fallbackLogo = "{{ url_for('branding.logo') }}";
 
   function setCheckboxGroup(name, checked){
@@ -916,8 +916,10 @@
         </td>
         <td>
           <div class="d-flex gap-1">
+            {% if not is_readonly and has_perm('jobs.bom.update') %}
             <button type="button" class="btn btn-sm btn-outline-secondary" data-action="replace" data-idx="${idx}">Replace</button>
             <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove" data-idx="${idx}">Remove</button>
+            {% endif %}
           </div>
         </td>
       `;

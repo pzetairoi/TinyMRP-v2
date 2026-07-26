@@ -4,8 +4,8 @@
 {% block content %}
 {% call page_header("Suppliers", "Vendor directory and performance tracking.", "Admin") %}
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Jobs</a>
-    {% if has_perm('suppliers.manage') %}
+    {% if has_perm('jobs.read') %}<a class="btn btn-outline-secondary" href="{{ url_for('admin_jobs.jobs_list') }}">Jobs</a>{% endif %}
+    {% if has_perm('suppliers.update') %}
     <a class="btn btn-primary" href="{{ url_for('admin_suppliers.suppliers_new') }}">New supplier</a>
     {% endif %}
   </div>
@@ -41,7 +41,9 @@
           </select>
         </th>
         <th>
+          {% if has_perm('suppliers.financial.read') %}
           <input class="form-control form-control-sm" type="number" name="rating" min="1" max="5" value="{{ filters.rating }}" placeholder="Rating" form="suppliers-filter">
+          {% else %}<span class="text-muted small">Restricted</span>{% endif %}
         </th>
         <th>
           <input class="form-control form-control-sm" type="search" name="contact_q" value="{{ filters.contact_q }}" placeholder="Contact" form="suppliers-filter">
@@ -66,28 +68,28 @@
         <tr>
           <td>{{ s.code or '-' }}</td>
           <td class="fw-semibold">
-            {% if has_perm('suppliers.manage') %}
-              <a href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=s.id) }}">{{ s.name }}</a>
-            {% elif has_perm('suppliers.view') %}
+            {% if has_perm('suppliers.read') %}
               <a href="{{ url_for('admin_suppliers.suppliers_view', sup_id=s.id) }}">{{ s.name }}</a>
             {% else %}
               {{ s.name }}
             {% endif %}
           </td>
           <td>{{ status_badge(s.status or 'active', s.status|default('active')) }}</td>
-          <td>{{ s.rating or '-' }}</td>
+          <td>{{ (s.rating or '-') if has_perm('suppliers.financial.read') else '-' }}</td>
           <td>{{ s.contact or '-' }}</td>
           <td>{{ s.email or '-' }}</td>
           <td>{{ (s.categories | join(', ')) if s.categories else '-' }}</td>
           <td class="d-flex gap-1">
-            {% if has_perm('suppliers.manage') %}
+            {% if has_perm('suppliers.update') %}
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_edit', sup_id=s.id) }}">Edit</a>
+            {% elif has_perm('suppliers.read') %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_view', sup_id=s.id) }}">View</a>
+            {% endif %}
+            {% if has_perm('suppliers.archive') %}
             <form method="post" action="{{ url_for('admin_suppliers.suppliers_delete', sup_id=s.id) }}" onsubmit="return confirm('Delete this supplier?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>
-            {% elif has_perm('suppliers.view') %}
-            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_view', sup_id=s.id) }}">View</a>
             {% endif %}
           </td>
         </tr>

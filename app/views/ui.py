@@ -3,7 +3,12 @@ import json, os
 from flask import Blueprint, render_template, abort, current_app, request
 from flask_login import login_required
 from flask_security import current_user
-from app.services.authorization import has_any_permission
+from app.models.part import Part
+from app.services.authorization import (
+    authorised_get,
+    has_any_permission,
+    require_permission,
+)
 
 bp = Blueprint("ui", __name__, url_prefix="/ui")
 
@@ -40,6 +45,7 @@ def vite_assets():
 
 @bp.get("/parts")
 @login_required
+@require_permission("parts.read")
 def parts_ui():
     assets = vite_assets()
     if not assets["js"]:
@@ -53,12 +59,24 @@ def parts_ui():
 
 @bp.get("/bom/<path:pn>")
 @login_required
+@require_permission("bom.read")
 def bom_ui(pn):
+    rev = (request.args.get("rev") or "").strip()
+    scoped = Part.objects(part_number__iexact=pn)
+    if rev:
+        scoped = scoped.filter(revision__iexact=rev)
+    if not authorised_get(
+        scoped,
+        current_user,
+        pn,
+        resource_type="parts",
+        identifier_field="part_number",
+    ):
+        abort(404)
     assets = vite_assets()
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
     # revision-aware initial state for React app
-    rev = (request.args.get("rev") or "").strip()
     return render_template(
         "ui/react_shell.html",
         title=f"BOM · {pn}{(' · REV ' + rev) if rev else ''}",
@@ -82,9 +100,9 @@ def admin_addin_ui():
     if not has_any_permission(
         current_user,
         (
-            "security.users.read",
-            "security.tokens.revoke",
             "numbering.manage",
+            "system.config.manage",
+            "system.storage.manage",
         ),
     ):
         abort(403)
@@ -126,12 +144,24 @@ def upload_pack_ui():
 
 @bp.get("/part/<path:pn>")
 @login_required
+@require_permission("parts.read")
 def part_ui(pn):
+    rev = (request.args.get("rev") or "").strip()
+    scoped = Part.objects(part_number__iexact=pn)
+    if rev:
+        scoped = scoped.filter(revision__iexact=rev)
+    if not authorised_get(
+        scoped,
+        current_user,
+        pn,
+        resource_type="parts",
+        identifier_field="part_number",
+    ):
+        abort(404)
     assets = vite_assets()
     if not assets["js"]:
         abort(404, "React build missing. Run `npm run build` in /frontend.")
     # revision-aware initial state for React app
-    rev = (request.args.get("rev") or "").strip()
     return render_template(
         "ui/react_shell.html",
         title=f"Part · {pn}{(' · REV ' + rev) if rev else ''}",

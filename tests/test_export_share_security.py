@@ -144,7 +144,6 @@ def test_standard_non_export_roles_and_disabled_legacy_admin_are_denied(client, 
     part = _released("EXP-ROLE", "A")
     for role_name in (
         "internal_viewer",
-        "planner",
         "auditor",
         "security_administrator",
         "system_administrator",
@@ -161,6 +160,18 @@ def test_standard_non_export_roles_and_disabled_legacy_admin_are_denied(client, 
             json={"rev": part.revision},
         )
         assert response.status_code == 403, role_name
+
+    for role_name in ("planner", "procurement", "sales_customer_service"):
+        user = _user(
+            f"{role_name}@export-role.example.test",
+            _standard_role(role_name),
+        )
+        _login(client, user)
+        response = client.post(
+            f"/api/parts/{part.part_number}/export/arena_bom",
+            json={"rev": part.revision},
+        )
+        assert response.status_code == 200, role_name
 
     legacy_admin = _admin("legacy-export@example.test")
     _login(client, legacy_admin)

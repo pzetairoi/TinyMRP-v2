@@ -4,19 +4,19 @@
 {% block content %}
 {% call page_header("Roles & permissions", "Define reusable access bundles and check the standard catalogue.", "People & access") %}
   <div class="d-flex flex-wrap gap-2">
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin.users_list') }}">Users</a>
-    <a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a>
-    <a class="btn btn-primary" href="{{ url_for('admin_roles.roles_create') }}">New custom role</a>
+    {% if has_perm('security.users.read') %}<a class="btn btn-outline-secondary" href="{{ url_for('admin.users_list') }}">Users</a>{% endif %}
+    {% if has_perm('audit.read') %}<a class="btn btn-outline-secondary" href="{{ url_for('admin_audit.audit_list') }}">Audit log</a>{% endif %}
+    {% if has_perm('security.roles.manage') %}<a class="btn btn-primary" href="{{ url_for('admin_roles.roles_create') }}">New custom role</a>{% endif %}
   </div>
 {% endcall %}
 
 <section class="card tm-card mb-4" aria-labelledby="standardRolesHeading">
   <div class="card-body">
     {% call card_header("Standard roles", "A read-only comparison with the canonical role catalogue runs whenever this page opens.") %}
-      <form method="post" action="{{ url_for('admin_roles.standard_roles_seed') }}">
+      {% if has_perm('security.roles.manage') %}<form method="post" action="{{ url_for('admin_roles.standard_roles_seed') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn btn-sm btn-primary" type="submit">Seed missing standard roles</button>
-      </form>
+      </form>{% endif %}
     {% endcall %}
     <div class="tm-access-stats" id="standardRolesHeading">
       <div><strong>{{ standard_report.current_count }}</strong><span>Current</span></div>
@@ -24,7 +24,7 @@
       <div><strong>{{ standard_report.drifted_count }}</strong><span>Drifted</span></div>
       <div><strong>{{ standard_report.invalid_count }}</strong><span>Invalid</span></div>
     </div>
-    {% if standard_report.drifted_count %}
+    {% if standard_report.drifted_count and has_perm('security.roles.manage') %}
     <details class="tm-access-advanced mt-3">
       <summary>Advanced: restore canonical definitions</summary>
       <p class="small text-muted mt-2 mb-2">
@@ -118,10 +118,12 @@
           </details>
         </td>
         <td>
-          {% if row.role %}
+          {% if row.role and has_perm('security.roles.manage') %}
           <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_roles.roles_edit', role_id=row.role.id) }}">Edit</a>
-          {% else %}
+          {% elif has_perm('security.roles.manage') %}
           <span class="small text-muted">Seed to edit</span>
+          {% else %}
+          <span class="small text-muted">Read only</span>
           {% endif %}
         </td>
       </tr>
@@ -143,7 +145,7 @@
       <strong>For development, staging and disposable test instances only.</strong>
       Test users and business records use reserved <code>permtest.*</code> and <code>DEMO-*</code> namespaces.
     </div>
-    {% if permission_test_enabled %}
+    {% if permission_test_enabled and has_perm('security.roles.manage') and has_perm('security.users.manage') and has_perm('security.assignments.manage') and has_perm('system.maintenance') %}
     <div class="d-flex flex-wrap gap-2">
       <form method="post" action="{{ url_for('admin_roles.permission_test_seed') }}"
             data-confirm="Create or refresh the reserved permission test environment? New random passwords will be generated.">

@@ -3,7 +3,9 @@
 {% block title %}Application Settings - Admin{% endblock %}
 {% block content %}
 {% call page_header("Application Settings", "Configure branding, import behaviour, process classification, and export defaults.", "Configuration") %}
+  {% if has_perm('system.config.manage') %}
   <button class="btn btn-primary" type="submit" form="adminSettingsForm">Save settings</button>
+  {% endif %}
 {% endcall %}
 <form id="adminSettingsForm" method="post" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -61,8 +63,8 @@
   <div class="card shadow-sm tm-card mb-3"><div class="card-body">
     {% call card_header("Process Library", "Define how manufacturing processes appear and which supporting files they require.") %}
       <div class="d-flex flex-wrap gap-2">
-        <button class="btn btn-sm btn-outline-primary" type="button" id="addProcessRow">Add process</button>
-        <button class="btn btn-sm btn-outline-secondary" type="submit" name="reset_process_library" value="1">Restore defaults</button>
+        {% if has_perm('system.config.manage') %}<button class="btn btn-sm btn-outline-primary" type="button" id="addProcessRow">Add process</button>
+        <button class="btn btn-sm btn-outline-secondary" type="submit" name="reset_process_library" value="1">Restore defaults</button>{% endif %}
       </div>
     {% endcall %}
     <div class="tm-process-toolbar mb-3">
@@ -91,10 +93,11 @@
     <div class="form-text">Users can override this value for an individual export.</div>
   </div></div>
 
-  {% call action_bar("Save configuration changes, or recompute when process mappings should be applied to existing parts.") %}
+  {% if has_perm('system.config.manage') %}{% call action_bar("Save configuration changes, or recompute when process mappings should be applied to existing parts.") %}
     <button class="btn btn-primary" type="submit">Save settings</button>
     <button class="btn btn-outline-primary" type="submit" name="recompute_process_library" value="1">Save and recompute existing parts</button>
   {% endcall %}
+  {% endif %}
 </form>
 
 <template id="processRowTemplate">

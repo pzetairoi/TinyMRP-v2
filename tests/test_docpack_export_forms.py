@@ -43,7 +43,17 @@ def test_jobs_form_docpack_section_keeps_field_names_and_hooks(client, app):
     the restyle, plus the JS hook classes the new progress bar/binder-toggle
     script depends on.
     """
-    user = _make_user("jobs-form@example.com", ["jobs.view", "jobs.manage"])
+    user = _make_user(
+        "jobs-form@example.com",
+        [
+            "jobs.read",
+            "exports.run",
+            "parts.read",
+            "bom.read",
+            "files.read",
+            "markups.read",
+        ],
+    )
     job = Job(job_number="JOB-FORM-1", title="Sample job").save()
 
     _login(client, user)
@@ -73,7 +83,17 @@ def test_jobs_form_docpack_section_keeps_field_names_and_hooks(client, app):
 
 
 def test_orders_form_docpack_and_scope_sections_keep_field_names(client, app):
-    user = _make_user("orders-form@example.com", ["orders.view", "orders.manage", "items.view"])
+    user = _make_user(
+        "orders-form@example.com",
+        [
+            "orders.read",
+            "exports.run",
+            "parts.read",
+            "bom.read",
+            "files.read",
+            "markups.read",
+        ],
+    )
     customer = Customer(name="Acme").save()
     order = Order(order_number="ORD-FORM-1", customer=customer, status="submitted", kind="sales").save()
 

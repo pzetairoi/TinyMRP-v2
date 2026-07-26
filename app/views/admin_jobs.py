@@ -4,9 +4,7 @@ from datetime import timedelta
 from typing import Dict, List, Tuple
 from app.services.acl import (
     permissions_required,
-    is_external_scoped_user,
     customer_scope_ids,
-    supplier_scope_ids,
     user_has_permission,
 )
 from app.services.authorization import (
@@ -15,6 +13,7 @@ from app.services.authorization import (
     authorise,
     authorise_part_access,
     scope_queryset,
+    uses_portal_presentation,
 )
 from app.services.field_policies import (
     filter_response_fields,
@@ -105,30 +104,21 @@ def _parse_bool(value: object) -> bool:
         return False
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
-def _external_user_ids() -> set[str]:
-    ids: set[str] = set()
-    for c in Customer.objects().only("users"):
-        for u in (c.users or []):
-            try:
-                ids.add(str(u.id))
-            except Exception:
-                continue
-    for s in Supplier.objects().only("users"):
-        for u in (s.users or []):
-            try:
-                ids.add(str(u.id))
-            except Exception:
-                continue
-    return ids
+def _is_portal_only_user(user) -> bool:
+    return (
+        not user_has_permission(user, "jobs.read")
+        or uses_portal_presentation(
+            user,
+            "jobs.read",
+            resource_type="jobs",
+        )
+    )
+
 
 def _eligible_job_users():
-    external_ids = _external_user_ids()
     out = []
     for u in User.objects().order_by("email"):
-        role_names = {getattr(r, "name", "") for r in (u.roles or [])}
-        if role_names & {"customer_viewer", "supplier_viewer"}:
-            continue
-        if str(u.id) in external_ids:
+        if _is_portal_only_user(u):
             continue
         out.append(u)
     return out
@@ -136,14 +126,10 @@ def _eligible_job_users():
 def _filter_job_participants(user_ids):
     if not user_ids:
         return []
-    external_ids = _external_user_ids()
     users = list(User.objects(id__in=user_ids))
     out = []
     for u in users:
-        role_names = {getattr(r, "name", "") for r in (u.roles or [])}
-        if role_names & {"customer_viewer", "supplier_viewer"}:
-            continue
-        if str(u.id) in external_ids:
+        if _is_portal_only_user(u):
             continue
         out.append(u)
     return out
@@ -462,7 +448,7 @@ def _build_job_bom_rollup(
         ordered = float(ordered_map.get(key, 0.0) or 0.0)
         rem = max(req - ordered, 0.0)
         over = max(ordered - req, 0.0)
-        meta = _part_meta(pn_disp, rev_disp)
+        meta = _part_meta(pn_disp, rev_disp, user=user)
         links = sorted(
             list((order_links_raw.get(key) or {}).values()),
             key=lambda item: (item.get("order_number") or ""),
@@ -570,9 +556,12 @@ def jobs_list():
     if date_to:
         q = q.filter(scheduled_end__lte=date_to)
 
-    is_external = is_external_scoped_user(current_user)
+    is_external = uses_portal_presentation(
+        current_user,
+        "jobs.read",
+        resource_type="jobs",
+    )
     cust_ids = customer_scope_ids(current_user)
-    supp_ids = supplier_scope_ids(current_user)
     mask_vendors = bool(is_external and cust_ids)
     mask_participants = bool(is_external)
     jobs = q.order_by("job_number")
@@ -657,21 +646,27 @@ def jobs_view(job_id):
         log_action("job.view", resource_type="job", resource=str(j.id))
     except Exception:
         pass
-    is_external = is_external_scoped_user(current_user)
+    is_external = uses_portal_presentation(
+        current_user,
+        "jobs.read",
+        resource_type="jobs",
+    )
     cust_ids = customer_scope_ids(current_user)
-    supp_ids = supplier_scope_ids(current_user)
     users = _eligible_job_users() if user_has_permission(current_user, "jobs.assign") else []
     suppliers, customers = _job_form_destinations()
     allowed_bom = authorised_part_pairs(
         current_user,
-        [(line.pn, line.rev or "") for line in (j.bom or [])],
+        [
+            (line.pn, _resolve_visible_rev(line.pn, line.rev))
+            for line in (j.bom or [])
+        ],
     )
     visible_bom = [
         line
         for line in (j.bom or [])
         if (
             str(line.pn or "").strip().casefold(),
-            str(line.rev or "").strip().casefold(),
+            _resolve_visible_rev(line.pn, line.rev).casefold(),
         )
         in allowed_bom
     ]
@@ -679,7 +674,7 @@ def jobs_view(job_id):
         [f"{line.pn},{line.rev},{line.qty:g}" for line in visible_bom]
     )
     orders = _orders_for_job(j)
-    can_manage_orders = user_has_permission(current_user, "orders.manage")
+    can_manage_orders = user_has_permission(current_user, "orders.update")
     rollup = _build_job_bom_rollup(
         j,
         can_manage_orders=can_manage_orders,
@@ -781,6 +776,14 @@ def _parse_bom_text(text: str):
             continue
         pn = _canonical_pn(parts[0])
         rev = _clean_rev(parts[1] if len(parts) > 1 else "")
+        if not rev:
+            part = (
+                scope_queryset(Part.objects, current_user, "parts")
+                .filter(part_number__iexact=pn)
+                .order_by("-updated_at")
+                .first()
+            )
+            rev = _clean_rev(getattr(part, "revision", "") if part else "")
         try:
             qty = float(parts[2]) if len(parts) > 2 else 1.0
         except Exception:
@@ -901,38 +904,40 @@ def jobs_edit(job_id):
         j.priority = (request.form.get("priority") or j.priority or "normal").strip()
         j.scheduled_start = _parse_date(request.form.get("scheduled_start"))
         j.scheduled_end = _parse_date(request.form.get("scheduled_end"))
-        cust_id = request.form.get("customer")
-        j.customer = (
-            authorised_get(
-                Customer.objects,
-                current_user,
-                cust_id,
-                resource_type="customers",
-                permission="jobs.assign",
-            )
-            if cust_id
-            else None
-        )
-        if cust_id and not j.customer:
-            abort(404)
-        user_ids = request.form.getlist("participants")
-        j.participants = _filter_job_participants(user_ids) if user_ids else []
-        supp_ids = request.form.getlist("vendors")
-        if supp_ids:
-            j.vendors = list(
-                scope_queryset(
-                    Supplier.objects(id__in=supp_ids),
+        if user_has_permission(current_user, "jobs.assign"):
+            cust_id = request.form.get("customer")
+            j.customer = (
+                authorised_get(
+                    Customer.objects,
                     current_user,
-                    "suppliers",
+                    cust_id,
+                    resource_type="customers",
                     permission="jobs.assign",
                 )
+                if cust_id
+                else None
             )
-            if len(j.vendors) != len(set(supp_ids)):
+            if cust_id and not j.customer:
                 abort(404)
-        else:
-            j.vendors = []
-        bom_text = request.form.get("bom_text") or ""
-        j.bom = _parse_bom_text(bom_text)
+            user_ids = request.form.getlist("participants")
+            j.participants = _filter_job_participants(user_ids) if user_ids else []
+            supp_ids = request.form.getlist("vendors")
+            if supp_ids:
+                j.vendors = list(
+                    scope_queryset(
+                        Supplier.objects(id__in=supp_ids),
+                        current_user,
+                        "suppliers",
+                        permission="jobs.assign",
+                    )
+                )
+                if len(j.vendors) != len(set(supp_ids)):
+                    abort(404)
+            else:
+                j.vendors = []
+        if user_has_permission(current_user, "jobs.bom.update"):
+            bom_text = request.form.get("bom_text") or ""
+            j.bom = _parse_bom_text(bom_text)
         j.updated_at = utc_now()
         j.save()
         flash("Job updated.", "success")
@@ -947,14 +952,17 @@ def jobs_edit(job_id):
     # Recompose bom_text for editing
     allowed_bom = authorised_part_pairs(
         current_user,
-        [(line.pn, line.rev or "") for line in (j.bom or [])],
+        [
+            (line.pn, _resolve_visible_rev(line.pn, line.rev))
+            for line in (j.bom or [])
+        ],
     )
     visible_bom = [
         line
         for line in (j.bom or [])
         if (
             str(line.pn or "").strip().casefold(),
-            str(line.rev or "").strip().casefold(),
+            _resolve_visible_rev(line.pn, line.rev).casefold(),
         )
         in allowed_bom
     ]
@@ -1028,7 +1036,7 @@ def _job_order_totals(job: Job):
     return required_total, ordered_total, received_total
 
 def _resolve_rev(pn: str, rev: str | None):
-    if rev is None:
+    if not _clean_rev(rev):
         p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
         if not p:
             return ""
@@ -1037,7 +1045,20 @@ def _resolve_rev(pn: str, rev: str | None):
     return _clean_rev(rev)
 
 
-def _part_meta(pn: str, rev: str):
+def _resolve_visible_rev(pn: str, rev: str | None) -> str:
+    rev_clean = _clean_rev(rev)
+    if rev_clean:
+        return rev_clean
+    part = (
+        scope_queryset(Part.objects, current_user, "parts")
+        .filter(part_number__iexact=pn)
+        .order_by("-updated_at")
+        .first()
+    )
+    return _clean_rev(getattr(part, "revision", "") if part else "")
+
+
+def _part_meta(pn: str, rev: str, *, user=None):
     resolved_rev = _resolve_rev(pn, rev)
     p = Part.objects(part_number__iexact=pn, revision__iexact=resolved_rev).first()
     desc = ""
@@ -1046,7 +1067,7 @@ def _part_meta(pn: str, rev: str):
         attrs = harvest_part_attrs(p)
         desc = attrs.get("description") or p.description or ""
         resolved_rev = _clean_rev(attrs.get("revision") or p.revision or resolved_rev or "")
-        urls = thumb_urls_for(pn, resolved_rev)
+        urls = thumb_urls_for(pn, resolved_rev, user=user)
         thumb = urls[0] if urls else ""
     return {"desc": desc, "rev": resolved_rev, "thumb": thumb}
 
@@ -1063,7 +1084,7 @@ def job_bom_json(job_id):
         abort(404)
     rows = []
     requested_pairs = [
-        (line.pn, _clean_rev(line.rev))
+        (line.pn, _resolve_visible_rev(line.pn, line.rev))
         for line in (j.bom or [])
         if str(line.pn or "").strip()
     ]
@@ -1077,12 +1098,12 @@ def job_bom_json(job_id):
     if authorised_part_pairs(current_user, requested_pairs) != expected_pairs:
         abort(403)
     boundary = response_context("jobs", current_user)
-    can_manage = user_has_permission(current_user, "jobs.manage")
+    can_manage = user_has_permission(current_user, "jobs.update")
     orders = _orders_for_job(j)
     for line in (j.bom or []):
         pn = line.pn
         stored_rev = (line.rev or "")
-        rev = _resolve_rev(pn, stored_rev)
+        rev = _resolve_visible_rev(pn, stored_rev)
         req = float(line.qty or 0)
         ordered = 0.0
         links = []
@@ -1091,7 +1112,7 @@ def job_bom_json(job_id):
                 continue
             qty_in_o = 0.0
             for l in (o.lines or []):
-                l_rev = _resolve_rev(l.pn or "", l.rev or "")
+                l_rev = _resolve_visible_rev(l.pn or "", l.rev or "")
                 if (l.pn or "").strip().lower() == pn.lower() and l_rev == rev:
                     qty_in_o += float(l.qty or 0)
             if qty_in_o > 0:

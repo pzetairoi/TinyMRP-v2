@@ -35,6 +35,20 @@ def _clean_rev(value: object) -> str:
     return clean_rev(value)
 
 
+def _resolve_scoped_revision(pn: str, revision: object, user=None) -> str:
+    revision_clean = _clean_rev(revision)
+    if revision_clean:
+        return revision_clean
+    query = Part.objects(part_number__iexact=str(pn or "").strip())
+    if user is not None:
+        query = scope_queryset(query, user, "parts")
+    part = query.order_by("-updated_at").first()
+    if not part:
+        return ""
+    attrs = harvest_part_attrs(part)
+    return _clean_rev(attrs.get("revision") or part.revision or "")
+
+
 def _coverage_groups(pn: str, rev: str) -> set[str]:
     if not has_permission(current_user, "files.read"):
         return set()
@@ -56,47 +70,57 @@ def _rows_for_child_pn(
     # Fetch links where this PN is the child
     if "child_pn" in BOMLink._fields:
         query = BOMLink.objects(child_pn=pn)
-        if child_rev is not None and "child_rev" in BOMLink._fields:
-            query = query.filter(child_rev=_clean_rev(child_rev))
         links = list(query)
     else:
         child_part = Part.objects(part_number=pn).only("id").first()
         links = list(BOMLink.objects(child=child_part))
 
+    requested_child_rev = _resolve_scoped_revision(pn, child_rev, user)
+    normalized_links = []
+    for link in links:
+        if "parent_pn" in BOMLink._fields:
+            parent_pn = str(getattr(link, "parent_pn", None) or "").strip()
+            parent_rev = _resolve_scoped_revision(
+                parent_pn,
+                getattr(link, "parent_rev", ""),
+                user,
+            )
+            effective_child_rev = _resolve_scoped_revision(
+                pn,
+                getattr(link, "child_rev", ""),
+                user,
+            )
+        else:
+            parent_obj = getattr(link, "parent", None)
+            parent_pn = str(getattr(parent_obj, "part_number", None) or "").strip()
+            parent_rev = _resolve_scoped_revision(
+                parent_pn,
+                getattr(parent_obj, "revision", "") if parent_obj else "",
+                user,
+            )
+            effective_child_rev = requested_child_rev
+        if not parent_pn:
+            continue
+        if (
+            child_rev is not None
+            and effective_child_rev.casefold() != requested_child_rev.casefold()
+        ):
+            continue
+        normalized_links.append(
+            (link, parent_pn, parent_rev, effective_child_rev)
+        )
+
     allowed_pairs = None
     if user is not None:
         requested_pairs = []
-        for link in links:
-            requested_pairs.append(
-                (
-                    getattr(link, "child_pn", pn) or pn,
-                    getattr(link, "child_rev", child_rev or "") or "",
-                )
-            )
-            requested_pairs.append(
-                (
-                    getattr(link, "parent_pn", "") or "",
-                    getattr(link, "parent_rev", "") or "",
-                )
-            )
+        for _, parent_pn, parent_rev, effective_child_rev in normalized_links:
+            requested_pairs.append((pn, effective_child_rev))
+            requested_pairs.append((parent_pn, parent_rev))
         allowed_pairs = authorised_part_pairs(user, requested_pairs)
 
     rows = []
     seen = set()
-    for l in links:
-        # Resolve parent PN / REV
-        if "parent_pn" in BOMLink._fields:
-            parent_pn = getattr(l, "parent_pn", None)
-            parent_rev = _clean_rev(getattr(l, "parent_rev", "") if hasattr(l, "parent_rev") else "")
-            effective_child_rev = _clean_rev(getattr(l, "child_rev", "") if hasattr(l, "child_rev") else (child_rev or ""))
-        else:
-            parent_obj = getattr(l, "parent", None)
-            parent_pn = getattr(parent_obj, "part_number", None)
-            parent_rev = _clean_rev(getattr(parent_obj, "revision", "") if parent_obj else "")
-            effective_child_rev = _clean_rev(child_rev or "")
-
-        if not parent_pn:
-            continue
+    for l, parent_pn, parent_rev, effective_child_rev in normalized_links:
         if allowed_pairs is not None:
             child_key = (pn.casefold(), effective_child_rev.casefold())
             parent_key = (parent_pn.casefold(), parent_rev.casefold())

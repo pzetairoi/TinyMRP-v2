@@ -68,18 +68,18 @@ DEMO_BOM = [
 EXPECTED_VISIBILITY = {
     "custA.viewer": {
         "jobs": ["DEMO-JOB-A1"],
-        "orders": ["DEMO-PO-Y1", "DEMO-SO-A1"],
+        "orders": ["DEMO-SO-A1"],
     },
     "custB.viewer": {
         "jobs": ["DEMO-JOB-B1"],
         "orders": [],
     },
     "supX.viewer": {
-        "jobs": [],
+        "jobs": ["DEMO-JOB-A1", "DEMO-JOB-O1"],
         "orders": ["DEMO-PO-X1"],
     },
     "supY.viewer": {
-        "jobs": [],
+        "jobs": ["DEMO-JOB-A1", "DEMO-JOB-B1"],
         "orders": ["DEMO-PO-Y1"],
     },
     "misconfig.custrole": {

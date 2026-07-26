@@ -404,14 +404,14 @@ def test_job_order_company_and_nested_field_policies(client):
     _login(client, planner)
     planner_job = client.get(f"/api/jobs/{job.job_number}").get_json()["job"]
     assert planner_job["estimated_hours"] == 10
-    assert "customer" not in planner_job
-    assert "customer_id" not in planner_job
+    assert planner_job["customer"] == customer.name
+    assert planner_job["customer_id"] == str(customer.id)
     planner_order = client.get(
         f"/api/orders/{order.order_number}"
     ).get_json()["order"]
     assert planner_order["total"] is None
     assert planner_order["lines"][0]["unit_price"] is None
-    assert "supplier" not in planner_order
+    assert planner_order["supplier"] == supplier.name
     assert "note" in planner_order["lines"][0]
 
     procurement = _user(

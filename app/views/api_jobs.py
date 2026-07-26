@@ -14,7 +14,9 @@ from app.services.api_auth import api_auth_required
 from app.services.authorization import (
     authorised_get,
     authorised_part_pairs,
+    has_permission,
     scope_queryset,
+    uses_portal_presentation,
 )
 from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW
 from app.services.field_policies import (
@@ -154,33 +156,20 @@ def _scoped_suppliers(user, permission, supplier_ids):
     return suppliers
 
 
-def _external_user_ids() -> set[str]:
-    ids: set[str] = set()
-    for c in Customer.objects().only("users"):
-        for u in (c.users or []):
-            try:
-                ids.add(str(u.id))
-            except Exception:
-                continue
-    for s in Supplier.objects().only("users"):
-        for u in (s.users or []):
-            try:
-                ids.add(str(u.id))
-            except Exception:
-                continue
-    return ids
-
 def _filter_participant_users(user_ids):
     if not user_ids:
         return []
-    external_ids = _external_user_ids()
     users = list(User.objects(id__in=user_ids))
     out = []
     for u in users:
-        role_names = {getattr(r, "name", "") for r in (u.roles or [])}
-        if role_names & {"customer_viewer", "supplier_viewer"}:
-            continue
-        if str(u.id) in external_ids:
+        if (
+            not has_permission(u, "jobs.read")
+            or uses_portal_presentation(
+                u,
+                "jobs.read",
+                resource_type="jobs",
+            )
+        ):
             continue
         out.append(u)
     return out

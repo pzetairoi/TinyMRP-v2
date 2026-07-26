@@ -6,7 +6,11 @@ from io import BytesIO
 from datetime import datetime, timezone
 from flask_login import current_user, login_required
 from app.services.acl import permissions_required
-from app.services.authorization import has_permission, require_permission
+from app.services.authorization import (
+    has_any_permission,
+    has_permission,
+    require_permission,
+)
 from app.services.export_artifacts import (
     load_export_artifact,
     store_export_artifact,
@@ -81,8 +85,9 @@ def _addin_installers():
 
 @bp.get("/")
 @login_required
-@permissions_required("tools.view")
 def tools_index():
+    if not has_any_permission(current_user, ("exports.run", "tools.view")):
+        abort(403)
     files = _static_tools()
     addin_files = _addin_installers()
     return render_template("tools/index.html", files=files, addin_files=addin_files)
@@ -155,7 +160,7 @@ def _default_compile_title() -> str:
 
 @bp.route("/excelcompile", methods=["GET", "POST"])
 @login_required
-@permissions_required("tools.view")
+@require_permission("exports.run")
 def excel_compile():
     excel_fields, processes, file_types_available = _excel_compile_options()
     default_title = _default_compile_title()
@@ -360,7 +365,6 @@ def excel_compile():
 
 @bp.get("/excelcompile/download/<path:filename>")
 @login_required
-@permissions_required("tools.view")
 @require_permission("exports.run")
 def excel_compile_download(filename):
     try:
