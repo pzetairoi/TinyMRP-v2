@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import wraps
 from typing import Optional, Set, Tuple
 
-from flask import abort
+from flask import abort, g
 from flask_login import current_user
 
 
@@ -76,8 +76,11 @@ def permissions_required(*permissions: str):
                 abort(401)
             from app.services.authorization import authorise
 
-            if not all(authorise(current_user, permission).allowed for permission in permissions):
-                abort(403)
+            for permission in permissions:
+                decision = authorise(current_user, permission)
+                if not decision.allowed:
+                    g.authz_denial = decision
+                    abort(403)
             return fn(*args, **kwargs)
 
         return wrapper

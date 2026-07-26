@@ -178,6 +178,24 @@ def _legacy_catalogue() -> list[dict[str, str]]:
     return [_permission_item(value) for value in LEGACY_PERMISSION_IDENTIFIERS]
 
 
+def _submitted_permissions() -> list[str]:
+    """Return the posted permissions, de-duplicated in first-seen order.
+
+    A checkbox offered by more than one catalogue section posts the same value
+    repeatedly; that is a form artefact, not a role the operator should have to
+    repair by hand.
+    """
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for permission in request.form.getlist("permissions"):
+        if permission in seen:
+            continue
+        seen.add(permission)
+        unique.append(permission)
+    return unique
+
+
 def _permission_group_summary(permissions: list[str]) -> list[dict[str, object]]:
     selected = set(permissions or [])
     summary = []
@@ -487,7 +505,7 @@ def roles_create():
         name = (request.form.get("name") or "").strip()
         display_name = (request.form.get("display_name") or "").strip()
         description = (request.form.get("description") or "").strip()
-        permissions = request.form.getlist("permissions")
+        permissions = _submitted_permissions()
         submitted = {
             "name": name,
             "display_name": display_name,
@@ -577,7 +595,7 @@ def roles_edit(role_id):
         name = role.name if definition else (request.form.get("name") or "").strip()
         display_name = (request.form.get("display_name") or "").strip()
         description = (request.form.get("description") or "").strip()
-        permissions = request.form.getlist("permissions")
+        permissions = _submitted_permissions()
         submitted = {
             "name": name,
             "display_name": display_name,

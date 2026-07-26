@@ -1,4 +1,5 @@
 ﻿{% extends "security/base.html" %}
+{% from "ui/_components.html" import permission_gap_notice %}
 {% set is_readonly = readonly if readonly is defined else false %}
 {% set hide_participants = hide_participants if hide_participants is defined else false %}
 {% set hide_vendors = hide_vendors if hide_vendors is defined else false %}
@@ -10,7 +11,12 @@
   <div class="col-12">
     <div class="card shadow-sm">
       <div class="card-body p-4">
-        <h1 class="h5 mb-3">{{ 'View job' if is_readonly else ('Edit job' if job else 'New job') }}</h1>
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h1 class="h5 mb-0">{{ 'View job' if is_readonly else ('Edit job' if job else 'New job') }}</h1>
+          {% if is_readonly and job and has_perm('jobs.update') %}
+          <a class="btn btn-sm btn-primary" href="{{ url_for('admin_jobs.jobs_edit', job_id=job.id) }}">Edit job</a>
+          {% endif %}
+        </div>
         <form method="post">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="row g-3">
@@ -550,9 +556,15 @@
           </div>
         {% endif %}
         </form>
-        {% if job and has_perm('exports.run') and has_perm('parts.read') and has_perm('bom.read') and has_perm('files.read') %}
+        {% if job and has_perm('exports.run') %}
         <div class="mt-4">
           <h2 class="h6 mb-3 fw-bold">Docpack export</h2>
+          {% set docpack_missing = [] %}
+          {% if not has_perm('parts.read') %}{% set _ = docpack_missing.append('parts.read') %}{% endif %}
+          {% if not has_perm('bom.read') %}{% set _ = docpack_missing.append('bom.read') %}{% endif %}
+          {% if not has_perm('files.read') %}{% set _ = docpack_missing.append('files.read') %}{% endif %}
+          {{ permission_gap_notice(docpack_missing) }}
+          {% if not docpack_missing %}
           <form method="post" action="{{ url_for('docpacks_api.build_job') }}" class="docpack-export-form" data-prefix="job">
             <input type="hidden" name="job_id" value="{{ job.id }}">
 
@@ -719,6 +731,7 @@
               </div>
             </div>
           </form>
+          {% endif %}
         </div>
         {% endif %}
         {% if (has_remaining_flat or has_remaining_tree) and can_use_order_kind('purchase', 'orders.create') %}

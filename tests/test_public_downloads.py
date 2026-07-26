@@ -18,7 +18,7 @@ def test_downloads_require_login(client):
 
 
 def test_downloads_available_to_logged_in_tools_user(client):
-    role = Role(name=f"tools-{uuid.uuid4()}", permissions=["tools.view"]).save()
+    role = Role(name=f"tools-{uuid.uuid4()}", permissions=["exports.run"]).save()
     user = User(
         email="tools-user@example.com",
         password="test",

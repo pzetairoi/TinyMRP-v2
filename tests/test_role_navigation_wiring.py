@@ -27,18 +27,13 @@ NAV_HREFS = {
 ROLE_NAVIGATION = {
     "administrator": set(NAV_HREFS) | {"admin"},
     "security_administrator": {"admin"},
-    "system_administrator": {"admin"},
-    "engineering_data_steward": {"parts", "tools"},
-    "import_operator": {"parts", "import"},
-    "import_approver": {"parts", "import", "admin"},
-    "planner": {"parts", "jobs", "orders", "customers", "suppliers", "tools"},
-    "procurement": {"parts", "jobs", "orders", "suppliers", "tools"},
-    "sales_customer_service": {"parts", "jobs", "orders", "customers", "tools"},
-    "production_operator": {"parts", "jobs"},
-    "quality_reviewer": {"parts", "admin"},
-    "internal_viewer": {"parts", "jobs", "orders", "customers", "suppliers"},
-    "customer_portal": {"parts", "jobs", "orders", "customers"},
-    "supplier_portal": {"parts", "jobs", "orders", "suppliers"},
+    "engineering_manager": {"parts", "jobs", "orders", "tools", "import", "admin"},
+    "engineering": {"parts", "jobs", "orders", "tools", "import"},
+    "commercial": {"parts", "jobs", "orders", "customers", "suppliers", "tools"},
+    "internal": {"parts", "jobs", "orders", "customers", "suppliers", "tools"},
+    "workshop": {"parts", "jobs"},
+    "customer": {"parts", "jobs", "orders", "customers"},
+    "supplier": {"parts", "jobs", "orders", "suppliers"},
     "auditor": {
         "parts",
         "jobs",
@@ -52,35 +47,25 @@ ROLE_NAVIGATION = {
 ROLE_LANDING = {
     "administrator": "/admin/",
     "security_administrator": "/admin/",
-    "system_administrator": "/admin/",
-    "engineering_data_steward": "/ui/parts",
-    "import_operator": "/ui/upload-pack",
-    "import_approver": "/ui/upload-pack",
-    "planner": "/admin/jobs/",
-    "procurement": "/admin/jobs/",
-    "sales_customer_service": "/admin/jobs/",
-    "production_operator": "/admin/jobs/",
-    "quality_reviewer": "/ui/parts",
-    "internal_viewer": "/admin/orders/",
-    "customer_portal": "/admin/jobs/",
-    "supplier_portal": "/admin/jobs/",
+    "engineering_manager": "/ui/parts",
+    "engineering": "/ui/parts",
+    "commercial": "/admin/jobs/",
+    "internal": "/admin/orders/",
+    "workshop": "/admin/jobs/",
+    "customer": "/admin/jobs/",
+    "supplier": "/admin/jobs/",
     "auditor": "/admin/",
 }
 
 ROLE_FORBIDDEN = {
     "security_administrator": "/admin/jobs/",
-    "system_administrator": "/ui/parts",
-    "engineering_data_steward": "/admin/jobs/",
-    "import_operator": "/admin/jobs/",
-    "import_approver": "/admin/jobs/",
-    "planner": "/admin/audit/",
-    "procurement": "/admin/customers/",
-    "sales_customer_service": "/admin/suppliers/",
-    "production_operator": "/admin/orders/",
-    "quality_reviewer": "/admin/jobs/",
-    "internal_viewer": "/admin/orders/new",
-    "customer_portal": "/admin/suppliers/",
-    "supplier_portal": "/admin/customers/",
+    "engineering_manager": "/admin/customers/",
+    "engineering": "/admin/customers/",
+    "commercial": "/ui/upload-pack",
+    "internal": "/admin/orders/new",
+    "workshop": "/admin/orders/",
+    "customer": "/admin/suppliers/",
+    "supplier": "/admin/customers/",
     "auditor": "/admin/users/new",
 }
 
@@ -152,14 +137,14 @@ def test_permission_test_users_sign_in_and_open_expected_primary_navigation(
     app,
 ):
     scenarios = (
-        "planner",
-        "procurement",
-        "sales_customer_service",
-        "production_operator",
-        "customer_portal",
-        "supplier_portal",
+        "engineering",
+        "engineering_manager",
+        "commercial",
+        "internal",
+        "workshop",
+        "customer",
+        "supplier",
         "security_administrator",
-        "system_administrator",
         "auditor",
     )
     with app.app_context():
@@ -197,24 +182,24 @@ def test_permission_test_users_sign_in_and_open_expected_primary_navigation(
     ("roles", "expected"),
     (
         (
-            ("sales_customer_service", "customer_portal"),
-            ROLE_NAVIGATION["sales_customer_service"],
+            ("commercial", "customer"),
+            ROLE_NAVIGATION["commercial"],
         ),
         (
-            ("procurement", "supplier_portal"),
-            ROLE_NAVIGATION["procurement"],
+            ("commercial", "supplier"),
+            ROLE_NAVIGATION["commercial"],
         ),
         (
-            ("internal_viewer", "customer_portal"),
-            ROLE_NAVIGATION["internal_viewer"],
+            ("internal", "customer"),
+            ROLE_NAVIGATION["internal"],
         ),
         (
-            ("planner", "production_operator"),
-            ROLE_NAVIGATION["planner"],
+            ("engineering", "workshop"),
+            ROLE_NAVIGATION["engineering"],
         ),
         (
-            ("security_administrator", "customer_portal"),
-            ROLE_NAVIGATION["customer_portal"] | {"admin"},
+            ("security_administrator", "customer"),
+            ROLE_NAVIGATION["customer"] | {"admin"},
         ),
     ),
 )
@@ -228,11 +213,11 @@ def test_multi_role_navigation_is_the_capability_union(client, roles, expected):
     assert ('id="navAdmin"' in body) is ("admin" in expected)
 
 
-def test_relationship_job_and_order_scopes_cover_portals_procurement_and_sales(
+def test_relationship_job_and_order_scopes_cover_portals_and_commercial(
     client,
 ):
-    customer_portal = _user("customer-portal", "customer_portal")
-    supplier_portal = _user("supplier-portal", "supplier_portal")
+    customer_portal = _user("customer-portal", "customer")
+    supplier_portal = _user("supplier-portal", "supplier")
     customer = Customer(
         code="ROLE-CUSTOMER",
         name="Role Customer",
@@ -301,26 +286,29 @@ def test_relationship_job_and_order_scopes_cover_portals_procurement_and_sales(
         purchase.order_number
     }
 
-    procurement = _user("procurement", "procurement")
-    procurement_jobs = client.get(
+    # Commercial covers both purchase and sales, so its scope is company-wide.
+    commercial = _user("commercial", "commercial")
+    commercial_jobs = client.get(
         "/api/jobs",
-        headers=_headers(procurement),
+        headers=_headers(commercial),
     ).get_json()["items"]
-    assert {row["job_number"] for row in procurement_jobs} == {
+    assert {row["job_number"] for row in commercial_jobs} == {
+        customer_job.job_number,
         vendor_job.job_number,
         purchase_job.job_number,
-        customer_job.job_number,
+        unrelated.job_number,
     }
-    sales_user = _user("sales", "sales_customer_service")
-    sales_jobs = client.get(
-        "/api/jobs",
-        headers=_headers(sales_user),
+    commercial_orders = client.get(
+        "/api/orders",
+        headers=_headers(commercial),
     ).get_json()["items"]
-    assert {row["job_number"] for row in sales_jobs} == {
-        customer_job.job_number
+    assert {sales.order_number, purchase.order_number} <= {
+        row["order_number"] for row in commercial_orders
     }
+
+    # Portal scope stays narrowed to linked companies.
     assert unrelated.job_number not in {
-        row["job_number"] for row in procurement_jobs + sales_jobs
+        row["job_number"] for row in customer_jobs + supplier_jobs
     }
     assert client.get(
         f"/api/jobs/{unrelated.job_number}",
@@ -345,31 +333,21 @@ def test_list_and_form_actions_follow_exact_operation_permissions(client):
         job=job,
     ).save()
 
-    planner = _user("action-planner", "planner")
-    _login(client, planner)
+    commercial = _user("action-commercial", "commercial")
+    _login(client, commercial)
     jobs_body = client.get("/admin/jobs/").get_data(as_text=True)
     orders_body = client.get("/admin/orders/").get_data(as_text=True)
     order_form = client.get("/admin/orders/new").get_data(as_text=True)
     assert "Create job" in jobs_body
     assert "New order" in orders_body
     assert "Edit" in jobs_body
-    assert 'value="confirmed"' not in order_form
+    # Commercial owns both order kinds and the full approval workflow.
+    assert 'value="purchase"' in order_form
+    assert 'value="sales"' in order_form
+    assert purchase.order_number in orders_body
+    assert sales.order_number in orders_body
 
-    procurement = _user("action-procurement", "procurement")
-    _login(client, procurement)
-    procurement_form = client.get("/admin/orders/new").get_data(as_text=True)
-    assert 'value="purchase"' in procurement_form
-    assert 'value="sales"' not in procurement_form
-    assert purchase.order_number in client.get("/admin/orders/").get_data(as_text=True)
-    assert sales.order_number not in client.get("/admin/orders/").get_data(as_text=True)
-
-    sales_user = _user("action-sales", "sales_customer_service")
-    _login(client, sales_user)
-    sales_form = client.get("/admin/orders/new").get_data(as_text=True)
-    assert 'value="sales"' in sales_form
-    assert 'value="purchase"' not in sales_form
-
-    for role_name in ("internal_viewer", "auditor"):
+    for role_name in ("internal", "auditor"):
         reader = _user(f"action-{role_name}", role_name)
         _login(client, reader)
         body = client.get("/admin/jobs/").get_data(as_text=True)
@@ -380,7 +358,7 @@ def test_list_and_form_actions_follow_exact_operation_permissions(client):
 
 
 def test_order_edit_only_offers_allowed_kind_and_valid_status_transitions(client):
-    procurement = _user("order-options-procurement", "procurement")
+    commercial = _user("order-options-commercial", "commercial")
     supplier = Supplier(code="OPTIONS-S", name="Options Supplier").save()
     order = Order(
         order_number="OPTIONS-PO",
@@ -388,13 +366,12 @@ def test_order_edit_only_offers_allowed_kind_and_valid_status_transitions(client
         status="submitted",
         supplier=supplier,
     ).save()
-    _login(client, procurement)
+    _login(client, commercial)
 
     response = client.get(f"/admin/orders/{order.id}/edit")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert 'value="purchase"' in body
-    assert 'value="sales"' not in body
     assert 'value="submitted"' in body
     assert 'value="confirmed"' in body
     assert 'value="cancelled"' in body
@@ -415,7 +392,7 @@ def test_order_edit_only_offers_allowed_kind_and_valid_status_transitions(client
 
 
 def test_portal_view_links_and_multi_role_internal_presentation(client):
-    portal = _user("link-portal", "customer_portal")
+    portal = _user("link-portal", "customer")
     customer = Customer(code="LINK-C", name="Link Customer", users=[portal]).save()
     job = Job(job_number="LINK-J", customer=customer).save()
     Order(
@@ -434,8 +411,8 @@ def test_portal_view_links_and_multi_role_internal_presentation(client):
 
     sales_portal = _user(
         "internal-sales-portal",
-        "sales_customer_service",
-        "customer_portal",
+        "commercial",
+        "customer",
     )
     customer.users.append(sales_portal)
     customer.save()
@@ -452,7 +429,7 @@ def test_portal_view_links_and_multi_role_internal_presentation(client):
     security_portal = _user(
         "security-portal",
         "security_administrator",
-        "customer_portal",
+        "customer",
     )
     customer.users.append(security_portal)
     customer.save()
@@ -472,14 +449,17 @@ def test_admin_navigation_and_mutations_are_filtered_without_legacy_admin(client
     assert "Application settings" not in security_body
     assert "System metrics" not in security_body
 
-    system = _user("admin-system", "system_administrator")
-    _login(client, system)
-    system_body = client.get("/admin/").get_data(as_text=True)
-    assert "Application settings" in system_body
-    assert "Fields &amp; exports" in system_body
-    assert "SolidWorks add-in" in system_body
-    assert "System metrics" in system_body
-    assert "Users" not in system_body
+    # The administrator owns every administration surface, users and roles included.
+    administrator = _user("admin-business", "administrator")
+    _login(client, administrator)
+    admin_home = client.get("/admin/").get_data(as_text=True)
+    assert "Application settings" in admin_home
+    assert "Fields &amp; exports" in admin_home
+    assert "SolidWorks add-in" in admin_home
+    assert "System metrics" in admin_home
+    assert "New user" in client.get("/admin/users").get_data(as_text=True)
+    assert client.get("/admin/users/new").status_code == 200
+    assert client.get("/admin/roles/new").status_code == 200
 
     auditor = _user("admin-auditor", "auditor")
     _login(client, auditor)
@@ -515,40 +495,32 @@ def test_import_and_document_pack_entries_match_real_capabilities(client):
         lines=[OrderLine(pn=part.part_number, rev=part.revision, qty=1)],
     ).save()
 
-    engineering = _user("pack-engineering", "engineering_data_steward")
+    engineering = _user("pack-engineering", "engineering")
     _login(client, engineering)
     assert client.get(
         f"/api/docpacks/options?pn={part.part_number}&rev={part.revision}"
     ).status_code == 200
     assert "Open compiler" in client.get("/tools/").get_data(as_text=True)
 
-    planner = _user("pack-planner", "planner")
-    _login(client, planner)
+    commercial = _user("pack-commercial", "commercial")
+    _login(client, commercial)
     assert "Docpack export" in client.get(
         f"/admin/jobs/{job.id}"
     ).get_data(as_text=True)
+    for order in (purchase, sales):
+        assert "Docpack export" in client.get(
+            f"/admin/orders/{order.id}"
+        ).get_data(as_text=True)
 
-    procurement = _user("pack-procurement", "procurement")
-    _login(client, procurement)
-    assert "Docpack export" in client.get(
-        f"/admin/orders/{purchase.id}"
-    ).get_data(as_text=True)
-
-    sales_user = _user("pack-sales", "sales_customer_service")
-    _login(client, sales_user)
-    assert "Docpack export" in client.get(
-        f"/admin/orders/{sales.id}"
-    ).get_data(as_text=True)
-
-    viewer = _user("pack-viewer", "internal_viewer")
-    _login(client, viewer)
+    workshop = _user("pack-workshop", "workshop")
+    _login(client, workshop)
     assert "Docpack export" not in client.get(
         f"/admin/jobs/{job.id}"
     ).get_data(as_text=True)
     assert client.post("/api/docpacks/build_job", json={"job_id": str(job.id)}).status_code == 403
 
-    operator = _user("import-operator", "import_operator")
-    _login(client, operator)
+    # Engineering runs low-risk imports; only the manager may override approved data.
+    _login(client, engineering)
     low_risk = client.post(
         "/api/upload/pack?dry_run=1",
         data={"file": (io.BytesIO(b"not-a-zip"), "parts.zip")},
@@ -559,8 +531,8 @@ def test_import_and_document_pack_entries_match_real_capabilities(client):
         data={"file": (io.BytesIO(b"not-a-zip"), "parts.zip")},
     ).status_code == 403
 
-    approver = _user("import-approver", "import_approver")
-    _login(client, approver)
+    manager = _user("import-manager", "engineering_manager")
+    _login(client, manager)
     override = client.post(
         "/api/upload/pack?override_mode=always",
         data={"file": (io.BytesIO(b"not-a-zip"), "parts.zip")},

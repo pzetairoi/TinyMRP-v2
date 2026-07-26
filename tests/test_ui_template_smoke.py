@@ -230,7 +230,7 @@ def test_stage1_server_rendered_pages_and_shell_routes_render(client, app, tmp_p
 
 
 def test_navigation_permission_groupings_and_active_states(client, app):
-    tools_import_role = _make_role("nav_tools_import", ["tools.view", "import.bom"])
+    tools_import_role = _make_role("nav_tools_import", ["exports.run", "import.bom"])
     jobs_role = _make_role("nav_jobs", ["jobs.view", "jobs.manage"])
     orders_role = _make_role("nav_orders", ["orders.view", "orders.manage"])
     companies_role = _make_role(

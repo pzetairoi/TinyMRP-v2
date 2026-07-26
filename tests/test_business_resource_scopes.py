@@ -50,122 +50,81 @@ def _numbers(response, key):
     return {item[key] for item in response.get_json()["items"]}
 
 
-def test_planner_can_prepare_jobs_and_orders_but_cannot_approve_or_manage_financials(
-    client,
-):
-    planner = _user("planner@stage3a.test", _standard_role("planner"))
-    headers = _headers(planner)
+def test_commercial_covers_both_order_kinds_and_both_company_types(client):
+    purchase = Order(order_number="PO-SCOPE", kind="purchase").save()
+    sales = Order(order_number="SO-SCOPE", kind="sales").save()
+    customer = Customer(code="C-SCOPE", name="Scoped Customer").save()
+    supplier = Supplier(code="S-SCOPE", name="Scoped Supplier").save()
 
-    created_job = client.post(
+    commercial = _user("commercial@stage3a.test", _standard_role("commercial"))
+    headers = _headers(commercial)
+
+    response = client.get("/api/orders", headers=headers)
+    assert {purchase.order_number, sales.order_number} <= _numbers(
+        response, "order_number"
+    )
+    for order in (purchase, sales):
+        assert client.get(
+            f"/api/orders/{order.order_number}",
+            headers=headers,
+        ).status_code == 200
+
+    assert client.put(
+        f"/api/customers/{customer.code}",
+        headers=headers,
+        json={"credit_limit": 100},
+    ).status_code == 200
+    assert client.put(
+        f"/api/suppliers/{supplier.code}",
+        headers=headers,
+        json={"rating": 4},
+    ).status_code == 200
+
+
+def test_commercial_plans_jobs_and_runs_the_full_order_workflow(client):
+    commercial = _user("commercial.flow@stage3a.test", _standard_role("commercial"))
+    headers = _headers(commercial)
+
+    assert client.post(
         "/api/jobs",
         headers=headers,
         json={"job_number": "JOB-PLAN", "title": "Plan"},
-    )
-    assert created_job.status_code == 200
+    ).status_code == 200
     assert client.put(
         "/api/jobs/JOB-PLAN",
         headers=headers,
         json={"description": "Prepared"},
     ).status_code == 200
 
-    created_order = client.post(
+    assert client.post(
         "/api/orders",
         headers=headers,
         json={"order_number": "PO-PLAN", "kind": "purchase"},
-    )
-    assert created_order.status_code == 200
+    ).status_code == 200
     Order.objects(order_number="PO-PLAN").update(status="submitted")
     assert client.post(
         "/api/orders/PO-PLAN/approve",
         headers=headers,
         json={},
-    ).status_code == 403
-
-    Customer(code="C-PLAN", name="Planner Customer").save()
-    Supplier(code="S-PLAN", name="Planner Supplier").save()
-    assert client.put(
-        "/api/customers/C-PLAN",
-        headers=headers,
-        json={"credit_limit": 50},
-    ).status_code == 403
-    assert client.put(
-        "/api/suppliers/S-PLAN",
-        headers=headers,
-        json={"rating": 5},
-    ).status_code == 403
-
-
-def test_procurement_and_sales_are_restricted_to_their_order_kind_and_company_type(
-    client,
-):
-    purchase = Order(order_number="PO-SCOPE", kind="purchase").save()
-    sales = Order(order_number="SO-SCOPE", kind="sales").save()
-    customer = Customer(code="C-SCOPE", name="Scoped Customer").save()
-    supplier = Supplier(code="S-SCOPE", name="Scoped Supplier").save()
-
-    procurement = _user(
-        "procurement@stage3a.test",
-        _standard_role("procurement"),
-    )
-    procurement_headers = _headers(procurement)
-    response = client.get("/api/orders", headers=procurement_headers)
-    assert _numbers(response, "order_number") == {purchase.order_number}
-    assert client.get(
-        f"/api/orders/{sales.order_number}",
-        headers=procurement_headers,
-    ).status_code == 404
-    assert client.put(
-        f"/api/customers/{customer.code}",
-        headers=procurement_headers,
-        json={"name": "No"},
-    ).status_code == 403
-    assert client.put(
-        f"/api/suppliers/{supplier.code}",
-        headers=procurement_headers,
-        json={"rating": 4},
     ).status_code == 200
 
-    sales_user = _user(
-        "sales@stage3a.test",
-        _standard_role("sales_customer_service"),
-    )
-    sales_headers = _headers(sales_user)
-    response = client.get("/api/orders", headers=sales_headers)
-    assert _numbers(response, "order_number") == {sales.order_number}
-    assert client.get(
-        f"/api/orders/{purchase.order_number}",
-        headers=sales_headers,
-    ).status_code == 404
-    assert client.put(
-        f"/api/customers/{customer.code}",
-        headers=sales_headers,
-        json={"credit_limit": 100},
-    ).status_code == 200
-    assert client.put(
-        f"/api/suppliers/{supplier.code}",
-        headers=sales_headers,
-        json={"rating": 3},
-    ).status_code == 403
 
-
-def test_production_operator_only_sees_and_updates_assigned_job_stages(client):
-    operator = _user(
-        "operator@stage3a.test",
-        _standard_role("production_operator"),
-    )
+def test_workshop_updates_stages_shop_wide_without_commercial_authority(client):
+    workshop = _user("workshop@stage3a.test", _standard_role("workshop"))
     stage = JobStage(stage_id="stage-1", name="Cut")
     assigned = Job(
         job_number="JOB-ASSIGNED",
-        participants=[operator],
+        participants=[workshop],
         stages=[stage],
     ).save()
-    Job(job_number="JOB-HIDDEN").save()
+    other = Job(job_number="JOB-OTHER").save()
     Order(order_number="PO-NO-EDIT", kind="purchase").save()
-    headers = _headers(operator)
+    headers = _headers(workshop)
 
+    # Workshop is shop-wide: unassigned jobs stay visible.
     response = client.get("/api/jobs", headers=headers)
-    assert _numbers(response, "job_number") == {assigned.job_number}
-    assert client.get("/api/jobs/JOB-HIDDEN", headers=headers).status_code == 404
+    assert {assigned.job_number, other.job_number} <= _numbers(response, "job_number")
+    assert client.get("/api/jobs/JOB-OTHER", headers=headers).status_code == 200
     assert client.post(
         "/api/jobs/JOB-ASSIGNED/stages/stage-1/complete",
         headers=headers,
@@ -194,7 +153,7 @@ def test_read_only_roles_can_read_but_not_write(client):
         lines=[OrderLine(pn="P1", unit_price=200)],
     ).save()
 
-    for role_name in ("internal_viewer", "auditor"):
+    for role_name in ("internal", "auditor"):
         user = _user(
             f"{role_name}@stage3a.test",
             _standard_role(role_name),
@@ -219,7 +178,7 @@ def test_read_only_roles_can_read_but_not_write(client):
 def test_customer_portal_scope_applies_to_lists_details_and_counts(client):
     portal = _user(
         "customer.portal@stage3a.test",
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     linked = Customer(code="C-LINKED", name="Linked", users=[portal]).save()
     other = Customer(code="C-OTHER", name="Other").save()
@@ -275,7 +234,7 @@ def test_supplier_portal_scope_applies_to_issued_orders_related_jobs_and_counts(
 ):
     portal = _user(
         "supplier.portal@stage3a.test",
-        _standard_role("supplier_portal"),
+        _standard_role("supplier"),
     )
     linked = Supplier(code="S-LINKED", name="Linked", users=[portal]).save()
     other = Supplier(code="S-OTHER", name="Other").save()
@@ -324,30 +283,24 @@ def test_supplier_portal_scope_applies_to_issued_orders_related_jobs_and_counts(
     assert sum(stats["status_counts"].values()) == 1
 
 
-def test_security_and_system_administrators_have_no_implicit_business_access(
-    client,
-):
+def test_security_administrator_has_no_implicit_business_access(client):
     Job(job_number="JOB-ADMIN-DENY").save()
-    for role_name in (
-        "security_administrator",
-        "system_administrator",
-    ):
-        user = _user(
-            f"{role_name}@stage3a.test",
-            _standard_role(role_name),
-        )
-        headers = _headers(user)
-        assert client.get("/api/jobs", headers=headers).status_code == 403
-        assert client.get("/api/orders", headers=headers).status_code == 403
-        assert client.get("/api/customers", headers=headers).status_code == 403
-        assert client.get("/api/suppliers", headers=headers).status_code == 403
+    user = _user(
+        "security_administrator@stage3a.test",
+        _standard_role("security_administrator"),
+    )
+    headers = _headers(user)
+    assert client.get("/api/jobs", headers=headers).status_code == 403
+    assert client.get("/api/orders", headers=headers).status_code == 403
+    assert client.get("/api/customers", headers=headers).status_code == 403
+    assert client.get("/api/suppliers", headers=headers).status_code == 403
 
 
 def test_multiple_roles_union_only_permissions_that_grant_the_operation(client):
     linked_user = _user(
         "multi.customer@stage3a.test",
-        _standard_role("customer_portal"),
-        _standard_role("internal_viewer"),
+        _standard_role("customer"),
+        _standard_role("internal"),
     )
     linked_customer = Customer(
         code="C-MULTI",
@@ -364,8 +317,8 @@ def test_multiple_roles_union_only_permissions_that_grant_the_operation(client):
 
     production_planner = _user(
         "multi.production@stage3a.test",
-        _standard_role("production_operator"),
-        _standard_role("planner"),
+        _standard_role("workshop"),
+        _standard_role("commercial"),
     )
     assert _numbers(
         client.get("/api/jobs", headers=_headers(production_planner)),
@@ -375,7 +328,7 @@ def test_multiple_roles_union_only_permissions_that_grant_the_operation(client):
     security_portal = _user(
         "multi.security@stage3a.test",
         _standard_role("security_administrator"),
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     linked_customer.users.append(security_portal)
     linked_customer.save()
@@ -394,11 +347,11 @@ def test_multiple_roles_union_only_permissions_that_grant_the_operation(client):
     ) == {"JOB-MULTI-LINKED", "JOB-MULTI-GLOBAL"}
 
 
-def test_engineering_quality_permissions_union_without_destructive_authority():
+def test_engineering_roles_stop_short_of_destructive_and_commercial_authority():
     user = _user(
-        "multi.engineering-quality@stage3a.test",
-        _standard_role("engineering_data_steward"),
-        _standard_role("quality_reviewer"),
+        "multi.engineering@stage3a.test",
+        _standard_role("engineering"),
+        _standard_role("engineering_manager"),
     )
     permissions = {
         permission
@@ -406,20 +359,24 @@ def test_engineering_quality_permissions_union_without_destructive_authority():
         for permission in (role.permissions or [])
     }
 
-    assert {"parts.update", "reviews.approve"} <= permissions
+    assert {
+        "parts.update",
+        "reviews.approve",
+        "imports.override_approved",
+    } <= permissions
     assert {
         "parts.purge",
         "files.purge",
         "orders.approve",
-        "imports.override_approved",
+        "security.users.manage",
     }.isdisjoint(permissions)
 
 
-def test_supplier_portal_plus_procurement_keeps_purchase_scope(client):
+def test_portal_role_combined_with_commercial_widens_to_every_order(client):
     portal = _user(
         "multi.supplier@stage3a.test",
-        _standard_role("supplier_portal"),
-        _standard_role("procurement"),
+        _standard_role("supplier"),
+        _standard_role("commercial"),
     )
     supplier = Supplier(code="S-MULTI", name="Supplier Multi", users=[portal]).save()
     Order(
@@ -429,31 +386,12 @@ def test_supplier_portal_plus_procurement_keeps_purchase_scope(client):
     ).save()
     Order(order_number="PO-MULTI-OTHER", kind="purchase").save()
     Order(order_number="SO-MULTI", kind="sales").save()
+
+    # Commercial contributes company-wide order scope, so the union is global.
     assert _numbers(
         client.get("/api/orders", headers=_headers(portal)),
         "order_number",
-    ) == {"PO-MULTI-LINKED", "PO-MULTI-OTHER"}
-
-
-def test_customer_portal_plus_sales_keeps_sales_scope(client):
-    portal = _user(
-        "multi.customer-sales@stage3a.test",
-        _standard_role("customer_portal"),
-        _standard_role("sales_customer_service"),
-    )
-    customer = Customer(code="C-SALES-MULTI", name="Customer Multi", users=[portal]).save()
-    Order(
-        order_number="SO-MULTI-LINKED",
-        kind="sales",
-        customer=customer,
-    ).save()
-    Order(order_number="SO-MULTI-OTHER", kind="sales").save()
-    Order(order_number="PO-MULTI", kind="purchase").save()
-
-    assert _numbers(
-        client.get("/api/orders", headers=_headers(portal)),
-        "order_number",
-    ) == {"SO-MULTI-LINKED", "SO-MULTI-OTHER"}
+    ) == {"PO-MULTI-LINKED", "PO-MULTI-OTHER", "SO-MULTI"}
 
 
 def test_financial_permissions_deny_reads_and_mixed_writes_without_partial_save(
@@ -589,7 +527,7 @@ def test_invalid_inaccessible_and_scope_failure_identifiers_fail_closed(
 ):
     portal = _user(
         "failclosed@stage3a.test",
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     linked = Customer(code="C-FAIL-LINK", name="Linked", users=[portal]).save()
     other = Customer(code="C-FAIL-OTHER", name="Other").save()
@@ -667,11 +605,11 @@ def test_archive_endpoints_preserve_records_and_reject_unknown_fields(client):
 def test_ordinary_company_updates_cannot_change_portal_user_relationships(client):
     linked = _user(
         "linked.portal@stage3a.test",
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     sales = _user(
         "sales.portal.assignment@stage3a.test",
-        _standard_role("sales_customer_service"),
+        _standard_role("commercial"),
     )
     customer = Customer(
         code="C-PORTAL-USERS",
@@ -689,7 +627,7 @@ def test_ordinary_company_updates_cannot_change_portal_user_relationships(client
 
     procurement = _user(
         "procurement.portal.assignment@stage3a.test",
-        _standard_role("procurement"),
+        _standard_role("commercial"),
     )
     supplier = Supplier(
         code="S-PORTAL-USERS",

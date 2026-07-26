@@ -1,5 +1,4 @@
 import mimetypes
-from pathlib import Path
 from flask import Blueprint, abort, send_file
 from flask_login import current_user, login_required
 
@@ -13,18 +12,6 @@ from app.services.file_security import (
 
 
 bp = Blueprint("extra_fileserve", __name__, url_prefix="/extra")
-
-
-def _allowed_path(abs_path: str, base_root: str) -> bool:
-    """Compatibility helper used by the deferred public-share route."""
-
-    try:
-        path = Path(abs_path).resolve(strict=True)
-        root = Path(base_root).resolve(strict=False)
-        path.relative_to(root)
-        return path.is_file()
-    except (OSError, RuntimeError, ValueError):
-        return False
 
 
 @bp.get("/view/<token>")

@@ -158,7 +158,7 @@ def test_production_operator_gets_assigned_markup_image_and_editable_layer(
     app,
     tmp_path,
 ):
-    definition = STANDARD_ROLES["production_operator"]
+    definition = STANDARD_ROLES["workshop"]
     role = Role(
         name=definition.slug,
         display_name=definition.display_name,

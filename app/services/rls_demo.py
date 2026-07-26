@@ -22,6 +22,7 @@ from app.models.api_token import ApiToken
 from app.services.api_tokens import create_token
 from app.services.biz_utils import calculate_order_totals
 from app.services.acl import apply_job_scope, apply_order_scope, allowed_parts_for
+from app.services.standard_roles import STANDARD_ROLE_SLUGS
 from app.services.timezone_utils import utc_iso, utc_now
 
 
@@ -410,43 +411,10 @@ def seed_rls_demo(reset: bool = False, domain: str = "demo.com", password: str |
 
 
 PERMISSION_TEST_ROLE_SCENARIOS: dict[str, tuple[str, ...]] = {
-    **{slug: (slug,) for slug in (
-        "administrator",
-        "security_administrator",
-        "system_administrator",
-        "engineering_data_steward",
-        "import_operator",
-        "import_approver",
-        "planner",
-        "procurement",
-        "sales_customer_service",
-        "production_operator",
-        "quality_reviewer",
-        "internal_viewer",
-        "customer_portal",
-        "supplier_portal",
-        "auditor",
-    )},
-    "engineering_quality": (
-        "engineering_data_steward",
-        "quality_reviewer",
-    ),
-    "planner_production": (
-        "planner",
-        "production_operator",
-    ),
-    "procurement_supplier": (
-        "procurement",
-        "supplier_portal",
-    ),
-    "sales_customer": (
-        "sales_customer_service",
-        "customer_portal",
-    ),
-    "security_customer": (
-        "security_administrator",
-        "customer_portal",
-    ),
+    **{slug: (slug,) for slug in STANDARD_ROLE_SLUGS},
+    "engineering_commercial": ("engineering", "commercial"),
+    "commercial_supplier": ("commercial", "supplier"),
+    "security_customer": ("security_administrator", "customer"),
 }
 
 
@@ -502,12 +470,12 @@ def _seed_permission_test_records(
         suppliers[code] = _upsert_supplier(code, name)
 
     customers["DEMO-CUST-A"].users = [
-        users["customer_portal"],
+        users["customer"],
         users["security_customer"],
     ]
-    customers["DEMO-CUST-B"].users = [users["sales_customer"]]
-    suppliers["DEMO-SUP-X"].users = [users["supplier_portal"]]
-    suppliers["DEMO-SUP-Y"].users = [users["procurement_supplier"]]
+    customers["DEMO-CUST-B"].users = []
+    suppliers["DEMO-SUP-X"].users = [users["supplier"]]
+    suppliers["DEMO-SUP-Y"].users = [users["commercial_supplier"]]
     for customer in customers.values():
         customer.save()
     for supplier in suppliers.values():
@@ -552,8 +520,8 @@ def _seed_permission_test_records(
             [suppliers["DEMO-SUP-X"]],
             [JobBOMLine(pn="DEMO-ASM-1", rev="A", qty=1.0)],
             [
-                users["production_operator"],
-                users["planner_production"],
+                users["workshop"],
+                users["engineering_commercial"],
             ],
         ),
         "DEMO-JOB-B1": (

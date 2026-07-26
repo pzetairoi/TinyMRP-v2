@@ -165,7 +165,7 @@ def test_legacy_admin_bypass_is_exact_and_configurable(app):
     admin_like = FakeUser([SimpleNamespace(name="admin_helper", permissions=[])])
     portal_admin_like = FakeUser(
         [
-            SimpleNamespace(name="customer_portal", permissions=[]),
+            SimpleNamespace(name="customer", permissions=[]),
             SimpleNamespace(name="administrator", permissions=[]),
         ]
     )

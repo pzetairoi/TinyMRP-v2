@@ -130,7 +130,7 @@ def test_security_and_system_administrators_alone_cannot_download(
     part = _part("ADMIN-NO-FILE", released=True)
     file_record = _managed(tmp_path, part.part_number, part.revision)
     token = _token(app, file_record)
-    for role_name in ("security_administrator", "system_administrator"):
+    for role_name in ("security_administrator",):
         user = _user(f"{role_name}@files.test", _standard_role(role_name))
         _login(client, user)
         assert client.get(f"/files/view/{token}").status_code == 404
@@ -145,7 +145,7 @@ def test_customer_portal_file_list_is_exact_and_hides_internal_cad(
     _managed(tmp_path, allowed.part_number, "A", "pdf")
     _managed(tmp_path, allowed.part_number, "A", "step")
     _managed(tmp_path, allowed.part_number, "B", "pdf")
-    portal = _user("portal@files.test", _standard_role("customer_portal"))
+    portal = _user("portal@files.test", _standard_role("customer"))
     customer = Customer(name="File Customer", users=[portal]).save()
     Job(
         job_number="FILE-JOB",
@@ -190,7 +190,7 @@ def test_customer_portal_job_updates_refresh_parts_and_thumbnail_access(
     preview.thumb_rel_path = "thumbs/png/PORTAL-ADDED_REV_A.png"
     preview.save()
 
-    portal = _user("updated-portal@files.test", _standard_role("customer_portal"))
+    portal = _user("updated-portal@files.test", _standard_role("customer"))
     customer = Customer(name="Updated File Customer", users=[portal]).save()
     job = Job(
         job_number="UPDATED-FILE-JOB",
@@ -300,7 +300,7 @@ def test_supplier_and_production_file_access_follow_exact_relationships(
     allowed_file = _managed(tmp_path, allowed.part_number, "A", "step")
     denied_file = _managed(tmp_path, denied.part_number, "B", "step")
 
-    supplier_user = _user("supplier@files.test", _standard_role("supplier_portal"))
+    supplier_user = _user("supplier@files.test", _standard_role("supplier"))
     supplier = Supplier(name="File Supplier", users=[supplier_user]).save()
     Order(
         order_number="FILE-PO",
@@ -312,15 +312,20 @@ def test_supplier_and_production_file_access_follow_exact_relationships(
     assert client.get(f"/files/view/{_token(app, allowed_file)}").status_code == 200
     assert client.get(f"/files/view/{_token(app, denied_file)}").status_code == 404
 
-    operator = _user("operator@files.test", _standard_role("production_operator"))
+    operator = _user("operator@files.test", _standard_role("workshop"))
+    unreleased = _part("SUP-FILE-DRAFT", "A", released=False)
+    unreleased_file = _managed(tmp_path, unreleased.part_number, "A", "step")
     Job(
         job_number="FILE-PRODUCTION",
         participants=[operator],
         bom=[JobBOMLine(pn=allowed.part_number, rev="A", qty=1)],
     ).save()
     _login(client, operator)
+    # Workshop is shop-wide, so any released revision's files are readable.
     assert client.get(f"/files/view/{_token(app, allowed_file)}").status_code == 200
-    assert client.get(f"/files/view/{_token(app, denied_file)}").status_code == 404
+    assert client.get(f"/files/view/{_token(app, denied_file)}").status_code == 200
+    # Unreleased engineering data stays closed.
+    assert client.get(f"/files/view/{_token(app, unreleased_file)}").status_code == 404
 
 
 def test_supplier_portal_can_read_parts_from_vendor_linked_job(client, app):
@@ -336,7 +341,7 @@ def test_supplier_portal_can_read_parts_from_vendor_linked_job(client, app):
     ).save()
     supplier_user = _user(
         "vendor-job-supplier@files.test",
-        _standard_role("supplier_portal"),
+        _standard_role("supplier"),
     )
     supplier = Supplier(name="Vendor Job Supplier", users=[supplier_user]).save()
     job = Job(
@@ -489,7 +494,7 @@ def test_associated_upload_replacement_and_validation_are_consistent(
     part = _part("EXTRA-MUT", "")
     engineer = _user(
         "engineer@files.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     _login(client, engineer)
     url = f"/api/parts/{part.part_number}/__no_rev__/extra"
@@ -541,7 +546,7 @@ def test_associated_upload_requires_add_replace_scope_and_mutable_revision(
     released = _part("EXTRA-REL", "A", released=True)
     viewer = _user(
         "viewer@files.test",
-        _standard_role("internal_viewer"),
+        _standard_role("internal"),
     )
     _login(client, viewer)
     assert client.post(
@@ -552,7 +557,7 @@ def test_associated_upload_requires_add_replace_scope_and_mutable_revision(
 
     engineer = _user(
         "released-engineer@files.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     _login(client, engineer)
     assert client.post(
@@ -577,7 +582,7 @@ def test_associated_purge_requires_explicit_files_purge(client, app, tmp_path):
         original_name="report.txt",
         rel_path=rel,
     ).save()
-    engineer = _user("no-purge@files.test", _standard_role("engineering_data_steward"))
+    engineer = _user("no-purge@files.test", _standard_role("engineering"))
     _login(client, engineer)
     endpoint = f"/api/parts/{part.part_number}/A/extra/{record.id}"
     assert client.delete(endpoint).status_code == 404
@@ -675,7 +680,7 @@ def test_refresh_preflights_add_and_stale_removal_permissions(
     ).save()
     engineer = _user(
         "refresh@files.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     _login(client, engineer)
     response = client.post(
@@ -694,7 +699,7 @@ def test_revision_clone_does_not_copy_file_metadata_or_share_physical_path(
     source_file = _managed(tmp_path, source.part_number, source.revision)
     engineer = _user(
         "revise@files.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     _login(client, engineer)
     response = client.post(

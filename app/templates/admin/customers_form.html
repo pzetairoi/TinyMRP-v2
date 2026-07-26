@@ -1,5 +1,5 @@
 {% extends "security/base.html" %}
-{% from "ui/_components.html" import page_header, card_header, empty_state, status_badge %}
+{% from "ui/_components.html" import page_header, card_header, empty_state, status_badge, permission_gap_notice %}
 {% set is_readonly = readonly if readonly is defined else false %}
 {% set hide_user_links = hide_user_links if hide_user_links is defined else false %}
 {% block title %}{{ 'View customer' if is_readonly else ('Edit customer' if customer else 'New customer') }} - Admin{% endblock %}
@@ -106,9 +106,12 @@
           {% endif %}
         </form>
 
-        {% if customer and has_perm('jobs.read') %}
+        {% if customer %}
         <div class="mt-4">
           {{ card_header("Jobs", "Jobs currently linked to this customer.") }}
+          {% if not has_perm('jobs.read') %}
+          {{ permission_gap_notice(['jobs.read']) }}
+          {% else %}
           <div class="table-responsive tm-table-shell">
             <table class="table table-sm table-striped align-middle mb-0">
               <thead>
@@ -145,12 +148,16 @@
               </tbody>
             </table>
           </div>
+          {% endif %}
         </div>
         {% endif %}
 
-        {% if customer and has_perm('orders.read') %}
+        {% if customer %}
         <div class="mt-4">
           {{ card_header("Orders", "Orders currently linked to this customer.") }}
+          {% if not has_perm('orders.read') %}
+          {{ permission_gap_notice(['orders.read']) }}
+          {% else %}
           <div class="table-responsive tm-table-shell">
             <table class="table table-sm table-striped align-middle mb-0">
               <thead>
@@ -189,6 +196,7 @@
               </tbody>
             </table>
           </div>
+          {% endif %}
         </div>
         {% endif %}
       </div>

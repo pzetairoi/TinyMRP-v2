@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from flask_login import current_user, login_required
 from app.services.acl import permissions_required
 from app.services.authorization import (
-    has_any_permission,
     has_permission,
     require_permission,
 )
@@ -85,9 +84,8 @@ def _addin_installers():
 
 @bp.get("/")
 @login_required
+@permissions_required("exports.run")
 def tools_index():
-    if not has_any_permission(current_user, ("exports.run", "tools.view")):
-        abort(403)
     files = _static_tools()
     addin_files = _addin_installers()
     return render_template("tools/index.html", files=files, addin_files=addin_files)
@@ -95,7 +93,7 @@ def tools_index():
 
 @bp.get("/addin/latest")
 @login_required
-@permissions_required("tools.view")
+@permissions_required("exports.run")
 def addin_latest():
     addin_files = _addin_installers()
     if not addin_files:
@@ -108,7 +106,7 @@ def addin_latest():
 
 @bp.get("/addin/<path:filename>")
 @login_required
-@permissions_required("tools.view")
+@permissions_required("exports.run")
 def addin_download(filename):
     root = _addin_root()
     target = os.path.abspath(os.path.join(root, filename))

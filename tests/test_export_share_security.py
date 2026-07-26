@@ -130,7 +130,7 @@ def test_exports_run_and_unreleased_authority_are_required_for_arena(client):
 
     engineer = _user(
         "engineer-export@example.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     _login(client, engineer)
     allowed = client.post(
@@ -143,12 +143,10 @@ def test_exports_run_and_unreleased_authority_are_required_for_arena(client):
 def test_standard_non_export_roles_and_disabled_legacy_admin_are_denied(client, app):
     part = _released("EXP-ROLE", "A")
     for role_name in (
-        "internal_viewer",
         "auditor",
         "security_administrator",
-        "system_administrator",
-        "customer_portal",
-        "supplier_portal",
+        "customer",
+        "supplier",
     ):
         user = _user(
             f"{role_name}@export-role.example.test",
@@ -161,7 +159,7 @@ def test_standard_non_export_roles_and_disabled_legacy_admin_are_denied(client, 
         )
         assert response.status_code == 403, role_name
 
-    for role_name in ("planner", "procurement", "sales_customer_service"):
+    for role_name in ("commercial", "internal"):
         user = _user(
             f"{role_name}@export-role.example.test",
             _standard_role(role_name),
@@ -295,7 +293,7 @@ def test_share_creation_uses_canonical_permission_and_exact_root(client):
     part = _released("SHARE-AUTH", "A")
     viewer = _user(
         "viewer-share-security@example.test",
-        _standard_role("internal_viewer"),
+        _standard_role("internal"),
     )
     _login(client, viewer)
     assert (

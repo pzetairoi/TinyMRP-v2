@@ -5,133 +5,97 @@ are additive: combinations receive the union of their permissions and scopes.
 The old exact `admin` slug remains a temporary compatibility bypass, but it is
 not a recommended standard role. No role is assigned automatically.
 
+Ten roles cover the intended organisation. Superseded slugs
+(`system_administrator`, `engineering_data_steward`, `import_operator`,
+`import_approver`, `planner`, `procurement`, `sales_customer_service`,
+`production_operator`, `internal_viewer`, `customer_portal`,
+`supplier_portal`) are no longer catalogue roles. Existing role documents and
+their user assignments survive as custom roles and stay correctly scoped,
+because `_scope_modes` still recognises the superseded portal and assigned-job
+names. Reassign those users, then delete the leftover custom roles.
+
 ## Role guide
 
 ### Administrator
 
-- **See:** All application, security, system, financial, audit, released and unreleased data.
-- **Change:** All business and administrative data, imports, exports, shares, archive actions, and active destructive operations.
+- **See:** All business, security, system, financial, audit, released and unreleased data.
+- **Change:** Everything: users, roles and assignments, all business data, imports including approved override, exports, shares, archive and purge, and system configuration, storage, rebuild and maintenance.
 - **Cannot:** It has no intended application restriction.
 - **Scope:** Global.
-- **Caveats:** Includes part/file purge and sensitive financial authority; assign sparingly. It receives every active canonical permission and does not depend on the legacy `admin` bypass.
+- **Caveats:** Includes user/role administration, purge and sensitive financial authority; assign sparingly and prefer a narrower role for day-to-day work.
 - **Combine with:** Nothing is normally required.
 
 ### Security Administrator
 
 - **See:** Users, roles and audit records.
 - **Change:** Users, roles, assignments and token revocation.
-- **Cannot:** Manage routine business data, settings, storage or maintenance.
+- **Cannot:** Manage business data, settings, storage or maintenance.
 - **Scope:** Global security administration only.
-- **Caveats:** It is deliberately not a full administrator.
-- **Combine with:** System Administrator only when the same person also maintains the installation; use a business role for business work.
+- **Caveats:** Use this to delegate account administration to someone who must not hold business authority.
+- **Combine with:** A business role for business work.
 
-### System Administrator
+### Engineering Manager
 
-- **See:** Configuration and audit records.
-- **Change:** Settings, storage, rebuild and maintenance operations.
-- **Cannot:** Manage users/roles or routine business data.
-- **Scope:** Global system administration only.
-- **Caveats:** Rebuilds and maintenance can affect the whole installation.
-- **Combine with:** Security Administrator only when responsibilities overlap; use a business role for business work.
-
-### Engineering/Data Steward
-
-- **See:** Released and unreleased parts, BOMs, normal managed files, comments and markups.
-- **Change:** Engineering master data, BOMs, normal files, numbering and shares; run engineering exports.
-- **Cannot:** Permanently purge, approve commercial orders, or override approved imports.
+- **See:** Everything Engineering sees, plus audit records.
+- **Change:** Everything Engineering changes, plus approved-data override imports, comment/markup moderation, existing review approvals and numbering scheme administration.
+- **Cannot:** Purge parts or files, run the commercial order workflow, or administer users.
 - **Scope:** Global engineering data.
-- **Caveats:** File replace is not file purge.
-- **Combine with:** Quality Reviewer for moderation/review authority, or Import Manager only when approved-data override is genuinely required.
+- **Caveats:** Approved-data override can modify released records; `reviews.approve` applies only to existing review operations, not part release.
+- **Combine with:** Nothing is normally required.
 
-### Import Operator
+### Engineering
 
-- **See:** Released and unreleased parts, BOMs and files needed to preview imports.
-- **Change:** Run low-risk imports.
-- **Cannot:** Overwrite approved/released records or use approved-data override.
-- **Scope:** Global import input with no wider engineering mutation grant.
-- **Caveats:** Import validation remains authoritative.
-- **Combine with:** Engineering/Data Steward when the operator also owns master data.
+- **See:** Released and unreleased parts, BOMs, managed files, comments, markups, jobs and orders.
+- **Change:** Parts, BOMs, managed files, numbering allocation, shares and exports; runs low-risk imports.
+- **Cannot:** Overwrite approved data, purge, moderate, or perform commercial actions.
+- **Scope:** Global engineering data.
+- **Caveats:** File replace is not file purge. Imports that touch approved records require Engineering Manager.
+- **Combine with:** Nothing is normally required.
 
-### Import Manager
+### Commercial (Sales & Procurement)
 
-- **See:** Released/unreleased parts, BOMs, files and import audit records.
-- **Change:** Run ordinary imports and authorised approved-data override imports.
-- **Cannot:** Administer users, settings or unrelated business records.
-- **Scope:** Global import workflow.
-- **Caveats:** This is not a two-person approval workflow. Overrides can modify released data and must be assigned carefully.
-- **Combine with:** Engineering/Data Steward only when the same person also maintains engineering data.
+- **See:** Parts, BOMs, files, comments, markups, all jobs, all orders with financials, and all customers and suppliers with financials.
+- **Change:** The full purchase and sales order workflow including approval, customer and supplier records and financials, company archiving, job planning, assignment and job BOMs, numbering allocation and exports.
+- **Cannot:** Mutate engineering master data, run imports, administer portal users, or purge.
+- **Scope:** Company-wide commercial records.
+- **Caveats:** Purchase and sales authority are combined, so the same person can raise and approve either kind of order. Granting portal access to an external user stays an administrator duty.
+- **Combine with:** Nothing is normally required.
 
-### Planner
+### Internal (Other Department)
 
-- **See:** Parts, BOMs, files, comments, drawing markups, jobs, non-financial orders, customers and suppliers for planning context.
-- **Change:** Jobs, job BOM/assignments, comments/markups and non-financial order preparation; submit orders, allocate numbers and run job packs.
-- **Cannot:** Approve orders or edit financial fields.
-- **Scope:** Global planning records.
-- **Caveats:** Customer/supplier reads do not grant company financial administration.
-- **Combine with:** Procurement or Sales/Customer Service only when that commercial responsibility is also intended.
-
-### Procurement
-
-- **See:** Purchase orders, suppliers, purchasing-related jobs, comments and drawing markups.
-- **Change:** Supplier records/financials, comments/markups and the purchase-order workflow, including approval.
-- **Cannot:** Exercise sales-order authority or customer financial administration.
-- **Scope:** Purchase-side records.
-- **Caveats:** The current workflow does not stop the same Procurement user creating and approving an order.
-- **Combine with:** Planner when the buyer also plans jobs.
-
-### Sales/Customer Service
-
-- **See:** Sales orders, customers, customer-related jobs, comments and drawing markups.
-- **Change:** Customer records/financials, comments/markups and the sales-order workflow, including approval.
-- **Cannot:** Exercise purchase-order authority or supplier financial administration.
-- **Scope:** Sales-side records.
-- **Caveats:** The current workflow does not stop the same Sales user creating and approving an order.
-- **Combine with:** Planner when the same person also plans jobs.
-
-### Production Operator
-
-- **See:** Assigned/participant jobs, exact related part revisions, permitted drawing images, comments and markups.
-- **Change:** Assigned job stages, material issue, operational comments and drawing markups.
-- **Cannot:** Access global orders or companies, edit engineering/BOM master data, or perform commercial actions.
-- **Scope:** Assigned jobs only.
-- **Caveats:** Adding a user as a participant changes their job and exact-part scope.
-- **Combine with:** Normally no other role; Planner broadens job scope globally.
-
-### Quality Reviewer
-
-- **See:** Released/unreleased engineering data, review comments, markups and audit data.
-- **Change:** Review comments/markups, moderation and existing review operations.
-- **Cannot:** Modify design/BOM data or perform a part-release workflow.
-- **Scope:** Global engineering review data.
-- **Caveats:** `reviews.approve` applies only to existing review operations, not part release.
-- **Combine with:** Engineering/Data Steward only when the reviewer also owns design data.
-
-### Internal Viewer
-
-- **See:** Released parts and non-financial jobs, orders, customers and suppliers.
-- **Change:** Nothing.
-- **Cannot:** See unreleased parts or financial values; export or mutate data.
+- **See:** Released parts, BOMs and files, plus non-financial jobs, orders, customers and suppliers.
+- **Change:** Comments only.
+- **Cannot:** See financial values or unreleased engineering data; mutate business records or run imports.
 - **Scope:** Global internal read-only data.
-- **Caveats:** It intentionally excludes annotations and sensitive engineering details.
+- **Caveats:** Exports are permitted so other departments can pull documentation.
 - **Combine with:** A specialised role only when additional work is required.
 
-### Customer Portal
+### Workshop
 
-- **See:** Linked customer organisations, their jobs/sales orders, and exact related part revisions.
+- **See:** All jobs, released part revisions, permitted drawings, comments and markups.
+- **Change:** Job stages, material issue, comments and drawing markups.
+- **Cannot:** Access orders or companies, edit job or engineering master data, or export.
+- **Scope:** Shop-wide jobs.
+- **Caveats:** Visibility is deliberately not limited to participant jobs, so no participant bookkeeping is required to keep the shop floor working.
+- **Combine with:** Normally no other role.
+
+### Customer
+
+- **See:** Linked customer organisations, their jobs and sales orders, and exact related part revisions.
 - **Change:** Nothing.
 - **Cannot:** See suppliers, internal cost, markups, internal comments or unrelated records.
 - **Scope:** Linked customers only.
-- **Caveats:** Parts must be released/approved unless a custom role also grants `parts.read_unreleased`.
-- **Combine with:** Avoid internal roles; combinations can deliberately broaden scope.
+- **Caveats:** Parts must be released/approved unless a custom role also grants `parts.read_unreleased`. Combining with an internal role widens scope to that role's.
+- **Combine with:** Avoid internal roles.
 
-### Supplier Portal
+### Supplier
 
 - **See:** Linked supplier organisations, issued purchase orders, jobs through `Job.vendors` or those orders, and exact related part revisions.
 - **Change:** Nothing.
 - **Cannot:** See customer sales pricing, other suppliers, margins or internal comments.
 - **Scope:** Linked suppliers and issued purchase relationships only.
 - **Caveats:** Parts must be released/approved unless explicitly extended.
-- **Combine with:** Avoid internal roles; combinations can deliberately broaden scope.
+- **Combine with:** Avoid internal roles.
 
 ### Auditor
 
@@ -140,19 +104,20 @@ not a recommended standard role. No role is assigned automatically.
 - **Cannot:** Export, mutate, approve, assign roles or purge.
 - **Scope:** Global read-only.
 - **Caveats:** Read access includes sensitive financial and unreleased information.
-- **Combine with:** Usually nothing; add a role only for a separately intended operational duty.
+- **Combine with:** Usually nothing.
 
 ## Active capability map
 
 | Surface | Read | Mutation or sensitive action | Principal roles |
 |---|---|---|---|
-| Parts/BOM/files | `parts.read`, `bom.read`, `files.read` | Engineering mutations, file replace, and purge use separate exact permissions | Administrator, Engineering, business readers, portals, Auditor |
-| Imports | `imports.preview` | Low-risk, approved execution and approved-data override are separate | Administrator, Import Operator, Import Manager |
-| Jobs | `jobs.read` | Job, assignment, BOM, stage, material issue, cancel and archive actions are separate | Administrator, Planner, business roles, Production |
-| Orders | `orders.read` | Financial, submit, approve, fulfil, ship, cancel and archive actions are separate | Administrator, Planner, Procurement, Sales |
-| Companies | Customer/supplier reads are separate | Update, financial, portal-link and archive actions are separate | Administrator, Planner, Procurement, Sales |
-| Comments/markups | `comments.read`, `markups.read` | Writing and moderation are separate | Administrator, Engineering, Planner, Procurement, Sales, Production, Quality; Auditor reads only |
-| Security/system | Security and system reads are separate | User/role and configuration/maintenance actions are separate | Administrator and the specialised administrators |
+| Parts/BOM/files | `parts.read`, `bom.read`, `files.read` | Engineering mutations, file replace, and purge use separate exact permissions | Administrator, Engineering roles, business readers, portals, Auditor |
+| Imports | `imports.preview` | Low-risk execution and approved-data override are separate | Administrator, Engineering, Engineering Manager |
+| Jobs | `jobs.read` | Job, assignment, BOM, stage, material issue, cancel and archive actions are separate | Administrator, Commercial, Workshop |
+| Orders | `orders.read` | Financial, submit, approve, fulfil, ship, cancel and archive actions are separate | Administrator, Commercial |
+| Companies | Customer/supplier reads are separate | Update, financial, portal-link and archive actions are separate | Administrator, Commercial |
+| Comments/markups | `comments.read`, `markups.read` | Writing and moderation are separate | Administrator, Engineering roles, Commercial, Internal, Workshop; Auditor reads only |
+| Security/system | Security and system reads are separate | User/role and configuration/maintenance actions are separate | Administrator, Security Administrator |
+| Tools/downloads | `exports.run` gates the Tools page | The SolidWorks add-in installer, macro and Excel compiler downloads use the same `exports.run` gate as the page | Administrator, Engineering roles, Commercial, Internal |
 
 The canonical registry contains only capabilities consumed by current routes or
 services. Legacy permission identifiers remain separately registered for stored
@@ -162,3 +127,13 @@ Custom roles can be deleted by a role administrator only when no users are
 assigned. Assigned roles return a conflict and link the administrator to the
 affected users; standard catalogue roles and the legacy `admin` role cannot be
 deleted through the role editor. This prevents dangling role references.
+
+## Adding a scoped role
+
+`_scope_modes` in `app/services/authorization.py` ends its role dispatch by
+adding the `global` mode, so a role name it does not recognise receives
+unrestricted visibility rather than failing closed. Any new role whose
+visibility must stay narrowed has to be added both to the `fixed` map in
+`_scope_modes` and to `scoped_roles` in `_build_scope_context`.
+`test_scoped_standard_roles_are_registered_in_the_scope_map` enforces this for
+the catalogue.

@@ -466,8 +466,8 @@ def test_upload_pack_override_authority_can_intentionally_update_released_part(
     tmp_path,
 ):
     role = Role(
-        name="import_approver",
-        permissions=list(STANDARD_ROLES["import_approver"].permissions),
+        name="engineering_manager",
+        permissions=list(STANDARD_ROLES["engineering_manager"].permissions),
     ).save()
     user.roles = [role]
     user.save()

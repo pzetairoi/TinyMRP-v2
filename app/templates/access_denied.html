@@ -1,0 +1,7 @@
+{% extends "security/base.html" %}
+{% from "ui/_components.html" import error_state, page_header %}
+{% block title %}Access Denied{% endblock %}
+{% block content %}
+{% call page_header("Access Denied", "You don't have permission to do that.", "Security") %}{% endcall %}
+{{ error_state("Access denied", message or "You don't have access to this action.") }}
+{% endblock %}

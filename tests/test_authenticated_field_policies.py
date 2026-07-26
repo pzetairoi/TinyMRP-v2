@@ -111,7 +111,7 @@ def test_part_list_detail_bom_and_dashboard_apply_equivalent_policies(
 ):
     user = _user(
         "engineering-route@field-policy.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     _login(client, user)
     with app.app_context():
@@ -248,7 +248,7 @@ def test_internal_viewer_and_portal_do_not_receive_review_or_revision_history(
 
     viewer = _user(
         "internal-viewer@field-policy.test",
-        _standard_role("internal_viewer"),
+        _standard_role("internal"),
     )
     _login(client, viewer)
     viewer_detail = client.get(
@@ -257,7 +257,6 @@ def test_internal_viewer_and_portal_do_not_receive_review_or_revision_history(
     assert viewer_detail["comments"] == []
     assert viewer_detail["uploader_profile"] == {}
     assert viewer_detail["approver_profile"] == {}
-    assert "pending_review_count" not in viewer_detail["part"]
     assert all(
         row["revision"] == "A"
         for row in viewer_detail["other_versions"]
@@ -265,7 +264,7 @@ def test_internal_viewer_and_portal_do_not_receive_review_or_revision_history(
 
     portal = _user(
         "customer-portal@field-policy.test",
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     customer = Customer(
         code="PORTAL-CUSTOMER",
@@ -291,7 +290,7 @@ def test_internal_viewer_and_portal_do_not_receive_review_or_revision_history(
 def test_production_operator_receives_comments_for_an_assigned_part(client):
     operator = _user(
         "production-comments@field-policy.test",
-        _standard_role("production_operator"),
+        _standard_role("workshop"),
     )
     part = _released("PRODUCTION-COMMENT")
     Job(
@@ -332,7 +331,7 @@ def test_file_metadata_retains_protected_urls_without_paths_or_hashes(
 ):
     user = _user(
         "file-policy@field-policy.test",
-        _standard_role("engineering_data_steward"),
+        _standard_role("engineering"),
     )
     _login(client, user)
     part = _released("FILE-POLICY")
@@ -436,7 +435,7 @@ def test_job_order_company_and_nested_field_policies(client):
 
     planner = _user(
         "planner-fields@example.test",
-        _standard_role("planner"),
+        _standard_role("commercial"),
     )
     _login(client, planner)
     planner_job = client.get(f"/api/jobs/{job.job_number}").get_json()["job"]
@@ -446,14 +445,15 @@ def test_job_order_company_and_nested_field_policies(client):
     planner_order = client.get(
         f"/api/orders/{order.order_number}"
     ).get_json()["order"]
-    assert planner_order["total"] is None
-    assert planner_order["lines"][0]["unit_price"] is None
+    # Commercial carries order financial authority.
+    assert planner_order["total"] == 110
+    assert planner_order["lines"][0]["unit_price"] == 50
     assert planner_order["supplier"] == supplier.name
     assert "note" in planner_order["lines"][0]
 
     procurement = _user(
         "procurement-fields@example.test",
-        _standard_role("procurement"),
+        _standard_role("commercial"),
     )
     _login(client, procurement)
     purchase = client.get(
@@ -471,7 +471,7 @@ def test_job_order_company_and_nested_field_policies(client):
 
     sales = _user(
         "sales-fields@example.test",
-        _standard_role("sales_customer_service"),
+        _standard_role("commercial"),
     )
     _login(client, sales)
     customer_payload = client.get(
@@ -486,7 +486,7 @@ def test_production_and_portal_job_fields_are_strict(client):
     part = _released("OP-PART")
     customer_portal = _user(
         "job-customer-portal@example.test",
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     customer = Customer(
         code="OP-CUSTOMER",
@@ -495,7 +495,7 @@ def test_production_and_portal_job_fields_are_strict(client):
     ).save()
     operator = _user(
         "production-fields@example.test",
-        _standard_role("production_operator"),
+        _standard_role("workshop"),
     )
     job = Job(
         job_number="OP-JOB",
@@ -520,9 +520,9 @@ def test_production_and_portal_job_fields_are_strict(client):
     ).get_json()["job"]
     assert operator_payload["job_number"] == job.job_number
     assert operator_payload["stages"][0]["note"] == "Operational note"
+    # Workshop reads shop-wide internal job fields but never commercial ones.
     assert "customer" not in operator_payload
-    assert "estimated_hours" not in operator_payload
-    assert "created_at" not in operator_payload
+    assert "total" not in operator_payload
 
     _login(client, customer_portal)
     portal_payload = client.get(
@@ -565,7 +565,7 @@ def test_financial_fields_are_null_or_absent_consistently(client):
     ).save()
     viewer = _user(
         "no-finance@example.test",
-        _standard_role("internal_viewer"),
+        _standard_role("internal"),
     )
     _login(client, viewer)
 
@@ -592,11 +592,11 @@ def test_financial_fields_are_null_or_absent_consistently(client):
 def test_portal_self_profiles_cross_domain_isolation_and_order_fields(client):
     customer_portal = _user(
         "customer-self@example.test",
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     supplier_portal = _user(
         "supplier-self@example.test",
-        _standard_role("supplier_portal"),
+        _standard_role("supplier"),
     )
     customer = Customer(
         code="SELF-C",
@@ -742,7 +742,7 @@ def test_portal_field_config_excludes_custom_sources_and_review_config(
         )
     portal = _user(
         "config-portal@example.test",
-        _standard_role("customer_portal"),
+        _standard_role("customer"),
     )
     Customer(code="CONFIG-C", name="Config Customer", users=[portal]).save()
     _login(client, portal)
@@ -763,7 +763,7 @@ def test_portal_field_config_excludes_custom_sources_and_review_config(
 def test_embedded_comment_profiles_redact_email_roles_and_permissions(client):
     reviewer = _user(
         "quality-route@example.test",
-        _standard_role("quality_reviewer"),
+        _standard_role("engineering_manager"),
     )
     part = _released("REVIEW-FIELD")
     PartAnnotation(
