@@ -18,7 +18,7 @@ from app.services.authorization import (
     scope_queryset,
     uses_portal_presentation,
 )
-from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW
+from app.services.biz_utils import generate_job_number, can_transition_job, JOB_STATUS_FLOW, safe_ref
 from app.services.field_policies import (
     filter_response_fields,
     response_context,
@@ -286,6 +286,7 @@ def _job_to_dict(job: Job, user=None):
         for line in (job.bom or [])
         if can_include(line.pn, line.rev or "")
     ]
+    job_customer = safe_ref(job, "customer")
     payload = {
         "job_number": job.job_number,
         "title": job.title,
@@ -300,8 +301,8 @@ def _job_to_dict(job: Job, user=None):
         "material_reserved": bool(job.material_reserved),
         "estimated_hours": job.estimated_hours,
         "actual_hours": job.actual_hours,
-        "customer": getattr(job.customer, "name", None),
-        "customer_id": str(job.customer.id) if job.customer else None,
+        "customer": getattr(job_customer, "name", None),
+        "customer_id": str(job_customer.id) if job_customer else None,
         "order_number": job.order_number,
         "stages": stage_payloads,
         "bom": bom_payloads,

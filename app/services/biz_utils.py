@@ -3,11 +3,21 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Iterable, Tuple
 
+from mongoengine.errors import DoesNotExist
+
 from app.models.job import Job
 from app.models.supplier import Supplier
 from app.models.customer import Customer
 from app.models.order import Order, OrderLine
 from app.services.timezone_utils import utc_now
+
+
+def safe_ref(doc, field: str):
+    """Dereference a ReferenceField, returning None if the target document was deleted."""
+    try:
+        return getattr(doc, field)
+    except DoesNotExist:
+        return None
 
 
 JOB_STATUS_FLOW = {

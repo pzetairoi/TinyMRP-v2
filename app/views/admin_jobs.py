@@ -642,6 +642,11 @@ def jobs_view(job_id):
     j = _scoped_job(job_id, "jobs.read")
     if not j:
         abort(404)
+    # Clean up broken references to avoid deref errors
+    try:
+        _ = j.customer.id if j.customer else None
+    except Exception:
+        j.customer = None
     try:
         log_action("job.view", resource_type="job", resource=str(j.id))
     except Exception:
