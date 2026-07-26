@@ -331,7 +331,6 @@ def test_security_and_system_administrators_have_no_implicit_business_access(
     for role_name in (
         "security_administrator",
         "system_administrator",
-        "break_glass_administrator",
     ):
         user = _user(
             f"{role_name}@stage3a.test",

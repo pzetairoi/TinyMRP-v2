@@ -288,6 +288,43 @@ def test_internal_viewer_and_portal_do_not_receive_review_or_revision_history(
     assert portal_detail["whereused"] == []
 
 
+def test_production_operator_receives_comments_for_an_assigned_part(client):
+    operator = _user(
+        "production-comments@field-policy.test",
+        _standard_role("production_operator"),
+    )
+    part = _released("PRODUCTION-COMMENT")
+    Job(
+        job_number="PRODUCTION-COMMENT-JOB",
+        participants=[operator],
+        bom=[JobBOMLine(pn=part.part_number, rev=part.revision, qty=1)],
+    ).save()
+    PartAnnotation(
+        part_number=part.part_number,
+        revision=part.revision,
+        comments=[
+            {
+                "id": "production-comment",
+                "author": "planner@example.test",
+                "text": "Check this dimension before machining.",
+                "status": "open",
+            }
+        ],
+    ).save()
+    _login(client, operator)
+
+    detail = client.get(
+        f"/api/part_detail?pn={part.part_number}&rev={part.revision}"
+    )
+
+    assert detail.status_code == 200
+    payload = detail.get_json()
+    assert payload["can_parts_note"] is True
+    assert payload["comments"][0]["id"] == "production-comment"
+    assert payload["comments"][0]["text"] == "Check this dimension before machining."
+    assert "author" not in payload["comments"][0]
+
+
 def test_file_metadata_retains_protected_urls_without_paths_or_hashes(
     client,
     app,

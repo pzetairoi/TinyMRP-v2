@@ -36,17 +36,12 @@ EXPECTED_CANONICAL_PERMISSIONS = {
     "parts.create",
     "parts.update",
     "parts.revise",
-    "parts.release.approve",
-    "parts.archive",
-    "parts.restore",
     "parts.purge",
     "bom.read",
     "bom.update",
     "files.read",
     "files.add",
     "files.replace",
-    "files.archive",
-    "files.restore",
     "files.purge",
     "numbering.allocate",
     "numbering.manage",
@@ -55,11 +50,8 @@ EXPECTED_CANONICAL_PERMISSIONS = {
     "shares.revoke",
     "imports.preview",
     "imports.execute_low_risk",
-    "imports.review_high_risk",
-    "imports.approve_high_risk",
     "imports.execute_approved",
     "imports.override_approved",
-    "imports.rollback",
     "comments.read",
     "comments.write",
     "comments.moderate",
@@ -74,7 +66,6 @@ EXPECTED_CANONICAL_PERMISSIONS = {
     "jobs.bom.update",
     "jobs.stages.update",
     "jobs.material.issue",
-    "jobs.material.receive",
     "jobs.cancel",
     "jobs.archive",
     "orders.read",
@@ -103,6 +94,7 @@ EXPECTED_CANONICAL_PERMISSIONS = {
 }
 
 EXPECTED_ROLE_PERMISSIONS = {
+    "administrator": EXPECTED_CANONICAL_PERMISSIONS,
     "security_administrator": {
         "security.users.read",
         "security.users.manage",
@@ -154,6 +146,7 @@ EXPECTED_ROLE_PERMISSIONS = {
         "bom.read",
         "files.read",
         "imports.preview",
+        "imports.execute_low_risk",
         "imports.execute_approved",
         "imports.override_approved",
         "audit.read",
@@ -162,6 +155,10 @@ EXPECTED_ROLE_PERMISSIONS = {
         "parts.read",
         "bom.read",
         "files.read",
+        "comments.read",
+        "comments.write",
+        "markups.read",
+        "markups.write",
         "jobs.read",
         "jobs.create",
         "jobs.update",
@@ -180,6 +177,10 @@ EXPECTED_ROLE_PERMISSIONS = {
         "parts.read",
         "bom.read",
         "files.read",
+        "comments.read",
+        "comments.write",
+        "markups.read",
+        "markups.write",
         "jobs.read",
         "suppliers.read",
         "suppliers.update",
@@ -202,6 +203,10 @@ EXPECTED_ROLE_PERMISSIONS = {
         "parts.read",
         "bom.read",
         "files.read",
+        "comments.read",
+        "comments.write",
+        "markups.read",
+        "markups.write",
         "jobs.read",
         "customers.read",
         "customers.update",
@@ -229,6 +234,8 @@ EXPECTED_ROLE_PERMISSIONS = {
         "jobs.material.issue",
         "comments.read",
         "comments.write",
+        "markups.read",
+        "markups.write",
     },
     "quality_reviewer": {
         "parts.read",
@@ -287,15 +294,15 @@ EXPECTED_ROLE_PERMISSIONS = {
         "comments.read",
         "markups.read",
     },
-    "break_glass_administrator": set(),
 }
 
 EXPECTED_ROLE_DISPLAY_NAMES = {
+    "administrator": "Administrator",
     "security_administrator": "Security Administrator",
     "system_administrator": "System Administrator",
     "engineering_data_steward": "Engineering/Data Steward",
     "import_operator": "Import Operator",
-    "import_approver": "Import Approver",
+    "import_approver": "Import Manager",
     "planner": "Planner",
     "procurement": "Procurement",
     "sales_customer_service": "Sales/Customer Service",
@@ -305,7 +312,6 @@ EXPECTED_ROLE_DISPLAY_NAMES = {
     "customer_portal": "Customer Portal",
     "supplier_portal": "Supplier Portal",
     "auditor": "Auditor",
-    "break_glass_administrator": "Break-glass Administrator",
 }
 
 
@@ -373,7 +379,6 @@ def test_legacy_items_permissions_do_not_gain_destructive_or_approval_authority(
         "numbering.allocate",
     } <= expanded
     assert {
-        "parts.release.approve",
         "parts.purge",
         "files.purge",
         "imports.override_approved",
@@ -392,7 +397,6 @@ def test_legacy_import_and_order_management_exclude_approval_and_override():
         "orders.fulfil",
     } <= expanded
     assert {
-        "imports.approve_high_risk",
         "imports.override_approved",
         "orders.approve",
     }.isdisjoint(expanded)

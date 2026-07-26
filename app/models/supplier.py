@@ -31,6 +31,6 @@ class Supplier(Document):
 
     meta = {
         "collection": "suppliers",
-        "indexes": ["name", "code", "status", "rating"],
+        "indexes": ["name", "code", "status", "rating", "users"],
         "db_alias": DB_ALIAS,
     }

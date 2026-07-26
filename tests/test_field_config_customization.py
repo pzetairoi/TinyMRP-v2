@@ -9,6 +9,7 @@ from app.models.part import Part
 from app.services.attrs import normalize_record_attrs
 from app.services.docpacks import DocPackOptions, build_docpack
 from app.services.field_config import field_requires_runtime_scan, query_paths_for_field, save_field_config
+from app.services.part_materialized import rebuild_part_materialized_fields
 
 
 def _login(client, user):
@@ -382,7 +383,7 @@ def test_filters_use_resolved_values_for_custom_and_remapped_fields(client):
     assert [row["part_number"] for row in global_resp.get_json()["data"]] == ["FLT-RAW-2"]
 
 
-def test_parts_lazy_filters_custom_text_without_materialized_field_values(client):
+def test_parts_lazy_custom_filter_requires_materialized_rebuild(client):
     admin = _admin_user()
     _login(client, admin)
 
@@ -423,7 +424,15 @@ def test_parts_lazy_filters_custom_text_without_materialized_field_values(client
         json={"first": 0, "rows": 25, "filters": {"legacy_code": {"value": "LEG-100"}}},
     )
     assert resp.status_code == 200
-    rows = resp.get_json()["data"]
+    assert resp.get_json()["data"] == []
+
+    report = rebuild_part_materialized_fields()
+    assert report["updated"] == 2
+
+    rows = client.post(
+        "/api/parts_lazy",
+        json={"first": 0, "rows": 25, "filters": {"legacy_code": {"value": "LEG-100"}}},
+    ).get_json()["data"]
     assert [row["part_number"] for row in rows] == ["STALE-100"]
     assert rows[0]["legacy_code"] == "LEG-100"
 

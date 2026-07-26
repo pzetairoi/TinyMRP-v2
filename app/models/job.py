@@ -67,6 +67,10 @@ class Job(Document):
 
     meta = {
         "collection": "jobs",
-        "indexes": ["job_number", "status", "priority", "scheduled_start", "created_at"],
+        "indexes": [
+            "job_number", "status", "priority", "scheduled_start", "created_at",
+            ("customer", "is_deleted"), ("vendors", "is_deleted"),
+            ("participants", "is_deleted"),
+        ],
         "db_alias": DB_ALIAS,
     }

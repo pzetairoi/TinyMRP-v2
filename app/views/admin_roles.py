@@ -109,10 +109,6 @@ def _permission_label(permission: str) -> str:
     subjects = pieces[:-1]
     if permission == "imports.execute_low_risk":
         return "Execute low-risk imports"
-    if permission == "imports.review_high_risk":
-        return "Review high-risk imports"
-    if permission == "imports.approve_high_risk":
-        return "Approve high-risk imports"
     if permission == "imports.execute_approved":
         return "Execute approved imports"
     if permission == "imports.override_approved":
@@ -361,8 +357,10 @@ def _role_form_context(
     *,
     selected_permissions: list[str] | None = None,
     submitted: dict[str, str] | None = None,
+    deletion_error: str = "",
 ) -> dict[str, object]:
     definition = STANDARD_ROLES.get(role.name) if role else None
+    assigned_count = User.objects(roles=role).count() if role else 0
     drift_fields = []
     if role and definition:
         if role.display_name != definition.display_name:
@@ -374,6 +372,8 @@ def _role_form_context(
     return {
         "role": role,
         "standard_definition": definition,
+        "assigned_count": assigned_count,
+        "deletion_error": deletion_error,
         "drift_fields": drift_fields,
         "canonical_groups": _canonical_catalogue(),
         "legacy_permissions": _legacy_catalogue(),
@@ -644,3 +644,45 @@ def roles_edit(role_id):
         "admin/roles_form.html",
         **_role_form_context(role),
     )
+
+
+@bp.post("/<role_id>/delete")
+@require_permission("security.roles.manage")
+def roles_delete(role_id):
+    try:
+        role = Role.objects.get(id=role_id)
+    except (DoesNotExist, ValidationError):
+        abort(404)
+
+    if role.name in STANDARD_ROLES or role.name == "admin":
+        abort(403)
+
+    assigned_count = User.objects(roles=role).count()
+    if assigned_count:
+        message = (
+            f"This role is still assigned to {assigned_count} user(s). "
+            "Review and remove those assignments before deleting the role."
+        )
+        log_action(
+            "admin.role.delete_blocked",
+            resource_type="role",
+            resource=role.name,
+            meta={"assigned_users": assigned_count},
+        )
+        return (
+            render_template(
+                "admin/roles_form.html",
+                **_role_form_context(role, deletion_error=message),
+            ),
+            409,
+        )
+
+    role_name = role.name
+    role.delete()
+    log_action(
+        "admin.role.delete",
+        resource_type="role",
+        resource=role_name,
+    )
+    flash("Custom role deleted.", "success")
+    return redirect(url_for("admin_roles.roles_list"))

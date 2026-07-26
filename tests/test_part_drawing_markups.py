@@ -2,10 +2,12 @@ import uuid
 
 from app.models.artifact import PartFile
 from app.models.auth import Role, User
+from app.models.job import Job, JobBOMLine
 from app.models.part import Part
 from app.models.part_annotation import PartAnnotation
 from app.models.part_drawing_markup import PartDrawingMarkup
 from app.services.parts_delete import delete_part_and_refs
+from app.services.standard_roles import STANDARD_ROLES
 
 
 def _login(client, user):
@@ -149,6 +151,55 @@ def test_user_without_part_access_gets_403(client, app):
     resp = _get(client, pf)
     assert resp.status_code == 403
     assert resp.get_json()["ok"] is False
+
+
+def test_production_operator_gets_assigned_markup_image_and_editable_layer(
+    client,
+    app,
+    tmp_path,
+):
+    definition = STANDARD_ROLES["production_operator"]
+    role = Role(
+        name=definition.slug,
+        display_name=definition.display_name,
+        permissions=list(definition.permissions),
+    ).save()
+    operator = _make_user("production-markup@example.com", [role])
+    part = _make_part("PRODUCTION-MARKUP", "A")
+    image_path = tmp_path / "png" / "PRODUCTION-MARKUP_REV_A.png"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"png")
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    drawing = PartFile(
+        part_number=part.part_number,
+        revision=part.revision,
+        ext_group="png",
+        ext="png",
+        is_dwg=True,
+        rel_path="png/PRODUCTION-MARKUP_REV_A.png",
+        path=str(image_path),
+        sha256="production-markup",
+        size=3,
+    ).save()
+    Job(
+        job_number="PRODUCTION-MARKUP-JOB",
+        participants=[operator],
+        bom=[JobBOMLine(pn=part.part_number, rev=part.revision, qty=1)],
+    ).save()
+    _login(client, operator)
+
+    images = client.get(
+        f"/api/part_images?pn={part.part_number}&rev=A&mode=drawing"
+    )
+    assert images.status_code == 200
+    image = images.get_json()[0]
+    assert image["source_file_id"] == str(drawing.id)
+    assert image["image_urls"]
+
+    layer = _get(client, drawing, pn=part.part_number)
+    assert layer.status_code == 200
+    assert layer.get_json()["can_edit"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from copy import deepcopy
 from datetime import date, datetime, time, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
-from flask import current_app, has_app_context
+from flask import current_app, g, has_app_context
 
 from app.models.app_settings import AppSettings
 from app.models.part import Part
@@ -1107,6 +1107,10 @@ def sanitize_admin_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any
 
 
 def get_field_config() -> Dict[str, Any]:
+    if has_app_context():
+        cached = getattr(g, "_part_field_config", None)
+        if isinstance(cached, dict):
+            return cached
     defaults = default_field_config()
     settings = _settings_doc(create=False)
     stored = {}
@@ -1174,15 +1178,20 @@ def get_field_config() -> Dict[str, Any]:
                 contexts[name]["default_field_ids"].insert(0, req)
         contexts[name]["available_fields"] = [deepcopy(field_index_map[field_id]) for field_id in contexts[name]["allowed_field_ids"]]
 
-    return {
+    result = {
         "fields": fields,
         "contexts": contexts,
         "canonical_aliases": list(sanitized.get("canonical_aliases") or default_canonical_alias_entries()),
         "approval_rules": dict(sanitized.get("approval_rules") or default_approval_rules()),
     }
+    if has_app_context():
+        g._part_field_config = result
+    return result
 
 
 def save_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any]:
+    if has_app_context():
+        g.pop("_part_field_config", None)
     sanitized = sanitize_admin_field_config(payload)
     settings = _settings_doc(create=True)
     saved_at = utc_now()
@@ -1201,6 +1210,8 @@ def save_field_config(payload: Dict[str, Any] | None) -> Dict[str, Any]:
 
 
 def reset_field_config() -> Dict[str, Any]:
+    if has_app_context():
+        g.pop("_part_field_config", None)
     settings = _settings_doc(create=True)
     saved_at = utc_now()
     settings.field_config = {}

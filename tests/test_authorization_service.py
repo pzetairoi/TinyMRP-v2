@@ -150,6 +150,7 @@ def test_request_cache_traverses_roles_once(app):
         "security_administrator",
         "system_administrator",
         "break_glass_administrator",
+        "administrator",
     ],
 )
 def test_ordinary_role_names_do_not_bypass_permissions(app, role_name):
@@ -392,7 +393,7 @@ def test_blank_revision_is_exact_not_family_wildcard(app, monkeypatch):
             bom=[JobBOMLine(pn="BLANK-1", rev="", qty=1)],
         ).save()
         monkeypatch.setattr(
-            "app.services.acl.allowed_parts_for",
+            "app.services.authorization.relationship_part_pairs",
             lambda _user: {("BLANK-1", "")},
         )
 
@@ -413,7 +414,7 @@ def test_part_acl_calculation_exception_denies(app, monkeypatch):
         Customer(name="Error Customer", users=[user]).save()
         Part(part_number="ERROR-1", revision="A").save()
         monkeypatch.setattr(
-            "app.services.acl.allowed_parts_for",
+            "app.services.authorization.relationship_part_pairs",
             lambda _user: (_ for _ in ()).throw(RuntimeError("ACL failed")),
         )
 
