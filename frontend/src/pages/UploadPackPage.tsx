@@ -91,10 +91,30 @@ const PRESETS: Record<Exclude<Preset, "custom">, [DataMode, BomMode, FileMode, A
   always: ["replace_all", "replace_all", "replace_all", "replace_all"],
 };
 
+type Tone = "safe" | "draft" | "admin";
+const TIER_META: Record<Exclude<Preset, "custom">, { label: string; hint: string }> = {
+  preserve: { label: "Fill only", hint: "Adds blanks, empty BOMs and missing files. Approved parts are never touched." },
+  unless_existing_approved: {
+    label: "Update drafts",
+    hint: "Also replaces existing draft (unapproved) data. Approved parts stay protected.",
+  },
+  always: {
+    label: "Override approved (Admin)",
+    hint: "Replaces everything, including approved parts and their approval status.",
+  },
+};
+const TONE_ALERT: Record<Tone, string> = { safe: "alert-success", draft: "alert-warning", admin: "alert-danger" };
+const TONE_BUTTON: Record<Tone, string> = { safe: "btn-success", draft: "btn-warning", admin: "btn-danger" };
+
 const stateLabels: Record<PlanPart["target_state"], string> = {
   new: "New",
-  existing_unapproved: "Existing unapproved",
-  existing_approved: "Existing approved",
+  existing_unapproved: "Draft",
+  existing_approved: "Approved",
+};
+const stateBadgeClass: Record<PlanPart["target_state"], string> = {
+  new: "text-bg-info",
+  existing_unapproved: "text-bg-secondary",
+  existing_approved: "text-bg-warning",
 };
 
 function valueText(value: unknown) {
@@ -199,18 +219,21 @@ function ChangeTable({ rows }: { rows: Change[] }) {
 }
 
 function PartRedline({ part }: { part: PlanPart }) {
+  const overridingApproved = part.target_state === "existing_approved" && part.changed;
   return (
     <details className="border rounded p-2 bg-white">
       <summary className="d-flex flex-wrap align-items-center gap-2">
         <strong>
           {part.part_number} — {part.revision || "No revision"}
         </strong>
-        <span className={`badge ${part.target_state === "existing_approved" ? "text-bg-warning" : "text-bg-secondary"}`}>
-          {stateLabels[part.target_state]}
-        </span>
-        <span className={`badge ${part.allowed ? "text-bg-success" : "text-bg-danger"}`}>
-          {part.allowed ? "Allowed" : "Blocked"}
-        </span>
+        <span className={`badge ${stateBadgeClass[part.target_state]}`}>{stateLabels[part.target_state]}</span>
+        {overridingApproved ? (
+          <span className={`badge ${part.allowed ? "text-bg-danger" : "text-bg-warning"}`}>
+            {part.allowed ? "Overriding approved" : "Needs admin to override"}
+          </span>
+        ) : !part.allowed ? (
+          <span className="badge text-bg-danger">Blocked</span>
+        ) : null}
       </summary>
       <div className="mt-3">
         <h6>Properties</h6>
@@ -261,7 +284,6 @@ export default function UploadPackPage() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
-  const [strict, setStrict] = useState(false);
   const [capabilities, setCapabilities] = useState<Capability>({});
   const [dataMode, setDataMode] = useState<DataMode>("fill_blanks");
   const [bomMode, setBomMode] = useState<BomMode>("fill_if_empty");
@@ -346,6 +368,17 @@ export default function UploadPackPage() {
       }),
     [plan, filter],
   );
+  // Surfaced at the top of the report so it's obvious at a glance whether approved data was touched.
+  const overrideCounts = useMemo(() => {
+    let overriding = 0;
+    let needsAdmin = 0;
+    for (const part of plan?.parts || []) {
+      if (part.target_state !== "existing_approved" || !part.changed) continue;
+      if (part.allowed) overriding += 1;
+      else needsAdmin += 1;
+    }
+    return { overriding, needsAdmin };
+  }, [plan]);
 
   function chooseFile(files: FileList | null) {
     const chosen = files?.[0] || null;
@@ -370,7 +403,6 @@ export default function UploadPackPage() {
     form.append("file_mode", fileMode);
     form.append("approval_mode", approvalMode);
     if (dryRun) form.append("dry_run", "1");
-    if (strict) form.append("strict_structure", "1");
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload/pack");
@@ -406,6 +438,9 @@ export default function UploadPackPage() {
     approvalMode !== "preserve";
   const overrideSelected =
     dataMode === "replace_all" || bomMode === "replace_all" || fileMode === "replace_all" || approvalMode === "replace_all";
+  // Red whenever approved data could be touched, amber for draft-only updates, green when nothing but blanks fill.
+  // Computed from the actual selected modes (not just the preset) so it stays accurate in "Custom".
+  const activeTone: Tone = overrideSelected ? "admin" : advancedSelected ? "draft" : "safe";
 
   return (
     <div className="container-xxl py-3">
@@ -449,36 +484,33 @@ export default function UploadPackPage() {
         />
 
         <h6 className="mt-4">2. Select import policy</h6>
-        <div className="row g-3">
-          <div className="col-md-6">
-            <label className="form-label fw-semibold mb-1" htmlFor="importPreset">
-              Properties, BOM, files and approval
-            </label>
-            <select
-              id="importPreset"
-              className="form-select form-select-sm"
-              value={preset}
-              onChange={(event) => {
-                const value = event.target.value as Preset;
-                if (value !== "custom") applyPreset(value);
-              }}
-            >
-              <option value="preserve">Fill safely (default)</option>
-              <option value="unless_existing_approved" disabled={!canAdvanced}>
-                Override if not approved
-              </option>
-              <option value="always" disabled={!canOverride}>
-                Override for admin users
-              </option>
-              {preset === "custom" ? <option value="custom">Custom (see advanced options below)</option> : null}
-            </select>
-            <div className="form-text">
-              Fill only adds blanks, empty BOMs and missing files without touching approval. Override if not
-              approved replaces unapproved targets. Override for admin users also replaces approved targets and
-              their approval status. Approved targets can never be filled or replaced without admin permissions,
-              no matter which policy is selected.
-            </div>
-          </div>
+        <div className="btn-group" role="group" aria-label="Import tier">
+          {(Object.keys(TIER_META) as Array<Exclude<Preset, "custom">>).map((tier) => {
+            const tierDisabled = tier === "unless_existing_approved" ? !canAdvanced : tier === "always" ? !canOverride : false;
+            const tierTone: Tone = tier === "always" ? "admin" : tier === "unless_existing_approved" ? "draft" : "safe";
+            return (
+              <button
+                key={tier}
+                type="button"
+                className={`btn ${preset === tier ? TONE_BUTTON[tierTone] : "btn-outline-secondary"}`}
+                disabled={tierDisabled}
+                onClick={() => applyPreset(tier)}
+              >
+                {TIER_META[tier].label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="small text-muted mt-1">
+          {preset === "custom" ? "Custom — set via the advanced options below." : TIER_META[preset].hint}
+        </div>
+        <div className={`alert ${TONE_ALERT[activeTone]} small mt-2 mb-0 fw-semibold`}>
+          {activeTone === "admin"
+            ? "Admin override active — approved parts will be overwritten if they differ."
+            : activeTone === "draft"
+              ? "Draft (unapproved) parts will be updated. Approved parts stay protected."
+              : "Safe: only blanks, empty BOMs and missing files are filled. Approved parts stay protected."}{" "}
+          Approved data can never be filled or replaced without admin permission, regardless of policy.
         </div>
 
         <details className="mt-3">
@@ -491,10 +523,10 @@ export default function UploadPackPage() {
               value={dataMode}
               onChange={setDataMode}
               options={[
-                { value: "skip", label: "Skip properties" },
-                { value: "fill_blanks", label: "Fill blank values", disabled: !canLowRisk },
-                { value: "replace_unapproved", label: "Replace on unapproved targets", disabled: !canAdvanced },
-                { value: "replace_all", label: "Replace on all targets (admin)", disabled: !canOverride },
+                { value: "skip", label: "Skip" },
+                { value: "fill_blanks", label: "Fill only", disabled: !canLowRisk },
+                { value: "replace_unapproved", label: "Update drafts", disabled: !canAdvanced },
+                { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
               ]}
             />
             <PolicySelect
@@ -504,10 +536,10 @@ export default function UploadPackPage() {
               value={bomMode}
               onChange={setBomMode}
               options={[
-                { value: "skip", label: "Skip BOM" },
-                { value: "fill_if_empty", label: "Fill only if empty", disabled: !canLowRisk },
-                { value: "replace_unapproved", label: "Replace unapproved BOMs", disabled: !canAdvanced },
-                { value: "replace_all", label: "Replace all BOMs (admin)", disabled: !canOverride },
+                { value: "skip", label: "Skip" },
+                { value: "fill_if_empty", label: "Fill only", disabled: !canLowRisk },
+                { value: "replace_unapproved", label: "Update drafts", disabled: !canAdvanced },
+                { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
               ]}
             />
             <PolicySelect
@@ -517,10 +549,10 @@ export default function UploadPackPage() {
               value={fileMode}
               onChange={setFileMode}
               options={[
-                { value: "skip", label: "Skip files" },
-                { value: "add_missing", label: "Add missing files", disabled: !canLowRisk },
-                { value: "replace_unapproved", label: "Replace files on unapproved targets", disabled: !canAdvanced },
-                { value: "replace_all", label: "Replace files on all targets (admin)", disabled: !canOverride },
+                { value: "skip", label: "Skip" },
+                { value: "add_missing", label: "Fill only", disabled: !canLowRisk },
+                { value: "replace_unapproved", label: "Update drafts", disabled: !canAdvanced },
+                { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
               ]}
             />
             <PolicySelect
@@ -530,36 +562,13 @@ export default function UploadPackPage() {
               value={approvalMode}
               onChange={setApprovalMode}
               options={[
-                { value: "preserve", label: "Preserve existing approval" },
-                { value: "import_unapproved", label: "Import on unapproved targets", disabled: !canAdvanced },
-                { value: "replace_all", label: "Replace approval on all targets (admin)", disabled: !canOverride },
+                { value: "preserve", label: "Skip (preserve existing)" },
+                { value: "import_unapproved", label: "Update drafts", disabled: !canAdvanced },
+                { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
               ]}
             />
           </div>
         </details>
-        {advancedSelected && !canAdvanced ? (
-          <div className="alert alert-warning small mt-3 mb-0">
-            Your roles cannot execute replacement effects. Preview remains available and will identify any
-            required permissions.
-          </div>
-        ) : null}
-        {overrideSelected && !canOverride ? (
-          <div className="alert alert-warning small mt-2 mb-0">
-            Your roles cannot modify existing approved targets.
-          </div>
-        ) : null}
-        <div className="form-check mt-3">
-          <input
-            id="strictImport"
-            type="checkbox"
-            className="form-check-input"
-            checked={strict}
-            onChange={(event) => setStrict(event.target.checked)}
-          />
-          <label className="form-check-label" htmlFor="strictImport">
-            Reject unknown package entries
-          </label>
-        </div>
 
         <h6 className="mt-4">3. Preview changes &nbsp; 4. Apply import</h6>
         <div className="d-flex gap-2 flex-wrap">
@@ -609,6 +618,20 @@ export default function UploadPackPage() {
                 {plan.summary.parts} exact part/revisions · {plan.summary.changed} changed ·{" "}
                 {plan.summary.blocked} blocked
               </div>
+              {overrideCounts.overriding || overrideCounts.needsAdmin ? (
+                <div className="small mt-1">
+                  {overrideCounts.overriding ? (
+                    <span className="badge text-bg-danger me-1">
+                      {overrideCounts.overriding} overriding approved
+                    </span>
+                  ) : null}
+                  {overrideCounts.needsAdmin ? (
+                    <span className="badge text-bg-warning">{overrideCounts.needsAdmin} need admin to override</span>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="small text-success mt-1">No approved data is affected.</div>
+              )}
             </div>
             <button
               className="btn btn-sm btn-outline-secondary"
