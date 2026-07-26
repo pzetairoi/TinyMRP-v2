@@ -311,6 +311,12 @@ def orders_view(order_id):
     o = _scoped_order(order_id, "orders.read")
     if not o:
         abort(404)
+    # Clean up broken references to avoid deref errors
+    for ref_field in ("customer", "supplier", "job"):
+        try:
+            _ = getattr(o, ref_field).id if getattr(o, ref_field) else None
+        except Exception:
+            setattr(o, ref_field, None)
     try:
         log_action("order.view", resource_type="order", resource=str(o.id))
     except Exception:
@@ -374,9 +380,19 @@ def order_scope_pdf(order_id):
         resource_type="orders",
     ):
         abort(404)
-    if order.customer and not has_permission(current_user, "customers.read"):
+    try:
+        has_customer = bool(order.customer)
+    except Exception:
+        order.customer = None
+        has_customer = False
+    if has_customer and not has_permission(current_user, "customers.read"):
         abort(403)
-    if order.supplier and not has_permission(current_user, "suppliers.read"):
+    try:
+        has_supplier = bool(order.supplier)
+    except Exception:
+        order.supplier = None
+        has_supplier = False
+    if has_supplier and not has_permission(current_user, "suppliers.read"):
         abort(403)
 
     attach_docs = (request.form.get("attach_docs") or "").lower() in ("1", "true", "yes", "on")
@@ -634,8 +650,11 @@ def orders_new():
             )
             if not o.customer:
                 abort(404)
-        if o.job and o.job.customer:
-            o.customer = o.job.customer
+        try:
+            if o.job and o.job.customer:
+                o.customer = o.job.customer
+        except DoesNotExist:
+            pass
         existing_lines = list(o.lines or [])
         o.lines = _preserve_line_financials(
             _parse_lines(request.form.get("lines") or ""),
@@ -667,8 +686,11 @@ def orders_new():
             "jobs",
             "orders.create",
         )
-        if job and job.customer:
-            prefill_customer = str(job.customer.id)
+        try:
+            if job and job.customer:
+                prefill_customer = str(job.customer.id)
+        except DoesNotExist:
+            pass
     return render_template(
         "admin/orders_form.html",
         order=None,
@@ -776,8 +798,11 @@ def orders_edit(order_id):
             or (cust_id and not o.customer)
         ):
             abort(404)
-        if o.job and o.job.customer:
-            o.customer = o.job.customer
+        try:
+            if o.job and o.job.customer:
+                o.customer = o.job.customer
+        except DoesNotExist:
+            pass
         o.lines = _preserve_line_financials(
             _parse_lines(request.form.get("lines") or ""),
             list(o.lines or []),
@@ -848,12 +873,16 @@ def orders_from_job(job_id):
     if not parts:
         flash("Select at least one part to create the order.", "error")
         return redirect(url_for("admin_jobs.jobs_edit", job_id=job.id))
+    try:
+        job_customer = job.customer if job.customer else None
+    except DoesNotExist:
+        job_customer = None
     o = Order(
         order_number=generate_order_number("purchase"),
         kind="purchase",
         status="draft",
         job=job,
-        customer=job.customer if job.customer else None,
+        customer=job_customer,
         order_date=utc_now(),
         currency="USD",
     )

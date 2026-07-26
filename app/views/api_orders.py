@@ -19,7 +19,7 @@ from app.services.authorization import (
     order_relationship_allowed,
     scope_queryset,
 )
-from app.services.biz_utils import generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines
+from app.services.biz_utils import generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines, safe_ref
 from app.services.field_policies import (
     filter_response_fields,
     response_context,
@@ -287,9 +287,9 @@ def _order_to_dict(o: Order, *, user=None):
         "kind": o.kind,
         "description": o.description,
         "status": o.status,
-        "customer": getattr(o.customer, "name", None),
-        "supplier": getattr(o.supplier, "name", None),
-        "job": getattr(o.job, "job_number", None),
+        "customer": getattr(safe_ref(o, "customer"), "name", None),
+        "supplier": getattr(safe_ref(o, "supplier"), "name", None),
+        "job": getattr(safe_ref(o, "job"), "job_number", None),
         "subtotal": o.subtotal,
         "tax_amount": o.tax_amount,
         "shipping_cost": o.shipping_cost,
