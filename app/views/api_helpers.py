@@ -23,6 +23,24 @@ def json_error(code: str, message: str, status: int = 400, details: list | None 
     }), status
 
 
+def invalid_payload_fields(data, allowed):
+    """Reject unknown request fields, naming them in the error details.
+
+    Shared so every resource rejects mass-assignment attempts with the same
+    error shape.
+    """
+
+    unknown = sorted(set(data) - set(allowed))
+    if not unknown:
+        return None
+    return json_error(
+        "invalid_fields",
+        "Unsupported field(s) in request.",
+        400,
+        unknown,
+    )
+
+
 def ensure_permissions(*perms: str):
     user = get_request_user()
     if not user:

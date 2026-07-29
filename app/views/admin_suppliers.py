@@ -3,7 +3,7 @@ from flask_login import current_user
 from app.services.acl import permissions_required
 from app.services.authorization import (
     authorised_get,
-    authorise,
+    enforce_permission as _require,
     has_permission,
     scope_queryset,
     uses_portal_presentation,
@@ -15,7 +15,12 @@ from app.models.supplier import Supplier
 from app.models.job import Job
 from app.models.order import Order
 from app.models.auth import User
-from app.models.common import Address, Contact
+from app.services.company_forms import (
+    parse_address_from_form as _parse_address_from_form,
+    parse_contacts_text as _parse_contacts_text,
+    parse_float as _parse_float,
+    primary_from_contacts as _primary_from_contacts,
+)
 from app.services.biz_utils import generate_supplier_code
 
 bp = Blueprint("admin_suppliers", __name__, url_prefix="/admin/suppliers")
@@ -70,11 +75,6 @@ _SUPPLIER_FINANCIAL_FORM_FIELDS = {
     "billing_postal",
     "billing_country",
 }
-
-
-def _require(permission):
-    if not authorise(current_user, permission).allowed:
-        abort(403)
 
 
 def _require_supplier_form_permissions():
@@ -204,66 +204,6 @@ def _parse_int(value):
         return int(value)
     except Exception:
         return None
-
-
-def _parse_float(value):
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def _parse_address_from_form(prefix: str):
-    label = (request.form.get(f"{prefix}_label") or "").strip()
-    line1 = (request.form.get(f"{prefix}_line1") or "").strip()
-    line2 = (request.form.get(f"{prefix}_line2") or "").strip()
-    city = (request.form.get(f"{prefix}_city") or "").strip()
-    state = (request.form.get(f"{prefix}_state") or "").strip()
-    postal = (request.form.get(f"{prefix}_postal") or "").strip()
-    country = (request.form.get(f"{prefix}_country") or "").strip()
-    if not any([line1, line2, city, state, postal, country]):
-        return None
-    return Address(
-        label=label,
-        line1=line1,
-        line2=line2,
-        city=city,
-        state=state,
-        postal=postal,
-        country=country,
-    )
-
-
-def _parse_contacts_text(text: str):
-    contacts = []
-    for raw in (text or "").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = [p.strip() for p in line.split("|")]
-        name = parts[0] if len(parts) > 0 else ""
-        title = parts[1] if len(parts) > 1 else ""
-        email = parts[2] if len(parts) > 2 else ""
-        phone = parts[3] if len(parts) > 3 else ""
-        primary_raw = parts[4] if len(parts) > 4 else ""
-        is_primary = primary_raw.lower() in ("1", "true", "yes", "y", "primary")
-        if not name:
-            continue
-        contacts.append(Contact(
-            name=name,
-            title=title,
-            email=email,
-            phone=phone,
-            is_primary=is_primary,
-        ))
-    return contacts
-
-
-def _primary_from_contacts(contacts):
-    for c in contacts or []:
-        if c.is_primary:
-            return c
-    return contacts[0] if contacts else None
 
 
 @bp.route("/new", methods=["GET","POST"])

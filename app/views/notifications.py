@@ -5,8 +5,8 @@ from flask import Blueprint, jsonify, request
 from app.models.auth import User
 from app.models.notification import UserNotification
 from app.models.part import Part
-from app.services.acl import allowed_parts_for, part_is_allowed
 from app.services.api_auth import api_auth_required, get_request_user
+from app.services.authorization import authorise_part_access, has_permission
 from app.services.timezone_utils import utc_iso, utc_now
 from app.services.user_profile import profile_for_user
 
@@ -77,15 +77,15 @@ def mentionable_users():
     rev = str(request.args.get("rev") or "").strip()
     if not pn:
         return jsonify({"ok": False, "error": "part_required"}), 400
+    # Mentioning is a commenting action, so it needs comment authority. This
+    # also keeps the internal directory away from customer and supplier portals.
+    if not has_permission(current, "comments.write"):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     part = Part.objects(part_number__iexact=pn, revision__iexact=rev).first()
     if not part:
         return jsonify({"ok": False, "error": "part_not_found"}), 404
-    try:
-        current_allowed = allowed_parts_for(current)
-        if isinstance(current_allowed, set) and not part_is_allowed(current_allowed, part.part_number, part.revision or ""):
-            return jsonify({"ok": False, "error": "forbidden"}), 403
-    except Exception:
-        pass
+    if not authorise_part_access(current, part.part_number, part.revision or "").allowed:
+        return jsonify({"ok": False, "error": "forbidden"}), 403
     users = []
     for user in User.objects(active=True).order_by("email"):
         if str(user.id) == str(current.id):
@@ -94,11 +94,10 @@ def mentionable_users():
         haystack = f"{user.email} {profile.get('label') or ''}".lower()
         if needle and needle not in haystack:
             continue
-        try:
-            target_allowed = allowed_parts_for(user)
-            if isinstance(target_allowed, set) and not part_is_allowed(target_allowed, part.part_number, part.revision or ""):
-                continue
-        except Exception:
+        # Only suggest people who could actually read the part and reply on it.
+        if not has_permission(user, "comments.read"):
+            continue
+        if not authorise_part_access(user, part.part_number, part.revision or "").allowed:
             continue
         users.append({
             "id": str(user.id),

@@ -59,7 +59,10 @@ def test_part_comment_notifies_mention_and_part_uploader(client):
 
 
 def test_notification_api_read_state_and_mentionable_users(client):
-    viewer = Role(name="notification_api_viewer", permissions=["items.view"]).save()
+    viewer = Role(
+        name="notification_api_viewer",
+        permissions=["items.view", "comments.write"],
+    ).save()
     user = _user("inbox@example.com", viewer)
     colleague = _user("colleague@example.com", viewer)
     row = UserNotification(
@@ -70,7 +73,12 @@ def test_notification_api_read_state_and_mentionable_users(client):
         body="Please review",
         url="/ui/part/PN-1",
     ).save()
-    Part(part_number="MENTION-1", revision="", description="Mention scope").save()
+    Part(
+        part_number="MENTION-1",
+        revision="",
+        description="Mention scope",
+        attrs={"approved": "yes"},
+    ).save()
     _login(client, user)
 
     listing = client.get("/api/notifications")
@@ -144,3 +152,26 @@ def test_markup_thread_mentions_and_uploader_notifications(client):
     assert created.status_code == 201
     assert UserNotification.objects(recipient=mentioned, kind="mention").count() == 1
     assert UserNotification.objects(recipient=uploader, kind="part_review").count() == 1
+
+
+def test_mention_directory_requires_comment_authority(client):
+    """Mention autocomplete must not expose the staff directory to portals."""
+
+    from app.services.standard_roles import STANDARD_ROLES
+
+    def _standard(slug):
+        definition = STANDARD_ROLES[slug]
+        return Role(
+            name=slug,
+            display_name=definition.display_name,
+            permissions=list(definition.permissions),
+        ).save()
+
+    Part(part_number="MENTION-SCOPE", revision="", attrs={"approved": "yes"}).save()
+    _user("engineer@example.com", _standard("engineering"))
+    portal = _user("buyer@customer.example.com", _standard("customer"))
+
+    _login(client, portal)
+    denied = client.get("/api/users/mentionable?q=engineer&pn=MENTION-SCOPE&rev=")
+    assert denied.status_code == 403
+    assert "engineer@example.com" not in denied.get_data(as_text=True)

@@ -19,7 +19,7 @@ from app.services.authorization import (
     order_relationship_allowed,
     scope_queryset,
 )
-from app.services.biz_utils import generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines, safe_ref
+from app.services.biz_utils import order_status_permission, generate_order_number, can_transition_order, calculate_order_totals, ORDER_STATUS_FLOW, consolidate_order_lines, safe_ref
 from app.services.field_policies import (
     filter_response_fields,
     response_context,
@@ -30,6 +30,7 @@ from app.views.api_helpers import (
     add_datetime_fields,
     ensure_permissions,
     get_json,
+    invalid_payload_fields,
     json_error,
     parse_datetime_param,
     parse_pagination,
@@ -92,18 +93,6 @@ _ADDRESS_FIELDS = {
 }
 
 
-def _invalid_payload_fields(data, allowed):
-    unknown = sorted(set(data) - set(allowed))
-    if unknown:
-        return json_error(
-            "invalid_fields",
-            "Unsupported field(s) in request.",
-            400,
-            unknown,
-        )
-    return None
-
-
 def _has_financial_changes(data):
     if set(data) & _ORDER_FINANCIAL_FIELDS:
         return True
@@ -117,13 +106,13 @@ def _has_financial_changes(data):
 def _invalid_nested_fields(data):
     address = data.get("shipping_address")
     if isinstance(address, dict):
-        invalid = _invalid_payload_fields(address, _ADDRESS_FIELDS)
+        invalid = invalid_payload_fields(address, _ADDRESS_FIELDS)
         if invalid:
             return invalid
     for raw in data.get("lines") or []:
         if not isinstance(raw, dict):
             return json_error("invalid_lines", "Order lines must be objects.", 400)
-        invalid = _invalid_payload_fields(raw, _LINE_FIELDS)
+        invalid = invalid_payload_fields(raw, _LINE_FIELDS)
         if invalid:
             return invalid
     return None
@@ -173,18 +162,6 @@ def _related_by_id_or_code(user, queryset, resource_type, permission, object_id,
         permission,
         field="code",
     )
-
-
-def _status_permission(status):
-    return {
-        "submitted": "orders.submit",
-        "confirmed": "orders.approve",
-        "in_production": "orders.fulfil",
-        "ready_to_ship": "orders.fulfil",
-        "shipped": "orders.ship",
-        "delivered": "orders.fulfil",
-        "cancelled": "orders.cancel",
-    }.get(status, "orders.update")
 
 
 def _parse_address(data) -> Address | None:
@@ -432,7 +409,7 @@ def create_order():
     if err:
         return err
     data = get_json()
-    invalid = _invalid_payload_fields(data, _ORDER_FIELDS)
+    invalid = invalid_payload_fields(data, _ORDER_FIELDS)
     if invalid:
         return invalid
     invalid = _invalid_nested_fields(data)
@@ -455,7 +432,7 @@ def create_order():
     if status not in ORDER_STATUS_FLOW:
         return json_error("invalid_status", "Invalid status.", 400)
     if status != "draft":
-        _, err = ensure_permissions(_status_permission(status))
+        _, err = ensure_permissions(order_status_permission(status))
         if err:
             return err
     order_number = (data.get("order_number") or "").strip() or generate_order_number(kind)
@@ -556,7 +533,7 @@ def update_order(order_number):
     if err:
         return err
     data = get_json()
-    invalid = _invalid_payload_fields(data, _ORDER_FIELDS - {"order_number"})
+    invalid = invalid_payload_fields(data, _ORDER_FIELDS - {"order_number"})
     if invalid:
         return invalid
     invalid = _invalid_nested_fields(data)
@@ -583,7 +560,7 @@ def update_order(order_number):
         if new_status not in ORDER_STATUS_FLOW:
             return json_error("invalid_status", "Invalid status.", 400)
         if new_status != order.status:
-            _, err = ensure_permissions(_status_permission(new_status))
+            _, err = ensure_permissions(order_status_permission(new_status))
             if err:
                 return err
             if not can_transition_order(order.status, new_status):
@@ -754,7 +731,7 @@ def order_ship(order_number):
     if not order:
         return json_error("not_found", "Order not found.", 404)
     data = get_json()
-    invalid = _invalid_payload_fields(
+    invalid = invalid_payload_fields(
         data,
         {"carrier", "tracking_number", "actual_delivery"},
     )
@@ -775,13 +752,13 @@ def order_ship(order_number):
 @api_auth_required
 def order_status(order_number):
     data = get_json()
-    invalid = _invalid_payload_fields(data, {"status"})
+    invalid = invalid_payload_fields(data, {"status"})
     if invalid:
         return invalid
     new_status = (data.get("status") or "").strip()
     if new_status not in ORDER_STATUS_FLOW:
         return json_error("invalid_status", "Invalid status.", 400)
-    permission = _status_permission(new_status)
+    permission = order_status_permission(new_status)
     user, err = ensure_permissions(permission)
     if err:
         return err

@@ -963,18 +963,29 @@ def authorise_part_access(
     )
 
 
+def enforce_permission(permission: str, *, user: Any = None) -> None:
+    """Abort unless the user holds the permission, recording why.
+
+    The imperative counterpart to :func:`require_permission`, for checks that
+    depend on the request body rather than the route.
+    """
+
+    actor = current_user if user is None else user
+    if not _is_authenticated(actor):
+        abort(401)
+    decision = authorise(actor, permission)
+    if not decision.allowed:
+        g.authz_denial = decision
+        abort(403)
+
+
 def require_permission(permission: str):
     """Require one canonical permission for a route."""
 
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            if not _is_authenticated(current_user):
-                abort(401)
-            decision = authorise(current_user, permission)
-            if not decision.allowed:
-                g.authz_denial = decision
-                abort(403)
+            enforce_permission(permission)
             return fn(*args, **kwargs)
 
         return wrapper

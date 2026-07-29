@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from typing import List
-
 from flask import Blueprint, jsonify, request
 from mongoengine.queryset.visitor import Q
 
 from app.models.supplier import Supplier
 from app.models.part import Part
 from app.models.order import Order
-from app.models.common import Contact, Address
 from app.services.api_auth import api_auth_required
 from app.services.authorization import authorised_get, has_permission, scope_queryset
 from app.services.attrs import harvest_part_attrs
@@ -17,40 +14,24 @@ from app.services.field_policies import (
     filter_response_fields,
     response_context,
 )
-from app.views.api_helpers import json_error, ensure_permissions, parse_pagination, iso, get_json
+from app.services.company_forms import (
+    ADDRESS_FIELDS as _ADDRESS_FIELDS,
+    CONTACT_FIELDS as _CONTACT_FIELDS,
+    address_to_dict as _address_to_dict,
+    contact_to_dict as _contact_to_dict,
+    parse_address as _parse_address,
+    parse_contacts as _parse_contacts,
+)
+from app.views.api_helpers import (
+    json_error,
+    ensure_permissions,
+    invalid_payload_fields,
+    parse_pagination,
+    iso,
+    get_json,
+)
 
 bp = Blueprint("suppliers_api", __name__, url_prefix="/api/suppliers")
-
-
-def _parse_address(data) -> Address | None:
-    if not data:
-        return None
-    return Address(
-        label=data.get("label") or "",
-        line1=data.get("line1") or "",
-        line2=data.get("line2") or "",
-        city=data.get("city") or "",
-        state=data.get("state") or "",
-        postal=data.get("postal") or "",
-        country=data.get("country") or "",
-        is_default=bool(data.get("is_default")),
-    )
-
-
-def _parse_contacts(items) -> List[Contact]:
-    out = []
-    for raw in items or []:
-        name = (raw.get("name") or "").strip()
-        if not name:
-            continue
-        out.append(Contact(
-            name=name,
-            title=raw.get("title") or "",
-            email=raw.get("email") or "",
-            phone=raw.get("phone") or "",
-            is_primary=bool(raw.get("is_primary")),
-        ))
-    return out
 
 
 _SUPPLIER_FIELDS = {
@@ -83,28 +64,6 @@ _SUPPLIER_FINANCIAL_FIELDS = {
     "min_order_value",
     "billing_address",
 }
-_ADDRESS_FIELDS = {
-    "label",
-    "line1",
-    "line2",
-    "city",
-    "state",
-    "postal",
-    "country",
-    "is_default",
-}
-_CONTACT_FIELDS = {"name", "title", "email", "phone", "is_primary"}
-
-
-def _invalid_payload_fields(data, allowed):
-    invalid = sorted(set(data) - set(allowed))
-    if invalid:
-        return json_error(
-            "invalid_fields",
-            f"Unsupported fields: {', '.join(invalid)}.",
-            400,
-        )
-    return None
 
 
 def _invalid_nested_fields(data):
@@ -113,7 +72,7 @@ def _invalid_nested_fields(data):
         if value is not None and not isinstance(value, dict):
             return json_error("invalid_address", "Address must be an object.", 400)
         if isinstance(value, dict):
-            invalid = _invalid_payload_fields(value, _ADDRESS_FIELDS)
+            invalid = invalid_payload_fields(value, _ADDRESS_FIELDS)
             if invalid:
                 return invalid
     contacts = data.get("contacts")
@@ -122,7 +81,7 @@ def _invalid_nested_fields(data):
     for value in contacts or []:
         if not isinstance(value, dict):
             return json_error("invalid_contact", "Contacts must be objects.", 400)
-        invalid = _invalid_payload_fields(value, _CONTACT_FIELDS)
+        invalid = invalid_payload_fields(value, _CONTACT_FIELDS)
         if invalid:
             return invalid
     return None
@@ -145,26 +104,6 @@ def _scoped_supplier(user, code, permission):
         code,
         resource_type="suppliers",
         permission=permission,
-    )
-
-
-def _address_to_dict(value, user, boundary):
-    if value is None:
-        return None
-    return filter_response_fields(
-        "address",
-        user,
-        {field: getattr(value, field, None) for field in _ADDRESS_FIELDS},
-        context={"policy_context": boundary, "surface": "embedded"},
-    )
-
-
-def _contact_to_dict(value, user, boundary):
-    return filter_response_fields(
-        "contact",
-        user,
-        {field: getattr(value, field, None) for field in _CONTACT_FIELDS},
-        context={"policy_context": boundary, "surface": "embedded"},
     )
 
 
@@ -258,7 +197,7 @@ def create_supplier():
     if err:
         return err
     data = get_json()
-    invalid = _invalid_payload_fields(data, _SUPPLIER_FIELDS)
+    invalid = invalid_payload_fields(data, _SUPPLIER_FIELDS)
     if invalid:
         return invalid
     invalid = _invalid_nested_fields(data)
@@ -328,7 +267,7 @@ def update_supplier(code):
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     data = get_json()
-    invalid = _invalid_payload_fields(data, _SUPPLIER_FIELDS - {"code"})
+    invalid = invalid_payload_fields(data, _SUPPLIER_FIELDS - {"code"})
     if invalid:
         return invalid
     invalid = _invalid_nested_fields(data)
@@ -376,7 +315,7 @@ def supplier_status(code):
     if not s:
         return json_error("not_found", "Supplier not found.", 404)
     data = get_json()
-    invalid = _invalid_payload_fields(data, {"status"})
+    invalid = invalid_payload_fields(data, {"status"})
     if invalid:
         return invalid
     status = (data.get("status") or "").strip()

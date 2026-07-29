@@ -29,6 +29,7 @@ from app.views.api_helpers import (
     add_datetime_fields,
     ensure_permissions,
     get_json,
+    invalid_payload_fields,
     json_error,
     parse_datetime_param,
     parse_pagination,
@@ -78,29 +79,17 @@ _STAGE_FIELDS = {
 _BOM_FIELDS = {"pn", "part_number", "rev", "revision", "qty"}
 
 
-def _invalid_payload_fields(data, allowed):
-    unknown = sorted(set(data) - set(allowed))
-    if unknown:
-        return json_error(
-            "invalid_fields",
-            "Unsupported field(s) in request.",
-            400,
-            unknown,
-        )
-    return None
-
-
 def _invalid_nested_fields(data):
     for raw in data.get("stages") or []:
         if not isinstance(raw, dict):
             return json_error("invalid_stages", "Job stages must be objects.", 400)
-        invalid = _invalid_payload_fields(raw, _STAGE_FIELDS)
+        invalid = invalid_payload_fields(raw, _STAGE_FIELDS)
         if invalid:
             return invalid
     for raw in data.get("bom") or []:
         if not isinstance(raw, dict):
             return json_error("invalid_bom", "Job BOM lines must be objects.", 400)
-        invalid = _invalid_payload_fields(raw, _BOM_FIELDS)
+        invalid = invalid_payload_fields(raw, _BOM_FIELDS)
         if invalid:
             return invalid
     return None
@@ -396,7 +385,7 @@ def create_job():
     if err:
         return err
     data = get_json()
-    invalid = _invalid_payload_fields(data, _JOB_BASE_FIELDS)
+    invalid = invalid_payload_fields(data, _JOB_BASE_FIELDS)
     if invalid:
         return invalid
     invalid = _invalid_nested_fields(data)
@@ -518,7 +507,7 @@ def update_job(job_number):
     if err:
         return err
     data = get_json()
-    invalid = _invalid_payload_fields(data, _JOB_BASE_FIELDS - {"job_number", "status"})
+    invalid = invalid_payload_fields(data, _JOB_BASE_FIELDS - {"job_number", "status"})
     if invalid:
         return invalid
     invalid = _invalid_nested_fields(data)
@@ -672,7 +661,7 @@ def delete_job(job_number):
 @api_auth_required
 def job_status(job_number):
     data = get_json()
-    invalid = _invalid_payload_fields(data, {"status", "allow_override"})
+    invalid = invalid_payload_fields(data, {"status", "allow_override"})
     if invalid:
         return invalid
     new_status = (data.get("status") or "").strip()

@@ -95,6 +95,24 @@ def generate_order_number(kind: str, now: datetime | None = None) -> str:
     return f"{key}{seq:03d}"
 
 
+def order_status_permission(status: str) -> str:
+    """Permission required to move an order into ``status``.
+
+    Shared so the admin forms and the JSON API cannot drift into enforcing
+    different authority for the same transition.
+    """
+
+    return {
+        "submitted": "orders.submit",
+        "confirmed": "orders.approve",
+        "in_production": "orders.fulfil",
+        "ready_to_ship": "orders.fulfil",
+        "shipped": "orders.ship",
+        "delivered": "orders.fulfil",
+        "cancelled": "orders.cancel",
+    }.get(status, "orders.update")
+
+
 def can_transition_job(old: str, new: str) -> bool:
     return new in JOB_STATUS_FLOW.get(old or "", set())
 

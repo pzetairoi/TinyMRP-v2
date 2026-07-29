@@ -31,12 +31,8 @@ from app.services.part_norm import clean_rev
 
 bp = Blueprint("whereused_api", __name__, url_prefix="/api")
 
-def _clean_rev(value: object) -> str:
-    return clean_rev(value)
-
-
 def _resolve_scoped_revision(pn: str, revision: object, user=None) -> str:
-    revision_clean = _clean_rev(revision)
+    revision_clean = clean_rev(revision)
     if revision_clean:
         return revision_clean
     query = Part.objects(part_number__iexact=str(pn or "").strip())
@@ -46,14 +42,14 @@ def _resolve_scoped_revision(pn: str, revision: object, user=None) -> str:
     if not part:
         return ""
     attrs = harvest_part_attrs(part)
-    return _clean_rev(attrs.get("revision") or part.revision or "")
+    return clean_rev(attrs.get("revision") or part.revision or "")
 
 
 def _coverage_groups(pn: str, rev: str) -> set[str]:
     if not has_permission(current_user, "files.read"):
         return set()
     groups: set[str] = set()
-    for row in PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev)).only("ext_group"):
+    for row in PartFile.objects(part_number__iexact=pn, revision__iexact=clean_rev(rev)).only("ext_group"):
         if row.ext_group and managed_file_group_allowed(current_user, row.ext_group):
             groups.add(str(row.ext_group).lower())
     return groups
@@ -144,7 +140,7 @@ def _rows_for_child_pn(
         if not parent_part:
             continue
         attrs = harvest_part_attrs(parent_part) if parent_part else {}
-        resolved_parent_rev = _clean_rev(attrs.get("revision", "") or parent_rev or "")
+        resolved_parent_rev = clean_rev(attrs.get("revision", "") or parent_rev or "")
         thumbs = (
             thumb_urls_for(parent_pn, resolved_parent_rev, user=user)
             if user is not None and has_permission(user, "files.read")
