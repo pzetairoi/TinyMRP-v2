@@ -28,12 +28,8 @@ from app.services.part_review_status import part_review_status_map
 
 bp = Blueprint("bom_tree_api", __name__, url_prefix="/api")
 
-def _clean_rev(value: object) -> str:
-    return clean_rev(value)
-
-
 def _resolve_scoped_revision(pn: str, revision: object, user=None) -> str:
-    revision_clean = _clean_rev(revision)
+    revision_clean = clean_rev(revision)
     if revision_clean:
         return revision_clean
     query = Part.objects(part_number__iexact=str(pn or "").strip())
@@ -43,7 +39,7 @@ def _resolve_scoped_revision(pn: str, revision: object, user=None) -> str:
     if not part:
         return ""
     attrs = harvest_part_attrs(part)
-    return _clean_rev(attrs.get("revision") or part.revision or "")
+    return clean_rev(attrs.get("revision") or part.revision or "")
 
 
 def _has_children(pn: str, rev: str | None = None) -> bool:
@@ -59,7 +55,7 @@ def _coverage_groups(pn: str, rev: str) -> set[str]:
     if not has_permission(current_user, "files.read"):
         return set()
     groups: set[str] = set()
-    for row in PartFile.objects(part_number__iexact=pn, revision__iexact=_clean_rev(rev)).only("ext_group"):
+    for row in PartFile.objects(part_number__iexact=pn, revision__iexact=clean_rev(rev)).only("ext_group"):
         if row.ext_group and managed_file_group_allowed(current_user, row.ext_group):
             groups.add(str(row.ext_group).lower())
     return groups
@@ -114,7 +110,7 @@ def _resolved_child_pair(link, user=None) -> tuple[str, str]:
 def _bom_is_fully_authorised(user, parent_pn: str, parent_rev: str) -> bool:
     """Deny a BOM response when any exact descendant is inaccessible."""
 
-    queue = [(str(parent_pn or "").strip(), _clean_rev(parent_rev))]
+    queue = [(str(parent_pn or "").strip(), clean_rev(parent_rev))]
     visited: set[tuple[str, str]] = set()
     while queue:
         current = queue.pop()
@@ -162,13 +158,13 @@ def _node(
     review_statuses: dict | None = None,
 ):
     # Prefer specific revision when provided, else pick latest by updated_at
-    rev_clean = _clean_rev(rev) if rev is not None else None
+    rev_clean = clean_rev(rev) if rev is not None else None
     if rev is not None:
         p = Part.objects(part_number=pn, revision=rev_clean).first()
     else:
         p = Part.objects(part_number=pn).order_by("-updated_at").first()
     attrs = harvest_part_attrs(p) if p else {}
-    effective_rev = _clean_rev(attrs.get("revision") or (p.revision if p else "") or (rev_clean or ""))
+    effective_rev = clean_rev(attrs.get("revision") or (p.revision if p else "") or (rev_clean or ""))
     proc_label = _process_label(p, attrs)
     config = config or get_field_config()
     boundary = response_context("parts", current_user)
@@ -179,7 +175,7 @@ def _node(
     )
     coverage = _coverage_groups(pn, effective_rev)
     review = (review_statuses or {}).get(
-        (str(pn or "").strip(), _clean_rev(effective_rev)),
+        (str(pn or "").strip(), clean_rev(effective_rev)),
         {"count": 0, "severity": "", "pending": False},
     )
     values = resolve_part_field_values(
@@ -284,13 +280,13 @@ def bom_tree():
         if rev is not None:
             p = scoped_parts.filter(
                 part_number__iexact=pn,
-                revision__iexact=_clean_rev(rev),
+                revision__iexact=clean_rev(rev),
             ).first()
         else:
             p = scoped_parts.filter(part_number__iexact=pn).order_by("-updated_at").first()
         if not p:
             return jsonify([])
-        root_rev = _clean_rev(rev) if rev is not None else _clean_rev(p.revision or "")
+        root_rev = clean_rev(rev) if rev is not None else clean_rev(p.revision or "")
         if not _bom_is_fully_authorised(current_user, p.part_number, root_rev):
             return jsonify([]), 403
         root = _node(
@@ -310,14 +306,14 @@ def bom_tree():
         parent_part_query = scoped_parts.filter(part_number__iexact=parent)
         if parent_rev is not None:
             parent_part_query = parent_part_query.filter(
-                revision__iexact=_clean_rev(parent_rev)
+                revision__iexact=clean_rev(parent_rev)
             )
         else:
             parent_part_query = parent_part_query.order_by("-updated_at")
         parent_part = parent_part_query.first()
         if not parent_part:
             return jsonify([]), 403
-        exact_parent_rev = _clean_rev(parent_part.revision or "")
+        exact_parent_rev = clean_rev(parent_part.revision or "")
         if not _bom_is_fully_authorised(
             current_user,
             parent_part.part_number,
@@ -401,14 +397,14 @@ def bom_flat():
     if rev is not None:
         root_part = scoped_parts.filter(
             part_number__iexact=pn,
-            revision__iexact=_clean_rev(rev),
+            revision__iexact=clean_rev(rev),
         ).first()
     else:
         root_part = scoped_parts.filter(part_number__iexact=pn).order_by("-updated_at").first()
     if not root_part:
         return jsonify([])
 
-    root_rev = _clean_rev(rev) if rev is not None else _clean_rev(root_part.revision or "")
+    root_rev = clean_rev(rev) if rev is not None else clean_rev(root_part.revision or "")
     if not _bom_is_fully_authorised(
         current_user,
         root_part.part_number,
@@ -419,7 +415,7 @@ def bom_flat():
     part_cache: dict[tuple[str, str], tuple[Part | None, dict, str, list[str], set[str], dict]] = {}
 
     def row_for(child_pn: str, child_rev: str) -> dict:
-        key = (child_pn, _clean_rev(child_rev))
+        key = (child_pn, clean_rev(child_rev))
         existing = rows_by_key.get(key)
         if existing:
             return existing
@@ -431,7 +427,7 @@ def bom_flat():
                 revision__iexact=key[1],
             ).first()
             attrs = harvest_part_attrs(part_doc) if part_doc else {}
-            effective_rev = _clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
+            effective_rev = clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
             proc_label = _process_label(part_doc, attrs)
             thumbs = (
                 preview_png_urls_for(
@@ -465,7 +461,7 @@ def bom_flat():
 
         _part_doc, attrs, proc_label, thumbs, _coverage, values = cached
         review = review_statuses.get(
-            (str(child_pn or "").strip(), _clean_rev(key[1])),
+            (str(child_pn or "").strip(), clean_rev(key[1])),
             {"count": 0, "severity": "", "pending": False},
         )
         boundary = response_context("parts", current_user)

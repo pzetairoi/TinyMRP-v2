@@ -38,10 +38,10 @@ from app.services.part_shares import (
     share_dict,
 )
 from app.services.timezone_utils import format_display_ts, local_input_value, utc_iso, utc_now
+from app.services.part_norm import clean_rev
 from app.services.thumbs import _dedup_urls
 from app.views.bom_tree import (
     _child_links,
-    _clean_rev as _bom_clean_rev,
     _coverage_groups as _bom_coverage_groups,
     _has_children,
     _is_hardware_node,
@@ -775,7 +775,7 @@ def public_share_bom_tree(share_id: str, token: str):
             child_pn = getattr(link, "child_pn", None)
             if not child_pn or child_pn == parent:
                 continue
-            child_rev = _bom_clean_rev(getattr(link, "child_rev", None)) if hasattr(link, "child_rev") else None
+            child_rev = clean_rev(getattr(link, "child_rev", None)) if hasattr(link, "child_rev") else None
             if not _share_allows_part_key(share, child_pn, child_rev):
                 continue
             node = _node(child_pn, link, rev=child_rev, config=config)
@@ -801,7 +801,7 @@ def public_share_bom_flat(share_id: str, token: str):
     part_cache: dict[tuple[str, str], tuple[Part | None, dict, str, list[str], set[str], dict]] = {}
 
     def row_for(child_pn: str, child_rev: str) -> dict:
-        key = (child_pn, _bom_clean_rev(child_rev))
+        key = (child_pn, clean_rev(child_rev))
         existing = rows_by_key.get(key)
         if existing:
             return existing
@@ -810,7 +810,7 @@ def public_share_bom_flat(share_id: str, token: str):
         if cached is None:
             part_doc = Part.objects(part_number=child_pn, revision=key[1]).first()
             attrs = harvest_part_attrs(part_doc) if part_doc else {}
-            effective_rev = _bom_clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
+            effective_rev = clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
             proc_label = _process_label(part_doc, attrs)
             thumbs = _share_preview_urls_for(share, token, child_pn, effective_rev, is_dwg=False)
             coverage = _bom_coverage_groups(child_pn, effective_rev)
@@ -872,7 +872,7 @@ def public_share_bom_flat(share_id: str, token: str):
         child_pn = getattr(link, "child_pn", None)
         if not child_pn:
             continue
-        child_rev = _bom_clean_rev(getattr(link, "child_rev", "") or "")
+        child_rev = clean_rev(getattr(link, "child_rev", "") or "")
         child_key = (child_pn, child_rev)
         if child_key == root_key:
             continue
@@ -908,7 +908,7 @@ def public_share_bom_flat(share_id: str, token: str):
             next_pn = getattr(link, "child_pn", None)
             if not next_pn:
                 continue
-            next_rev = _bom_clean_rev(getattr(link, "child_rev", "") or "")
+            next_rev = clean_rev(getattr(link, "child_rev", "") or "")
             next_key = (next_pn, next_rev)
             if next_key in lineage:
                 continue

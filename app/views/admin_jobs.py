@@ -10,7 +10,7 @@ from app.services.acl import (
 from app.services.authorization import (
     authorised_get,
     authorised_part_pairs,
-    authorise,
+    enforce_permission as _require,
     authorise_part_access,
     scope_queryset,
     uses_portal_presentation,
@@ -54,11 +54,6 @@ _JOB_FORM_FIELDS = {
 }
 
 
-def _require(permission):
-    if not authorise(current_user, permission).allowed:
-        abort(403)
-
-
 def _scoped_job(job_id, permission):
     return authorised_get(
         Job.objects,
@@ -93,9 +88,6 @@ def _require_job_form_permissions():
     if "bom_text" in request.form:
         _require("jobs.bom.update")
 
-
-def _clean_rev(value: object) -> str:
-    return clean_rev(value)
 
 def _parse_bool(value: object) -> bool:
     if isinstance(value, bool):
@@ -139,22 +131,22 @@ _MAX_BOM_DEPTH = 40
 
 
 def _part_key(pn: str, rev: str | None) -> Tuple[str, str]:
-    return ((pn or "").strip().lower(), _clean_rev(rev).lower())
+    return ((pn or "").strip().lower(), clean_rev(rev).lower())
 
 
 def _effective_rev_for_bom(pn: str, rev: str | None) -> str:
-    rev_clean = _clean_rev(rev)
+    rev_clean = clean_rev(rev)
     if rev_clean:
         return rev_clean
     p = Part.objects(part_number__iexact=(pn or "").strip()).only("revision", "updated_at").order_by("-updated_at").first()
-    return _clean_rev(getattr(p, "revision", "") if p else "")
+    return clean_rev(getattr(p, "revision", "") if p else "")
 
 
 def _bom_children_links(parent_pn: str, parent_rev: str | None) -> List[BOMLink]:
     parent_pn = (parent_pn or "").strip()
     if not parent_pn:
         return []
-    rev_clean = _clean_rev(parent_rev)
+    rev_clean = clean_rev(parent_rev)
     if "parent_rev" in BOMLink._fields:
         scoped = list(BOMLink.objects(parent_pn=parent_pn, parent_rev=rev_clean))
         if scoped:
@@ -204,7 +196,7 @@ def _expand_part_totals(pn: str, rev: str | None, qty: float) -> Tuple[Dict[Tupl
         key = _part_key(cur_pn, cur_rev)
         totals[key] = totals.get(key, 0.0) + cur_qty
         if key not in display:
-            display[key] = (cur_pn, _clean_rev(cur_rev))
+            display[key] = (cur_pn, clean_rev(cur_rev))
         if is_cycle or depth >= _MAX_BOM_DEPTH:
             continue
 
@@ -254,7 +246,7 @@ def _expand_part_occurrences(pn: str, rev: str | None, qty: float, root_index: i
             {
                 "key": key,
                 "pn": cur_pn,
-                "rev": _clean_rev(cur_rev),
+                "rev": clean_rev(cur_rev),
                 "required": float(cur_qty),
                 "depth": depth,
                 "level": level,
@@ -390,7 +382,7 @@ def _job_order_coverage(
                     continue
                 ordered_map[key] = ordered_map.get(key, 0.0) + float(qty or 0.0)
                 if key not in display_map:
-                    display_map[key] = expanded_display.get(key, (pn, _clean_rev(line.rev)))
+                    display_map[key] = expanded_display.get(key, (pn, clean_rev(line.rev)))
                 if include_links:
                     _merge_order_link(order_links, key, o, href)
 
@@ -780,7 +772,7 @@ def _parse_bom_text(text: str):
         if len(parts) < 1:
             continue
         pn = _canonical_pn(parts[0])
-        rev = _clean_rev(parts[1] if len(parts) > 1 else "")
+        rev = clean_rev(parts[1] if len(parts) > 1 else "")
         if not rev:
             part = (
                 scope_queryset(Part.objects, current_user, "parts")
@@ -788,7 +780,7 @@ def _parse_bom_text(text: str):
                 .order_by("-updated_at")
                 .first()
             )
-            rev = _clean_rev(getattr(part, "revision", "") if part else "")
+            rev = clean_rev(getattr(part, "revision", "") if part else "")
         try:
             qty = float(parts[2]) if len(parts) > 2 else 1.0
         except Exception:
@@ -801,7 +793,7 @@ def _consolidate_lines(lines):
     merged = {}
     for l in lines or []:
         pn_raw = (l.pn or "").strip()
-        rev_raw = _clean_rev(l.rev)
+        rev_raw = clean_rev(l.rev)
         key = (pn_raw.lower(), rev_raw)
         if key in merged:
             merged[key]["qty"] += float(l.qty or 0)
@@ -1041,17 +1033,17 @@ def _job_order_totals(job: Job):
     return required_total, ordered_total, received_total
 
 def _resolve_rev(pn: str, rev: str | None):
-    if not _clean_rev(rev):
+    if not clean_rev(rev):
         p = Part.objects(part_number__iexact=pn).order_by("-updated_at").first()
         if not p:
             return ""
         attrs = harvest_part_attrs(p)
-        return _clean_rev(attrs.get("revision") or p.revision or "")
-    return _clean_rev(rev)
+        return clean_rev(attrs.get("revision") or p.revision or "")
+    return clean_rev(rev)
 
 
 def _resolve_visible_rev(pn: str, rev: str | None) -> str:
-    rev_clean = _clean_rev(rev)
+    rev_clean = clean_rev(rev)
     if rev_clean:
         return rev_clean
     part = (
@@ -1060,7 +1052,7 @@ def _resolve_visible_rev(pn: str, rev: str | None) -> str:
         .order_by("-updated_at")
         .first()
     )
-    return _clean_rev(getattr(part, "revision", "") if part else "")
+    return clean_rev(getattr(part, "revision", "") if part else "")
 
 
 def _part_meta(pn: str, rev: str, *, user=None):
@@ -1071,7 +1063,7 @@ def _part_meta(pn: str, rev: str, *, user=None):
     if p:
         attrs = harvest_part_attrs(p)
         desc = attrs.get("description") or p.description or ""
-        resolved_rev = _clean_rev(attrs.get("revision") or p.revision or resolved_rev or "")
+        resolved_rev = clean_rev(attrs.get("revision") or p.revision or resolved_rev or "")
         urls = thumb_urls_for(pn, resolved_rev, user=user)
         thumb = urls[0] if urls else ""
     return {"desc": desc, "rev": resolved_rev, "thumb": thumb}
@@ -1096,7 +1088,7 @@ def job_bom_json(job_id):
     expected_pairs = {
         (
             str(part_number or "").strip().casefold(),
-            _clean_rev(revision).casefold(),
+            clean_rev(revision).casefold(),
         )
         for part_number, revision in requested_pairs
     }
@@ -1169,7 +1161,7 @@ def job_bom_update(job_id):
     if set(data) - {"pn", "rev", "line_rev", "qty"}:
         abort(400)
     pn = _canonical_pn(data.get("pn") or "")
-    rev = _clean_rev(data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
+    rev = clean_rev(data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
     try:
         qty = float(data.get("qty") or 1.0)
     except Exception:
@@ -1182,7 +1174,7 @@ def job_bom_update(job_id):
     if j.bom is None:
         j.bom = []
     for line in j.bom:
-        if line.pn.lower() == pn.lower() and _clean_rev(line.rev) == rev:
+        if line.pn.lower() == pn.lower() and clean_rev(line.rev) == rev:
             line.qty = qty; updated = True; break
     if not updated:
         j.bom.append(JobBOMLine(pn=pn, rev=rev or "", qty=qty))
@@ -1197,9 +1189,9 @@ def job_bom_remove(job_id):
     if set(data) - {"pn", "rev", "line_rev"}:
         abort(400)
     pn = (data.get("pn") or "").strip()
-    rev = _clean_rev(data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
+    rev = clean_rev(data.get("line_rev") if "line_rev" in data else data.get("rev") or "")
     before = len(j.bom or [])
-    j.bom = [l for l in (j.bom or []) if not (l.pn.lower() == pn.lower() and _clean_rev(l.rev) == rev)]
+    j.bom = [l for l in (j.bom or []) if not (l.pn.lower() == pn.lower() and clean_rev(l.rev) == rev)]
     if len(j.bom) != before:
         j.save()
     return jsonify({"ok": True, "removed": before - len(j.bom)})
@@ -1211,13 +1203,13 @@ def job_bom_replace(job_id):
     d = request.get_json(silent=True) or {}
     if set(d) - {"old_pn", "old_rev", "new_pn", "new_rev"}:
         abort(400)
-    opn = (d.get("old_pn") or "").strip(); orev = _clean_rev(d.get("old_rev") or "")
-    npn = _canonical_pn(d.get("new_pn") or ""); nrev = _clean_rev(d.get("new_rev") or "")
+    opn = (d.get("old_pn") or "").strip(); orev = clean_rev(d.get("old_rev") or "")
+    npn = _canonical_pn(d.get("new_pn") or ""); nrev = clean_rev(d.get("new_rev") or "")
     if not npn:
         return jsonify({"error":"missing new_pn"}), 400
     if not authorise_part_access(current_user, npn, nrev).allowed:
         abort(404)
     for line in (j.bom or []):
-        if line.pn.lower() == opn.lower() and _clean_rev(line.rev) == orev:
+        if line.pn.lower() == opn.lower() and clean_rev(line.rev) == orev:
             line.pn = npn; line.rev = nrev or ""; j.save(); return jsonify({"ok": True})
     return jsonify({"ok": False, "error":"not found"}), 404

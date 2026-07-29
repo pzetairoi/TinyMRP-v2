@@ -12,7 +12,7 @@ from app.services.acl import (
 from app.services.authorization import (
     authorised_get,
     authorised_part_pairs,
-    authorise,
+    enforce_permission as _require,
     authorise_part_access,
     has_permission,
     order_kind_allowed,
@@ -34,6 +34,7 @@ from app.models.supplier import Supplier
 from app.models.customer import Customer
 from app.models.part import Part
 from app.services.biz_utils import (
+    order_status_permission,
     ORDER_STATUS_FLOW,
     calculate_order_totals,
     can_transition_order,
@@ -74,11 +75,6 @@ _ORDER_FORM_FIELDS = {
 }
 
 
-def _require(permission):
-    if not authorise(current_user, permission).allowed:
-        abort(403)
-
-
 def _scoped_order(order_id, permission):
     return authorised_get(
         Order.objects,
@@ -87,18 +83,6 @@ def _scoped_order(order_id, permission):
         resource_type="orders",
         permission=permission,
     )
-
-
-def _status_permission(status):
-    return {
-        "submitted": "orders.submit",
-        "confirmed": "orders.approve",
-        "in_production": "orders.fulfil",
-        "ready_to_ship": "orders.fulfil",
-        "shipped": "orders.ship",
-        "delivered": "orders.fulfil",
-        "cancelled": "orders.cancel",
-    }.get(status, "orders.update")
 
 
 def _require_order_form_permissions(current_status=None):
@@ -117,7 +101,7 @@ def _require_order_form_permissions(current_status=None):
         if status not in ORDER_STATUS_FLOW:
             abort(400)
         if current_status is not None or status != "draft":
-            _require(_status_permission(status))
+            _require(order_status_permission(status))
         if current_status and not can_transition_order(current_status, status):
             abort(400)
 
