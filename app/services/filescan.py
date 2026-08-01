@@ -1,5 +1,6 @@
 # app/services/filescan.py — discovery + PartFile registry sync (upsert & stale removal)
 import os, re
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Dict, List, Tuple, Any, Optional
@@ -19,6 +20,23 @@ _DATASHEET_ATTR_KEYS = {
     "datasheet_url",
 }
 _DATASHEET_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+
+# Directory listings reused across the parts of a single scan. Empty outside a
+# ``scan_cache()`` block so ordinary one-part lookups always hit fresh storage.
+_SCAN_CACHE: Dict[str, Dict[str, Dict[str, Path]]] = {}
+
+
+@contextmanager
+def scan_cache():
+    """Reuse directory listings for the duration of a bulk scan."""
+    if "dirs" in _SCAN_CACHE:
+        yield  # Already inside an outer scan; keep its cache.
+        return
+    _SCAN_CACHE["dirs"] = {}
+    try:
+        yield
+    finally:
+        _SCAN_CACHE.pop("dirs", None)
 
 def _sources(approved: Optional[bool] = None) -> List[Dict[str, Any]]:
     try:
@@ -78,43 +96,54 @@ def _expectations_for(pn: str, rev: str) -> List[Tuple[str, str, bool]]:
                 wants.append((grp, f"{b}.{ext}", False))
     return wants
 
+def _dir_index(directory: Path) -> Dict[str, Path]:
+    """Case-folded name -> real entry for one directory.
+
+    Discovery probes dozens of candidate spellings per part, so listing a
+    directory once and reusing the index keeps a full rescan from degrading
+    into tens of thousands of directory reads. The cache lives for one scan
+    only (see :func:`scan_cache`), because storage changes between scans.
+    """
+    cache = _SCAN_CACHE.get("dirs")
+    key = str(directory)
+    if cache is not None and key in cache:
+        return cache[key]
+    index: Dict[str, Path] = {}
+    try:
+        for entry in directory.iterdir():
+            # First spelling wins, matching the case-insensitive filesystems
+            # this has to behave identically on.
+            index.setdefault(entry.name.casefold(), entry)
+    except OSError:
+        index = {}
+    if cache is not None:
+        cache[key] = index
+    return index
+
+
 def _find_case_insensitive(local_root: Path, rel: str) -> Path | None:
+    """Resolve 'rel' under local_root ignoring case for every path segment.
+
+    Always case-insensitive so the same storage tree behaves identically on
+    Windows (case-insensitive) and Linux (case-sensitive).
     """
-    Try to find file 'rel' under local_root, case-insensitive for both dirs and filename.
-    """
-    parts = Path(rel).parts
     cur = local_root
+    parts = PurePosixPath(str(rel).replace("\\", "/")).parts
     for i, part in enumerate(parts):
-        if i == len(parts) - 1:
-            # filename: select first matching ignoring case
-            try:
-                # if exact exists
-                p = cur / part
-                if p.exists():
-                    return p
-            except Exception:
-                pass
-            low = part.lower()
-            for cand in cur.iterdir():
-                if cand.name.lower() == low and cand.is_file():
-                    return cand
+        last = i == len(parts) - 1
+        # Always resolve through the directory index rather than trusting the
+        # requested spelling: case-insensitive filesystems would happily accept
+        # it and report back a name that does not exist on a case-sensitive one.
+        match = _dir_index(cur).get(part.casefold())
+        if match is None:
             return None
-        else:
-            # directory level
-            nextd = cur / part
-            if nextd.exists() and nextd.is_dir():
-                cur = nextd
-            else:
-                low = part.lower()
-                found = None
-                for d in cur.iterdir():
-                    if d.is_dir() and d.name.lower() == low:
-                        found = d
-                        break
-                if not found:
-                    return None
-                cur = found
-    return None
+        try:
+            if not (match.is_file() if last else match.is_dir()):
+                return None
+        except OSError:
+            return None
+        cur = match
+    return cur if cur != local_root else None
 
 def _rel_path_for(candidate: Path, local_root: Path) -> str:
     
@@ -346,11 +375,6 @@ def upsert_part_files_detailed(
     n = 0
     changes: List[Dict[str, Any]] = []
     affected_pairs: set[tuple[str, str]] = set()
-    # ``path`` is globally unique, yet a single scan can legitimately resolve the
-    # same file for several identities (repeated hardware, blank-revision
-    # aliases). Keep the first identity that claims a path so the rest are
-    # skipped instead of failing the whole import on a duplicate-key error.
-    claimed_paths: set[str] = set()
     for r in recs or []:
         rpn = pn or r.get("pn") or r.get("part_number")
         rrev = (rev if rev is not None else r.get("rev") or r.get("revision") or "")
@@ -362,9 +386,40 @@ def upsert_part_files_detailed(
             # Not enough to identify the artifact; skip quietly
             continue
 
-        # Unique key for your "one file per ext_group+ext per (pn,rev)" rule
-        query = dict(part_number=rpn, revision=rrev, ext_group=group, ext=ext, is_dwg=is_dwg)
-        existing = PartFile.objects(**query).first()
+        # One artifact per ext_group+ext per (pn,rev), matched case-insensitively.
+        # Storage lookup is case-insensitive on every platform, so a case-variant
+        # spelling must resolve to the same record instead of creating a second
+        # one that then collides on the unique ``path`` index.
+        siblings = list(
+            PartFile.objects(
+                part_number__iexact=rpn,
+                revision__iexact=rrev,
+                ext_group=group,
+                ext=ext,
+                is_dwg=is_dwg,
+            ).order_by("id")
+        )
+        # Case-variant rows written before identity matching existed can point at
+        # different storage roots. Keep the row already holding the incoming path
+        # (otherwise the oldest) and drop the rest, or the unique ``path`` index
+        # would reject re-pointing the survivor.
+        norm_rel = (r.get("rel_path") or "").replace("\\", "/").lstrip("/")
+        unique_path = str(r.get("abs_path") or "").strip() or norm_rel
+        existing = next(
+            (item for item in siblings if item.path == unique_path),
+            siblings[0] if siblings else None,
+        )
+        for stale in siblings:
+            if existing is not None and stale.id != existing.id:
+                stale.delete()
+        # Reuse the stored identity so repeated scans keep one canonical spelling.
+        query = dict(
+            part_number=existing.part_number if existing else rpn,
+            revision=(existing.revision or "") if existing else rrev,
+            ext_group=group,
+            ext=ext,
+            is_dwg=is_dwg,
+        )
 
         # Allowed fields from the model
         allowed = set(PartFile._fields.keys())
@@ -373,32 +428,11 @@ def upsert_part_files_detailed(
         updates: Dict[str, Any] = {}
         final_values: Dict[str, Any] = {}
 
-        # Normalized rel_path -> also use as unique, non-null `path`
-        rel_path = r.get("rel_path") or ""
-        norm_rel = rel_path.replace("\\", "/").lstrip("/")
-
         if "rel_path" in allowed and norm_rel:
             updates["set__rel_path"] = norm_rel
             final_values["rel_path"] = norm_rel
 
-        abs_path = str(r.get("abs_path") or "").strip()
-        unique_path = abs_path or norm_rel
         if "path" in allowed and unique_path:
-            if unique_path in claimed_paths:
-                # Another identity in this same batch already owns the file.
-                continue
-            owner = PartFile.objects(path=unique_path).first()
-            if owner is not None and (
-                owner.part_number,
-                owner.revision or "",
-                owner.ext_group,
-                owner.ext,
-                bool(owner.is_dwg),
-            ) != (rpn, rrev or "", group, ext, is_dwg):
-                # The path is recorded under a different identity; re-pointing it
-                # here would violate the unique index, so leave the owner intact.
-                continue
-            claimed_paths.add(unique_path)
             updates["set__path"] = unique_path
             final_values["path"] = unique_path
 
@@ -448,12 +482,13 @@ def upsert_part_files_detailed(
         # Upsert
         PartFile.objects(**query).modify(upsert=True, new=True, **updates)  # type: ignore
         n += 1
-        affected_pairs.add((str(rpn), str(rrev or "")))
+        # Report the spelling actually stored, not the incoming case variant.
+        affected_pairs.add((str(query["part_number"]), str(query["revision"] or "")))
         if action == "added" or changed_fields:
             changes.append(
                 {
-                    "part_number": str(rpn),
-                    "revision": str(rrev or ""),
+                    "part_number": str(query["part_number"]),
+                    "revision": str(query["revision"] or ""),
                     "ext_group": group,
                     "ext": ext,
                     "is_dwg": is_dwg,

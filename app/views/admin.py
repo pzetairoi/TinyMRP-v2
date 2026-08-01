@@ -756,3 +756,40 @@ def purge_parts():
         return redirect(url_for("admin.users_list"))
 
     return render_template("admin/purge_parts.html")
+
+
+@bp.route("/rescan-files", methods=["GET", "POST"])
+@require_permission("system.maintenance")
+def rescan_files():
+    """Reconcile every part's file records against storage.
+
+    The scan runs in the background; the page polls ``rescan_files_progress``
+    so a long run reports progress instead of looking hung.
+    """
+    from app.services import file_rescan
+
+    if request.method == "POST":
+        if request.form.get("action") == "cancel":
+            file_rescan.cancel()
+            return redirect(url_for("admin.rescan_files"))
+        remove_stale = bool(request.form.get("remove_stale"))
+        file_rescan.start(current_app._get_current_object(), remove_stale=remove_stale)
+        try:
+            log_action(
+                "admin.rescan_files",
+                resource_type="system",
+                resource=f"remove_stale={remove_stale}",
+            )
+        except Exception:
+            pass
+        return redirect(url_for("admin.rescan_files"))
+
+    return render_template("admin/rescan_files.html", progress=file_rescan.get_progress())
+
+
+@bp.route("/rescan-files/progress")
+@require_permission("system.maintenance")
+def rescan_files_progress():
+    from app.services import file_rescan
+
+    return file_rescan.get_progress()
