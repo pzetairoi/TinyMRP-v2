@@ -591,6 +591,12 @@ def jobs_list():
                 "customer_id": cust_id,
                 "participants": "Hidden" if mask_participants else (parts or "-"),
                 "vendors": "Hidden" if mask_vendors else (vendors or "-"),
+                # Deletion consequences surfaced in the confirm prompt: orders
+                # get unlinked, and portal users lose the part access this job
+                # grants them.
+                "order_count": Order.objects(job=j).count(),
+                "part_count": len(j.bom or []),
+                "vendor_count": len(j.vendors or []),
                 "required_total": required_total,
                 "ordered_total": ordered_total,
                 "received_total": received_total,

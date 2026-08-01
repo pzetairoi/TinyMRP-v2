@@ -163,7 +163,7 @@
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
             {% endif %}
             {% if has_perm('jobs.archive') and has_perm('orders.update') %}
-            <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=j.id) }}" onsubmit="return confirm('Delete job {{ j.job_number }}? This will unlink related orders and hide the job.');">
+            <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=j.id) }}" onsubmit="return confirm('Delete job {{ j.job_number }}?{% if j.order_count %}\n\n{{ j.order_count }} order(s) will be unlinked from this job (the orders themselves are kept).{% endif %}{% if j.part_count and (j.customer_id or j.vendor_count) %}\n\nAccess warning: {{ j.customer_name }}{% if j.vendor_count %} and {{ j.vendor_count }} supplier(s){% endif %} will lose portal access to the {{ j.part_count }} part(s) this job grants.{% endif %}\n\nContinue?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
             </form>

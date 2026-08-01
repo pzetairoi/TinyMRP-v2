@@ -178,7 +178,14 @@ def admin_metrics():
         metrics = get_metrics_store().snapshot(file_root=file_root)
     except Exception:
         metrics = {}
-    return render_template("admin/metrics.html", metrics=metrics)
+    try:
+        from app.services.diagnostics import environment_report
+
+        environment = environment_report()
+    except Exception:
+        current_app.logger.exception("environment report failed")
+        environment = {}
+    return render_template("admin/metrics.html", metrics=metrics, environment=environment)
 
 
 @bp.route("/settings", methods=["GET", "POST"])
@@ -729,33 +736,43 @@ def users_edit(user_id):
 
 @bp.route("/purge-parts", methods=["GET", "POST"])
 @require_permission("parts.purge")
-@require_permission("files.purge")
 def purge_parts():
-    """Dangerous action: delete all Parts, BOM links, and PartFiles.
-    Requires admin and explicit POST with CSRF.
+    """Selectively delete user-entered data.
+
+    Each target is independently selectable; the service re-checks the actor's
+    permission per target so a partial grant purges only what it may.
     """
+    from app.services import purge
+    from app.services.authorization import has_permission
+
     if request.method == "POST":
-        from app.services.authorization import has_permission
-
-        if not has_permission(current_user, "files.purge"):
-            abort(403)
-        # Import here to avoid circulars at import time
-        from ..models.part import Part
-        from ..models.bom import BOMLink
-        from ..models.artifact import PartFile
-
-        n_files = PartFile.objects.delete()
-        n_bom   = BOMLink.objects.delete()
-        n_parts = Part.objects.delete()
-
+        selected = request.form.getlist("targets")
+        if not selected:
+            flash("Select at least one item to delete.", "error")
+            return redirect(url_for("admin.purge_parts"))
+        confirmation = request.form.get("confirmation") or ""
+        needs = purge.requires_confirmation(selected)
+        if needs and confirmation.strip() != purge.CONFIRM_PHRASE:
+            flash(
+                f"Type {purge.CONFIRM_PHRASE} to confirm deleting: {', '.join(needs)}.",
+                "error",
+            )
+            return redirect(url_for("admin.purge_parts"))
+        results = purge.run(
+            selected, current_user, has_permission, confirmation=confirmation
+        )
+        summary = ", ".join(f"{key}={count}" for key, count in sorted(results.items()))
         try:
-            log_action("admin.purge_parts", resource_type="system", resource=f"parts={n_parts},bom={n_bom},files={n_files}")
+            log_action("admin.purge_parts", resource_type="system", resource=summary or "none")
         except Exception:
             pass
-        flash(f"Deleted parts={n_parts}, bom_links={n_bom}, part_files={n_files}", "success")
-        return redirect(url_for("admin.users_list"))
+        flash(f"Deleted: {summary}" if results else "Nothing was deleted.", "success")
+        return redirect(url_for("admin.purge_parts"))
 
-    return render_template("admin/purge_parts.html")
+    return render_template(
+        "admin/purge_parts.html",
+        targets=purge.available(current_user, has_permission),
+    )
 
 
 @bp.route("/rescan-files", methods=["GET", "POST"])

@@ -1,26 +1,136 @@
 {% extends "security/base.html" %}
 {% from "ui/_components.html" import page_header, danger_block %}
-{% block title %}Purge Parts Data â€” Admin{% endblock %}
+{% block title %}Delete Data — Admin{% endblock %}
 {% block content %}
-{% call page_header("Purge Parts Data", "Irreversible maintenance action for parts, BOM links, and part files.", "Admin") %}{% endcall %}
+{% call page_header("Delete data", "Selectively and permanently remove user-entered data.", "Admin") %}{% endcall %}
 <div class="card shadow-sm tm-card">
   <div class="card-body">
     {{ danger_block(
       "This action permanently deletes data.",
-      "All documents in the parts, bom, and part_files collections will be removed. Users and roles are not affected.",
-      "Only proceed if you are intentionally clearing the engineering dataset."
+      "Only the items you tick are removed, and only those your roles permit. Files on disk are never deleted.",
+      "There is no undo. Take a database backup first."
     ) }}
 
-    <form class="mt-4 d-flex flex-wrap gap-2" method="post" onsubmit="return confirm('This will delete ALL parts/BOM/files. Continue?');">
+    {% if targets %}
+    <form method="post" id="purge-form" class="mt-3">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-danger">
-        Delete all parts / BOM / files
-      </button>
-      <a href="{{ url_for('admin.users_list') }}" class="btn btn-outline-secondary">Cancel</a>
+
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+        <button class="btn btn-sm btn-outline-secondary" type="button" id="purge-all">Select all</button>
+        <button class="btn btn-sm btn-outline-secondary" type="button" id="purge-none">Clear</button>
+        <span class="text-muted small ms-2" id="purge-summary"></span>
+      </div>
+
+      {% for group in targets|map(attribute='group')|unique %}
+      <h6 class="mt-3">{{ group }}</h6>
+      <div class="list-group mb-2">
+        {% for t in targets if t.group == group %}
+        <label class="list-group-item d-flex gap-2 align-items-start">
+          <input class="form-check-input flex-shrink-0 mt-1 purge-check" type="checkbox"
+                 name="targets" value="{{ t.key }}" data-count="{{ t.count }}"
+                 data-confirm="{{ 1 if t.confirm else 0 }}"
+                 {% if not t.count %}disabled{% endif %}>
+          <span>
+            <span class="fw-semibold">{{ t.label }}</span>
+            {% if t.confirm %}<span class="badge text-bg-danger ms-1">irreversible</span>{% endif %}
+            <span class="badge {{ 'text-bg-secondary' if t.count else 'text-bg-light text-muted' }} ms-1">{{ t.count }}</span>
+            <div class="small text-muted">{{ t.description }}</div>
+            {% if t.warns %}
+            <div class="small text-warning">
+              Leaves orphaned data unless you also select: {{ t.warns|join(', ') }}.
+            </div>
+            {% endif %}
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+      {% endfor %}
+
+      <div class="mt-3" id="purge-confirm-wrap" hidden>
+        <div class="alert alert-danger mb-2">
+          <div class="fw-semibold">This permanently destroys work that cannot be rebuilt.</div>
+          <div class="small" id="purge-confirm-list"></div>
+        </div>
+        <label class="form-label fw-semibold mb-1" for="confirmation">
+          Type <code>DELETE</code> to confirm
+        </label>
+        <input type="text" class="form-control" style="max-width: 260px"
+               id="confirmation" name="confirmation" autocomplete="off"
+               placeholder="DELETE">
+      </div>
+
+      <div class="d-flex flex-wrap gap-2 mt-3">
+        <button type="submit" class="btn btn-danger" id="purge-submit" disabled>Delete selected</button>
+        <a href="{{ url_for('admin.admin_index') }}" class="btn btn-outline-secondary">Cancel</a>
+      </div>
     </form>
-  </div>
-  <div class="card-footer small text-muted">
-    Tip: Re-seed demo data anytime via CLI (e.g., <code>flask --app run.py data seed-demo</code>).
+    {% else %}
+    <div class="alert alert-secondary mt-3 mb-0">
+      Your roles do not permit deleting any data.
+    </div>
+    {% endif %}
   </div>
 </div>
+
+<script>
+(function () {
+  const form = document.getElementById("purge-form");
+  if (!form) return;
+  const boxes = Array.from(form.querySelectorAll(".purge-check:not([disabled])"));
+  const submit = document.getElementById("purge-submit");
+  const summary = document.getElementById("purge-summary");
+
+  const confirmWrap = document.getElementById("purge-confirm-wrap");
+  const confirmList = document.getElementById("purge-confirm-list");
+  const confirmInput = document.getElementById("confirmation");
+  const PHRASE = "DELETE";
+
+  function refresh() {
+    const picked = boxes.filter((b) => b.checked);
+    const rows = picked.reduce((n, b) => n + Number(b.dataset.count || 0), 0);
+    const risky = picked.filter((b) => b.dataset.confirm === "1");
+    confirmWrap.hidden = risky.length === 0;
+    if (risky.length) {
+      confirmList.textContent =
+        "Irreversible: " + risky.map((b) => label(b)).join(", ") + ".";
+    } else {
+      // Never submit a stale phrase once the risky items are deselected.
+      confirmInput.value = "";
+    }
+    const typedOk = !risky.length || confirmInput.value.trim() === PHRASE;
+    submit.disabled = picked.length === 0 || !typedOk;
+    summary.textContent = picked.length
+      ? `${picked.length} item(s) selected · ${rows} record(s) will be deleted`
+      : "";
+  }
+
+  function label(box) {
+    return box.closest("label").querySelector(".fw-semibold").textContent.trim();
+  }
+
+  boxes.forEach((b) => b.addEventListener("change", refresh));
+  confirmInput.addEventListener("input", refresh);
+  document.getElementById("purge-all").addEventListener("click", () => {
+    boxes.forEach((b) => { b.checked = true; });
+    refresh();
+  });
+  document.getElementById("purge-none").addEventListener("click", () => {
+    boxes.forEach((b) => { b.checked = false; });
+    refresh();
+  });
+
+  form.addEventListener("submit", (event) => {
+    const picked = boxes.filter((b) => b.checked);
+    const rows = picked.reduce((n, b) => n + Number(b.dataset.count || 0), 0);
+    const names = picked.map(label).join("\n  - ");
+    if (!window.confirm(
+      `Permanently delete ${rows} record(s)?\n\n  - ${names}\n\nThis cannot be undone.`
+    )) {
+      event.preventDefault();
+    }
+  });
+
+  refresh();
+})();
+</script>
 {% endblock %}

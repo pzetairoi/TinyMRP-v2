@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from datetime import date, datetime, time, timezone
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
 from flask import current_app, g, has_app_context
@@ -686,7 +687,18 @@ def default_arena_header_for_field(field_id: str, label: str = "") -> str:
 
 
 def _default_builtin_map() -> Dict[str, Dict[str, Any]]:
+    """Fresh, mutable copy for callers that edit the returned fields."""
     return {field["id"]: deepcopy(field) for field in DEFAULT_FIELDS}
+
+
+@lru_cache(maxsize=1)
+def _default_builtin_index() -> Dict[str, Dict[str, Any]]:
+    """Read-only view of the same map.
+
+    DEFAULT_FIELDS is a module constant, so the deep copy only exists to protect
+    callers that mutate. Read-only lookups on request hot paths share this one.
+    """
+    return {field["id"]: field for field in DEFAULT_FIELDS}
 
 
 def _default_field_order() -> List[str]:
@@ -1557,7 +1569,7 @@ def field_uses_materialized_value(field_id: str, config: Optional[Dict[str, Any]
         return True
     if str(field.get("data_type") or "") == "date":
         return True
-    default_field = _default_builtin_map().get(field_id)
+    default_field = _default_builtin_index().get(field_id)
     if not default_field or field.get("source_locked"):
         return False
     current_source = _normalize_source_path(field.get("source_path"))

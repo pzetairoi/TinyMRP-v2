@@ -1,4 +1,4 @@
-from mongoengine import Document, EmbeddedDocument, EmbeddedDocumentField, StringField, FloatField, ListField, ReferenceField, DateTimeField, IntField
+from mongoengine import Document, EmbeddedDocument, EmbeddedDocumentField, StringField, FloatField, ListField, ReferenceField, DateTimeField, IntField, NULLIFY
 from datetime import datetime
 
 DB_ALIAS = "tinymrp-v2"
@@ -30,7 +30,9 @@ class Order(Document):
     order_number = StringField(required=True, unique=True)
     description  = StringField()
     kind         = StringField(default="purchase")  # purchase | sales
-    job          = ReferenceField(Job)
+    # Deleting a Job clears the link instead of leaving a dangling DBRef that
+    # raises DoesNotExist when any order row is rendered.
+    job          = ReferenceField(Job, reverse_delete_rule=NULLIFY)
     supplier     = ReferenceField(Supplier)
     customer     = ReferenceField(Customer)
     lines        = ListField(EmbeddedDocumentField(OrderLine), default=list)
