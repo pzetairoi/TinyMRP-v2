@@ -122,3 +122,44 @@ def test_discover_part_files_supports_attr_datasheet_relative_path(app, tmp_path
         datasheet = found.get(("datasheet", False))
         assert datasheet is not None
         assert datasheet["rel_path"].casefold() == "datasheet/vendor-file.pdf"
+
+
+def test_upsert_skips_paths_already_claimed_in_the_same_batch(app, tmp_path):
+    """A shared file must not fail the batch on the unique ``path`` index.
+
+    Blank-revision hardware repeated across subassemblies resolves to one file
+    on disk for several identities; the first claims it and the rest are
+    skipped instead of raising E11000.
+    """
+    from app.models.artifact import PartFile
+    from app.services.filescan import upsert_part_files_detailed
+
+    shared = tmp_path / "png" / "M12X1.75 X 35 G8_REV_.png"
+    _touch(shared)
+    record = {
+        "ext_group": "png",
+        "ext": "png",
+        "is_dwg": False,
+        "rel_path": "png/M12X1.75 X 35 G8_REV_.png",
+        "abs_path": str(shared),
+    }
+
+    with app.app_context():
+        PartFile.objects.delete()
+        result = upsert_part_files_detailed(
+            [
+                {"part_number": "M12X1.75 X 35 G8", "revision": "", **record},
+                {"part_number": "OTHER-PART", "revision": "", **record},
+            ]
+        )
+
+        assert result["count"] == 1
+        assert PartFile.objects(path=str(shared)).count() == 1
+        assert PartFile.objects.first().part_number == "M12X1.75 X 35 G8"
+
+        # Re-running keeps the original owner and still does not raise.
+        again = upsert_part_files_detailed(
+            [{"part_number": "M12X1.75 X 35 G8", "revision": "", **record}]
+        )
+        assert again["count"] == 1
+        assert PartFile.objects(path=str(shared)).count() == 1

@@ -346,6 +346,11 @@ def upsert_part_files_detailed(
     n = 0
     changes: List[Dict[str, Any]] = []
     affected_pairs: set[tuple[str, str]] = set()
+    # ``path`` is globally unique, yet a single scan can legitimately resolve the
+    # same file for several identities (repeated hardware, blank-revision
+    # aliases). Keep the first identity that claims a path so the rest are
+    # skipped instead of failing the whole import on a duplicate-key error.
+    claimed_paths: set[str] = set()
     for r in recs or []:
         rpn = pn or r.get("pn") or r.get("part_number")
         rrev = (rev if rev is not None else r.get("rev") or r.get("revision") or "")
@@ -377,9 +382,25 @@ def upsert_part_files_detailed(
             final_values["rel_path"] = norm_rel
 
         abs_path = str(r.get("abs_path") or "").strip()
-        if "path" in allowed and (abs_path or norm_rel):
-            updates["set__path"] = abs_path or norm_rel
-            final_values["path"] = abs_path or norm_rel
+        unique_path = abs_path or norm_rel
+        if "path" in allowed and unique_path:
+            if unique_path in claimed_paths:
+                # Another identity in this same batch already owns the file.
+                continue
+            owner = PartFile.objects(path=unique_path).first()
+            if owner is not None and (
+                owner.part_number,
+                owner.revision or "",
+                owner.ext_group,
+                owner.ext,
+                bool(owner.is_dwg),
+            ) != (rpn, rrev or "", group, ext, is_dwg):
+                # The path is recorded under a different identity; re-pointing it
+                # here would violate the unique index, so leave the owner intact.
+                continue
+            claimed_paths.add(unique_path)
+            updates["set__path"] = unique_path
+            final_values["path"] = unique_path
 
         # Pass through common metadata if present
         if "http_url" in r and "http_url" in allowed:
