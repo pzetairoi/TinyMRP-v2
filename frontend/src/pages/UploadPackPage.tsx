@@ -26,6 +26,19 @@ type FileChange = {
   action: string;
   reason?: string;
 };
+// Actions that represent an actual effect; everything else is context the
+// "changed only" view hides.
+const EFFECT_ACTIONS = new Set([
+  "add",
+  "replace",
+  "remove",
+  "change",
+  "clear",
+  "quantity_change",
+  "link",
+  "blocked",
+]);
+const isEffect = (action: string) => EFFECT_ACTIONS.has(action);
 type PlanPart = {
   part_number: string;
   revision: string;
@@ -50,7 +63,7 @@ type Plan = {
     new: number;
     changed: number;
     blocked: number;
-    approved_targets: number;
+    modified_approved: number;
   };
 };
 type UploadResult = {
@@ -76,19 +89,28 @@ type UploadResult = {
   errors?: Array<{ stage?: string; message?: string }>;
 };
 
-type Filter = "all" | "changed" | "blocked" | "approved";
+type Filter = "all" | "changed" | "blocked" | "modified_approved";
 type DataMode = "skip" | "fill_blanks" | "replace_unapproved" | "replace_all";
 type BomMode = "skip" | "fill_if_empty" | "replace_unapproved" | "replace_all";
 type FileMode = "skip" | "add_missing" | "replace_unapproved" | "replace_all";
 type ApprovalMode = "preserve" | "import_unapproved" | "replace_all";
 type Preset = "preserve" | "unless_existing_approved" | "always" | "custom";
 
-// Quick presets that set all four independent policies at once. Touching an
+// Quick presets that set the three independent policies at once. Touching an
 // individual policy below detaches it from the preset ("Custom").
-const PRESETS: Record<Exclude<Preset, "custom">, [DataMode, BomMode, FileMode, ApprovalMode]> = {
-  preserve: ["fill_blanks", "fill_if_empty", "add_missing", "preserve"],
-  unless_existing_approved: ["replace_unapproved", "replace_unapproved", "replace_unapproved", "preserve"],
-  always: ["replace_all", "replace_all", "replace_all", "replace_all"],
+const PRESETS: Record<Exclude<Preset, "custom">, [DataMode, BomMode, FileMode]> = {
+  preserve: ["fill_blanks", "fill_if_empty", "add_missing"],
+  unless_existing_approved: ["replace_unapproved", "replace_unapproved", "replace_unapproved"],
+  always: ["replace_all", "replace_all", "replace_all"],
+};
+
+// Approval is just another property: it follows the Properties policy, gated by
+// the same permissions and the target's existing approved state.
+const APPROVAL_FOR_DATA: Record<DataMode, ApprovalMode> = {
+  skip: "preserve",
+  fill_blanks: "preserve",
+  replace_unapproved: "import_unapproved",
+  replace_all: "replace_all",
 };
 
 type Tone = "safe" | "draft" | "admin";
@@ -183,43 +205,138 @@ function PolicySelect<T extends string>({
   );
 }
 
-function ChangeTable({ rows }: { rows: Change[] }) {
-  if (!rows.length) return <div className="text-muted small">No incoming values.</div>;
+// One row shape for properties, approval, BOM and files, so a single foldable
+// section renders every kind of change identically.
+type Row = { name: string; note?: string; before?: unknown; after?: unknown; action: string; reason?: string };
+
+const toPropertyRows = (rows: Change[]): Row[] =>
+  rows.map((row) => ({
+    name: row.label || row.field_id || "",
+    note: row.source_key ? `from ${row.source_key}` : "",
+    before: row.before,
+    after: row.after,
+    action: row.action,
+    reason: row.reason,
+  }));
+
+const toBomRows = (rows: BomChange[]): Row[] =>
+  rows.map((row) => ({
+    name: row.part_number,
+    note: row.revision ? `REV ${row.revision}` : "",
+    before: row.before_qty,
+    after: row.after_qty,
+    action: row.action,
+    reason: row.planned_action ? `Planned: ${row.planned_action.replaceAll("_", " ")}` : "",
+  }));
+
+const toFileRows = (rows: FileChange[]): Row[] =>
+  rows.map((row) => ({
+    name: row.name,
+    note: row.kind === "discovered" ? `${row.category} · found in storage` : row.category,
+    action: row.action,
+    reason: row.reason,
+  }));
+
+// Folded by default and labelled with its effect count, so the part opens on a
+// summary and drills down only where something actually happened.
+function Section({
+  title,
+  rows,
+  showValues = true,
+  changedOnly,
+  headline,
+  empty,
+}: {
+  title: string;
+  rows: Row[];
+  showValues?: boolean;
+  changedOnly: boolean;
+  headline?: string;
+  empty: string;
+}) {
+  const effects = rows.filter((row) => isEffect(row.action));
+  const visible = changedOnly ? effects : rows;
   return (
-    <div className="table-responsive">
-      <table className="table table-sm align-middle mb-0">
-        <thead>
-          <tr>
-            <th>Field</th>
-            <th>Before</th>
-            <th>After</th>
-            <th>Action</th>
-            <th>Reason</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={`${row.field_id || row.label}-${index}`}>
-              <td>
-                <div>{row.label || row.field_id}</div>
-                {row.source_key ? <small className="text-muted">from {row.source_key}</small> : null}
-              </td>
-              <td className={row.action === "replace" ? "text-danger" : ""}>{valueText(row.before)}</td>
-              <td className={["add", "replace", "change"].includes(row.action) ? "text-primary" : ""}>
-                {valueText(row.after)}
-              </td>
-              <td className={`text-capitalize ${actionClass(row.action)}`}>{row.action.replaceAll("_", " ")}</td>
-              <td className="small">{row.reason || "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <details className="border rounded mt-2" open={effects.length > 0}>
+      <summary className="px-2 py-1 d-flex flex-wrap align-items-center gap-2">
+        <strong>{title}</strong>
+        <span className={`badge ${effects.length ? "text-bg-primary" : "text-bg-light text-muted"}`}>
+          {effects.length ? `${effects.length} change${effects.length > 1 ? "s" : ""}` : "no change"}
+        </span>
+        {headline ? <span className="small text-muted">{headline}</span> : null}
+      </summary>
+      <div className="px-2 pb-2">
+        {!visible.length ? (
+          <div className="text-muted small">{rows.length ? "No changes — switch to “All rows”." : empty}</div>
+        ) : (
+          <div className="table-responsive">
+            <table className="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  {showValues ? <th>Before</th> : null}
+                  {showValues ? <th>After</th> : null}
+                  <th>Action</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((row, index) => (
+                  <tr key={`${row.name}-${index}`}>
+                    <td>
+                      <div>{row.name}</div>
+                      {row.note ? <small className="text-muted">{row.note}</small> : null}
+                    </td>
+                    {showValues ? (
+                      <td className={row.action === "replace" ? "text-danger" : ""}>{valueText(row.before)}</td>
+                    ) : null}
+                    {showValues ? (
+                      <td className={["add", "replace", "change"].includes(row.action) ? "text-primary" : ""}>
+                        {valueText(row.after)}
+                      </td>
+                    ) : null}
+                    <td className={`text-capitalize ${actionClass(row.action)}`}>
+                      {row.action.replaceAll("_", " ")}
+                    </td>
+                    <td className="small">{row.reason || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 
-function PartRedline({ part }: { part: PlanPart }) {
+function PartRedline({ part, changedOnly }: { part: PlanPart; changedOnly: boolean }) {
   const overridingApproved = part.target_state === "existing_approved" && part.changed;
+  const sections = [
+    {
+      title: "Properties",
+      label: "properties",
+      rows: toPropertyRows([...part.properties, ...part.approval]),
+      empty: "No incoming values.",
+    },
+    {
+      title: "Files",
+      label: "files",
+      rows: toFileRows(part.files),
+      showValues: false,
+      empty: "No files for this part/revision.",
+    },
+    {
+      title: "BOM",
+      label: "BOM",
+      rows: toBomRows(part.bom.changes),
+      headline: `${part.bom.action.replaceAll("_", " ")}${part.bom.reason ? ` — ${part.bom.reason}` : ""}`,
+      empty: "No incoming BOM definition.",
+    },
+  ];
+  const badges = sections
+    .map((section) => [section.label, section.rows.filter((row) => isEffect(row.action)).length] as const)
+    .filter(([, count]) => count > 0);
   return (
     <details className="border rounded p-2 bg-white">
       <summary className="d-flex flex-wrap align-items-center gap-2">
@@ -234,42 +351,14 @@ function PartRedline({ part }: { part: PlanPart }) {
         ) : !part.allowed ? (
           <span className="badge text-bg-danger">Blocked</span>
         ) : null}
+        <span className="small text-muted ms-auto">
+          {badges.length ? badges.map(([label, count]) => `${count} ${label}`).join(" · ") : "no changes"}
+        </span>
       </summary>
-      <div className="mt-3">
-        <h6>Properties</h6>
-        <ChangeTable rows={part.properties} />
-        <h6 className="mt-3">Approval</h6>
-        <ChangeTable rows={part.approval} />
-        <h6 className="mt-3">BOM</h6>
-        <div className={`small mb-1 ${actionClass(part.bom.action)}`}>
-          <strong className="text-capitalize">{part.bom.action.replaceAll("_", " ")}</strong>
-          {part.bom.reason ? ` — ${part.bom.reason}` : ""}
-        </div>
-        {part.bom.changes.length ? (
-          <ul className="small mb-0">
-            {part.bom.changes.map((change, index) => (
-              <li className={actionClass(change.action)} key={`${change.part_number}:${change.revision}:${index}`}>
-                {change.part_number} {change.revision ? `REV ${change.revision}` : ""}:{" "}
-                {change.before_qty ?? "—"} → {change.after_qty ?? "—"} ({change.action.replaceAll("_", " ")})
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="text-muted small">No incoming BOM definition.</div>
-        )}
-        <h6 className="mt-3">Files</h6>
-        {part.files.length ? (
-          <ul className="small mb-0">
-            {part.files.map((file, index) => (
-              <li className={actionClass(file.action)} key={`${file.kind}:${file.name}:${index}`}>
-                <strong>{file.action.toUpperCase()}</strong> {file.category}: {file.name}
-                {file.reason ? ` — ${file.reason}` : ""}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="text-muted small">No files for this part/revision.</div>
-        )}
+      <div className="mt-2">
+        {sections.map((section) => (
+          <Section key={section.title} {...section} changedOnly={changedOnly} />
+        ))}
       </div>
     </details>
   );
@@ -284,11 +373,12 @@ export default function UploadPackPage() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [search, setSearch] = useState("");
+  const [changedOnly, setChangedOnly] = useState(true);
   const [capabilities, setCapabilities] = useState<Capability>({});
   const [dataMode, setDataMode] = useState<DataMode>("fill_blanks");
   const [bomMode, setBomMode] = useState<BomMode>("fill_if_empty");
   const [fileMode, setFileMode] = useState<FileMode>("add_missing");
-  const [approvalMode, setApprovalMode] = useState<ApprovalMode>("preserve");
   const [rootPreviewUrl, setRootPreviewUrl] = useState<string | null>(null);
   const [rootPreviewStatus, setRootPreviewStatus] = useState("");
 
@@ -342,32 +432,58 @@ export default function UploadPackPage() {
   const canAdvanced = !!capabilities["imports.execute_approved"];
   const canOverride = canAdvanced && !!capabilities["imports.override_approved"];
 
+  const approvalMode = APPROVAL_FOR_DATA[dataMode];
+
   const preset = useMemo<Preset>(() => {
     const match = (Object.entries(PRESETS) as Array<[Exclude<Preset, "custom">, typeof PRESETS[Exclude<Preset, "custom">]]>).find(
-      ([, tuple]) => tuple[0] === dataMode && tuple[1] === bomMode && tuple[2] === fileMode && tuple[3] === approvalMode,
+      ([, tuple]) => tuple[0] === dataMode && tuple[1] === bomMode && tuple[2] === fileMode,
     );
     return match ? match[0] : "custom";
-  }, [dataMode, bomMode, fileMode, approvalMode]);
+  }, [dataMode, bomMode, fileMode]);
 
   function applyPreset(name: Exclude<Preset, "custom">) {
-    const [nextData, nextBom, nextFile, nextApproval] = PRESETS[name];
+    const [nextData, nextBom, nextFile] = PRESETS[name];
     setDataMode(nextData);
     setBomMode(nextBom);
     setFileMode(nextFile);
-    setApprovalMode(nextApproval);
   }
 
   const plan = result?.plan;
-  const visibleParts = useMemo(
-    () =>
-      (plan?.parts || []).filter((part) => {
-        if (filter === "changed") return part.changed;
-        if (filter === "blocked") return part.blocked || !part.allowed;
-        if (filter === "approved") return part.target_state === "existing_approved";
-        return true;
-      }),
-    [plan, filter],
-  );
+  const matchesFilter = (part: PlanPart, name: Filter) => {
+    if (name === "changed") return part.changed;
+    if (name === "blocked") return part.blocked || !part.allowed;
+    // Approved parts the import actually alters — the ones worth reviewing.
+    if (name === "modified_approved") return part.target_state === "existing_approved" && part.changed;
+    return true;
+  };
+  const tabCounts = useMemo(() => {
+    const parts = plan?.parts || [];
+    return {
+      all: parts.length,
+      changed: parts.filter((part) => matchesFilter(part, "changed")).length,
+      blocked: parts.filter((part) => matchesFilter(part, "blocked")).length,
+      modified_approved: parts.filter((part) => matchesFilter(part, "modified_approved")).length,
+    } as Record<Filter, number>;
+  }, [plan]);
+  const visibleParts = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return (plan?.parts || []).filter((part) => {
+      if (!matchesFilter(part, filter)) return false;
+      if (!needle) return true;
+      // Search part identity plus the names of everything it touches, so a
+      // file or child part number finds its parent row.
+      return [
+        part.part_number,
+        part.revision,
+        ...part.properties.map((row) => `${row.label || row.field_id} ${valueText(row.after)}`),
+        ...part.files.map((row) => `${row.name} ${row.category}`),
+        ...part.bom.changes.map((row) => row.part_number),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [plan, filter, search]);
   // Surfaced at the top of the report so it's obvious at a glance whether approved data was touched.
   const overrideCounts = useMemo(() => {
     let overriding = 0;
@@ -519,7 +635,7 @@ export default function UploadPackPage() {
             <PolicySelect
               id="dataMode"
               label="Properties"
-              help="Control ordinary and configured custom fields. Approval is governed separately."
+              help="Ordinary, custom and approval fields. Approval follows this policy and the target's approved state."
               value={dataMode}
               onChange={setDataMode}
               options={[
@@ -552,18 +668,6 @@ export default function UploadPackPage() {
                 { value: "skip", label: "Skip" },
                 { value: "add_missing", label: "Fill only", disabled: !canLowRisk },
                 { value: "replace_unapproved", label: "Update drafts", disabled: !canAdvanced },
-                { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
-              ]}
-            />
-            <PolicySelect
-              id="approvalMode"
-              label="Approval"
-              help="Approval aliases are resolved through the configured canonical field rules."
-              value={approvalMode}
-              onChange={setApprovalMode}
-              options={[
-                { value: "preserve", label: "Skip (preserve existing)" },
-                { value: "import_unapproved", label: "Update drafts", disabled: !canAdvanced },
                 { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
               ]}
             />
@@ -682,24 +786,69 @@ export default function UploadPackPage() {
             <div className="alert alert-secondary small mt-3">No permanent changes are planned.</div>
           )}
 
-          <div className="btn-group btn-group-sm mb-3" role="group" aria-label="Redline filter">
-            {(["all", "changed", "blocked", "approved"] as Filter[]).map((name) => (
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <div className="btn-group btn-group-sm" role="group" aria-label="Redline filter">
+              {(
+                [
+                  ["all", "All"],
+                  ["changed", "Changed"],
+                  ["blocked", "Blocked"],
+                  ["modified_approved", "Modified approved"],
+                ] as Array<[Filter, string]>
+              ).map(([name, label]) => (
+                <button
+                  key={name}
+                  type="button"
+                  className={`btn ${filter === name ? "btn-secondary" : "btn-outline-secondary"}`}
+                  onClick={() => setFilter(name)}
+                >
+                  {label} <span className="badge text-bg-light text-muted">{tabCounts[name]}</span>
+                </button>
+              ))}
+            </div>
+            <input
+              type="search"
+              className="form-control form-control-sm"
+              style={{ maxWidth: 260 }}
+              placeholder="Search part, file or field…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <div className="btn-group btn-group-sm" role="group" aria-label="Detail level">
               <button
-                key={name}
                 type="button"
-                className={`btn ${filter === name ? "btn-secondary" : "btn-outline-secondary"}`}
-                onClick={() => setFilter(name)}
+                className={`btn ${changedOnly ? "btn-secondary" : "btn-outline-secondary"}`}
+                onClick={() => setChangedOnly(true)}
               >
-                {name === "approved" ? "Approved targets" : name[0].toUpperCase() + name.slice(1)}
+                Changes only
               </button>
-            ))}
+              <button
+                type="button"
+                className={`btn ${changedOnly ? "btn-outline-secondary" : "btn-secondary"}`}
+                onClick={() => setChangedOnly(false)}
+              >
+                All rows
+              </button>
+            </div>
           </div>
 
           <div className="d-flex flex-column gap-2">
             {visibleParts.map((part) => (
-              <PartRedline key={`${part.part_number}:${part.revision}`} part={part} />
+              <PartRedline
+                key={`${part.part_number}:${part.revision}`}
+                part={part}
+                changedOnly={changedOnly}
+              />
             ))}
-            {!visibleParts.length ? <div className="text-muted small">No redline entries match this filter.</div> : null}
+            {!visibleParts.length ? (
+              <div className="text-muted small">
+                {search.trim()
+                  ? "No parts match this search in the selected tab."
+                  : filter === "modified_approved"
+                    ? "No approved parts are altered by this import."
+                    : `No parts are ${filter === "blocked" ? "blocked" : "changed"} by this import.`}
+              </div>
+            ) : null}
           </div>
 
           <details className="mt-3 border-top pt-3">

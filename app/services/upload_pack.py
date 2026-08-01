@@ -730,6 +730,43 @@ def _file_action(
     if mode == "replace_unapproved" and state == "existing_approved":
         return "blocked", "Replace unapproved does not alter approved targets."
     return "replace", "Selected file policy permits replacement."
+def _discovered_file_rows(
+    pair: tuple[str, str],
+    existing_part: Part | None,
+    existing_state: dict[str, Any],
+    incoming_attrs: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Redline rows for files found in storage rather than carried in the ZIP.
+
+    Record reconciliation is not gated by the file policy: it only points
+    ``PartFile`` at bytes that already exist on disk, so it neither writes nor
+    overwrites content. Discovery resolves datasheet aliases against the attrs
+    the part will hold after the import, so a datasheet named by this very
+    package is still found.
+    """
+    rows = []
+    attrs = {**((existing_part.attrs if existing_part else None) or {}), **(incoming_attrs or {})}
+    for (group, drawing), record in discover_part_files(*pair, attrs=attrs).items():
+        extension = str(record.get("ext") or "").casefold()
+        existing_file = existing_state["managed"].get((pair, (group.casefold(), extension, drawing)))
+        linked = bool(existing_file) and getattr(existing_file, "rel_path", "") == record.get("rel_path")
+        rows.append(
+            {
+                "kind": "discovered",
+                "name": os.path.basename(str(record.get("rel_path") or "")),
+                "category": group,
+                "action": "unchanged" if linked else ("link" if existing_file else "add"),
+                "reason": (
+                    "Storage file is already recorded."
+                    if linked
+                    else "Found in storage; the file record is repointed."
+                    if existing_file
+                    else "Found in storage; a file record is created."
+                ),
+                "_discovered": {"ext_group": group, "is_dwg": drawing, **record},
+            }
+        )
+    return rows
 def build_import_plan(
     parsed_package: dict[str, Any],
     existing_state: dict[str, Any],
@@ -849,13 +886,25 @@ def build_import_plan(
                     "_file": file,
                 }
             )
+        # BOM-only packs carry no deliverables; their files already sit in
+        # storage. Plan the same reconciliation the apply performs so the
+        # redline reports discovered files instead of showing none.
+        if not parsed_package["files"]:
+            file_rows.extend(
+                _discovered_file_rows(
+                    pair, existing_part, existing_state, normalized.get("attrs") or {}
+                )
+            )
         changed_actions = {"add", "replace", "remove", "quantity_change", "change", "clear"}
+        # Discovered rows only reconcile file records, so they are reported but
+        # never make the part itself count as changed.
+        content_files = [item for item in file_rows if item["kind"] != "discovered"]
         blocked_count = sum(
             item["action"] == "blocked"
-            for item in properties + approval + file_rows
+            for item in properties + approval + content_files
         ) + int(bom["action"] == "blocked")
         changed = (
-            any(item["action"] in changed_actions for item in properties + approval + file_rows)
+            any(item["action"] in changed_actions for item in properties + approval + content_files)
             or bom["action"] in {"add", "replace"}
         )
         entries.append(
@@ -908,8 +957,9 @@ def required_import_permissions(plan: dict[str, Any]) -> list[str]:
             item["action"]
             for item in part["properties"] + part["approval"]
         } & changed_actions
-        file_adds = any(item["action"] == "add" for item in part["files"])
-        file_replaces = any(item["action"] == "replace" for item in part["files"])
+        content = [item for item in part["files"] if item["kind"] != "discovered"]
+        file_adds = any(item["action"] == "add" for item in content)
+        file_replaces = any(item["action"] == "replace" for item in content)
         bom_action = part["bom"]["action"]
         bom_changed = bom_action in {"add", "replace"}
         if not (property_actions or file_adds or file_replaces or bom_changed):
@@ -983,7 +1033,12 @@ def _public_plan(
             "new": sum(item["target_state"] == "new" for item in parts),
             "changed": sum(bool(item["changed"]) for item in parts),
             "blocked": sum(bool(item["blocked"]) for item in parts),
-            "approved_targets": sum(item["target_state"] == "existing_approved" for item in parts),
+            # Approved parts the import actually alters — the case worth
+            # reviewing, unlike the count of approved parts merely touched.
+            "modified_approved": sum(
+                item["target_state"] == "existing_approved" and bool(item["changed"])
+                for item in parts
+            ),
         },
     }
 def _apply_properties(part: Part, entry: dict[str, Any], aliases: dict[str, str]) -> None:
@@ -1036,7 +1091,9 @@ def _file_coverage(
         if (entry["part_number"], entry["revision"]) != pair:
             continue
         for item in entry["files"]:
-            if item["kind"] == "managed" and item["action"] in {"add", "replace"}:
+            if item["kind"] == "discovered":
+                groups.add(item["category"])
+            elif item["kind"] == "managed" and item["action"] in {"add", "replace"}:
                 groups.add(item["_file"]["identity"][0])
     return groups
 def _stage_files(plan: dict[str, Any], file_root: str) -> tuple[str, list[dict[str, Any]]]:
@@ -1046,7 +1103,7 @@ def _stage_files(plan: dict[str, Any], file_root: str) -> tuple[str, list[dict[s
         for entry in plan["parts"]:
             pair = (entry["part_number"], entry["revision"])
             for row in entry["files"]:
-                if row["action"] not in {"add", "replace"}:
+                if row["action"] not in {"add", "replace"} or "_file" not in row:
                     continue
                 file = row["_file"]
                 destination = _safe_destination(file_root, file["relative_path"])
@@ -1215,7 +1272,7 @@ def execute_import_plan(
         or ""
     ).strip()
     has_file_writes = any(
-        item["action"] in {"add", "replace"}
+        item["action"] in {"add", "replace"} and "_file" in item
         for entry in plan["parts"]
         for item in entry["files"]
     )
@@ -1272,27 +1329,19 @@ def execute_import_plan(
         # deliverables; the matching files already live in storage, so every
         # imported part reconciles its file records from a storage scan —
         # including re-imports whose part data is already up to date.
-        files_discovered = 0
-        if not plan["_parsed"]["files"] and plan["parts"]:
-            records = []
-            for entry in plan["parts"]:
-                pn, rev = entry["part_number"], entry["revision"]
-                part = plan["_state"]["parts"].get((pn, rev))
-                for (group, drawing), record in discover_part_files(
-                    pn,
-                    rev,
-                    attrs=part.attrs if part else {},
-                ).items():
-                    records.append(
-                        {
-                            "part_number": pn,
-                            "revision": rev,
-                            "ext_group": group,
-                            "is_dwg": drawing,
-                            **record,
-                        }
-                    )
-            files_discovered = int(upsert_part_files_detailed(records).get("count") or 0)
+        records = [
+            {
+                "part_number": entry["part_number"],
+                "revision": entry["revision"],
+                **item["_discovered"],
+            }
+            for entry in plan["parts"]
+            for item in entry["files"]
+            if "_discovered" in item
+        ]
+        files_discovered = (
+            int(upsert_part_files_detailed(records).get("count") or 0) if records else 0
+        )
         thumb_pairs = managed_changed if generate_thumbs else set()
         thumbnails = generate_thumbs_for_parts(sorted(thumb_pairs)) if thumb_pairs else 0
         return {

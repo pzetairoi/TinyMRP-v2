@@ -465,6 +465,21 @@ def test_bom_only_package_discovers_existing_storage_files_for_all_parts(app, tm
         ],
     )
 
+    # The preview reports the storage files it will reconcile, so a BOM-only
+    # pack no longer shows an empty Files section.
+    with app.app_context():
+        preview = _run(data, dry_run=True)
+    previewed = {
+        item["part_number"]: [row["category"] for row in item["files"]]
+        for item in preview["plan"]["parts"]
+    }
+    assert previewed == {"PLAN-NO-FILES": ["pdf"], "PLAN-NO-FILES-CHILD": ["pdf"]}
+    assert all(
+        row["action"] == "add" and row["kind"] == "discovered"
+        for item in preview["plan"]["parts"]
+        for row in item["files"]
+    )
+
     with app.app_context():
         applied = _run(data, dry_run=False)
 

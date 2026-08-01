@@ -1,4 +1,4 @@
-import{r as Ie,j as Ze}from"./index-DoRF9eRz.js";/**
+import{r as Ie,j as Ze}from"./index-BjVWE0wL.js";/**
  * @license
  * Copyright 2010-2025 Three.js Authors
  * SPDX-License-Identifier: MIT
