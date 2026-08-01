@@ -113,33 +113,11 @@ def test_shared_macros_render_without_empty_action_wrappers(app):
     assert "tm-card-header__actions" not in html
 
 
-def test_csrf_error_and_import_result_templates_render(app):
-    result = {
-        "zip": "sample.zip",
-        "root": "ASM-100",
-        "parts_created": 1,
-        "parts_updated": 2,
-        "modified_parts_count": 0,
-        "parts_seeded": 0,
-        "links_created": 3,
-        "links_skipped": 0,
-        "parts_with_props": 1,
-        "artifacts_added": 4,
-        "thumbnails_generated": 1,
-        "errors": [],
-        "warnings": [],
-        "parts_seeded_list": [],
-        "artifacts_found_by_type": {},
-        "modified_parts": [],
-    }
-    with app.app_context(), app.test_request_context("/import"):
+def test_csrf_error_template_renders(app):
+    with app.app_context(), app.test_request_context("/"):
         csrf_html = render_template("csrf_error.html", reason="Token missing")
-        import_html = render_template("import/result.html", result=result)
     assert "CSRF check failed" in csrf_html
     assert "Token missing" in csrf_html
-    assert "Import Result" in import_html
-    assert "Open BOM UI" in import_html
-    assert "Nothing else to review" in import_html
 
 
 def test_stage1_empty_states_and_warning_pages_render(client, app, tmp_path):
@@ -219,7 +197,6 @@ def test_stage1_server_rendered_pages_and_shell_routes_render(client, app, tmp_p
         "/ui/admin/addin",
         "/ui/admin/fields",
         "/ui/addin/tokens",
-        "/import/",
     ]
 
     for url in shell_pages:

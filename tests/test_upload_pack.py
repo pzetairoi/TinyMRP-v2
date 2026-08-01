@@ -243,15 +243,21 @@ def test_upload_pack_report_includes_existing_part_file_changes(client, app, use
     )
     assert resp.status_code == 200
     data = resp.get_json() or {}
-    report = data.get("import") or {}
+    plan = data.get("plan") or {}
 
-    modified_parts = report.get("modified_parts") or []
-    entry = next((item for item in modified_parts if item.get("part_number") == pn and item.get("revision") == rev), None)
+    entry = next(
+        (
+            item
+            for item in plan.get("parts") or []
+            if item.get("part_number") == pn and item.get("revision") == rev
+        ),
+        None,
+    )
     assert entry is not None
-    file_changes = entry.get("file_changes") or []
-    kinds = {item.get("kind") for item in file_changes}
-    assert "deliverable" in kinds
-    assert "extra_file" in kinds
+    file_rows = entry.get("files") or []
+    kinds = {item.get("kind") for item in file_rows}
+    assert kinds == {"managed", "associated"}
+    assert all(item.get("action") == "add" for item in file_rows)
 
 
 def test_upload_pack_scans_attr_named_datasheet_when_other_deliverables_are_parsed(client, app, user, tmp_path):
@@ -376,6 +382,94 @@ def test_upload_pack_zip_slip_rejected(client, app, user, tmp_path):
     assert resp.status_code == 400
 
 
+def test_import_capabilities_endpoint_is_lightweight_and_exact(client, app, user):
+    role = Role(
+        name="capabilities-preview",
+        permissions=["imports.preview", "imports.execute_low_risk"],
+    ).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+
+    resp = client.get("/api/import/capabilities")
+    assert resp.status_code == 200
+    payload = resp.get_json() or {}
+    assert payload == {
+        "imports": {
+            "imports.execute_approved": False,
+            "imports.execute_low_risk": True,
+            "imports.override_approved": False,
+            "imports.preview": True,
+        }
+    }
+
+
+def test_import_execution_permission_does_not_grant_resource_writes(
+    client,
+    app,
+    user,
+    tmp_path,
+):
+    """imports.* alone must not create parts; parts/bom/files writes are separate."""
+    role = Role(
+        name="imports-only",
+        permissions=[
+            "imports.preview",
+            "imports.execute_low_risk",
+            "imports.execute_approved",
+            "imports.override_approved",
+        ],
+    ).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    zip_bytes = _make_bom_zip("IMPORTS-ONLY", "A", {})
+
+    resp = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(zip_bytes), "pack.zip")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 403
+    missing = (resp.get_json() or {}).get("missing_permissions") or []
+    assert "parts.create" in missing
+    assert Part.objects(part_number="IMPORTS-ONLY", revision="A").first() is None
+
+
+def test_resource_writes_do_not_grant_import_execution(client, app, user, tmp_path):
+    role = Role(
+        name="writes-only",
+        permissions=[
+            "imports.preview",
+            "parts.create",
+            "parts.update",
+            "bom.update",
+            "files.add",
+            "files.replace",
+        ],
+    ).save()
+    user.roles = [role]
+    user.save()
+    _login(client, user)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    zip_bytes = _make_bom_zip("WRITES-ONLY", "A", {})
+
+    resp = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(zip_bytes), "pack.zip")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 403
+    missing = (resp.get_json() or {}).get("missing_permissions") or []
+    assert "imports.execute_low_risk" in missing
+    assert Part.objects(part_number="WRITES-ONLY", revision="A").first() is None
+
+
 def test_upload_pack_preview_and_execution_permissions_are_separate(
     client,
     app,
@@ -442,7 +536,10 @@ def test_upload_pack_low_risk_user_cannot_override_released_part(
         "/api/upload/pack",
         data={
             "file": (io.BytesIO(zip_bytes), "always.zip"),
-            "override_mode": "always",
+            "data_mode": "replace_all",
+            "bom_mode": "replace_all",
+            "file_mode": "replace_all",
+            "approval_mode": "replace_all",
         },
         content_type="multipart/form-data",
     )
@@ -492,7 +589,10 @@ def test_upload_pack_override_authority_can_intentionally_update_released_part(
         "/api/upload/pack",
         data={
             "file": (io.BytesIO(zip_bytes), "approved-override.zip"),
-            "override_mode": "always",
+            "data_mode": "replace_all",
+            "bom_mode": "replace_all",
+            "file_mode": "replace_all",
+            "approval_mode": "replace_all",
         },
         content_type="multipart/form-data",
     )
@@ -557,7 +657,10 @@ def test_upload_pack_preserve_mode_does_not_replace_existing_files(
         "/api/upload/pack",
         data={
             "file": (io.BytesIO(zip_bytes), "preserve.zip"),
-            "override_mode": "preserve",
+            "data_mode": "fill_blanks",
+            "bom_mode": "fill_if_empty",
+            "file_mode": "add_missing",
+            "approval_mode": "preserve",
         },
         content_type="multipart/form-data",
     )

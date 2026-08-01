@@ -202,15 +202,6 @@ def _node(
         and field.get("kind") == "custom"
         and str(field.get("id") or "").strip()
     }
-    custom_attr_keys = {
-        str(field.get("source_path") or "")[6:].lower(): str(
-            field.get("source_path") or ""
-        )[6:]
-        for field in config.get("fields") or []
-        if isinstance(field, dict)
-        and field.get("kind") == "custom"
-        and str(field.get("source_path") or "").lower().startswith("attrs.")
-    }
     data = filter_response_fields(
         "bom_line",
         current_user,
@@ -228,7 +219,6 @@ def _node(
             "attrs": filter_part_custom_fields(
                 current_user,
                 attrs,
-                configured_fields=custom_attr_keys,
                 context={"policy_context": boundary},
             ),
             "pending_review_count": int(review.get("count") or 0),
@@ -472,15 +462,6 @@ def bom_flat():
             and field.get("kind") == "custom"
             and str(field.get("id") or "").strip()
         }
-        custom_attr_keys = {
-            str(field.get("source_path") or "")[6:].lower(): str(
-                field.get("source_path") or ""
-            )[6:]
-            for field in config.get("fields") or []
-            if isinstance(field, dict)
-            and field.get("kind") == "custom"
-            and str(field.get("source_path") or "").lower().startswith("attrs.")
-        }
         row = filter_response_fields(
             "bom_line",
             current_user,
@@ -497,7 +478,6 @@ def bom_flat():
             "attrs": filter_part_custom_fields(
                 current_user,
                 attrs,
-                configured_fields=custom_attr_keys,
                 context={"policy_context": boundary},
             ),
             "pending_review_count": int(review.get("count") or 0),

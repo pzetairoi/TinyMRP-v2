@@ -701,10 +701,6 @@ def create_app(config_object=None):
     from app.views.dashboard import bp as dashboard_api_bp
     app.register_blueprint(dashboard_api_bp)
     
-    # Importer views for BOM uploads
-    from app.views.importer import bp as importer_bp
-    app.register_blueprint(importer_bp)
-
     # Upload Pack + extra files API
     from app.views.upload_pack import bp as upload_pack_bp
     app.register_blueprint(upload_pack_bp)

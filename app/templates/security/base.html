@@ -46,7 +46,7 @@
     {% set supplier_portal_only = permission_boundary('suppliers') == 'supplier_portal' %}
     {% set companies_active = request_path.startswith('/admin/customers') or request_path.startswith('/admin/suppliers') %}
     {% set tools_active = request_path.startswith('/tools') %}
-    {% set import_active = request_path.startswith('/ui/upload-pack') or request_path.startswith('/import') %}
+    {% set import_active = request_path.startswith('/ui/upload-pack') %}
     {% set admin_people = has_perm('security.users.read') or has_perm('security.roles.read') %}
     {% set admin_audit = has_perm('audit.read') %}
     {% set admin_config = has_perm('system.config.read') or has_perm('system.config.manage') or has_perm('system.rebuild') %}

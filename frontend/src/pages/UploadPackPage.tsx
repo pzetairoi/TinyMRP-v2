@@ -56,23 +56,24 @@ type Plan = {
 type UploadResult = {
   zip?: string;
   dry_run?: boolean;
+  root?: string;
+  root_rev?: string;
   plan?: Plan;
-  import?: {
-    root?: string;
-    root_rev?: string;
+  metrics?: {
     parts_created?: number;
     parts_updated?: number;
     links_created?: number;
-    artifacts_added?: number;
-    extra_files_written?: number;
+    files_written?: number;
+    managed_files_written?: number;
+    associated_files_written?: number;
+    files_discovered?: number;
     thumbnails_generated?: number;
-    warnings?: Array<{ stage?: string; message?: string }>;
-    errors?: Array<{ stage?: string; message?: string }>;
   };
   timings?: Record<string, number>;
-  diagnostics?: Record<string, number | boolean>;
+  diagnostics?: Record<string, number | string | boolean>;
   capabilities?: Capability;
   warnings?: Array<string | { stage?: string; message?: string }>;
+  errors?: Array<{ stage?: string; message?: string }>;
 };
 
 type Filter = "all" | "changed" | "blocked" | "approved";
@@ -82,8 +83,7 @@ type FileMode = "skip" | "add_missing" | "replace_unapproved" | "replace_all";
 type ApprovalMode = "preserve" | "import_unapproved" | "replace_all";
 type Preset = "preserve" | "unless_existing_approved" | "always" | "custom";
 
-// Same three tiers as the backend's legacy override_mode (app/services/import_zip.py):
-// quick presets that set all four independent policies at once. Touching an
+// Quick presets that set all four independent policies at once. Touching an
 // individual policy below detaches it from the preset ("Custom").
 const PRESETS: Record<Exclude<Preset, "custom">, [DataMode, BomMode, FileMode, ApprovalMode]> = {
   preserve: ["fill_blanks", "fill_if_empty", "add_missing", "preserve"],
@@ -293,14 +293,14 @@ export default function UploadPackPage() {
   const [rootPreviewStatus, setRootPreviewStatus] = useState("");
 
   useEffect(() => {
-    fetch("/api/field-config")
+    fetch("/api/import/capabilities")
       .then((response) => (response.ok ? response.json() : Promise.reject(response)))
-      .then((payload) => setCapabilities(payload?.permissions?.imports || {}))
+      .then((payload) => setCapabilities(payload?.imports || {}))
       .catch(() => setCapabilities({}));
   }, []);
 
-  const rootPn = result?.import?.root || "";
-  const rootRev = result?.import?.root_rev || "";
+  const rootPn = result?.root || "";
+  const rootRev = result?.root_rev || "";
   const rootHref = rootPn
     ? `/ui/part/${encodeURIComponent(rootPn)}?rev=${encodeURIComponent(rootRev)}`
     : "";

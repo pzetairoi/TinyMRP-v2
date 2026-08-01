@@ -8,7 +8,7 @@ from app.models.auth import Role
 from app.models.bom import BOMLink
 from app.models.part import Part
 from app.services.field_config import get_field_config
-from app.services.import_zip import import_bom_zip
+from app.services.upload_pack import import_upload_pack
 
 
 def _login(client, user):
@@ -30,7 +30,7 @@ def _make_bom_zip(flat_rows: list[dict], tree_rows: list[str]) -> bytes:
     return buf.getvalue()
 
 
-def test_import_bom_zip_discovers_attr_named_datasheet(app, tmp_path):
+def test_bom_only_import_discovers_attr_named_datasheet_from_storage(app, tmp_path):
     pn = "IMP-DS"
     rev = "A"
     _touch(tmp_path / "datasheet" / "vendor-file.pdf", b"datasheet")
@@ -52,17 +52,21 @@ def test_import_bom_zip_discovers_attr_named_datasheet(app, tmp_path):
     with app.app_context():
         app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
         app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
-        import_bom_zip(
+        import_upload_pack(
             zip_bytes,
             "datasheet-import.zip",
             seed_tag="test",
-            scan_artifacts=True,
+            allow_extra=False,
             generate_thumbs=False,
         )
 
-        datasheet = PartFile.objects(part_number=pn, revision=rev, ext_group="datasheet").first()
-        assert datasheet is not None
-        assert datasheet.rel_path == "datasheet/vendor-file.pdf"
+        # A properties+BOM package carries no files; the import reconciles
+        # file records from storage for every imported part.
+        assert Part.objects(part_number=pn, revision=rev).first() is not None
+        assert (
+            PartFile.objects(part_number=pn, revision=rev, ext_group="datasheet").count()
+            == 1
+        )
 
 
 def test_refresh_files_recursive_discovers_attr_named_datasheets(client, app, user, tmp_path):

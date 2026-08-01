@@ -520,21 +520,54 @@ def test_import_and_document_pack_entries_match_real_capabilities(client):
     assert client.post("/api/docpacks/build_job", json={"job_id": str(job.id)}).status_code == 403
 
     # Engineering runs low-risk imports; only the manager may override approved data.
+    def _override_pack():
+        import json
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "ROLE_FLATBOM.txt",
+                json.dumps(
+                    {
+                        "partnumber": part.part_number,
+                        "revision": part.revision,
+                        "description": "Override attempt",
+                    }
+                ),
+            )
+            archive.writestr(
+                "ROLE_TREEBOM.txt",
+                "ITEM NO.\tPART NUMBER\tRevision\tQTY.\n"
+                f"1\t{part.part_number}\t{part.revision}\t1\n",
+            )
+        return buffer.getvalue()
+
+    override_modes = {
+        "data_mode": "replace_all",
+        "bom_mode": "replace_all",
+        "file_mode": "replace_all",
+        "approval_mode": "replace_all",
+    }
     _login(client, engineering)
     low_risk = client.post(
         "/api/upload/pack?dry_run=1",
-        data={"file": (io.BytesIO(b"not-a-zip"), "parts.zip")},
+        data={"file": (io.BytesIO(_override_pack()), "parts.zip")},
     )
     assert low_risk.status_code != 403
-    assert client.post(
-        "/api/upload/pack?override_mode=always",
-        data={"file": (io.BytesIO(b"not-a-zip"), "parts.zip")},
-    ).status_code == 403
+    denied = client.post(
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(_override_pack()), "parts.zip"), **override_modes},
+    )
+    assert denied.status_code == 403
+    assert "imports.override_approved" in (denied.get_json() or {}).get(
+        "missing_permissions", []
+    )
 
     manager = _user("import-manager", "engineering_manager")
     _login(client, manager)
     override = client.post(
-        "/api/upload/pack?override_mode=always",
-        data={"file": (io.BytesIO(b"not-a-zip"), "parts.zip")},
+        "/api/upload/pack",
+        data={"file": (io.BytesIO(_override_pack()), "parts.zip"), **override_modes},
     )
     assert override.status_code != 403

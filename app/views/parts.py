@@ -1154,7 +1154,7 @@ def part_detail():
         return jsonify({"error": "not found"}), 404
 
     field_config = get_field_config()
-    custom_field_ids, custom_attr_keys = _configured_custom_fields(field_config)
+    custom_field_ids, _custom_attr_keys = _configured_custom_fields(field_config)
     boundary = response_context("parts", current_user)
     attrs = harvest_part_attrs(p)
     can_read_comments = (
@@ -1180,7 +1180,6 @@ def part_detail():
     visible_attrs = filter_part_custom_fields(
         current_user,
         filtered_part_attrs(p, attrs),
-        configured_fields=custom_attr_keys,
         context={"policy_context": boundary},
     )
     norm_rev = _normalized_revision(p, attrs)
@@ -2106,7 +2105,10 @@ def part_refresh_files(pn):
     )
     if not p:
         return jsonify({"ok": False, "error": "not found"}), 404
-    if part_is_released(p):
+    # This endpoint is a mutating refresh capability even when a particular
+    # scan happens to find no delta. A read-only discovery route does not
+    # currently exist.
+    if not has_permission(current_user, "files.add"):
         return jsonify({"ok": False, "error": "not found"}), 404
     target_rev = _clean_rev_value(p.revision or "")
 
@@ -2144,15 +2146,17 @@ def part_refresh_files(pn):
         pairs = list(visited) if visited else pairs
 
     planned: list[dict[str, Any]] = []
-    required_permissions: set[str] = set()
     scoped_parts = scope_queryset(Part.objects, current_user, "parts")
+    root_pair = (p.part_number, target_rev)
     for pn_i, rev_i in pairs:
         part_doc = scoped_parts.filter(
             part_number__iexact=pn_i,
             revision__iexact=rev_i,
         ).first()
-        if part_doc is None or part_is_released(part_doc):
-            return jsonify({"ok": False, "error": "not found"}), 404
+        # Descendants without a Part record or outside the caller's part
+        # scope are skipped, not fatal; the root was validated above.
+        if part_doc is None:
+            continue
         part_attrs = harvest_part_attrs(part_doc)
         try:
             found = discover_part_files(
@@ -2162,7 +2166,9 @@ def part_refresh_files(pn):
                 attrs=part_attrs,
             )
         except Exception:
-            return jsonify({"ok": False, "error": "refresh failed"}), 400
+            if (pn_i, rev_i) == root_pair:
+                return jsonify({"ok": False, "error": "refresh failed"}), 400
+            continue
         recs = []
         for (group, is_dwg), meta in (found or {}).items():
             rec = dict(meta)
@@ -2170,7 +2176,15 @@ def part_refresh_files(pn):
             rec["is_dwg"] = bool(is_dwg)
             recs.append(rec)
         plan = plan_part_file_refresh(pn_i, rev_i, recs, found)
-        required_permissions.update(plan["requires"])
+        # Pairs whose planned effects exceed the caller's file authority are
+        # skipped during recursion; the root itself still fails closed.
+        if any(
+            not has_permission(current_user, permission)
+            for permission in plan["requires"]
+        ):
+            if (pn_i, rev_i) == root_pair:
+                return jsonify({"ok": False, "error": "not found"}), 404
+            continue
         planned.append(
             {
                 "pn": pn_i,
@@ -2180,16 +2194,6 @@ def part_refresh_files(pn):
                 "plan": plan,
             }
         )
-
-    # This endpoint is a mutating refresh capability even when a particular
-    # scan happens to find no delta. A read-only discovery route does not
-    # currently exist.
-    required_permissions.add("files.add")
-    if any(
-        not has_permission(current_user, permission)
-        for permission in required_permissions
-    ):
-        return jsonify({"ok": False, "error": "not found"}), 404
 
     files_found_total = 0
     upserts_total = 0
@@ -2216,13 +2220,13 @@ def part_refresh_files(pn):
         removed_total += removed_count
         refreshed.append({"pn": pn_i, "rev": rev_i, "files_found": len(recs), "files_removed": removed_count})
 
-    thumbs = generate_thumbs_for_parts(pairs)
+    thumbs = generate_thumbs_for_parts([(item["pn"], item["rev"]) for item in planned])
     try:
         log_action(
             "part.files.refresh",
             resource_type="part",
             resource=f"{p.part_number}:{target_rev}",
-            meta={"recursive": recursive, "parts": len(pairs), "found": files_found_total, "upserts": upserts_total, "removed": removed_total, "thumbs": thumbs},
+            meta={"recursive": recursive, "parts": len(refreshed), "found": files_found_total, "upserts": upserts_total, "removed": removed_total, "thumbs": thumbs},
         )
     except Exception:
         pass
@@ -2232,7 +2236,7 @@ def part_refresh_files(pn):
             "part_number": p.part_number,
             "revision": target_rev,
             "recursive": recursive,
-            "parts_refreshed": len(pairs),
+            "parts_refreshed": len(refreshed),
             "files_found": files_found_total,
             "artifacts_upserted": upserts_total,
             "artifacts_removed": removed_total,

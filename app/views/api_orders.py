@@ -781,7 +781,8 @@ def order_stats():
         return err
     base = scope_queryset(Order.objects, user, "orders")
     financial = has_permission(user, "orders.financial.read")
-    month = base.filter(order_date__gte=utc_now().replace(day=1))
+    month_start = utc_now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month = base.filter(order_date__gte=month_start)
     count = base.count()
     total_value = float(base.sum("total") or 0.0) if financial else None
     return jsonify(
