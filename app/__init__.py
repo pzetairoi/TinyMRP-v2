@@ -871,9 +871,30 @@ def create_app(config_object=None):
                 return target == current or can_transition_order(current, target)
             except Exception:
                 return False
+        # Permission-test impersonation: targets for the account menu and the
+        # banner shown while acting as somebody else. Empty on any instance
+        # without ALLOW_PERMISSION_TEST_DATA, so the UI stays hidden.
+        impersonation_targets = []
+        impersonating_as = ""
+        try:
+            from flask_login import current_user
+
+            from app.services import impersonation as _imp
+
+            if _imp.impersonator_id():
+                impersonating_as = str(getattr(current_user, "email", "") or "")
+            else:
+                impersonation_targets = [
+                    str(user.email) for user in _imp.available_targets(current_user)
+                ]
+        except Exception:
+            impersonation_targets = []
+            impersonating_as = ""
         return dict(
             files_base=fb,
             has_perm=has_perm,
+            impersonation_targets=impersonation_targets,
+            impersonating_as=impersonating_as,
             current_user_profile=current_profile,
             current_user_roles=current_roles,
             current_user_permissions=current_permissions,

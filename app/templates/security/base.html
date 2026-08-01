@@ -261,6 +261,27 @@
                       <button class="btn btn-sm btn-outline-danger w-100" type="submit">Logout</button>
                     </form>
                   </li>
+                  {% if impersonating_as %}
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <form class="px-3" method="post" action="{{ url_for('admin_roles.permission_test_impersonate_stop') }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-sm btn-warning w-100" type="submit">Stop testing as {{ impersonating_as }}</button>
+                    </form>
+                  </li>
+                  {% elif impersonation_targets %}
+                  <li><hr class="dropdown-divider"></li>
+                  <li class="dropdown-header small">Test as permission-test user</li>
+                  {% for target in impersonation_targets %}
+                  <li>
+                    <form method="post" action="{{ url_for('admin_roles.permission_test_impersonate') }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="email" value="{{ target }}">
+                      <button class="dropdown-item small" type="submit">{{ target }}</button>
+                    </form>
+                  </li>
+                  {% endfor %}
+                  {% endif %}
                 </ul>
               </li>
             {% else %}
@@ -270,6 +291,19 @@
         </div>
       </div>
     </nav>
+
+    {% if impersonating_as %}
+    <div class="alert alert-warning border-0 rounded-0 mb-0 py-2" role="status">
+      <div class="container d-flex flex-wrap align-items-center gap-2 small">
+        <strong>Permission test:</strong>
+        <span>you are acting as <code>{{ impersonating_as }}</code>. Actions are recorded against your admin account.</span>
+        <form class="ms-auto" method="post" action="{{ url_for('admin_roles.permission_test_impersonate_stop') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-sm btn-warning" type="submit">Return to my account</button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
 
     {% if is_admin and admin_active %}
     <nav class="tm-admin-bar" aria-label="Administration sections">

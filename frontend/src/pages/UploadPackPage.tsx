@@ -52,8 +52,14 @@ type PlanPart = {
   allowed: boolean;
   blocked_change_count: number;
 };
+type DuplicateChoice = {
+  part_number: string;
+  revision: string;
+  options: Array<{ index: number; label: string; description: string }>;
+};
 type Plan = {
   parts: PlanPart[];
+  duplicates?: DuplicateChoice[];
   required_permissions: string[];
   missing_permissions: string[];
   allowed: boolean;
@@ -375,6 +381,8 @@ export default function UploadPackPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [changedOnly, setChangedOnly] = useState(true);
+  // Operator picks for part numbers that appear more than once in the pack.
+  const [duplicateChoices, setDuplicateChoices] = useState<Record<string, number>>({});
   const [capabilities, setCapabilities] = useState<Capability>({});
   const [dataMode, setDataMode] = useState<DataMode>("fill_blanks");
   const [bomMode, setBomMode] = useState<BomMode>("fill_if_empty");
@@ -518,6 +526,9 @@ export default function UploadPackPage() {
     form.append("bom_mode", bomMode);
     form.append("file_mode", fileMode);
     form.append("approval_mode", approvalMode);
+    if (Object.keys(duplicateChoices).length) {
+      form.append("duplicate_choices", JSON.stringify(duplicateChoices));
+    }
     if (dryRun) form.append("dry_run", "1");
 
     const xhr = new XMLHttpRequest();
@@ -785,6 +796,47 @@ export default function UploadPackPage() {
           ) : (
             <div className="alert alert-secondary small mt-3">No permanent changes are planned.</div>
           )}
+
+          {plan.duplicates?.length ? (
+            <div className="alert alert-warning small mt-3">
+              <div className="fw-semibold mb-2">
+                {plan.duplicates.length} part number(s) appear more than once in this pack.
+              </div>
+              <div className="mb-2">
+                SolidWorks exports virtual components under their parent, so several rows can share
+                one part number. Pick which row to keep, then preview again.
+              </div>
+              {plan.duplicates.map((dup) => {
+                const key = `${dup.part_number}␟${dup.revision}`;
+                return (
+                  <div key={key} className="mb-2">
+                    <div>
+                      <code>{dup.part_number}</code>
+                      {dup.revision ? ` REV ${dup.revision}` : ""}
+                    </div>
+                    <select
+                      className="form-select form-select-sm mt-1"
+                      style={{ maxWidth: 520 }}
+                      value={duplicateChoices[key] ?? 0}
+                      onChange={(event) =>
+                        setDuplicateChoices((prev) => ({
+                          ...prev,
+                          [key]: Number(event.target.value),
+                        }))
+                      }
+                    >
+                      {dup.options.map((option) => (
+                        <option key={option.index} value={option.index}>
+                          {option.label}
+                          {option.description ? ` — ${option.description}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
 
           <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
             <div className="btn-group btn-group-sm" role="group" aria-label="Redline filter">

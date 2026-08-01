@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from typing import List
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
@@ -59,10 +60,19 @@ def _uploaded_by() -> str:
     return (getattr(current_user, "email", None) or str(getattr(current_user, "id", ""))).strip()
 def _import_options() -> dict:
     source = request.form if request.form else request.args
-    return {
+    options = {
         name: source.get(name) or None
         for name in ("data_mode", "bom_mode", "file_mode", "approval_mode")
     }
+    # Operator picks for clashing part identities, posted as JSON so a pack with
+    # several clashes needs one field rather than one per part.
+    raw = source.get("duplicate_choices") or ""
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except ValueError:
+        parsed = {}
+    options["duplicate_choices"] = parsed if isinstance(parsed, dict) else {}
+    return options
 def _mutable_scope_check(pairs):
     """Return the exact requested pairs outside the caller's part scope.
 
