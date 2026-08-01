@@ -79,18 +79,17 @@ def test_effective_permissions_union_duplicates_and_immutable_result():
     assert has_any_permission(user, ["customers.read", "jobs.read"])
 
 
-def test_legacy_expansion_is_non_mutating_and_can_be_disabled():
-    stored = ["items.view"]
-    user = FakeUser([SimpleNamespace(name="legacy", permissions=stored)])
+def test_permission_resolution_is_non_mutating_and_grants_nothing_extra():
+    """A role grants exactly its permissions -- none imply another."""
+    stored = ["parts.read"]
+    user = FakeUser([SimpleNamespace(name="reader", permissions=stored)])
 
-    expanded = effective_permissions(user)
-
-    assert "items.view" in expanded
-    assert "parts.read" in expanded
-    assert effective_permissions(user, include_legacy=False) == frozenset({"items.view"})
+    assert effective_permissions(user) == frozenset({"parts.read"})
     assert has_permission(user, "parts.read")
-    assert not has_permission(user, "parts.read", include_legacy=False)
-    assert stored == ["items.view"]
+    # Related capabilities are never implied by a coarser grant.
+    assert not has_permission(user, "parts.update")
+    assert not has_permission(user, "bom.read")
+    assert stored == ["parts.read"]
 
 
 def test_unknown_and_malformed_role_data_never_grants_authority():
@@ -201,19 +200,8 @@ def test_canonical_and_missing_permission_decisions():
     invalid = authorise(user, "not.registered")
 
     assert allowed.allowed and allowed.reason_code == "allowed"
-    assert not allowed.used_legacy_expansion
     assert not denied.allowed and denied.reason_code == "missing_permission"
     assert not invalid.allowed and invalid.reason_code == "invalid_permission"
-
-
-def test_legacy_decision_records_expansion():
-    user = FakeUser([SimpleNamespace(name="legacy", permissions=["items.view"])])
-
-    decision = authorise(user, "parts.read")
-
-    assert decision.allowed
-    assert decision.used_legacy_expansion
-    assert not decision.used_legacy_admin_bypass
 
 
 def test_customer_scope_and_authoritative_lookup_cannot_cross_organisation(app):

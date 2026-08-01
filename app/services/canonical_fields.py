@@ -455,18 +455,53 @@ def approval_void_regex(config: Optional[Dict[str, Any]] = None) -> re.Pattern[s
     return re.compile(r"^\s*(?:" + "|".join(patterns) + r")\s*$", re.IGNORECASE)
 
 
-def canonical_alias_index(config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
-    entries = canonical_alias_entries_from_field_config(config) if isinstance(config, dict) else get_runtime_canonical_aliases()
-    out: Dict[str, str] = {}
+def _alias_lookups(
+    entries: List[Dict[str, Any]],
+) -> tuple[Dict[str, str], Dict[str, List[str]]]:
+    """Derive the alias->field and field->aliases lookups in one pass.
+
+    Both are pure functions of ``entries``. Rebuilding them per call made
+    resolving a page of parts O(rows x fields x aliases); the per-request memo
+    below keeps it O(entries) once. Keyed on the entries' identity so a config
+    change (which produces a new list) invalidates on its own.
+    """
+
+    by_alias: Dict[str, str] = {}
+    by_field: Dict[str, List[str]] = {}
     for item in entries:
-        field_id = str(item.get("field_id") or "").strip()
-        if not field_id:
+        raw_field_id = str(item.get("field_id") or "").strip()
+        aliases = [
+            token
+            for token in (canonical_attr_key(alias) for alias in item.get("aliases") or [])
+            if token
+        ]
+        by_field.setdefault(canonical_attr_key(item.get("field_id")), aliases)
+        if not raw_field_id:
             continue
-        for alias in item.get("aliases") or []:
-            token = canonical_attr_key(alias)
-            if token and token not in out:
-                out[token] = field_id
-    return out
+        for token in aliases:
+            if token not in by_alias:
+                by_alias[token] = raw_field_id
+    return by_alias, by_field
+
+
+def _cached_alias_lookups(
+    config: Optional[Dict[str, Any]] = None,
+) -> tuple[Dict[str, str], Dict[str, List[str]]]:
+    if isinstance(config, dict):
+        return _alias_lookups(canonical_alias_entries_from_field_config(config))
+    entries = get_runtime_canonical_aliases()
+    if not has_app_context():
+        return _alias_lookups(entries)
+    cached = getattr(g, "_canonical_alias_lookups", None)
+    if cached is not None and cached[0] is entries:
+        return cached[1]
+    lookups = _alias_lookups(entries)
+    g._canonical_alias_lookups = (entries, lookups)
+    return lookups
+
+
+def canonical_alias_index(config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    return _cached_alias_lookups(config)[0]
 
 
 def canonical_field_for_attr_key(raw_key: Any, config: Optional[Dict[str, Any]] = None) -> str:
@@ -474,12 +509,10 @@ def canonical_field_for_attr_key(raw_key: Any, config: Optional[Dict[str, Any]] 
 
 
 def canonical_aliases_for_field(field_id: str, config: Optional[Dict[str, Any]] = None) -> List[str]:
-    entries = canonical_alias_entries_from_field_config(config) if isinstance(config, dict) else get_runtime_canonical_aliases()
     target = canonical_attr_key(field_id)
-    for item in entries:
-        if canonical_attr_key(item.get("field_id")) == target:
-            return [canonical_attr_key(alias) for alias in (item.get("aliases") or []) if canonical_attr_key(alias)]
-    return [target] if target else []
+    # An entry with no usable aliases falls back to the field id itself, as
+    # does a field with no entry at all.
+    return _cached_alias_lookups(config)[1].get(target) or ([target] if target else [])
 
 
 def _approval_text_token(value: Any) -> str:

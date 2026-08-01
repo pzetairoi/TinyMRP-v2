@@ -21,7 +21,6 @@ from app.services.audit import log_action
 from app.services.authorization import require_permission
 from app.services.permissions import (
     CANONICAL_PERMISSION_GROUPS,
-    LEGACY_PERMISSION_IDENTIFIERS,
     duplicate_permissions,
     unknown_permissions,
 )
@@ -174,10 +173,6 @@ def _canonical_catalogue() -> list[dict[str, object]]:
     ]
 
 
-def _legacy_catalogue() -> list[dict[str, str]]:
-    return [_permission_item(value) for value in LEGACY_PERMISSION_IDENTIFIERS]
-
-
 def _submitted_permissions() -> list[str]:
     """Return the posted permissions, de-duplicated in first-seen order.
 
@@ -211,9 +206,6 @@ def _permission_group_summary(permissions: list[str]) -> list[dict[str, object]]
                     "count": count,
                 }
             )
-    legacy_count = len(selected.intersection(LEGACY_PERMISSION_IDENTIFIERS))
-    if legacy_count:
-        summary.append({"label": "Legacy compatibility", "count": legacy_count})
     return summary
 
 
@@ -394,7 +386,6 @@ def _role_form_context(
         "deletion_error": deletion_error,
         "drift_fields": drift_fields,
         "canonical_groups": _canonical_catalogue(),
-        "legacy_permissions": _legacy_catalogue(),
         "selected_permissions": (
             selected_permissions
             if selected_permissions is not None

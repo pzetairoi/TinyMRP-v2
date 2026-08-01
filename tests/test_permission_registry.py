@@ -10,12 +10,9 @@ from app.services.permissions import (
     CANONICAL_PERMISSION_IDENTIFIERS,
     CANONICAL_PERMISSIONS,
     DuplicatePermissionsError,
-    LEGACY_PERMISSION_COMPATIBILITY,
-    LEGACY_PERMISSION_IDENTIFIERS,
-    LEGACY_PERMISSIONS,
     PERMISSION_REGISTRY,
     UnknownPermissionsError,
-    expand_legacy_permissions,
+    resolve_permissions,
     validate_permissions,
 )
 from app.services.standard_roles import STANDARD_ROLES
@@ -273,18 +270,7 @@ def test_canonical_registry_is_exact_and_has_no_duplicates():
     assert CANONICAL_PERMISSIONS == EXPECTED_CANONICAL_PERMISSIONS
     assert len(flattened) == len(set(flattened))
     assert tuple(flattened) == CANONICAL_PERMISSION_IDENTIFIERS
-    assert len(LEGACY_PERMISSION_IDENTIFIERS) == len(set(LEGACY_PERMISSION_IDENTIFIERS))
-    assert PERMISSION_REGISTRY == CANONICAL_PERMISSIONS | LEGACY_PERMISSIONS
-
-
-def test_no_permission_is_both_canonical_and_legacy():
-    """The role editor renders the two catalogues separately.
-
-    An identifier in both is posted twice and fails duplicate validation, so
-    editing any role holding it becomes impossible.
-    """
-
-    assert CANONICAL_PERMISSIONS.isdisjoint(LEGACY_PERMISSIONS)
+    assert PERMISSION_REGISTRY == CANONICAL_PERMISSIONS
 
 
 def test_standard_roles_have_exact_permissions():
@@ -332,70 +318,61 @@ def test_duplicate_permissions_are_rejected_by_registry_and_role_model():
         Role(name="duplicate", permissions=["parts.read", "parts.read"]).save()
 
 
-def test_registered_legacy_permissions_remain_storable():
-    role = Role(name="legacy", permissions=sorted(LEGACY_PERMISSIONS)).save()
+def test_a_grant_never_confers_authority_beyond_itself():
+    """No permission implies another.
 
-    assert set(role.permissions) == LEGACY_PERMISSIONS
+    Everyday engineering, import and party-management grants must never leak
+    into destructive, approval or financial authority. Resolution validates
+    the stored strings and returns exactly them.
+    """
 
-
-def test_legacy_items_permissions_do_not_gain_destructive_or_approval_authority():
-    expanded = expand_legacy_permissions(["items.view", "items.edit"])
-
-    assert {
+    everyday = [
         "parts.read",
-        "bom.read",
-        "files.read",
-        "comments.read",
-        "markups.read",
         "parts.create",
         "parts.update",
         "parts.revise",
+        "bom.read",
         "bom.update",
+        "files.read",
         "files.add",
         "files.replace",
+        "comments.read",
         "comments.write",
+        "markups.read",
         "markups.write",
         "numbering.allocate",
-    } <= expanded
-    assert {
-        "parts.purge",
-        "files.purge",
-        "imports.override_approved",
-    }.isdisjoint(expanded)
-
-
-def test_legacy_import_and_order_management_exclude_approval_and_override():
-    expanded = expand_legacy_permissions(["import.bom", "orders.manage"])
-
-    assert {
         "imports.preview",
         "imports.execute_low_risk",
+        "orders.read",
         "orders.create",
         "orders.update",
         "orders.submit",
         "orders.fulfil",
-    } <= expanded
+        "customers.read",
+        "customers.update",
+        "suppliers.read",
+        "suppliers.update",
+    ]
+
+    resolved = resolve_permissions(everyday)
+
+    assert resolved == set(everyday)
     assert {
+        "parts.purge",
+        "files.purge",
         "imports.override_approved",
+        "imports.execute_approved",
         "orders.approve",
-    }.isdisjoint(expanded)
-
-
-def test_legacy_party_management_does_not_imply_financial_authority():
-    expanded = expand_legacy_permissions(["customers.manage", "suppliers.manage"])
-
-    assert {"customers.update", "suppliers.update"} <= expanded
-    assert {
+        "reviews.approve",
         "customers.financial.read",
         "customers.financial.update",
         "suppliers.financial.read",
         "suppliers.financial.update",
-    }.isdisjoint(expanded)
+    }.isdisjoint(resolved)
 
 
-def test_all_legacy_compatibility_targets_are_canonical():
-    assert set(LEGACY_PERMISSION_COMPATIBILITY) <= LEGACY_PERMISSIONS
-    assert all(
-        implied <= CANONICAL_PERMISSIONS
-        for implied in LEGACY_PERMISSION_COMPATIBILITY.values()
-    )
+def test_resolution_rejects_unregistered_identifiers():
+    """Retired coarse strings are no longer storable or resolvable."""
+
+    with pytest.raises(UnknownPermissionsError):
+        resolve_permissions(["items.view"])

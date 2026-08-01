@@ -145,13 +145,13 @@ def _recent_parts(user, limit: int = 5) -> list[dict[str, object]]:
             continue
         part = (
             base.filter(part_number__iexact=pn, revision__iexact=rev.strip())
-            .only("part_number", "revision", "description", "status", "attrs", "updated_at")
+            .only("part_number", "revision", "description", "status", "attrs", "canonical", "updated_at")
             .first()
         )
         if not part:
             continue
         attrs = harvest_part_attrs(part)
-        approval = approval_field_values(attrs)
+        approval = approval_field_values(attrs, part=part)
         revision = (attrs.get("revision") or part.revision or "").strip()
         row: dict[str, object] = {
             "part_number": part.part_number,

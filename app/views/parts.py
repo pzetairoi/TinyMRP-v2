@@ -17,7 +17,7 @@ from app.models.order import Order
 from app.models.bom import BOMLink
 from app.extensions import csrf
 from app.services.thumbs import thumb_urls_for, thumb_urls_map
-from app.services.attrs import approval_field_values, approval_filter_raw, approved_value, harvest_part_attrs
+from app.services.attrs import approval_field_values, approval_filter_raw, harvest_part_attrs
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.views.whereused import _rows_for_child_pn
@@ -1032,9 +1032,9 @@ def parts_lazy():
     docs = list(
         qs.order_by(*order_fields)
         .only(
-            "part_number", "revision", "description", "category", "attrs", "processes",
-            "file_groups", "field_values", "has_pdf", "has_png", "has_dxf", "has_step",
-            "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
+            "part_number", "revision", "description", "category", "attrs", "canonical",
+            "processes", "file_groups", "field_values", "has_pdf", "has_png", "has_dxf",
+            "has_step", "has_edr", "has_3mf", "has_ply", "has_stl", "has_datasheet",
             "pending_review_count", "pending_review_severity",
         )
         .skip(first)
@@ -1113,6 +1113,7 @@ def parts_lazy():
                 "has_ply": bool("ply" in allowed_file_groups and values.get("has_ply", part.has_ply)),
                 "has_stl": bool("stl" in allowed_file_groups and values.get("has_stl", part.has_stl)),
                 "has_datasheet": bool("datasheet" in allowed_file_groups and values.get("has_datasheet", part.has_datasheet)),
+                "approved": part_is_released(part),
                 "pending_review_count": review_count,
                 "pending_review_severity": review_severity,
                 "has_pending_reviews": review_count > 0,
@@ -1264,7 +1265,7 @@ def part_detail():
         attrs=attrs,
         extra={"part_number": p.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
     )
-    summary_field_values.update(approval_field_values(attrs))
+    summary_field_values.update(approval_field_values(attrs, part=p))
     summary_field_values = serialize_field_values(summary_field_values)
     summary_field_values = filter_response_fields(
         "parts",
@@ -1283,7 +1284,7 @@ def part_detail():
         else ""
     )
     approver_identity = (
-        str(approval_field_values(attrs).get("approved_by") or "").strip()
+        str(approval_field_values(attrs, part=p).get("approved_by") or "").strip()
         if can_read_approval_identity
         else ""
     )
@@ -1406,6 +1407,9 @@ def part_detail():
         current_user,
         {
                 "part_number": p.part_number,
+                # The one approval flag the UI reads. Resolved on write, so it
+                # always agrees with the list, the filters and the scope rules.
+                "approved": part_is_released(p),
                 "description": summary_field_values.get("description", p.description or attrs.get("description", "")),
                 "revision": norm_rev,
                 "display_code": f"{p.part_number}-{norm_rev}" if norm_rev else p.part_number,
@@ -2181,7 +2185,7 @@ def part_refresh_files(pn):
             found = discover_part_files(
                 pn_i,
                 rev_i,
-                approved=bool(approved_value(part_attrs)),
+                approved=part_is_released(part_doc),
                 attrs=part_attrs,
             )
         except Exception:

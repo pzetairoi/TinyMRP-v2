@@ -212,7 +212,13 @@ def test_public_share_child_navigation_requires_flag(client):
 
 
 def test_non_admin_cannot_create_public_share(client):
-    viewer_role = Role(name="viewer", permissions=["items.view"]).save()
+    viewer_role = Role(name="viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     viewer = _make_user("viewer-share@example.com", roles=[viewer_role])
     Part(part_number="PN-NO-SHARE", revision="A", description="No Share").save()
 

@@ -15,10 +15,32 @@ def _make_user(email: str):
 
 
 def test_refresh_files_permissions(client, user):
-    viewer_role = Role(name="viewer", permissions=["items.view"]).save()
+    viewer_role = Role(name="viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     editor_role = Role(
         name="editor",
-        permissions=["items.view", "items.edit", "parts.read_unreleased"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+            "parts.read_unreleased",
+        ],
     ).save()
 
     part = Part(part_number="PN-901", revision="A", description="Refresh Part").save()

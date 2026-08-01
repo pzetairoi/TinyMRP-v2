@@ -9,7 +9,8 @@ from urllib.parse import quote
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
-from app.services.attrs import harvest_part_attrs, ALIASES, approved_value
+from app.services.attrs import harvest_part_attrs, ALIASES
+from app.services.authorization import part_is_released
 from app.services.canonical_fields import canonical_processes_for_part
 from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.processmeta import normalize_processes
@@ -1341,10 +1342,7 @@ def _visual_list_pdf(
 
         # Approval status icon (above the QR)
         try:
-            approved = False
-            if pdoc is not None:
-                a = harvest_part_attrs(pdoc)
-                approved = bool(approved_value(a))
+            approved = part_is_released(pdoc) if pdoc is not None else False
             show_notapproved = True
             if procs_lower and any(p in ('hardware', 'purchase', 'others') for p in procs_lower):
                 show_notapproved = False

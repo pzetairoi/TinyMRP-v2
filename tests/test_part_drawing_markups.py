@@ -30,7 +30,11 @@ def _viewer_user(email="markup-viewer@example.com"):
     role = Role(
         name=f"viewer-{uuid.uuid4()}",
         permissions=[
-            "items.view",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
             "parts.read_unreleased",
             "comments.write",
             "markups.write",
@@ -145,7 +149,13 @@ def test_user_without_part_access_gets_403(client, app):
     part = _make_part()
     pf = _make_drawing()
     # Externally scoped user (customer_viewer) with no jobs/orders -> empty allowlist.
-    role = Role(name="customer_viewer", permissions=["items.view"]).save()
+    role = Role(name="customer_viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     external = _make_user("external@example.com", [role])
     _login(client, external)
     resp = _get(client, pf)

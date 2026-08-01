@@ -126,41 +126,6 @@
         {% endfor %}
       </div>
 
-      <details class="tm-permission-group tm-permission-group--legacy mt-3" data-permission-group>
-        <summary class="tm-permission-group__header">
-          <span>
-            <strong>Legacy compatibility permissions</strong>
-            <small>New roles should normally use canonical permissions.</small>
-          </span>
-          <span class="tm-group-controls">
-            <span class="badge text-bg-warning">Compatibility only</span>
-            <button class="btn btn-sm btn-link" type="button" data-permission-group-select>Select group</button>
-            <button class="btn btn-sm btn-link" type="button" data-permission-group-clear>Clear group</button>
-          </span>
-        </summary>
-        <div class="alert alert-warning small">
-          These identifiers remain available for compatibility with older integrations and roles.
-        </div>
-        <div class="tm-permission-group__items">
-          {% for permission in legacy_permissions %}
-          <label class="tm-permission-option"
-                 data-permission-option
-                 data-permission-search-value="{{ permission.label }} {{ permission.id }} Legacy compatibility {{ permission.action }}">
-            <input class="form-check-input" type="checkbox" name="permissions"
-                   value="{{ permission.id }}" data-permission-kind="legacy"
-                   {% if permission.id in selected_permissions %}checked{% endif %}>
-            <span>
-              <span class="d-flex flex-wrap align-items-center gap-2">
-                <strong>{{ permission.label }}</strong>
-                <span class="badge text-bg-light tm-action-badge">{{ permission.action }}</span>
-              </span>
-              <small>Legacy compatibility</small>
-              <code>{{ permission.id }}</code>
-            </span>
-          </label>
-          {% endfor %}
-        </div>
-      </details>
     </div>
   </section>
 

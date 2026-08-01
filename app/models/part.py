@@ -58,6 +58,7 @@ class Part(Document):
             { "fields": ["canonical.finish"], "name": "parts_canonical_finish_idx" },
             { "fields": ["canonical.mass"], "name": "parts_canonical_mass_idx" },
             { "fields": ["canonical.datasheet"], "name": "parts_canonical_datasheet_idx" },
+            { "fields": ["canonical.approved"], "name": "parts_canonical_approved_idx" },
             { "fields": ["canonical.approved_by"], "name": "parts_canonical_approved_by_idx" },
             { "fields": ["file_groups"], "name": "parts_file_groups_idx" },
             { "fields": ["has_pdf"], "name": "parts_has_pdf_idx" },

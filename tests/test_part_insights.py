@@ -11,7 +11,13 @@ def _login(client, user):
 
 
 def test_part_insights_shape(client, user):
-    role = Role(name="viewer", permissions=["items.view"]).save()
+    role = Role(name="viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -49,7 +55,13 @@ def test_part_insights_shape(client, user):
 
 
 def test_datasheet_url_counts_as_present_in_parts_list_and_insights(client, user):
-    role = Role(name="datasheet_viewer", permissions=["items.view"]).save()
+    role = Role(name="datasheet_viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)

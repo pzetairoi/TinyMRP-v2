@@ -207,12 +207,33 @@ def test_stage1_server_rendered_pages_and_shell_routes_render(client, app, tmp_p
 
 
 def test_navigation_permission_groupings_and_active_states(client, app):
-    tools_import_role = _make_role("nav_tools_import", ["exports.run", "import.bom"])
-    jobs_role = _make_role("nav_jobs", ["jobs.view", "jobs.manage"])
-    orders_role = _make_role("nav_orders", ["orders.view", "orders.manage"])
+    tools_import_role = _make_role("nav_tools_import", ["exports.run", "imports.execute_low_risk", "imports.preview"])
+    jobs_role = _make_role("nav_jobs", [
+            "jobs.read",
+            "jobs.archive",
+            "jobs.assign",
+            "jobs.bom.update",
+            "jobs.cancel",
+            "jobs.create",
+            "jobs.material.issue",
+            "jobs.stages.update",
+            "jobs.update",
+        ])
+    orders_role = _make_role("nav_orders", [
+            "orders.read",
+            "orders.create",
+            "orders.fulfil",
+            "orders.submit",
+            "orders.update",
+        ])
     companies_role = _make_role(
         "nav_companies",
-        ["customers.view", "customers.manage", "suppliers.view", "suppliers.manage"],
+        [
+            "customers.read",
+            "customers.update",
+            "suppliers.read",
+            "suppliers.update",
+        ],
     )
 
     tools_import_user = _make_user("ui-tools-import@example.com", [tools_import_role])

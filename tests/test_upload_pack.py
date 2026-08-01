@@ -48,7 +48,24 @@ def _make_bom_zip(
 
 
 def test_upload_pack_accepts_flatbom_with_bom(client, app, user, tmp_path):
-    role = Role(name="importer_bom", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(name="importer_bom", permissions=[
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -77,9 +94,22 @@ def test_upload_pack_imports_extra_with_rev(client, app, user, tmp_path):
     role = Role(
         name="importer",
         permissions=[
-            "import.bom",
-            "items.view",
-            "items.edit",
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
             "parts.read_unreleased",
         ],
     ).save()
@@ -119,7 +149,24 @@ def test_upload_pack_imports_extra_with_rev(client, app, user, tmp_path):
 
 
 def test_upload_pack_rev_empty_token(client, app, user, tmp_path):
-    role = Role(name="importer2", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(name="importer2", permissions=[
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -149,7 +196,24 @@ def test_upload_pack_rev_empty_token(client, app, user, tmp_path):
 
 
 def test_upload_pack_legacy_extra_uses_bom_rev(client, app, user, tmp_path):
-    role = Role(name="importer3", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(name="importer3", permissions=[
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -178,7 +242,24 @@ def test_upload_pack_legacy_extra_uses_bom_rev(client, app, user, tmp_path):
 
 
 def test_upload_pack_extra_label_manifest(client, app, user, tmp_path):
-    role = Role(name="importer_label", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(name="importer_label", permissions=[
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -217,7 +298,24 @@ def test_upload_pack_extra_label_manifest(client, app, user, tmp_path):
 
 
 def test_upload_pack_report_includes_existing_part_file_changes(client, app, user, tmp_path):
-    role = Role(name="importer_report", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(name="importer_report", permissions=[
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -261,7 +359,24 @@ def test_upload_pack_report_includes_existing_part_file_changes(client, app, use
 
 
 def test_upload_pack_scans_attr_named_datasheet_when_other_deliverables_are_parsed(client, app, user, tmp_path):
-    role = Role(name="importer_datasheet", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(name="importer_datasheet", permissions=[
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -303,7 +418,23 @@ def test_upload_pack_scans_attr_named_datasheet_when_other_deliverables_are_pars
 def test_direct_extra_upload_empty_rev(client, app, user, tmp_path):
     role = Role(
         name="editor",
-        permissions=["items.view", "items.edit", "parts.read_unreleased"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+            "parts.read_unreleased",
+        ],
     ).save()
     user.roles = [role]
     user.save()
@@ -328,7 +459,13 @@ def test_direct_extra_upload_empty_rev(client, app, user, tmp_path):
 
 
 def test_extra_delete_requires_permission(client, app, user, tmp_path):
-    role = Role(name="viewer", permissions=["items.view"]).save()
+    role = Role(name="viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -361,7 +498,24 @@ def test_extra_delete_requires_permission(client, app, user, tmp_path):
 
 
 def test_upload_pack_zip_slip_rejected(client, app, user, tmp_path):
-    role = Role(name="importer4", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(name="importer4", permissions=[
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -677,7 +831,23 @@ def test_upload_pack_preserve_mode_does_not_replace_existing_files(
 def test_files_overview_separates_current_and_other_revisions(client, app, user, tmp_path):
     role = Role(
         name="files_overview",
-        permissions=["items.view", "items.edit", "parts.read_unreleased"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+            "parts.read_unreleased",
+        ],
     ).save()
     user.roles = [role]
     user.save()
