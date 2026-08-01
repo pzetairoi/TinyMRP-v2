@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify, current_app, send_file
 from typing import Any, Optional
 from datetime import datetime, timedelta
 from flask_login import login_required, current_user
+from mongoengine.errors import DoesNotExist
 from mongoengine.queryset.visitor import Q
 from io import BytesIO
 import logging
@@ -110,6 +111,7 @@ from app.services.part_annotations import (
     annotation_payload,
     filtered_part_attrs,
     migrate_legacy_annotations,
+    preload_annotations,
     remove_part_comment,
     set_part_comment_status,
     set_part_notes,
@@ -271,6 +273,18 @@ def _ancestor_paths(pn: str, rev: str | None, max_depth: int = 6):
     if not paths:
         paths = [[start]]
     return paths
+
+
+def _safe_ref(document, field: str):
+    """Dereference a ReferenceField, treating a dangling target as absent.
+
+    Deleting a referenced document leaves the DBRef behind, and mongoengine
+    raises ``DoesNotExist`` on access rather than returning ``None``.
+    """
+    try:
+        return getattr(document, field, None)
+    except DoesNotExist:
+        return None
 
 
 def _build_used_set(pairs: list[tuple[str, str | None]]):
@@ -534,6 +548,9 @@ def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
         used_set = _build_used_set([(l.pn, l.rev) for l in (order.lines or [])])
         if not used_set:
             continue
+        # An order can outlive the job it referenced; dereferencing a deleted
+        # job raises and would fail the whole part detail response.
+        order_job = _safe_ref(order, "job")
         for path in paths:
             top_used = None
             for anc in reversed(path):
@@ -553,8 +570,8 @@ def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
                 {
                     "row_key": f"order:{order.id}:{imm['pn']}:{top['pn']}:{top['rev']}",
                     "source": "order",
-                    "job_id": str(order.job.id) if order.job else "",
-                    "job_number": order.job.job_number if order.job else "",
+                    "job_id": str(order_job.id) if order_job else "",
+                    "job_number": order_job.job_number if order_job else "",
                     "order_id": str(order.id),
                     "order_number": order.order_number,
                     "order_kind": order.kind,
@@ -1030,6 +1047,8 @@ def parts_lazy():
     ]
 
     _t_query = time.perf_counter()
+    # Warm the annotation cache for the whole page instead of one query per row.
+    preload_annotations(docs)
     thumb_map = (
         thumb_urls_map(
             [(part.part_number, revision) for part, _attrs, revision in page_rows],

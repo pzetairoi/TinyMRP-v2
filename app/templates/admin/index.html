@@ -47,13 +47,13 @@
   </section>
   {% endif %}
 
-  {% if has_perm('system.maintenance') or (has_perm('parts.purge') and has_perm('files.purge')) %}
+  {% if has_perm('system.maintenance') or has_perm('parts.purge') %}
   <section class="tm-admin-hub__section">
     {% call section_header("System & danger zone", "Monitor the instance and access controlled maintenance actions.") %}{% endcall %}
     <div class="tm-admin-link-grid">
-      {% if has_perm('system.maintenance') %}{{ admin_link("System metrics", "Inspect request performance, storage, and resource use.", url_for('admin.admin_metrics'), "M") }}{% endif %}
+      {% if has_perm('system.maintenance') %}{{ admin_link("Metrics & environment", "Performance, configuration and storage diagnostics.", url_for('admin.admin_metrics'), "M") }}{% endif %}
       {% if has_perm('system.maintenance') %}{{ admin_link("Rescan part files", "Reconcile every part's file records against storage.", url_for('admin.rescan_files'), "R") }}{% endif %}
-      {% if has_perm('parts.purge') and has_perm('files.purge') %}{{ admin_link("Purge parts data", "Permanently clear parts, BOM links, and part files.", url_for('admin.purge_parts'), "!", "danger") }}{% endif %}
+      {% if has_perm('parts.purge') %}{{ admin_link("Delete data", "Selectively clear parts, BOM, files, comments, business records and users.", url_for('admin.purge_parts'), "!", "danger") }}{% endif %}
     </div>
   </section>
   {% endif %}

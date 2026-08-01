@@ -1,5 +1,5 @@
 # app/views/bom_tree.py
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g, has_request_context
 from flask_login import login_required
 from app.models.artifact import PartFile
 from app.models.part import Part
@@ -32,14 +32,33 @@ def _resolve_scoped_revision(pn: str, revision: object, user=None) -> str:
     revision_clean = clean_rev(revision)
     if revision_clean:
         return revision_clean
+    # Blank child revisions are common, and the authorisation walk plus the
+    # render walk both resolve the same part numbers. The lookup depends only
+    # on (pn, user), so memoise it for the request instead of re-querying and
+    # re-hydrating the same Part for every link that references it.
+    # The lookup is scope-filtered, so the identity is part of the cache key:
+    # two users in one request must never share a resolved revision.
+    key = (str(pn or "").strip().casefold(), str(getattr(user, "id", user) or ""))
+    cache = None
+    if has_request_context():
+        cache = getattr(g, "_bom_scoped_revision_cache", None)
+        if cache is None:
+            cache = {}
+            g._bom_scoped_revision_cache = cache
+        if key in cache:
+            return cache[key]
     query = Part.objects(part_number__iexact=str(pn or "").strip())
     if user is not None:
         query = scope_queryset(query, user, "parts")
-    part = query.order_by("-updated_at").first()
+    part = query.order_by("-updated_at").only("revision", "attrs").first()
     if not part:
-        return ""
-    attrs = harvest_part_attrs(part)
-    return clean_rev(attrs.get("revision") or part.revision or "")
+        resolved = ""
+    else:
+        attrs = harvest_part_attrs(part)
+        resolved = clean_rev(attrs.get("revision") or part.revision or "")
+    if cache is not None:
+        cache[key] = resolved
+    return resolved
 
 
 def _has_children(pn: str, rev: str | None = None) -> bool:

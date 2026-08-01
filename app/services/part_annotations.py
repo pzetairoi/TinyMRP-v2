@@ -53,6 +53,27 @@ def _get_doc(part: Part) -> Optional[PartAnnotation]:
     return doc
 
 
+def preload_annotations(parts: Iterable[Part]) -> None:
+    """Warm the per-request document cache for a whole listing in one query.
+
+    ``_get_doc`` caches per part, so a page of rows would otherwise issue one
+    query each. Misses are cached as ``None`` so parts without annotations do
+    not fall back to individual lookups.
+    """
+    if not has_request_context():
+        return
+    cache = _doc_cache()
+    wanted = {key for key in (_part_key(part) for part in parts) if key[0] and key not in cache}
+    if not wanted:
+        return
+    for doc in PartAnnotation.objects(part_number__in=sorted({key[0] for key in wanted})):
+        key = ((doc.part_number or "").strip(), clean_rev(doc.revision or ""))
+        if key in wanted:
+            cache[key] = doc
+    for key in wanted:
+        cache.setdefault(key, None)
+
+
 def _set_doc_cache(part: Part, doc: Optional[PartAnnotation]) -> None:
     if not has_request_context():
         return

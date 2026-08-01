@@ -515,19 +515,37 @@ def _approval_scalar_status(
     return None
 
 
+def _canonical_attr_index(attrs: Dict[str, Any]) -> Dict[str, List[tuple[str, Any]]]:
+    """Group an attrs mapping by canonical key, preserving insertion order.
+
+    Canonicalising every attrs key once per call keeps approval resolution
+    linear; the previous per-alias rescan made it O(aliases x attrs) on a path
+    that runs for every row of every parts and BOM listing.
+    """
+    index: Dict[str, List[tuple[str, Any]]] = {}
+    for raw_key, raw_value in (attrs or {}).items():
+        index.setdefault(canonical_attr_key(raw_key), []).append((str(raw_key), raw_value))
+    return index
+
+
 def _iter_approval_values(attrs: Dict[str, Any], aliases: Iterable[str]) -> List[tuple[str, Any]]:
-    items = list((attrs or {}).items())
+    return _iter_approval_values_indexed(_canonical_attr_index(attrs), aliases)
+
+
+def _iter_approval_values_indexed(
+    index: Dict[str, List[tuple[str, Any]]],
+    aliases: Iterable[str],
+) -> List[tuple[str, Any]]:
     out: List[tuple[str, Any]] = []
     seen_keys: set[str] = set()
     for alias in aliases:
         token = canonical_attr_key(alias)
         if not token:
             continue
-        for raw_key, raw_value in items:
-            raw_token = canonical_attr_key(raw_key)
-            if raw_token == token and str(raw_key) not in seen_keys:
-                seen_keys.add(str(raw_key))
-                out.append((str(raw_key), raw_value))
+        for raw_key, raw_value in index.get(token, ()):
+            if raw_key not in seen_keys:
+                seen_keys.add(raw_key)
+                out.append((raw_key, raw_value))
     return out
 
 
@@ -551,9 +569,11 @@ def resolve_approval(
     false_tokens = set(rules.get("unapproved_values") or [])
     true_tokens = set(rules.get("approved_values") or [])
     placeholder_tokens = set(rules.get("identity_placeholders") or [])
-    status_values = _iter_approval_values(raw, canonical_aliases_for_field(APPROVED_FIELD_ID, config))
-    identity_values = _iter_approval_values(raw, canonical_aliases_for_field(APPROVED_BY_FIELD_ID, config))
-    date_values = _iter_approval_values(raw, canonical_aliases_for_field(APPROVED_DATE_FIELD_ID, config))
+    # Build the canonical index once and reuse it for all three approval fields.
+    index = _canonical_attr_index(raw)
+    status_values = _iter_approval_values_indexed(index, canonical_aliases_for_field(APPROVED_FIELD_ID, config))
+    identity_values = _iter_approval_values_indexed(index, canonical_aliases_for_field(APPROVED_BY_FIELD_ID, config))
+    date_values = _iter_approval_values_indexed(index, canonical_aliases_for_field(APPROVED_DATE_FIELD_ID, config))
 
     explicit_statuses: List[bool] = []
     approved_by = ""

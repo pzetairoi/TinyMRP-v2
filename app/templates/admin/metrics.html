@@ -1,8 +1,8 @@
 {% extends "security/base.html" %}
 {% from "ui/_components.html" import page_header, card_header, empty_state %}
-{% block title %}Admin Metrics{% endblock %}
+{% block title %}Metrics & Environment{% endblock %}
 {% block content %}
-{% call page_header("Admin Metrics", "Operational snapshot for the current application instance.", "Admin") %}
+{% call page_header("Metrics & Environment", "Operational snapshot, configuration and storage diagnostics for this instance.", "Admin") %}
   <div class="tm-helper-text">Snapshot: {{ metrics.snapshot_at|default('n/a') }}</div>
 {% endcall %}
 
@@ -131,6 +131,128 @@
           {% else %}
             {{ empty_state("No endpoint data yet", "Endpoint metrics will show up after the app has processed traffic.") }}
           {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-12">
+      <div class="card shadow-sm tm-card">
+        <div class="card-body">
+          {{ card_header("Storage sources") }}
+          <div class="text-muted small mb-2">
+            Deliverable roots used for file discovery, in priority order.
+          </div>
+          {% if environment.storage %}
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Source</th><th>Local root</th><th>URL prefix</th>
+                  <th>Status</th><th>Files</th><th>Free / total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for src in environment.storage %}
+                <tr>
+                  <td>
+                    <div>{{ src.label or src.id or '—' }}</div>
+                    <small class="text-muted">
+                      {% if src.use_for_approved %}approved{% endif %}
+                      {%- if src.use_for_approved and src.use_for_unapproved %} · {% endif -%}
+                      {% if src.use_for_unapproved %}drafts{% endif %}
+                    </small>
+                  </td>
+                  <td class="small"><code>{{ src.root or '—' }}</code></td>
+                  <td class="small">{{ src.url_prefix or '—' }}</td>
+                  <td>
+                    {% if src.exists %}
+                      <span class="badge text-bg-success">reachable</span>
+                      {% if not src.writable %}<span class="badge text-bg-warning">read-only</span>{% endif %}
+                    {% else %}
+                      <span class="badge text-bg-danger">unreachable</span>
+                    {% endif %}
+                    {% if src.error %}<div class="small text-danger">{{ src.error }}</div>{% endif %}
+                  </td>
+                  <td>{{ src.files }}</td>
+                  <td class="small">{{ src.free_h or '—' }}{% if src.total_h %} / {{ src.total_h }}{% endif %}</td>
+                </tr>
+                {% if src.groups %}
+                <tr>
+                  <td colspan="6" class="small text-muted">
+                    {% for g in src.groups %}
+                      <span class="me-2">
+                        {% if g.exists %}✓{% else %}<span class="text-danger">✕</span>{% endif %}
+                        {{ g.name }}{% if g.exists %} ({{ g.files }}){% endif %}
+                      </span>
+                    {% endfor %}
+                  </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+            {{ empty_state("No storage sources configured", "Set FILES_LOCAL_ROOT or configure sources in settings.") }}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card shadow-sm tm-card h-100">
+        <div class="card-body">
+          {{ card_header("File record health") }}
+          {% if environment.records %}
+          <div class="fw-bold">{{ environment.records.total }} file records</div>
+          <div class="text-muted small">
+            Checked {{ environment.records.checked }}
+            {%- if environment.records.truncated %} (sample){% endif %} against disk.
+          </div>
+          {% if environment.records.missing_count %}
+          <div class="alert alert-warning small mt-2 mb-0">
+            <strong>{{ environment.records.missing_count }} record(s) point at a missing file.</strong>
+            Run “Rescan part files” to reconcile.
+            <ul class="mb-0 mt-1">
+              {% for row in environment.records.missing %}
+              <li><code>{{ row.part_number }}{% if row.revision %} REV {{ row.revision }}{% endif %}</code> — {{ row.path }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          {% else %}
+          <div class="text-success small mt-2">Every checked record resolves to a file on disk.</div>
+          {% endif %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card shadow-sm tm-card h-100">
+        <div class="card-body">
+          {{ card_header("Configuration") }}
+          <div class="text-muted small mb-2">Secrets and credentials are redacted.</div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <tbody>
+                {% for row in environment.config %}
+                <tr>
+                  <td class="small"><code>{{ row.key }}</code></td>
+                  <td class="small">
+                    {% if row.status == 'unset' %}
+                      <span class="text-muted">unset</span>
+                    {% else %}
+                      {{ row.value }}
+                    {% endif %}
+                  </td>
+                  <td class="small text-muted">{{ row.source }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

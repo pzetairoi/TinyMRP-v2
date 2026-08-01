@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable
 
-from flask import current_app
+from flask import current_app, g, has_request_context
 
 from app.models.part import Part
 from app.services.app_settings import resolve_file_sources
@@ -49,8 +49,24 @@ def _resolved_root(value: Any) -> Path | None:
 
 
 def managed_storage_roots() -> tuple[StorageRoot, ...]:
-    """Return configured managed-file roots without silently broadening them."""
+    """Return configured managed-file roots without silently broadening them.
 
+    Every managed-file check resolves these roots, so a listing that renders
+    hundreds of rows would otherwise re-read app settings and re-resolve the
+    same paths once per row. The result is memoised for the current request
+    only, so a settings change still takes effect on the next one.
+    """
+    if has_request_context():
+        cached = getattr(g, "_managed_storage_roots", None)
+        if cached is not None:
+            return cached
+    roots = _managed_storage_roots_uncached()
+    if has_request_context():
+        g._managed_storage_roots = roots
+    return roots
+
+
+def _managed_storage_roots_uncached() -> tuple[StorageRoot, ...]:
     sources: list[dict[str, Any]] = []
     configured = current_app.config.get("FILE_SOURCES")
     try:
