@@ -99,7 +99,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "engineering",
             "Engineering",
-            "Maintains parts, BOMs, files, numbering, shares and exports, and runs low-risk imports; no approved-data override or purge.",
+            "Maintains parts, BOMs, files, shares and exports, allocates part numbers and runs low-risk imports; no numbering-scheme management, approved-data override or purge.",
             _ENGINEERING,
         ),
         _role(

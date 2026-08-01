@@ -704,3 +704,59 @@ def roles_delete(role_id):
     )
     flash("Custom role deleted.", "success")
     return redirect(url_for("admin_roles.roles_list"))
+
+
+@bp.post("/permission-test/impersonate")
+@require_permission("security.users.manage")
+@require_permission("security.assignments.manage")
+def permission_test_impersonate():
+    """Act as a seeded permission-test user without logging out.
+
+    Every guard lives in the service: the posted email is only honoured when it
+    resolves to an active ``permtest.*`` account on the configured domain and
+    the instance enables permission-test data.
+    """
+    from flask_security.utils import login_user
+
+    from app.services import impersonation
+
+    target = impersonation.resolve_target(current_user, request.form.get("email"))
+    if target is None:
+        abort(403)
+
+    actor_email = str(getattr(current_user, "email", "") or "")
+    log_action(
+        "admin.permission_test.impersonate",
+        resource_type="user",
+        resource=str(target.email),
+        meta={"impersonator": actor_email},
+    )
+    impersonation.begin(current_user)
+    login_user(target)
+    return redirect(url_for("main.app_home"))
+
+
+@bp.post("/permission-test/impersonate/stop")
+def permission_test_impersonate_stop():
+    """Return to the administrator who started the swap.
+
+    Deliberately unguarded by permission: the impersonated session holds the
+    test user's (lower) permissions, so requiring admin rights here would trap
+    the operator in the swapped identity.
+    """
+    from flask_security.utils import login_user
+
+    from app.services import impersonation
+
+    original = impersonation.real_user()
+    impersonation.end()
+    if original is None:
+        abort(403)
+    log_action(
+        "admin.permission_test.impersonate.stop",
+        resource_type="user",
+        resource=str(getattr(current_user, "email", "") or ""),
+        meta={"impersonator": str(original.email or "")},
+    )
+    login_user(original)
+    return redirect(url_for("admin_roles.roles_list"))

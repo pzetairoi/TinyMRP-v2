@@ -216,6 +216,9 @@ def parse_import_package(
         "treebom_parse_count": 0,
     }
     parts: dict[tuple[str, str], dict[str, Any]] = {}
+    # Rows whose identity collides with one already accepted; the operator picks
+    # the winner rather than the import failing or silently keeping the last row.
+    duplicates: dict[tuple[str, str], list[dict[str, Any]]] = {}
     links: list[tuple[str, str, str, str, float, list[dict[str, Any]]]] = []
     files: list[dict[str, Any]] = []
     root: tuple[str, str] | None = None
@@ -259,6 +262,13 @@ def parse_import_package(
                         }
                     )
                     continue
+                if key in parts:
+                    # SolidWorks exports virtual components as "PN^parent", and
+                    # several of them collapse onto one part number. Report the
+                    # clash instead of silently overwriting so the operator can
+                    # choose which row wins.
+                    duplicates.setdefault(key, [parts[key]]).append(normalized)
+                    continue
                 parts[key] = normalized
         if tree_names:
             diagnostics["treebom_parse_count"] = 1
@@ -268,10 +278,12 @@ def parse_import_package(
                 for line in text.splitlines()
                 if len(columns := line.split("\t")) >= 4
                 and columns[0].strip() != "ITEM NO."
-                and clean_pn(columns[1])
+                and _base_pn(columns[1])
             ]
             if raw_rows:
-                root = (clean_pn(raw_rows[0][1]), clean_rev(raw_rows[0][2]))
+                # Match the link parser: virtual components are "PN^parent" and
+                # must resolve to the same identity here as they do in the BOM.
+                root = (_base_pn(raw_rows[0][1]), clean_rev(raw_rows[0][2]))
             links = _aggregate_links(
                 _parse_treebom(text, tree_names[0], diagnostics)
             )
@@ -400,15 +412,79 @@ def parse_import_package(
                 {"severity": "warning", "stage": "zip.structure", "message": message}
             )
     _validate_cycles(links)
+    _resolve_duplicate_parts(parts, duplicates, options, diagnostics)
     return {
         "filename": filename,
         "parts": parts,
         "links": links,
         "files": files,
         "root": root,
+        "duplicates": _duplicate_choices(duplicates),
         "diagnostics": diagnostics,
         "parse_elapsed_s": time.perf_counter() - started,
     }
+def _duplicate_label(row: dict[str, Any]) -> str:
+    """Human-readable origin of a duplicate row, for the operator's choice."""
+    attrs = row.get("attrs") or {}
+    for key in ("partnumber", "part_number", "pn"):
+        raw = str(attrs.get(key) or "").strip()
+        if raw:
+            return raw
+    return str(row.get("part_number") or "")
+def _duplicate_choices(
+    duplicates: dict[tuple[str, str], list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Serialisable description of every clash, one entry per identity."""
+    return [
+        {
+            "part_number": key[0],
+            "revision": key[1],
+            "options": [
+                {
+                    "index": index,
+                    "label": _duplicate_label(row),
+                    "description": row.get("description") or "",
+                }
+                for index, row in enumerate(rows)
+            ],
+        }
+        for key, rows in sorted(duplicates.items())
+    ]
+def _resolve_duplicate_parts(
+    parts: dict[tuple[str, str], dict[str, Any]],
+    duplicates: dict[tuple[str, str], list[dict[str, Any]]],
+    options: dict[str, Any],
+    diagnostics: dict[str, Any],
+) -> None:
+    """Apply the operator's pick for each clashing identity.
+
+    Without a choice the first row stays (a stable, predictable default) and the
+    clash is reported as a warning so the import proceeds rather than failing.
+    """
+    picks = options.get("duplicate_choices") or {}
+    for key, rows in duplicates.items():
+        chosen = 0
+        raw = picks.get(f"{key[0]}␟{key[1]}", picks.get(key[0]))
+        try:
+            candidate = int(raw)
+        except (TypeError, ValueError):
+            candidate = 0
+        if 0 <= candidate < len(rows):
+            chosen = candidate
+        parts[key] = rows[chosen]
+        diagnostics["warnings"].append(
+            {
+                "severity": "warning",
+                "stage": "flatbom.duplicate",
+                "part_number": key[0],
+                "revision": key[1],
+                "message": (
+                    f"{len(rows)} rows share this part number; kept "
+                    f"“{_duplicate_label(rows[chosen])}”."
+                ),
+                "detail": ", ".join(_duplicate_label(row) for row in rows),
+            }
+        )
 def _validate_cycles(
     links: Iterable[tuple[str, str, str, str, float, list[dict[str, Any]]]],
 ) -> None:
@@ -572,6 +648,10 @@ def _property_action(
     if mode == "skip":
         return "skipped", "Properties policy is Skip."
     if mode == "fill_blanks":
+        # "Fill only" promises approved parts are never touched, so a blank
+        # field on an approved target is preserved rather than filled.
+        if state == "existing_approved":
+            return "blocked", "Fill only does not alter approved targets."
         return (
             ("add", "Existing value is blank.")
             if not _has_value(before)
@@ -700,6 +780,9 @@ def _bom_redline(
         action, reason = "unchanged", "Incoming and existing BOMs match."
     elif mode == "skip":
         action, reason = "skipped", "BOM policy preserves the existing definition."
+    elif mode == "fill_if_empty" and state == "existing_approved":
+        # "Fill only" promises approved parts are never touched.
+        action, reason = "blocked", "Fill only does not alter approved targets."
     elif mode == "fill_if_empty" and existing:
         action, reason = "skipped", "Fill if empty never merges into an existing BOM."
     elif mode == "replace_unapproved" and state == "existing_approved":
@@ -723,6 +806,9 @@ def _file_action(
         return "unchanged", "File content matches."
     if mode == "skip":
         return "skipped", "Files policy is Skip."
+    if mode == "add_missing" and state == "existing_approved":
+        # "Fill only" promises approved parts are never touched.
+        return "blocked", "Fill only does not alter approved targets."
     if not exists:
         return "add", "No equivalent file identity exists."
     if mode == "add_missing":
@@ -888,8 +974,10 @@ def build_import_plan(
             )
         # BOM-only packs carry no deliverables; their files already sit in
         # storage. Plan the same reconciliation the apply performs so the
-        # redline reports discovered files instead of showing none.
-        if not parsed_package["files"]:
+        # redline reports discovered files instead of showing none. The Files
+        # policy still governs it: "Skip" means the storage scan is not run at
+        # all, so no file records are touched.
+        if not parsed_package["files"] and options["file_mode"] != "skip":
             file_rows.extend(
                 _discovered_file_rows(
                     pair, existing_part, existing_state, normalized.get("attrs") or {}
@@ -1028,6 +1116,8 @@ def _public_plan(
         "allowed": not missing,
         "blocked_change_count": sum(item["blocked_change_count"] for item in parts),
         "approval_integrity_warnings": plan["approval_integrity_warnings"],
+        # Identity clashes the operator can re-resolve by re-running with a pick.
+        "duplicates": list(plan["_parsed"].get("duplicates") or []),
         "summary": {
             "parts": len(parts),
             "new": sum(item["target_state"] == "new" for item in parts),
@@ -1379,12 +1469,16 @@ def import_upload_pack(
     actor_permissions: set[str] | None = None,
     scope_check: Any = None,
     generate_thumbs: bool = True,
+    duplicate_choices: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Parse once, load once, plan once and optionally execute that plan.
 
     ``scope_check`` receives the exact existing ``(part_number, revision)``
     pairs the plan mutates and returns the subset outside the caller's
     mutable scope; a non-empty result blocks the apply.
+
+    ``duplicate_choices`` maps a clashing ``"part_number␟revision"`` to the
+    index of the row to keep; unspecified clashes keep the first row.
     """
     started = time.perf_counter()
     options = _policy_options(
@@ -1397,6 +1491,7 @@ def import_upload_pack(
         {
             "strict_structure": strict_structure,
             "allow_extra": allow_extra,
+            "duplicate_choices": duplicate_choices or {},
         }
     )
     parsed = parse_import_package(file_bytes, filename, options)

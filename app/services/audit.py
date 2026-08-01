@@ -60,6 +60,18 @@ def log_action(action: str, resource_type: Optional[str] = None, resource: Optio
         _meta: Dict[str, Any] = dict(meta or {})
         if not has_request_context():
             _meta.setdefault("source", "cli")
+        else:
+            # Under permission-test impersonation the acting identity is a test
+            # user; record the administrator behind it so accountability for the
+            # action is never lost.
+            try:
+                from app.services.impersonation import real_user
+
+                behind = real_user()
+                if behind is not None:
+                    _meta.setdefault("impersonated_by", _safe_str(behind.email))
+            except Exception:
+                pass
         ip = ""
         ua = ""
         method = ""

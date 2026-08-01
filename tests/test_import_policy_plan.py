@@ -120,7 +120,9 @@ def test_property_replacement_uses_advanced_permission_and_apply_keeps_redline(a
     assert applied["diagnostics"]["materialized_part_saves"] == 1
 
 
-def test_any_approved_target_mutation_requires_both_advanced_capabilities(app, tmp_path):
+def test_fill_only_never_alters_an_approved_target(app, tmp_path):
+    """"Fill only" states approved parts are never touched, so it must not
+    fill their blanks either — not even blank properties or missing files."""
     app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
     app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
     Part(
@@ -140,17 +142,18 @@ def test_any_approved_target_mutation_requires_both_advanced_capabilities(app, t
         file_mode="add_missing",
     )
 
-    assert preview["required_permissions"] == [
-        "files.add",
-        "imports.execute_approved",
-        "imports.override_approved",
-        "parts.update",
-    ]
-    assert preview["missing_permissions"] == [
-        "imports.execute_approved",
-        "imports.override_approved",
-    ]
-    assert preview["plan"]["parts"][0]["target_state"] == "existing_approved"
+    entry = preview["plan"]["parts"][0]
+    assert entry["target_state"] == "existing_approved"
+    # Nothing is written, so no approved-override capability is demanded.
+    assert "imports.override_approved" not in preview["required_permissions"]
+    assert not entry["changed"]
+    assert entry["blocked"]
+    assert all(
+        change["action"] == "blocked"
+        for change in entry["properties"]
+        if change["field_id"] == "description"
+    )
+    assert all(row["action"] == "blocked" for row in entry["files"])
     with pytest.raises(ImportPermissionError):
         _run(data, dry_run=False, permissions={"imports.override_approved"})
 
@@ -558,3 +561,177 @@ def test_noop_plan_still_requires_low_risk_tier_to_apply(app):
     applied = _run(data, dry_run=False, permissions=LOW)
     assert applied["metrics"]["parts_created"] == 0
     assert applied["metrics"]["parts_updated"] == 0
+
+
+def test_duplicate_part_numbers_warn_and_let_the_operator_choose(app):
+    """SolidWorks virtual components collapse onto one part number.
+
+    The import must not fail or silently keep the last row: it reports the
+    clash, keeps a predictable default, and honours an explicit pick.
+    """
+    data = _pack(
+        [
+            {"partnumber": "DUP-PN^PARENT-A", "revision": "", "description": "FROM A"},
+            {"partnumber": "DUP-PN^PARENT-B", "revision": "", "description": "FROM B"},
+        ]
+    )
+
+    with app.app_context():
+        preview = _run(data)
+
+    clashes = preview["plan"]["duplicates"]
+    assert [item["part_number"] for item in clashes] == ["DUP-PN"]
+    assert [option["label"] for option in clashes[0]["options"]] == [
+        "DUP-PN^PARENT-A",
+        "DUP-PN^PARENT-B",
+    ]
+    assert any(
+        item.get("stage") == "flatbom.duplicate"
+        for item in preview.get("warnings") or []
+        if isinstance(item, dict)
+    )
+
+    def description_of(result):
+        entry = next(p for p in result["plan"]["parts"] if p["part_number"] == "DUP-PN")
+        return next(c["after"] for c in entry["properties"] if c["field_id"] == "description")
+
+    # No pick keeps the first row; an explicit pick selects the other.
+    with app.app_context():
+        assert description_of(_run(data)) == "FROM A"
+        assert description_of(
+            _run(data, duplicate_choices={"DUP-PN\u241f": 1})
+        ) == "FROM B"
+
+
+def test_duplicate_part_numbers_apply_without_a_unique_key_error(app):
+    """The whole import still completes, creating exactly one part."""
+    data = _pack(
+        [
+            {"partnumber": "DUP-APPLY^A", "revision": "", "description": "FROM A"},
+            {"partnumber": "DUP-APPLY^B", "revision": "", "description": "FROM B"},
+        ]
+    )
+
+    with app.app_context():
+        applied = _run(data, dry_run=False, data_mode="fill_blanks",
+                       bom_mode="skip", file_mode="skip")
+
+        assert applied["metrics"]["parts_created"] == 1
+        assert Part.objects(part_number="DUP-APPLY").count() == 1
+        assert Part.objects.get(part_number="DUP-APPLY").description == "FROM A"
+
+
+def test_files_skip_suppresses_the_storage_scan(app, tmp_path):
+    """"Skip" must mean no file records are touched at all.
+
+    BOM-only packs reconcile file records from a storage scan; that scan is a
+    file effect and has to obey the Files policy like any other.
+    """
+    app.config["FILE_SOURCES"] = [
+        {"local_root": str(tmp_path), "url_prefix": "/deliverables"}
+    ]
+    _touch = (tmp_path / "pdf")
+    _touch.mkdir(parents=True, exist_ok=True)
+    (_touch / "SKIP-SCAN_REV_A.pdf").write_bytes(b"pdf")
+    data = _pack([{"partnumber": "SKIP-SCAN", "revision": "A", "description": "D"}])
+
+    with app.app_context():
+        skipped = _run(data, data_mode="fill_blanks", bom_mode="skip", file_mode="skip")
+        filled = _run(data, data_mode="fill_blanks", bom_mode="skip", file_mode="add_missing")
+
+    def files_of(result):
+        entry = next(p for p in result["plan"]["parts"] if p["part_number"] == "SKIP-SCAN")
+        return entry["files"]
+
+    assert files_of(skipped) == []
+    assert [row["kind"] for row in files_of(filled)] == ["discovered"]
+
+    with app.app_context():
+        applied = _run(data, dry_run=False, data_mode="fill_blanks",
+                       bom_mode="skip", file_mode="skip")
+        assert applied["metrics"]["files_discovered"] == 0
+        assert PartFile.objects(part_number="SKIP-SCAN").count() == 0
+
+
+def test_engineering_may_create_an_approved_part_but_never_modify_one(app):
+    """Engineering uploads approved data once; only manager/admin may change it."""
+    from app.services.standard_roles import STANDARD_ROLES
+
+    engineering = set(STANDARD_ROLES["engineering"].permissions)
+    manager = set(STANDARD_ROLES["engineering_manager"].permissions)
+
+    def pack(description):
+        return _pack(
+            [
+                {
+                    "partnumber": "ENG-APPROVED",
+                    "revision": "A",
+                    "description": description,
+                    "approved": "QA",
+                }
+            ]
+        )
+
+    with app.app_context():
+        # Creating a brand-new part that already carries approval is low risk.
+        _run(pack("FIRST"), dry_run=False, permissions=engineering,
+             data_mode="fill_blanks", bom_mode="skip", file_mode="skip")
+        assert Part.objects.get(part_number="ENG-APPROVED").description == "FIRST"
+
+        # The part is now approved, so engineering cannot alter it.
+        for mode in ("fill_blanks", "replace_unapproved"):
+            _run(pack("SECOND"), dry_run=False, permissions=engineering,
+                 data_mode=mode, bom_mode="skip", file_mode="skip")
+            assert Part.objects.get(part_number="ENG-APPROVED").description == "FIRST"
+
+        with pytest.raises(ImportPermissionError):
+            _run(pack("SECOND"), dry_run=False, permissions=engineering,
+                 data_mode="replace_all", bom_mode="skip", file_mode="skip")
+
+        # The manager holds the approved-override capability.
+        _run(pack("BY-MANAGER"), dry_run=False, permissions=manager,
+             data_mode="replace_all", bom_mode="skip", file_mode="skip")
+        assert Part.objects.get(part_number="ENG-APPROVED").description == "BY-MANAGER"
+
+
+def test_any_uploader_may_create_approved_data_but_only_override_may_modify_it(app):
+    """The rule is a capability, not a role.
+
+    Anyone holding ordinary upload rights can import anything, including a part
+    that already carries approval. Changing an *existing* approved part is
+    reserved for imports.override_approved (administrator, engineering manager).
+    """
+    uploader = PREVIEW | {"imports.execute_low_risk"} | RESOURCE_WRITES
+    override = uploader | {"imports.execute_approved", "imports.override_approved"}
+
+    def pack(description):
+        return _pack(
+            [
+                {
+                    "partnumber": "ANY-UPLOADER",
+                    "revision": "A",
+                    "description": description,
+                    "approved": "QA",
+                }
+            ]
+        )
+
+    with app.app_context():
+        created = _run(pack("CREATED"), dry_run=False, permissions=uploader,
+                       data_mode="fill_blanks", bom_mode="skip", file_mode="skip")
+        # Creating approved data never demands the override capability.
+        assert "imports.override_approved" not in created["required_permissions"]
+        assert Part.objects.get(part_number="ANY-UPLOADER").description == "CREATED"
+
+        for mode in ("fill_blanks", "replace_unapproved"):
+            _run(pack("EDITED"), dry_run=False, permissions=uploader,
+                 data_mode=mode, bom_mode="skip", file_mode="skip")
+            assert Part.objects.get(part_number="ANY-UPLOADER").description == "CREATED"
+
+        with pytest.raises(ImportPermissionError):
+            _run(pack("EDITED"), dry_run=False, permissions=uploader,
+                 data_mode="replace_all", bom_mode="skip", file_mode="skip")
+
+        _run(pack("OVERRIDDEN"), dry_run=False, permissions=override,
+             data_mode="replace_all", bom_mode="skip", file_mode="skip")
+        assert Part.objects.get(part_number="ANY-UPLOADER").description == "OVERRIDDEN"
