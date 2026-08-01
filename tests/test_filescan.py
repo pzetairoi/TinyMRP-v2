@@ -124,12 +124,12 @@ def test_discover_part_files_supports_attr_datasheet_relative_path(app, tmp_path
         assert datasheet["rel_path"].casefold() == "datasheet/vendor-file.pdf"
 
 
-def test_upsert_skips_paths_already_claimed_in_the_same_batch(app, tmp_path):
-    """A shared file must not fail the batch on the unique ``path`` index.
+def test_upsert_matches_identity_case_insensitively(app, tmp_path):
+    """Case-variant spellings are one artifact, not two.
 
-    Blank-revision hardware repeated across subassemblies resolves to one file
-    on disk for several identities; the first claims it and the rest are
-    skipped instead of raising E11000.
+    Storage lookup is case-insensitive on Windows and the app reads parts with
+    ``__iexact`` everywhere, so a variant spelling must update the existing
+    record instead of inserting a second one that collides on unique ``path``.
     """
     from app.models.artifact import PartFile
     from app.services.filescan import upsert_part_files_detailed
@@ -149,17 +149,141 @@ def test_upsert_skips_paths_already_claimed_in_the_same_batch(app, tmp_path):
         result = upsert_part_files_detailed(
             [
                 {"part_number": "M12X1.75 X 35 G8", "revision": "", **record},
-                {"part_number": "OTHER-PART", "revision": "", **record},
+                {"part_number": "M12x1.75 x 35 g8", "revision": "", **record},
+            ]
+        )
+
+        assert result["count"] == 2
+        assert PartFile.objects.count() == 1
+        # The first-seen spelling stays canonical across later variants.
+        assert PartFile.objects.first().part_number == "M12X1.75 X 35 G8"
+
+    # Revision case is unified the same way.
+    other = tmp_path / "pdf" / "WIDGET_REV_A.pdf"
+    _touch(other)
+    pdf = {
+        "ext_group": "pdf",
+        "ext": "pdf",
+        "is_dwg": False,
+        "rel_path": "pdf/WIDGET_REV_A.pdf",
+        "abs_path": str(other),
+    }
+    with app.app_context():
+        upsert_part_files_detailed([{"part_number": "WIDGET", "revision": "A", **pdf}])
+        upsert_part_files_detailed([{"part_number": "widget", "revision": "a", **pdf}])
+        assert PartFile.objects(ext_group="pdf").count() == 1
+
+
+def test_discovery_is_case_insensitive_for_dirs_and_filenames(app, tmp_path):
+    """Storage laid out on Linux must resolve identically on Windows.
+
+    Directory and filename casing both vary in real trees, so discovery folds
+    case at every path segment rather than relying on the host filesystem.
+    """
+    with app.app_context():
+        app.config["FILE_SOURCES"] = [
+            {"local_root": str(tmp_path), "url_prefix": "/deliverables"}
+        ]
+        # Upper-case directory, mixed-case stem, upper-case extension.
+        _touch(tmp_path / "PNG" / "widget-01_rev_a.PNG")
+        _touch(tmp_path / "pdf" / "WIDGET-01_REV_A.pdf")
+
+        found = discover_part_files("Widget-01", "A")
+
+        assert found[("png", False)]["rel_path"] == "PNG/widget-01_rev_a.PNG"
+        assert found[("pdf", False)]["rel_path"] == "pdf/WIDGET-01_REV_A.pdf"
+
+        # A different query casing resolves to the same files.
+        assert discover_part_files("WIDGET-01", "a").keys() == found.keys()
+
+
+def test_scan_cache_reuses_directory_listings(app, tmp_path, monkeypatch):
+    """The bulk-scan cache must not re-list a directory per candidate."""
+    from app.services import filescan
+
+    with app.app_context():
+        app.config["FILE_SOURCES"] = [
+            {"local_root": str(tmp_path), "url_prefix": "/deliverables"}
+        ]
+        for i in range(3):
+            _touch(tmp_path / "png" / f"PART-{i}_REV_A.png")
+
+        calls = {"n": 0}
+        real_iterdir = Path.iterdir
+
+        def counting_iterdir(self):
+            calls["n"] += 1
+            return real_iterdir(self)
+
+        monkeypatch.setattr(Path, "iterdir", counting_iterdir)
+
+        with filescan.scan_cache():
+            for i in range(3):
+                discover_part_files(f"part-{i}", "A")
+            cached = calls["n"]
+
+        # Without the cache the same work re-lists directories many more times.
+        calls["n"] = 0
+        for i in range(3):
+            discover_part_files(f"part-{i}", "A")
+        uncached = calls["n"]
+
+        assert cached < uncached
+
+
+def test_upsert_collapses_case_variant_rows_split_across_storage_roots(app, tmp_path):
+    """Rows written before identity matching existed must converge, not collide.
+
+    Two case-variant spellings can each own a record pointing at a different
+    storage root. Re-pointing one at the other's path would violate the unique
+    ``path`` index, so the loser is removed and a single record survives.
+    """
+    from app.models.artifact import PartFile
+    from app.services.filescan import upsert_part_files_detailed
+
+    old_root = tmp_path / "cadexport"
+    new_root = tmp_path / "deliverables"
+    name = "AS 1111.1 - M10 X 35 X 35-NNZP_REV_.png"
+    _touch(new_root / "png" / name)
+
+    with app.app_context():
+        PartFile.objects.delete()
+        # Pre-existing split: same identity ignoring case, different roots.
+        PartFile(
+            part_number="AS 1111.1 - M10 X 35 X 35-NNZP",
+            revision="",
+            ext_group="png",
+            ext="png",
+            is_dwg=False,
+            rel_path=f"png/{name}",
+            path=str(old_root / "png" / name),
+        ).save()
+        PartFile(
+            part_number="AS 1111.1 - M10 x 35 x 35-NNZP",
+            revision="",
+            ext_group="png",
+            ext="png",
+            is_dwg=False,
+            rel_path=f"png/{name}",
+            path=str(new_root / "png" / name),
+        ).save()
+        assert PartFile.objects.count() == 2
+
+        result = upsert_part_files_detailed(
+            [
+                {
+                    "part_number": "AS 1111.1 - M10 X 35 X 35-NNZP",
+                    "revision": "",
+                    "ext_group": "png",
+                    "ext": "png",
+                    "is_dwg": False,
+                    "rel_path": f"png/{name}",
+                    "abs_path": str(new_root / "png" / name),
+                }
             ]
         )
 
         assert result["count"] == 1
-        assert PartFile.objects(path=str(shared)).count() == 1
-        assert PartFile.objects.first().part_number == "M12X1.75 X 35 G8"
-
-        # Re-running keeps the original owner and still does not raise.
-        again = upsert_part_files_detailed(
-            [{"part_number": "M12X1.75 X 35 G8", "revision": "", **record}]
-        )
-        assert again["count"] == 1
-        assert PartFile.objects(path=str(shared)).count() == 1
+        assert PartFile.objects.count() == 1
+        survivor = PartFile.objects.first()
+        assert survivor.path == str(new_root / "png" / name)

@@ -1,0 +1,99 @@
+{% extends "security/base.html" %}
+{% from "ui/_components.html" import page_header %}
+{% block title %}Rescan Part Files — Admin{% endblock %}
+{% block content %}
+{% call page_header("Rescan part files", "Reconcile every part's file records against storage.", "Admin") %}{% endcall %}
+<div class="card shadow-sm tm-card">
+  <div class="card-body">
+    <p class="text-muted">
+      Scans the configured storage sources for every part and revision in the database and
+      updates the file records that the parts, docpack and export screens read. Matching is
+      case-insensitive, so storage written on Linux and on Windows resolves identically.
+      No files on disk are created, moved or modified.
+    </p>
+
+    <div id="rescan-progress" class="my-3" hidden>
+      <div class="d-flex justify-content-between small">
+        <span id="rescan-label">Starting…</span>
+        <span id="rescan-counts" class="text-muted"></span>
+      </div>
+      <div class="progress mt-1" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+        <div id="rescan-bar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%">0%</div>
+      </div>
+    </div>
+
+    <form class="mt-3 d-flex flex-wrap gap-2 align-items-center" method="post" id="rescan-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary" id="rescan-start">Rescan all part files</button>
+      <div class="form-check ms-2">
+        <input class="form-check-input" type="checkbox" name="remove_stale" id="remove_stale" value="1">
+        <label class="form-check-label small" for="remove_stale">
+          Also remove records whose file no longer exists
+        </label>
+      </div>
+      <a href="{{ url_for('admin.admin_index') }}" class="btn btn-outline-secondary ms-auto">Back</a>
+    </form>
+
+    <form method="post" id="rescan-cancel-form" hidden>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="cancel">
+      <button type="submit" class="btn btn-outline-danger btn-sm mt-2">Cancel scan</button>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  const url = "{{ url_for('admin.rescan_files_progress') }}";
+  const wrap = document.getElementById("rescan-progress");
+  const bar = document.getElementById("rescan-bar");
+  const label = document.getElementById("rescan-label");
+  const counts = document.getElementById("rescan-counts");
+  const startBtn = document.getElementById("rescan-start");
+  const cancelForm = document.getElementById("rescan-cancel-form");
+  let timer = null;
+
+  function render(state) {
+    const running = state.status === "running";
+    wrap.hidden = state.status === "idle";
+    startBtn.disabled = running;
+    cancelForm.hidden = !running;
+    const total = state.total || 0;
+    const done = state.processed || 0;
+    // Before the part list is counted the run is real but has no percentage yet.
+    const pct = total ? Math.round((done / total) * 100) : (running ? 0 : 100);
+    bar.style.width = pct + "%";
+    bar.textContent = pct + "%";
+    bar.classList.toggle("progress-bar-animated", running);
+    bar.classList.toggle("bg-danger", state.status === "error");
+    bar.classList.toggle("bg-success", state.status === "done");
+    label.textContent =
+      state.status === "running" ? (total ? "Scanning parts…" : "Counting parts…")
+      : state.status === "done" ? "Scan complete."
+      : state.status === "cancelled" ? "Scan cancelled."
+      : state.status === "error" ? ("Scan failed: " + (state.error || "unknown error"))
+      : "";
+    counts.textContent = total
+      ? `${done} / ${total} parts · ${state.files || 0} file records` +
+        (state.removed ? ` · ${state.removed} removed` : "")
+      : "";
+    return running;
+  }
+
+  function poll() {
+    fetch(url, { headers: { "Accept": "application/json" } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+      .then((state) => {
+        if (!render(state) && timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      })
+      .catch(() => {});
+  }
+
+  poll();
+  timer = setInterval(poll, 1000);
+})();
+</script>
+{% endblock %}
