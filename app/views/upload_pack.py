@@ -5,7 +5,11 @@ from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from app.extensions import csrf
 from app.models.extra_file import PartExtraFile
-from app.services.authorization import effective_permissions, has_permission
+from app.services.authorization import (
+    effective_permissions,
+    has_permission,
+    relationship_part_pairs,
+)
 from app.services.extra_files import (
     extra_file_url_for,
     extra_rel_path,
@@ -20,8 +24,12 @@ from app.services.file_security import (
     exact_file_part,
 )
 from app.services.part_norm import clean_pn, clean_rev
-from app.services.import_zip import DEFAULT_OVERRIDE_MODE
-from app.services.upload_pack import ImportPermissionError, import_upload_pack
+from app.services.upload_pack import (
+    IMPORT_PERMISSIONS,
+    ImportPermissionError,
+    ImportScopeError,
+    import_upload_pack,
+)
 from app.views.api_helpers import add_datetime_fields
 bp = Blueprint("upload_pack_api", __name__, url_prefix="/api")
 def _extra_file_payload(ef: PartExtraFile) -> dict:
@@ -51,23 +59,41 @@ def _uploaded_by() -> str:
     return (getattr(current_user, "email", None) or str(getattr(current_user, "id", ""))).strip()
 def _import_options() -> dict:
     source = request.form if request.form else request.args
-    values = {
-        "override_mode": source.get("override_mode") or DEFAULT_OVERRIDE_MODE,
-        "data_mode": source.get("data_mode") or None,
-        "bom_mode": source.get("bom_mode") or None,
-        "file_mode": source.get("file_mode") or None,
-        "approval_mode": source.get("approval_mode") or None,
+    return {
+        name: source.get(name) or None
+        for name in ("data_mode", "bom_mode", "file_mode", "approval_mode")
     }
-    if not source.get("override_mode") and not any(
-        source.get(name) for name in ("data_mode", "bom_mode", "file_mode", "approval_mode")
-    ):
-        values.update(
-            data_mode="fill_blanks",
-            bom_mode="fill_if_empty",
-            file_mode="add_missing",
-            approval_mode="preserve",
-        )
-    return values
+def _mutable_scope_check(pairs):
+    """Return the exact requested pairs outside the caller's part scope.
+
+    Globally scoped users may mutate any planned pair; relationship-scoped
+    users are limited to their exact derived part/revision set.
+    """
+    allowed = relationship_part_pairs(current_user)
+    if allowed is None:
+        return []
+    allowed_folded = {
+        (str(pn).strip().casefold(), str(rev or "").strip().casefold())
+        for pn, rev in allowed
+    }
+    return [
+        (pn, rev)
+        for pn, rev in pairs
+        if (str(pn).strip().casefold(), str(rev or "").strip().casefold())
+        not in allowed_folded
+    ]
+@bp.get("/import/capabilities")
+@login_required
+def import_capabilities():
+    """Lightweight effective import capabilities for the Upload Pack UI."""
+    return jsonify(
+        {
+            "imports": {
+                permission: has_permission(current_user, permission)
+                for permission in sorted(IMPORT_PERMISSIONS)
+            }
+        }
+    )
 @bp.post("/upload/pack")
 @csrf.exempt
 @login_required
@@ -82,12 +108,6 @@ def upload_pack():
     filename = secure_filename(f.filename)
     dry_run = _parse_bool(request.form.get("dry_run") or request.args.get("dry_run"))
     strict = _parse_bool(request.form.get("strict_structure") or request.args.get("strict_structure"))
-    legacy_mode = request.form.get("override_mode") or request.args.get("override_mode")
-    if legacy_mode in {"always", "approved_only"} and (
-        not has_permission(current_user, "imports.execute_approved")
-        or not has_permission(current_user, "imports.override_approved")
-    ):
-        return jsonify({"error": "forbidden"}), 403
     allow_extra = bool(current_app.config.get("EXTRA_FILES_ALLOWED", True))
     file_bytes = f.read()
     try:
@@ -99,6 +119,7 @@ def upload_pack():
             strict_structure=strict,
             allow_extra=allow_extra,
             actor_permissions=set(effective_permissions(current_user)),
+            scope_check=_mutable_scope_check,
             **_import_options(),
         )
     except ImportPermissionError as exc:
@@ -108,6 +129,19 @@ def upload_pack():
                     "error": "forbidden",
                     "detail": str(exc),
                     "missing_permissions": exc.missing_permissions,
+                }
+            ),
+            403,
+        )
+    except ImportScopeError as exc:
+        return (
+            jsonify(
+                {
+                    "error": "forbidden",
+                    "detail": str(exc),
+                    "denied_parts": [
+                        {"pn": pn, "rev": rev} for pn, rev in exc.denied_pairs
+                    ],
                 }
             ),
             403,
@@ -131,20 +165,15 @@ def upload_pack():
         )
     try:
         from app.services.audit import log_action
-        def metric_count(value):
-            if isinstance(value, (list, tuple, set, dict)):
-                return len(value)
-            try:
-                return int(value or 0)
-            except (TypeError, ValueError):
-                return 0
+        metrics = result.get("metrics") or {}
         log_action(
             "upload.pack",
             resource_type="import",
             resource=filename,
             meta={
-                "parts_imported": metric_count(result.get("parts_imported") or result.get("imported_parts") or result.get("parts")),
-                "files_uploaded": metric_count(result.get("files_uploaded") or result.get("file_count") or result.get("files")),
+                "parts_created": int(metrics.get("parts_created") or 0),
+                "parts_updated": int(metrics.get("parts_updated") or 0),
+                "files_uploaded": int(metrics.get("files_written") or 0),
                 "dry_run": dry_run,
             },
         )

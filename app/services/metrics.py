@@ -70,8 +70,6 @@ def _label_feature(blueprint: Optional[str], endpoint: str) -> str:
         bp = blueprint.replace("_", " ").strip()
         if bp.lower().startswith("api "):
             return f"API: {bp[4:].title()}"
-        if bp.lower() == "importer":
-            return "Import BOM"
         if bp.lower() == "docpacks":
             return "Doc Packs"
         if bp.lower() == "fileserve":

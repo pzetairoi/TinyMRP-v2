@@ -206,7 +206,10 @@ def test_part_list_detail_bom_and_dashboard_apply_equivalent_policies(
     detail = client.get(
         f"/api/part_detail?pn={root.part_number}&rev={root.revision}"
     ).get_json()
-    assert detail["part"]["attributes"] == {"engineering_grade": "G1"}
+    attributes = detail["part"]["attributes"]
+    assert attributes["engineering_grade"] == "G1"
+    assert "secret_token" not in attributes
+    assert "storage_path" not in attributes
     assert "secret_token" not in detail["part"]["field_values"]
     assert "arena_file_link_base_url" not in detail
 
@@ -215,7 +218,8 @@ def test_part_list_detail_bom_and_dashboard_apply_equivalent_policies(
     ).get_json()
     assert tree[0]["data"]["engineering_grade"] == "G2"
     assert "secret_token" not in tree[0]["data"]
-    assert tree[0]["data"]["attrs"] == {"engineering_grade": "G2"}
+    assert tree[0]["data"]["attrs"]["engineering_grade"] == "G2"
+    assert "secret_token" not in tree[0]["data"]["attrs"]
 
     dashboard = client.get("/api/dashboard/summary").get_json()
     assert set(dashboard) <= {

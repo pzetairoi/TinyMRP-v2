@@ -9,7 +9,28 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.docpacks import _flatten_bom
 from app.services.field_config import save_field_config
-from app.services.import_zip import import_bom_zip
+from app.services.upload_pack import import_upload_pack
+
+
+def import_bom_zip(zip_bytes: bytes, filename: str, seed_tag: str = "test") -> dict:
+    """Apply an import with draft-replacement policies; flatten diagnostics."""
+    result = import_upload_pack(
+        zip_bytes,
+        filename,
+        dry_run=False,
+        allow_extra=False,
+        seed_tag=seed_tag,
+        generate_thumbs=False,
+        data_mode="replace_unapproved",
+        bom_mode="replace_unapproved",
+        file_mode="replace_unapproved",
+        approval_mode="preserve",
+    )
+    return {
+        **result["diagnostics"],
+        "warnings": result["warnings"],
+        "errors": result["errors"],
+    }
 
 
 def _make_zip(flat_txt: str, tree_txt: str) -> bytes:

@@ -8,22 +8,6 @@ from typing import Any, Iterable
 from flask import current_app, has_app_context
 from app.services.part_norm import clean_pn, clean_qty, clean_rev
 from app.services.processmeta import normalize_processes
-DEFAULT_OVERRIDE_MODE = "unless_existing_approved"
-_OVERRIDE_ALIASES = {
-    "default": DEFAULT_OVERRIDE_MODE,
-    "override_unless_existing_approved": DEFAULT_OVERRIDE_MODE,
-    "override_unless_approved": DEFAULT_OVERRIDE_MODE,
-}
-_OVERRIDE_MODES = {
-    DEFAULT_OVERRIDE_MODE,
-    "preserve",
-    "approved_only",
-    "always",
-}
-def normalize_override_mode(value: object) -> str:
-    mode = str(value or DEFAULT_OVERRIDE_MODE).strip().lower()
-    mode = _OVERRIDE_ALIASES.get(mode, mode)
-    return mode if mode in _OVERRIDE_MODES else DEFAULT_OVERRIDE_MODE
 def _base_pn(value: object) -> str:
     return clean_pn(str(value or "").split("^", 1)[0])
 def _issue(
@@ -315,30 +299,3 @@ def _aggregate_links(
         (*key, quantity, occurrences[key])
         for key, quantity in sorted(totals.items())
     ]
-def import_bom_zip(
-    file_bytes: bytes,
-    filename: str,
-    seed_tag: str = "upload",
-    *,
-    scan_artifacts: bool = True,
-    generate_thumbs: bool = True,
-    override_mode: str = DEFAULT_OVERRIDE_MODE,
-    **options: Any,
-) -> dict[str, Any]:
-    """Compatibility wrapper around the single upload-pack implementation."""
-    from app.services.upload_pack import import_upload_pack
-    result = import_upload_pack(
-        file_bytes,
-        filename,
-        dry_run=False,
-        allow_extra=False,
-        seed_tag=seed_tag,
-        override_mode=override_mode,
-        scan_artifacts=scan_artifacts,
-        generate_thumbs=generate_thumbs,
-        **options,
-    )
-    report = dict(result.get("import") or {})
-    report.setdefault("zip", filename)
-    report.setdefault("override_mode", normalize_override_mode(override_mode))
-    return report

@@ -12,9 +12,6 @@ from .models.auth import User, Role
 from .models.part import Part
 from .models.bom import BOMLink
 
-# Import necessary extensions for zip import functionality
-from app.services.import_zip import import_bom_zip
-
 from flask import current_app
 
 from app.services.attrs import harvest_part_attrs, merge_save_part_attrs
@@ -661,11 +658,34 @@ def importcmd():
 @importcmd.command("zip")
 @click.option("--file", "path", required=True, help="Path to ZIP file")
 @click.option("--tag", default="upload-cli")
+@click.option("--data-mode", default="fill_blanks", show_default=True)
+@click.option("--bom-mode", default="fill_if_empty", show_default=True)
+@click.option("--file-mode", default="add_missing", show_default=True)
+@click.option("--approval-mode", default="preserve", show_default=True)
+@click.option("--dry-run", is_flag=True, default=False)
 @with_appcontext
-def import_zip_cmd(path, tag):
+def import_zip_cmd(path, tag, data_mode, bom_mode, file_mode, approval_mode, dry_run):
+    from app.services.upload_pack import import_upload_pack
+
     with open(path, "rb") as f:
-        result = import_bom_zip(f.read(), path, seed_tag=tag)
-    click.echo(result)
+        result = import_upload_pack(
+            f.read(),
+            path,
+            seed_tag=tag,
+            dry_run=dry_run,
+            allow_extra=False,
+            data_mode=data_mode,
+            bom_mode=bom_mode,
+            file_mode=file_mode,
+            approval_mode=approval_mode,
+        )
+    summary = result["plan"]["summary"]
+    click.echo(
+        f"zip={result['zip']} root={result['root']} rev={result['root_rev']} "
+        f"dry_run={result['dry_run']} parts={summary['parts']} "
+        f"changed={summary['changed']} blocked={summary['blocked']} "
+        f"metrics={result['metrics']}"
+    )
 
     
     

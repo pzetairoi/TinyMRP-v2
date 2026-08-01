@@ -52,9 +52,8 @@ def test_upload_pack_returns_import_report_on_parse_errors(client, app, user, tm
     )
     assert resp.status_code == 200
     data = resp.get_json() or {}
-    report = data.get("import") or {}
-    assert report.get("flat_lines_failed_parse") == 1
-    assert len(report.get("errors") or []) >= 1
+    assert (data.get("diagnostics") or {}).get("flat_lines_failed_parse") == 1
+    assert len(data.get("errors") or []) >= 1
 
     part = Part.objects(part_number=pn, revision=rev).first()
     assert part is not None

@@ -1,23 +1,42 @@
+"""End-to-end policy semantics for the single upload-pack import pipeline."""
+
 import io
 import json
 import zipfile
 
 from app.models.bom import BOMLink
 from app.models.part import Part
-from app.services.import_zip import import_bom_zip
 from app.services.field_config import save_field_config
 from app.services.part_annotations import annotation_payload
+from app.services.upload_pack import import_upload_pack
 
 
-def _make_zip(flat_rows):
+def _make_zip(flat_rows, tree_lines=None):
     buf = io.BytesIO()
+    root = flat_rows[0]
+    tree_lines = tree_lines or [
+        "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+        f"1\t{root['partnumber']}\t{root.get('revision', '')}\t1",
+    ]
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("OVR_FLATBOM.txt", "\n".join(json.dumps(row) for row in flat_rows))
-        zf.writestr("OVR_TREEBOM.txt", "ITEM NO.\tPART NUMBER\tRevision\tQTY.\n1\tOVR-ROOT\t\t1\n")
+        zf.writestr("OVR_TREEBOM.txt", "\n".join(tree_lines))
     return buf.getvalue()
 
 
-def test_import_preserve_mode_keeps_existing_values(app):
+def _apply(zip_bytes, filename="policy.zip", **options):
+    return import_upload_pack(
+        zip_bytes,
+        filename,
+        dry_run=False,
+        allow_extra=False,
+        seed_tag="test",
+        generate_thumbs=False,
+        **options,
+    )
+
+
+def test_fill_policies_keep_existing_values(app):
     Part(
         part_number="OVR-100",
         revision="",
@@ -38,14 +57,7 @@ def test_import_preserve_mode_keeps_existing_values(app):
     )
 
     with app.app_context():
-        import_bom_zip(
-            zip_bytes,
-            "override.zip",
-            seed_tag="test",
-            scan_artifacts=False,
-            generate_thumbs=False,
-            override_mode="preserve",
-        )
+        _apply(zip_bytes, data_mode="fill_blanks")
 
     part = Part.objects(part_number="OVR-100", revision="").first()
     assert part is not None
@@ -54,7 +66,7 @@ def test_import_preserve_mode_keeps_existing_values(app):
     assert part.attrs.get("notes") == "Keep this note"
 
 
-def test_import_preserve_mode_keeps_existing_bom(app):
+def test_fill_if_empty_keeps_existing_bom(app):
     Part(part_number="OVR-BOM", revision="A", description="Existing").save()
     Part(part_number="OVR-OLD-CHILD", revision="A").save()
     BOMLink(
@@ -64,35 +76,20 @@ def test_import_preserve_mode_keeps_existing_bom(app):
         child_rev="A",
         qty=7,
     ).save()
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(
-            "PRESERVE_FLATBOM.txt",
-            "\n".join(
-                [
-                    json.dumps({"partnumber": "OVR-BOM", "revision": "A"}),
-                    json.dumps({"partnumber": "OVR-NEW-CHILD", "revision": "A"}),
-                ]
-            ),
-        )
-        zf.writestr(
-            "PRESERVE_TREEBOM.txt",
-            "\n".join(
-                [
-                    "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
-                    "1\tOVR-BOM\tA\t1",
-                    "1.1\tOVR-NEW-CHILD\tA\t2",
-                ]
-            ),
-        )
-
-    import_bom_zip(
-        buf.getvalue(),
-        "preserve-bom.zip",
-        scan_artifacts=False,
-        generate_thumbs=False,
-        override_mode="preserve",
+    zip_bytes = _make_zip(
+        [
+            {"partnumber": "OVR-BOM", "revision": "A"},
+            {"partnumber": "OVR-NEW-CHILD", "revision": "A"},
+        ],
+        [
+            "ITEM NO.\tPART NUMBER\tRevision\tQTY.",
+            "1\tOVR-BOM\tA\t1",
+            "1.1\tOVR-NEW-CHILD\tA\t2",
+        ],
     )
+
+    with app.app_context():
+        _apply(zip_bytes, bom_mode="fill_if_empty")
 
     links = list(BOMLink.objects(parent_pn="OVR-BOM", parent_rev="A"))
     assert [(link.child_pn, link.child_rev, link.qty) for link in links] == [
@@ -100,12 +97,16 @@ def test_import_preserve_mode_keeps_existing_bom(app):
     ]
 
 
-def test_import_override_modes_upgrade_approved_and_preserve_notes(app):
+def test_replace_unapproved_updates_draft_and_normalises_approval_aliases(app):
     Part(
         part_number="OVR-200",
         revision="",
         description="Draft Description",
-        attrs={"material": "Steel", "notes": "Operator note", "comments": [{"text": "Keep me"}]},
+        attrs={
+            "material": "Steel",
+            "notes": "Operator note",
+            "comments": [{"text": "Keep me"}],
+        },
     ).save()
 
     zip_bytes = _make_zip(
@@ -122,13 +123,10 @@ def test_import_override_modes_upgrade_approved_and_preserve_notes(app):
     )
 
     with app.app_context():
-        import_bom_zip(
+        _apply(
             zip_bytes,
-            "approved-only.zip",
-            seed_tag="test",
-            scan_artifacts=False,
-            generate_thumbs=False,
-            override_mode="approved_only",
+            data_mode="replace_unapproved",
+            approval_mode="import_unapproved",
         )
 
     part = Part.objects(part_number="OVR-200", revision="").first()
@@ -144,42 +142,7 @@ def test_import_override_modes_upgrade_approved_and_preserve_notes(app):
     assert [row.get("text") for row in (payload.get("comments") or [])] == ["Keep me"]
 
 
-def test_import_default_mode_overrides_unapproved_parts(app):
-    Part(
-        part_number="OVR-300",
-        revision="",
-        description="Old Description",
-        attrs={"material": "Steel"},
-    ).save()
-
-    zip_bytes = _make_zip(
-        [
-            {
-                "partnumber": "OVR-300",
-                "revision": "",
-                "description": "New Description",
-                "material": "Aluminium",
-            }
-        ]
-    )
-
-    with app.app_context():
-        report = import_bom_zip(
-            zip_bytes,
-            "default-mode.zip",
-            seed_tag="test",
-            scan_artifacts=False,
-            generate_thumbs=False,
-        )
-
-    part = Part.objects(part_number="OVR-300", revision="").first()
-    assert part is not None
-    assert report["override_mode"] == "unless_existing_approved"
-    assert part.description == "New Description"
-    assert part.attrs.get("material") == "Aluminium"
-
-
-def test_import_default_mode_preserves_existing_approved_parts(app):
+def test_replace_unapproved_preserves_existing_approved_parts(app):
     Part(
         part_number="OVR-301",
         revision="",
@@ -199,13 +162,7 @@ def test_import_default_mode_preserves_existing_approved_parts(app):
     )
 
     with app.app_context():
-        import_bom_zip(
-            zip_bytes,
-            "default-approved.zip",
-            seed_tag="test",
-            scan_artifacts=False,
-            generate_thumbs=False,
-        )
+        _apply(zip_bytes, data_mode="replace_unapproved")
 
     part = Part.objects(part_number="OVR-301", revision="").first()
     assert part is not None
@@ -214,7 +171,7 @@ def test_import_default_mode_preserves_existing_approved_parts(app):
     assert part.attrs.get("approved_by") == "QA"
 
 
-def test_import_modes_honor_custom_approval_aliases(app):
+def test_policies_honor_configured_approval_aliases(app):
     with app.app_context():
         save_field_config(
             {
@@ -233,7 +190,7 @@ def test_import_modes_honor_custom_approval_aliases(app):
             attrs={"material": "Titanium", "EngineeringApproval": "QA Person"},
         ).save()
 
-        import_bom_zip(
+        _apply(
             _make_zip(
                 [
                     {
@@ -244,9 +201,7 @@ def test_import_modes_honor_custom_approval_aliases(app):
                     }
                 ]
             ),
-            "custom-existing.zip",
-            scan_artifacts=False,
-            generate_thumbs=False,
+            data_mode="replace_unapproved",
         )
         existing = Part.objects(part_number="OVR-CUSTOM-EXISTING", revision="").first()
         assert existing.description == "Released Description"
@@ -258,7 +213,7 @@ def test_import_modes_honor_custom_approval_aliases(app):
             description="Draft Description",
             attrs={"material": "Steel"},
         ).save()
-        import_bom_zip(
+        _apply(
             _make_zip(
                 [
                     {
@@ -270,10 +225,8 @@ def test_import_modes_honor_custom_approval_aliases(app):
                     }
                 ]
             ),
-            "custom-incoming.zip",
-            scan_artifacts=False,
-            generate_thumbs=False,
-            override_mode="approved_only",
+            data_mode="replace_unapproved",
+            approval_mode="import_unapproved",
         )
         incoming = Part.objects(part_number="OVR-CUSTOM-INCOMING", revision="").first()
         assert incoming.description == "Released Description"
@@ -282,9 +235,9 @@ def test_import_modes_honor_custom_approval_aliases(app):
         assert incoming.canonical.get("approved_by") == "QA Person"
 
 
-def test_import_reports_conflicting_approval_statuses(app):
+def test_conflicting_approval_statuses_are_conservative_and_reported(app):
     with app.app_context():
-        report = import_bom_zip(
+        result = _apply(
             _make_zip(
                 [
                     {
@@ -296,12 +249,14 @@ def test_import_reports_conflicting_approval_statuses(app):
                     }
                 ]
             ),
-            "approval-conflict.zip",
-            scan_artifacts=False,
-            generate_thumbs=False,
+            approval_mode="replace_all",
         )
         part = Part.objects(part_number="OVR-APPROVAL-CONFLICT", revision="").first()
         assert part is not None
         assert part.canonical.get("approved") is False
-        assert report["approval_integrity_warnings"] == 1
-        assert any(issue.get("stage") == "flatbom.approval" for issue in report["warnings"])
+        assert result["plan"]["approval_integrity_warnings"] == 1
+        entry = result["plan"]["parts"][0]
+        assert all(item["action"] == "blocked" for item in entry["approval"])
+        assert any(
+            issue.get("stage") == "flatbom.approval" for issue in result["warnings"]
+        )

@@ -26,18 +26,17 @@ from app.services.canonical_fields import (
     canonical_alias_index,
     canonical_attr_key,
     resolve_approval,
+    set_runtime_canonical_aliases,
 )
 from app.services.extra_files import extra_rel_path, rev_from_token, validated_upload_filename
 from app.services.field_config import field_index, get_field_config
 from app.services.filescan import discover_part_files, upsert_part_files_detailed
 from app.services.import_zip import (
-    DEFAULT_OVERRIDE_MODE,
     _aggregate_links,
     _base_pn,
     _normalize_part,
     _parse_flatbom,
     _parse_treebom,
-    normalize_override_mode,
 )
 from app.services.part_materialized import sync_part_materialized_fields
 from app.services.part_norm import clean_pn, clean_rev
@@ -79,6 +78,13 @@ class ImportPermissionError(ValueError):
         self.missing_permissions = sorted(set(missing))
         super().__init__(
             "missing import permission(s): " + ", ".join(self.missing_permissions)
+        )
+class ImportScopeError(ValueError):
+    def __init__(self, pairs: Iterable[tuple[str, str]]):
+        self.denied_pairs = sorted(set(pairs))
+        super().__init__(
+            "part/revision outside the caller's mutable scope: "
+            + ", ".join(f"{pn}:{rev or '(blank)'}" for pn, rev in self.denied_pairs)
         )
 def _has_value(value: Any) -> bool:
     if value is None:
@@ -158,34 +164,17 @@ def _load_manifest(zf: zipfile.ZipFile) -> dict[tuple[str, str, str], dict[str, 
     return output
 def _policy_options(
     *,
-    override_mode: object = DEFAULT_OVERRIDE_MODE,
     data_mode: object = None,
     bom_mode: object = None,
     file_mode: object = None,
     approval_mode: object = None,
 ) -> dict[str, Any]:
-    legacy = normalize_override_mode(override_mode)
-    translated = {
-        "preserve": ("fill_blanks", "fill_if_empty", "add_missing", "preserve"),
-        DEFAULT_OVERRIDE_MODE: (
-            "replace_unapproved",
-            "replace_unapproved",
-            "replace_unapproved",
-            "preserve",
-        ),
-        "approved_only": (
-            "replace_unapproved",
-            "replace_unapproved",
-            "replace_unapproved",
-            "import_unapproved",
-        ),
-        "always": ("replace_all", "replace_all", "replace_all", "replace_all"),
-    }[legacy]
+    """Validate the four independent import policies, defaulting to fill-only."""
     values = {
-        "data_mode": str(data_mode or translated[0]).strip().lower(),
-        "bom_mode": str(bom_mode or translated[1]).strip().lower(),
-        "file_mode": str(file_mode or translated[2]).strip().lower(),
-        "approval_mode": str(approval_mode or translated[3]).strip().lower(),
+        "data_mode": str(data_mode or "fill_blanks").strip().lower(),
+        "bom_mode": str(bom_mode or "fill_if_empty").strip().lower(),
+        "file_mode": str(file_mode or "add_missing").strip().lower(),
+        "approval_mode": str(approval_mode or "preserve").strip().lower(),
     }
     valid = {
         "data_mode": DATA_MODES,
@@ -196,13 +185,6 @@ def _policy_options(
     for name, allowed in valid.items():
         if values[name] not in allowed:
             raise ValueError(f"invalid {name}: {values[name]}")
-    values.update(
-        {
-            "override_mode": legacy,
-            "legacy_preserve": legacy == "preserve" and bom_mode is None,
-            "legacy_approved_only": legacy == "approved_only",
-        }
-    )
     return values
 def parse_import_package(
     file_bytes: bytes,
@@ -232,7 +214,6 @@ def parse_import_package(
         "zip_open_count": 1,
         "flatbom_parse_count": 0,
         "treebom_parse_count": 0,
-        "storage_scan_fallback": False,
     }
     parts: dict[tuple[str, str], dict[str, Any]] = {}
     links: list[tuple[str, str, str, str, float, list[dict[str, Any]]]] = []
@@ -493,6 +474,16 @@ def load_import_state(parsed_package: dict[str, Any]) -> dict[str, Any]:
         "associated": associated,
         "query_count": 4,
     }
+def _resolve_approval(attrs: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    """Resolve approval through the request-cached alias snapshot when possible.
+
+    ``build_import_plan`` seeds the runtime snapshot from the request's field
+    configuration exactly once, so per-part resolution does not re-sanitise
+    the alias configuration.
+    """
+    if has_app_context():
+        return resolve_approval(attrs)
+    return resolve_approval(attrs, config=config)
 def _field_maps(config: dict[str, Any]) -> tuple[dict[str, str], dict[str, dict[str, Any]]]:
     aliases = canonical_alias_index(config)
     fields = field_index(config)
@@ -504,9 +495,9 @@ def _field_maps(config: dict[str, Any]) -> tuple[dict[str, str], dict[str, dict[
     return aliases, fields
 def _logical_incoming(
     normalized: dict[str, Any],
-    config: dict[str, Any],
+    aliases: dict[str, str],
+    fields: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    aliases, fields = _field_maps(config)
     values: dict[str, dict[str, Any]] = {}
     attrs = normalized.get("attrs") or {}
     for raw_key, value in attrs.items():
@@ -516,10 +507,16 @@ def _logical_incoming(
         field_id = aliases.get(normalized_key, normalized_key)
         if field_id in _APPROVAL_FIELDS:
             continue
-        if field_id in values and values[field_id]["value"] != value:
-            if field_id == "process":
+        if field_id in values:
+            if values[field_id]["value"] != value:
+                if field_id == "process":
+                    # Process is multi-value: extra aliases contribute values.
+                    values[field_id].setdefault("raw_values", {})[str(raw_key)] = value
+                else:
+                    values[field_id].setdefault("conflicts", {})[str(raw_key)] = value
+            else:
+                # Duplicate alias with an equal value consolidates silently.
                 values[field_id].setdefault("raw_values", {})[str(raw_key)] = value
-            values[field_id].setdefault("aliases", []).append(str(raw_key))
             continue
         field = fields.get(field_id) or {}
         values[field_id] = {
@@ -567,9 +564,6 @@ def _property_action(
     state: str,
     before: Any,
     after: Any,
-    *,
-    legacy_approved_only: bool,
-    incoming_approved: bool,
 ) -> tuple[str, str]:
     if before == after:
         return "unchanged", "Incoming and existing values match."
@@ -577,8 +571,6 @@ def _property_action(
         return "add", "New part/revision."
     if mode == "skip":
         return "skipped", "Properties policy is Skip."
-    if legacy_approved_only and not incoming_approved:
-        return "skipped", "Legacy approved_only requires an approved incoming target."
     if mode == "fill_blanks":
         return (
             ("add", "Existing value is blank.")
@@ -594,13 +586,14 @@ def _approval_rows(
     state: str,
     mode: str,
     config: dict[str, Any],
+    aliases: dict[str, str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    existing = resolve_approval(part.attrs or {}, config=config) if part else {
+    existing = _resolve_approval(part.attrs or {}, config) if part else {
         "approved": False,
         "approved_by": "",
         "approved_date": "",
     }
-    incoming = resolve_approval(incoming_attrs, config=config)
+    incoming = _resolve_approval(incoming_attrs, config)
     warnings = list(incoming.get("ambiguous") or [])
     rows = []
     labels = {
@@ -626,8 +619,7 @@ def _approval_rows(
     has_legacy_existing_alias = bool(
         raw_existing_keys
         and any(
-            canonical_alias_index(config).get(key) in _APPROVAL_FIELDS
-            and key not in canonical_approval_keys
+            aliases.get(key) in _APPROVAL_FIELDS and key not in canonical_approval_keys
             for key in raw_existing_keys
         )
     )
@@ -678,10 +670,6 @@ def _bom_redline(
     existing_links: list[BOMLink],
     state: str,
     mode: str,
-    *,
-    legacy_preserve: bool,
-    legacy_approved_only: bool,
-    incoming_approved: bool,
 ) -> dict[str, Any]:
     existing = {
         (link.child_pn, clean_rev(link.child_rev)): float(link.qty or 0)
@@ -710,10 +698,8 @@ def _bom_redline(
     changed = any(item["action"] != "unchanged" for item in changes)
     if not changed:
         action, reason = "unchanged", "Incoming and existing BOMs match."
-    elif mode == "skip" or (legacy_preserve and state != "new"):
+    elif mode == "skip":
         action, reason = "skipped", "BOM policy preserves the existing definition."
-    elif legacy_approved_only and state != "new" and not incoming_approved:
-        action, reason = "skipped", "Legacy approved_only requires an approved incoming target."
     elif mode == "fill_if_empty" and existing:
         action, reason = "skipped", "Fill if empty never merges into an existing BOM."
     elif mode == "replace_unapproved" and state == "existing_approved":
@@ -732,9 +718,6 @@ def _file_action(
     state: str,
     exists: bool,
     same: bool,
-    *,
-    legacy_approved_only: bool,
-    incoming_approved: bool,
 ) -> tuple[str, str]:
     if exists and same:
         return "unchanged", "File content matches."
@@ -744,8 +727,6 @@ def _file_action(
         return "add", "No equivalent file identity exists."
     if mode == "add_missing":
         return "skipped", "Add missing never overwrites an existing file identity."
-    if legacy_approved_only and not incoming_approved:
-        return "skipped", "Legacy approved_only requires an approved incoming target."
     if mode == "replace_unapproved" and state == "existing_approved":
         return "blocked", "Replace unapproved does not alter approved targets."
     return "replace", "Selected file policy permits replacement."
@@ -756,7 +737,11 @@ def build_import_plan(
     field_config: dict[str, Any],
 ) -> dict[str, Any]:
     """Create the complete no-write redline."""
-    aliases, _fields = _field_maps(field_config)
+    aliases, fields = _field_maps(field_config)
+    if has_app_context():
+        # Seed the request-scoped alias/approval snapshot exactly once so all
+        # per-part approval resolution reuses it.
+        set_runtime_canonical_aliases(field_config)
     incoming_boms: dict[tuple[str, str], dict[tuple[str, str], float]] = defaultdict(dict)
     for ppn, prev, cpn, crev, qty, _occurrences in parsed_package["links"]:
         incoming_boms[(ppn, prev)][(cpn, crev)] = float(qty)
@@ -768,7 +753,7 @@ def build_import_plan(
     for pair, normalized in sorted(parsed_package["parts"].items()):
         existing_part = existing_state["parts"].get(pair)
         existing_approval = (
-            resolve_approval(existing_part.attrs or {}, config=field_config)
+            _resolve_approval(existing_part.attrs or {}, field_config)
             if existing_part
             else {"approved": False, "ambiguous": []}
         )
@@ -779,22 +764,23 @@ def build_import_plan(
             if existing_approval.get("approved")
             else "existing_unapproved"
         )
-        incoming_approval = resolve_approval(
-            normalized.get("attrs") or {},
-            config=field_config,
-        )
         properties = []
-        for field_id, incoming in sorted(_logical_incoming(normalized, field_config).items()):
+        for field_id, incoming in sorted(_logical_incoming(normalized, aliases, fields).items()):
             before = _existing_logical(existing_part, incoming, aliases)
             action, reason = _property_action(
                 options["data_mode"],
                 state,
                 before,
                 incoming["value"],
-                legacy_approved_only=options["legacy_approved_only"],
-                incoming_approved=bool(incoming_approval.get("approved"))
-                and not incoming_approval.get("ambiguous"),
             )
+            conflicts = incoming.get("conflicts") or {}
+            if conflicts:
+                reason = (
+                    f"{reason} Conflicting duplicate aliases kept the first value "
+                    f"({incoming['source_key']}); ignored: "
+                    + ", ".join(sorted(conflicts))
+                    + "."
+                )
             properties.append(
                 {
                     "field_id": field_id,
@@ -803,6 +789,7 @@ def build_import_plan(
                     "write_key": incoming["write_key"],
                     "top_level": incoming["top_level"],
                     "raw_values": incoming.get("raw_values", {}),
+                    "alias_conflicts": _json_value(conflicts),
                     "before": _json_value(before),
                     "after": _json_value(incoming["value"]),
                     "action": action,
@@ -815,6 +802,7 @@ def build_import_plan(
             state,
             options["approval_mode"],
             field_config,
+            aliases,
         )
         approval_warning_count += len(approval_warnings)
         for warning in approval_warnings:
@@ -833,10 +821,6 @@ def build_import_plan(
             existing_state["boms"].get(pair, []),
             state,
             options["bom_mode"],
-            legacy_preserve=options["legacy_preserve"],
-            legacy_approved_only=options["legacy_approved_only"],
-            incoming_approved=bool(incoming_approval.get("approved"))
-            and not incoming_approval.get("ambiguous"),
         ) if pair in incoming_boms else {
             "action": "unchanged",
             "reason": "No incoming BOM definition.",
@@ -854,9 +838,6 @@ def build_import_plan(
                 state,
                 existing_file is not None,
                 same,
-                legacy_approved_only=options["legacy_approved_only"],
-                incoming_approved=bool(incoming_approval.get("approved"))
-                and not incoming_approval.get("ambiguous"),
             )
             file_rows.append(
                 {
@@ -896,7 +877,7 @@ def build_import_plan(
         "parts": entries,
         "options": {
             key: options[key]
-            for key in ("data_mode", "bom_mode", "file_mode", "approval_mode", "override_mode")
+            for key in ("data_mode", "bom_mode", "file_mode", "approval_mode")
         },
         "approval_integrity_warnings": approval_warning_count,
         "_parsed": parsed_package,
@@ -907,34 +888,64 @@ def build_import_plan(
     required_import_permissions(plan)
     return plan
 def required_import_permissions(plan: dict[str, Any]) -> list[str]:
+    """Derive every permission the completed plan requires.
+
+    This is the single authority consumed by the API route and, through the
+    plan payload, by the React UI. It combines the import execution tier
+    (low-risk, advanced, approved override) with the resource write
+    permissions implied by the planned effects, so import execution never
+    implicitly grants Part, BOM or file writes and vice versa.
+    """
+    changed_actions = {"add", "replace", "change", "clear"}
+    destructive_actions = {"replace", "change", "clear"}
+    required: set[str] = set()
     low_risk = False
     advanced = False
     approved_override = False
     for part in plan["parts"]:
         state = part["target_state"]
-        actions = [
+        property_actions = {
             item["action"]
-            for item in part["properties"] + part["approval"] + part["files"]
-        ]
-        actions.append(part["bom"]["action"])
-        actual = {action for action in actions if action in {"add", "replace", "change", "clear"}}
-        if not actual:
+            for item in part["properties"] + part["approval"]
+        } & changed_actions
+        file_adds = any(item["action"] == "add" for item in part["files"])
+        file_replaces = any(item["action"] == "replace" for item in part["files"])
+        bom_action = part["bom"]["action"]
+        bom_changed = bom_action in {"add", "replace"}
+        if not (property_actions or file_adds or file_replaces or bom_changed):
             continue
+        if state == "new":
+            required.add("parts.create")
+        elif property_actions:
+            required.add("parts.update")
+        if bom_changed:
+            required.add("bom.update")
+        if file_adds:
+            required.add("files.add")
+        if file_replaces:
+            required.add("files.replace")
         if state == "existing_approved":
             advanced = approved_override = True
-        elif state == "existing_unapproved" and actual.intersection({"replace", "change", "clear"}):
+        elif state == "existing_unapproved" and (
+            property_actions & destructive_actions
+            or file_replaces
+            or bom_action == "replace"
+        ):
             advanced = True
         else:
             low_risk = True
-    required = []
+    if not (low_risk or advanced or approved_override):
+        # A plan with zero effects is still an execution request whose response
+        # discloses plan details, so it must not bypass the import tiers.
+        low_risk = True
     if low_risk:
-        required.append("imports.execute_low_risk")
+        required.add("imports.execute_low_risk")
     if advanced:
-        required.append("imports.execute_approved")
+        required.add("imports.execute_approved")
     if approved_override:
-        required.append("imports.override_approved")
-    plan["required_permissions"] = required
-    return required
+        required.add("imports.override_approved")
+    plan["required_permissions"] = sorted(required)
+    return plan["required_permissions"]
 def _public_plan(
     plan: dict[str, Any],
     *,
@@ -1194,7 +1205,6 @@ def execute_import_plan(
     *,
     uploaded_by: str = "",
     seed_tag: str = "upload-pack",
-    scan_artifacts: bool = False,
     generate_thumbs: bool = True,
 ) -> dict[str, Any]:
     """Execute only effects already selected in the authorised plan."""
@@ -1258,13 +1268,15 @@ def execute_import_plan(
             for item in staged
             if item["file"]["kind"] == "managed"
         }
-        fallback = False
-        fallback_upserted = 0
-        if scan_artifacts and not plan["_parsed"]["files"] and changed_pairs:
-            fallback = True
-            plan["_parsed"]["diagnostics"]["storage_scan_fallback"] = True
+        # BOM-only packs (the addin's Create BOM / Upload pack output) carry no
+        # deliverables; the matching files already live in storage, so every
+        # imported part reconciles its file records from a storage scan —
+        # including re-imports whose part data is already up to date.
+        files_discovered = 0
+        if not plan["_parsed"]["files"] and plan["parts"]:
             records = []
-            for pn, rev in changed_pairs:
+            for entry in plan["parts"]:
+                pn, rev = entry["part_number"], entry["revision"]
                 part = plan["_state"]["parts"].get((pn, rev))
                 for (group, drawing), record in discover_part_files(
                     pn,
@@ -1280,7 +1292,7 @@ def execute_import_plan(
                             **record,
                         }
                     )
-            fallback_upserted = int(upsert_part_files_detailed(records).get("count") or 0)
+            files_discovered = int(upsert_part_files_detailed(records).get("count") or 0)
         thumb_pairs = managed_changed if generate_thumbs else set()
         thumbnails = generate_thumbs_for_parts(sorted(thumb_pairs)) if thumb_pairs else 0
         return {
@@ -1288,105 +1300,20 @@ def execute_import_plan(
             "parts_updated": parts_updated,
             "links_created": links_created,
             "files_written": len(staged),
-            "artifacts_added": sum(item["file"]["kind"] == "managed" for item in staged)
-            + fallback_upserted,
-            "extra_files_written": sum(item["file"]["kind"] == "associated" for item in staged),
+            "managed_files_written": sum(item["file"]["kind"] == "managed" for item in staged),
+            "associated_files_written": sum(item["file"]["kind"] == "associated" for item in staged),
+            "files_discovered": files_discovered,
             "thumbnails_generated": int(thumbnails or 0),
-            "thumbnails_built": int(thumbnails or 0),
-            "storage_scan_fallback": fallback,
             "materialized_part_saves": len(changed_pairs),
         }
     finally:
         shutil.rmtree(stage_root, ignore_errors=True)
-def _legacy_report(
-    plan: dict[str, Any],
-    public: dict[str, Any],
-    metrics: dict[str, Any],
-    filename: str,
-) -> dict[str, Any]:
-    changed = {"add", "replace", "change", "clear"}
-    def legacy_bom(entry):
-        changes = entry["bom"]["changes"]
-        return {
-            "added": [
-                {
-                    "part_number": item["part_number"],
-                    "revision": item["revision"],
-                    "qty": item["after_qty"],
-                }
-                for item in changes
-                if item.get("planned_action", item["action"]) == "add"
-            ],
-            "removed": [
-                {
-                    "part_number": item["part_number"],
-                    "revision": item["revision"],
-                    "qty": item["before_qty"],
-                }
-                for item in changes
-                if item.get("planned_action", item["action"]) == "remove"
-            ],
-            "qty_changed": [
-                item
-                for item in changes
-                if item.get("planned_action", item["action"]) == "quantity_change"
-            ],
-        }
-    modified = [
-        {
-            "part_number": entry["part_number"],
-            "revision": entry["revision"],
-            "data_changes": [
-                {
-                    "scope": "part",
-                    "field": item["field_id"],
-                    "before": item["before"],
-                    "after": item["after"],
-                    "action": item["action"],
-                }
-                for item in entry["properties"] + entry["approval"]
-                if item["action"] in changed
-            ],
-            "bom_changes": legacy_bom(entry)
-            if entry["bom"]["action"] in {"add", "replace"}
-            else None,
-            "file_changes": [
-                {
-                    "part_number": entry["part_number"],
-                    "revision": entry["revision"],
-                    "kind": "deliverable" if item["kind"] == "managed" else "extra_file",
-                    "name": item["name"],
-                    "action": "updated" if item["action"] == "replace" else "added",
-                }
-                for item in entry["files"]
-                if item["action"] in changed
-            ],
-        }
-        for entry in public["parts"]
-        if entry["target_state"] != "new" and entry["changed"]
+def _changed_existing_pairs(plan: dict[str, Any]) -> list[tuple[str, str]]:
+    return [
+        (entry["part_number"], entry["revision"])
+        for entry in plan["parts"]
+        if entry["changed"] and entry["target_state"] != "new"
     ]
-    diagnostics = plan["_parsed"]["diagnostics"]
-    root = plan["_parsed"]["root"] or ("", "")
-    return {
-        **diagnostics,
-        "zip": filename,
-        "root": root[0],
-        "root_rev": root[1],
-        "override_mode": plan["options"]["override_mode"],
-        "parts_created": metrics.get("parts_created", 0),
-        "parts_updated": metrics.get("parts_updated", 0),
-        "links_created": metrics.get("links_created", 0),
-        "artifacts_added": metrics.get("artifacts_added", 0),
-        "thumbnails_generated": metrics.get("thumbnails_generated", 0),
-        "thumbnails_built": metrics.get("thumbnails_built", 0),
-        "warnings": diagnostics["warnings"],
-        "errors": diagnostics["errors"],
-        "approval_integrity_warnings": public["approval_integrity_warnings"],
-        "bom_integrity_status": diagnostics["bom_integrity_status"],
-        "modified_parts": modified,
-        "modified_parts_count": len(modified),
-        **metrics,
-    }
 def import_upload_pack(
     file_bytes: bytes,
     filename: str,
@@ -1396,19 +1323,22 @@ def import_upload_pack(
     strict_structure: bool = False,
     allow_extra: bool = True,
     seed_tag: str = "upload-pack",
-    override_mode: str = DEFAULT_OVERRIDE_MODE,
     data_mode: str | None = None,
     bom_mode: str | None = None,
     file_mode: str | None = None,
     approval_mode: str | None = None,
     actor_permissions: set[str] | None = None,
-    scan_artifacts: bool = False,
+    scope_check: Any = None,
     generate_thumbs: bool = True,
 ) -> dict[str, Any]:
-    """Parse once, load once, plan once and optionally execute that plan."""
+    """Parse once, load once, plan once and optionally execute that plan.
+
+    ``scope_check`` receives the exact existing ``(part_number, revision)``
+    pairs the plan mutates and returns the subset outside the caller's
+    mutable scope; a non-empty result blocks the apply.
+    """
     started = time.perf_counter()
     options = _policy_options(
-        override_mode=override_mode,
         data_mode=data_mode,
         bom_mode=bom_mode,
         file_mode=file_mode,
@@ -1431,25 +1361,30 @@ def import_upload_pack(
             raise ImportPermissionError(preview_missing)
         if not dry_run and public["missing_permissions"]:
             raise ImportPermissionError(public["missing_permissions"])
+    if not dry_run and scope_check is not None:
+        mutated = _changed_existing_pairs(plan)
+        denied = list(scope_check(mutated)) if mutated else []
+        if denied:
+            raise ImportScopeError(denied)
     metrics: dict[str, Any] = {}
     if not dry_run:
         metrics = execute_import_plan(
             plan,
             uploaded_by=uploaded_by,
             seed_tag=seed_tag,
-            scan_artifacts=scan_artifacts,
             generate_thumbs=generate_thumbs,
         )
-    legacy = _legacy_report(plan, public, metrics, filename)
     elapsed = time.perf_counter() - started
     capabilities = {
         permission: actor_permissions is None or permission in actor_permissions
         for permission in sorted(IMPORT_PERMISSIONS)
     }
+    root = parsed["root"] or ("", "")
     return {
         "zip": filename,
         "dry_run": bool(dry_run),
-        "override_mode": options["override_mode"],
+        "root": root[0],
+        "root_rev": root[1],
         "options": public["options"],
         "plan": public,
         "required_permissions": public["required_permissions"],
@@ -1457,36 +1392,20 @@ def import_upload_pack(
         "allowed": public["allowed"],
         "blocked_change_count": public["blocked_change_count"],
         "capabilities": capabilities,
-        "items": [
-            {
-                "pn": item["part_number"],
-                "rev": item["revision"],
-                "imported": not dry_run and item["changed"],
-                "warnings": item["approval_integrity_warnings"],
-            }
-            for item in public["parts"]
-        ],
         "warnings": parsed["diagnostics"]["warnings"],
-        "import": legacy,
+        "errors": parsed["diagnostics"]["errors"],
+        "metrics": metrics,
         "timings": {
             "parse_s": parsed["parse_elapsed_s"],
             "total_s": elapsed,
         },
         "diagnostics": {
+            **{
+                key: value
+                for key, value in parsed["diagnostics"].items()
+                if key not in {"warnings", "errors"}
+            },
             "query_count": state["query_count"],
-            "zip_open_count": parsed["diagnostics"]["zip_open_count"],
-            "flatbom_parse_count": parsed["diagnostics"]["flatbom_parse_count"],
-            "treebom_parse_count": parsed["diagnostics"]["treebom_parse_count"],
-            "storage_scan_fallback": metrics.get("storage_scan_fallback", False),
             "materialized_part_saves": metrics.get("materialized_part_saves", 0),
         },
-        "deliverables_written": sum(
-            item["action"] in {"add", "replace"}
-            for entry in public["parts"]
-            for item in entry["files"]
-            if item["kind"] == "managed"
-        )
-        if not dry_run
-        else 0,
-        "extra_files_written": metrics.get("extra_files_written", 0),
     }

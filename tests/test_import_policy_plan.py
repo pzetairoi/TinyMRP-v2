@@ -13,7 +13,14 @@ from app.services.upload_pack import ImportPermissionError, import_upload_pack
 
 
 PREVIEW = {"imports.preview"}
-LOW = PREVIEW | {"imports.execute_low_risk"}
+RESOURCE_WRITES = {
+    "parts.create",
+    "parts.update",
+    "bom.update",
+    "files.add",
+    "files.replace",
+}
+LOW = PREVIEW | {"imports.execute_low_risk"} | RESOURCE_WRITES
 MANAGER = LOW | {"imports.execute_approved", "imports.override_approved"}
 
 
@@ -40,7 +47,6 @@ def _run(data, *, dry_run=True, permissions=MANAGER, **options):
         "policy.zip",
         dry_run=dry_run,
         actor_permissions=set(permissions),
-        scan_artifacts=False,
         generate_thumbs=False,
         **options,
     )
@@ -61,16 +67,19 @@ def test_preview_is_no_write_single_parse_and_batched_state_load(app):
         approval_mode="preserve",
     )
 
-    assert result["required_permissions"] == ["imports.execute_low_risk"]
+    assert result["required_permissions"] == [
+        "files.add",
+        "imports.execute_low_risk",
+        "parts.create",
+    ]
     assert result["allowed"] is True
-    assert result["diagnostics"] == {
-        "query_count": 4,
-        "zip_open_count": 1,
-        "flatbom_parse_count": 1,
-        "treebom_parse_count": 1,
-        "storage_scan_fallback": False,
-        "materialized_part_saves": 0,
-    }
+    diagnostics = result["diagnostics"]
+    assert diagnostics["query_count"] == 4
+    assert diagnostics["zip_open_count"] == 1
+    assert diagnostics["flatbom_parse_count"] == 1
+    assert diagnostics["treebom_parse_count"] == 1
+    assert diagnostics["materialized_part_saves"] == 0
+    assert "storage_scan_fallback" not in diagnostics
     assert Part.objects(part_number="PLAN-NEW", revision="A").first() is None
     assert PartFile.objects(part_number="PLAN-NEW", revision="A").count() == 0
 
@@ -95,7 +104,10 @@ def test_property_replacement_uses_advanced_permission_and_apply_keeps_redline(a
     preview = _run(data, data_mode="replace_unapproved")
     entry = preview["plan"]["parts"][0]
 
-    assert preview["required_permissions"] == ["imports.execute_approved"]
+    assert preview["required_permissions"] == [
+        "imports.execute_approved",
+        "parts.update",
+    ]
     assert {item["action"] for item in entry["properties"]} >= {"replace"}
     with pytest.raises(ImportPermissionError):
         _run(data, dry_run=False, permissions=LOW, data_mode="replace_unapproved")
@@ -129,8 +141,10 @@ def test_any_approved_target_mutation_requires_both_advanced_capabilities(app, t
     )
 
     assert preview["required_permissions"] == [
+        "files.add",
         "imports.execute_approved",
         "imports.override_approved",
+        "parts.update",
     ]
     assert preview["missing_permissions"] == [
         "imports.execute_approved",
@@ -170,8 +184,10 @@ def test_bom_modes_are_independent_and_show_add_remove_quantity_redline(app):
     planned = {item.get("planned_action", item["action"]) for item in parent["bom"]["changes"]}
     assert planned == {"add", "remove"}
     assert replaced["required_permissions"] == [
-        "imports.execute_low_risk",
+        "bom.update",
         "imports.execute_approved",
+        "imports.execute_low_risk",
+        "parts.create",
     ]
 
 
@@ -218,7 +234,10 @@ def test_managed_and_associated_files_share_collision_policy(app, tmp_path):
     assert {item["action"] for item in replace["plan"]["parts"][0]["files"]} == {
         "replace"
     }
-    assert replace["required_permissions"] == ["imports.execute_approved"]
+    assert replace["required_permissions"] == [
+        "files.replace",
+        "imports.execute_approved",
+    ]
 
 
 def test_configured_custom_field_and_approval_aliases_are_logical_redline_fields(app):
@@ -281,34 +300,246 @@ def test_conflicting_approval_aliases_are_conservative_and_visible(app):
     assert entry["blocked"] is True
 
 
-@pytest.mark.parametrize(
-    ("legacy", "expected"),
-    [
-        (
-            "preserve",
-            ("fill_blanks", "fill_if_empty", "add_missing", "preserve"),
-        ),
-        (
-            "unless_existing_approved",
-            (
-                "replace_unapproved",
-                "replace_unapproved",
-                "replace_unapproved",
-                "preserve",
-            ),
-        ),
-        ("always", ("replace_all", "replace_all", "replace_all", "replace_all")),
-    ],
-)
-def test_legacy_override_translation_remains_visible(app, legacy, expected):
-    result = _run(
-        _pack([{"partnumber": f"LEGACY-{legacy}", "revision": "A"}]),
-        override_mode=legacy,
+def test_default_policies_are_fill_only_and_invalid_modes_are_rejected(app):
+    result = _run(_pack([{"partnumber": "PLAN-DEFAULTS", "revision": "A"}]))
+    assert result["options"] == {
+        "data_mode": "fill_blanks",
+        "bom_mode": "fill_if_empty",
+        "file_mode": "add_missing",
+        "approval_mode": "preserve",
+    }
+    with pytest.raises(ValueError, match="invalid data_mode"):
+        _run(_pack([{"partnumber": "PLAN-BAD", "revision": "A"}]), data_mode="always")
+
+
+def test_blank_revision_targets_are_exact(app):
+    Part(part_number="PLAN-BLANK", revision="", description="Existing").save()
+    Part(part_number="PLAN-BLANK", revision="B", description="Other rev").save()
+    data = _pack(
+        [{"partnumber": "PLAN-BLANK", "revision": "", "material": "Steel"}],
+        [("1", "PLAN-BLANK", "", 1)],
     )
-    options = result["options"]
+
+    applied = _run(data, dry_run=False, data_mode="fill_blanks")
+
+    assert [
+        (item["part_number"], item["revision"]) for item in applied["plan"]["parts"]
+    ] == [("PLAN-BLANK", "")]
+    blank = Part.objects.get(part_number="PLAN-BLANK", revision="")
+    other = Part.objects.get(part_number="PLAN-BLANK", revision="B")
+    assert blank.attrs.get("material") == "Steel"
+    assert other.attrs.get("material") is None
+
+
+def test_duplicate_equal_aliases_consolidate_and_conflicts_block(app):
+    equal = _run(
+        _pack(
+            [
+                {
+                    "partnumber": "PLAN-DUP-EQ",
+                    "revision": "A",
+                    "material": "Steel",
+                    "Material": "Steel",
+                }
+            ]
+        )
+    )
+    material = next(
+        item
+        for item in equal["plan"]["parts"][0]["properties"]
+        if item["field_id"] == "material"
+    )
+    assert material["action"] == "add"
+    assert material["after"] == "Steel"
+
+    conflict = _run(
+        _pack(
+            [
+                {
+                    "partnumber": "PLAN-DUP-NE",
+                    "revision": "A",
+                    "material": "Steel",
+                    "Material": "Aluminium",
+                }
+            ]
+        )
+    )
+    conflicted = next(
+        item
+        for item in conflict["plan"]["parts"][0]["properties"]
+        if item["field_id"] == "material"
+    )
+    assert conflicted["after"] == "Steel"
+    assert list(conflicted.get("alias_conflicts") or {}) == ["Material"]
+    assert "Conflicting duplicate aliases" in conflicted["reason"]
+
+
+def test_empty_parent_bom_fill_and_approved_bom_replacement(app):
+    Part(part_number="PLAN-EMPTY-PARENT", revision="A").save()
+    fill_data = _pack(
+        [
+            {"partnumber": "PLAN-EMPTY-PARENT", "revision": "A"},
+            {"partnumber": "PLAN-CHILD", "revision": "A"},
+        ],
+        [
+            ("1", "PLAN-EMPTY-PARENT", "A", 1),
+            ("1.1", "PLAN-CHILD", "A", 4),
+        ],
+    )
+    applied = _run(fill_data, dry_run=False, bom_mode="fill_if_empty")
+    parent = next(
+        item
+        for item in applied["plan"]["parts"]
+        if item["part_number"] == "PLAN-EMPTY-PARENT"
+    )
+    assert parent["bom"]["action"] == "add"
+    links = list(BOMLink.objects(parent_pn="PLAN-EMPTY-PARENT", parent_rev="A"))
+    assert [(link.child_pn, link.child_rev, link.qty) for link in links] == [
+        ("PLAN-CHILD", "A", 4.0)
+    ]
+
+    Part(
+        part_number="PLAN-APPROVED-BOM",
+        revision="A",
+        attrs={"approved_by": "QA"},
+    ).save()
+    BOMLink(
+        parent_pn="PLAN-APPROVED-BOM",
+        parent_rev="A",
+        child_pn="OLD",
+        child_rev="A",
+        qty=1,
+    ).save()
+    replace_data = _pack(
+        [
+            {"partnumber": "PLAN-APPROVED-BOM", "revision": "A"},
+            {"partnumber": "PLAN-CHILD", "revision": "A"},
+        ],
+        [
+            ("1", "PLAN-APPROVED-BOM", "A", 1),
+            ("1.1", "PLAN-CHILD", "A", 2),
+        ],
+    )
+    blocked = _run(replace_data, bom_mode="replace_unapproved", data_mode="skip")
+    approved_entry = next(
+        item
+        for item in blocked["plan"]["parts"]
+        if item["part_number"] == "PLAN-APPROVED-BOM"
+    )
+    assert approved_entry["bom"]["action"] == "blocked"
+
+    with pytest.raises(ImportPermissionError):
+        _run(
+            replace_data,
+            dry_run=False,
+            permissions=LOW,
+            bom_mode="replace_all",
+            data_mode="skip",
+        )
+    allowed = _run(replace_data, dry_run=False, bom_mode="replace_all", data_mode="skip")
+    entry = next(
+        item
+        for item in allowed["plan"]["parts"]
+        if item["part_number"] == "PLAN-APPROVED-BOM"
+    )
+    assert entry["bom"]["action"] == "replace"
+    links = list(BOMLink.objects(parent_pn="PLAN-APPROVED-BOM", parent_rev="A"))
+    assert [(link.child_pn, link.child_rev) for link in links] == [("PLAN-CHILD", "A")]
+
+
+def test_bom_only_package_discovers_existing_storage_files_for_all_parts(app, tmp_path):
+    app.config["FILE_SOURCES"] = [
+        {"local_root": str(tmp_path), "url_prefix": "/deliverables"}
+    ]
+    (tmp_path / "pdf").mkdir()
+    (tmp_path / "pdf" / "PLAN-NO-FILES_REV_A.pdf").write_bytes(b"root pdf")
+    (tmp_path / "pdf" / "PLAN-NO-FILES-CHILD_REV_A.pdf").write_bytes(b"child pdf")
+    data = _pack(
+        [
+            {"partnumber": "PLAN-NO-FILES", "revision": "A", "material": "Steel"},
+            {"partnumber": "PLAN-NO-FILES-CHILD", "revision": "A"},
+        ],
+        [
+            ("1", "PLAN-NO-FILES", "A", 1),
+            ("1.1", "PLAN-NO-FILES-CHILD", "A", 2),
+        ],
+    )
+
+    with app.app_context():
+        applied = _run(data, dry_run=False)
+
+    assert applied["metrics"]["files_written"] == 0
+    assert applied["metrics"]["files_discovered"] == 2
+    assert PartFile.objects(part_number="PLAN-NO-FILES", ext_group="pdf").count() == 1
+    assert PartFile.objects(part_number="PLAN-NO-FILES-CHILD", ext_group="pdf").count() == 1
+    assert PartExtraFile.objects(part_number="PLAN-NO-FILES").count() == 0
+    part = Part.objects.get(part_number="PLAN-NO-FILES", revision="A")
+    assert part.attrs.get("material") == "Steel"
+    links = list(BOMLink.objects(parent_pn="PLAN-NO-FILES", parent_rev="A"))
+    assert [(link.child_pn, link.qty) for link in links] == [
+        ("PLAN-NO-FILES-CHILD", 2.0)
+    ]
+
+    # Re-importing the identical pack changes no part data, yet still
+    # reconciles file records against storage.
+    (tmp_path / "step").mkdir()
+    (tmp_path / "step" / "PLAN-NO-FILES-CHILD_REV_A.step").write_bytes(b"child step")
+    with app.app_context():
+        reapplied = _run(data, dry_run=False)
+    assert reapplied["metrics"]["parts_created"] == 0
+    assert reapplied["metrics"]["parts_updated"] == 0
+    assert reapplied["metrics"]["files_discovered"] >= 1
     assert (
-        options["data_mode"],
-        options["bom_mode"],
-        options["file_mode"],
-        options["approval_mode"],
-    ) == expected
+        PartFile.objects(part_number="PLAN-NO-FILES-CHILD", ext_group="step").count()
+        == 1
+    )
+
+
+def test_scope_check_blocks_out_of_scope_existing_targets(app):
+    Part(part_number="PLAN-SCOPED", revision="A", description="Existing").save()
+    data = _pack(
+        [
+            {
+                "partnumber": "PLAN-SCOPED",
+                "revision": "A",
+                "description": "Replacement",
+            }
+        ]
+    )
+
+    from app.services.upload_pack import ImportScopeError
+
+    with pytest.raises(ImportScopeError):
+        _run(
+            data,
+            dry_run=False,
+            data_mode="replace_unapproved",
+            scope_check=lambda pairs: list(pairs),
+        )
+    part = Part.objects.get(part_number="PLAN-SCOPED", revision="A")
+    assert part.description == "Existing"
+
+
+def test_noop_plan_still_requires_low_risk_tier_to_apply(app):
+    Part(part_number="PLAN-NOOP", revision="A", description="Same").save()
+    data = _pack(
+        [{"partnumber": "PLAN-NOOP", "revision": "A", "description": "Same"}]
+    )
+
+    preview = _run(data)
+    assert preview["required_permissions"] == ["imports.execute_low_risk"]
+    assert all(
+        entry["properties"] == [] or
+        all(item["action"] not in {"add", "replace", "change", "clear"}
+            for item in entry["properties"])
+        for entry in preview["plan"]["parts"]
+    )
+
+    with pytest.raises(ImportPermissionError):
+        _run(data, dry_run=False, permissions=set())
+    with pytest.raises(ImportPermissionError):
+        _run(data, dry_run=False, permissions=RESOURCE_WRITES)
+
+    applied = _run(data, dry_run=False, permissions=LOW)
+    assert applied["metrics"]["parts_created"] == 0
+    assert applied["metrics"]["parts_updated"] == 0

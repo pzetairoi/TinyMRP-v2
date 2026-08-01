@@ -416,19 +416,16 @@ def filter_part_custom_fields(
     user: Any,
     payload: Mapping[str, Any] | None,
     *,
-    configured_fields: Mapping[str, Any] | None = None,
     context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(payload, Mapping) or response_context(
         "parts", user, context=context
     ) != "internal" or not (_has(user, "parts.update") or _has(user, "bom.update")):
         return {}
-    allowed = {str(key).strip().lower() for key in (configured_fields or {})}
     return {
         str(key): deepcopy(value)
         for key, value in payload.items()
-        if str(key).strip().lower() in allowed
-        and not any(token in str(key).lower() for token in _SENSITIVE_TOKENS)
+        if not any(token in str(key).lower() for token in _SENSITIVE_TOKENS)
     }
 
 
