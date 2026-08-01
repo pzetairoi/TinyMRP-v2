@@ -33,7 +33,15 @@ def _auth_headers(token: str) -> dict:
 
 def test_customer_viewer_scoping_api(client, app):
     with app.app_context():
-        role = _role("viewer", ["jobs.view", "orders.view", "items.view"])
+        role = _role("viewer", [
+            "jobs.read",
+            "orders.read",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ])
         user = _user("cust.viewer@example.com", role)
         cust1 = Customer(name="Cust A", users=[user]).save()
         cust2 = Customer(name="Cust B").save()
@@ -70,7 +78,15 @@ def test_customer_viewer_scoping_api(client, app):
 
 def test_supplier_viewer_scoping_api(client, app):
     with app.app_context():
-        role = _role("viewer", ["jobs.view", "orders.view", "items.view"])
+        role = _role("viewer", [
+            "jobs.read",
+            "orders.read",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ])
         user = _user("supp.viewer@example.com", role)
         supp1 = Supplier(name="Supp A", users=[user]).save()
         supp2 = Supplier(name="Supp B").save()
@@ -100,7 +116,15 @@ def test_supplier_viewer_scoping_api(client, app):
 
 def test_internal_role_unscoped(client, app):
     with app.app_context():
-        role = _role("planner", ["jobs.view", "orders.view", "items.view"])
+        role = _role("planner", [
+            "jobs.read",
+            "orders.read",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ])
         user = _user("planner@example.com", role)
         cust = Customer(name="Cust Z").save()
         supp = Supplier(name="Supp Z").save()

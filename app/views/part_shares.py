@@ -416,7 +416,7 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
         "part_detail_summary",
         extra={"part_number": part.part_number, "revision": norm_rev, "datasheet": datasheet_summary_url},
     )
-    approval_values = approval_field_values(attrs)
+    approval_values = approval_field_values(attrs, part=part)
     summary_field_values.update(
         {
             "approved": bool(approval_values.get("approved")),

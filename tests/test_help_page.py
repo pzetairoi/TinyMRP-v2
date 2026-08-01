@@ -8,7 +8,13 @@ def _login(client, user):
 
 
 def test_help_page_missing_content(client, app, user, tmp_path):
-    role = Role(name="viewer", permissions=["items.view"]).save()
+    role = Role(name="viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)

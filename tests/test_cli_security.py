@@ -127,11 +127,25 @@ def test_reconciliation_reports_historical_invalid_permissions_without_rewriting
         {
             "name": "historical_custom",
             "description": "Historical role",
-            "permissions": ["items.view", "historical.unknown"],
+            "permissions": [
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "historical.unknown",
+        ],
         }
     )
     historical = Role.objects.get(name="historical_custom")
-    assert historical.permissions == ["items.view", "historical.unknown"]
+    assert historical.permissions == [
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "historical.unknown",
+        ]
 
     runner = app.test_cli_runner()
     report = _result_json(runner.invoke(args=["user", "seed-roles", "--dry-run"]))
@@ -147,7 +161,14 @@ def test_reconciliation_reports_historical_invalid_permissions_without_rewriting
         {"permissions": ["historical.unknown"], "slug": "historical_custom"}
     ]
     historical.reload()
-    assert historical.permissions == ["items.view", "historical.unknown"]
+    assert historical.permissions == [
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "historical.unknown",
+        ]
     historical.description = "Attempted edit"
     with pytest.raises(ValidationError, match="historical.unknown"):
         historical.save()

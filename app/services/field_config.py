@@ -10,7 +10,7 @@ from flask import current_app, g, has_app_context
 
 from app.models.app_settings import AppSettings
 from app.models.part import Part
-from app.services.attrs import ALIASES, approved_value, canonical_attr_key, harvest_part_attrs, normalize_props
+from app.services.attrs import ALIASES, canonical_attr_key, harvest_part_attrs, normalize_props
 from app.services.canonical_fields import (
     approval_rules_from_field_config,
     canonical_alias_entries_from_field_config,
@@ -286,8 +286,12 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Approved",
         "kind": "builtin",
         "data_type": "boolean",
+        # Resolved once on write and read straight back, like approved_by and
+        # approved_date. No alias fallback: a part the resolver has not written
+        # is not approved.
+        "source_path": "part.canonical.approved",
         "source_locked": True,
-        "sortable": False,
+        "sortable": True,
         "filterable": True,
     },
     {
@@ -1420,8 +1424,23 @@ def discover_part_attr_fields() -> List[Dict[str, Any]]:
 
 
 def field_index(config: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+    """Map field id -> field definition.
+
+    Resolving one row's values calls this once per field, so rebuilding the
+    dict every time made a listing O(rows x fields x fields). The index is a
+    pure function of the config, memoized per request on the config's identity
+    so an edited config (a new object) rebuilds on its own.
+    """
+
     config = config or get_field_config()
-    return {field["id"]: field for field in config.get("fields", [])}
+    if has_app_context():
+        cached = getattr(g, "_field_index_cache", None)
+        if cached is not None and cached[0] is config:
+            return cached[1]
+    index = {field["id"]: field for field in config.get("fields", [])}
+    if has_app_context():
+        g._field_index_cache = (config, index)
+    return index
 
 
 def context_config(context_name: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -1670,7 +1689,9 @@ def resolve_part_field_value(
     if field_id == "comments":
         return _coerce_value(annotation_payload(part).get("comments_search"), data_type)
     if field_id == "approved":
-        return bool(approved_value(attrs))
+        # Single source of truth: the boolean written by the import/save
+        # resolver. Re-deriving it from attrs here let the two disagree.
+        return bool((getattr(part, "canonical", None) or {}).get("approved"))
     if field_id == "datasheet":
         datasheet_url = datasheet_url_from_attrs(attrs)
         if datasheet_url:

@@ -13,7 +13,6 @@ from app.models.part import Part
 from app.models.supplier import Supplier
 from app.services.permissions import (
     CANONICAL_PERMISSION_IDENTIFIERS,
-    LEGACY_PERMISSION_IDENTIFIERS,
 )
 from app.services.rls_demo import (
     PERMISSION_TEST_ROLE_SCENARIOS,
@@ -66,7 +65,7 @@ def _access_actor(*permissions):
     return _user(f"access-{uuid.uuid4().hex}@example.com", [role])
 
 
-def test_admin_permission_editor_uses_complete_registry_and_separates_legacy(
+def test_admin_permission_editor_offers_only_enforced_permissions(
     client,
     app,
 ):
@@ -83,10 +82,11 @@ def test_admin_permission_editor_uses_complete_registry_and_separates_legacy(
         assert (
             f'value="{permission}" data-permission-kind="canonical"' in body
         )
-    assert "Legacy compatibility permissions" in body
-    assert "New roles should normally use canonical permissions." in body
-    for permission in LEGACY_PERMISSION_IDENTIFIERS:
-        assert f'value="{permission}" data-permission-kind="legacy"' in body
+    # The role editor no longer offers the coarse legacy identifiers: they
+    # gate no endpoint of their own and only existed for the retired demo
+    # role system. They stay accepted by the registry for stored roles.
+    assert "Legacy compatibility permissions" not in body
+    assert 'data-permission-kind="legacy"' not in body
     assert "data-permission-action=\"read\"" in body
     assert not hasattr(admin_roles, "PERMISSIONS")
     assert "endsWith(\".read\")" in client.get(

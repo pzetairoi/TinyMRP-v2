@@ -210,7 +210,7 @@ def test_upload_pack_size_cap(monkeypatch):
         SECURITY_PASSWORD_SALT="test-salt",
     )
     app.config["UPLOAD_PACK_MAX_ZIP_MB"] = 1
-    role = Role(name="importer", permissions=["import.bom"]).save()
+    role = Role(name="importer", permissions=["imports.execute_low_risk", "imports.preview"]).save()
     user = User(email="uploader@example.com", password="x", active=True, fs_uniquifier="u3", roles=[role]).save()
     client = app.test_client()
     _login_session(client, user)

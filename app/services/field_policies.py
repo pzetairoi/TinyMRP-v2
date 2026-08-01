@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from copy import deepcopy
+from functools import lru_cache
 from typing import Any
 
 _logger = logging.getLogger("tinymrp.field_policies")
@@ -37,6 +38,9 @@ _READ_PERMISSION = {
     "customers": "customers.read", "suppliers": "suppliers.read",
 }
 
+# ``approved`` is part status, not review metadata: every boundary that may
+# read a part may see whether it is approved. The approver's identity and date
+# stay out of this set and are released separately.
 _PART_BASE = _fields(
     """id key row_key part_number pn revision rev display_code description desc
     status category uom qty total_qty alt_group leaf children level material
@@ -44,7 +48,7 @@ _PART_BASE = _fields(
     has_pdf has_png has_dxf has_step has_edr has_3mf has_ply has_stl
     has_datasheet datasheet field_values classification processes_normalized
     missing_fields deliverables_present deliverables_missing_recommended
-    where_used_count total_qty_used"""
+    where_used_count total_qty_used approved"""
 )
 _PART_EXTERNAL = _PART_BASE - _fields(
     """mass manufacturer mfr_part field_values classification
@@ -288,17 +292,26 @@ def allowed_read_fields(
     return fields
 
 
+@lru_cache(maxsize=4096)
+def _key_is_internally_safe(key: Any) -> bool:
+    """Both inputs are module constants, so the verdict depends only on the key.
+
+    Every row of a listing carries the same keys, so re-scanning each one
+    against every sensitive token was pure repetition.
+    """
+
+    return key not in _INTERNAL_DENIED and not any(
+        token in str(key).lower() for token in _SENSITIVE_TOKENS
+    )
+
+
 def _internal_fields(
     normalized: str,
     user: Any,
     payload: Mapping[str, Any],
     context: Mapping[str, Any] | None,
 ) -> set[str]:
-    fields = {
-        key for key in payload
-        if key not in _INTERNAL_DENIED
-        and not any(token in str(key).lower() for token in _SENSITIVE_TOKENS)
-    }
+    fields = {key for key in payload if _key_is_internally_safe(key)}
     if normalized == "file_metadata":
         fields &= set(_FILE_SAFE)
         if isinstance(context, Mapping) and context.get("markup_source") and (
@@ -322,8 +335,11 @@ def _internal_fields(
             }
         if not (_has(user, "markups.read") or _has(user, "markups.write")):
             fields.discard("uploader_profile")
+        # Approval status is part data: anyone who may read the part must see
+        # whether it is approved, or the badge silently reads "not approved".
+        # Who approved it, and when, stays with reviewers and auditors.
         if not (_has(user, "reviews.approve") or _has(user, "audit.read")):
-            fields -= {"approver_profile", "approved", "approved_date", "approved_by"}
+            fields -= {"approver_profile", "approved_date", "approved_by"}
     elif normalized == "jobs":
         if not _has(user, "customers.read"):
             fields -= {"customer", "customer_id"}

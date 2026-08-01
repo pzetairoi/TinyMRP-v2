@@ -72,7 +72,23 @@ def test_bom_only_import_discovers_attr_named_datasheet_from_storage(app, tmp_pa
 def test_refresh_files_recursive_discovers_attr_named_datasheets(client, app, user, tmp_path):
     role = Role(
         name="datasheet_editor",
-        permissions=["items.view", "items.edit", "parts.read_unreleased"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+            "parts.read_unreleased",
+        ],
     ).save()
     user.roles = [role]
     user.save()
@@ -120,7 +136,13 @@ def test_refresh_files_recursive_discovers_attr_named_datasheets(client, app, us
 
 
 def test_part_detail_uses_protected_datasheet_metadata_only(client, app, user, tmp_path):
-    role = Role(name="datasheet_viewer", permissions=["items.view"]).save()
+    role = Role(name="datasheet_viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)

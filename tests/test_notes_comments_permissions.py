@@ -37,15 +37,34 @@ def test_comment_read_permission_cannot_mutate(client, user):
 def test_notes_update_permissions(client, user):
     viewer_role = Role(
         name="viewer",
-        permissions=["items.view", "parts.read_unreleased", "comments.write"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "parts.read_unreleased",
+            "comments.write",
+        ],
     ).save()
     editor_role = Role(
         name="editor",
         permissions=[
-            "items.view",
-            "items.edit",
-            "parts.read_unreleased",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
             "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+            "parts.read_unreleased",
         ],
     ).save()
 
@@ -81,7 +100,15 @@ def test_notes_update_permissions(client, user):
 def test_notes_and_comments_preserve_attrs_and_keep_search_indexes(client, user):
     viewer_role = Role(
         name="viewer_notes",
-        permissions=["items.view", "parts.read_unreleased", "comments.write"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "parts.read_unreleased",
+            "comments.write",
+        ],
     ).save()
     user.roles = [viewer_role]
     user.save()
@@ -152,7 +179,11 @@ def test_comment_priority_id_and_delete_endpoint(client, user):
     viewer_role = Role(
         name="viewer_comment_delete",
         permissions=[
-            "items.view",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
             "parts.read_unreleased",
             "comments.write",
             "comments.moderate",
@@ -205,7 +236,11 @@ def test_parts_table_exposes_and_filters_pending_review_severity(client, user):
     viewer_role = Role(
         name="viewer_review_filter",
         permissions=[
-            "items.view",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
             "parts.read_unreleased",
             "comments.write",
             "comments.moderate",
@@ -286,7 +321,11 @@ def test_comment_reply_and_priority_edit_endpoints(client, user):
     viewer_role = Role(
         name="viewer_reply",
         permissions=[
-            "items.view",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
             "parts.read_unreleased",
             "comments.write",
             "comments.moderate",

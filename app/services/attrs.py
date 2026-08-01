@@ -44,87 +44,43 @@ REQUIRED_KEYS: Iterable[str] = (
     "spare_part",
 )
 
-def approval_query_keys(*, include_canonical: bool = True, include_legacy: bool = True) -> List[str]:
-    keys: List[str] = []
-    if include_canonical:
-        keys.extend(["canonical.approved", "canonical.approved_by", "field_values.approved", "attrs.approved", "attrs.approved_by"])
-    if include_legacy:
-        keys.extend(["attrs.approvedby", "attrs.is_approved", "attrs.approval_status"])
-    seen = set()
-    out: List[str] = []
-    for key in keys:
-        token = str(key or "").strip()
-        if not token or token in seen:
-            continue
-        seen.add(token)
-        out.append(token)
-    return out
+APPROVAL_QUERY_FIELD = "canonical.approved"
 
 
-def approval_filter_raw(keys: Iterable[str] | None = None, *, approved: bool) -> Dict[str, Any]:
-    fields = [str(key or "").strip() for key in (keys or approval_query_keys()) if str(key or "").strip()]
-    if not fields:
-        return {}
+def approval_filter_raw(*, approved: bool) -> Dict[str, Any]:
+    """Match parts by their stored approval boolean.
 
-    canonical_field = "canonical.approved" if "canonical.approved" in fields else ""
-    fallback_fields = [field for field in fields if field != canonical_field]
-    void_re = approval_void_regex()
-
-    positive_clauses = [
-        {
-            "$and": [
-                {field: {"$exists": True}},
-                {field: {"$nin": [None, False, 0]}},
-                {field: {"$not": void_re}},
-            ]
-        }
-        for field in fallback_fields
-    ]
-    negative_clauses = [
-        condition
-        for field in fallback_fields
-        for condition in ({field: {"$in": [None, False, 0]}}, {field: void_re})
-    ]
-
-    if positive_clauses:
-        fallback_approved: Dict[str, Any] = {"$and": [{"$or": positive_clauses}, {"$nor": negative_clauses}]}
-        fallback_unapproved: Dict[str, Any] = {"$or": [{"$nor": positive_clauses}, {"$or": negative_clauses}]}
-    else:
-        fallback_approved = {"_id": {"$exists": False}}
-        fallback_unapproved = {}
-
-    if not canonical_field:
-        return fallback_approved if approved else fallback_unapproved
+    Approval is resolved once on write (see ``extract_canonical_fields``),
+    which is the only place aliases and blank-ish values are interpreted. Reads
+    are therefore a single indexed equality test: anything not explicitly
+    ``True`` is unapproved, so a part that has never been written by the
+    resolver is fail-closed rather than treated as approved.
+    """
 
     if approved:
+        return {APPROVAL_QUERY_FIELD: True}
+    return {APPROVAL_QUERY_FIELD: {"$ne": True}}
+
+
+def approval_field_values(
+    attrs: Dict[str, Any],
+    *,
+    part: Any = None,
+) -> Dict[str, Any]:
+    """Return the approval triple for a response payload.
+
+    Prefers the boolean already resolved on write. ``attrs`` is only consulted
+    for records that have not been through the resolver yet (previews and
+    import planning), so a stored part and its filters can never disagree.
+    """
+
+    stored = getattr(part, "canonical", None) if part is not None else None
+    if isinstance(stored, dict) and "approved" in stored:
         return {
-            "$or": [
-                {canonical_field: True},
-                {"$and": [{canonical_field: {"$exists": False}}, fallback_approved]},
-            ]
+            "approved": bool(stored.get("approved")),
+            "approved_by": str(stored.get("approved_by") or "").strip(),
+            "approved_date": str(stored.get("approved_date") or "").strip(),
         }
-    return {
-        "$or": [
-            {canonical_field: {"$exists": True, "$ne": True}},
-            {"$and": [{canonical_field: {"$exists": False}}, fallback_unapproved]},
-        ]
-    }
-
-
-def approved_by_value(attrs: Dict[str, Any]) -> Any:
-    return resolve_approval(attrs or {}).get("approved_by") or None
-
-
-def approved_date_value(attrs: Dict[str, Any]) -> Any:
-    return resolve_approval(attrs or {}).get("approved_date") or None
-
-
-def approved_value(attrs: Dict[str, Any]) -> Any:
-    approval = resolve_approval(attrs or {})
-    return approval.get("approved_by") or (True if approval.get("approved") else None)
-
-
-def approval_field_values(attrs: Dict[str, Any]) -> Dict[str, Any]:
     approval = resolve_approval(attrs or {})
     return {
         "approved": bool(approval.get("approved")),
@@ -133,31 +89,26 @@ def approval_field_values(attrs: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# Derived from module-level constants, so these sets never change. Building
+# them per call showed up while normalising a page of parts.
+_APPROVAL_ALIAS_GROUPS: Dict[str, set[str]] = {
+    target: {token for token in map(canonical_attr_key, aliases) if token}
+    for target, aliases in (
+        ("approved", APPROVED_STATUS_ATTR_ALIASES),
+        ("approved_by", APPROVED_BY_ATTR_ALIASES),
+        ("approved_date", APPROVED_DATE_ATTR_ALIASES),
+    )
+}
+
+
 def _normalize_approved_fields(attrs: Dict[str, Any]) -> None:
     if not isinstance(attrs, dict):
         return
     approval = resolve_approval(attrs)
-    groups = {
-        "approved": {
-            canonical_attr_key(alias)
-            for alias in APPROVED_STATUS_ATTR_ALIASES
-            if canonical_attr_key(alias)
-        },
-        "approved_by": {
-            canonical_attr_key(alias)
-            for alias in APPROVED_BY_ATTR_ALIASES
-            if canonical_attr_key(alias)
-        },
-        "approved_date": {
-            canonical_attr_key(alias)
-            for alias in APPROVED_DATE_ATTR_ALIASES
-            if canonical_attr_key(alias)
-        },
-    }
-    preserved: Dict[str, List[Any]] = {key: [] for key in groups}
+    preserved: Dict[str, List[Any]] = {key: [] for key in _APPROVAL_ALIAS_GROUPS}
     for key in list(attrs.keys()):
         token = canonical_attr_key(key)
-        for target, aliases in groups.items():
+        for target, aliases in _APPROVAL_ALIAS_GROUPS.items():
             if token in aliases:
                 value = attrs.pop(key, None)
                 if isinstance(value, (list, tuple, set)):

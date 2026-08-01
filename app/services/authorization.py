@@ -24,8 +24,6 @@ from flask import (
 from flask_login import current_user
 
 from app.services.permissions import (
-    LEGACY_PERMISSION_COMPATIBILITY,
-    LEGACY_PERMISSIONS,
     PERMISSION_REGISTRY,
 )
 
@@ -37,14 +35,12 @@ class AuthorizationDecision:
     permission: str
     resource_type: str = ""
     resource_id: str = ""
-    used_legacy_expansion: bool = False
     used_legacy_admin_bypass: bool = False
 
 
 @dataclass(frozen=True)
 class _PermissionSnapshot:
-    direct: frozenset[str]
-    expanded: frozenset[str]
+    permissions: frozenset[str]
     role_names: frozenset[str]
     role_permissions: tuple[tuple[str, frozenset[str]], ...] = ()
 
@@ -62,7 +58,7 @@ class AuthorizationScopeError(RuntimeError):
     """Raised when a scope policy does not exist for a resource type."""
 
 
-_EMPTY_SNAPSHOT = _PermissionSnapshot(frozenset(), frozenset(), frozenset(), ())
+_EMPTY_SNAPSHOT = _PermissionSnapshot(frozenset(), frozenset(), ())
 _RESOURCE_PERMISSIONS = {
     "parts": "parts.read",
     "jobs": "jobs.read",
@@ -120,19 +116,12 @@ def _build_permission_snapshot(user: Any) -> _PermissionSnapshot:
             if isinstance(permission, str) and permission in PERMISSION_REGISTRY
         }
         direct.update(valid)
-        expanded = set(valid)
-        for permission in valid & LEGACY_PERMISSIONS:
-            expanded.update(LEGACY_PERMISSION_COMPATIBILITY.get(permission, ()))
         if isinstance(name, str) and name:
             role_names.add(name)
-            role_permissions.append((name, frozenset(expanded)))
+            role_permissions.append((name, frozenset(valid)))
 
-    expanded = set(direct)
-    for permission in direct & LEGACY_PERMISSIONS:
-        expanded.update(LEGACY_PERMISSION_COMPATIBILITY.get(permission, ()))
     return _PermissionSnapshot(
-        direct=frozenset(direct),
-        expanded=frozenset(expanded),
+        permissions=frozenset(direct),
         role_names=frozenset(role_names),
         role_permissions=tuple(role_permissions),
     )
@@ -149,12 +138,11 @@ def _permission_snapshot(user: Any) -> _PermissionSnapshot:
     return snapshot
 
 
-def effective_permissions(user: Any, *, include_legacy: bool = True) -> frozenset[str]:
+def effective_permissions(user: Any) -> frozenset[str]:
     """Return the immutable union of all valid permissions assigned to a user."""
 
     try:
-        snapshot = _permission_snapshot(user)
-        return snapshot.expanded if include_legacy else snapshot.direct
+        return _permission_snapshot(user).permissions
     except Exception:
         return frozenset()
 
@@ -175,12 +163,7 @@ def _uses_legacy_admin_bypass(user: Any) -> bool:
     return "admin" in _permission_snapshot(user).role_names
 
 
-def has_permission(
-    user: Any,
-    permission: str,
-    *,
-    include_legacy: bool = True,
-) -> bool:
+def has_permission(user: Any, permission: str) -> bool:
     """Return whether a registered permission is effective for the user."""
 
     if (
@@ -191,23 +174,14 @@ def has_permission(
         return False
     try:
         return _uses_legacy_admin_bypass(user) or permission in effective_permissions(
-            user,
-            include_legacy=include_legacy,
+            user
         )
     except Exception:
         return False
 
 
-def has_any_permission(
-    user: Any,
-    permissions: Iterable[str],
-    *,
-    include_legacy: bool = True,
-) -> bool:
-    return any(
-        has_permission(user, permission, include_legacy=include_legacy)
-        for permission in permissions
-    )
+def has_any_permission(user: Any, permissions: Iterable[str]) -> bool:
+    return any(has_permission(user, permission) for permission in permissions)
 
 
 def _resource_identity(
@@ -229,12 +203,11 @@ def _denied(
     permission: str,
     resource_type: str = "",
     resource_id: str = "",
-    used_legacy_expansion: bool = False,
     used_legacy_admin_bypass: bool = False,
 ) -> AuthorizationDecision:
     decision = AuthorizationDecision(
         False, reason_code, permission, resource_type, resource_id,
-        used_legacy_expansion, used_legacy_admin_bypass,
+        used_legacy_admin_bypass,
     )
     try:
         log_authorization_denial(user, decision)
@@ -261,15 +234,10 @@ def authorise(
     try:
         snapshot = _permission_snapshot(user) if not reason else _EMPTY_SNAPSHOT
         used_admin = not reason and _uses_legacy_admin_bypass(user)
-        used_legacy = (
-            not reason
-            and permission not in snapshot.direct
-            and permission in snapshot.expanded
-        )
-        if not reason and not used_admin and permission not in snapshot.expanded:
+        if not reason and not used_admin and permission not in snapshot.permissions:
             reason = "missing_permission"
     except Exception:
-        reason, used_admin, used_legacy = "authorisation_error", False, False
+        reason, used_admin = "authorisation_error", False
     if reason:
         return _denied(
             user,
@@ -279,8 +247,7 @@ def authorise(
             resource_id=resource_id,
         )
     return AuthorizationDecision(
-        True, "allowed", permission, resource_type, resource_id,
-        used_legacy, used_admin,
+        True, "allowed", permission, resource_type, resource_id, used_admin,
     )
 
 
@@ -311,7 +278,6 @@ def log_authorization_denial(user: Any, decision: AuthorizationDecision) -> None
             "actor_id": actor_id, "permission": decision.permission,
             "reason_code": decision.reason_code, "endpoint": endpoint,
             "method": method,
-            "used_legacy_expansion": decision.used_legacy_expansion,
             "used_legacy_admin_bypass": decision.used_legacy_admin_bypass,
         },
     )
@@ -866,12 +832,15 @@ def _part_resource_id(part_number: Any, revision: Any) -> str:
 
 
 def part_is_released(part: Any) -> bool:
-    """Return the application's canonical approval/release state for a part."""
+    """Return the application's canonical approval/release state for a part.
+
+    Reads the boolean resolved on write, matching ``approval_filter_raw`` so a
+    part visible through a scoped query is never judged differently here. Any
+    other state is unapproved, which fails closed for portal visibility.
+    """
 
     try:
-        from app.services.attrs import approved_value, harvest_part_attrs
-
-        return bool(approved_value(harvest_part_attrs(part)))
+        return bool((getattr(part, "canonical", None) or {}).get("approved"))
     except Exception:
         return False
 
@@ -947,7 +916,6 @@ def authorise_part_access(
             if query.only("id").first() is not None:
                 return AuthorizationDecision(
                     True, "allowed", "parts.read", "part", resource_id,
-                    permission.used_legacy_expansion,
                     permission.used_legacy_admin_bypass,
                 )
     except Exception:
@@ -958,7 +926,6 @@ def authorise_part_access(
         permission="parts.read",
         resource_type="part",
         resource_id=resource_id,
-        used_legacy_expansion=permission.used_legacy_expansion,
         used_legacy_admin_bypass=permission.used_legacy_admin_bypass,
     )
 

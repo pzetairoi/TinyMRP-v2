@@ -14,7 +14,13 @@ def _login(client, user):
 
 
 def test_dashboard_summary_shape(client, user):
-    role = Role(name="viewer", permissions=["items.view"]).save()
+    role = Role(name="viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -43,7 +49,13 @@ def test_dashboard_summary_shape(client, user):
 
 
 def test_dashboard_summary_distinguishes_status_from_identity_placeholders(client, user):
-    role = Role(name="viewer", permissions=["items.view"]).save()
+    role = Role(name="viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)
@@ -64,7 +76,13 @@ def test_dashboard_summary_distinguishes_status_from_identity_placeholders(clien
 
 
 def test_dashboard_recent_parts_include_display_timestamp(client, user):
-    role = Role(name="viewer", permissions=["items.view"]).save()
+    role = Role(name="viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)

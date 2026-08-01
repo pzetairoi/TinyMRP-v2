@@ -512,26 +512,6 @@ function explicitApprovalStatus(value: unknown): boolean | null {
   return null
 }
 
-function approvalStatus(value: unknown): boolean | null {
-  if (value === undefined || value === null) return null
-  if (Array.isArray(value)) {
-    let sawNonEmpty = false
-    for (const item of value) {
-      const status = approvalStatus(item)
-      if (status === false) return false
-      if (status === true) return true
-      if (hasDisplayValue(item)) sawNonEmpty = true
-    }
-    return sawNonEmpty ? true : null
-  }
-
-  const explicit = explicitApprovalStatus(value)
-  if (explicit !== null) return explicit
-  if (typeof value === "string") return value.trim() ? true : null
-  if (typeof value === "number") return value !== 0
-  return null
-}
-
 function approvalIdentityText(value: unknown): string {
   if (value === undefined || value === null) return ""
   if (Array.isArray(value)) {
@@ -2101,41 +2081,24 @@ function isExternalDatasheetUrl(url: string): boolean {
     return rawSummaryValue(fieldId)
   }
 
-  const approvedAliases = useMemo(
-    () => canonicalFieldAliases(fieldConfig, "approved", ["approved"]),
-    [fieldConfig],
-  )
   const approvedByAliases = useMemo(
     () => canonicalFieldAliases(fieldConfig, "approved_by", ["approved_by", "approvedby", "approved"]),
     [fieldConfig],
   )
 
+  // Approval is resolved once server-side on import/save. The client reads
+  // that boolean and never re-derives it from aliases, which is what made the
+  // badge disagree with the filters and with the parts list.
   const approvedInfo = useMemo(() => {
-    const fieldValues = part?.field_values || {}
-    const attrs = part?.attrs || {}
-    const explicitApproved = readRecordValue(fieldValues, "approved")
-    const explicitBoolean = typeof explicitApproved === "boolean" ? explicitApproved : null
-    const attrApprovedValues = collectRecordValues(attrs, approvedAliases)
-    const fieldApprovedBy = readRecordValue(fieldValues, "approved_by")
-    const attrApprovedByValues = collectRecordValues(attrs, approvedByAliases)
-    const identitySource = [fieldApprovedBy, ...attrApprovedByValues].find((value) => !!approvalIdentityText(value))
-    const label = approvalIdentityText(identitySource)
-
-    if (explicitBoolean !== null) {
-      return { approved: explicitBoolean, label: explicitBoolean ? label : "" }
-    }
-
-    const candidates = [explicitApproved, ...attrApprovedValues, fieldApprovedBy, ...attrApprovedByValues]
-    const explicitStatuses = candidates
-      .map((value) => explicitApprovalStatus(value))
-      .filter((value): value is boolean => value !== null)
-
-    if (explicitStatuses.includes(false)) return { approved: false, label: "" }
-    if (explicitStatuses.includes(true)) return { approved: true, label: label || "" }
-
-    const hasApprovalValue = candidates.some((value) => approvalStatus(value) === true)
-    return { approved: hasApprovalValue, label: hasApprovalValue ? label || "" : "" }
-  }, [approvedAliases, approvedByAliases, part])
+    const approved = part?.approved === true
+    if (!approved) return { approved: false, label: "" }
+    const fieldApprovedBy = readRecordValue(part?.field_values || {}, "approved_by")
+    const attrApprovedByValues = collectRecordValues(part?.attrs || {}, approvedByAliases)
+    const identitySource = [fieldApprovedBy, ...attrApprovedByValues].find(
+      (value) => !!approvalIdentityText(value),
+    )
+    return { approved: true, label: approvalIdentityText(identitySource) }
+  }, [approvedByAliases, part])
 
   const uploaderIdentity = useMemo(() => {
     const a = part?.attrs || {}

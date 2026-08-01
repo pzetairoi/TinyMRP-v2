@@ -20,7 +20,24 @@ def _make_zip(flat_txt: str, tree_txt: str) -> bytes:
 
 
 def test_upload_pack_returns_import_report_on_parse_errors(client, app, user, tmp_path):
-    role = Role(name="importer_partial", permissions=["import.bom", "items.view", "items.edit"]).save()
+    role = Role(name="importer_partial", permissions=[
+            "imports.execute_low_risk",
+            "imports.preview",
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "bom.update",
+            "comments.write",
+            "files.add",
+            "files.replace",
+            "markups.write",
+            "numbering.allocate",
+            "parts.create",
+            "parts.revise",
+            "parts.update",
+        ]).save()
     user.roles = [role]
     user.save()
     _login(client, user)

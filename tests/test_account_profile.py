@@ -34,7 +34,18 @@ def _make_user(app, email: str, password: str, roles=None):
 def test_account_home_shows_permissions_and_security_summary(client, app):
     viewer = Role(
         name="account_viewer",
-        permissions=["items.view", "jobs.view", "orders.view", "exports.run", "import.bom"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "jobs.read",
+            "orders.read",
+            "exports.run",
+            "imports.execute_low_risk",
+            "imports.preview",
+        ],
     ).save()
     user = _make_user(app, "account@example.com", "current-password-123", [viewer])
     with app.app_context():
@@ -86,8 +97,8 @@ def test_account_home_shows_permissions_and_security_summary(client, app):
     assert f'href="{part_href}"' in body
     assert f'href="{job_href}"' in body
     assert f'href="{order_href}"' in body
-    assert "items.view" in body
-    assert "jobs.view" in body
+    assert "parts.read" in body
+    assert "jobs.read" in body
     assert "Security Summary" in body
     assert "Change Password" in body
 
@@ -102,7 +113,17 @@ def test_account_home_requires_authentication(client):
 def test_account_home_shows_dashboard_empty_states(client, app):
     viewer = Role(
         name="account_empty_viewer",
-        permissions=["items.view", "jobs.view", "orders.view", "import.bom"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "jobs.read",
+            "orders.read",
+            "imports.execute_low_risk",
+            "imports.preview",
+        ],
     ).save()
     user = _make_user(app, "empty-home@example.com", "current-password-123", [viewer])
 
@@ -118,7 +139,32 @@ def test_account_home_shows_dashboard_empty_states(client, app):
 def test_account_home_respects_dashboard_permissions_and_links(client, app):
     role = Role(
         name="account_tools_importor",
-        permissions=["items.view", "exports.run", "import.bom", "jobs.manage", "orders.manage", "customers.view", "suppliers.view"],
+        permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "exports.run",
+            "imports.execute_low_risk",
+            "imports.preview",
+            "jobs.archive",
+            "jobs.assign",
+            "jobs.bom.update",
+            "jobs.cancel",
+            "jobs.create",
+            "jobs.material.issue",
+            "jobs.read",
+            "jobs.stages.update",
+            "jobs.update",
+            "orders.create",
+            "orders.fulfil",
+            "orders.read",
+            "orders.submit",
+            "orders.update",
+            "customers.read",
+            "suppliers.read",
+        ],
     ).save()
     user = _make_user(app, "actions@example.com", "current-password-123", [role])
 
@@ -146,7 +192,7 @@ def test_account_home_respects_dashboard_permissions_and_links(client, app):
 
 
 def test_account_home_hides_dashboard_sections_without_permissions(client, app):
-    role = Role(name="account_jobs_only", permissions=["jobs.view"]).save()
+    role = Role(name="account_jobs_only", permissions=["jobs.read"]).save()
     user = _make_user(app, "jobs-only@example.com", "current-password-123", [role])
     job = Job(job_number="JOB-ONLY-1", title="Visible job").save()
 
@@ -168,7 +214,7 @@ def test_account_home_hides_dashboard_sections_without_permissions(client, app):
 
 
 def test_account_home_handles_optional_fields_missing(client, app):
-    role = Role(name="account_optional_viewer", permissions=["jobs.view", "orders.view"]).save()
+    role = Role(name="account_optional_viewer", permissions=["jobs.read", "orders.read"]).save()
     user = _make_user(app, "optional@example.com", "current-password-123", [role])
     job = Job(job_number="JOB-OPT-1").save()
     order = Order(order_number="ORD-OPT-1").save()
@@ -235,7 +281,13 @@ def test_account_password_change_updates_password_hash(client, app):
 
 
 def test_part_detail_exposes_resolved_identity_profiles(client, app):
-    viewer = Role(name="identity_viewer", permissions=["items.view"]).save()
+    viewer = Role(name="identity_viewer", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+        ]).save()
     viewer_user = _make_user(app, "viewer@example.com", "viewer-password-123", [viewer])
     owner_user = _make_user(app, "owner@example.com", "owner-password-123")
     with app.app_context():
@@ -282,7 +334,22 @@ def test_recently_visited_counts_manage_edit_route_too(client, app):
     visit too, or "recently visited" would stay empty for anyone who only
     ever creates/edits jobs and orders.
     """
-    role = Role(name="manager_role", permissions=["jobs.manage", "orders.manage"]).save()
+    role = Role(name="manager_role", permissions=[
+            "jobs.archive",
+            "jobs.assign",
+            "jobs.bom.update",
+            "jobs.cancel",
+            "jobs.create",
+            "jobs.material.issue",
+            "jobs.read",
+            "jobs.stages.update",
+            "jobs.update",
+            "orders.create",
+            "orders.fulfil",
+            "orders.read",
+            "orders.submit",
+            "orders.update",
+        ]).save()
     user = _make_user(app, "manager@example.com", "current-password-123", [role])
     job = Job(job_number="JOB-EDIT-1", title="Edited job").save()
     order = Order(order_number="ORD-EDIT-1", description="Edited order").save()
@@ -302,7 +369,15 @@ def test_recently_visited_counts_manage_edit_route_too(client, app):
 
 
 def test_home_prefs_hide_and_resize_recent_lists(client, app):
-    role = Role(name="prefs_role", permissions=["items.view", "jobs.view", "orders.view"]).save()
+    role = Role(name="prefs_role", permissions=[
+            "bom.read",
+            "comments.read",
+            "files.read",
+            "markups.read",
+            "parts.read",
+            "jobs.read",
+            "orders.read",
+        ]).save()
     user = _make_user(app, "prefs@example.com", "current-password-123", [role])
     job = Job(job_number="JOB-PREF-1").save()
 

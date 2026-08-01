@@ -1011,47 +1011,6 @@ def init_app(app):
 
     app.cli.add_command(biz)
 
-    # ---- RLS demo dataset utilities ----
-    import json
-    from app.services.rls_demo import seed_rls_demo, build_visibility_report, smoke_rls_demo
-
-    @click.group()
-    def rlsdemo():
-        """RLS demo dataset utilities."""
-
-    @rlsdemo.command("seed")
-    @click.option("--reset", is_flag=True, help="Delete demo data before seeding.")
-    @click.option("--domain", default="demo.com", show_default=True, help="Email domain for demo users.")
-    @click.option("--password", default=None, help="Optional fixed password for all demo users.")
-    @with_appcontext
-    def rlsdemo_seed(reset, domain, password):
-        data = seed_rls_demo(reset=reset, domain=domain, password=password)
-        out = {
-            "domain": domain,
-            "reset": bool(reset),
-            "users": data.get("users", {}),
-            "tokens": data.get("tokens", {}),
-            "token_path": data.get("token_path", ""),
-        }
-        click.echo(json.dumps(out, indent=2))
-
-    @rlsdemo.command("report")
-    @click.option("--domain", default="demo.com", show_default=True, help="Email domain for demo users.")
-    @with_appcontext
-    def rlsdemo_report(domain):
-        report = build_visibility_report(domain=domain)
-        click.echo(json.dumps(report, indent=2))
-
-    @rlsdemo.command("smoke")
-    @click.option("--domain", default="demo.com", show_default=True, help="Email domain for demo users.")
-    @with_appcontext
-    def rlsdemo_smoke(domain):
-        result = smoke_rls_demo(domain=domain)
-        click.echo(json.dumps(result, indent=2))
-        if isinstance(result, dict) and result.get("ok") is False:
-            raise SystemExit(1)
-
-    app.cli.add_command(rlsdemo)
 
 
 

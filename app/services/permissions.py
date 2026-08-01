@@ -1,8 +1,8 @@
-"""Canonical and transitional permission definitions.
+"""Canonical permission definitions.
 
-Endpoint enforcement remains on the legacy permission strings during Stage 1.
-The compatibility map is intentionally data-only until the central
-authorisation service consumes it in Stage 2.
+Every identifier here gates a real endpoint or UI control. The coarse legacy
+strings that predated this registry were retired with the demo role system
+they served.
 """
 
 from __future__ import annotations
@@ -110,121 +110,8 @@ if len(CANONICAL_PERMISSION_IDENTIFIERS) != len(set(CANONICAL_PERMISSION_IDENTIF
     raise RuntimeError("Canonical permission registry contains duplicate identifiers")
 CANONICAL_PERMISSIONS = frozenset(CANONICAL_PERMISSION_IDENTIFIERS)
 
-# Existing permission strings remain valid while endpoint enforcement is
-# migrated. They are deliberately not aliases in the canonical registry.
-LEGACY_PERMISSION_IDENTIFIERS = (
-    "users.manage",
-    "roles.manage",
-    "settings.manage",
-    "items.view",
-    "items.edit",
-    "bom.view",
-    "bom.edit",
-    "jobs.view",
-    "jobs.manage",
-    "suppliers.view",
-    "suppliers.manage",
-    "customers.view",
-    "customers.manage",
-    "orders.view",
-    "orders.manage",
-    "workorders.view",
-    "workorders.edit",
-    "workorders.close",
-    "inventory.issue",
-    "inventory.receive",
-    "mrp.run",
-    "reports.view",
-    "tools.view",
-    "import.bom",
-)
-if len(LEGACY_PERMISSION_IDENTIFIERS) != len(set(LEGACY_PERMISSION_IDENTIFIERS)):
-    raise RuntimeError("Legacy permission registry contains duplicate identifiers")
-# A permission must live in exactly one registry: the role editor renders the
-# canonical groups and the legacy catalogue separately, so an overlapping
-# identifier is submitted twice and fails duplicate validation on save.
-_OVERLAPPING_REGISTRIES = CANONICAL_PERMISSIONS.intersection(LEGACY_PERMISSION_IDENTIFIERS)
-if _OVERLAPPING_REGISTRIES:
-    raise RuntimeError(
-        "Permission identifiers registered as both canonical and legacy: "
-        + ", ".join(sorted(_OVERLAPPING_REGISTRIES))
-    )
-LEGACY_PERMISSIONS = frozenset(LEGACY_PERMISSION_IDENTIFIERS)
-
-PERMISSION_REGISTRY = CANONICAL_PERMISSIONS | LEGACY_PERMISSIONS
-
-
-# Transitional only. Coarse permissions intentionally do not expand to
-# approval, permanent purge, approved-data override, or unrelated financial
-# authority. This map is consumed by the central service in Stage 2.
-LEGACY_PERMISSION_COMPATIBILITY: dict[str, frozenset[str]] = {
-    "users.manage": frozenset(
-        {
-            "security.users.read",
-            "security.users.manage",
-            "security.assignments.manage",
-        }
-    ),
-    "roles.manage": frozenset({"security.roles.read", "security.roles.manage"}),
-    "settings.manage": frozenset({"system.config.read", "system.config.manage"}),
-    "items.view": frozenset(
-        {
-            "parts.read",
-            "bom.read",
-            "files.read",
-            "comments.read",
-            "markups.read",
-        }
-    ),
-    "items.edit": frozenset(
-        {
-            "parts.create",
-            "parts.update",
-            "parts.revise",
-            "bom.update",
-            "files.add",
-            "files.replace",
-            "comments.write",
-            "markups.write",
-            "numbering.allocate",
-        }
-    ),
-    "bom.view": frozenset({"bom.read"}),
-    "bom.edit": frozenset({"bom.update"}),
-    "import.bom": frozenset({"imports.preview", "imports.execute_low_risk"}),
-    "jobs.view": frozenset({"jobs.read"}),
-    "jobs.manage": frozenset(
-        {
-            "jobs.read",
-            "jobs.create",
-            "jobs.update",
-            "jobs.assign",
-            "jobs.bom.update",
-            "jobs.stages.update",
-            "jobs.material.issue",
-            "jobs.cancel",
-            "jobs.archive",
-        }
-    ),
-    "workorders.view": frozenset({"jobs.read"}),
-    "workorders.edit": frozenset({"jobs.stages.update"}),
-    "workorders.close": frozenset({"jobs.stages.update"}),
-    "inventory.issue": frozenset({"jobs.material.issue"}),
-    "orders.view": frozenset({"orders.read"}),
-    "orders.manage": frozenset(
-        {
-            "orders.read",
-            "orders.create",
-            "orders.update",
-            "orders.submit",
-            "orders.fulfil",
-        }
-    ),
-    "customers.view": frozenset({"customers.read"}),
-    "customers.manage": frozenset({"customers.read", "customers.update"}),
-    "suppliers.view": frozenset({"suppliers.read"}),
-    "suppliers.manage": frozenset({"suppliers.read", "suppliers.update"}),
-}
+# Every registered permission gates a real endpoint or UI control.
+PERMISSION_REGISTRY = CANONICAL_PERMISSIONS
 
 
 class PermissionValidationError(ValueError):
@@ -286,11 +173,11 @@ def validate_permissions(permissions: Iterable[str] | None) -> tuple[str, ...]:
     return values
 
 
-def expand_legacy_permissions(permissions: Iterable[str] | None) -> frozenset[str]:
-    """Return registered permissions plus their transitional implications."""
+def resolve_permissions(permissions: Iterable[str] | None) -> frozenset[str]:
+    """Return the validated set of registered permissions.
 
-    values = validate_permissions(permissions)
-    expanded = set(values)
-    for permission in values:
-        expanded.update(LEGACY_PERMISSION_COMPATIBILITY.get(permission, ()))
-    return frozenset(expanded)
+    Each registered identifier gates one endpoint and never implies another, so
+    resolution is validation alone.
+    """
+
+    return frozenset(validate_permissions(permissions))
