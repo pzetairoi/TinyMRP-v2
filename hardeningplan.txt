@@ -53,11 +53,20 @@ Active workstreams as of 2026-08-03:
     Protected gate: production build, both static and rendered Compose paths,
       fresh bootstrap, all deployment script checks, rendered/live Caddy path.
 
-  P3C-SECRET-SCAN  AVAILABLE FOR PARALLEL CLAIM  owner: none
-    Scope: replace broad generated/docs exclusions with the narrow minimum while
-           keeping intentional fixtures explicit and making full-history scan
-           behavior reproducible. Candidate files: .gitleaks.toml and one new
-           focused contract test only. Do not edit workflow or roadmap files.
+  P3C-SECRET-SCAN  IN PROGRESS  owner: /root/p3b_advisory_triage
+    Scope: restore the upstream default detection rules, replace broad generated/
+           docs exclusions with the narrow minimum, and add focused source
+           contracts. Work in a separate worktree based on 38e2ef0.
+    Reserved files:
+      .gitleaks.toml
+      tests/test_gitleaks_contract.py (new)
+    FINDING The custom config did not extend the upstream defaults and defined
+            no rules of its own, making the prior CI scan vacuous. A full-history
+            reconnaissance also found two high-entropy candidates in a deleted
+            `.env.example` revision; classify without printing values and keep
+            them blocking unless a human confirms rotation/disposition.
+    The workflow owner separately owns checkout `fetch-depth: 0`; this stream
+    must not edit workflow, roadmap, generated assets or application files.
 
 Completed workstream scope:
   P2-STRICT-AUTH  DONE 2026-08-03  owner: Codex /root
