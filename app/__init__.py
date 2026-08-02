@@ -102,7 +102,8 @@ def create_app(config_object=None):
     except Exception:
         logger.warning("Could not load env file(s), continuing without them")
 
-    # Security mode (compat by default)
+    # Security mode is strict by default; compat must be selected explicitly
+    # for local development or a time-bounded migration.
     from app.services.security_mode import security_mode as _security_mode
     security_mode = _security_mode()
     app.config["TINYMRP_SECURITY_MODE"] = security_mode
@@ -562,7 +563,18 @@ def create_app(config_object=None):
             return resp
 
     # CORS handling (dynamic allowlist; safe by default)
-    from app.services.security_mode import resolve_cors_origin, request_has_token, session_csrf_allowed, is_api_request, extract_token_value, is_strict_mode
+    from app.services.security_mode import (
+        API_AUTH_BEARER,
+        API_AUTH_HEALTH,
+        API_AUTH_PUBLIC_SHARE,
+        API_AUTH_SESSION,
+        api_auth_policy,
+        extract_token_value,
+        is_api_request,
+        is_strict_mode,
+        resolve_cors_origin,
+        session_csrf_allowed,
+    )
 
     @app.before_request
     def _cors_preflight():
@@ -594,36 +606,77 @@ def create_app(config_object=None):
                 resp.headers.setdefault("Access-Control-Allow-Credentials", "true")
         return resp
 
-    # Strict mode: /api requires a valid bearer token (no session fallback)
-    from app.services.api_tokens import verify_token, touch_last_used
+    from app.services.api_auth import api_error_response
+    from app.services.api_tokens import touch_last_used, verify_token
 
-    public_api_paths = {"/api/health"}
-
-    def _is_public_api_path(path: str | None) -> bool:
-        normalized = (path or "").rstrip("/")
-        return normalized in public_api_paths
-
-    @app.before_request
-    def _strict_api_token_guard():
-        if not is_strict_mode():
-            return None
-        if not is_api_request(request.path):
-            return None
-        if _is_public_api_path(request.path):
-            return None
-        token_value = extract_token_value()
-        if not token_value:
-            return jsonify({"ok": False, "error": "token_required"}), 401
+    def _authenticate_presented_api_token(token_value: str):
         token = verify_token(token_value)
         if not token:
-            return jsonify({"ok": False, "error": "invalid_token"}), 401
-        g.api_user = token.user_id
+            return None
+        user = token.user_id
+        g.api_user = user
         g.api_token_id = str(token.id)
         touch_last_used(token)
+        # Flask-Login-backed authorization still exists in several integration
+        # endpoints. Populate its request-local user without creating a cookie.
         try:
-            security.login_manager._update_request_context_with_user(token.user_id)
+            security.login_manager._update_request_context_with_user(user)
         except Exception:
-            pass
+            g._login_user = user
+        return user
+
+    @app.before_request
+    def _api_authentication_policy_guard():
+        if not is_api_request(request.path):
+            return None
+        policy = api_auth_policy()
+        if policy in {API_AUTH_HEALTH, API_AUTH_PUBLIC_SHARE}:
+            return None
+
+        token_value = extract_token_value()
+        if token_value:
+            user = _authenticate_presented_api_token(token_value)
+            if not user and is_strict_mode():
+                return api_error_response(
+                    "invalid_token",
+                    "The API bearer token is invalid, expired, or revoked.",
+                )
+
+        if not is_strict_mode():
+            return None
+
+        has_session = bool(
+            getattr(current_user, "is_authenticated", False)
+            and not getattr(g, "api_token_id", None)
+        )
+        has_bearer = bool(getattr(g, "api_token_id", None))
+
+        if policy == API_AUTH_BEARER:
+            if not has_bearer:
+                return api_error_response(
+                    "token_required",
+                    "A valid API bearer token is required.",
+                )
+            return None
+
+        if policy == API_AUTH_SESSION:
+            if has_bearer:
+                return api_error_response(
+                    "session_required",
+                    "This browser API requires an authenticated same-origin session.",
+                )
+            if not has_session:
+                return api_error_response(
+                    "authentication_required",
+                    "Authentication required.",
+                )
+            return None
+
+        if not (has_session or has_bearer):
+            return api_error_response(
+                "authentication_required",
+                "A browser session or valid API bearer token is required.",
+            )
         return None
 
     # Session CSRF guard (origin/referer check for unsafe methods)
@@ -633,14 +686,18 @@ def create_app(config_object=None):
     def _session_csrf_guard():
         if request.method in ("GET", "HEAD", "OPTIONS", "TRACE"):
             return None
-        if request_has_token():
+        if getattr(g, "api_token_id", None):
             return None
         if not getattr(current_user, "is_authenticated", False):
             return None
         if session_csrf_allowed():
             return None
         if is_api_request(request.path):
-            return jsonify({"ok": False, "error": "csrf_failed"}), 400
+            return api_error_response(
+                "csrf_failed",
+                "The request origin did not match this TinyMRP instance.",
+                status=400,
+            )
         return render_template("csrf_error.html", reason="CSRF origin check failed"), 400
 
     try:

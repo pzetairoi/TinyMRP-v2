@@ -186,7 +186,7 @@ FILES_PUBLIC_URLS="false"
 # the normal app route, so Nginx X-Accel-Redirect must remain disabled here.
 FILES_ACCEL_REDIRECT_PREFIX=""
 FLASK_ENV="production"
-TINYMRP_SECURITY_MODE="${TINYMRP_SECURITY_MODE:-compat}"
+TINYMRP_SECURITY_MODE="${TINYMRP_SECURITY_MODE:-strict}"
 INSTANCE_URL="$(primary_url_for_domain "$DOMAIN" "$TLS_MODE")"
 TINYMRP_ALLOWED_ORIGINS="$INSTANCE_URL"
 TINYMRP_CORS_CREDENTIALS="true"

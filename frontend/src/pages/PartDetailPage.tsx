@@ -12,6 +12,7 @@ import "./partdetail.css";
 import FieldSelector from "../components/FieldSelector";
 import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
 import { withBomOccurrenceKeys } from "../lib/bomTree";
+import { apiErrorMessage, apiFetch, readApiResponse } from "../lib/api";
 import type {
   DrawingImageRow,
   MarkupDraft,
@@ -578,6 +579,7 @@ export default function PartDetailPage() {
   const [jobsOrders, setJobsOrders] = useState<JobsOrdersRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [canJobsRead, setCanJobsRead] = useState(false);
   const [canOrdersRead, setCanOrdersRead] = useState(false);
   const [canJobsManage, setCanJobsManage] = useState(false);
@@ -648,6 +650,7 @@ export default function PartDetailPage() {
   type DocOpts = { file_types: string[]; processes: string[]; markup_document_count: number };
   const [docOpts, setDocOpts] = useState<DocOpts>({ file_types: [], processes: [], markup_document_count: 0 });
   const [docLoading, setDocLoading] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
   const [docProgress, setDocProgress] = useState(0);
   const progressTimer = useRef<number | null>(null);
   // Lets the user stop a long docpack compile without leaving the page.
@@ -691,6 +694,7 @@ export default function PartDetailPage() {
   const [bomNodes, setBomNodes] = useState<TreeNode[]>([]);
   const [flatBomRows, setFlatBomRows] = useState<FlatBomRow[]>([]);
   const [flatBomLoading, setFlatBomLoading] = useState(false);
+  const [bomError, setBomError] = useState<string | null>(null);
   const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({});
 
   const effectiveRev = (part?.revision ?? rev ?? "").trim();
@@ -1055,6 +1059,8 @@ function isExternalDatasheetUrl(url: string): boolean {
     let canceled = false;
     (async () => {
       setLoading(true);
+      setForbidden(false);
+      setLoadError(null);
       setRefreshMsg(null);
       setRefreshError(null);
       try {
@@ -1062,9 +1068,11 @@ function isExternalDatasheetUrl(url: string): boolean {
           ? `${shareApiBase}/part_detail?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`
           : `/api/part_detail?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`;
         const r = await fetch(detailUrl);
-        if (r.status === 403) { if (!canceled) { setForbidden(true); } return; }
-        if (!r.ok) throw new Error(await r.text());
-        const j = await r.json();
+        if (r.status === 403) {
+          if (!canceled) setForbidden(true);
+          return;
+        }
+        const j = await readApiResponse<any>(r);
         if (canceled) return;
 
         const partAttrs = j.part?.attributes || j.part?.attrs || {};
@@ -1144,8 +1152,8 @@ function isExternalDatasheetUrl(url: string): boolean {
         setCanExport(!!j.can_export);
         setCanBomRead(!!j.can_bom_read);
       } catch (e) {
-        console.error("part_detail failed", e);
           if (!canceled) {
+            setLoadError(apiErrorMessage(e, "Failed to load part details."));
             setPart(null);
             setFiles([]);
             setChildren([]);
@@ -1187,21 +1195,14 @@ function isExternalDatasheetUrl(url: string): boolean {
     setExtraLoading(true);
     setExtraError(null);
     try {
-      const resp = await fetch(
+      const data = await apiFetch<any>(
         `/api/parts/${encodeURIComponent(pn)}/${encodeURIComponent(revToken)}/extra`
       );
-      if (resp.status === 403) {
-        setExtraFiles([]);
-        setExtraError("Forbidden");
-        return;
-      }
-      if (!resp.ok) throw new Error(await resp.text());
-      const data = await resp.json();
       const rows = Array.isArray(data) ? data : data?.files || [];
       setExtraFiles(rows);
     } catch (err: any) {
       setExtraFiles([]);
-      setExtraError(err?.message || "Failed to load associated files.");
+      setExtraError(apiErrorMessage(err, "Failed to load associated files."));
     } finally {
       setExtraLoading(false);
     }
@@ -1216,21 +1217,13 @@ function isExternalDatasheetUrl(url: string): boolean {
       const url = isSharedView
         ? `${shareApiBase}/files_overview?${qs.toString()}`
         : `/api/parts/${encodeURIComponent(pn)}/files_overview?${qs.toString()}`;
-      const resp = await fetch(url);
-      if (resp.status === 403) {
-        setFilesOverviewCurrent(null);
-        setFilesOverviewOther([]);
-        setFilesOverviewError("Forbidden");
-        return;
-      }
-      if (!resp.ok) throw new Error(await resp.text());
-      const data = await resp.json();
+      const data = await apiFetch<any>(url);
       setFilesOverviewCurrent(data?.current_revision || null);
       setFilesOverviewOther(Array.isArray(data?.other_revisions) ? data.other_revisions : []);
     } catch (err: any) {
       setFilesOverviewCurrent(null);
       setFilesOverviewOther([]);
-      setFilesOverviewError(err?.message || "Failed to load file visibility.");
+      setFilesOverviewError(apiErrorMessage(err, "Failed to load file visibility."));
     } finally {
       setFilesOverviewLoading(false);
     }
@@ -1259,8 +1252,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       try {
         const fetchRows = async (mode: "drawing" | "preview"): Promise<DrawingImageRow[]> => {
           const qs = new URLSearchParams({ pn, mode, rev: effectiveRev || "" });
-          const r = await fetch(`/api/part_images?${qs.toString()}`);
-          const rows = (r.ok ? await r.json() : []) as DrawingImageRow[];
+          const rows = await apiFetch<DrawingImageRow[]>(`/api/part_images?${qs.toString()}`);
           return Array.isArray(rows) ? rows : [];
         };
         // Exported drawing PNG preferred; otherwise the part's full-size
@@ -1308,6 +1300,7 @@ function isExternalDatasheetUrl(url: string): boolean {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setDocError(null);
       try {
         if (isSharedView && !sharedAllowsDocpacks) {
           if (!cancelled) setDocOpts({ file_types: [], processes: [], markup_document_count: 0 });
@@ -1316,17 +1309,16 @@ function isExternalDatasheetUrl(url: string): boolean {
         const optionsUrl = isSharedView
           ? `${shareApiBase}/docpacks/options?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&depth=${depth}`
           : `/api/docpacks/options?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&depth=${depth}`;
-        const r = await fetch(optionsUrl);
-        if (r.status === 403) { if (!cancelled) setForbidden(true); return; }
-        if (!r.ok) return;
-        const j = await r.json();
+        const j = await apiFetch<any>(optionsUrl);
         if (cancelled) return;
         const file_types = Array.isArray(j.file_types) ? j.file_types : [];
         const processes = Array.isArray(j.processes) ? j.processes : [];
         setDocOpts({ file_types, processes, markup_document_count: Number(j.markup_document_count || 0) });
         if (selTypes.size === 0 && file_types.length) setSelTypes(new Set(file_types));
         if (selProcesses.size === 0 && processes.length) setSelProcesses(new Set(processes));
-      } catch {}
+      } catch (error) {
+        if (!cancelled) setDocError(apiErrorMessage(error, "Failed to load document-pack options."));
+      }
     })();
     return () => { cancelled = true };
   }, [depth, isSharedView, pn, rev, shareApiBase, sharedAllowsDocpacks]);
@@ -1339,30 +1331,28 @@ function isExternalDatasheetUrl(url: string): boolean {
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch("/api/process_meta");
-        if (r.ok) {
-          const m = await r.json();
-          if (!cancelled) setProcMeta(m || {});
-        }
-      } catch {}
+        const processMetaUrl = isSharedView ? `${shareApiBase}/process-meta` : "/api/process_meta";
+        const m = await apiFetch<Record<string, ProcMeta>>(processMetaUrl);
+        if (!cancelled) setProcMeta(m || {});
+      } catch (error) {
+        if (!cancelled) setBomError(apiErrorMessage(error, "Failed to load process metadata."));
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isSharedView, shareApiBase]);
 
   // ---- BOM: show first-level children as table roots ----
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setBomError(null);
       try {
         const rootUrl = isSharedView
           ? `${shareApiBase}/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&withThumb=1`
           : `/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}&withThumb=1`;
-        const r = await fetch(rootUrl);
-        if (r.status === 403) { if (!cancelled) setForbidden(true); return; }
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const root: TreeNode[] = asArr(await r.json());
+        const root: TreeNode[] = asArr(await apiFetch<TreeNode[]>(rootUrl));
         if (cancelled) return;
         if (!root.length) {
           setBomNodes([]);
@@ -1377,9 +1367,7 @@ function isExternalDatasheetUrl(url: string): boolean {
         const childUrl = isSharedView
           ? `${shareApiBase}/bom_tree?parent=${encodeURIComponent(rootPn)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`
           : `/api/bom_tree?parent=${encodeURIComponent(rootPn)}&parent_rev=${encodeURIComponent(rootRev)}&withThumb=1`;
-        const r2 = await fetch(childUrl);
-        if (!r2.ok) throw new Error(`HTTP ${r2.status}`);
-        let kids: TreeNode[] = withBomOccurrenceKeys(asArr(await r2.json()), String(rootNode?.key || "bom"));
+        let kids: TreeNode[] = withBomOccurrenceKeys(asArr(await apiFetch<TreeNode[]>(childUrl)), String(rootNode?.key || "bom"));
 
         kids = annotateDepth(kids, 0, String(rootNode?.key ?? rootPn));
         if (!cancelled) {
@@ -1387,10 +1375,10 @@ function isExternalDatasheetUrl(url: string): boolean {
           setBomExpanded({});
         }
       } catch (e) {
-        console.error("bom_tree root (detail) failed", e);
         if (!cancelled) {
           setBomNodes([]);
           setBomExpanded({});
+          setBomError(apiErrorMessage(e, "Failed to load the BOM tree."));
         }
       }
     })();
@@ -1403,21 +1391,18 @@ function isExternalDatasheetUrl(url: string): boolean {
     let cancelled = false;
     (async () => {
       setFlatBomLoading(true);
+      setBomError(null);
       try {
         const flatUrl = isSharedView
           ? `${shareApiBase}/bom_flat?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`
           : `/api/bom_flat?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || "")}`;
-        const r = await fetch(flatUrl);
-        if (r.status === 403) {
-          if (!cancelled) setForbidden(true);
-          return;
-        }
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const rows = asArr<FlatBomRow>(await r.json());
+        const rows = asArr<FlatBomRow>(await apiFetch<FlatBomRow[]>(flatUrl));
         if (!cancelled) setFlatBomRows(rows);
       } catch (err) {
-        console.error("bom_flat failed", err);
-        if (!cancelled) setFlatBomRows([]);
+        if (!cancelled) {
+          setFlatBomRows([]);
+          setBomError(apiErrorMessage(err, "Failed to load the flat BOM."));
+        }
       } finally {
         if (!cancelled) setFlatBomLoading(false);
       }
@@ -1458,6 +1443,7 @@ function isExternalDatasheetUrl(url: string): boolean {
   async function onExpandNode(e: any) {
     const key = String(e?.node?.key || "");
     if (!key) return;
+    setBomError(null);
     try {
       const parentNode = findNode(bomNodes, key);
       const parentPn = (parentNode as any)?.data?.pn || key;
@@ -1465,10 +1451,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       const url = isSharedView
         ? `${shareApiBase}/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`
         : `/api/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(parentRev)}&withThumb=1`;
-      const r = await fetch(url);
-      if (r.status === 403) { setForbidden(true); return; }
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const kids: TreeNode[] = withBomOccurrenceKeys(asArr(await r.json()), key);
+      const kids: TreeNode[] = withBomOccurrenceKeys(asArr(await apiFetch<TreeNode[]>(url)), key);
 
       setBomNodes((prev) => {
         const parentDepth = findNodeDepth(prev, key) ?? 0;
@@ -1477,7 +1460,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       });
       setBomExpanded((prev) => ({ ...prev, [key]: true }));
     } catch (err) {
-      console.error("bom_tree children (detail) failed", err);
+      setBomError(apiErrorMessage(err, "Failed to load the selected BOM branch."));
     }
   }
 
@@ -1488,6 +1471,7 @@ function isExternalDatasheetUrl(url: string): boolean {
     const queue: string[] = bomNodes.map((n) => String(n.key));
     let nextTree = bomNodes;
     const expanded: Record<string, boolean> = { ...bomExpanded };
+    setBomError(null);
 
     while (queue.length) {
       const key = queue.shift()!;
@@ -1506,19 +1490,17 @@ function isExternalDatasheetUrl(url: string): boolean {
           const url = isSharedView
             ? `${shareApiBase}/bom_tree?parent=${encodeURIComponent(parentPn2)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`
             : `/api/bom_tree?parent=${encodeURIComponent(parentPn2)}&parent_rev=${encodeURIComponent(parentRev2)}&withThumb=1`;
-          const r = await fetch(url);
-          if (r.ok) {
-            let kids: TreeNode[] = withBomOccurrenceKeys(asArr(await r.json()), key);
-            const parentDepth = findNodeDepth(nextTree, key) ?? 0;
-            kids = annotateDepth(kids, parentDepth + 1, key);
-            if (kids.length) {
-              nextTree = setNodeChildren(nextTree, key, kids);
-              expanded[key] = true;
-              for (const k of kids) queue.push(String(k.key));
-            }
+          let kids: TreeNode[] = withBomOccurrenceKeys(asArr(await apiFetch<TreeNode[]>(url)), key);
+          const parentDepth = findNodeDepth(nextTree, key) ?? 0;
+          kids = annotateDepth(kids, parentDepth + 1, key);
+          if (kids.length) {
+            nextTree = setNodeChildren(nextTree, key, kids);
+            expanded[key] = true;
+            for (const k of kids) queue.push(String(k.key));
           }
         } catch (e) {
-          console.warn("expandAll fetch failed for", key, e);
+          setBomError(apiErrorMessage(e, `Failed to expand BOM branch ${key}.`));
+          break;
         }
       } else {
         // already have children
@@ -2001,13 +1983,11 @@ function isExternalDatasheetUrl(url: string): boolean {
     setShareError(null)
     try {
       const qs = new URLSearchParams({ rev: effectiveRev || "" })
-      const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/shares?${qs.toString()}`)
-      if (!resp.ok) throw new Error(await resp.text())
-      const data = await resp.json()
+      const data = await apiFetch<any>(`/api/parts/${encodeURIComponent(pn)}/shares?${qs.toString()}`)
       setShareLinks(Array.isArray(data?.shares) ? data.shares : [])
     } catch (err: any) {
       setShareLinks([])
-      setShareError(err?.message || "Failed to load share links.")
+      setShareError(apiErrorMessage(err, "Failed to load share links."))
     } finally {
       setShareLoading(false)
     }
@@ -2019,7 +1999,7 @@ function isExternalDatasheetUrl(url: string): boolean {
     setShareCreateError(null)
     setShareCopied(false)
     try {
-      const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/shares`, {
+      const data = await apiFetch<any>(`/api/parts/${encodeURIComponent(pn)}/shares`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2030,12 +2010,10 @@ function isExternalDatasheetUrl(url: string): boolean {
           allow_attributes: shareAllowExtended,
         }),
       })
-      if (!resp.ok) throw new Error(await resp.text())
-      const data = await resp.json()
       setShareCreateUrl(String(data?.url || ""))
       await loadShareLinks()
     } catch (err: any) {
-      setShareCreateError(err?.message || "Failed to create share link.")
+      setShareCreateError(apiErrorMessage(err, "Failed to create share link."))
     } finally {
       setShareCreateBusy(false)
     }
@@ -2056,13 +2034,12 @@ function isExternalDatasheetUrl(url: string): boolean {
     setShareRevokingId(shareRow.id)
     setShareError(null)
     try {
-      const resp = await fetch(`/api/parts/${encodeURIComponent(pn)}/shares/${encodeURIComponent(shareRow.id)}`, {
+      await apiFetch(`/api/parts/${encodeURIComponent(pn)}/shares/${encodeURIComponent(shareRow.id)}`, {
         method: "DELETE",
       })
-      if (!resp.ok) throw new Error(await resp.text())
       await loadShareLinks()
     } catch (err: any) {
-      setShareError(err?.message || "Failed to revoke share link.")
+      setShareError(apiErrorMessage(err, "Failed to revoke share link."))
     } finally {
       setShareRevokingId(null)
     }
@@ -2245,21 +2222,17 @@ function isExternalDatasheetUrl(url: string): boolean {
     setNotesSaving(true)
     setNotesError(null)
     try {
-      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/notes?rev=${encodeURIComponent(part.revision || "")}`, {
+      const j = await apiFetch<any>(`/api/parts/${encodeURIComponent(part.part_number)}/notes?rev=${encodeURIComponent(part.revision || "")}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes: nextNotes, rev: part.revision || "" }),
       })
-      if (!resp.ok) {
-        throw new Error(await resp.text())
-      }
-      const j = await resp.json()
       const persisted = String(j.notes || "")
       setNotes(persisted)
       setSavedNotes(persisted)
       setNotesSavedOnce(true)
     } catch (e: any) {
-      setNotesError(e?.message || "Failed to save notes")
+      setNotesError(apiErrorMessage(e, "Failed to save notes"))
     } finally {
       setNotesSaving(false)
     }
@@ -2322,16 +2295,14 @@ function isExternalDatasheetUrl(url: string): boolean {
     setCommentSaving(true)
     setCommentError(null)
     try {
-      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}${path}`, {
+      const j = await apiFetch<any>(`/api/parts/${encodeURIComponent(part.part_number)}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rev: part.revision || "", ...body }),
       })
-      const j = await resp.json().catch(() => null)
-      if (!resp.ok || !j?.ok) throw new Error(j?.error || j?.message || `HTTP ${resp.status}`)
       return j
     } catch (e: any) {
-      setCommentError(e?.message || "Comment request failed")
+      setCommentError(apiErrorMessage(e, "Comment request failed"))
       return null
     } finally {
       setCommentSaving(false)
@@ -2392,16 +2363,11 @@ function isExternalDatasheetUrl(url: string): boolean {
     try {
       const qs = new URLSearchParams({ rev: part.revision || "" })
       if (refreshIncludeChildren) qs.set("recursive", "1")
-      const resp = await fetch(`/api/parts/${encodeURIComponent(part.part_number)}/refresh_files?${qs.toString()}`, {
+      const j = await apiFetch<any>(`/api/parts/${encodeURIComponent(part.part_number)}/refresh_files?${qs.toString()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rev: part.revision || "", recursive: refreshIncludeChildren }),
       })
-      const j = await resp.json().catch(() => ({}))
-      if (!resp.ok) {
-        const msg = j?.error || `HTTP ${resp.status}`
-        throw new Error(msg)
-      }
       const found = j?.files_found ?? 0
       const upserts = j?.artifacts_upserted ?? 0
       const removed = j?.artifacts_removed ?? 0
@@ -2421,7 +2387,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       }
       setRefreshTick((t) => t + 1)
     } catch (err: any) {
-      setRefreshError(err?.message || "Refresh failed")
+      setRefreshError(apiErrorMessage(err, "Refresh failed"))
     } finally {
       setRefreshBusy(false)
     }
@@ -2441,7 +2407,7 @@ function isExternalDatasheetUrl(url: string): boolean {
     setDeleteBusy(true);
     setDeleteError(null);
     try {
-      const resp = await fetch("/api/part_delete", {
+      await apiFetch("/api/part_delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2451,13 +2417,9 @@ function isExternalDatasheetUrl(url: string): boolean {
           delete_files: deleteFilesToo,
         }),
       });
-      if (!resp.ok) {
-        const msg = await resp.text();
-        throw new Error(msg || "Delete failed");
-      }
       window.location.href = "/ui/parts";
     } catch (err: any) {
-      setDeleteError(err?.message || "Delete failed");
+      setDeleteError(apiErrorMessage(err, "Delete failed"));
     } finally {
       setDeleteBusy(false);
     }
@@ -2474,18 +2436,14 @@ function isExternalDatasheetUrl(url: string): boolean {
         `/api/parts/${encodeURIComponent(pn)}/${encodeURIComponent(revToken)}/extra`,
         { method: "POST", body: form }
       );
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        const msg = data?.error || `HTTP ${resp.status}`;
-        throw new Error(msg);
-      }
+      const data = await readApiResponse<any>(resp);
       if (Array.isArray(data?.errors) && data.errors.length) {
         setExtraUploadError(data.errors.join("; "));
       }
       await loadExtraFiles();
       await loadFilesOverview();
     } catch (err: any) {
-      setExtraUploadError(err?.message || "Upload failed.");
+      setExtraUploadError(apiErrorMessage(err, "Upload failed."));
     } finally {
       setExtraUploadBusy(false);
       if (extraFileInputRef.current) extraFileInputRef.current.value = "";
@@ -2497,20 +2455,17 @@ function isExternalDatasheetUrl(url: string): boolean {
     const ok = window.confirm("Delete this associated file?");
     if (!ok) return;
     setExtraDeleteBusy(fileId);
+    setExtraUploadError(null);
     try {
       const resp = await fetch(
         `/api/parts/${encodeURIComponent(pn)}/${encodeURIComponent(revToken)}/extra/${encodeURIComponent(fileId)}`,
         { method: "DELETE" }
       );
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok) {
-        const msg = data?.error || `HTTP ${resp.status}`;
-        throw new Error(msg);
-      }
+      await readApiResponse(resp);
       await loadExtraFiles();
       await loadFilesOverview();
     } catch (err) {
-      console.error(err);
+      setExtraUploadError(apiErrorMessage(err, "Delete failed."));
     } finally {
       setExtraDeleteBusy(null);
     }
@@ -2598,6 +2553,16 @@ function isExternalDatasheetUrl(url: string): boolean {
         )}
       </div>
     );
+  }
+
+  if (loading) {
+    return <div className="container-fluid py-3 text-muted">Loading part details...</div>;
+  }
+  if (forbidden) {
+    return <div className="container-fluid py-3"><div className="alert alert-danger" role="alert">You are not authorized to view this part.</div></div>;
+  }
+  if (loadError || !part) {
+    return <div className="container-fluid py-3"><div className="alert alert-danger" role="alert">{loadError || "Part not found."}</div></div>;
   }
 
   return (
@@ -3121,6 +3086,7 @@ function isExternalDatasheetUrl(url: string): boolean {
             </TabPanel>
 
             {(!isSharedView || sharedAllowsDocpacks) && <TabPanel header={tabHeader("Doc Packs", "pi-folder")}>
+              {docError ? <div className="alert alert-danger mt-3" role="alert">{docError}</div> : null}
               {(() => {
                 const docpackMissing: string[] = [];
                 if (!canExport) docpackMissing.push("exports.run");
@@ -3355,6 +3321,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                 <div>
                   <button className="btn btn-primary" disabled={docLoading} onClick={async ()=>{
                     setDocLoading(true);
+                    setDocError(null);
                     // kick off a friendly progress indicator (indeterminate → up to 85%)
                     setDocProgress(10);
                     if (progressTimer.current) { window.clearInterval(progressTimer.current); }
@@ -3405,7 +3372,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                       const buildUrl = isSharedView ? `${shareApiBase}/docpacks/build` : '/api/docpacks/build';
                       docAbort.current = new AbortController();
                       const resp = await fetch(buildUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: docAbort.current.signal });
-                      if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                      if(!resp.ok) await readApiResponse(resp);
                       const blob = await resp.blob();
                       const disp = resp.headers.get('Content-Disposition') || '';
                       const m = disp.match(/filename="?([^";]+)"?/i);
@@ -3417,7 +3384,9 @@ function isExternalDatasheetUrl(url: string): boolean {
                       setTimeout(() => setDocProgress(0), 800);
                     }catch(err){
                       // An aborted build is a deliberate user action, not an error.
-                      if ((err as any)?.name !== 'AbortError') console.error(err);
+                      if ((err as any)?.name !== 'AbortError') {
+                        setDocError(apiErrorMessage(err, 'Failed to build the document pack.'));
+                      }
                       setDocProgress(0);
                     }
                     finally{
@@ -3948,6 +3917,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       </div>
 
       {/* Components table */}
+      {bomError ? <div className="alert alert-danger mt-4" role="alert">{bomError}</div> : null}
       {hasBomContent ? (
       <div className="mt-4">
         <div className="d-flex align-items-center justify-content-between mb-2">

@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 
 type MentionUser = {
   id: string
@@ -49,6 +50,7 @@ export default function MentionTextarea({
   const mentionRangeRef = useRef<{ start: number; end: number } | null>(null)
   const [suggestions, setSuggestions] = useState<MentionUser[]>([])
   const [activeSuggestion, setActiveSuggestion] = useState(0)
+  const [suggestionError, setSuggestionError] = useState<string | null>(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [emojiGroup, setEmojiGroup] = useState<(typeof EMOJI_GROUPS)[number]['id']>('popular')
 
@@ -74,17 +76,20 @@ export default function MentionTextarea({
       return
     }
     mentionRangeRef.current = { start: mention.start, end: mention.end }
+    setSuggestionError(null)
     const requestId = ++requestRef.current
     searchTimerRef.current = window.setTimeout(async () => {
       try {
         const params = new URLSearchParams({ q: mention.query, pn: partNumber, rev: revision || '' })
-        const response = await fetch(`/api/users/mentionable?${params.toString()}`)
-        const data = await response.json().catch(() => null)
-        if (requestId !== requestRef.current || !response.ok) return
+        const data = await apiFetch<{ users?: MentionUser[] }>(`/api/users/mentionable?${params.toString()}`)
+        if (requestId !== requestRef.current) return
         setSuggestions(Array.isArray(data?.users) ? data.users : [])
         setActiveSuggestion(0)
-      } catch {
-        if (requestId === requestRef.current) closeSuggestions()
+      } catch (error) {
+        if (requestId === requestRef.current) {
+          closeSuggestions()
+          setSuggestionError(apiErrorMessage(error, 'Failed to load mention suggestions.'))
+        }
       }
     }, 140)
   }
@@ -151,6 +156,8 @@ export default function MentionTextarea({
         onKeyDown={handleKeyDown}
         onBlur={() => window.setTimeout(closeSuggestions, 120)}
       />
+
+      {suggestionError ? <div className="text-danger small" role="alert">{suggestionError}</div> : null}
 
       {suggestions.length ? (
         <div className="tm-mention-menu" role="listbox" aria-label="Mention a user">

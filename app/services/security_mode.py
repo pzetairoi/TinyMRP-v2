@@ -10,6 +10,27 @@ from flask import current_app, has_app_context, request
 _LOCALHOSTS = {"localhost", "127.0.0.1", "::1"}
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
+API_AUTH_HEALTH = "health"
+API_AUTH_PUBLIC_SHARE = "public_share"
+API_AUTH_SESSION = "session"
+API_AUTH_BEARER = "bearer"
+API_AUTH_SESSION_OR_BEARER = "session_or_bearer"
+
+_HEALTH_ENDPOINTS = frozenset({"api_health.health"})
+_PUBLIC_SHARE_ENDPOINTS = frozenset(
+    {
+        "part_shares.public_share_field_config",
+        "part_shares.public_share_part_detail",
+        "part_shares.public_share_files_overview",
+        "part_shares.public_share_part_images",
+        "part_shares.public_share_bom_tree",
+        "part_shares.public_share_bom_flat",
+        "part_shares.public_share_docpack_options",
+        "part_shares.public_share_docpack_build",
+        "part_shares.public_share_process_meta",
+    }
+)
+
 
 def security_mode() -> str:
     if has_app_context():
@@ -19,7 +40,9 @@ def security_mode() -> str:
     if not val:
         val = os.getenv("TINYMRP_SECURITY_MODE", "")
     val = str(val or "").strip().lower()
-    return "strict" if val == "strict" else "compat"
+    # Production-safe by default. Compatibility mode remains available only
+    # when an operator or the development/test environment selects it.
+    return "compat" if val == "compat" else "strict"
 
 
 def is_strict_mode() -> bool:
@@ -171,6 +194,24 @@ def extract_token_value() -> str:
 def is_api_request(path: str | None = None) -> bool:
     p = path or request.path or ""
     return p.startswith("/api")
+
+
+def api_auth_policy() -> str:
+    """Classify the matched API endpoint into its explicit auth category."""
+    endpoint = request.endpoint or ""
+    if endpoint in _HEALTH_ENDPOINTS:
+        return API_AUTH_HEALTH
+    if endpoint in _PUBLIC_SHARE_ENDPOINTS:
+        return API_AUTH_PUBLIC_SHARE
+
+    view = current_app.view_functions.get(endpoint)
+    configured = getattr(view, "_tinymrp_api_auth_policy", None)
+    if configured in {API_AUTH_BEARER, API_AUTH_SESSION_OR_BEARER}:
+        return configured
+
+    # All other /api routes are browser/session APIs. This fail-closed default
+    # prevents a newly added endpoint from becoming anonymously reachable.
+    return API_AUTH_SESSION
 
 
 def session_csrf_allowed() -> bool:

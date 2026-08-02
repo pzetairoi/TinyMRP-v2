@@ -601,6 +601,14 @@ def public_share_field_config(share_id: str, token: str):
     return public_response_headers(resp)
 
 
+@bp.get("/api/share/part/<share_id>/<token>/process-meta")
+def public_share_process_meta(share_id: str, token: str):
+    _share_or_abort(share_id, token)
+    meta = dict(current_app.config.get("PROCESS_META") or {})
+    meta.pop("_alias_index", None)
+    return _public_json(meta)
+
+
 @bp.get("/api/share/part/<share_id>/<token>/part_detail")
 def public_share_part_detail(share_id: str, token: str):
     share = _share_or_abort(share_id, token)

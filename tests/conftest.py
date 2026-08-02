@@ -8,7 +8,11 @@ from app.models.auth import User
 
 
 @pytest.fixture(autouse=True)
-def _mongo_test_db():
+def _mongo_test_db(monkeypatch):
+    # The general regression suite exercises the explicitly supported local
+    # development compatibility profile. Strict-mode behavior has its own app
+    # fixtures and integration coverage.
+    monkeypatch.setenv("TINYMRP_SECURITY_MODE", "compat")
     disconnect(alias="tinymrp-v2")
     connect(
         alias="tinymrp-v2",

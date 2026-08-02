@@ -73,19 +73,25 @@ def test_cors_strict_allowlist_no_creds_by_default(monkeypatch):
     assert "Access-Control-Allow-Credentials" not in resp.headers
 
 
-def test_strict_api_requires_token_even_with_session(monkeypatch):
+def test_strict_browser_api_accepts_same_origin_session(monkeypatch):
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="strict",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
-    user = User(email="strict@example.com", password="x", active=True, fs_uniquifier="u1").save()
+    role = Role(name="strict-reader", permissions=["parts.read"]).save()
+    user = User(
+        email="strict@example.com",
+        password="x",
+        active=True,
+        fs_uniquifier="u1",
+        roles=[role],
+    ).save()
     client = app.test_client()
     _login_session(client, user)
-    resp = client.get("/api/auth/check")
-    assert resp.status_code == 401
-    assert resp.get_json().get("error") == "token_required"
+    resp = client.get("/api/dashboard/summary")
+    assert resp.status_code == 200
 
 
 def test_api_health_is_public_in_compat(monkeypatch):
@@ -133,7 +139,7 @@ def test_auth_check_requires_token_in_strict(monkeypatch):
 
     unauthorized = client.get("/api/auth/check")
     assert unauthorized.status_code == 401
-    assert unauthorized.get_json().get("error") == "token_required"
+    assert unauthorized.get_json()["error"]["code"] == "token_required"
 
     authorized = client.get("/api/auth/check", headers={"Authorization": f"Bearer {raw}"})
     data = authorized.get_json()
@@ -158,7 +164,7 @@ def test_session_csrf_blocks_cross_origin(monkeypatch):
         headers={"Origin": "http://evil.example"},
     )
     assert resp.status_code == 400
-    assert resp.get_json().get("error") == "csrf_failed"
+    assert resp.get_json()["error"]["code"] == "csrf_failed"
 
 
 def test_files_proxy_blocks_ip_in_strict(monkeypatch):

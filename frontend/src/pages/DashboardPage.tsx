@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { loadFieldConfig } from '../lib/fieldConfig'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 
 type Summary = {
   counts: { total_parts: number; updated_7d: number; approved: number }
@@ -23,12 +24,10 @@ export default function DashboardPage() {
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch('/api/dashboard/summary')
-        if (!res.ok) throw new Error(await res.text())
-        const j = await res.json()
+        const j = await apiFetch<Summary>('/api/dashboard/summary')
         if (!cancelled) setData(j as Summary)
       } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load dashboard')
+        if (!cancelled) setError(apiErrorMessage(e, 'Failed to load dashboard'))
       } finally {
         if (!cancelled) setLoading(false)
       }

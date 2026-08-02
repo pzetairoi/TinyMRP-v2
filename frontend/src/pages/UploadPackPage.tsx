@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./uploadpack.css";
+import { apiErrorMessage, apiFetch } from "../lib/api";
 
 type Capability = Record<string, boolean>;
 type Change = {
@@ -434,6 +435,7 @@ export default function UploadPackPage() {
   // Operator picks for part numbers that appear more than once in the pack.
   const [duplicateChoices, setDuplicateChoices] = useState<Record<string, number>>({});
   const [capabilities, setCapabilities] = useState<Capability>({});
+  const [capabilitiesError, setCapabilitiesError] = useState("");
   const [dataMode, setDataMode] = useState<DataMode>("fill_blanks");
   const [bomMode, setBomMode] = useState<BomMode>("fill_if_empty");
   const [fileMode, setFileMode] = useState<FileMode>("add_missing");
@@ -441,10 +443,15 @@ export default function UploadPackPage() {
   const [rootPreviewStatus, setRootPreviewStatus] = useState("");
 
   useEffect(() => {
-    fetch("/api/import/capabilities")
-      .then((response) => (response.ok ? response.json() : Promise.reject(response)))
-      .then((payload) => setCapabilities(payload?.imports || {}))
-      .catch(() => setCapabilities({}));
+    apiFetch<{ imports?: Capability }>("/api/import/capabilities")
+      .then((payload) => {
+        setCapabilities(payload?.imports || {});
+        setCapabilitiesError("");
+      })
+      .catch((requestError) => {
+        setCapabilities({});
+        setCapabilitiesError(apiErrorMessage(requestError, "Failed to load import permissions."));
+      });
   }, []);
 
   const rootPn = result?.root || "";
@@ -802,6 +809,7 @@ export default function UploadPackPage() {
         {!canPreview && Object.keys(capabilities).length ? (
           <div className="text-danger small mt-2">Your roles do not include import preview access.</div>
         ) : null}
+        {capabilitiesError ? <div className="alert alert-danger mt-3 mb-0" role="alert">{capabilitiesError}</div> : null}
         {error ? <div className="alert alert-danger mt-3 mb-0">{error}</div> : null}
       </div>
 

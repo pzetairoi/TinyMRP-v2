@@ -1,5 +1,6 @@
 // frontend/src/components/ImageStrip.tsx
 import { useEffect, useState } from "react"
+import { apiErrorMessage, apiFetch } from "../lib/api"
 type ApiRow = { urls: string[] }
 
 type Props = {
@@ -14,14 +15,22 @@ type Props = {
 
 export default function ImageStrip({ pn, rev = '', mode = 'preview', endpointBase = '/api/part_images', limit, fit = false, cacheBust }: Props) {
   const [rows, setRows] = useState<ApiRow[]>([])
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     ;(async ()=>{
       const qs = new URLSearchParams({ pn, mode })  // <--- tell backend which set we want
       if (rev !== undefined) qs.set('rev', rev)
-      const r = await fetch(`${endpointBase}?${qs.toString()}`)
-      const j = (r.ok ? await r.json() : []) as ApiRow[]
-      if (!cancelled) setRows(Array.isArray(j) ? j : [])
+      setError(null)
+      try {
+        const j = await apiFetch<ApiRow[]>(`${endpointBase}?${qs.toString()}`)
+        if (!cancelled) setRows(Array.isArray(j) ? j : [])
+      } catch (err) {
+        if (!cancelled) {
+          setRows([])
+          setError(apiErrorMessage(err, 'Failed to load part images.'))
+        }
+      }
     })()
     return ()=>{cancelled=true}
   }, [pn, rev, mode, endpointBase, cacheBust])
@@ -34,6 +43,7 @@ export default function ImageStrip({ pn, rev = '', mode = 'preview', endpointBas
     : { display:'flex', gap:12, flexWrap:'wrap', marginBottom:16 }
   return (
     <div style={wrapStyle as any}>
+      {error && <div className="text-danger small" role="alert">{error}</div>}
       {list.map((row, i) => <FallbackImg key={i} urls={row.urls} fit={fit} cacheBust={cacheBust} />)}
     </div>
   )

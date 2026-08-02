@@ -29,6 +29,7 @@ import {
 // Import the ImageStrip component to display images for the part
 import ImageStrip from "../components/ImageStrip"
 import { withBomOccurrenceKeys } from '../lib/bomTree'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 
 
 // Backend must return Where-Used rows as objects with these keys:
@@ -88,6 +89,7 @@ export default function BomPage() {
 
   // --- BOM Tree ---
   const [nodes, setNodes] = useState<TreeNode[]>([])
+  const [treeError, setTreeError] = useState<string | null>(null)
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({})
   const [fieldConfig, setFieldConfig] = useState<FieldConfigPayload | null>(null)
   const [fieldPreferences, setFieldPreferences] = useState<FieldPreferences | null>(null)
@@ -108,14 +110,15 @@ export default function BomPage() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      setTreeError(null)
       try {
-        const r = await fetch(`/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || '')}`)
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        const root: TreeNode[] = await r.json()
+        const root = await apiFetch<TreeNode[]>(`/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || '')}`)
         if (!cancelled) setNodes(withBomOccurrenceKeys(root))
       } catch (e) {
-        console.error('bom_tree root failed', e)
-        if (!cancelled) setNodes([])
+        if (!cancelled) {
+          setNodes([])
+          setTreeError(apiErrorMessage(e, 'Failed to load the BOM tree.'))
+        }
       }
     })()
     return () => {
@@ -148,17 +151,17 @@ export default function BomPage() {
   }
 
   async function loadChildrenFor(key: string) {
+    setTreeError(null)
     try {
       const parent = findNode(nodes, key)
       const parentPn = (parent as any)?.data?.pn || key
       const prev = (parent as any)?.data?.rev || ''
-      const r = await fetch(`/api/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(prev)}`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const kids: TreeNode[] = withBomOccurrenceKeys(await r.json(), key)
+      const payload = await apiFetch<TreeNode[]>(`/api/bom_tree?parent=${encodeURIComponent(parentPn)}&parent_rev=${encodeURIComponent(prev)}`)
+      const kids: TreeNode[] = withBomOccurrenceKeys(payload, key)
       setNodes((prev) => setNodeChildren(prev, key, kids))
       setExpandedKeys((prev) => ({ ...prev, [key]: true }))
     } catch (e) {
-      console.error('bom_tree children failed', e)
+      setTreeError(apiErrorMessage(e, 'Failed to load the selected BOM branch.'))
     }
   }
 
@@ -166,6 +169,7 @@ export default function BomPage() {
   const [wuRows, setWuRows] = useState<WURow[]>([])
   const [wuTotal, setWuTotal] = useState(0)
   const [loadingWU, setLoadingWU] = useState(false)
+  const [whereUsedError, setWhereUsedError] = useState<string | null>(null)
   const bomFields = fieldConfig ? contextFields(fieldConfig, 'bom_tree') : FALLBACK_BOM_FIELDS
   const whereUsedFields = fieldConfig ? contextFields(fieldConfig, 'where_used') : FALLBACK_WHERE_USED_FIELDS
   const defaultBomIds = fieldConfig ? defaultFieldIds(fieldConfig, 'bom_tree') : FALLBACK_BOM_FIELDS.map((field) => field.id)
@@ -291,23 +295,22 @@ export default function BomPage() {
     let cancelled = false
     ;(async () => {
       setLoadingWU(true)
+      setWhereUsedError(null)
       try {
-        const r = await fetch('/api/whereused_lazy', {
+        const j = await apiFetch<{ data?: WURow[]; totalRecords?: number }>('/api/whereused_lazy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pn, rev, ...lazy }),
         })
-        if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`)
-        const j = await r.json()
         if (!cancelled) {
           setWuRows(j.data || [])
           setWuTotal(j.totalRecords || 0)
         }
       } catch (e) {
-        console.error('whereused_lazy failed', e)
         if (!cancelled) {
           setWuRows([])
           setWuTotal(0)
+          setWhereUsedError(apiErrorMessage(e, 'Failed to load where-used results.'))
         }
       } finally {
         if (!cancelled) setLoadingWU(false)
@@ -354,6 +357,7 @@ export default function BomPage() {
 {/* BOM TreeTable */}
 
 <div className="mb-4">
+  {treeError && <div className="alert alert-danger" role="alert">{treeError}</div>}
   <div className="d-flex justify-content-end gap-2 mb-2">
     {bomFields.length > 0 && (
       <FieldSelector
@@ -455,6 +459,7 @@ export default function BomPage() {
 
 
       {/* Where-used */}
+      {whereUsedError && <div className="alert alert-danger" role="alert">{whereUsedError}</div>}
       <DataTable
         value={wuRows}
         header={

@@ -4,6 +4,7 @@ import type { DataTableFilterMeta } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
 import FieldSelector from '../components/FieldSelector'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 import {
   contextFields,
   defaultFieldIds,
@@ -113,6 +114,7 @@ export default function PartsPage() {
   const [search, setSearch] = useState(initialQ)
   const [debouncedSearch, setDebouncedSearch] = useState(initialQ)
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [totalRecords, setTotal] = useState(0)
   const [selectedByKey, setSelectedByKey] = useState<Record<string, Part>>({})
   const [qtyById, setQtyById] = useState<Record<string, number>>({})
@@ -201,19 +203,19 @@ export default function PartsPage() {
 
     ;(async () => {
       setLoading(true)
+      setLoadError(null)
       try {
         const payload: any = { ...lazy }
         if (jobId && jobOnly) {
           payload.job = jobId
           payload.job_only = true
         }
-        const res = await fetch('/api/parts_lazy', {
+        const j = await apiFetch<{ data?: Part[]; totalRecords?: number }>('/api/parts_lazy', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(payload),
           signal: controller.signal,
         })
-        const j = await res.json()
         if (cancelled) return
         setRows(j.data || [])
         setTotal(j.totalRecords || 0)
@@ -221,6 +223,7 @@ export default function PartsPage() {
         if (cancelled || err?.name === 'AbortError') return
         setRows([])
         setTotal(0)
+        setLoadError(apiErrorMessage(err, 'Failed to load parts.'))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -631,6 +634,7 @@ export default function PartsPage() {
 
   return (
     <div className="p-3">
+      {loadError && <div className="alert alert-danger" role="alert">{loadError}</div>}
       <DataTable value={rows}
         header={header}
         lazy paginator totalRecords={totalRecords} rows={lazy.rows} first={lazy.first}

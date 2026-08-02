@@ -73,6 +73,7 @@ def test_guided_instance_creation_persists_bootstrap_inputs_before_starting_app(
 
     assert 'FILES_ACCEL_REDIRECT_PREFIX=""' in create
     assert 'TINYMRP_SEED_ADMIN="true"' in create
+    assert 'TINYMRP_SECURITY_MODE="${TINYMRP_SECURITY_MODE:-strict}"' in create
     _assert_in_order(
         create,
         'upsert_env_value "$INSTANCE_ENV" "FILES_ACCEL_REDIRECT_PREFIX"',

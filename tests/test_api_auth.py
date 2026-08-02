@@ -49,13 +49,13 @@ def test_auth_check_and_revoke(client, user):
     token_doc.update(set__revoked_at=utc_now())
     fail_resp = client.get("/api/auth/check", headers=_auth_headers(raw))
     assert fail_resp.status_code == 401
-    assert fail_resp.get_json()["error"] == "invalid_token"
+    assert fail_resp.get_json()["error"]["code"] == "invalid_token"
 
 
 def test_auth_check_requires_token_without_session_fallback(client):
     resp = client.get("/api/auth/check")
     assert resp.status_code == 401
-    assert resp.get_json()["error"] == "token_required"
+    assert resp.get_json()["error"]["code"] == "token_required"
 
 
 def test_settings_and_numbering_with_bearer(client, user):
