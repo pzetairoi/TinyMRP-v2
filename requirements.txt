@@ -39,7 +39,7 @@ dnspython==2.8.0
 pillow==11.3.0
 openpyxl==3.1.5
 PyPDF2==3.0.1
-reportlab==4.2.5
+reportlab==5.0.0
 qrcode[pil]==7.4.2
 svglib==1.5.1
 defusedxml==0.7.1
