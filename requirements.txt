@@ -16,7 +16,7 @@ colorama==0.4.6
 # --- Auth / security ---
 Flask-Limiter==3.8.0
 limits==5.8.0
-cryptography==43.0.1
+cryptography==48.0.1
 Flask-Login==0.6.3
 Flask-Principal==0.4.0
 Flask-Security-Too==5.8.1
@@ -27,7 +27,7 @@ passlib==1.7.4
 libpass==1.9.3
 argon2-cffi==25.1.0
 argon2-cffi-bindings==25.1.0
-cffi==1.17.1
+cffi==2.0.0
 pycparser==2.22
 
 # --- Database ---
@@ -36,7 +36,7 @@ pymongo==4.17.0
 dnspython==2.8.0
 
 # --- Documents / images (docpacks, thumbnails, labels) ---
-pillow==11.3.0
+pillow==12.3.0
 openpyxl==3.1.5
 PyPDF2==3.0.1
 reportlab==4.2.5
@@ -57,5 +57,5 @@ psutil==7.2.2
 tzdata==2026.3
 
 # --- WSGI servers ---
-gunicorn==21.2.0        # Linux / containers
+gunicorn==22.0.0        # Linux / containers
 waitress==3.0.2         # Windows service (deploy/windows)
