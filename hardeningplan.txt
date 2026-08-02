@@ -44,12 +44,19 @@ Active workstreams as of 2026-08-03:
       app/static/parts-ui/** (generated from the claimed frontend sources)
       tests/test_security_hardening.py
       tests/test_strict_auth_mode.py (new)
+      tests/test_api_auth.py
+      tests/conftest.py
+      tests/test_vps_caddy_deployment_contract.py
       .env.dev.example
       .env.docker.example
       .env.server.example
       docker-compose.yml
       docker-compose.onefolder.yml
+      deploy/scripts/create-instance.sh
+      deploy/README.md
       README.md
+      MIGRATION.md
+      SECURITY.md
       docs/help/06b_server_installation.md
       docs/help/07_troubleshooting.md
       app/static/help/help.html
