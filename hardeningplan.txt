@@ -61,14 +61,23 @@ Active workstreams as of 2026-08-03:
       docs/help/07_troubleshooting.md
       app/static/help/help.html
       app/static/help/help_toc.json
+      docs/PROFESSIONALIZATION_PLAN.md
+      docs/security/dependency_advisory_triage.md
+      docs/security/risk_acceptance_template.md
       docs/PRODUCTION_HARDENING_BASELINE.md
       CHANGELOG.md
       hardeningplan.txt
     Protected integration gate: Phase 1C lifecycle regressions, full backend and
       frontend checks, production image, both Compose paths, guided VPS render,
       six Caddy contracts, shell syntax/ShellCheck and rendered Caddy validation.
+    CHECKPOINT 80783b3 is pushed. The focused strict/session/bearer/share/CSRF/
+               permission/RLS/lifecycle/Caddy matrix passed 76 tests, frontend
+               build and lint passed, and the pre-PDF host suite passed 622 with
+               one skip. Documentation and the combined production gate remain.
 
-  P3B-PYPDF-MIGRATION  IN PROGRESS  owner: /root/p3b_pypdf_migration
+Completed workstream scope:
+  P3B-PYPDF-MIGRATION  DONE/INTEGRATED 2026-08-03
+    owner: /root/p3b_pypdf_migration; integrated by Codex /root
     Scope: replace the EOL PyPDF2 dependency/import surface with an exact tested
            pypdf pin; add focused compatibility and malicious/invalid-input
            regressions; report production-image and protected Caddy evidence.
@@ -84,11 +93,14 @@ Active workstreams as of 2026-08-03:
       tests/test_excel_compile.py
       tests/test_docpacks_binder.py
       tests/test_whereused_report.py
-    This stream may read but must not edit authentication, frontend, deployment,
-    documentation, generated assets or roadmap files. It must use a separate
-    worktree/branch from d5d3647 and return one focused pushed commit.
+    Work ran in a separate worktree and returned pushed commit 663113e, reviewed
+    and integrated on the primary branch as 5743b82. pypdf 6.14.2 removed
+    PdfMerger, so supported PdfWriter.append semantics replace it. Five new
+    parity/adversarial regressions cover outlines, offsets, malformed/truncated/
+    oversized-declared inputs and fail-closed markup combination. Production
+    image/full suite, pip check, six Caddy contracts and rendered Compose/Caddy
+    all passed. Requirements-file pip-audit is now one finding in one package.
 
-Completed workstream scope:
   P1C-SESSION-LIFECYCLE  DONE 2026-08-03  owner: Codex /root
     Scope: central fs_uniquifier rotation, browser-session invalidation for
            password/security-state changes, lifecycle audit and regressions.
@@ -171,6 +183,9 @@ Completed workstreams:
   P3B-RUNTIME-UPGRADES  DONE/INTEGRATED 2026-08-03  commit: 3346b51
     Pillow/cryptography/CFFI/Gunicorn upgraded; production and Caddy validation;
     pip-audit reduced from 34 findings/5 packages to 2/2.
+  P3B-PYPDF-MIGRATION  DONE/INTEGRATED 2026-08-03  commit: 5743b82
+    pypdf 6.14.2 migration, supported writer/append behavior, adversarial PDF
+    regressions and protected production/Caddy evidence; pip-audit reduced to 1/1.
   P1B-TOKEN-LIFECYCLE  DONE 2026-08-03  commits: 49cf24a, 49ee2b4
     Expiring tokens, owner enforcement, lifecycle UI, revocation triggers,
     global API-token logout, full suite and protected VPS/Caddy gates.
@@ -199,10 +214,9 @@ Parallel workstream definition (complete; retained for scope history):
     controls, owner and expiry for primary review.
 
 Next integration order:
-  Implement and verify P2-STRICT-AUTH on the primary branch while the isolated
-  P3B-PYPDF-MIGRATION runs in its separate worktree. Review and integrate the
-  PDF commit only after its focused evidence passes, then run the combined full
-  suite and protected guided VPS/Caddy gate before closing either board entry.
+  Finish P2-STRICT-AUTH documentation, then run the combined full suite,
+  production-image security checks and protected guided VPS/Caddy gate. Close
+  Phase 2 only after those pass; Phase 3C is the next primary workstream.
 ========================================================================
 
 Completed so far:
@@ -216,10 +230,10 @@ Completed so far:
                    docs/PRODUCTION_HARDENING_BASELINE.md
   Phase 1A  DONE   stored XSS in job/order forms + 17 regression tests (Claude)
                    residual: CSP unsafe-inline removal NOT started
-  Phase 3B  PARTIAL advisory triage + straight runtime upgrades integrated
-                   (50d75e7, 608be56, 3346b51)
-                   residual: PyPDF2-to-pypdf migration; two proposed exceptions
-                   need a human owner/date before release
+  Phase 3B  DONE engineering remediation 2026-08-03
+                   (50d75e7, 608be56, 3346b51, 5743b82)
+                   residual: two proposed exceptions need a human owner/date
+                   and <=90-day expiry before release
   Phase 3C  PARTIAL actions on current majors, but SHA pinning + digest pinning
                    + blocking gates all still TODO
   Phase 0   DONE 2026-08-02 (Codex)
@@ -266,11 +280,12 @@ Phase 3B advisory-triage record (integrated 2026-08-03):
            image/upload/docpack/markup tests, combined full suite, Gunicorn
            config, six deployment contracts, rendered Compose/Caddy and a live
            disposable Caddy -> Gunicorn 22 health request all passed.
-  CURRENT pip-audit is 2 findings across 2 packages: PyPDF2 and the proposed
+  DONE EOL PyPDF2 was replaced with pypdf 6.14.2 in 5743b82 across all 12
+       production import sites and six test callers. Supported PdfWriter.append
+       replaces removed PdfMerger behavior; five parity/adversarial regressions
+       cover malformed input and binder/markup behavior.
+  CURRENT requirements-file pip-audit is 1 finding in 1 package: the proposed
           Flask-Security-Too exception. npm remains two high React Router rows.
-  ACTION Replace EOL PyPDF2 with pypdf in a separate commit. There are 12 import
-         sites: seven in docpacks.py, four in order_scope.py and one in
-         markup_documents.py. Test crafted/invalid PDFs and binder generation.
   EXCEPTION EXC-2026-001 is Proposed only. Flask-Security-Too's medium advisory
             is WebAuthn-only; TinyMRP neither enables WebAuthn nor installs its
             extras. No patched release exists. Enabling WebAuthn voids it.
@@ -333,9 +348,9 @@ Protected owner requirement added 2026-08-02:
   and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
 
 Current work:
-  Phase 1C and the P3B straight runtime upgrades are DONE and integrated. The
-  next primary phase is Phase 2 strict-mode authentication. The remaining P3B
-  PyPDF migration may be claimed in parallel after this closure commit.
+  Phase 2 strict-mode authentication implementation is pushed at 80783b3 and
+  remains active for documentation plus combined production/Caddy evidence.
+  P3B runtime and pypdf remediation are DONE and integrated through 5743b82.
 
 Phase 1B decision log (recorded before implementation, 2026-08-03):
   * New API tokens expire after 90 days by default and may not exceed 365 days;
@@ -587,7 +602,7 @@ Objective: Produce a reliable, vulnerability-gated fresh installation.
   CLOSED DEPLOY-SEED-01. Remaining deployment/infrastructure risks belong to
        Phase 5 and the live release-candidate exercise in Phase 10.
 
-3B. Dependency remediation — [PARTIAL; upgrades through 3346b51]
+3B. Dependency remediation — [DONE engineering remediation through 5743b82]
 Done ahead of sequence while triaging the open Dependabot PRs. Landed on main, so
 it is already in the base of this branch.
   DONE Upgraded runtime deps: requests 2.34.2, urllib3 2.7.0, idna 3.18,
@@ -610,8 +625,9 @@ it is already in the base of this branch.
        and required CFFI to 2.0.0 in runtime-only commit 3346b51. Production
        build/full suite and rendered plus live disposable Caddy paths passed;
        pip-audit fell from 34/5 to 2/2.
-  TODO Migrate EOL PyPDF2 to pypdf in a separate commit. Twelve imports exist
-       across docpacks.py, markup_documents.py and order_scope.py.
+  DONE Migrated EOL PyPDF2 to pypdf 6.14.2 in 5743b82. Production full suite,
+       pip check, malformed-input regressions and protected Caddy gates passed;
+       requirements-file pip-audit fell to 1 finding in 1 package.
   TRIAGED React Router GHSA-qwww-vcr4-c8h2 affects unstable RSC APIs only; none
           are used. Core react-router 8.3.0 is patched, but react-router-dom has
           no 8.x. Do not accept npm audit fix --force's 7.11.0 downgrade because
@@ -962,8 +978,8 @@ Phase 1A — stored XSS. DONE.
 Phase 3A — fresh deployments. DONE 2026-08-03; Caddy/VPS path preserved.
 Phase 1B — token lifecycle. DONE 2026-08-03.
 Phase 1C — server-side session lifecycle. DONE 2026-08-03.
-Phase 2 — strict-mode authentication. NEXT PRIMARY.
-Phase 3B — straight runtime upgrades DONE; PyPDF migration remains parallel-safe.
+Phase 2 — strict-mode authentication. IN PROGRESS; implementation pushed at 80783b3.
+Phase 3B — dependency engineering remediation DONE; human exceptions remain.
 Phase 3C — reproducible supply chain.
 Phase 4 — safe, atomic imports.
 Phase 5 — production infrastructure.
@@ -972,6 +988,6 @@ Phase 7 — add-in hardening.
 Phase 8 — maintainability.
 Phase 9 — commercial scope.
 Phase 10 — release validation.
-The next implementation request should be: “Implement Phase 2 strict-mode
-authentication while preserving the Phase 1C lifecycle controls and Phase 3A
-VPS/Caddy gates; migrate PyPDF2 to pypdf in a separate parallel worktree.”
+The next implementation request should be: “Finish Phase 2 combined production
+and guided VPS/Caddy validation, close its evidence, then begin Phase 3C
+reproducible supply-chain gates.”
