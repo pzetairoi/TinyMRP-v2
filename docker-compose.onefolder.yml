@@ -3,7 +3,8 @@
 # - Persist MongoDB + runtime secrets under <deliverables>/.tinymrp/
 #
 # Windows note: use forward slashes (e.g. C:/CADEXPORT/Deliverables).
-# Admin seeding: a random one-time password is generated and printed to the app logs.
+# The PowerShell helper generates first-admin credentials operator-side and writes
+# them to its compose env file; the container never generates or logs them.
 
 services:
   mongo:
@@ -46,11 +47,13 @@ services:
       # Leave accel redirect empty unless you intentionally provision and test
       # an Nginx internal route that matches the chosen prefix.
       FILES_ACCEL_REDIRECT_PREFIX: ""
-      # Seed a default admin (password is generated once and printed to container logs)
-      TINYMRP_SEED_ADMIN: "true"
+      # Admin bootstrap is opt-in and requires both explicit credentials.
+      TINYMRP_SEED_ADMIN: ${TINYMRP_SEED_ADMIN:-false}
       # NOTE: Must be a syntactically valid, deliverable-looking email for email_validator.
-      # Override if you want a real address.
-      TINYMRP_ADMIN_EMAIL: admin@example.com
+      # The helper defaults this to admin@example.com; direct users should set a
+      # real operator-controlled address.
+      TINYMRP_ADMIN_EMAIL: ${TINYMRP_ADMIN_EMAIL:-}
+      TINYMRP_ADMIN_PASSWORD: ${TINYMRP_ADMIN_PASSWORD:-}
     depends_on:
       mongo:
         condition: service_healthy

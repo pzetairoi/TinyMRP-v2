@@ -1163,6 +1163,11 @@ sudo ./deploy/scripts/rollback-instance.sh company1
 <li>creates the Caddy route</li>
 <li>enables HTTPS automatically for public domains</li>
 </ul>
+<p>The installer generates the first administrator credentials before Docker is
+started and shows them once in the invoking terminal. The app container does not
+generate or log passwords. Existing users and password hashes are not changed on
+restart or update. If an empty database is missing valid bootstrap credentials,
+the app stays unhealthy and the guided deployment reports the failure.</p>
 <p>Generated file-serving defaults for guided Caddy deployments:</p>
 <ul>
 <li><code>FILES_LOCAL_ROOT=&quot;/data/deliverables&quot;</code></li>
@@ -1174,7 +1179,7 @@ sudo ./deploy/scripts/rollback-instance.sh company1
 <h3 id="3-open-tinymrp">3) Open TinyMRP</h3>
 <ul>
 <li>URL: <code>https://company1.tinymrp.com</code></li>
-<li>Login with the generated admin account from the installer output.</li>
+<li>Login with the generated canonical administrator account from the installer output.</li>
 </ul>
 </div></details><details class="help-section" id="sec-dns-and-domain-setup"><summary><span class="help-section-title" id="dns-and-domain-setup">DNS And Domain Setup</span></summary><div class="help-section-body">
 <p>Examples:</p>
@@ -1683,23 +1688,13 @@ whole plan.</li>
 <td></td>
 </tr>
 <tr>
-<td><code>TINYMRP_ADMIN_EMAIL</code></td>
-<td><code>admin@example.com</code></td>
-<td></td>
-</tr>
-<tr>
-<td><code>TINYMRP_ADMIN_PASSWORD</code></td>
-<td><code>ChangeMe123!</code></td>
-<td></td>
-</tr>
-<tr>
 <td><code>TINYMRP_SECURITY_MODE</code></td>
 <td><code>compat</code></td>
 <td></td>
 </tr>
 <tr>
 <td><code>TINYMRP_SEED_ADMIN</code></td>
-<td><code>true</code></td>
+<td><code>false</code></td>
 <td></td>
 </tr>
 <tr>

@@ -266,36 +266,29 @@ All endpoints require authentication and respect role permissions (`jobs.*`, `su
 
 ## Roles & Permissions
 
-Default roles and permissions are created/updated by:
+Missing canonical roles are created without overwriting local customisations by:
 
 ```powershell
 flask --app run.py user seed-roles
 ```
 
-This overwrites descriptions and permission lists for the built-in roles below.
+Use `user seed-roles --dry-run` to report drift. Use `--apply` only after review
+when you intentionally want to restore the canonical definitions.
 
 ### Built-in roles (default permissions)
 
-- `admin`: full access (all permissions).
-- `planner`:
-  - `items.view`, `bom.view`, `mrp.run`, `reports.view`
-  - `jobs.view`, `jobs.manage`, `orders.view`, `orders.manage`
-  - `suppliers.view`, `customers.view`
-  - `tools.view`, `import.bom`
-- `operator`:
-  - `workorders.view`, `workorders.edit`, `workorders.close`
-  - `inventory.issue`, `inventory.receive`
-  - `items.view`, `bom.view`
-  - `tools.view`, `import.bom`
-- `viewer` (read-only):
-  - `items.view`, `bom.view`, `workorders.view`, `reports.view`
-  - `jobs.view`, `orders.view`, `suppliers.view`, `customers.view`
-- `customer_viewer` (scoped read-only):
-  - `items.view`, `bom.view`, `jobs.view`, `orders.view`, `customers.view`
-- `supplier_viewer` (scoped read-only):
-  - `items.view`, `bom.view`, `orders.view`, `suppliers.view`
+- `administrator`: all registered permissions.
+- `security_administrator`: users, roles, assignments, token revocation and audit.
+- `engineering_manager`, `engineering`: engineering data and workflows.
+- `commercial`: sales, procurement, customer, supplier and job workflows.
+- `internal`, `workshop`: internal read/collaboration and workshop execution.
+- `customer`, `supplier`: deliberately scoped external read-only access.
+- `auditor`: broad read-only audit and business visibility.
 
-Roles can be managed by admins in `/admin/roles`. If roles are corrupted, re-run `seed-roles` to restore defaults.
+The exact permission intent is documented in
+`docs/security/role_intent_feature_matrix.md`. Roles can be managed by authorised
+administrators in `/admin/roles`. The legacy `admin` slug remains recognised for
+existing installations but is not created for new users.
 
 ### Row-level scoping for external users
 
@@ -311,7 +304,8 @@ Rules:
 - **Customer-scoped users** (linked via `Customer.users`) only see their customers, jobs, and orders (including orders tied to their jobs).
 - **Supplier-scoped users** (linked via `Supplier.users`) only see their suppliers, orders, and jobs associated via vendor/order links.
 - **Viewer role with links**: a user with role `viewer` who is linked to any customer/supplier is treated as scoped (prevents accidental global access).
-- **Internal roles** (`admin`, `operator`, `planner`) remain unscoped.
+- **Internal canonical roles** remain unscoped unless their role definition is
+  deliberately mapped to a business scope.
 
 To link a user, edit the Customer/Supplier in the admin UI and add the user under its `users` field.
 
@@ -338,8 +332,7 @@ python run.py
 
 # 3) Seed roles and create an admin
 flask --app run.py user seed-roles
-flask --app run.py user create --email admin@admin.com --password admin
-flask --app run.py user grant-admin --email admin@admin.com
+flask --app run.py user bootstrap-admin --email admin@example.com
 
 # 4) Build the frontend (writes to app/static/parts-ui)
 cd frontend
@@ -439,15 +432,18 @@ docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server
 
 ### User and role management
 
-The first run seeds default roles plus an admin user (`admin@example.com`). Check the generated password in the `logs -n 200 app` output and log into `http://localhost:5000/` with it.
+On the first run, the PowerShell helper generates a strong administrator password,
+writes the bootstrap settings to `<deliverables>\.tinymrp\compose.env`, and shows
+the password once in the invoking terminal. It is never printed by the container.
+Log into `http://localhost:5000/` with the displayed email and password.
 
 For CLI management once the stack is up, run:
 
 ```powershell
 docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py user list
 docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py role list
-docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py user create --email new@local --password Secret123
-docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py user grant-role --email new@local --role admin
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py user create --email new@example.com
+docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server\tinymrp_v2\docker-compose.onefolder.yml exec app flask --app run.py user grant-role --email new@example.com --role internal
 ```
 
 Use the same `docker compose exec ...` pattern to run `user set-password`, `grant-role`, or `revoke-role`.
@@ -457,8 +453,7 @@ Useful snippets (from `handycommands.txt`):
 ```bash
 docker compose up -d
 docker compose exec app flask --app run.py user seed-roles
-docker compose exec app flask --app run.py user create --email admin@admin.com --password admin
-docker compose exec app flask --app run.py user grant-admin --email admin@admin.com
+docker compose exec app flask --app run.py user bootstrap-admin --email admin@example.com
 
 # Recreate just the app container
 docker compose up -d --force-recreate app

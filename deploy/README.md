@@ -115,6 +115,14 @@ What the script does:
 - adds or updates the Caddy route
 - reloads Caddy safely
 
+The first administrator uses the canonical `administrator` role. The script
+generates its password before starting Docker, stores the bootstrap settings in
+the instance `.env`, and shows the password once in the invoking terminal. The
+container never generates or prints credentials. On later restarts and updates,
+an existing user database is left unchanged even though the persisted seed flag
+remains enabled. Missing or invalid credentials on a genuinely empty database
+stop startup instead of producing a falsely healthy instance.
+
 Optional flags:
 
 ```bash

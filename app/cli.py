@@ -76,6 +76,17 @@ def list_roles():
 def _get_user(email: str):
     return User.objects(email=str(email or "").strip().lower()).first()
 
+
+def _canonical_administrator_role():
+    from app.services.standard_roles import reconcile_standard_roles
+
+    reconcile_standard_roles()
+    role = Role.objects(name="administrator").first()
+    if role is None:
+        raise click.ClickException("Canonical administrator role could not be created")
+    return role
+
+
 @user.command("create")
 @click.option("--email", prompt=True)
 @click.option("--password", prompt=True, hide_input=True, confirmation_prompt=True)
@@ -121,10 +132,11 @@ def grant_admin(email):
     if not u:
         click.echo("User not found")
         raise SystemExit(1)
-    r = Role.objects(name="admin").first() or Role(name="admin").save()
+    r = _canonical_administrator_role()
     if r not in u.roles:
-        u.roles.append(r); u.save()
-    click.echo("Granted admin role")    
+        u.roles.append(r)
+        u.save()
+    click.echo("Granted administrator role")
 
 @user.command("set-password")
 @click.option("--email", prompt=True)
@@ -209,23 +221,24 @@ def seed_roles(dry_run, apply):
 @click.option("--password", prompt=True, hide_input=True, confirmation_prompt=True)
 @with_appcontext
 def bootstrap_admin(email, password):
-    email = str(email or "").strip().lower()
-    from app.services.standard_roles import reconcile_standard_roles
+    from app.services.container_bootstrap import (
+        BootstrapConfigurationError,
+        validate_first_admin_credentials,
+    )
 
-    reconcile_standard_roles()
+    try:
+        email, password = validate_first_admin_credentials(email, password)
+    except BootstrapConfigurationError as exc:
+        click.echo(str(exc))
+        raise SystemExit(1)
+    r = _canonical_administrator_role()
     u = _get_user(email)
     if not u:
         u = User(email=email.lower(), fs_uniquifier=secrets.token_hex(16))
-    errors = validate_admin_password(password, email=email)
-    if errors:
-        for error in errors:
-            click.echo(error)
-        raise SystemExit(1)
     u.password = hash_password(password)
     u.active = True
     u.password_changed_at = utc_now()
     u.updated_at = utc_now()
-    r = Role.objects(name="admin").first() or Role(name="admin").save()
     if r not in (u.roles or []):
         u.roles.append(r)
     u.save()

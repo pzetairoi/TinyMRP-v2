@@ -36,6 +36,132 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+  fresh-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fresh database, bootstrap, restart, login and API smoke
+        env:
+          COMPOSE_PROJECT_NAME: tinymrp-phase3a-smoke
+          SMOKE_EMAIL: phase3a-smoke@example.com
+          HTTP_PORT: "5080"
+        run: |
+          set -euo pipefail
+          SMOKE_ROOT="$RUNNER_TEMP/tinymrp-phase3a-smoke"
+          DELIVERABLES_DIR="$SMOKE_ROOT/deliverables"
+          SMOKE_ENV="$SMOKE_ROOT/compose.env"
+          SMOKE_PASSWORD="$(openssl rand -hex 24)"
+          mkdir -p "$DELIVERABLES_DIR"
+          cat >"$SMOKE_ENV" <<EOF
+          HTTP_PORT=$HTTP_PORT
+          DELIVERABLES_DIR=$DELIVERABLES_DIR
+          SECRET_KEY=$(openssl rand -hex 32)
+          SECURITY_PASSWORD_SALT=$(openssl rand -hex 32)
+          TINYMRP_SECURITY_MODE=compat
+          TINYMRP_ALLOWED_ORIGINS=http://localhost:$HTTP_PORT
+          TINYMRP_CORS_CREDENTIALS=true
+          TINYMRP_SEED_ADMIN=true
+          TINYMRP_ADMIN_EMAIL=$SMOKE_EMAIL
+          TINYMRP_ADMIN_PASSWORD=$SMOKE_PASSWORD
+          FILES_ACCEL_REDIRECT_PREFIX=
+          FILES_UPSTREAM_ALLOWED_HOSTS=
+          FILES_PROXY_MAX_BYTES=
+          EOF
+
+          COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --env-file "$SMOKE_ENV" -f docker-compose.yml)
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ]; then
+              "${COMPOSE[@]}" ps || true
+              "${COMPOSE[@]}" logs --no-color app mongo nginx || true
+            fi
+            "${COMPOSE[@]}" down -v --remove-orphans || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          "${COMPOSE[@]}" config --quiet
+          "${COMPOSE[@]}" up -d --build --wait
+          "${COMPOSE[@]}" exec -T mongo mongosh --quiet --eval \
+            "if (db.adminCommand('ping').ok !== 1) { quit(1) }"
+
+          TOKEN="$(
+            "${COMPOSE[@]}" exec -T app python - <<'PY' | tail -n 1
+          from app import create_app
+          from app.models.auth import Role, User
+          from app.services.api_tokens import create_token
+          from app.services.standard_roles import STANDARD_ROLE_SLUGS
+
+          app = create_app()
+          with app.app_context():
+              assert set(Role.objects.scalar("name")) == set(STANDARD_ROLE_SLUGS)
+              assert Role.objects.count() == len(STANDARD_ROLE_SLUGS)
+              user = User.objects.get(email="phase3a-smoke@example.com")
+              assert user.active is True
+              assert [role.name for role in user.roles] == ["administrator"]
+              _, raw_token = create_token(user, label="phase3a-compose-smoke")
+              print(raw_token)
+          PY
+          )"
+          test -n "$TOKEN"
+          export TINYMRP_SMOKE_PASSWORD="$SMOKE_PASSWORD"
+          export TINYMRP_SMOKE_TOKEN="$TOKEN"
+          python scripts/smoke_fresh_compose.py \
+            --base-url "http://localhost:$HTTP_PORT" --email "$SMOKE_EMAIL"
+
+          SNAPSHOT_BEFORE="$(
+            "${COMPOSE[@]}" exec -T app python - <<'PY' | tail -n 1
+          import json
+          from app import create_app
+          from app.models.auth import Role, User
+
+          app = create_app()
+          with app.app_context():
+              user = User.objects.get(email="phase3a-smoke@example.com")
+              print(json.dumps({
+                  "password": user.password,
+                  "roles": [role.name for role in user.roles],
+                  "role_count": Role.objects.count(),
+                  "user_count": User.objects.count(),
+              }, sort_keys=True))
+          PY
+          )"
+          "${COMPOSE[@]}" restart app
+          "${COMPOSE[@]}" up -d --wait app
+          SNAPSHOT_AFTER="$(
+            "${COMPOSE[@]}" exec -T app python - <<'PY' | tail -n 1
+          import json
+          from app import create_app
+          from app.models.auth import Role, User
+
+          app = create_app()
+          with app.app_context():
+              user = User.objects.get(email="phase3a-smoke@example.com")
+              print(json.dumps({
+                  "password": user.password,
+                  "roles": [role.name for role in user.roles],
+                  "role_count": Role.objects.count(),
+                  "user_count": User.objects.count(),
+              }, sort_keys=True))
+          PY
+          )"
+          test "$SNAPSHOT_BEFORE" = "$SNAPSHOT_AFTER"
+
+          set +e
+          BAD_OUTPUT="$("${COMPOSE[@]}" run --rm --no-deps \
+            -e MONGO_URI=mongodb://mongo:27017/tinymrp-phase3a-invalid \
+            -e MONGO_WAIT_RETRIES=1 \
+            -e TINYMRP_SEED_ADMIN=true \
+            -e TINYMRP_ADMIN_EMAIL=invalid-bootstrap@example.com \
+            -e TINYMRP_ADMIN_PASSWORD= app true 2>&1)"
+          BAD_STATUS=$?
+          set -e
+          test "$BAD_STATUS" -ne 0
+          ! grep -Fq "[entrypoint] Launching:" <<<"$BAD_OUTPUT"
+          ! "${COMPOSE[@]}" logs --no-color app | grep -Fq -- "$SMOKE_PASSWORD"
+
   supply-chain:
     runs-on: ubuntu-latest
     steps:

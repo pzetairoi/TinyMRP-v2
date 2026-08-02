@@ -6,9 +6,9 @@
 #   2. Existing data volume: see docs/UPDATING_PRODUCTION.md ("Enabling Mongo auth
 #      on an existing instance") — users must be created before enabling auth.
 #
-# Admin seeding: no default credentials. With TINYMRP_SEED_ADMIN=true and an empty
-# database, a random one-time password is generated and printed in the app logs
-# unless TINYMRP_ADMIN_PASSWORD is provided explicitly.
+# Admin seeding is off by default. A fresh database starts only when an opted-in
+# seed supplies both TINYMRP_ADMIN_EMAIL and TINYMRP_ADMIN_PASSWORD explicitly.
+# The guided VPS and one-folder helpers generate those credentials operator-side.
 
 services:
   mongo:
@@ -68,7 +68,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-text}
       # Admin seeding — NO default credentials (see header note).
-      TINYMRP_SEED_ADMIN: ${TINYMRP_SEED_ADMIN:-true}
+      TINYMRP_SEED_ADMIN: ${TINYMRP_SEED_ADMIN:-false}
       TINYMRP_ADMIN_EMAIL: ${TINYMRP_ADMIN_EMAIL:-}
       TINYMRP_ADMIN_PASSWORD: ${TINYMRP_ADMIN_PASSWORD:-}
     depends_on:

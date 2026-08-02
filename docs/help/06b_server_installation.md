@@ -82,6 +82,12 @@ The script:
 - creates the Caddy route
 - enables HTTPS automatically for public domains
 
+The installer generates the first administrator credentials before Docker is
+started and shows them once in the invoking terminal. The app container does not
+generate or log passwords. Existing users and password hashes are not changed on
+restart or update. If an empty database is missing valid bootstrap credentials,
+the app stays unhealthy and the guided deployment reports the failure.
+
 Generated file-serving defaults for guided Caddy deployments:
 
 - `FILES_LOCAL_ROOT="/data/deliverables"`
@@ -94,7 +100,7 @@ Keep the deliverables bind mount at `/srv/tinymrp/instances/<instance>/deliverab
 ### 3) Open TinyMRP
 
 - URL: `https://company1.tinymrp.com`
-- Login with the generated admin account from the installer output.
+- Login with the generated canonical administrator account from the installer output.
 
 ## DNS And Domain Setup
 

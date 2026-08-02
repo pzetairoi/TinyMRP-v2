@@ -5,7 +5,54 @@ Branch: hardening/production-readiness
 Driver: Codex. Anything below marked [DONE ... Claude] was done in parallel.
 Phase 0 is complete; no Phase 0 files remain reserved for parallel work.
 
+========================================================================
+PARALLEL WORK BOARD — update before editing; never share an unclaimed file
+========================================================================
+Coordination rules:
+  1. Each AI must claim a bounded workstream and its files here before editing.
+  2. A parallel AI should use its own Git worktree and branch from the current
+     hardening/production-readiness HEAD. It must not switch the branch in the
+     primary workspace or stage/commit another workstream's files.
+  3. Do not edit a file reserved by another active workstream. Send findings to
+     the primary owner instead.
+  4. Each workstream keeps one focused commit, records commands/results here,
+     and identifies the commit hash for review/cherry-pick.
+  5. The primary owner integrates commits, runs the combined full suite and
+     updates the production-blocker register.
+
+Active workstreams as of 2026-08-03:
+  None. Phase 3A is complete; no Phase 3A files remain reserved.
+
+Completed workstreams:
+  P3A-BOOTSTRAP  DONE 2026-08-03  owner: Codex /root
+    Canonical, idempotent, fail-closed bootstrap; deliberate credentials;
+    fresh-Compose smoke; standalone/one-folder migration; operator docs.
+  P3A-CADDY-TEST  DONE 2026-08-03  owner: /root/phase3a_caddy_audit
+    Independent audit plus six cross-platform regression contracts in
+    tests/test_vps_caddy_deployment_contract.py. No Caddy defect was exposed.
+  P3A-HANDOFF  DONE 2026-08-03  owner: Codex /root
+    Final consistency sweep, Python 3.11 verification, evidence and roadmap.
+
+Available parallel workstream (safe to claim on a separate branch/worktree):
+  P3B-ADVISORY-TRIAGE  AVAILABLE
+    Scope: applicability research and time-limited exception templates for the
+           current Python/React Router advisories; documentation only.
+    Allowed files:
+      docs/security/dependency_advisory_triage.md (new)
+      docs/security/risk_acceptance_template.md (new)
+    Do not change requirements, package manifests, workflows or application
+    code in this stream. Record sources, affected features, compensating
+    controls, owner and expiry for primary review.
+
+Next integration order:
+  Commit Phase 3A -> Phase 1B token lifecycle -> Phase 1C session lifecycle.
+  P3B-ADVISORY-TRIAGE may run in parallel because it is documentation-only.
+========================================================================
+
 Completed so far:
+  Phase 3A  DONE 2026-08-03 (Codex + parallel Caddy audit)
+                   DEPLOY-SEED-01 closed; evidence below and in
+                   docs/PRODUCTION_HARDENING_BASELINE.md
   Phase 1A  DONE   stored XSS in job/order forms + 17 regression tests (Claude)
                    residual: CSP unsafe-inline removal NOT started
   Phase 3B  PARTIAL dependency upgrades landed on main (Claude)
@@ -41,6 +88,48 @@ Phase 0 completion details:
   OPEN Supply-chain gates: pip-audit 34 entries/5 packages; npm production
        audit 2 high entries. These are Phase 3B blockers.
 
+Phase 3A completion details:
+  DONE Replaced the inline legacy role seed and removed the missing PERMISSIONS
+       import. app/services/container_bootstrap.py now uses the canonical
+       reconcile_standard_roles() create-missing mode and never overwrites role
+       drift, deletes custom/legacy roles, or changes an existing user.
+  DONE Fresh opt-in admin bootstrap validates explicit email/password before any
+       write, rejects the historical example password, hashes the password and
+       grants only the canonical administrator role. No credential is generated
+       or printed in container logs.
+  DONE Entrypoint distinguishes deterministic configuration failure from
+       retryable runtime/database failure, bounds retry behavior and exits
+       nonzero before Gunicorn after the final failure.
+  DONE Direct Compose seeding now defaults false. Guided Caddy create-instance
+       keeps its existing explicit seed/email/password env contract. The Windows
+       one-folder helper generates/stores credentials operator-side, preserves
+       them on rerun and safely detects older data without stored credentials.
+  DONE Canonical administrator assignment also replaces new legacy-admin
+       creation in CLI grant/bootstrap commands. Existing legacy admin users are
+       intentionally untouched for compatibility.
+  DONE Fixed standalone install-server.sh's invalid CLI invocation. It now uses
+       the same safe bootstrap, passes operator values as positional shell
+       arguments, avoids password reset on reinstall and fails the requested
+       installation when first-admin creation fails.
+  DONE Added 20 bootstrap/installer tests, six independent VPS/Caddy deployment
+       contract tests and a CI fresh-Compose job. The smoke checks Mongo, exact
+       roles, admin, CSRF browser login, health, protected bearer API, restart
+       idempotence, log secrecy and fail-closed invalid bootstrap.
+  VERIFIED Linux Python 3.11 final suite: 595 passed; Phase 3A focused final
+       suite: 26 passed. Ruff, pinned Black, scoped mypy, Bandit -ll, pip check,
+       Bash syntax, ShellCheck -S error, PowerShell parse and workflow YAML/
+       embedded Bash parse all pass.
+  VERIFIED Built production image and real fresh stack: Mongo ready; exact
+       canonical roles; administrator; browser login; /api/health; protected
+       /api/auth/check; password absent from logs; restart password hash/roles/
+       counts unchanged; invalid fresh config exited 2 without launching app.
+  VERIFIED Main/one-folder Compose parse. All deployment scripts pass Bash
+       syntax. A representative internal-TLS Caddy route passes caddy validate,
+       the rendered VPS Compose passes docker compose config, and the empty
+       FILES_ACCEL_REDIRECT_PREFIX/update/rollback/doctor contracts have tests.
+  NOTE No live public VPS, DNS or ACME mutation was performed. That remains a
+       release-environment validation item, not a Phase 3A code defect.
+
 Protected owner requirement added 2026-08-02:
   The guided Ubuntu/VPS deployment scripts using Caddy MUST remain supported.
   Any phase touching auth, files, containers, health, networking, environment
@@ -48,11 +137,11 @@ Protected owner requirement added 2026-08-02:
   instance Compose, empty FILES_ACCEL_REDIRECT_PREFIX, update/rollback behavior
   and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
 
-Next recommended work:
-  Phase 3A first: fix the entrypoint's removed PERMISSIONS import/legacy role
-  slugs and make seeding fail startup correctly. This is prioritized ahead of
-  1B because a fresh VPS/Caddy instance currently cannot reliably bootstrap.
-  Then resume Phase 1B/1C followed by Phase 2.
+Current work:
+  Phase 3A DONE. Next primary implementation is Phase 1B (API-token lifecycle),
+  then Phase 1C (session lifecycle), followed by Phase 2. Do not implement 1B
+  and 1C in parallel because both touch user security-state revocation. The
+  documentation-only P3B-ADVISORY-TRIAGE workstream above is safe in parallel.
 ========================================================================
 
 Progressive mitigation roadmap
@@ -67,8 +156,8 @@ Phase 0 — Establish a controlled baseline — [DONE 2026-08-02, Codex]
 Objective: Create an immutable, reproducible starting point before remediation begins.
 Completion evidence and residual risks are in
 docs/PRODUCTION_HARDENING_BASELINE.md. All listed Phase 0 acceptance criteria
-were met. The Caddy/VPS fresh-bootstrap limitation is an explicitly open Phase
-3A production blocker, not an unrecorded Phase 0 success.
+were met. The Caddy/VPS fresh-bootstrap limitation was recorded as a Phase 3A
+production blocker and was closed on 2026-08-03.
 Estimated effort
 0.5–2 engineering days.
 Request to use
@@ -191,19 +280,24 @@ Implement Phase 2 using session authentication for the same-origin browser and b
 
 Phase 3 — Repair deployment and supply-chain gates
 Objective: Produce a reliable, vulnerability-gated fresh installation.
-3A. Container initialization
-Replace the legacy entrypoint role definitions with the canonical standard-role service.
-Remove the missing PERMISSIONS import.
-Make seeding idempotent.
-Make unrecoverable initialization failures stop container startup.
-Avoid printing generated credentials into long-lived logs.
-Introduce a deliberate bootstrap-admin workflow.
-Add a fresh-database Compose smoke test that verifies:Mongo availability.
-Role creation.
-Administrator bootstrap.
-Login.
-Health/readiness.
-A protected API request.
+3A. Container initialization — [DONE 2026-08-03, Codex + parallel Caddy audit]
+  DONE Replaced legacy entrypoint definitions with the canonical standard-role
+       service and removed the missing PERMISSIONS import.
+  DONE Bootstrap is idempotent for persisted guided-VPS seed settings; existing
+       users, password hashes, assignments, local role drift and legacy roles are
+       preserved.
+  DONE Unrecoverable initialization failure prevents application launch.
+  DONE Credentials originate in an operator helper/installer and are never
+       generated or printed by the container.
+  DONE Direct Compose, Windows one-folder, guided Caddy and standalone nginx
+       first-admin workflows are documented and have safe migration behavior.
+  DONE CI fresh-database Compose smoke verifies Mongo, exact canonical roles,
+       administrator bootstrap, browser login, health, a protected bearer API,
+       restart idempotence, log secrecy and false-success prevention.
+  DONE Guided VPS/Caddy rendering, network isolation, update, rollback and doctor
+       behavior are protected by six tests and local config validation evidence.
+  CLOSED DEPLOY-SEED-01. Remaining deployment/infrastructure risks belong to
+       Phase 5 and the live release-candidate exercise in Phase 10.
 
 3B. Dependency remediation — [PARTIALLY DONE 2026-08-02, Claude, on main: 5a893e6 + f574515]
 Done ahead of sequence while triaging the open Dependabot PRs. Landed on main, so
@@ -270,7 +364,8 @@ A fresh-install smoke test runs in CI.
 Estimated effort
 4–8 days, depending on dependency compatibility.
 Request to use
-Implement Phase 3A, the fresh-container initialization and smoke test.
+Completed. Do not repeat Phase 3A; preserve its bootstrap, Compose and Caddy
+regression gates while implementing later phases.
 
 Phase 4 — Protect imports and business data integrity
 Objective: Prevent archive-based denial of service and partial imports.
@@ -569,8 +664,8 @@ Recommended implementation order
 The shortest safe path is:
 Phase 0 — controlled baseline. DONE.
 Phase 1A — stored XSS. DONE.
-Phase 3A — fresh deployments. NEXT, prioritized for Caddy/VPS compatibility.
-Phase 1B/1C — tokens and sessions.
+Phase 3A — fresh deployments. DONE 2026-08-03; Caddy/VPS path preserved.
+Phase 1B/1C — tokens and sessions. NEXT (sequential, shared revocation state).
 Phase 2 — strict-mode authentication.
 Phase 3B/3C — dependencies and supply chain.
 Phase 4 — safe, atomic imports.
@@ -580,5 +675,5 @@ Phase 7 — add-in hardening.
 Phase 8 — maintainability.
 Phase 9 — commercial scope.
 Phase 10 — release validation.
-The next implementation request should be: “Implement Phase 3A while preserving
-and testing the guided VPS/Caddy deployment path.”
+The next implementation request should be: “Implement Phase 1B API-token
+lifecycle and revocation, preserving the Phase 3A deployment and Caddy gates.”

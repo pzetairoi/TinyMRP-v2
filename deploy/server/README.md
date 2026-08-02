@@ -19,7 +19,9 @@ Certificate variants: `--certbot` (public host, Let's Encrypt), `--self-signed` 
 Other options: `--deliverables <dir>`, `--mongo-uri <uri>` (external MongoDB), `--compat`,
 `--skip-ufw`. Re-running is safe: existing env, certs and data are preserved.
 
-The script prints a one-time admin password at the end — change it after first login.
+For an empty user database, the script prints a one-time administrator password
+at the end; change it after first login. Re-running against an existing user
+database does not reset any password or role assignment.
 
 ## Manual install (what the script does)
 
@@ -41,7 +43,7 @@ The script prints a one-time admin password at the end — change it after first
      (replace the `__PLACEHOLDER__` values), symlink into `sites-enabled`, remove `default`,
      `nginx -t && systemctl reload nginx`.
 7. Firewall: `ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp && ufw enable`.
-8. First admin: `cd /opt/tinymrp_v2 && sudo -u tinymrp /opt/tinymrp_venv/bin/flask bootstrap-admin <email> '<password>'`.
+8. First admin (password is prompted securely): `cd /opt/tinymrp_v2 && sudo -u tinymrp /opt/tinymrp_venv/bin/flask --app app user bootstrap-admin --email <email>`.
 9. Optional fail2ban: install the two files from `deploy/server/fail2ban-*` into
    `/etc/fail2ban/{filter.d,jail.d}/` and restart fail2ban.
 

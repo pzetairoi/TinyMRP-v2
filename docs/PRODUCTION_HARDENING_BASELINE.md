@@ -36,10 +36,10 @@ environment variables, networking, startup or deployment scripts must verify:
 5. Existing-instance update and rollback behavior is preserved.
 6. A fresh instance can bootstrap its roles and administrator and become ready.
 
-Items 1-5 were statically or locally validated in Phase 0. Item 6 is currently
-blocked by the legacy container role-seeding import and is the first priority
-in Phase 3A. Existing Caddy routes and generated Compose configuration were not
-removed or replaced by Phase 0.
+Items 1-5 were statically or locally validated in Phase 0. Item 6 was blocked by
+the legacy container role-seeding import at baseline and was closed by Phase 3A
+on 2026-08-03. Existing Caddy routes and generated Compose configuration were
+not removed or replaced.
 
 ## Baseline change classification
 
@@ -131,6 +131,42 @@ compatibility checking. A clean frontend install audited 269 packages.
 Installer SHA-256:
 `E07FD3DA76FAA3A81A69F7B371A2894F9169646A34247747D11076A71EBE908B`.
 
+## Phase 3A completion evidence (2026-08-03)
+
+`DEPLOY-SEED-01` is closed on `hardening/production-readiness`. The container
+entrypoint now delegates to a canonical, idempotent bootstrap service and exits
+nonzero before the application command on invalid configuration or exhausted
+runtime retries. Existing users, passwords, assignments, legacy roles and local
+canonical-role drift are not rewritten.
+
+Fresh-administrator credentials are explicit and originate operator-side. The
+guided Caddy installer's persisted `.env` contract remains unchanged; the
+one-folder and standalone installers now follow the same no-log, no-reset rule.
+Direct Compose seeding defaults off. New administrators receive
+`administrator`, while existing legacy `admin` assignments remain compatible.
+
+Final verification evidence:
+
+- Linux Python 3.11: `595 passed` on the final tree.
+- Phase 3A focused suite: `26 passed` (20 bootstrap/installer plus six guided
+  VPS/Caddy contract tests).
+- Ruff, pinned Black, scoped mypy, Bandit `-ll`, `pip check`, Bash syntax,
+  ShellCheck error-level, PowerShell parsing and workflow YAML/embedded Bash
+  parsing passed.
+- Main and one-folder Compose configurations parsed; the production image built.
+- A real isolated fresh Compose stack verified Mongo availability, the exact
+  canonical role set, administrator creation, CSRF browser login, public health,
+  a protected bearer-token request, absence of the password from app logs and
+  unchanged password hash/roles/counts after restart.
+- A separate empty database with missing first-admin credentials exited `2` and
+  did not launch the application command.
+- A rendered internal-TLS Caddy route passed `caddy validate`; the rendered VPS
+  Compose passed `docker compose config`; empty acceleration-prefix, isolated
+  Mongo, update, rollback and doctor contracts are pinned by tests.
+
+No public DNS, ACME account or live VPS was mutated. Those are release-environment
+checks for Phase 10 rather than evidence of a remaining Phase 3A code defect.
+
 ## Open production blockers
 
 The identifier should be used in commits, reviews and risk decisions.
@@ -142,7 +178,7 @@ The identifier should be used in commits, reviews and risk decisions.
 | IAM-REV-01 | P0 | Open | 1B/1C | Deactivated users and credential changes do not reliably revoke API/session access |
 | IAM-TOKEN-01 | P0 | Open | 1B | User tokens default to no expiry and lack complete lifecycle controls |
 | AUTH-MODE-01 | P0 | Open | 2 | Strict mode is incompatible with normal browser and public-share API flows |
-| DEPLOY-SEED-01 | P0 | Open; next deployment priority | 3A | Entrypoint imports removed `PERMISSIONS`, retries, then starts without successful seeding |
+| DEPLOY-SEED-01 | P0 | Closed 2026-08-03 | 3A | Canonical, idempotent, fail-closed initialization and fresh-install smoke |
 | SUPPLY-PY-01 | P0 | Open | 3B | Python vulnerability gate reports 34 entries in 5 packages |
 | SUPPLY-NPM-01 | P0 | Open | 3B | Frontend production audit reports 2 high entries |
 | SUPPLY-IMM-01 | P1 | Open | 3C | Base images and Actions are not pinned to immutable digests/SHAs |
@@ -157,22 +193,23 @@ The identifier should be used in commits, reviews and risk decisions.
 | COMM-SCOPE-01 | P0 for marketing | Open | 9 | Current product is an engineering BOM/document portal, not a complete MRP |
 | COMM-LEGAL-01 | P0 for paid rollout | Open | 9 | Commercial/privacy/support/third-party notice package incomplete |
 
-## Caddy/VPS-specific finding
+## Caddy/VPS-specific finding and resolution
 
-The Caddy configuration and per-instance Compose renderer are healthy at this
-baseline. The application image itself still fails this import used by its
-entrypoint:
+At the Phase 0 baseline, the Caddy configuration and per-instance Compose
+renderer were healthy, but the application image failed this entrypoint import:
 
 ```text
 from app.views.admin_roles import PERMISSIONS
 ImportError: cannot import name 'PERMISSIONS'
 ```
 
-The entrypoint retries and eventually starts the application, which can delay
-updates and leave fresh instances without expected roles/admin bootstrap. Do
-not interpret a successful image build or valid Caddyfile as a successful fresh
-deployment. Repair and smoke-test this in Phase 3A before relying on new VPS
-instance creation.
+Phase 3A removed that inline import and legacy seed logic. The entrypoint now
+retries only runtime failures, rejects deterministic operator errors immediately
+and never starts Gunicorn after bootstrap failure. Guided instance creation still
+writes explicit seed/email/password values, uses an empty
+`FILES_ACCEL_REDIRECT_PREFIX`, waits for app health before installing its Caddy
+route and preserves the update/automatic-rollback flow. Six cross-platform
+contract tests plus rendered Compose/Caddy validation protect these behaviors.
 
 ## Handoff rules
 
@@ -187,9 +224,10 @@ instance creation.
 7. Use Python 3.11 and Node 24 for release evidence, regardless of host defaults.
 8. Preserve the baseline tag; do not move or recreate it.
 
-The recommended next implementation is Phase 3A because the owner explicitly
-requires the VPS/Caddy deployment workflow to remain usable. After Phase 3A,
-resume Phase 1B/1C and Phase 2 unless new evidence changes the dependency order.
+The recommended next implementation is Phase 1B, followed by Phase 1C and Phase
+2. Token and session lifecycle work should be sequential because both mutate
+user security-state revocation. Phase 3B advisory research may run in parallel
+as documented in `hardeningplan.txt`.
 
 ## Residual Phase 0 limitations
 
@@ -197,8 +235,9 @@ resume Phase 1B/1C and Phase 2 unless new evidence changes the dependency order.
   test was performed.
 - Caddy was validated in an isolated local configuration, not against a live
   VPS, DNS or ACME service.
-- The generated VPS instance was not brought fully online because the known
-  entrypoint seeding defect belongs to Phase 3A.
+- Phase 3A brought a real isolated fresh Compose stack online and validated the
+  generated VPS/Caddy configuration, but did not mutate a live VPS, DNS or ACME
+  environment.
 - Mutable image tags mean the locally observed digests are evidence, not a
   reproducible release guarantee.
 - The broad warning count, Black backlog and low-coverage modules remain later

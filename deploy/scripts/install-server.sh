@@ -259,13 +259,31 @@ fi
 # -------------------------------------------------------------- first admin ---
 if [ -n "$ADMIN_EMAIL" ]; then
   ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '\n=+/')A1!"
-  log "Bootstrapping admin ${ADMIN_EMAIL} (idempotent)"
-  if sudo -u tinymrp bash -c "cd '$APP_DIR' && set -a && . '$ENV_FILE' && set +a && FLASK_APP=app '$VENV_DIR/bin/flask' bootstrap-admin '$ADMIN_EMAIL' '$ADMIN_PASSWORD'" >/dev/null 2>&1; then
-    log "  Admin ready. One-time password: ${ADMIN_PASSWORD}"
-    log "  CHANGE IT after first login."
+  log "Bootstrapping first administrator ${ADMIN_EMAIL} (existing users are unchanged)"
+  if BOOTSTRAP_OUTPUT="$(sudo -u tinymrp bash -c '
+    set -e
+    cd "$1"
+    set -a
+    . "$2"
+    set +a
+    export TINYMRP_SEED_ADMIN=true
+    export TINYMRP_ADMIN_EMAIL="$4"
+    export TINYMRP_ADMIN_PASSWORD="$5"
+    exec "$3" -m app.services.container_bootstrap
+  ' _ "$APP_DIR" "$ENV_FILE" "$VENV_DIR/bin/python" "$ADMIN_EMAIL" "$ADMIN_PASSWORD" 2>&1)"; then
+    if printf '%s\n' "$BOOTSTRAP_OUTPUT" | grep -Fq '"admin": "created"'; then
+      log "  Administrator ready. One-time password: ${ADMIN_PASSWORD}"
+      log "  CHANGE IT after first login."
+    elif printf '%s\n' "$BOOTSTRAP_OUTPUT" | grep -Fq '"admin": "existing-users-skip"'; then
+      log "  Existing user database detected; no password or role assignment was changed."
+    else
+      die "First-administrator bootstrap returned an unexpected result; no password was displayed."
+    fi
   else
-    warn "  bootstrap-admin failed or user exists — create manually:"
-    warn "  cd ${APP_DIR} && sudo -u tinymrp ${VENV_DIR}/bin/flask bootstrap-admin <email> '<password>'"
+    warn "  First-administrator bootstrap failed: ${BOOTSTRAP_OUTPUT}"
+    warn "  Create or repair it manually (the password is prompted securely):"
+    warn "  cd ${APP_DIR} && sudo -u tinymrp ${VENV_DIR}/bin/flask --app app user bootstrap-admin --email <email>"
+    die "Installation did not complete the requested first-administrator bootstrap."
   fi
 fi
 

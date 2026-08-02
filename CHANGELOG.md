@@ -6,6 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 ## [Unreleased]
 
 ### Fixed
+- Container initialization now uses canonical standard roles, creates a fresh
+  `administrator` only from explicit operator credentials, never logs generated
+  passwords, preserves existing users on restart/update, and prevents application
+  launch after unrecoverable bootstrap failure. Fresh-Compose and guided VPS/Caddy
+  regression gates cover the supported deployment paths.
+- The standalone Linux and Windows one-folder installers now bootstrap safely
+  without resetting an existing administrator or displaying an unusable replacement
+  password during upgrades.
 - Uploads failed with "Permission denied: /data/deliverables/png" on instances built
   from the Phase-2 image: `useradd --system` assigned appuser a UID below 1000 while
   the deploy scripts chown the deliverables mount to 1000:1000. The image now pins
@@ -46,7 +54,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - New `deploy/scripts/install-server.sh`: idempotent scripted install of the manual path
   (packages incl. MongoDB 7.0 official repo, dedicated system user, venv, generated strong
   secrets with strict mode by default, systemd unit, nginx configs, UFW, optional fail2ban,
-  journald cap, health self-check, one-time admin bootstrap via `flask bootstrap-admin`).
+  journald cap, health self-check, canonical idempotent first-admin bootstrap).
 - fail2ban filter + jail for login abuse (`deploy/server/fail2ban-*`), banning on
   repeated 401/403/429 login responses in the nginx access log.
 - `deploy/server/README.md`: equivalent manual and scripted instructions plus

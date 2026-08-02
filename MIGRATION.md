@@ -43,10 +43,14 @@ Auto-seeding is now opt-in:
 ```
 TINYMRP_SEED_ADMIN=true
 TINYMRP_ADMIN_EMAIL=admin@example.com
-TINYMRP_ADMIN_PASSWORD=ChangeMe123!
+TINYMRP_ADMIN_PASSWORD=<unique-strong-password>
 ```
 
-In compat mode, if `TINYMRP_SEED_ADMIN=true` and no password is provided, a one-time password is generated and logged on first boot.
+On an empty database, opted-in seeding requires both explicit credentials and
+assigns the canonical `administrator` role. Missing, malformed, weak, or
+historical example credentials stop container startup; no password is generated
+or written to container logs. If any users already exist, restart and update are
+idempotent and do not change their passwords or role assignments.
 
 ## Secret Rotation Checklist
 
@@ -61,7 +65,7 @@ In compat mode, if `TINYMRP_SEED_ADMIN=true` and no password is provided, a one-
 flask --app run.py user list
 flask --app run.py role list
 flask --app run.py user set-password --email user@example.com
-flask --app run.py user bootstrap-admin --email admin@example.com --password ChangeMe123!
+flask --app run.py user bootstrap-admin --email admin@example.com
 ```
 
 Docker:
