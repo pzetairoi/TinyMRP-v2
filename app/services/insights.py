@@ -29,10 +29,17 @@ def _safe_lower(value: str | None) -> str:
 
 
 def normalized_processes(attrs: Dict, part_processes: List[str], meta: Dict) -> List[str]:
-    from app.services.processmeta import normalize_processes
+    """Return a part's canonical processes.
+
+    ``part_processes`` is normalised on write, so it is returned as-is. The
+    attrs fallback only serves records that predate the resolver.
+    """
 
     if part_processes:
-        return normalize_processes({"processes": part_processes}, meta)
+        return [str(value) for value in part_processes if value]
+
+    from app.services.processmeta import normalize_processes
+
     return normalize_processes(attrs or {}, meta)
 
 

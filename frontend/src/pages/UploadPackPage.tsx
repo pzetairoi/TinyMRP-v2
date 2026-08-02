@@ -77,6 +77,8 @@ type UploadResult = {
   dry_run?: boolean;
   root?: string;
   root_rev?: string;
+  /** Inline preview of the top-level part; response-only, never stored. */
+  root_preview?: string;
   plan?: Plan;
   metrics?: {
     parts_created?: number;
@@ -121,14 +123,17 @@ const APPROVAL_FOR_DATA: Record<DataMode, ApprovalMode> = {
 
 type Tone = "safe" | "draft" | "admin";
 const TIER_META: Record<Exclude<Preset, "custom">, { label: string; hint: string }> = {
-  preserve: { label: "Fill only", hint: "Adds blanks, empty BOMs and missing files. Approved parts are never touched." },
+  preserve: {
+    label: "Fill only",
+    hint: "Fills blanks, empty BOMs and missing files. New parts import in full, including their approval. Nothing on an existing approved part is changed.",
+  },
   unless_existing_approved: {
     label: "Update drafts",
-    hint: "Also replaces existing draft (unapproved) data. Approved parts stay protected.",
+    hint: "Also replaces existing draft (unapproved) data. Existing approved parts stay protected.",
   },
   always: {
     label: "Override approved (Admin)",
-    hint: "Replaces everything, including approved parts and their approval status.",
+    hint: "Also changes existing approved parts -- their properties, BOM, files and approval status.",
   },
 };
 const TONE_ALERT: Record<Tone, string> = { safe: "alert-success", draft: "alert-warning", admin: "alert-danger" };
@@ -316,6 +321,51 @@ function Section({
   );
 }
 
+function RootPartCard({
+  as: Tag,
+  href,
+  previewUrl,
+  partNumber,
+  revision,
+  caption,
+}: {
+  as: "a" | "div";
+  href?: string;
+  previewUrl: string | null;
+  partNumber: string;
+  revision: string;
+  caption: string;
+}) {
+  return (
+    <Tag
+      href={href}
+      className="d-flex align-items-center gap-2 mt-3 p-2 border rounded text-decoration-none"
+    >
+      {previewUrl ? (
+        <img
+          src={previewUrl}
+          alt={`${partNumber} preview`}
+          className="rounded border flex-shrink-0"
+          style={{ width: 48, height: 48, objectFit: "cover" }}
+        />
+      ) : (
+        <div
+          className="rounded border bg-light flex-shrink-0"
+          style={{ width: 48, height: 48 }}
+          aria-hidden="true"
+        />
+      )}
+      <div className="small">
+        <div className="fw-semibold">
+          Top-level part: {partNumber}
+          {revision ? ` — REV ${revision}` : ""}
+        </div>
+        <div className="text-muted">{caption}</div>
+      </div>
+    </Tag>
+  );
+}
+
 function PartRedline({ part, changedOnly }: { part: PlanPart; changedOnly: boolean }) {
   const overridingApproved = part.target_state === "existing_approved" && part.changed;
   const sections = [
@@ -402,12 +452,32 @@ export default function UploadPackPage() {
   const rootHref = rootPn
     ? `/ui/part/${encodeURIComponent(rootPn)}?rev=${encodeURIComponent(rootRev)}`
     : "";
+  // A preview of a part that does not exist yet has nowhere to link to. After
+  // an applied import it does, and an existing part always did.
+  const rootExists =
+    !!rootPn &&
+    (!result?.dry_run ||
+      (result?.plan?.parts ?? []).some(
+        (part) =>
+          part.part_number === rootPn &&
+          part.revision === rootRev &&
+          part.target_state !== "new",
+      ));
 
   useEffect(() => {
     let cancelled = false;
     if (!rootPn) {
       setRootPreviewUrl(null);
       setRootPreviewStatus("");
+      return () => {
+        cancelled = true;
+      };
+    }
+    const packPreview = result?.root_preview || "";
+    if (!rootExists) {
+      // Nothing stored yet -- show the image straight from the pack.
+      setRootPreviewUrl(packPreview || null);
+      setRootPreviewStatus(packPreview ? "" : "No preview image in this pack.");
       return () => {
         cancelled = true;
       };
@@ -423,17 +493,26 @@ export default function UploadPackPage() {
         if (url) {
           setRootPreviewUrl(url);
           setRootPreviewStatus("");
+        } else if (packPreview) {
+          setRootPreviewUrl(packPreview);
+          setRootPreviewStatus("");
         } else {
-          setRootPreviewStatus("No preview image found for the top-level part.");
+          setRootPreviewStatus("No preview image stored for the top-level part.");
         }
       })
       .catch(() => {
-        if (!cancelled) setRootPreviewStatus("Failed to load preview image.");
+        if (cancelled) return;
+        if (packPreview) {
+          setRootPreviewUrl(packPreview);
+          setRootPreviewStatus("");
+          return;
+        }
+        setRootPreviewStatus("Failed to load preview image.");
       });
     return () => {
       cancelled = true;
     };
-  }, [rootPn, rootRev]);
+  }, [rootPn, rootRev, rootExists, result?.root_preview]);
 
   const canPreview = !!capabilities["imports.preview"];
   const canLowRisk = !!capabilities["imports.execute_low_risk"];
@@ -633,11 +712,13 @@ export default function UploadPackPage() {
         </div>
         <div className={`alert ${TONE_ALERT[activeTone]} small mt-2 mb-0 fw-semibold`}>
           {activeTone === "admin"
-            ? "Admin override active — approved parts will be overwritten if they differ."
+            ? "Admin override active — existing approved parts will be overwritten if they differ."
             : activeTone === "draft"
-              ? "Draft (unapproved) parts will be updated. Approved parts stay protected."
-              : "Safe: only blanks, empty BOMs and missing files are filled. Approved parts stay protected."}{" "}
-          Approved data can never be filled or replaced without admin permission, regardless of policy.
+              ? "Draft (unapproved) parts will be updated. Existing approved parts stay protected."
+              : "Safe: only blanks, empty BOMs and missing files are filled. Existing approved parts stay protected."}{" "}
+          Any uploader may import a new part that arrives already approved. Changing an
+          existing approved part — its properties, BOM or files — always needs the
+          override permission, regardless of policy.
         </div>
 
         <details className="mt-3">
@@ -646,7 +727,7 @@ export default function UploadPackPage() {
             <PolicySelect
               id="dataMode"
               label="Properties"
-              help="Ordinary, custom and approval fields. Approval follows this policy and the target's approved state."
+              help="Ordinary, custom and approval fields. Skip writes none of them. Approval follows this policy: any uploader may import a new part that is already approved, but changing one afterwards needs the override."
               value={dataMode}
               onChange={setDataMode}
               options={[
@@ -659,7 +740,7 @@ export default function UploadPackPage() {
             <PolicySelect
               id="bomMode"
               label="BOM"
-              help="Fill creates a whole BOM only when the exact parent/revision has none."
+              help="Fill creates a whole BOM only when the exact parent/revision has none. Changing the BOM of an existing approved part needs the override."
               value={bomMode}
               onChange={setBomMode}
               options={[
@@ -672,7 +753,7 @@ export default function UploadPackPage() {
             <PolicySelect
               id="fileMode"
               label="Files"
-              help="The same policy applies to managed deliverables and associated files."
+              help="The same policy applies to managed deliverables and associated files. Replacing a file on an existing approved part needs the override. Files never create parts: anything not listed in the BOM is skipped and reported."
               value={fileMode}
               onChange={setFileMode}
               options={[
@@ -758,32 +839,18 @@ export default function UploadPackPage() {
           </div>
 
           {rootPn ? (
-            <a
-              href={rootHref}
-              className="d-flex align-items-center gap-2 mt-3 p-2 border rounded text-decoration-none"
-            >
-              {rootPreviewUrl ? (
-                <img
-                  src={rootPreviewUrl}
-                  alt={`${rootPn} preview`}
-                  className="rounded border flex-shrink-0"
-                  style={{ width: 48, height: 48, objectFit: "cover" }}
-                />
-              ) : (
-                <div
-                  className="rounded border bg-light flex-shrink-0"
-                  style={{ width: 48, height: 48 }}
-                  aria-hidden="true"
-                />
-              )}
-              <div className="small">
-                <div className="fw-semibold">
-                  Top-level part: {rootPn}
-                  {rootRev ? ` — REV ${rootRev}` : ""}
-                </div>
-                <div className="text-muted">{rootPreviewStatus || "Open part details"}</div>
-              </div>
-            </a>
+            // Always show what is being imported; only link once it exists.
+            <RootPartCard
+              as={rootExists ? "a" : "div"}
+              href={rootExists ? rootHref : undefined}
+              previewUrl={rootPreviewUrl}
+              partNumber={rootPn}
+              revision={rootRev}
+              caption={
+                rootPreviewStatus ||
+                (rootExists ? "Open part details" : "Not imported yet — apply to create it.")
+              }
+            />
           ) : null}
 
           {plan.required_permissions.length ? (

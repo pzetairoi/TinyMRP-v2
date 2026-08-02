@@ -297,6 +297,7 @@ var
   ExistingContextDefaults: string;
   ExistingAutoGeneric: string;
   ExistingAutoAny: string;
+  ExistingMeshLimit: string;
   Lines: string;
 begin
   ExistingOutput := ReadConfigValue(ExistingConfigPath, 'deliverables_folder', '');
@@ -309,6 +310,7 @@ begin
   ExistingContextDefaults := ReadConfigValue(ExistingConfigPath, 'NumberingContextDefaults', 'type=PART;family=;subfamily=;project=;site=');
   ExistingAutoGeneric := ReadConfigValue(ExistingConfigPath, 'AutoAssignGenericNames', 'True');
   ExistingAutoAny := ReadConfigValue(ExistingConfigPath, 'AutoAssignAnyNames', 'False');
+  ExistingMeshLimit := ReadConfigValue(ExistingConfigPath, 'MeshExportSizeLimitMb', '50');
 
   if (ExistingConfigPath <> '') and (OverrideSettingsCheck <> nil) and (not OverrideSettingsCheck.Checked) then
   begin
@@ -377,7 +379,8 @@ begin
     'DisplayCodeProperty=DisplayCode' + #13#10 +
     'NumberingApplyMode=active_config' + #13#10 +
     'AutoAssignGenericNames=' + ExistingAutoGeneric + #13#10 +
-    'AutoAssignAnyNames=' + ExistingAutoAny + #13#10;
+    'AutoAssignAnyNames=' + ExistingAutoAny + #13#10 +
+    'MeshExportSizeLimitMb=' + ExistingMeshLimit + #13#10;
 
   SaveStringToFile(ConfigPath, Lines, False);
 end;

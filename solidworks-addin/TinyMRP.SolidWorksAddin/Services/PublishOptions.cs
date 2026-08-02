@@ -19,5 +19,6 @@ namespace TinyMRP.SolidWorksAddin.Services
         public bool CreateUploadPack { get; set; }
         public bool UploadPackIncludeDeliverables { get; set; }
         public bool UploadPackIncludeExtras { get; set; }
+        public int MeshExportSizeLimitMb { get; set; } = MeshExportLimit.DefaultMegabytes;
     }
 }

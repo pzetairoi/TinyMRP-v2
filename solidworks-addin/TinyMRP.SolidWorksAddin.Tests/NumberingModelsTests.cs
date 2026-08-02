@@ -48,5 +48,35 @@ namespace TinyMRP.SolidWorksAddin.Tests
             Assert.AreEqual(12, segment.StartAt);
             Assert.IsTrue(segment.AutoCounter);
         }
+
+        [TestMethod]
+        public void SchemeRoundTrip_ReadsLastAllocatedPartNumber()
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["id"] = "scheme-1",
+                ["name"] = "Parts",
+                ["last_part_number"] = "PART-0042"
+            };
+
+            NumberingSchemeDefinition scheme = NumberingSchemeDefinition.FromDictionary(data);
+
+            Assert.AreEqual("PART-0042", scheme.LastPartNumber);
+            Assert.IsTrue(scheme.LastPartNumberAvailable);
+        }
+
+        [TestMethod]
+        public void SchemeRoundTrip_DetectsBackendWithoutLastAllocatedField()
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["id"] = "scheme-1",
+                ["name"] = "Parts"
+            };
+
+            NumberingSchemeDefinition scheme = NumberingSchemeDefinition.FromDictionary(data);
+
+            Assert.IsFalse(scheme.LastPartNumberAvailable);
+        }
     }
 }

@@ -186,10 +186,12 @@ def test_bom_modes_are_independent_and_show_add_remove_quantity_redline(app):
     )
     planned = {item.get("planned_action", item["action"]) for item in parent["bom"]["changes"]}
     assert planned == {"add", "remove"}
+    # data_mode="skip" writes no properties, so the only effects are the BOM
+    # rewrite on the existing parent (advanced) and materialising the new child
+    # it references. Nothing here is a low-risk property import.
     assert replaced["required_permissions"] == [
         "bom.update",
         "imports.execute_approved",
-        "imports.execute_low_risk",
         "parts.create",
     ]
 

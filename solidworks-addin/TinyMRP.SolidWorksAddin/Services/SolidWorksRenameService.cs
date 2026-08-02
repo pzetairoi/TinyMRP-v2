@@ -113,6 +113,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     result.Ok = true;
                     result.Message = "Saved copy. References were not updated.";
+                    TryCopyAssociatedFiles(currentPath, targetPath);
                     AddinLogger.Write("Rename safe mode saved copy: " + targetPath);
                     return result;
                 }
@@ -120,6 +121,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 result.Message = "Rename failed. References could not be updated.";
                 return result;
             }
+
+            TryCopyAssociatedFiles(currentPath, targetPath);
 
             if (!options.KeepBackup && !string.IsNullOrWhiteSpace(currentPath))
             {
@@ -130,6 +133,18 @@ namespace TinyMRP.SolidWorksAddin.Services
             result.Message = "Rename completed.";
             AddinLogger.Write("Rename completed: " + targetPath);
             return result;
+        }
+
+        private void TryCopyAssociatedFiles(string sourcePath, string targetPath)
+        {
+            try
+            {
+                AssociatedFilesStore.CopyForRenamedDocument(sourcePath, targetPath);
+            }
+            catch (Exception ex)
+            {
+                AddinLogger.Write("Failed to copy associated-files sidecar: " + ex.Message);
+            }
         }
 
         private int TryGetSaveAsOption(string name)
@@ -189,6 +204,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 if (File.Exists(path))
                 {
                     File.Delete(path);
+                    AssociatedFilesStore.DeleteForDocument(path);
                     AddinLogger.Write("Deleted backup file: " + path);
                 }
             }

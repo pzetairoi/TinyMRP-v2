@@ -67,7 +67,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (!string.IsNullOrWhiteSpace(flatBomPath) && File.Exists(flatBomPath))
             {
                 string name = Path.GetFileName(flatBomPath);
-                archive.CreateEntryFromFile(flatBomPath, ZipPath("bom", name));
+                archive.CreateEntryFromFile(flatBomPath, ZipPath("bom", name), CompressionLevel.Fastest);
             }
             else
             {
@@ -77,7 +77,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             if (!string.IsNullOrWhiteSpace(treeBomPath) && File.Exists(treeBomPath))
             {
                 string name = Path.GetFileName(treeBomPath);
-                archive.CreateEntryFromFile(treeBomPath, ZipPath("bom", name));
+                archive.CreateEntryFromFile(treeBomPath, ZipPath("bom", name), CompressionLevel.Fastest);
             }
             else
             {
@@ -122,16 +122,22 @@ namespace TinyMRP.SolidWorksAddin.Services
                     continue;
                 }
 
-                foreach (string file in Directory.GetFiles(groupDir))
+                foreach (string file in Directory.EnumerateFiles(groupDir))
                 {
                     string name = Path.GetFileName(file);
+                    if (IsTransientOrFailedArtifact(name))
+                    {
+                        Log(log, "Upload pack skipped transient or failed export artifact: " + file);
+                        continue;
+                    }
+
                     string baseName = Path.GetFileNameWithoutExtension(name);
                     if (allowedBaseNames != null && !IsAllowedDeliverable(baseName, allowedBaseNames))
                     {
                         continue;
                     }
                     string zipPath = ZipPath("deliverables", group, name);
-                    archive.CreateEntryFromFile(file, zipPath);
+                    archive.CreateEntryFromFile(file, zipPath, CompressionLevel.Fastest);
                 }
             }
         }
@@ -182,7 +188,7 @@ namespace TinyMRP.SolidWorksAddin.Services
 
                     string name = Path.GetFileName(path);
                     string zipPath = ZipPath("extra", bundle.PartNumber, revToken, name);
-                    archive.CreateEntryFromFile(path, zipPath);
+                    archive.CreateEntryFromFile(path, zipPath, CompressionLevel.Fastest);
 
                     string label = entry.Label ?? string.Empty;
                     string ext = entry.Extension ?? string.Empty;
@@ -252,6 +258,23 @@ namespace TinyMRP.SolidWorksAddin.Services
             }
 
             return false;
+        }
+
+        internal static bool IsTransientOrFailedArtifact(string path)
+        {
+            string name = Path.GetFileName(path ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            return name.StartsWith("~$", StringComparison.OrdinalIgnoreCase) ||
+                   name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+                   name.IndexOf(".tmp.", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.EndsWith(".bad", StringComparison.OrdinalIgnoreCase) ||
+                   name.IndexOf(".bad.", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.EndsWith(".replacebak", StringComparison.OrdinalIgnoreCase) ||
+                   name.IndexOf(".replacebak.", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static void Log(Action<string> log, string message)

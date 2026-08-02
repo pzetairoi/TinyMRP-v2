@@ -18,6 +18,8 @@ Output DLL:
 
 `solidworks-addin/TinyMRP.SolidWorksAddin/bin/x64/Release/net48/TinyMRP.SolidWorksAddin.dll`
 
+Release builds increment `TinyMRP.SolidWorksAddin/BuildNumber.txt` once and display that integer in the add-in title. Debug builds and tests reuse the current number without incrementing it.
+
 ## Register / Unregister (manual)
 
 ```powershell
@@ -44,10 +46,10 @@ Key settings in `TinyMRP_config.txt`:
 - `AuthToken` - TinyMRP API token for API calls
 - `NumberingSchemeId` - default scheme to select
 - `NumberingContextDefaults` - default context fields for numbering
-- `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty` - custom property names
-- `NumberingApplyMode` - default apply mode (active_config|all_configs|selected_configs)
+- `PartNumberProperty`, `RevisionProperty`, `DisplayCodeProperty` - legacy property names used for read-only compatibility
 - `AutoAssignGenericNames` - auto-assign for Part1/Assembly1 names (True|False)
 - `AutoAssignAnyNames` - allow auto-assign for any name (dangerous)
+- `MeshExportSizeLimitMb` - maximum generated PLY/STL/3MF size; oversized output is skipped (default `50`)
 
 Backend URL rules:
 
@@ -61,16 +63,15 @@ Backend URL rules:
 
 - Publish/BOM: export deliverables, run BOM, progress + cancel.
 - Tools: freeze/unfreeze, normalize units, hide reference geometry.
-- Numbering: scheme selection, segment builder, preview and allocate PN+REV.
+- Numbering: scheme selection, last-used number, preview, and allocate to a filename.
 - Configuration: Quick Start + Advanced settings, templates, paths, server settings.
 
 ## Numbering workflow (quick)
 
 1. Open the Numbering tab and click **Refresh** to load schemes.
-2. Select an existing scheme or build one with presets and segments.
-3. Validate and **Save scheme** (requires admin/manager or `numbering.manage`).
-4. Enter context fields and click **Preview next**.
-5. Click **Allocate PN+REV** and choose where to apply it.
+2. Select an existing scheme and review the last part number used.
+3. Click **Preview Partnumber**.
+4. Click **Allocate and save/rename**. Unsaved documents prompt for a folder; saved documents are renamed.
 
 ## Add-in Quick Start
 
@@ -85,12 +86,7 @@ Token notes:
 - Paste the raw token into the add-in when you create it. The raw token cannot be recovered later because only its hash is stored.
 - If the instance was recreated, or `SECRET_KEY` / `SECURITY_PASSWORD_SALT` changed, old API tokens will stop working. Generate a new raw API token and paste it into the add-in.
 
-The add-in writes custom properties:
-
-- `PartNumber`
-- `Revision`
-- `DisplayCode`
-- `TinyMRP_SchemeId` (optional)
+Number allocation does not create or modify SolidWorks custom properties. Generated part numbers are applied to the filename only. Associated-file metadata is stored in a `.tinymrp-associated-files.json` sidecar next to the SolidWorks document; legacy metadata properties are read for migration but never changed.
 
 ## Permissions
 

@@ -1,4 +1,4 @@
-# SolidWorks Add-in Installation
+# Installing the SolidWorks Add-in
 
 This page covers installer setup, activation in SolidWorks, and first connection to TinyMRP.
 

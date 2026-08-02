@@ -4,6 +4,7 @@ from app.models.app_settings import AppSettings
 from app.models.api_token import ApiToken
 from app.models.auth import Role
 from app.models.numbering import NumberingScheme
+from app.models.part import Part
 from app.models.user_settings import UserSettings
 from app.services.api_tokens import create_token
 from app.services.timezone_utils import utc_now
@@ -113,6 +114,49 @@ def test_settings_and_numbering_with_bearer(client, user):
     allocate_data = allocate.get_json()
     assert allocate.status_code == 200
     assert allocate_data["ok"] is True
+
+
+def test_scheme_list_includes_latest_allocated_part_number(client, user, monkeypatch):
+    import app.views.numbering as numbering_view
+
+    monkeypatch.setattr(numbering_view, "user_has_permission", lambda _user, _perm: True)
+    _, raw = create_token(user, "scheme-latest")
+    scheme = NumberingScheme(name="Latest scheme").save()
+    scheme_id = str(scheme.id)
+    Part(part_number="PART-0041", attrs={"numbering_scheme_id": scheme_id}).save()
+    Part(part_number="PART-0042", attrs={"numbering_scheme_id": scheme_id}).save()
+
+    response = client.get("/api/numbering/schemes", headers=_auth_headers(raw))
+    data = response.get_json()
+    listed = next(item for item in data["schemes"] if item["id"] == scheme_id)
+
+    assert response.status_code == 200
+    assert listed["last_part_number"] == "PART-0042"
+
+
+def test_scheme_list_recovers_latest_number_from_legacy_part_pattern(client, user, monkeypatch):
+    import app.views.numbering as numbering_view
+
+    monkeypatch.setattr(numbering_view, "user_has_permission", lambda _user, _perm: True)
+    _, raw = create_token(user, "scheme-legacy-latest")
+    scheme = NumberingScheme(
+        name="Legacy trailer",
+        separator="-",
+        pattern_segments=[
+            {"kind": "literal", "value": "BD"},
+            {"kind": "seq", "padding": 2, "base": 10, "auto_counter": False},
+            {"kind": "seq", "padding": 3, "base": 10, "auto_counter": True},
+        ],
+    ).save()
+    Part(part_number="BD-01-001").save()
+    Part(part_number="BD-01-002").save()
+    Part(part_number="UNRELATED-999").save()
+
+    response = client.get("/api/numbering/schemes", headers=_auth_headers(raw))
+    listed = next(item for item in response.get_json()["schemes"] if item["id"] == str(scheme.id))
+
+    assert response.status_code == 200
+    assert listed["last_part_number"] == "BD-01-002"
 
 
 def test_simple_scheme_create_respects_start_at(client, user, monkeypatch):

@@ -789,41 +789,20 @@ def canonical_attrs_for_part(
         return {}
 
     current = dict(getattr(part, "canonical", {}) or {})
-    raw = raw_attrs if isinstance(raw_attrs, dict) else getattr(part, "attrs", {}) or {}
+    if current:
+        # Written by the resolver on every save, so it is authoritative.
+        # Re-deriving it here let a read disagree with the stored value and
+        # with the indexed queries that filter on it.
+        return current
+
+    # Only reached for a document that predates the resolver.
     top_level = {
         field_id: getattr(part, attr_name, None)
         for field_id, attr_name in _TOP_LEVEL_MIRRORS.items()
     }
     top_level["processes"] = list(getattr(part, "processes", None) or [])
-
-    if current:
-        merged = dict(current)
-        for field_id, value in top_level.items():
-            if field_id == "processes":
-                if not merged.get("processes") and _has_value(value):
-                    merged["processes"] = normalize_processes({"processes": value}, _process_meta(process_meta))
-                continue
-            if not _has_value(merged.get(field_id)) and _has_value(value):
-                merged[field_id] = value
-
-        approval = resolve_approval(raw)
-        if approval.get("has_approval_signal"):
-            merged[APPROVED_FIELD_ID] = bool(approval.get("approved"))
-            if approval.get("approved_by"):
-                merged[APPROVED_BY_FIELD_ID] = approval["approved_by"]
-            else:
-                merged.pop(APPROVED_BY_FIELD_ID, None)
-        if approval.get("approved_date"):
-            merged[APPROVED_DATE_FIELD_ID] = approval["approved_date"]
-        elif APPROVED_FIELD_ID not in merged:
-            current_approval = resolve_approval(current)
-            merged[APPROVED_FIELD_ID] = bool(current_approval.get("approved"))
-            if current_approval.get("approved_by"):
-                merged[APPROVED_BY_FIELD_ID] = current_approval["approved_by"]
-        return merged
-
     return extract_canonical_fields(
-        raw,
+        raw_attrs if isinstance(raw_attrs, dict) else getattr(part, "attrs", {}) or {},
         process_meta=process_meta,
         top_level=top_level,
     )
@@ -836,8 +815,8 @@ def canonical_processes_for_part(
     process_meta: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     canonical = canonical_attrs_for_part(part, raw_attrs=raw_attrs, process_meta=process_meta)
-    values = canonical.get("processes")
-    return normalize_processes({"processes": values}, _process_meta(process_meta)) if _has_value(values) else []
+    # Already normalised on write; re-normalising per read was redundant.
+    return [str(value) for value in (canonical.get("processes") or []) if value]
 
 
 def canonical_process_label_for_part(

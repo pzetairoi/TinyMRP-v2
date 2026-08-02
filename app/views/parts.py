@@ -81,7 +81,6 @@ from app.services.field_config import (
 from app.services.part_query import (
     filter_constraints,
     filter_value,
-    or_contains,
     pairs_query,
     terms,
 )
@@ -765,14 +764,31 @@ def parts_lazy():
         return combined
 
     def _path_empty_q(path: str) -> Q:
+        # An empty list counts as empty too, so list-valued fields such as
+        # processes answer this the same way scalar fields do.
         mongo_path = _mongo_path(path)
-        return Q(__raw__={"$or": [{mongo_path: {"$exists": False}}, {mongo_path: None}, {mongo_path: ""}]})
+        return Q(__raw__={"$or": [
+            {mongo_path: {"$exists": False}},
+            {mongo_path: {"$in": [None, ""]}},
+            {mongo_path: {"$size": 0}},
+        ]})
 
     def _path_not_empty_q(path: str) -> Q:
         mongo_path = _mongo_path(path)
-        return Q(__raw__={mongo_path: {"$exists": True, "$nin": [None, ""]}})
+        return Q(__raw__={"$and": [
+            {mongo_path: {"$exists": True, "$nin": [None, ""]}},
+            {"$nor": [{mongo_path: {"$size": 0}}]},
+        ]})
 
     def _text_constraint_q(paths: list[str], match_mode: str, value: Any) -> Q:
+        # A multi-select ("in") sends a list; match any of the chosen values.
+        if isinstance(value, (list, tuple, set)):
+            picked = [str(item).strip() for item in value if str(item or "").strip()]
+            if not picked:
+                return Q()
+            return _combine_q(
+                [_text_constraint_q(paths, "equals", item) for item in picked], "or"
+            )
         text = str(value or "").strip()
         if match_mode == "contains":
             term_queries = [
@@ -788,10 +804,20 @@ def parts_lazy():
         if match_mode in lookups:
             lookup = lookups[match_mode]
             return _combine_q([Q(**{f"{path}__{lookup}": text}) for path in paths], "or")
-        if match_mode == "notContains":
-            return _combine_q([~Q(**{f"{path}__icontains": text}) for path in paths], "and")
-        if match_mode == "notEquals":
-            return _combine_q([~Q(**{f"{path}__iexact": text}) for path in paths], "and")
+        # MongoEngine's Q has no __invert__, so negation is expressed as a raw
+        # $not. This also matches documents missing the field, which is what
+        # "does not contain" means to a user.
+        if match_mode in ("notContains", "notEquals"):
+            # $not takes a compiled regex; the {$regex, $options} document form
+            # is rejected by the server here.
+            pattern = re.escape(text)
+            regex = re.compile(
+                pattern if match_mode == "notContains" else f"^{pattern}$", re.IGNORECASE
+            )
+            return _combine_q(
+                [Q(__raw__={_mongo_path(path): {"$not": regex}}) for path in paths],
+                "and",
+            )
         return _text_constraint_q(paths, "contains", text)
 
     def _typed_constraint_q(paths: list[str], data_type: str, constraint: dict[str, Any]) -> Q:
@@ -881,54 +907,9 @@ def parts_lazy():
                     queries.append(_file_filter_q(field_id, expected))
             return _combine_q(queries, operator) if queries else None
         paths = query_paths_for_field(field_id, field_config)
-        if field_id == "process":
-            queries = []
-            for constraint in constraints:
-                mode = str(constraint.get("match_mode") or "contains")
-                if mode == "contains":
-                    queries.append(_process_filter_q(str(constraint.get("value") or "")))
-                else:
-                    process_paths = ["processes", "attrs__process", "attrs__process2", "attrs__process3", "attrs__processes", "canonical__processes"]
-                    queries.append(_typed_constraint_q(process_paths, data_type, constraint))
-            return _combine_q(queries, operator)
         if not paths:
             return None
         return _combine_q([_typed_constraint_q(paths, data_type, item) for item in constraints], operator)
-
-    def _or_array_regex(field: str, term: str) -> Q:
-        if not term:
-            return Q()
-        return Q(__raw__={field: {"$regex": re.escape(term), "$options": "i"}})
-
-    process_meta = current_app.config.get("PROCESS_META", {}) or {}
-
-    def _process_filter_q(text: str) -> Q:
-        raw_text = str(text or "").strip()
-        if not raw_text:
-            return Q()
-        normalized = normalize_processes({"processes": [raw_text]}, process_meta)
-        raw_terms = terms(raw_text)
-        if raw_text.lower() not in raw_terms:
-            raw_terms.insert(0, raw_text.lower())
-        out = Q(processes__in=normalized) if normalized else Q()
-        for term in raw_terms:
-            out = (
-                out
-                | _or_array_regex("processes", term)
-                | Q(attrs__process__icontains=term)
-                | Q(attrs__process2__icontains=term)
-                | Q(attrs__process3__icontains=term)
-                | Q(attrs__processes__icontains=term)
-                | Q(canonical__processes__icontains=term)
-            )
-        category_paths = query_paths_for_field("category", field_config) or ["attrs__category", "category"]
-        material_paths = query_paths_for_field("material", field_config) or ["attrs__material"]
-        normalized_text = raw_text.lower()
-        if normalized_text in {"hardware", "fastener", "fasteners"}:
-            out = out | or_contains(category_paths, "hardware")
-        elif normalized_text in {"sheet metal", "sheetmetal", "sheet"}:
-            out = out | or_contains(category_paths, "sheet") | or_contains(material_paths, "sheet")
-        return out
 
     def _file_filter_q(field_id: str, expected: bool) -> Q:
         path = primary_query_path(field_id, field_config) or field_id

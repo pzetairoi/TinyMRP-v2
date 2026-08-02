@@ -15,6 +15,7 @@ from app.services.numbering import (
     normalize_scheme_payload,
     validate_scheme_definition,
     scheme_to_dict,
+    latest_part_numbers_by_scheme,
     preview_number,
     allocate_number,
     revision_for_existing,
@@ -64,7 +65,13 @@ def list_schemes():
         queryset = NumberingScheme.objects(is_active=True)
     else:
         return _json_error("forbidden", "Not authorized.", status=403)
-    schemes = [scheme_to_dict(s) for s in queryset.order_by("name")]
+    scheme_docs = list(queryset.order_by("name"))
+    latest_numbers = latest_part_numbers_by_scheme(scheme_docs)
+    schemes = []
+    for scheme in scheme_docs:
+        data = scheme_to_dict(scheme)
+        data["last_part_number"] = latest_numbers.get(str(scheme.id), "")
+        schemes.append(data)
     return jsonify({"ok": True, "schemes": schemes})
 
 

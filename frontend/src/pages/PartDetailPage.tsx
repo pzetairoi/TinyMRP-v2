@@ -47,6 +47,7 @@ type Part = {
   uom?: string;
   processes?: string[];
   process?: string;
+  approved?: boolean;
   field_values?: Record<string, any>;
   attrs: Record<string, any>;
 };
@@ -649,6 +650,8 @@ export default function PartDetailPage() {
   const [docLoading, setDocLoading] = useState(false);
   const [docProgress, setDocProgress] = useState(0);
   const progressTimer = useRef<number | null>(null);
+  // Lets the user stop a long docpack compile without leaving the page.
+  const docAbort = useRef<AbortController | null>(null);
   const extraFileInputRef = useRef<HTMLInputElement | null>(null);
   const [depth, setDepth] = useState<'top'|'full'>('full');
   const [classified, setClassified] = useState<'hide'|'show'|'only'>('show');
@@ -678,10 +681,9 @@ export default function PartDetailPage() {
   const [stampQuote, setStampQuote] = useState(false);
   const [stampConfidential, setStampConfidential] = useState(false);
   const [stampApproved, setStampApproved] = useState(false);
-  const [stampWip, setStampWip] = useState(false);
   const [stampInprog, setStampInprog] = useState(false);
   const [outputName, setOutputName] = useState("");
-  const [includeConsumed, setIncludeConsumed] = useState(false); // Hide consumed by default
+  const [includeConsumed, setIncludeConsumed] = useState(true); // Show consumed by default
   const [fabricationPack, setFabricationPack] = useState(false);
 
   // BOM Tree
@@ -1078,6 +1080,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                 uom: j.part.uom || "EA",
                 process: j.part.process || "",
                 processes: Array.isArray(j.part.processes) ? j.part.processes : [],
+                approved: j.part.approved === true,
                 field_values: j.part.field_values || {},
                 attrs: partAttrs,
               }
@@ -3342,7 +3345,6 @@ function isExternalDatasheetUrl(url: string): boolean {
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="sQuote" checked={stampQuote} onChange={(e)=>setStampQuote(e.target.checked)} /><label className="form-check-label" htmlFor="sQuote">For quotation</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="sConf" checked={stampConfidential} onChange={(e)=>setStampConfidential(e.target.checked)} /><label className="form-check-label" htmlFor="sConf">Confidential</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="sAppr" checked={stampApproved} onChange={(e)=>setStampApproved(e.target.checked)} /><label className="form-check-label" htmlFor="sAppr">Approved</label></div>
-                      <div className="form-check"><input className="form-check-input" type="checkbox" id="sWip" checked={stampWip} onChange={(e)=>setStampWip(e.target.checked)} /><label className="form-check-label" htmlFor="sWip">WIP</label></div>
                       <div className="form-check"><input className="form-check-input" type="checkbox" id="sProg" checked={stampInprog} onChange={(e)=>setStampInprog(e.target.checked)} /><label className="form-check-label" htmlFor="sProg">In progress / Not approved</label></div>
                     </div>
                   </div>
@@ -3397,12 +3399,12 @@ function isExternalDatasheetUrl(url: string): boolean {
                         stamp_quote: stampQuote,
                         stamp_confidential: stampConfidential,
                         stamp_approved: stampApproved,
-                        stamp_wip: stampWip,
                         stamp_inprogress: stampInprog,
                       };
                       if (outputName.trim()) body.output_name = outputName.trim();
                       const buildUrl = isSharedView ? `${shareApiBase}/docpacks/build` : '/api/docpacks/build';
-                      const resp = await fetch(buildUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                      docAbort.current = new AbortController();
+                      const resp = await fetch(buildUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: docAbort.current.signal });
                       if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
                       const blob = await resp.blob();
                       const disp = resp.headers.get('Content-Disposition') || '';
@@ -3414,14 +3416,25 @@ function isExternalDatasheetUrl(url: string): boolean {
                       setDocProgress(100);
                       setTimeout(() => setDocProgress(0), 800);
                     }catch(err){
-                      console.error(err);
+                      // An aborted build is a deliberate user action, not an error.
+                      if ((err as any)?.name !== 'AbortError') console.error(err);
                       setDocProgress(0);
                     }
                     finally{
                       setDocLoading(false);
+                      docAbort.current = null;
                       if (progressTimer.current) { window.clearInterval(progressTimer.current); progressTimer.current = null; }
                     }
                   }}>{docLoading? `Building... ${docProgress}%` : 'Submit'}</button>
+                  {docLoading && (
+                    <button
+                      type="button"
+                      className="btn btn-outline-danger ms-2"
+                      onClick={() => docAbort.current?.abort()}
+                    >
+                      Cancel
+                    </button>
+                  )}
                   {docLoading && (
                     <div className="mt-2" aria-live="polite">
                       <div className="progress" style={{height: 8}}>

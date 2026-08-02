@@ -6,7 +6,7 @@ import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from markdown_it import MarkdownIt
 
@@ -264,29 +264,91 @@ def _replace_placeholders(text: str, values: Dict[str, str]) -> str:
     return out
 
 
-def _build_toc(tokens) -> List[Dict[str, str]]:
-    toc = []
+def _build_toc(tokens) -> List[Dict[str, Any]]:
+    """Return chapters (h1) each holding their sections (h2).
+
+    A flat list of every heading ran to well over a hundred entries, which is
+    unusable as navigation. Third-level headings stay addressable by anchor but
+    are left out of the tree.
+    """
+
+    toc: List[Dict[str, Any]] = []
     slug_counts: Dict[str, int] = {}
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        if token.type == "heading_open":
-            level = int(token.tag[1])
-            if i + 1 < len(tokens):
-                title = tokens[i + 1].content
-            else:
-                title = ""
-            slug = _slugify(title)
-            if slug in slug_counts:
-                slug_counts[slug] += 1
-                slug = f"{slug}-{slug_counts[slug]}"
-            else:
-                slug_counts[slug] = 1
-            token.attrSet("id", slug)
-            if level >= 2:
-                toc.append({"id": slug, "title": title, "level": level})
-        i += 1
+    for i, token in enumerate(tokens):
+        if token.type != "heading_open":
+            continue
+        level = int(token.tag[1])
+        title = tokens[i + 1].content if i + 1 < len(tokens) else ""
+        slug = _slugify(title)
+        if slug in slug_counts:
+            slug_counts[slug] += 1
+            slug = f"{slug}-{slug_counts[slug]}"
+        else:
+            slug_counts[slug] = 1
+        token.attrSet("id", slug)
+        if level == 1:
+            toc.append({"id": slug, "title": title, "sections": []})
+        elif level == 2 and toc:
+            toc[-1]["sections"].append({"id": slug, "title": title})
     return toc
+
+
+_LONE_IMG_RE = re.compile(r'<p>(<img src="([^"]+)" alt="([^"]*)"[^>]*>)</p>')
+
+
+def _figures(html: str) -> str:
+    """Turn a standalone image into a captioned figure.
+
+    The markdown alt text is the caption, so a screenshot always arrives with
+    an explanation of what the reader is meant to notice in it.
+    """
+
+    def replace(match: "re.Match[str]") -> str:
+        img, _src, alt = match.group(1), match.group(2), match.group(3)
+        caption = f'<figcaption class="help-figure-caption">{alt}</figcaption>' if alt else ""
+        return f'<figure class="help-figure">{img}{caption}</figure>'
+
+    return _LONE_IMG_RE.sub(replace, html)
+
+
+_H1_RE = re.compile(r"<h1[^>]*>.*?</h1>", re.DOTALL)
+_H2_SPLIT_RE = re.compile(r'(<h2 id="[^"]*">.*?</h2>)', re.DOTALL)
+_H2_ID_RE = re.compile(r'<h2 id="([^"]*)">(.*?)</h2>', re.DOTALL)
+
+
+def _collapsible(html: str) -> str:
+    """Wrap every h2 section in a <details> so the page reads as an outline.
+
+    Chapters (h1) stay visible as headers; each section below them folds. The
+    first section of each chapter starts open so the page never looks empty.
+    """
+
+    chapters = [part for part in _H1_RE.split(html)]
+    headers = _H1_RE.findall(html)
+    out: List[str] = [chapters[0]] if chapters and chapters[0].strip() else []
+
+    for index, header in enumerate(headers):
+        body = chapters[index + 1] if index + 1 < len(chapters) else ""
+        pieces = _H2_SPLIT_RE.split(body)
+        rendered = [f'<section class="help-chapter">{header}']
+        if pieces and pieces[0].strip():
+            rendered.append(f'<div class="help-intro">{pieces[0]}</div>')
+        for position in range(1, len(pieces), 2):
+            match = _H2_ID_RE.match(pieces[position])
+            if not match:
+                continue
+            slug, title = match.group(1), match.group(2)
+            content = pieces[position + 1] if position + 1 < len(pieces) else ""
+            opened = " open" if position == 1 else ""
+            rendered.append(
+                f'<details class="help-section" id="sec-{slug}"{opened}>'
+                f'<summary><span class="help-section-title" id="{slug}">{title}</span></summary>'
+                f'<div class="help-section-body">{content}</div>'
+                f"</details>"
+            )
+        rendered.append("</section>")
+        out.append("".join(rendered))
+    return "".join(out)
 
 
 def build_help() -> Dict[str, str]:
@@ -299,7 +361,7 @@ def build_help() -> Dict[str, str]:
     md.disable("linkify")
     tokens = md.parse(combined)
     toc = _build_toc(tokens)
-    html = md.renderer.render(tokens, md.options, {})
+    html = _collapsible(_figures(md.renderer.render(tokens, md.options, {})))
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     help_html_path = OUTPUT_DIR / "help.html"
