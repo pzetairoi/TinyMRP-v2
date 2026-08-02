@@ -36,7 +36,7 @@ pymongo==4.17.0
 dnspython==2.8.0
 
 # --- Documents / images (docpacks, thumbnails, labels) ---
-pillow==11.3.0
+pillow==12.3.0
 openpyxl==3.1.5
 PyPDF2==3.0.1
 reportlab==4.2.5
