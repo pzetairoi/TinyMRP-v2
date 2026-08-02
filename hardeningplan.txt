@@ -78,6 +78,12 @@ Active workstreams as of 2026-08-03:
       app/services/markup_documents.py
       app/services/order_scope.py
       tests/test_pypdf_migration.py (new)
+      tests/test_docpack_markups.py
+      tests/test_docpack_binder_missing_files.py
+      tests/test_docpack_binder_child_pdfs.py
+      tests/test_excel_compile.py
+      tests/test_docpacks_binder.py
+      tests/test_whereused_report.py
     This stream may read but must not edit authentication, frontend, deployment,
     documentation, generated assets or roadmap files. It must use a separate
     worktree/branch from d5d3647 and return one focused pushed commit.
