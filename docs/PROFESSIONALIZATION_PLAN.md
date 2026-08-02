@@ -10,7 +10,7 @@ enough to implement and test on its own, and each ends with explicit acceptance 
 
 - Application security foundation: dual security modes (`compat`/`strict`), argon2 password hashing,
   Flask-Security with generic responses, CSRF protection (WTF + origin/referer guard), CORS allowlist,
-  security headers + CSP, HSTS on secure requests, bearer-token-only `/api` in strict mode, ProxyFix,
+  security headers + CSP, HSTS on secure requests, explicit strict endpoint auth categories, ProxyFix,
   upload size caps, SSRF host allowlist on the file proxy.
 - Protected file delivery: tokenized URLs, nginx `auth_request` on `/Deliverables`, `X-Accel-Redirect` support.
 - API tokens with expiry, revocation and last-used tracking; audit logging of sensitive actions; RLS scoping.
@@ -41,7 +41,7 @@ enough to implement and test on its own, and each ends with explicit acceptance 
 | G14 | Ruff rule set is syntax-only; mypy covers 2 files; no coverage gate; no shellcheck on deploy scripts | Quality regressions slip through | 0/4 |
 | G15 | Monolithic 27 KB README; no per-tier hardening guides or ops runbook | Operator error | 7 |
 | G16 | No release process (tags, changelog, versioned images) | Untraceable deployments | 0 |
-| G17 | `compat` mode is the default; strict-mode production posture is opt-in | Insecure-by-default installs | 3 |
+| G17 | ~~`compat` mode was the default~~ **Closed in Phase 2 (`80783b3`)**: strict is the app/main Compose/guided Caddy default; compat is explicit for development/migration | Insecure-by-default installs | 3 |
 
 ## 2. Deployment tiers (target shapes)
 

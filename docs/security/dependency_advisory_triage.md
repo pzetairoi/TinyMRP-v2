@@ -8,7 +8,8 @@ availability and source applicability were independently revalidated after
 Phase 1B and before integration in commit `50d75e7`.
 
 The original triage commit was **analysis only**. This document now also records
-the reviewed remediation status after runtime upgrade commit `3346b51`, while
+the reviewed remediation status after runtime upgrade commit `3346b51` and PDF
+migration commit `5743b82`, while
 preserving the applicability evidence that drove each decision.
 
 ## How this was produced
@@ -18,7 +19,7 @@ pip-audit -r requirements.txt --format json     # 34 entries / 5 packages
 cd frontend && npm audit --omit=dev --audit-level=high   # 2 high entries
 ```
 
-After `3346b51`, the same Python audit reports **2 findings / 2 packages**.
+After `5743b82`, the same requirements-file audit reports **1 finding / 1 package**.
 The frontend result remains 2 high entries because its separately proposed
 exception and framework migration have not changed.
 
@@ -36,13 +37,13 @@ inspected.
 | pillow | **12.3.0** | 0 | Was applicable | **remediated in `3346b51`** | no |
 | cryptography | **48.0.1** + CFFI 2.0.0 | 0 | Was partly applicable | **remediated in `3346b51`** | no |
 | gunicorn | **22.0.0** | 0 | Was conditional on proxy topology | **remediated in `3346b51`** | no |
-| PyPDF2 | 3.0.1 | 1 | Yes, low | **package rename → `pypdf`** | needs code change |
+| pypdf | **6.14.2** | 0 | PyPDF2 finding was applicable | **remediated in `5743b82`** | no |
 | Flask-Security-Too | 5.8.1 | 1 | **NO — feature not enabled** | none available | exception |
 | react-router(-dom) | 7.18.1 | 2 | **NO — unstable RSC APIs only** | none reachable | exception |
 
-Net after the straight upgrades: the Python audit is down from **34/5 to 2/2**.
-PyPDF2 still needs its separately tested package migration, while
-Flask-Security-Too and React Router retain proposed (not accepted) exceptions.
+Net after the runtime and PDF remediation: the Python audit is down from
+**34/5 to 1/1**. Flask-Security-Too and React Router retain proposed (not
+accepted) exceptions.
 
 ---
 
@@ -143,7 +144,7 @@ requirement), validate a rendered VPS/Caddy deployment after this upgrade.
 
 ---
 
-## 4. PyPDF2 3.0.1 — 1 advisory — APPLICABLE, needs a code migration
+## 4. PyPDF2 3.0.1 — 1 advisory — REMEDIATED
 
 | Advisory | CVE | Issue | "Fixed in" |
 | --- | --- | --- | --- |
@@ -165,9 +166,18 @@ The imported names (`PdfReader`, `PdfWriter`, `PdfMerger`) exist in `pypdf` with
 largely compatible APIs, so the migration is mechanical but touches PDF
 generation — the docpack/binder path, which has substantial test coverage.
 
-**Recommendation:** track separately from the straight upgrades. Applicability is
-real (crafted PDFs are user-supplied) but severity is DoS-only, so it should not
-hold up the Pillow/cryptography/gunicorn work.
+**Implemented in `5743b82`.** `requirements.txt` now pins `pypdf==6.14.2` and
+all 12 production plus six test imports use the successor package. pypdf 6.14.2
+removed `PdfMerger`, so the merge paths use supported `PdfWriter.append`
+behavior and record offsets only after successful appends. Five new regressions
+cover reader/writer and outline parity, merge offsets, invalid/truncated and
+oversized-declared streams, and fail-closed markup combination.
+
+The production Python 3.11/Node 24 image built, its complete suite passed, and
+`pip check`, the six guided VPS/Caddy contracts, rendered Compose and actual
+Caddy validation all passed. The requirements-file audit no longer reports the
+PyPDF advisory. Pathological but syntactically valid PDF resource consumption
+remains part of Phase 4 ingress/archive limits.
 
 ---
 
@@ -261,7 +271,7 @@ Ordered by real risk, not by advisory count:
    passed.
 3. **DONE — `cryptography` → 48.0.1 + CFFI 2.0.0** — resolver, Argon2 and full
    suite passed.
-4. **`PyPDF2` → `pypdf`** — separate commit; 12 import sites, DoS-only severity.
+4. **DONE — `PyPDF2` → `pypdf` 6.14.2** — parity/adversarial and production gates passed.
 5. **File two risk acceptances** — Flask-Security-Too (WebAuthn off) and
    react-router (RSC unused).
 
@@ -270,11 +280,8 @@ this and the earlier batch on `main` did not honour it.
 
 ### Remaining scope
 
-- `SUPPLY-PY-01` and `SUPPLY-NPM-01` remain open. After items 1–3, the
-  Python gate reports only PyPDF2 and Flask-Security-Too; completing item 4
-  should leave only Flask-Security-Too.
-- Even after item 4, the
-  Python gate still reports the Flask-Security-Too entry and the frontend gate
+- `SUPPLY-PY-01` and `SUPPLY-NPM-01` remain open for human disposition. The
+  Python gate now reports only Flask-Security-Too, and the frontend gate
   still reports the two react-router entries, because neither has a reachable
   fix. **Those gates cannot go green by upgrading alone** — they need the filed
   exceptions plus, if the gate must be blocking, an explicit ignore entry
@@ -287,4 +294,4 @@ this and the earlier batch on `main` did not honour it.
 - Any change that enables WebAuthn → the Flask-Security exception is void.
 - Any change that adopts React Router RSC APIs → the react-router exception is void.
 - Re-run both gates before every release regardless; the latest 2026-08-03
-  Python snapshot is 2 findings across 2 packages.
+  requirements-file Python snapshot is 1 finding in 1 package.

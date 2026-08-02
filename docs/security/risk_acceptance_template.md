@@ -175,4 +175,4 @@ Listed so nobody files an unnecessary acceptance. Detail in
 | `pillow` 11.3.0 | **done** → 12.3.0 (`3346b51`) | 25 applicable upload-decoder rows cleared |
 | `cryptography` 43.0.1 | **done** → 48.0.1 + CFFI 2.0.0 (`3346b51`) | bundled-OpenSSL and related rows cleared |
 | `gunicorn` 21.2.0 | **done** → 22.0.0 (`3346b51`) | request-smuggling rows cleared; Caddy path passed |
-| `PyPDF2` 3.0.1 | **pending** → `pypdf` | PyPDF2 is EOL at 3.0.1; 12 import sites |
+| `PyPDF2` 3.0.1 | **done** → `pypdf` 6.14.2 (`5743b82`) | 12 production imports plus tests migrated; parity/adversarial and production gates passed |

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-02 21:20 UTC",
-  "commit": "b6e2a33",
+  "generated_at": "2026-08-02 22:54 UTC",
+  "commit": "42f9f22",
   "items": [
     {
       "id": "getting-started",
@@ -293,6 +293,10 @@
           "title": "Local VM Mode"
         },
         {
+          "id": "strict-authentication-on-guided-caddy-instances",
+          "title": "Strict authentication on guided Caddy instances"
+        },
+        {
           "id": "windows-lan-only-setup-no-docker",
           "title": "Windows LAN-Only Setup (No Docker)"
         },
@@ -373,6 +377,10 @@
         {
           "id": "the-add-in-cannot-connect",
           "title": "The add-in cannot connect"
+        },
+        {
+          "id": "the-browser-shows-an-authentication-or-csrf-error",
+          "title": "The browser shows an authentication or CSRF error"
         },
         {
           "id": "what-to-collect-before-asking-for-help",

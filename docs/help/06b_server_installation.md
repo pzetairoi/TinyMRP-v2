@@ -257,6 +257,23 @@ sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
 ```
 
 Local domains such as `demo.test.local` and `demo.localhost` do not use public Let's Encrypt certificates.
+For plain-HTTP local testing only, export `TINYMRP_SECURITY_MODE=compat` before
+creating the instance. New HTTPS/internal-TLS guided instances default to strict.
+
+## Strict authentication on guided Caddy instances
+
+`create-instance.sh` persists `TINYMRP_SECURITY_MODE=strict`, the instance's
+exact origin, and strong secrets for every new instance. Caddy remains the TLS
+endpoint and forwards the host and scheme used by the browser. Normal browser
+pages and APIs use the signed session; unsafe browser API requests must have a
+same-origin Origin/Referer. The SolidWorks add-in and other integrations use API
+bearer tokens. Public part shares remain limited to their opaque share URL, and
+`/api/health` stays anonymous for Caddy/Docker health checks.
+
+Updating an older instance does not rewrite its saved security mode. To migrate
+one deliberately, verify HTTPS first, change `TINYMRP_SECURITY_MODE=strict` in
+its instance `.env`, recreate the app, and test browser login/write, add-in token
+check, and a public share before considering the migration complete.
 
 ## Windows LAN-Only Setup (No Docker)
 
@@ -266,7 +283,7 @@ Use this path for service-based Windows deployment with NGINX reverse proxy + Wa
 2. Keep Flask app private on `127.0.0.1:8000`.
 3. Keep MongoDB private on `127.0.0.1:27017` (or separate internal DB server).
 4. Expose only NGINX HTTP (`80`) to allowed LAN ranges.
-5. Run with `TINYMRP_SECURITY_MODE=compat`, `FORCE_HTTPS=false`, `FILES_PUBLIC_URLS=false`.
+5. Run with `TINYMRP_SECURITY_MODE=compat`, `FORCE_HTTPS=false`, `FILES_PUBLIC_URLS=false`. This is a LAN-only compatibility profile, not an internet-facing production posture.
 
 Compatibility note (as of 2026-02-24):
 

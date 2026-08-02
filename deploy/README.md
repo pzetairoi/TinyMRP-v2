@@ -11,6 +11,9 @@ Default behavior:
 - MongoDB stays private and is never published on the host.
 - Each TinyMRP instance gets its own private Docker network and database.
 - All public traffic enters through the shared `tinymrp_proxy` Docker network.
+- New instances use `TINYMRP_SECURITY_MODE=strict`: browser APIs use the
+  same-origin session with CSRF origin checks, while integrations use bearer
+  tokens. Existing instance updates preserve the mode already stored in `.env`.
 
 The scripts live in `deploy/scripts/`:
 
@@ -122,6 +125,11 @@ container never generates or prints credentials. On later restarts and updates,
 an existing user database is left unchanged even though the persisted seed flag
 remains enabled. Missing or invalid credentials on a genuinely empty database
 stop startup instead of producing a falsely healthy instance.
+
+New instances also persist `TINYMRP_SECURITY_MODE=strict` and their exact Caddy
+origin. Caddy continues to terminate TLS and forward the original host/scheme,
+which strict session CSRF validation requires. The health route remains public,
+so container and routed health checks are unchanged.
 
 Optional flags:
 

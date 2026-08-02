@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Security (Phase 2 — coherent production authentication)
+- Strict is now the application, main Compose and guided VPS/Caddy default;
+  compatibility mode is explicit for local development, the plain-HTTP
+  Windows one-folder helper, and staged migration.
+- API endpoints are classified as browser-session, bearer-only integration,
+  session-or-bearer dual use, capability-scoped public share, or health. Normal
+  React workflows now work in strict mode while bearer tokens cannot substitute
+  for browser-only sessions.
+- Session API writes retain same-origin CSRF enforcement, including when an
+  attacker supplies an invalid bearer header. Authentication failures use a
+  consistent JSON error envelope, and the React UI displays request failures
+  instead of silently replacing protected datasets with empty results.
+- Public-share field, part, BOM, files, document-pack and process-metadata APIs
+  are narrowly capability scoped. Health remains anonymous for Docker/Caddy.
+- New strict-mode integration coverage includes browser navigation/CRUD,
+  bearer/invalid/expired tokens, public shares, CSRF, permissions, row scope,
+  session lifecycle, and the protected guided VPS/Caddy contracts.
+
 ### Security (Phase 1C — browser-session lifecycle)
 - Password changes, administrative resets, deactivation/reactivation, role
   assignment or permission changes, CLI security changes, and disposable-user
@@ -21,10 +39,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - Upgraded Pillow 11.3.0 to 12.3.0, cryptography 43.0.1 to 48.0.1, CFFI 1.17.1
   to 2.0.0, and Gunicorn 21.2.0 to 22.0.0. CFFI 2.0 is required by the upgraded
   cryptography wheel.
-- Python audit findings fell from 34 rows across five packages to two findings
-  across two packages. The remaining PyPDF2 finding requires the separately
-  tracked `pypdf` migration; the Flask-Security-Too WebAuthn-only finding has no
-  patched release and remains a proposed, unaccepted exception.
+- Migrated EOL PyPDF2 to `pypdf` 6.14.2, including supported writer/append merge
+  behavior and adversarial malformed-input regressions. Python requirements
+  audit findings fell from 34 rows across five packages to one finding in one
+  package: Flask-Security-Too's WebAuthn-only issue, which has no patched release
+  and remains a proposed, unaccepted exception.
 - The production Python 3.11/Node 24 image, complete backend suite, image/PDF
   workflows, and the guided VPS/Caddy configuration and live proxy path passed.
 

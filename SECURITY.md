@@ -29,16 +29,20 @@ TinyMRP supports two runtime security profiles via:
 TINYMRP_SECURITY_MODE=compat|strict
 ```
 
-### compat (default)
+### compat (development/migration only)
 
 - Keeps existing behavior where possible.
 - Applies an origin/referer CSRF guard to session-authenticated unsafe requests.
 - Adds safer CORS behavior (no wildcard + credentials).
-- If `SECRET_KEY` or `SECURITY_PASSWORD_SALT` is missing/weak, a temporary in-memory secret is generated and a warning is logged (sessions/tokens reset on restart).
+- If `SECRET_KEY` or `SECURITY_PASSWORD_SALT` is missing/weak, a runtime secret may be generated and persisted with a warning.
+- Do not expose this profile to the public internet.
 
-### strict
+### strict (default)
 
-- `/api/*` requires Bearer tokens only (no session fallback).
+- Browser/session APIs require the authenticated same-origin session; bearer tokens cannot substitute for browser access.
+- Integration APIs accept bearer tokens, with the token-check endpoint bearer-only.
+- Public-share APIs are limited to matched share endpoints and validate the opaque share capability; health remains anonymous.
+- Unsafe session-authenticated API requests require a same-origin Origin or Referer.
 - CORS is disabled unless `TINYMRP_ALLOWED_ORIGINS` is set.
 - Cookies are Secure + SameSite=Strict.
 - Startup fails if secrets are missing/weak.
@@ -68,7 +72,7 @@ TINYMRP_SECURITY_MODE=compat|strict
 If you suspect compromise:
 1. Rotate `SECRET_KEY` and `SECURITY_PASSWORD_SALT`.
 2. Revoke API tokens (or clear `api_tokens` collection).
-3. Invalidate sessions by restarting the app after secret rotation.
+3. Session identities rotate automatically on password, activation and authorization-state changes. Rotate application secrets only for an incident-wide logout.
 4. Review audit logs for suspicious actions.
 5. Verify proxy upstream and file roots are correct.
 

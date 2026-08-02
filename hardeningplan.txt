@@ -21,7 +21,11 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  P2-STRICT-AUTH  IN PROGRESS  owner: Codex /root
+  None. Phase 3C is the next unclaimed primary workstream. A parallel AI may
+  claim a bounded Phase 3C item below in its own worktree before editing.
+
+Completed workstream scope:
+  P2-STRICT-AUTH  DONE 2026-08-03  owner: Codex /root
     Scope: coherent endpoint-category policy; same-origin session plus CSRF for
            the browser UI; bearer-only integration endpoints; narrow public
            share/health access; consistent API errors; frontend error handling;
@@ -73,9 +77,16 @@ Active workstreams as of 2026-08-03:
     CHECKPOINT 80783b3 is pushed. The focused strict/session/bearer/share/CSRF/
                permission/RLS/lifecycle/Caddy matrix passed 76 tests, frontend
                build and lint passed, and the pre-PDF host suite passed 622 with
-               one skip. Documentation and the combined production gate remain.
+               one skip.
+    VERIFIED The final strict-auth plus pypdf production-derived Python 3.11
+             suite passed 628 tests. Main/one-folder/rendered guided Compose,
+             Bash syntax, ShellCheck error-level, PowerShell parsing, six Caddy
+             contracts and a rendered internal-TLS Caddy route passed.
+    FIXED The plain-HTTP Windows one-folder profile is explicitly compat and
+          persists that choice; strict Secure cookies remain the default for
+          the application, main Compose and guided TLS/Caddy deployments.
+    CLOSED AUTH-MODE-01. No live VPS, DNS or ACME state was changed.
 
-Completed workstream scope:
   P3B-PYPDF-MIGRATION  DONE/INTEGRATED 2026-08-03
     owner: /root/p3b_pypdf_migration; integrated by Codex /root
     Scope: replace the EOL PyPDF2 dependency/import surface with an exact tested
@@ -177,6 +188,10 @@ Completed workstream scope:
                       contract, config-render and deployment-script checks.
 
 Completed workstreams:
+  P2-STRICT-AUTH  DONE 2026-08-03  commit: 80783b3 + final evidence checkpoint
+    Explicit endpoint categories, same-origin session/CSRF policy, integration
+    bearer policy, narrow public shares, consistent errors, frontend error UX,
+    strict production defaults and protected VPS/Caddy validation; 628 passed.
   P1C-SESSION-LIFECYCLE  DONE 2026-08-03  commit: 7cd50bd
     Server-side session version rotation, lifecycle audit, 11 regressions, full
     suite and protected VPS/Caddy gates; IAM-REV-01 closed.
@@ -214,12 +229,14 @@ Parallel workstream definition (complete; retained for scope history):
     controls, owner and expiry for primary review.
 
 Next integration order:
-  Finish P2-STRICT-AUTH documentation, then run the combined full suite,
-  production-image security checks and protected guided VPS/Caddy gate. Close
-  Phase 2 only after those pass; Phase 3C is the next primary workstream.
+  Phase 2 and Phase 3B are integrated. Claim Phase 3C reproducible supply-chain
+  work before editing; preserve the guided VPS/Caddy deployment contracts.
 ========================================================================
 
 Completed so far:
+  Phase 2   DONE 2026-08-03 (Codex; implementation checkpoint 80783b3)
+                   AUTH-MODE-01 closed; production-derived suite 628 passed;
+                   guided VPS/Caddy render and contracts preserved
   Phase 1C  DONE 2026-08-03 (Codex)
                    IAM-REV-01 closed; all browser sessions/remember cookies are
                    invalidated on credential and authorization-state changes
@@ -262,8 +279,8 @@ Phase 0 completion details:
   DONE Added the audit baseline and explicit release-blocker checklist under
        docs/PRODUCTION_HARDENING_BASELINE.md.
   BASELINE Supply-chain gates were pip-audit 34 entries/5 packages and npm
-           production audit 2 high entries. Current Python result is 2/2 after
-           3346b51; frontend remains 2 high.
+           production audit 2 high entries. Current requirements-file Python
+           result is 1/1 after 5743b82; frontend remains 2 high.
 
 Phase 3B advisory-triage record (integrated 2026-08-03):
   EVIDENCE docs/security/dependency_advisory_triage.md and
@@ -348,9 +365,9 @@ Protected owner requirement added 2026-08-02:
   and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
 
 Current work:
-  Phase 2 strict-mode authentication implementation is pushed at 80783b3 and
-  remains active for documentation plus combined production/Caddy evidence.
-  P3B runtime and pypdf remediation are DONE and integrated through 5743b82.
+  Phase 2 strict-mode authentication and Phase 3B runtime/pypdf remediation are
+  DONE. Phase 3C reproducible supply-chain gates are next and currently
+  unclaimed so another AI can take a bounded item in parallel.
 
 Phase 1B decision log (recorded before implementation, 2026-08-03):
   * New API tokens expire after 90 days by default and may not exceed 365 days;
@@ -542,7 +559,7 @@ Request to use
 Implement Phase 1, starting with Phase 1A.
 
 The subphases can be implemented separately.
-Phase 2 — Make production authentication coherent
+Phase 2 — Make production authentication coherent — [DONE 2026-08-03, Codex]
 Objective: Ensure strict production mode supports the actual browser, API and public-share workflows.
 Design decision
 Choose and document one of these models:
@@ -576,6 +593,28 @@ Public shares work without exposing unrelated APIs.
 API tokens remain unsuitable for browser-session substitution.
 Strict mode becomes the documented and deployed default.
 Compat mode is either removed or clearly marked as development-only.
+
+Phase 2 completion record (2026-08-03; implementation checkpoint 80783b3):
+  IMPLEMENTED Explicit browser-session, bearer-only integration, dual-use,
+              capability-scoped public-share and anonymous-health categories.
+              The global /api bearer rule is replaced by endpoint policy.
+  IMPLEMENTED Same-origin browser writes retain CSRF/origin checks. Invalid
+              bearer headers cannot bypass that guard, and valid bearer tokens
+              cannot substitute for browser-only sessions.
+  IMPLEMENTED Public shares expose only scoped part/BOM/file/document/process
+              metadata. API errors use a consistent nested JSON envelope and
+              the React client displays protected-request failures.
+  DEFAULTS Application startup, main Compose and new guided TLS/Caddy instances
+           are strict. Explicit compat remains for development, controlled
+           migrations and the plain-HTTP localhost/LAN one-folder helper.
+  TESTED Seven strict-mode integration regressions; affected auth/session/share/
+         permissions/RLS plus six Caddy contracts passed. Frontend lint/build
+         passed. Final production-derived Python 3.11 suite: 628 passed.
+  VERIFIED Main and one-folder Compose, generated guided-instance Compose,
+           deployment Bash syntax/ShellCheck, PowerShell parsing and rendered
+           internal-TLS Caddy validation passed. No live VPS/DNS/ACME mutation.
+  CLOSED AUTH-MODE-01. Remaining deliberate compat selection is an operator
+         configuration risk documented in the migration/deployment guides.
 Estimated effort
 4–8 days.
 Request to use
@@ -978,7 +1017,7 @@ Phase 1A — stored XSS. DONE.
 Phase 3A — fresh deployments. DONE 2026-08-03; Caddy/VPS path preserved.
 Phase 1B — token lifecycle. DONE 2026-08-03.
 Phase 1C — server-side session lifecycle. DONE 2026-08-03.
-Phase 2 — strict-mode authentication. IN PROGRESS; implementation pushed at 80783b3.
+Phase 2 — strict-mode authentication. DONE 2026-08-03; AUTH-MODE-01 closed.
 Phase 3B — dependency engineering remediation DONE; human exceptions remain.
 Phase 3C — reproducible supply chain.
 Phase 4 — safe, atomic imports.
@@ -988,6 +1027,5 @@ Phase 7 — add-in hardening.
 Phase 8 — maintainability.
 Phase 9 — commercial scope.
 Phase 10 — release validation.
-The next implementation request should be: “Finish Phase 2 combined production
-and guided VPS/Caddy validation, close its evidence, then begin Phase 3C
-reproducible supply-chain gates.”
+The next implementation request should be: “Implement Phase 3C reproducible
+supply-chain gates while preserving and testing the guided VPS/Caddy path.”

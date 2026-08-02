@@ -267,8 +267,11 @@ def test_direct_compose_defaults_to_no_first_admin_and_requires_credentials():
 
 def test_onefolder_helper_generates_credentials_outside_container_logs():
     helper = Path("tools/run-tinymrp-container.ps1").read_text(encoding="utf-8")
+    compose = Path("docker-compose.onefolder.yml").read_text(encoding="utf-8")
 
     assert "RandomNumberGenerator" in helper
+    assert '"TINYMRP_SECURITY_MODE=compat"' in helper
+    assert "TINYMRP_SECURITY_MODE: ${TINYMRP_SECURITY_MODE:-compat}" in compose
     assert '"TINYMRP_SEED_ADMIN=$bootstrapEnabled"' in helper
     assert '"TINYMRP_ADMIN_EMAIL=$AdminEmail"' in helper
     assert '"TINYMRP_ADMIN_PASSWORD=$adminPassword"' in helper

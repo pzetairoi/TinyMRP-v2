@@ -102,6 +102,7 @@ try {
   @(
     "TINYMRP_DELIVERABLES_DIR=$dockerDeliverables"
     "HTTP_PORT=$HttpPort"
+    "TINYMRP_SECURITY_MODE=compat"
     "TINYMRP_SEED_ADMIN=$bootstrapEnabled"
     "TINYMRP_ADMIN_EMAIL=$AdminEmail"
     "TINYMRP_ADMIN_PASSWORD=$adminPassword"

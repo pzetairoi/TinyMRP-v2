@@ -203,7 +203,7 @@ Final verification evidence:
 
 Residual Phase 1B risk: legacy no-expiry tokens remain valid until operators
 rotate or revoke them; the UI makes them identifiable. Strict-mode browser
-compatibility remains Phase 2, and add-in secret storage remains Phase 7.
+compatibility was closed by Phase 2, and add-in secret storage remains Phase 7.
 
 ## Phase 1C completion evidence (2026-08-03)
 
@@ -234,6 +234,48 @@ Compose configurations parsed; all deployment Bash/PowerShell scripts passed
 syntax checks; ShellCheck passed at error level; the six Caddy/VPS contracts
 passed; and a rendered internal-TLS route passed `caddy validate`.
 
+## Phase 2 completion evidence (2026-08-03)
+
+`AUTH-MODE-01` is closed by implementation checkpoint `80783b3` and this final
+evidence checkpoint. Strict mode now classifies APIs explicitly as
+browser-session, bearer-only integration, browser-or-bearer dual use,
+capability-scoped public share, or anonymous health. The same-origin React UI
+uses its session and retains origin/CSRF protection for unsafe requests; valid
+API tokens cannot substitute for browser-only sessions. Invalid bearer headers
+also cannot bypass the session origin guard.
+
+Public shares expose only their capability-scoped part, BOM, files, document
+pack and process metadata. Authentication and authorization failures use a
+consistent nested JSON error envelope, and the React request layer reports
+failures rather than silently turning protected data into empty datasets.
+Application startup, main Compose, and newly created guided VPS/Caddy instances
+default to strict. Compatibility mode remains explicit for local development,
+time-bounded upgrades, and the plain-HTTP localhost/LAN one-folder helper; that
+helper must not be exposed to the internet.
+
+Final verification evidence:
+
+- Seven new strict-mode integrations plus the affected session, bearer, share,
+  permission, row-scope, bootstrap and six guided VPS/Caddy contracts passed.
+  The focused final set passed 33 tests after pinning the one-folder profile.
+- Frontend lint passed with its one pre-existing warning and the production
+  bundle built. The pre-PDF combined host suite passed 622 tests with one skip.
+- The final combined strict-auth plus pypdf tree passed **628 tests** under the
+  production-derived Python 3.11 image. `pip check` was clean and the exact
+  requirements audit remained one Flask-Security-Too finding in one package.
+- Main and one-folder Compose parsed. All deployment Bash scripts passed syntax
+  and ShellCheck error-level checks; PowerShell scripts parsed. The actual
+  guided instance Compose renderer passed `docker compose config`, and its
+  internal-TLS Caddy route passed `caddy validate`.
+- The generated Caddy/Compose path, anonymous health check, empty
+  `FILES_ACCEL_REDIRECT_PREFIX`, isolated Mongo network, and update/rollback/
+  doctor contracts remain intact. No live VPS, DNS, or ACME state was changed.
+
+Residual Phase 2 risk: `compat` remains available for controlled migration and
+local plain-HTTP profiles, so operators can still weaken a production instance
+by selecting it deliberately. Deployment documentation labels that choice and
+the guided TLS installer writes strict mode for every new instance.
+
 ## Phase 3B advisory-triage evidence (2026-08-03)
 
 The failing dependency gates were re-run and every current advisory was mapped
@@ -243,8 +285,8 @@ rows; triage alone did not close either gate.
 
 Four Python findings had actionable remedies: Pillow 12.3.0, gunicorn 22.0.0
 and cryptography 48.0.1 were straight runtime-pin upgrades and are now
-integrated, while the EOL `PyPDF2` package still must migrate to `pypdf` across
-12 import sites. Pillow was highest priority because user-supplied images reach
+integrated, and EOL `PyPDF2` was migrated to `pypdf` 6.14.2 across all 12
+production import sites in `5743b82`. Pillow was highest priority because user-supplied images reach
 native decoders; gunicorn's request-framing findings were relevant to the
 protected Caddy reverse-proxy topology.
 
@@ -263,9 +305,10 @@ The three straight upgrades were integrated as `3346b51`: Pillow 12.3.0,
 gunicorn 22.0.0 and cryptography 48.0.1, plus CFFI 2.0.0 required by
 cryptography's resolver metadata. The production image built, `pip check`
 passed, the complete combined Python 3.11 suite exited zero, and a disposable
-Caddy-to-Gunicorn request returned healthy. `pip-audit` now reports **2 findings
-across 2 packages**: the proposed Flask-Security-Too exception and the separately
-tracked PyPDF2-to-`pypdf` migration.
+Caddy-to-Gunicorn request returned healthy. The pypdf production build/full
+suite, parity/adversarial regressions and protected Caddy gates also passed.
+Requirements-file `pip-audit` now reports **1 finding in 1 package**: the
+proposed Flask-Security-Too exception.
 
 ## Open production blockers
 
@@ -277,9 +320,9 @@ The identifier should be used in commits, reviews and risk decisions.
 | SEC-CSP-01 | P1 | Open | 1A residual/2 | Inline scripts and handlers still require CSP `unsafe-inline` |
 | IAM-REV-01 | P0 | Closed 2026-08-03 (`7cd50bd`) | 1C | API-token and browser-session revocation on credential/security-state changes |
 | IAM-TOKEN-01 | P0 | Closed 2026-08-03 (`49cf24a`, `49ee2b4`) | 1B | Expiring token policy and complete token lifecycle controls |
-| AUTH-MODE-01 | P0 | Open | 2 | Strict mode is incompatible with normal browser and public-share API flows |
+| AUTH-MODE-01 | P0 | Closed 2026-08-03 (`80783b3`) | 2 | Strict browser, integration, public-share and health policies |
 | DEPLOY-SEED-01 | P0 | Closed 2026-08-03 | 3A | Canonical, idempotent, fail-closed initialization and fresh-install smoke |
-| SUPPLY-PY-01 | P0 | Partial: 2/2 remain | 3B | PyPDF2 migration remains; proposed WebAuthn exception needs human owner/date |
+| SUPPLY-PY-01 | P0 | Engineering remediation done; 1/1 proposed exception remains | 3B | Proposed WebAuthn exception needs human owner/date and <=90-day expiry |
 | SUPPLY-NPM-01 | P0 | Open; triaged | 3B/6 | Two RSC-only React Router rows remain; proposed exception needs human owner/date and v8 migration tracking |
 | SUPPLY-IMM-01 | P1 | Open | 3C | Base images and Actions are not pinned to immutable digests/SHAs |
 | IMPORT-DOS-01 | P0 | Open | 4A | No cumulative uncompressed/archive compression-ratio limit |
@@ -324,9 +367,9 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 7. Use Python 3.11 and Node 24 for release evidence, regardless of host defaults.
 8. Preserve the baseline tag; do not move or recreate it.
 
-The recommended next implementation is Phase 2. The remaining PyPDF2-to-`pypdf`
-Phase 3B migration may proceed in an independently claimed worktree; both
+Phase 2 strict authentication and Phase 3B's pypdf migration are complete. Both
 proposed vulnerability exceptions still require human ownership and expiry.
+Phase 3C reproducible supply-chain work is next.
 
 ## Residual Phase 0 limitations
 

@@ -116,6 +116,19 @@ with the part number so it can be cleaned up.
 4. Check the token has not been revoked by an administrator, account
    deactivation or a password change/reset.
 
+## The browser shows an authentication or CSRF error
+
+1. In production, confirm `TINYMRP_SECURITY_MODE=strict` and use the public
+   HTTPS URL. Strict cookies are not intended for a plain-HTTP public site.
+2. Confirm Caddy still forwards the original host and scheme. A browser write
+   is rejected when its Origin/Referer does not match the routed instance.
+3. Do not paste an API bearer token into browser requests. Browser-only APIs
+   require the signed login session; tokens are for the add-in/integrations.
+4. If a page reports `token_required`, check that the frontend is not calling
+   the add-in-only `/api/auth/check` endpoint.
+5. If an older instance intentionally remains in compat during migration,
+   confirm its instance `.env` explicitly says so; updates preserve that value.
+
 ## What to collect before asking for help
 
 Include as much of this as you can:

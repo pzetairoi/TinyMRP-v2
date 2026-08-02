@@ -47,8 +47,8 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `FILES_ACCEL_REDIRECT_PREFIX`: optional internal Nginx location used for `X-Accel-Redirect`; leave this empty for the guided Caddy deployment and any setup that does not create and verify a matching internal route.
   - `FILES_ALLOW_LEGACY_TOKENS=false`: allow legacy base64 file tokens (off by default).
 - Optional:
-  - `TINYMRP_SECURITY_MODE=compat|strict`: security profile (default compat).
-  - `TINYMRP_ALLOWED_ORIGINS`: comma-separated CORS allowlist (strict mode requires this).
+  - `TINYMRP_SECURITY_MODE=strict|compat`: security profile (default strict; compat is local-development/migration only).
+  - `TINYMRP_ALLOWED_ORIGINS`: comma-separated allowlist for cross-origin requests. Same-origin browser use does not require CORS.
   - `TINYMRP_CORS_CREDENTIALS=true`: allow credentials when using an explicit allowlist.
   - `API_TOKEN_DEFAULT_TTL_DAYS=90`: lifetime applied to newly created API tokens.
   - `API_TOKEN_MAX_TTL_DAYS=365`: maximum lifetime users may request; must be at least the default.
@@ -67,7 +67,7 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `EXTRA_FILES_ALLOWED=true`: enable/disable associated file uploads.
   - `APP_TIMEZONE`: default timezone (IANA name) for docpack timestamps if no admin override is set.
   - `BRANDING_LOGO_MAX_BYTES`: max logo upload size in bytes (default 2097152).
-  - `TINYMRP_SEED_ADMIN=true`: opt-in admin seeding on first boot (compat mode).
+  - `TINYMRP_SEED_ADMIN=true`: opt-in admin seeding on first boot.
   - `TINYMRP_ADMIN_EMAIL`, `TINYMRP_ADMIN_PASSWORD`: credentials used when seeding.
 
 Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
@@ -76,8 +76,8 @@ Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 
 ## Security Modes
 
-- **compat (default)**: backward-compatible behavior, with safer CORS defaults, origin-based CSRF guard for session APIs, and warnings for weak secrets. If secrets are missing/weak, TinyMRP generates a temporary runtime secret (sessions/tokens will reset on restart).
-- **strict**: /api is token-only, CORS is disabled unless `TINYMRP_ALLOWED_ORIGINS` is set, cookies are Secure + SameSite=Strict, and startup fails if secrets are missing/weak.
+- **strict (default)**: the same-origin browser uses its authenticated session and an origin/referer CSRF check; integrations and the SolidWorks add-in use bearer tokens. `/api/auth/check` is bearer-only, public-share APIs require their scoped share capability, and `/api/health` is anonymous. Browser-only APIs reject bearer substitution. CORS is disabled unless an origin is explicitly allowed, cookies are Secure + SameSite=Strict, and startup fails if secrets are missing or weak.
+- **compat (development/migration only)**: preserves legacy behavior for local HTTP and staged upgrades. It retains the session-origin CSRF guard and safer CORS defaults, but may persist generated runtime secrets when explicit secrets are missing. Do not expose compat mode to the public internet.
 
 See `SECURITY.md` for the full threat model and `MIGRATION.md` for a safe rollout checklist.
 
@@ -404,6 +404,11 @@ If you want a turnkey setup where the only input is the host **deliverables fold
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\run-tinymrp-container.ps1 "C:\TinyMRP\Deliverables"
 ```
 
+This localhost/LAN-only helper intentionally persists
+`TINYMRP_SECURITY_MODE=compat` because it publishes plain HTTP. Do not expose it
+to the internet. Use the guided VPS/Caddy deployment for strict authentication,
+Secure cookies and TLS.
+
 This persists everything under:
 
 - `<deliverables>\.tinymrp\mongo` (MongoDB data)
@@ -645,7 +650,7 @@ Data helpers (see `app/cli.py`):
 ## Notes & Tips
 
 - CSRF is enabled; some API blueprints are explicitly exempted where required for SPA calls.
-- Session-authenticated API requests are protected by an origin/referer CSRF guard; strict mode makes `/api/*` token-only.
+- Session-authenticated API requests are protected by an origin/referer CSRF guard. In strict mode, browser APIs require the same-origin session, integration APIs accept or require bearer tokens according to their explicit endpoint policy, and public-share APIs validate only their scoped share capability.
 - Files config uses canonical keys `FILES_LOCAL_ROOT`, `FILES_URL_PREFIX`, `FILES_UPSTREAM_BASE`. Backward-compatible aliases `FILE_ROOT_LOCAL` and `FILE_ROOT_HTTP` remain for older code paths.
 - Frontend build artifacts are written to `app/static/parts-ui` by `npm run build` from the `frontend` directory.
 

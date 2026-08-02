@@ -1293,7 +1293,21 @@ sudo docker compose up -d --force-recreate
 <pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --local-mode http
 sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
 </code></pre>
-<p>Local domains such as <code>demo.test.local</code> and <code>demo.localhost</code> do not use public Let's Encrypt certificates.</p>
+<p>Local domains such as <code>demo.test.local</code> and <code>demo.localhost</code> do not use public Let's Encrypt certificates.
+For plain-HTTP local testing only, export <code>TINYMRP_SECURITY_MODE=compat</code> before
+creating the instance. New HTTPS/internal-TLS guided instances default to strict.</p>
+</div></details><details class="help-section" id="sec-strict-authentication-on-guided-caddy-instances"><summary><span class="help-section-title" id="strict-authentication-on-guided-caddy-instances">Strict authentication on guided Caddy instances</span></summary><div class="help-section-body">
+<p><code>create-instance.sh</code> persists <code>TINYMRP_SECURITY_MODE=strict</code>, the instance's
+exact origin, and strong secrets for every new instance. Caddy remains the TLS
+endpoint and forwards the host and scheme used by the browser. Normal browser
+pages and APIs use the signed session; unsafe browser API requests must have a
+same-origin Origin/Referer. The SolidWorks add-in and other integrations use API
+bearer tokens. Public part shares remain limited to their opaque share URL, and
+<code>/api/health</code> stays anonymous for Caddy/Docker health checks.</p>
+<p>Updating an older instance does not rewrite its saved security mode. To migrate
+one deliberately, verify HTTPS first, change <code>TINYMRP_SECURITY_MODE=strict</code> in
+its instance <code>.env</code>, recreate the app, and test browser login/write, add-in token
+check, and a public share before considering the migration complete.</p>
 </div></details><details class="help-section" id="sec-windows-lan-only-setup-no-docker"><summary><span class="help-section-title" id="windows-lan-only-setup-no-docker">Windows LAN-Only Setup (No Docker)</span></summary><div class="help-section-body">
 <p>Use this path for service-based Windows deployment with NGINX reverse proxy + Waitress.</p>
 <ol>
@@ -1301,7 +1315,7 @@ sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
 <li>Keep Flask app private on <code>127.0.0.1:8000</code>.</li>
 <li>Keep MongoDB private on <code>127.0.0.1:27017</code> (or separate internal DB server).</li>
 <li>Expose only NGINX HTTP (<code>80</code>) to allowed LAN ranges.</li>
-<li>Run with <code>TINYMRP_SECURITY_MODE=compat</code>, <code>FORCE_HTTPS=false</code>, <code>FILES_PUBLIC_URLS=false</code>.</li>
+<li>Run with <code>TINYMRP_SECURITY_MODE=compat</code>, <code>FORCE_HTTPS=false</code>, <code>FILES_PUBLIC_URLS=false</code>. This is a LAN-only compatibility profile, not an internet-facing production posture.</li>
 </ol>
 <p>Compatibility note (as of 2026-02-24):</p>
 <ul>
@@ -1497,6 +1511,19 @@ if unsure, then replace the old secret in the add-in immediately.</li>
 <li>Check the token has not been revoked by an administrator, account
 deactivation or a password change/reset.</li>
 </ol>
+</div></details><details class="help-section" id="sec-the-browser-shows-an-authentication-or-csrf-error"><summary><span class="help-section-title" id="the-browser-shows-an-authentication-or-csrf-error">The browser shows an authentication or CSRF error</span></summary><div class="help-section-body">
+<ol>
+<li>In production, confirm <code>TINYMRP_SECURITY_MODE=strict</code> and use the public
+HTTPS URL. Strict cookies are not intended for a plain-HTTP public site.</li>
+<li>Confirm Caddy still forwards the original host and scheme. A browser write
+is rejected when its Origin/Referer does not match the routed instance.</li>
+<li>Do not paste an API bearer token into browser requests. Browser-only APIs
+require the signed login session; tokens are for the add-in/integrations.</li>
+<li>If a page reports <code>token_required</code>, check that the frontend is not calling
+the add-in-only <code>/api/auth/check</code> endpoint.</li>
+<li>If an older instance intentionally remains in compat during migration,
+confirm its instance <code>.env</code> explicitly says so; updates preserve that value.</li>
+</ol>
 </div></details><details class="help-section" id="sec-what-to-collect-before-asking-for-help"><summary><span class="help-section-title" id="what-to-collect-before-asking-for-help">What to collect before asking for help</span></summary><div class="help-section-body">
 <p>Include as much of this as you can:</p>
 <ul>
@@ -1626,6 +1653,10 @@ whole plan.</li>
 <tr>
 <td>GET</td>
 <td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/part_images</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/share/part/&lt;share_id&gt;/&lt;token&gt;/process-meta</code></td>
 </tr>
 </tbody>
 </table>

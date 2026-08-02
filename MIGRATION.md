@@ -1,17 +1,24 @@
 # Migration Guide (Security Hardening)
 
-## Safe Path (compat mode, default)
+## Safe upgrade path for an existing compat deployment
 
 1. `git pull` on the server.
 2. Restart services (`docker compose restart` or systemd).
 3. Verify the app boots and UI loads.
+
+Because strict is now the application and production deployment default, set
+`TINYMRP_SECURITY_MODE=compat` explicitly before the first upgrade if the
+existing site still uses local HTTP or has not completed the checks below.
+Existing guided VPS instances retain the mode persisted in their instance
+`.env`; updates do not silently rewrite it. New guided Caddy instances use
+strict mode.
 
 Compat mode preserves existing behavior, but improves safety:
 - CORS is no longer wildcard + credentials.
 - Session-authenticated API requests are protected by an origin/referer CSRF guard.
 - If `SECRET_KEY`/`SECURITY_PASSWORD_SALT` is missing or weak, a runtime secret is generated once and persisted to `instance/runtime_secrets.json` (sessions/tokens remain stable across restarts). A warning is logged to encourage explicit secrets.
 
-## Enable Strict Mode (opt-in)
+## Move the deployment to strict mode
 
 Set in your environment:
 
@@ -19,6 +26,7 @@ Set in your environment:
 TINYMRP_SECURITY_MODE=strict
 SECRET_KEY=<strong secret>
 SECURITY_PASSWORD_SALT=<strong salt>
+# Needed only for a genuinely cross-origin UI/integration:
 TINYMRP_ALLOWED_ORIGINS=https://your-ui.example.com
 ```
 
@@ -31,10 +39,19 @@ FILES_PROXY_MAX_BYTES=2147483648
 ```
 
 Strict mode changes:
-- `/api/*` requires Bearer tokens (no session cookies).
+- Same-origin browser APIs use the authenticated session and reject bearer-only substitution.
+- Session-authenticated unsafe API requests require a same-origin Origin or Referer.
+- Integration endpoints accept bearer tokens; `/api/auth/check` requires one.
+- Public-share APIs are anonymous only inside the token-scoped `/api/share/part/...` surface.
+- `/api/health` remains anonymous for health checks.
 - CORS disabled unless allowlist is set.
 - Secure cookies + SameSite=Strict.
 - Startup fails if secrets are missing/weak.
+
+Before switching an existing site, verify HTTPS and the proxy's forwarded host
+and scheme, then test browser login/navigation, one browser write, the add-in's
+token check, an active public share, and an expired/revoked token. A 401 JSON
+response now includes `error.code`, `error.message`, and `error.details`.
 
 ## Admin Seeding Changes
 
