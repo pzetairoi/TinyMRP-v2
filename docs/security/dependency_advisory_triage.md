@@ -2,8 +2,10 @@
 
 Workstream: **P3B-ADVISORY-TRIAGE** · Phase 3B · blockers `SUPPLY-PY-01`, `SUPPLY-NPM-01`
 
-Evidence collected **2026-08-03** against branch `hardening/production-readiness`
-at commit `de8d5a5`.
+Evidence was originally collected **2026-08-03** against commit `de8d5a5` on
+`hardening/production-readiness`. The audit counts, advisory state, package
+availability and source applicability were independently revalidated after
+Phase 1B and before integration in commit `50d75e7`.
 
 This document is **analysis only**. It changes no manifest, workflow or
 application code. Its purpose is to say, for every advisory currently failing a
@@ -29,7 +31,7 @@ inspected.
 | Package | Pinned | Entries | Applicable? | Remedy | Blocked? |
 | --- | --- | --- | --- | --- | --- |
 | pillow | 11.3.0 | 25 | **YES — highest priority** | upgrade to 12.3.0 | no |
-| cryptography | 43.0.1 | 5 | Partly (transport//OpenSSL) | upgrade to 48.0.1 | no |
+| cryptography | 43.0.1 | 5 rows / 4 distinct | Partly (transport/OpenSSL) | upgrade to 48.0.1 | no |
 | gunicorn | 21.2.0 | 2 | Conditional on proxy topology | upgrade to 22.0.0 | no |
 | PyPDF2 | 3.0.1 | 1 | Yes, low | **package rename → `pypdf`** | needs code change |
 | Flask-Security-Too | 5.8.1 | 1 | **NO — feature not enabled** | none available | exception |
@@ -84,7 +86,7 @@ the aggregate suite. Confirm the pinned `reportlab`/`svglib` still interoperate.
 
 ---
 
-## 2. cryptography 43.0.1 — 5 advisories — PARTLY APPLICABLE, fix available
+## 2. cryptography 43.0.1 — 5 audit rows / 4 distinct advisories — PARTLY APPLICABLE, fix available
 
 **Remedy: upgrade to `cryptography==48.0.1`.** Verified installable.
 
@@ -95,8 +97,10 @@ the aggregate suite. Confirm the pinned `reportlab`/`svglib` still interoperate.
 | PYSEC-2026-35 | CVE-2026-34073 | — | 46.0.6 |
 | PYSEC-2026-2141 | CVE-2026-26007 | — | 46.0.5 |
 
-The bundled-OpenSSL advisory applies to anyone installing the PyPI wheel, which
-is what the container does. 48.0.1 supersedes all five.
+`pip-audit` emits five rows because `PYSEC-2026-35` is duplicated in its current
+output; there are four distinct advisory IDs. The bundled-OpenSSL advisory
+applies to anyone installing the PyPI wheel, which is what the container does.
+48.0.1 supersedes every reported row.
 
 Exposure is lower than Pillow's: `cryptography` here backs password hashing and
 TLS client work rather than parsing hostile input directly. Still, it is a clean
@@ -137,10 +141,11 @@ versions end at 3.0.1). The project was renamed, and the advisory's fix version
 refers to the successor package **`pypdf`**. PyPDF2 is end-of-life.
 
 So this cannot be closed by a version bump; it needs a dependency swap plus an
-import migration across roughly 10 call sites:
+import migration across 12 call sites:
 
 - `app/services/docpacks.py` — lines 1490, 2174, 2256, 2274, 2299, 3093, 3214
 - `app/services/markup_documents.py` — line 333
+- `app/services/order_scope.py` — lines 166, 188, 240, 293
 
 The imported names (`PdfReader`, `PdfWriter`, `PdfMerger`) exist in `pypdf` with
 largely compatible APIs, so the migration is mechanical but touches PDF
@@ -168,7 +173,7 @@ The defect is entirely on the **WebAuthn reauthentication path**
 - `requirements.txt:22` pins `Flask-Security-Too==5.8.1` **with no extras**, so
   the optional WebAuthn dependencies are not installed at all.
 - The only multi-factor path implemented is TOTP, gated behind
-  `SECURITY_TWO_FACTOR_ENABLED` (`app/__init__.py:372-400`), default off.
+  `SECURITY_TWO_FACTOR_ENABLED` (`app/__init__.py:390-418`), default off.
 
 The vulnerable code path is unreachable in this deployment. Exploitation also
 requires an authenticated attacker who already holds a registered WebAuthn
@@ -243,7 +248,7 @@ Ordered by real risk, not by advisory count:
    Validate a rendered VPS/Caddy deployment.
 3. **`cryptography` → 48.0.1** — clean upgrade, removes the bundled-OpenSSL
    finding.
-4. **`PyPDF2` → `pypdf`** — separate commit; ~10 import sites, DoS-only severity.
+4. **`PyPDF2` → `pypdf`** — separate commit; 12 import sites, DoS-only severity.
 5. **File two risk acceptances** — Flask-Security-Too (WebAuthn off) and
    react-router (RSC unused).
 

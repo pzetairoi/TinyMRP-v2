@@ -83,7 +83,7 @@ different user. TinyMRP does not enable WebAuthn:
 - `Flask-Security-Too==5.8.1` is pinned **without extras**, so the optional
   WebAuthn dependencies are not installed.
 - The only MFA path is TOTP, behind `SECURITY_TWO_FACTOR_ENABLED`
-  (`app/__init__.py:372-400`), default off.
+  (`app/__init__.py:390-418`), default off.
 
 Exploitation additionally requires an authenticated attacker already holding a
 registered WebAuthn credential on the same deployment — unobtainable with the
@@ -175,4 +175,4 @@ Listed so nobody files an unnecessary acceptance. Detail in
 | `pillow` 11.3.0 | upgrade → 12.3.0 | 25 advisories; **applicable** — decodes user uploads |
 | `cryptography` 43.0.1 | upgrade → 48.0.1 | includes the bundled-OpenSSL finding |
 | `gunicorn` 21.2.0 | upgrade → 22.0.0 | request smuggling; relevant behind Caddy |
-| `PyPDF2` 3.0.1 | migrate → `pypdf` | PyPDF2 is EOL at 3.0.1; ~10 import sites |
+| `PyPDF2` 3.0.1 | migrate → `pypdf` | PyPDF2 is EOL at 3.0.1; 12 import sites |

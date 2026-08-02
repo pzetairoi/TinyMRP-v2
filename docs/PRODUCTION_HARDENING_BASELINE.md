@@ -205,6 +205,31 @@ rotate or revoke them; the UI makes them identifiable. Sessions are not revoked
 by these events until Phase 1C, strict-mode browser compatibility remains Phase
 2, and add-in secret storage remains Phase 7.
 
+## Phase 3B advisory-triage evidence (2026-08-03)
+
+The failing dependency gates were re-run and every current advisory was mapped
+to reachable product features. `pip-audit` still reports 34 rows across five
+packages and the production frontend audit still reports two high React Router
+rows; triage alone does not close either gate.
+
+Four Python findings have actionable remedies: Pillow 12.3.0, gunicorn 22.0.0
+and cryptography 48.0.1 are straight runtime-pin upgrades, while the EOL
+`PyPDF2` package must migrate to `pypdf` across 12 import sites. Pillow is the
+highest priority because user-supplied images reach native decoders; gunicorn's
+request-framing findings are relevant to the protected Caddy reverse-proxy
+topology.
+
+Two findings need explicit, time-limited exceptions if released before an
+upstream/package migration is available. Flask-Security-Too's medium finding is
+limited to WebAuthn, which TinyMRP does not enable or install. The React Router
+high finding is limited to unstable RSC APIs, which the client-side SPA does not
+use; the patched core `react-router` 8.3.0 release is not available as a
+`react-router-dom` 8.x upgrade. `npm audit fix --force` proposes an unsafe
+downgrade and must not be used. Both exception records remain **Proposed** until
+a human risk owner supplies acceptance and expiry dates. Full evidence is in
+`docs/security/dependency_advisory_triage.md` and
+`docs/security/risk_acceptance_template.md`.
+
 ## Open production blockers
 
 The identifier should be used in commits, reviews and risk decisions.
@@ -217,8 +242,8 @@ The identifier should be used in commits, reviews and risk decisions.
 | IAM-TOKEN-01 | P0 | Closed 2026-08-03 (`49cf24a`, `49ee2b4`) | 1B | Expiring token policy and complete token lifecycle controls |
 | AUTH-MODE-01 | P0 | Open | 2 | Strict mode is incompatible with normal browser and public-share API flows |
 | DEPLOY-SEED-01 | P0 | Closed 2026-08-03 | 3A | Canonical, idempotent, fail-closed initialization and fresh-install smoke |
-| SUPPLY-PY-01 | P0 | Open | 3B | Python vulnerability gate reports 34 entries in 5 packages |
-| SUPPLY-NPM-01 | P0 | Open | 3B | Frontend production audit reports 2 high entries |
+| SUPPLY-PY-01 | P0 | Open; triaged | 3B | Remediable Python upgrades/migration remain; proposed WebAuthn exception needs human owner/date |
+| SUPPLY-NPM-01 | P0 | Open; triaged | 3B/6 | Two RSC-only React Router rows remain; proposed exception needs human owner/date and v8 migration tracking |
 | SUPPLY-IMM-01 | P1 | Open | 3C | Base images and Actions are not pinned to immutable digests/SHAs |
 | IMPORT-DOS-01 | P0 | Open | 4A | No cumulative uncompressed/archive compression-ratio limit |
 | IMPORT-ATOMIC-01 | P0 | Open | 4B | Cross-store imports can leave partial database/filesystem state |
@@ -263,8 +288,8 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 8. Preserve the baseline tag; do not move or recreate it.
 
 The recommended next implementation is Phase 1C, followed by Phase 2. Phase 3B
-advisory research is complete and its reviewed documentation is queued for
-integration as documented in `hardeningplan.txt`.
+advisory research is integrated; its three straight runtime upgrades may proceed
+in an independently claimed worktree while the PyPDF migration remains separate.
 
 ## Residual Phase 0 limitations
 

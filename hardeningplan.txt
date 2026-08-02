@@ -21,8 +21,9 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  None while the Phase 1B evidence commit is prepared. Phase 1C may be claimed
-  after P3B documentation integration; its files are not yet reserved.
+  None during this documentation reconciliation checkpoint. The next primary
+  workstream is Phase 1C. P3B straight runtime upgrades may run in a separate
+  worktree once their exact files are claimed below.
 
 Completed workstream scope:
   P1B-TOKEN-LIFECYCLE  DONE 2026-08-03  owner: Codex /root
@@ -74,14 +75,13 @@ Completed workstreams:
     tests/test_vps_caddy_deployment_contract.py. No Caddy defect was exposed.
   P3A-HANDOFF  DONE 2026-08-03  owner: Codex /root
     Final consistency sweep, Python 3.11 verification, evidence and roadmap.
-  P3B-ADVISORY-TRIAGE  DONE/AWAITING INTEGRATION 2026-08-03  owner: Claude
-    Existing parallel branch p3b-onto-3a was discovered after the board had
-    accidentally lost its earlier completion status. Security docs commit:
-    6912f78. Plan-only follow-up: c6f6068 (do not cherry-pick over this active
-    handoff; incorporate its findings manually). Review/integrate after P1B.
+  P3B-ADVISORY-TRIAGE  DONE/INTEGRATED 2026-08-03  owner: Claude + Codex review
+    Security docs originated at 6912f78 and were reviewed, corrected and
+    integrated on hardening/production-readiness as 50d75e7 plus the following
+    reconciliation checkpoint. No manifest or application code changed.
 
 Parallel workstream definition (complete; retained for scope history):
-  P3B-ADVISORY-TRIAGE  DONE on p3b-onto-3a
+  P3B-ADVISORY-TRIAGE  DONE and integrated on hardening/production-readiness
     Scope: applicability research and time-limited exception templates for the
            current Python/React Router advisories; documentation only.
     Allowed files:
@@ -92,8 +92,9 @@ Parallel workstream definition (complete; retained for scope history):
     controls, owner and expiry for primary review.
 
 Next integration order:
-  Integrate reviewed P3B advisory documentation -> Phase 1C session lifecycle.
-  Phase 1B is complete, so its former file reservations no longer block 1C.
+  Phase 1C session lifecycle is the next primary workstream. The independent
+  Pillow/gunicorn/cryptography runtime-pin upgrade may run in parallel once
+  claimed; PyPDF2-to-pypdf remains a separate later workstream.
 ========================================================================
 
 Completed so far:
@@ -105,9 +106,10 @@ Completed so far:
                    docs/PRODUCTION_HARDENING_BASELINE.md
   Phase 1A  DONE   stored XSS in job/order forms + 17 regression tests (Claude)
                    residual: CSP unsafe-inline removal NOT started
-  Phase 3B  PARTIAL dependency upgrades landed on main (Claude)
-                   residual: react-router advisory has no fix available;
-                   Flask-Security advisory not investigated
+  Phase 3B  PARTIAL earlier dependency upgrades plus completed advisory triage
+                   (Claude + Codex review; triage integrated as 50d75e7)
+                   residual: four remediable package changes remain; two
+                   proposed exceptions need a human owner/date before release
   Phase 3C  PARTIAL actions on current majors, but SHA pinning + digest pinning
                    + blocking gates all still TODO
   Phase 0   DONE 2026-08-02 (Codex)
@@ -137,6 +139,36 @@ Phase 0 completion details:
        docs/PRODUCTION_HARDENING_BASELINE.md.
   OPEN Supply-chain gates: pip-audit 34 entries/5 packages; npm production
        audit 2 high entries. These are Phase 3B blockers.
+
+Phase 3B advisory-triage record (integrated 2026-08-03):
+  EVIDENCE docs/security/dependency_advisory_triage.md and
+           docs/security/risk_acceptance_template.md, integrated in 50d75e7
+           and corrected against the current Phase 1B tree in the following
+           documentation checkpoint.
+  VERIFIED pip-audit remains 34 rows across five packages. cryptography accounts
+           for five rows but four distinct advisory IDs because PYSEC-2026-35 is
+           duplicated. npm production audit remains two high React Router rows.
+  ACTION Pillow 11.3.0 -> 12.3.0 is highest priority: user-controlled images
+         reach native decoders. Test upload, thumbnails, markup and docpacks.
+  ACTION gunicorn 21.2.0 -> 22.0.0 addresses request smuggling relevant behind
+         the protected Caddy proxy. Re-run rendered VPS Compose/Caddy and the six
+         deployment-contract tests.
+  ACTION cryptography 43.0.1 -> 48.0.1 clears the bundled-OpenSSL and related
+         rows. Keep these three straight runtime upgrades in one bounded commit.
+  ACTION Replace EOL PyPDF2 with pypdf in a separate commit. There are 12 import
+         sites: seven in docpacks.py, four in order_scope.py and one in
+         markup_documents.py. Test crafted/invalid PDFs and binder generation.
+  EXCEPTION EXC-2026-001 is Proposed only. Flask-Security-Too's medium advisory
+            is WebAuthn-only; TinyMRP neither enables WebAuthn nor installs its
+            extras. No patched release exists. Enabling WebAuthn voids it.
+  EXCEPTION EXC-2026-002 is Proposed only. The React Router high advisory is
+            RSC-only and TinyMRP is a client SPA without unstable RSC APIs. Core
+            react-router 8.3.0 is fixed, but react-router-dom has no 8.x release.
+            Do not run npm audit fix --force: its proposed 7.11.0 downgrade
+            restores five other advisories.
+  BLOCKED Both exception records require a named human risk owner, acceptance
+          date and <=90-day expiry before they can satisfy a release gate.
+          Engineering must not mark them Accepted on the owner's behalf.
 
 Phase 3A completion details:
   DONE Replaced the inline legacy role seed and removed the missing PERMISSIONS
@@ -188,8 +220,9 @@ Protected owner requirement added 2026-08-02:
   and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
 
 Current work:
-  Phase 1B DONE. P3B-ADVISORY-TRIAGE is complete on p3b-onto-3a and is the next
-  integration action. Phase 1C may start after that documentation-only commit.
+  Phase 1B is DONE and P3B advisory triage is integrated. Phase 1C session
+  lifecycle is next. The straight P3B runtime upgrades are safe to assign to a
+  separate worktree after the board records non-overlapping file ownership.
 
 Phase 1B decision log (recorded before implementation, 2026-08-03):
   * New API tokens expire after 90 days by default and may not exceed 365 days;
@@ -243,8 +276,8 @@ Phase 1B completion record (2026-08-03):
   RESIDUAL Legacy no-expiry tokens remain identifiable and valid until rotated;
            browser-session revocation is Phase 1C; strict browser/API compatibility
            is Phase 2; add-in secret storage is Phase 7.
-  NEXT Review/cherry-pick 6912f78 and manually reconcile c6f6068 plan findings,
-       then claim and implement Phase 1C.
+  NEXT Claim and implement Phase 1C. In parallel, upgrade only Pillow, gunicorn
+       and cryptography in a separately owned P3B runtime-pin workstream.
 ========================================================================
 
 Progressive mitigation roadmap
@@ -418,19 +451,25 @@ it is already in the base of this branch.
        NOT honoured — 5a893e6 mixes runtime and dev updates in one commit. Left as
        is since it is already pushed; worth splitting on any future batch.
 
-  TODO "Upgrade React Router and regenerate the lockfile."
-       Moved to 7.18.1 (from the 7.8.x line) but this does NOT clear the gate.
-       react-router is under GHSA-qwww-vcr4-c8h2, advisory range >=7.12.0-pre.0
-       with NO fixed version published. `npm audit --omit=dev --audit-level=high`
-       therefore still fails. Important: main was ALREADY failing this gate with
-       five react-router advisories before the bump; the change reduced five to
-       one. npm's only suggested fix is downgrading to 7.11.0, which reinstates the
-       other five. There is currently no version that passes — recheck upstream.
-  TODO Investigate the Flask-Security advisory (Flask-Security-Too 5.8.1 is still
-       the pin) and document whether configured features are affected. Not started.
-  TODO Formal vulnerability-gate exception format (applicability, compensating
-       control, owner, expiry). Not started — the react-router item above is
-       exactly the case that needs it, since the gate cannot pass today.
+  DONE Triaged every current Python and frontend advisory in 50d75e7. Detailed
+       reachability, remedies and re-check triggers are in
+       docs/security/dependency_advisory_triage.md.
+  TODO Upgrade Pillow to 12.3.0, gunicorn to 22.0.0 and cryptography to 48.0.1
+       as a bounded runtime-only commit. The gunicorn change must preserve and
+       validate the guided VPS/Caddy path.
+  TODO Migrate EOL PyPDF2 to pypdf in a separate commit. Twelve imports exist
+       across docpacks.py, markup_documents.py and order_scope.py.
+  TRIAGED React Router GHSA-qwww-vcr4-c8h2 affects unstable RSC APIs only; none
+          are used. Core react-router 8.3.0 is patched, but react-router-dom has
+          no 8.x. Do not accept npm audit fix --force's 7.11.0 downgrade because
+          it restores five other advisories. Track the v8 migration in Phase 6.
+  TRIAGED Flask-Security-Too GHSA-f66q-9rf6-8795 affects WebAuthn reauthentication
+          only. TinyMRP does not enable WebAuthn or install its extras, and no
+          patched release exists. Enabling WebAuthn makes this immediately
+          applicable and blocking.
+  PROPOSED EXC-2026-001 and EXC-2026-002 provide the formal exception records,
+           compensating controls and voiding conditions. They are not accepted:
+           a named human owner, sign-off date and expiry are still required.
 
 Still-open Dependabot PRs and why (do not just merge these):
   #35 eslint 10  — blocked: eslint-plugin-react-hooks@5.2.0 peers on eslint <=9.
