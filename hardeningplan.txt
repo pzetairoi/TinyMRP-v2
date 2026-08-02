@@ -21,8 +21,43 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  None. Phase 3C is the next unclaimed primary workstream. A parallel AI may
-  claim a bounded Phase 3C item below in its own worktree before editing.
+  P3C-WORKFLOW-PINS  IN PROGRESS  owner: Codex /root
+    Scope: pin every third-party GitHub Action to a verified immutable commit;
+           retain Python/npm/Trivy audit reports and backend/frontend/image
+           CycloneDX SBOMs even when their corresponding blocking gate fails.
+    Reserved files:
+      .github/workflows/security.yml
+      .github/workflows/release-image.yml
+      frontend/package.json
+      frontend/package-lock.json
+      tests/test_supply_chain_contract.py (new)
+      hardeningplan.txt
+    FINDING The configured `aquasecurity/trivy-action@0.36.0` ref does not
+            exist upstream; the actual release tag is `v0.36.0`. The immutable
+            peeled release commit is ed142fd0673e97e23eac54620cfb913e5ce36c25.
+    Gate: parse workflow YAML and embedded Bash, run frontend npm ci/SBOM/build,
+          validate audit/SBOM artifacts and immutable-action source contracts.
+
+  P3C-IMAGE-PINS  AVAILABLE FOR PARALLEL CLAIM  owner: none
+    Scope: pin Dockerfile and supported deployment images to verified multi-arch
+           manifest digests without changing service topology or Caddy behavior.
+    Candidate files after claim:
+      docker/app/Dockerfile
+      docker-compose.yml
+      docker-compose.onefolder.yml
+      deploy/scripts/lib/common.sh
+      deploy/scripts/restore-instance.sh
+      deploy/scripts/lib/nextcloud.sh
+      tests/test_vps_caddy_deployment_contract.py
+      tests/test_container_bootstrap.py
+    Protected gate: production build, both static and rendered Compose paths,
+      fresh bootstrap, all deployment script checks, rendered/live Caddy path.
+
+  P3C-SECRET-SCAN  AVAILABLE FOR PARALLEL CLAIM  owner: none
+    Scope: replace broad generated/docs exclusions with the narrow minimum while
+           keeping intentional fixtures explicit and making full-history scan
+           behavior reproducible. Candidate files: .gitleaks.toml and one new
+           focused contract test only. Do not edit workflow or roadmap files.
 
 Completed workstream scope:
   P2-STRICT-AUTH  DONE 2026-08-03  owner: Codex /root
