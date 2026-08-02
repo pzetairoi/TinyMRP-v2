@@ -1,10 +1,19 @@
 title = "TinyMRP gitleaks config"
 
-[allowlist]
+# A repository config replaces Gitleaks' built-in rules unless it explicitly
+# extends them. Keep this block: without it the CI scan has zero detection rules
+# and passes vacuously.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated or vendored paths with no human-authored source"
 paths = [
-  '''^docs/''',
-  '''^app/static/''',
-  '''^frontend/dist/''',
+  # Local dependency installs are third-party code and can be very large.
   '''^frontend/node_modules/''',
-  '''^testfiles/''',
+  # Vite output; the human-authored frontend/src tree remains scanned.
+  '''^frontend/dist/''',
+  # Generated binary webfonts only. Generated JavaScript, CSS, HTML, SVG, and
+  # the rest of app/static remain scanned so build-time leaks are still caught.
+  '''^app/static/parts-ui/assets/.*\.(?:eot|ttf|woff2?)$''',
 ]
