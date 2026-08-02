@@ -1,4 +1,4 @@
-# SolidWorks Add-in Walkthrough
+# Using the SolidWorks Add-in
 
 This guide maps each add-in tab to practical tasks.
 

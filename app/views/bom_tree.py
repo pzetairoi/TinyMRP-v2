@@ -263,14 +263,10 @@ def _process_label(part: Part | None, attrs: dict | None = None) -> str:
     return canonical_process_label_for_part(part, raw_attrs=attrs or {}, process_meta=meta)
 
 def _is_hardware_node(node: dict) -> bool:
-    try:
-        data = node.get("data") or {}
-        attrs = data.get("attrs") or {}
-        meta = current_app.config.get("PROCESS_META", {}) or {}
-        procs = normalize_processes({"processes": data.get("processes") or data.get("process") or attrs.get("processes") or []}, meta)
-        return "hardware" in procs
-    except Exception:
-        return False
+    # "process" is the canonical, comma-joined label built by
+    # canonical_process_label_for_part, so matching a token is enough.
+    label = str((node.get("data") or {}).get("process") or "")
+    return "hardware" in [token.strip() for token in label.split(",")]
 
 @bp.get("/bom_tree")
 @login_required

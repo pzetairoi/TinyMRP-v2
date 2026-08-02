@@ -1,4 +1,4 @@
-# End-to-End Workflow
+# Common Workflows
 
 This page provides practical workflows that match current TinyMRP behavior.
 
@@ -18,8 +18,16 @@ This page provides practical workflows that match current TinyMRP behavior.
 ### 3) Build and import upload pack
 
 - Create upload pack ZIP from the add-in.
-- Import in web app at `/ui/upload-pack`.
-- Review import report for warnings/errors.
+- Open **Import** in the web app and choose the ZIP.
+- Set the three policies (Properties, BOM, Files) for what you intend.
+- Press **Preview** and read the redline. Nothing is written yet.
+- Check the warnings: files that do not match a BOM row are skipped and listed
+  there.
+- Press **Apply** only when the redline matches your intent.
+
+> **Note:** if the redline shows *blocked* rows against an existing approved
+> part, that is the override rule. Either the change is not wanted, or it needs
+> someone with `imports.override_approved`.
 
 ### 4) Validate in Part Detail
 

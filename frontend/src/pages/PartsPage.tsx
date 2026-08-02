@@ -650,8 +650,6 @@ export default function PartsPage() {
         filterDisplay="row" removableSort rowsPerPageOptions={[10,25,50,100]}
         stripedRows responsiveLayout="scroll"
         resizableColumns
-        stateKey="tinymrp-parts-inventory-layout-v1"
-        stateStorage="local"
         reorderableColumns
         onColReorder={(event) => {
           const order = event.columns
@@ -660,7 +658,7 @@ export default function PartsPage() {
           if (order.length === selectedPartsFieldIds.length) persistPartsFieldSelection(order)
         }}
         columnResizeMode="expand"
-        tableStyle={{ tableLayout: 'fixed' }}
+        tableStyle={{ tableLayout: 'fixed', width: '100%', minWidth: '100%' }}
         rowClassName={reviewRowClass}
       >
         {showReviewColumn && <Column

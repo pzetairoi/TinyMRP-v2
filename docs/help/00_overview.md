@@ -1,59 +1,77 @@
-# Overview
+# Getting Started
 
-TinyMRP is a manufacturing data platform that combines:
+TinyMRP keeps one trusted copy of your engineering data. Parts, BOMs and CAD
+deliverables come out of SolidWorks, land here through an import, and everyone
+else — workshop, purchasing, customers, suppliers — sees exactly the slice they
+are allowed to see.
 
-- A web app for parts, BOMs, jobs, orders, suppliers, customers, and document packs.
-- A SolidWorks add-in for publishing deliverables, creating upload packs, and allocating part numbers.
+If you read nothing else, read this page.
 
-This help content is written for day-to-day users. It focuses on what to do, where to click, and what result to expect.
+## The five-minute version
 
-## Start Here By Role
+1. **Engineering exports an upload pack** from SolidWorks: a ZIP containing a
+   BOM and the deliverables (PDF, STEP, PNG, DXF, and so on).
+2. **Someone imports it** on the Import page. You always *preview* first: the
+   app shows a line-by-line redline of what would change before anything is
+   written.
+3. **Parts appear in Inventory.** Each row is one part *and revision*.
+4. **Part Details** is where the work happens: drawings, 3D previews, files,
+   comments, markups and Doc Packs.
+5. **Doc Packs** bundle what you need — a PDF binder, an Excel BOM, selected
+   files — into one download for a supplier, a job folder or a quote.
 
-### Design and engineering
+## The one idea that explains everything
 
-- Use `Web UI walkthrough` for Inventory, Part Detail, BOM, and Doc Packs.
-- Use `SolidWorks add-in walkthrough` for Publish/BOM, Tools, Numbering, and Configuration tabs.
+**A part is identified by its part number *and* its revision.**
 
-### Purchasing and planning
+`3950-35` rev `A` and `3950-35` rev `B` are two separate records, each with its
+own files, BOM and approval state. Almost every confusing moment in this app
+comes from looking at a different revision than you expected. The revision is
+shown next to the part number everywhere; when it is blank, the part simply has
+no revision set, which is normal in many workflows.
 
-- Use `End-to-end workflow` for progressive ordering across multi-level BOMs.
-- Focus on Jobs: `Parts in Orders`, `Over-Ordered Parts`, and `Parts Not Yet Ordered` (Flat/Tree toggle).
+## Approved vs draft
 
-### Admin and IT
+Every part revision is either **approved** or **draft** (unapproved). The
+approval flag is worked out *once*, when the part is imported or saved, from
+whatever your CAD properties happen to call it — `approved`, `approvedby`,
+`released`, and so on. From then on a single stored value drives everything:
+the badge on Part Details, the Approved filter in Inventory, what customers and
+suppliers can see, and what an import is allowed to overwrite.
 
-- Use `Server installation` for deployment, environment variables, and upgrades.
-- For Windows workstation hardening and LAN-only exposure, use `deploy/windows/README.md`.
-- Use `Customization and admin settings` for users, roles, scoping, branding, and limits.
+Two consequences worth knowing:
 
-## Core Concepts
+- If a valid approver name is present, the part counts as **approved**.
+- Values like `pending`, `n/a`, `TBC`, `no` or a blank field mean **not
+  approved**.
 
-- Part revision: TinyMRP tracks files by `(Part Number, Revision)`.
-- Deliverables: model and drawing outputs like PDF, DXF, STEP, 3MF, PLY, STL, PNG.
-- Associated files: extra files linked to a part revision (photos, scans, reports).
-- Upload Pack: ZIP with `bom/`, `deliverables/`, and optional `extra/`.
-- Doc Pack: generated package (binder/index/visual/hardware/Excel/etc).
+> **Why this matters:** anyone with upload rights can import a part that
+> arrives *already* approved. But once an approved part exists here, changing
+> it requires the override permission. See **Roles and permissions**.
 
-## How To Use This Help Quickly
+## What you can see depends on your role
 
-- Use the right-side `On this page` panel in `/help` to jump by heading.
-- Use the heading search box for exact terms such as `Over-Ordered`, `Upload Pack`, `Numbering`, `Scope of supply`.
-- For API and route lookup, use `Reference (auto-updated)`.
+Menus, buttons and even individual table rows adapt to your permissions. If a
+menu entry is missing, your role does not include it — that is the app working
+correctly, not a fault. Two rules answer most questions:
 
-## Help Sections
+- Without **parts.read_unreleased**, you only see approved parts.
+- Customers and suppliers only see parts reachable from *their own* jobs and
+  orders.
 
-- `01_server_installation.md`: deployment and runtime operations.
-- `02_web_ui_walkthrough.md`: complete web app usage.
-- `03_addin_installation.md`: installer, registration, first connection.
-- `04_addin_ui_walkthrough.md`: detailed add-in tab behavior.
-- `05_end_to_end_workflow.md`: practical release and purchasing flows.
-- `06_customization_admin.md`: admin operations and settings.
-- `07_troubleshooting.md`: issue-driven diagnostics.
-- `08_reference_auto.md`: generated routes, APIs, env vars, and add-in options.
+## Where to go next
 
-## Keeping Help Current
+| I want to… | Go to |
+| --- | --- |
+| Find a part | **Inventory** |
+| Look at drawings, files, 3D, comments | **Part Details** |
+| Get data in from SolidWorks | **Import** |
+| Produce a PDF binder or Excel BOM | Part Details → **Doc Packs** |
+| Understand why I cannot do something | **Roles and permissions** |
+| Fix something that went wrong | **Troubleshooting** |
 
-Help pages are generated from `docs/help/`:
+## A note on this help
 
-1. Edit markdown files in `docs/help/`.
-2. Run `flask --app run.py help build`.
-3. Commit updated files in `app/static/help/`.
+Every screen, option and limit described here was checked against the running
+application. Where the app enforces a rule that is easy to trip over, it is
+called out in a box like the one above rather than buried in prose.

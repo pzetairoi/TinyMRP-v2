@@ -63,13 +63,6 @@ def filter_value(filters: dict[str, Any], key: str, default: Any = MISSING) -> A
     return default
 
 
-def or_contains(paths: Iterable[str], term: str) -> Q:
-    out = Q()
-    for path in paths:
-        out = out | Q(**{f"{path}__icontains": term})
-    return out
-
-
 def pairs_query(pairs: Iterable[tuple[str, str]]) -> Q:
     out = Q()
     for pn, rev in pairs:

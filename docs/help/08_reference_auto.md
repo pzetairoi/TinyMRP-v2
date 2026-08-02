@@ -1,4 +1,4 @@
-# Reference (auto-updated)
+# Reference
 
 This section is generated when you run `flask --app run.py help build`.
 

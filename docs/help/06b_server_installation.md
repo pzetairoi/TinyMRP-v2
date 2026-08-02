@@ -1,4 +1,4 @@
-# Server And Web App Installation
+# Installation
 
 This page covers first deployment, safe updates, and operating basics for TinyMRP v2.
 

@@ -436,6 +436,7 @@ def _part_detail_payload_for_share(share, raw_token: str, part: Part) -> dict:
     return {
         "part": {
             "part_number": part.part_number,
+            "approved": bool(approval_values.get("approved")),
             "description": summary_field_values.get("description", part.description or attrs.get("description", "")),
             "revision": norm_rev,
             "display_code": f"{part.part_number}-{norm_rev}" if norm_rev else part.part_number,

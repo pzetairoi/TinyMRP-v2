@@ -126,6 +126,75 @@ def _deliverable_identity(filename: str) -> tuple[str, str, bool] | None:
         return None
     pn = clean_pn(base[:marker])
     return (pn, clean_rev(base[marker + 5 :]), drawing) if pn else None
+def _root_preview_data_uri(
+    files: list[dict[str, Any]],
+    root: tuple[str, str] | None,
+) -> str:
+    """Return the root part's preview PNG as an inline data URI.
+
+    Used to show what is being imported before anything is written. It is held
+    in the response only -- nothing is stored, so it cannot collide with or
+    outlive the thumbnails that an applied import generates.
+    """
+
+    if not root:
+        return ""
+    source = next(
+        (
+            item
+            for item in files
+            if item["kind"] == "managed"
+            and item["pair"] == root
+            and item["identity"][0] == "png"
+            and not item["identity"][2]
+        ),
+        None,
+    )
+    if source is None:
+        return ""
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(source["bytes"])) as image:
+            image = image.convert("RGBA")
+            image.thumbnail((160, 160))
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", optimize=True)
+    except Exception:
+        return ""
+    encoded = __import__("base64").b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _claim_pair(
+    parts: dict[tuple[str, str], dict[str, Any]],
+    pair: tuple[str, str],
+    entry: str,
+    diagnostics: dict[str, Any],
+) -> bool:
+    """Return whether a packed file belongs to a part the BOM declares.
+
+    Only FLATBOM/TREEBOM rows create parts. A file whose name does not resolve
+    to one of those pairs is reported and skipped rather than inventing a
+    part/revision -- CAD exports routinely include temp artefacts whose names
+    otherwise parse into a bogus revision.
+    """
+
+    if pair in parts:
+        return True
+    diagnostics["warnings"].append(
+        {
+            "severity": "warning",
+            "stage": "files.orphan",
+            "message": (
+                f"Skipped {entry}: no BOM entry for {pair[0]}"
+                f"{' rev ' + pair[1] if pair[1] else ''}."
+            ),
+        }
+    )
+    return False
+
+
 def _shell(pair: tuple[str, str]) -> dict[str, Any]:
     return {
         "part_number": pair[0],
@@ -353,6 +422,8 @@ def parse_import_package(
                         }
                     )
                     continue
+                if not _claim_pair(parts, (pn, rev), safe, diagnostics):
+                    continue
                 extension = os.path.splitext(filename_only)[1].lstrip(".").casefold()
                 content = zf.read(info)
                 files.append(
@@ -366,7 +437,6 @@ def parse_import_package(
                         "sha256": hashlib.sha256(content).hexdigest(),
                     }
                 )
-                parts.setdefault((pn, rev), _shell((pn, rev)))
                 continue
             if head == "extra":
                 if not options.get("allow_extra", True):
@@ -388,6 +458,8 @@ def parse_import_package(
                     rev = next(iter(revisions)) if len(revisions) == 1 else ""
                     filename_only = segments[-1]
                 filename_only = validated_upload_filename(filename_only)
+                if not _claim_pair(parts, (pn, rev), safe, diagnostics):
+                    continue
                 relative = extra_rel_path(pn, rev, filename_only)
                 content = zf.read(info)
                 meta = manifest.get((pn, rev, filename_only.casefold()), {})
@@ -403,7 +475,6 @@ def parse_import_package(
                         "sha256": hashlib.sha256(content).hexdigest(),
                     }
                 )
-                parts.setdefault((pn, rev), _shell((pn, rev)))
                 continue
             message = f"Unknown ZIP entry: {safe}"
             if options.get("strict_structure"):
@@ -643,10 +714,12 @@ def _property_action(
 ) -> tuple[str, str]:
     if before == after:
         return "unchanged", "Incoming and existing values match."
-    if state == "new":
-        return "add", "New part/revision."
+    # Skip is checked before the new-part shortcut: selecting "Skip" must mean
+    # no property is written, on a new part as much as an existing one.
     if mode == "skip":
         return "skipped", "Properties policy is Skip."
+    if state == "new":
+        return "add", "New part/revision."
     if mode == "fill_blanks":
         # "Fill only" promises approved parts are never touched, so a blank
         # field on an approved target is preserved rather than filled.
@@ -715,7 +788,13 @@ def _approval_rows(
             after = before
         elif before == after:
             action, reason = "unchanged", "Incoming and existing values match."
+        elif mode == "skip":
+            action, reason = "skipped", "Properties policy is Skip."
+            after = before
         elif state == "new":
+            # There is no existing approval to preserve on a new target, so
+            # recording the incoming signal is not a modification. Any uploader
+            # may create approved data; only changing it later is restricted.
             action, reason = "add", "Approval signal recorded on the new target."
         elif mode == "preserve":
             action, reason = "skipped", "Approval policy preserves existing approval fields."
@@ -923,7 +1002,8 @@ def build_import_plan(
             existing_part,
             normalized.get("attrs") or {},
             state,
-            options["approval_mode"],
+            # Approval values live in attrs, so skipping properties skips them.
+            "skip" if options["data_mode"] == "skip" else options["approval_mode"],
             field_config,
             aliases,
         )
@@ -1035,6 +1115,7 @@ def required_import_permissions(plan: dict[str, Any]) -> list[str]:
     """
     changed_actions = {"add", "replace", "change", "clear"}
     destructive_actions = {"replace", "change", "clear"}
+    existing_pairs = set(plan["_state"]["parts"])
     required: set[str] = set()
     low_risk = False
     advanced = False
@@ -1058,6 +1139,14 @@ def required_import_permissions(plan: dict[str, Any]) -> list[str]:
             required.add("parts.update")
         if bom_changed:
             required.add("bom.update")
+            # Writing the BOM materialises any child that does not exist yet,
+            # so the same rows demand the create capability.
+            if any(
+                (link[2], link[3]) not in existing_pairs
+                for link in plan["_parsed"]["links"]
+                if (link[0], link[1]) == (part["part_number"], part["revision"])
+            ):
+                required.add("parts.create")
         if file_adds:
             required.add("files.add")
         if file_replaces:
@@ -1377,9 +1466,33 @@ def execute_import_plan(
     parts_updated = 0
     changed_pairs: set[tuple[str, str]] = set()
     try:
+        # A written BOM row needs its parent and child to exist, and a stored
+        # file needs its owner, even when the Properties policy is Skip. Those
+        # parts are materialised as bare shells carrying no imported property.
+        structural: set[tuple[str, str]] = set()
         for entry in plan["parts"]:
             pair = (entry["part_number"], entry["revision"])
-            if not entry["changed"]:
+            if entry["bom"]["action"] in {"add", "replace"}:
+                structural.add(pair)
+                structural.update(
+                    (link[2], link[3])
+                    for link in plan["_parsed"]["links"]
+                    if (link[0], link[1]) == pair
+                )
+            # Discovered rows only reconcile records for files already in
+            # storage; they never justify creating the part itself.
+            if any(
+                item["action"] in {"add", "replace"} and item["kind"] != "discovered"
+                for item in entry["files"]
+            ):
+                structural.add(pair)
+        # Only ones that do not exist yet: an existing part needs no rewrite
+        # just because its BOM or files are being reconciled.
+        structural -= set(plan["_state"]["parts"])
+
+        for entry in plan["parts"]:
+            pair = (entry["part_number"], entry["revision"])
+            if not entry["changed"] and pair not in structural:
                 continue
             part = plan["_state"]["parts"].get(pair)
             if part is None:
@@ -1529,6 +1642,9 @@ def import_upload_pack(
         "dry_run": bool(dry_run),
         "root": root[0],
         "root_rev": root[1],
+        # Preview-only image of the top level part, inline so it needs no
+        # storage and disappears with the response.
+        "root_preview": _root_preview_data_uri(parsed["files"], parsed["root"]),
         "options": public["options"],
         "plan": public,
         "required_permissions": public["required_permissions"],

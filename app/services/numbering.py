@@ -439,6 +439,7 @@ def preview_number(
     revision_policy = str((scheme_dict.get("revision") or {}).get("policy") or DEFAULT_REVISION["policy"])
     revision_start = str((scheme_dict.get("revision") or {}).get("start") or DEFAULT_REVISION["start"])
     revision = revision_for_new_part(revision_policy, revision_start)
+    last_part_number = latest_part_numbers_by_scheme([scheme]).get(str(scheme.id), "")
 
     return {
         "candidate_part_number": candidate,
@@ -447,6 +448,7 @@ def preview_number(
         "scope_key_used": scope_key,
         "sequence_values_used": resolved_sequence_values,
         "auto_sequence_index": auto_seq_index,
+        "last_part_number": last_part_number,
     }, []
 
 
@@ -616,6 +618,69 @@ def scheme_to_dict(scheme: NumberingScheme) -> Dict[str, Any]:
         "validation_rules": scheme.validation_rules or {},
         "audit": scheme.audit or {},
     }
+
+
+def latest_part_numbers_by_scheme(schemes: List[NumberingScheme]) -> Dict[str, str]:
+    """Return latest numbers, including legacy parts created before scheme ids were stored."""
+    scheme_docs = [scheme for scheme in (schemes or []) if scheme and getattr(scheme, "id", None)]
+    ids = [str(scheme.id) for scheme in scheme_docs]
+    if not ids:
+        return {}
+
+    rows = Part._get_collection().aggregate([
+        {"$match": {"attrs.numbering_scheme_id": {"$in": ids}}},
+        {"$sort": {"created_at": -1, "_id": -1}},
+        {"$group": {
+            "_id": "$attrs.numbering_scheme_id",
+            "part_number": {"$first": "$part_number"},
+        }},
+    ])
+    latest = {
+        str(row.get("_id") or ""): str(row.get("part_number") or "")
+        for row in rows
+        if row.get("_id")
+    }
+
+    # Older allocations did not tag Part.attrs with numbering_scheme_id. Recover those
+    # records from the scheme's fixed pattern so existing installations show useful data
+    # immediately after the backend update, without a database migration.
+    for scheme in scheme_docs:
+        scheme_id = str(scheme.id)
+        if latest.get(scheme_id):
+            continue
+        pattern = _scheme_part_number_regex(scheme)
+        if pattern is None:
+            continue
+        part = Part.objects(part_number=pattern).order_by("-created_at", "-id").only("part_number").first()
+        if part:
+            latest[scheme_id] = str(part.part_number or "")
+    return latest
+
+
+def _scheme_part_number_regex(scheme: NumberingScheme):
+    data = scheme_to_dict(scheme)
+    separator = re.escape(str(data.get("separator") or "-"))
+    seq_defaults = data.get("seq") or {}
+    pieces: List[str] = []
+    for segment in data.get("pattern_segments") or []:
+        kind = str(segment.get("kind") or "").strip().lower()
+        if kind == "literal":
+            pieces.append(re.escape(str(segment.get("value") or "").strip()))
+        elif kind == "seq":
+            padding = _coerce_int(segment.get("padding"), _coerce_int(seq_defaults.get("padding"), DEFAULT_SEQ["padding"]))
+            base = _coerce_int(segment.get("base"), _coerce_int(seq_defaults.get("base"), DEFAULT_SEQ["base"]))
+            pieces.append((r"[0-9A-Z]" if base == 36 else r"[0-9]") + "{" + str(max(padding, 1)) + "}")
+        elif kind == "date":
+            lengths = {"YYYY": 4, "YY": 2, "MM": 2, "YYYYMM": 6}
+            length = lengths.get(str(segment.get("fmt") or "").strip())
+            if not length:
+                return None
+            pieces.append(r"[0-9]" + "{" + str(length) + "}")
+        else:
+            return None
+    if not pieces:
+        return None
+    return re.compile("^" + separator.join(pieces) + "$", re.IGNORECASE)
 
 
 # --- automatic counter -----------------------------------------------------------------

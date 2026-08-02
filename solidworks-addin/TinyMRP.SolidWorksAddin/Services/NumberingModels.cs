@@ -12,6 +12,8 @@ namespace TinyMRP.SolidWorksAddin.Services
         public bool IsActive { get; set; }
         public bool IsPreset { get; set; }
         public bool IsRecommended { get; set; }
+        public string LastPartNumber { get; set; }
+        public bool LastPartNumberAvailable { get; set; }
         public string Visibility { get; set; }
         public string Separator { get; set; }
         public string ScopeMode { get; set; }
@@ -63,6 +65,8 @@ namespace TinyMRP.SolidWorksAddin.Services
                 IsActive = NumberingJson.GetBool(data, "is_active", true),
                 IsPreset = NumberingJson.GetBool(data, "is_preset", false),
                 IsRecommended = NumberingJson.GetBool(data, "is_recommended", false),
+                LastPartNumber = NumberingJson.GetString(data, "last_part_number") ?? string.Empty,
+                LastPartNumberAvailable = data != null && data.ContainsKey("last_part_number"),
                 Visibility = NumberingJson.GetString(data, "visibility") ?? "advanced_only",
                 Separator = NumberingJson.GetString(data, "separator") ?? "-",
                 ScopeMode = NumberingJson.GetString(data, "scope_mode") ?? "global",

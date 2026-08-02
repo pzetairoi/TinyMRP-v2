@@ -19,7 +19,6 @@ namespace TinyMRP.SolidWorksAddin
     {
         private const string AddinTitle = "TinyMRP";
         private const string AddinDescription = "TinyMRP SolidWorks add-in";
-        private const string TaskPaneTitle = "TinyMRP";
         private const string TaskPaneIconFileName = "TinyMRP.TaskPane.bmp";
         private const string AddinIconFileName = "TinyMRP.AddinIcon.bmp";
         private const string LogoRelativePath = "Assets\\logo.png";
@@ -32,75 +31,75 @@ namespace TinyMRP.SolidWorksAddin
         private int _addinId;
         private string _taskPaneIconPath;
 
-        private static string AddinTitleWithVersion()
+        internal static string DisplayTitle()
         {
             return TitleWithVersion(AddinTitle, Assembly.GetExecutingAssembly());
         }
 
-        private static string TaskPaneTitleWithVersion()
-        {
-            return TitleWithVersion(TaskPaneTitle, Assembly.GetExecutingAssembly());
-        }
-
         private static string TitleWithVersion(string baseTitle, Assembly asm)
         {
-            string version = string.Empty;
+            string informationalVersion = string.Empty;
+            string fileVersion = string.Empty;
             try
             {
-                version = asm?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ??
-                          string.Empty;
+                informationalVersion = asm?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? string.Empty;
             }
             catch
             {
-                version = string.Empty;
+                informationalVersion = string.Empty;
             }
 
-            if (string.IsNullOrWhiteSpace(version))
+            try
             {
-                try
+                if (asm != null && !string.IsNullOrWhiteSpace(asm.Location))
                 {
-                    if (asm != null && !string.IsNullOrWhiteSpace(asm.Location))
-                    {
-                        FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(asm.Location);
-                        version = fvi != null ? (fvi.ProductVersion ?? string.Empty) : string.Empty;
-                        if (string.IsNullOrWhiteSpace(version))
-                        {
-                            version = fvi != null ? (fvi.FileVersion ?? string.Empty) : string.Empty;
-                        }
-                    }
-                }
-                catch
-                {
-                    version = string.Empty;
+                    FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(asm.Location);
+                    fileVersion = fvi != null ? (fvi.FileVersion ?? string.Empty) : string.Empty;
                 }
             }
-
-            if (string.IsNullOrWhiteSpace(version))
+            catch
             {
-                try
-                {
-                    version = (asm != null ? (asm.GetName().Version?.ToString() ?? string.Empty) : string.Empty);
-                }
-                catch
-                {
-                    version = string.Empty;
-                }
+                fileVersion = string.Empty;
             }
 
-            if (string.IsNullOrWhiteSpace(version))
+            return FormatTitle(baseTitle, informationalVersion, fileVersion);
+        }
+
+        internal static string FormatTitle(string baseTitle, string informationalVersion, string fileVersion)
+        {
+            string buildNumber = ExtractBuildNumber(informationalVersion);
+            if (string.IsNullOrWhiteSpace(buildNumber) &&
+                Version.TryParse(fileVersion, out Version parsedVersion) && parsedVersion.Revision > 0)
             {
-                return baseTitle;
+                buildNumber = parsedVersion.Revision.ToString();
+            }
+            return string.IsNullOrWhiteSpace(buildNumber) ? baseTitle : baseTitle + " V" + buildNumber;
+        }
+
+        private static string ExtractBuildNumber(string informationalVersion)
+        {
+            string version = (informationalVersion ?? string.Empty).Trim();
+            if (int.TryParse(version, out int integerVersion) && integerVersion > 0)
+            {
+                return integerVersion.ToString();
             }
 
-            version = version.Trim();
             const string buildToken = "+build.";
             int buildIdx = version.IndexOf(buildToken, StringComparison.OrdinalIgnoreCase);
             if (buildIdx >= 0)
             {
-                version = version.Substring(0, buildIdx) + "+" + version.Substring(buildIdx + buildToken.Length);
+                int start = buildIdx + buildToken.Length;
+                int end = start;
+                while (end < version.Length && char.IsDigit(version[end]))
+                {
+                    end++;
+                }
+                if (end > start)
+                {
+                    return version.Substring(start, end - start);
+                }
             }
-
-            return baseTitle + " v" + version;
+            return string.Empty;
         }
 
         public bool ConnectToSW(object ThisSW, int cookie)
@@ -112,7 +111,7 @@ namespace TinyMRP.SolidWorksAddin
 
             try
             {
-                _taskPane = _swApp.CreateTaskpaneView2(GetTaskPaneIconPath(), TaskPaneTitleWithVersion());
+                _taskPane = _swApp.CreateTaskpaneView2(GetTaskPaneIconPath(), DisplayTitle());
                 if (_taskPane != null)
                 {
                     var paneObject = _taskPane.AddControl(UI.MainPaneControl.TaskPaneProgId, string.Empty);
@@ -210,7 +209,7 @@ namespace TinyMRP.SolidWorksAddin
                         rk.SetValue("Description", AddinDescription);
                         if (File.Exists(addinIconPath))
                         {
-                            rk.SetValue("Icon", addinIconPath);
+                            rk.SetValue("Icon Path", addinIconPath);
                         }
                     }
                 }

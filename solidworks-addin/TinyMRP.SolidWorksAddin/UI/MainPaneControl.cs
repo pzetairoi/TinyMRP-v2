@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using SolidWorks.Interop.sldworks;
@@ -32,6 +33,8 @@ namespace TinyMRP.SolidWorksAddin.UI
         private CheckBox _removeModifiedNotesCheck;
         private CheckBox _topLevelOnlyCheck;
         private CheckBox _overwriteCheck;
+        private NumericUpDown _meshExportLimitUpDown;
+        private NumericUpDown _configMeshExportLimitUpDown;
         private CheckBox _uploadPackIncludeDeliverablesCheck;
         private CheckBox _uploadPackIncludeExtrasCheck;
         private Button _assocFilesButton;
@@ -49,7 +52,7 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Label _publishProgressLabel;
         private ProgressBar _bomProgressBar;
         private Label _bomProgressLabel;
-        private Label _actionStatusLabel;
+        private LinkLabel _actionStatusLabel;
         private Button _cancelButton;
         private LinkLabel _openLogLink;
         private string _lastRunLogPath = string.Empty;
@@ -84,11 +87,10 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Label _quickPreviewLabel;
         private Button _quickDiagnosticsButton;
         private Button _numberingPreviewButton;
-        private Button _numberingAllocateButton;
         private Button _numberingAllocateSaveButton;
-        private Button _numberingAllocateRenameButton;
         private ComboBox _numberingPresetCombo;
         private Button _numberingPresetRefreshButton;
+        private TextBox _numberingLastUsedText;
         private TextBox _numberingPreviewPartText;
         private TextBox _numberingPreviewRevisionText;
         private TextBox _numberingPreviewDisplayText;
@@ -106,9 +108,6 @@ namespace TinyMRP.SolidWorksAddin.UI
         private Button _renameDryRunButton;
         private CheckBox _autoAssignGenericCheck;
         private CheckBox _autoAssignAnyNameCheck;
-        private TextBox _numberingPartNumberPropText;
-        private TextBox _numberingRevisionPropText;
-        private TextBox _numberingDisplayCodePropText;
         private ComboBox _advancedSchemeCombo;
         private ComboBox _advancedApplyModeCombo;
         private TextBox _advancedContextJsonText;
@@ -152,15 +151,12 @@ namespace TinyMRP.SolidWorksAddin.UI
         private ComboBox _revisionActionCombo;
         private TextBox _existingPartNumberText;
         private CheckBox _createPartCheck;
-        private ComboBox _applyScopeCombo;
-        private CheckBox _applyDocPropsCheck;
-        private CheckedListBox _configListBox;
-        private Button _loadConfigsButton;
         private Label _allocateResultLabel;
         private NumberingApiClient _numberingClient;
         private NumberingSchemeDefinition _currentScheme;
         private readonly List<NumberingSchemeDefinition> _loadedSchemes = new List<NumberingSchemeDefinition>();
         private readonly HashSet<string> _autoAssignedModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private bool _startupConnectionChecked;
 
         public MainPaneControl()
         {
@@ -169,30 +165,11 @@ namespace TinyMRP.SolidWorksAddin.UI
             AutoScroll = true;
             MinimumSize = new Size(280, 320);
 
-            var header = new Label
-            {
-                Text = "TinyMRP",
-                Font = new Font("Segoe UI", 11F, FontStyle.Bold, GraphicsUnit.Point),
-                AutoSize = true,
-                Padding = new Padding(4, 4, 4, 0)
-            };
-
-            var root = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 2,
-                Padding = new Padding(6)
-            };
-            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            root.Controls.Add(header, 0, 0);
-            root.Controls.Add(_tabs, 0, 1);
-
-            Controls.Add(root);
+            Controls.Add(_tabs);
 
             BuildTabs();
             ApplyConfig(AddinContext.Config);
+            Load += OnPaneLoaded;
         }
 
         private void BuildTabs()
@@ -283,8 +260,16 @@ namespace TinyMRP.SolidWorksAddin.UI
             };
             _overwriteCheck = CreateCheckBox("Overwrite files");
             _topLevelOnlyCheck = CreateCheckBox("Top level only");
+            _meshExportLimitUpDown = CreateMeshLimitControl();
             optionsPanel.Controls.Add(_overwriteCheck);
             optionsPanel.Controls.Add(_topLevelOnlyCheck);
+            optionsPanel.Controls.Add(new Label
+            {
+                Text = "PLY/STL/3MF limit (MB)",
+                AutoSize = true,
+                Margin = new Padding(3, 7, 0, 0)
+            });
+            optionsPanel.Controls.Add(_meshExportLimitUpDown);
             AddSection(panel, CreateGroupBox("Options", optionsPanel));
 
             var assocPanel = new FlowLayoutPanel
@@ -386,7 +371,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             _bomProgressLabel = new Label { AutoSize = true, Text = "Process BOM: idle" };
             AddProgressRow(progressLayout, "Process BOM", _bomProgressBar, _bomProgressLabel);
 
-            _actionStatusLabel = new Label { AutoSize = true, Text = "" };
+            _actionStatusLabel = new LinkLabel { AutoSize = true, Text = "" };
+            _actionStatusLabel.LinkClicked += (_, args) => TryOpenPath(args.Link.LinkData as string);
             _cancelButton = new Button { Text = "Stop process", AutoSize = true };
             _cancelButton.Click += OnStopProcess;
             _openLogLink = new LinkLabel { AutoSize = true, Text = "Open last run log", Visible = false };
@@ -572,14 +558,9 @@ namespace TinyMRP.SolidWorksAddin.UI
                 Dock = DockStyle.Fill
             };
             _numberingPreviewButton = CreateCommandButton("Preview Partnumber", OnNumberingPreview);
-            _numberingAllocateButton = CreateCommandButton("Allocate & Apply", OnNumberingAllocate);
-            _numberingAllocateButton.Visible = false;
-            _numberingAllocateSaveButton = CreateCommandButton("Allocate and Save", OnNumberingAllocateSave);
-            _numberingAllocateRenameButton = CreateCommandButton("Allocate and rename", OnNumberingAllocateRename);
+            _numberingAllocateSaveButton = CreateCommandButton("Allocate and save/rename", OnNumberingAllocateSave);
             commandStrip.Controls.Add(_numberingPreviewButton);
-            commandStrip.Controls.Add(_numberingAllocateButton);
             commandStrip.Controls.Add(_numberingAllocateSaveButton);
-            commandStrip.Controls.Add(_numberingAllocateRenameButton);
             AddSection(panel, commandStrip);
 
             var quickLayout = CreateFormLayout();
@@ -589,6 +570,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             _numberingPresetRefreshButton = new Button { Text = "Refresh", AutoSize = true };
             _numberingPresetRefreshButton.Click += OnRefreshSchemes;
             AddField(quickLayout, "Numbering scheme", CreateInlineField(_numberingPresetCombo, _numberingPresetRefreshButton));
+            _numberingLastUsedText = CreateReadOnlyPreview();
+            AddField(quickLayout, "Last part number used", _numberingLastUsedText);
 
             var previewBox = new TableLayoutPanel
             {
@@ -671,15 +654,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(schemeLayout, "Visibility", _schemeVisibilityCombo);
             AddSection(panel, CreateGroupBox("Scheme", schemeLayout));
 
-            var mapLayout = CreateFormLayout();
-            _numberingPartNumberPropText = new TextBox { Width = 200 };
-            AddField(mapLayout, "Part number property", _numberingPartNumberPropText);
-            _numberingRevisionPropText = new TextBox { Width = 200 };
-            AddField(mapLayout, "Revision property", _numberingRevisionPropText);
-            _numberingDisplayCodePropText = new TextBox { Width = 200 };
-            AddField(mapLayout, "Display code property", _numberingDisplayCodePropText);
-            AddSection(panel, CreateGroupBox("Property mapping", mapLayout));
-
             var previewActions = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.TopDown,
@@ -703,11 +677,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             AddField(allocateLayout, "Revision action", _revisionActionCombo);
             _existingPartNumberText = new TextBox { Width = 160 };
             AddField(allocateLayout, "Existing PN", _existingPartNumberText);
-            _applyScopeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
-            _applyScopeCombo.Items.AddRange(new object[] { "Active configuration", "All configurations", "Selected configurations" });
-            AddField(allocateLayout, "Apply to", _applyScopeCombo);
-            _applyDocPropsCheck = new CheckBox { Text = "Also document properties", AutoSize = true };
-            AddField(allocateLayout, "Document props", _applyDocPropsCheck);
             _createPartCheck = new CheckBox { Text = "Create/update part on server", AutoSize = true };
             AddField(allocateLayout, "Server record", _createPartCheck);
 
@@ -751,33 +720,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             renameAdvancedWrap.Controls.Add(_autoAssignAnyNameCheck);
             renameAdvancedWrap.Controls.Add(_renameDryRunButton);
             AddSection(panel, CreateGroupBox("Rename (advanced)", renameAdvancedWrap));
-
-            var configListWrap = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                AutoSize = true,
-                WrapContents = false,
-                Dock = DockStyle.Fill
-            };
-            _configListBox = new CheckedListBox { Height = 120, Dock = DockStyle.Fill };
-            var configButtons = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.TopDown,
-                AutoSize = true,
-                WrapContents = false
-            };
-            _loadConfigsButton = new Button { Text = "Load configurations", AutoSize = true };
-            _loadConfigsButton.Click += OnLoadConfigurations;
-            var btnConfigAll = new Button { Text = "Select all", AutoSize = true };
-            btnConfigAll.Click += (_, __) => SetConfigSelection(true);
-            var btnConfigClear = new Button { Text = "Clear", AutoSize = true };
-            btnConfigClear.Click += (_, __) => SetConfigSelection(false);
-            configButtons.Controls.Add(_loadConfigsButton);
-            configButtons.Controls.Add(btnConfigAll);
-            configButtons.Controls.Add(btnConfigClear);
-            configListWrap.Controls.Add(_configListBox);
-            configListWrap.Controls.Add(configButtons);
-            AddSection(panel, CreateGroupBox("Configurations", configListWrap));
 
             var schemeEditor = BuildSchemeEditorPanel();
             AddSection(panel, CreateCollapsibleSection("Scheme builder", schemeEditor, false));
@@ -1066,6 +1008,15 @@ namespace TinyMRP.SolidWorksAddin.UI
             var paths = CreateFormLayout();
             _deliverablesFolderText = new TextBox { Width = 200 };
             AddField(paths, "Output folder", CreateFolderPicker(_deliverablesFolderText, OnBrowseDeliverables));
+            _configMeshExportLimitUpDown = CreateMeshLimitControl();
+            AddField(paths, "PLY/STL/3MF limit (MB)", _configMeshExportLimitUpDown);
+            _configMeshExportLimitUpDown.ValueChanged += (_, __) =>
+                SyncNumeric(_configMeshExportLimitUpDown, _meshExportLimitUpDown);
+            if (_meshExportLimitUpDown != null)
+            {
+                _meshExportLimitUpDown.ValueChanged += (_, __) =>
+                    SyncNumeric(_meshExportLimitUpDown, _configMeshExportLimitUpDown);
+            }
             var pathNote = new Label
             {
                 Text = "Used for deliverables and BOM output.",
@@ -1273,24 +1224,20 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_quickPartNumberPropText != null)
             {
                 _quickPartNumberPropText.TextChanged += (_, __) => SyncText(_quickPartNumberPropText, _partNumberPropText);
-                _quickPartNumberPropText.TextChanged += (_, __) => SyncText(_quickPartNumberPropText, _numberingPartNumberPropText);
             }
             if (_quickRevisionPropText != null)
             {
                 _quickRevisionPropText.TextChanged += (_, __) => SyncText(_quickRevisionPropText, _revisionPropText);
-                _quickRevisionPropText.TextChanged += (_, __) => SyncText(_quickRevisionPropText, _numberingRevisionPropText);
             }
             if (_quickDisplayCodePropText != null)
             {
                 _quickDisplayCodePropText.TextChanged += (_, __) => SyncText(_quickDisplayCodePropText, _displayCodePropText);
-                _quickDisplayCodePropText.TextChanged += (_, __) => SyncText(_quickDisplayCodePropText, _numberingDisplayCodePropText);
             }
             if (_quickApplyModeCombo != null)
             {
                 _quickApplyModeCombo.SelectedIndexChanged += (_, __) =>
                 {
                     SyncCombo(_quickApplyModeCombo, _advancedApplyModeCombo);
-                    SelectApplyModeCombo(_applyScopeCombo, ApplyModeFromCombo(_quickApplyModeCombo));
                 };
             }
             if (_quickSchemeCombo != null)
@@ -1312,36 +1259,20 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_partNumberPropText != null)
             {
                 _partNumberPropText.TextChanged += (_, __) => SyncText(_partNumberPropText, _quickPartNumberPropText);
-                _partNumberPropText.TextChanged += (_, __) => SyncText(_partNumberPropText, _numberingPartNumberPropText);
-            }
-            if (_numberingPartNumberPropText != null)
-            {
-                _numberingPartNumberPropText.TextChanged += (_, __) => SyncText(_numberingPartNumberPropText, _partNumberPropText);
             }
             if (_revisionPropText != null)
             {
                 _revisionPropText.TextChanged += (_, __) => SyncText(_revisionPropText, _quickRevisionPropText);
-                _revisionPropText.TextChanged += (_, __) => SyncText(_revisionPropText, _numberingRevisionPropText);
-            }
-            if (_numberingRevisionPropText != null)
-            {
-                _numberingRevisionPropText.TextChanged += (_, __) => SyncText(_numberingRevisionPropText, _revisionPropText);
             }
             if (_displayCodePropText != null)
             {
                 _displayCodePropText.TextChanged += (_, __) => SyncText(_displayCodePropText, _quickDisplayCodePropText);
-                _displayCodePropText.TextChanged += (_, __) => SyncText(_displayCodePropText, _numberingDisplayCodePropText);
-            }
-            if (_numberingDisplayCodePropText != null)
-            {
-                _numberingDisplayCodePropText.TextChanged += (_, __) => SyncText(_numberingDisplayCodePropText, _displayCodePropText);
             }
             if (_advancedApplyModeCombo != null)
             {
                 _advancedApplyModeCombo.SelectedIndexChanged += (_, __) =>
                 {
                     SyncCombo(_advancedApplyModeCombo, _quickApplyModeCombo);
-                    SelectApplyModeCombo(_applyScopeCombo, ApplyModeFromCombo(_advancedApplyModeCombo));
                 };
             }
             if (_advancedSchemeCombo != null)
@@ -1380,6 +1311,24 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 _syncingConfigFields = true;
                 target.SelectedIndex = source.SelectedIndex;
+            }
+            finally
+            {
+                _syncingConfigFields = false;
+            }
+        }
+
+        private void SyncNumeric(NumericUpDown source, NumericUpDown target)
+        {
+            if (_syncingConfigFields || source == null || target == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _syncingConfigFields = true;
+                target.Value = Math.Max(target.Minimum, Math.Min(target.Maximum, source.Value));
             }
             finally
             {
@@ -2032,6 +1981,18 @@ namespace TinyMRP.SolidWorksAddin.UI
                 _removeModifiedNotesCheck.Checked = config.RemoveModifiedNotes;
             }
 
+            decimal meshLimit = MeshExportLimit.NormalizeMegabytes(config.MeshExportSizeLimitMb);
+            if (_meshExportLimitUpDown != null)
+            {
+                _meshExportLimitUpDown.Value = Math.Max(_meshExportLimitUpDown.Minimum,
+                    Math.Min(_meshExportLimitUpDown.Maximum, meshLimit));
+            }
+            if (_configMeshExportLimitUpDown != null)
+            {
+                _configMeshExportLimitUpDown.Value = Math.Max(_configMeshExportLimitUpDown.Minimum,
+                    Math.Min(_configMeshExportLimitUpDown.Maximum, meshLimit));
+            }
+
             if (_configPathLabel != null)
             {
                 _configPathLabel.Text = "Config: " + config.ConfigPath;
@@ -2060,7 +2021,10 @@ namespace TinyMRP.SolidWorksAddin.UI
                 ExportEdrawingDrawing = _edrDrawingCheck != null && _edrDrawingCheck.Checked,
                 OverwriteFiles = _overwriteCheck != null && _overwriteCheck.Checked,
                 TopLevelOnly = _topLevelOnlyCheck != null && _topLevelOnlyCheck.Checked,
-                CreateUploadPack = false
+                CreateUploadPack = false,
+                MeshExportSizeLimitMb = _meshExportLimitUpDown != null
+                    ? (int)_meshExportLimitUpDown.Value
+                    : MeshExportLimit.DefaultMegabytes
             };
 
             return options;
@@ -2122,6 +2086,11 @@ namespace TinyMRP.SolidWorksAddin.UI
                 config.RemoveModifiedNotes = _removeModifiedNotesCheck.Checked;
             }
 
+            NumericUpDown meshLimitControl = _meshExportLimitUpDown ?? _configMeshExportLimitUpDown;
+            config.MeshExportSizeLimitMb = meshLimitControl != null
+                ? (int)meshLimitControl.Value
+                : MeshExportLimit.DefaultMegabytes;
+
             if (_quickDxfSheetNamesText != null || _dxfSheetNamesText != null)
             {
                 config.DxfSheetNames = GetPreferredText(
@@ -2136,18 +2105,18 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             config.NumberingContextDefaults = string.Empty;
             config.PartNumberProperty = GetPreferredText(
-                _quickPartNumberPropText ?? _numberingPartNumberPropText,
+                _quickPartNumberPropText,
                 _partNumberPropText,
                 config.PartNumberProperty ?? "PartNumber");
             config.RevisionProperty = GetPreferredText(
-                _quickRevisionPropText ?? _numberingRevisionPropText,
+                _quickRevisionPropText,
                 _revisionPropText,
                 config.RevisionProperty ?? "Revision");
             config.DisplayCodeProperty = GetPreferredText(
-                _quickDisplayCodePropText ?? _numberingDisplayCodePropText,
+                _quickDisplayCodePropText,
                 _displayCodePropText,
                 config.DisplayCodeProperty ?? "DisplayCode");
-            config.NumberingApplyMode = ApplyModeFromCombo(_quickApplyModeCombo ?? _advancedApplyModeCombo ?? _applyScopeCombo);
+            config.NumberingApplyMode = ApplyModeFromCombo(_quickApplyModeCombo ?? _advancedApplyModeCombo);
             config.AutoAssignGenericNames = _autoAssignGenericCheck != null && _autoAssignGenericCheck.Checked;
             config.AutoAssignAnyNames = _autoAssignAnyNameCheck != null && _autoAssignAnyNameCheck.Checked;
             config.ResolvePaths();
@@ -2163,12 +2132,20 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            string initiatingDocumentTitle = GetActiveDocumentTitle();
             PublishOptions options = BuildOptions();
             ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
             SetStatus("Creating files...");
             UpdateRunLogLink(string.Empty);
-            publisher.ProcessFiles(options, Log, UpdatePublishProgress);
-            UpdateRunLogLink(publisher.LastRunLogPath);
+            try
+            {
+                publisher.ProcessFiles(options, Log, UpdatePublishProgress);
+            }
+            finally
+            {
+                UpdateRunLogLink(publisher.LastRunLogPath);
+                ShowExportFinished("File export", initiatingDocumentTitle);
+            }
             // Keep the final status/progress from the publisher (includes per-run log path).
         }
 
@@ -2189,6 +2166,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            string initiatingDocumentTitle = GetActiveDocumentTitle();
             ResetProgress(_publishProgressBar, _publishProgressLabel, "Create files");
             SetStatus("Resuming last export...");
             UpdateRunLogLink(string.Empty);
@@ -2201,7 +2179,11 @@ namespace TinyMRP.SolidWorksAddin.UI
                 MessageBox.Show("Resume failed: " + ex.Message, "TinyMRP",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-            UpdateRunLogLink(publisher.LastRunLogPath);
+            finally
+            {
+                UpdateRunLogLink(publisher.LastRunLogPath);
+                ShowExportFinished("File export resume", initiatingDocumentTitle);
+            }
         }
 
         private void OnCreateUploadPack(object sender, EventArgs e)
@@ -2214,12 +2196,19 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            string initiatingDocumentTitle = GetActiveDocumentTitle();
             PublishOptions options = BuildUploadPackOptions();
             SetStatus("Creating upload pack...");
             UpdateRunLogLink(string.Empty);
-            publisher.ProcessUploadPack(options, Log);
-            UpdateRunLogLink(publisher.LastRunLogPath);
-            SetStatus("Done.");
+            try
+            {
+                publisher.ProcessUploadPack(options, Log);
+            }
+            finally
+            {
+                UpdateRunLogLink(publisher.LastRunLogPath);
+                ShowExportFinished("Upload pack", initiatingDocumentTitle);
+            }
         }
 
         private void OnManageAssociatedFiles(object sender, EventArgs e)
@@ -2248,33 +2237,33 @@ namespace TinyMRP.SolidWorksAddin.UI
                 configName = activeConfig != null ? activeConfig.Name : string.Empty;
             }
 
-            string raw = GetCustomProperty(info.Model, configName, AssociatedFilesPayload.PropertyName);
-            if (string.IsNullOrWhiteSpace(raw))
+            string modelPath = info.Model.GetPathName() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(modelPath))
             {
-                raw = GetCustomProperty(info.Model, string.Empty, AssociatedFilesPayload.PropertyName);
+                MessageBox.Show("Save the SolidWorks document before managing associated files.", "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
             }
-            AssociatedFilesPayload payload = AssociatedFilesPayload.FromJson(raw);
+
+            string legacyJson = GetCustomProperty(info.Model, configName, AssociatedFilesPayload.PropertyName);
+            if (string.IsNullOrWhiteSpace(legacyJson))
+            {
+                legacyJson = GetCustomProperty(info.Model, string.Empty, AssociatedFilesPayload.PropertyName);
+            }
+            AssociatedFilesPayload payload = AssociatedFilesStore.Load(modelPath, configName, legacyJson);
             using (var dialog = new AssociatedFilesDialog(payload.Files))
             {
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
                     payload.Files = dialog.Files ?? new List<AssociatedFileEntry>();
-                    string json = payload.ToJson();
-                    SolidWorksPropertyWriter.SetCustomProperty(
-                        info.Model,
-                        configName,
-                        AssociatedFilesPayload.PropertyName,
-                        json);
                     try
                     {
-                        if (!string.IsNullOrWhiteSpace(info.Model.GetPathName()))
-                        {
-                            info.Model.Save2(true);
-                        }
+                        AssociatedFilesStore.Save(modelPath, configName, payload);
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // ignore save errors
+                        MessageBox.Show("Associated files could not be saved: " + ex.Message, "TinyMRP",
+                            MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
             }
@@ -2295,14 +2284,145 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            string initiatingDocumentTitle = GetActiveDocumentTitle();
             PublishOptions options = BuildOptions();
             ResetProgress(_bomProgressBar, _bomProgressLabel, "Process BOM");
             SetStatus("Processing BOM...");
             UpdateRunLogLink(string.Empty);
-            publisher.ProcessBom(options, Log, UpdateBomProgress);
-            UpdateRunLogLink(publisher.LastRunLogPath);
-            SetStatus("Done.");
-            ResetProgress(_bomProgressBar, _bomProgressLabel, "Process BOM");
+            try
+            {
+                publisher.ProcessBom(options, Log, UpdateBomProgress);
+            }
+            finally
+            {
+                UpdateRunLogLink(publisher.LastRunLogPath);
+                ResetProgress(_bomProgressBar, _bomProgressLabel, "Process BOM");
+                ShowExportFinished("BOM export", initiatingDocumentTitle);
+            }
+        }
+
+        private string GetActiveDocumentTitle()
+        {
+            try
+            {
+                ModelDoc2 active = AddinContext.SldWorks != null ? AddinContext.SldWorks.ActiveDoc as ModelDoc2 : null;
+                return active != null ? (active.GetTitle() ?? string.Empty) : string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private void ShowExportFinished(string operation, string initiatingDocumentTitle)
+        {
+            try
+            {
+                string title = (initiatingDocumentTitle ?? string.Empty).Trim();
+                while (title.EndsWith("*", StringComparison.Ordinal))
+                {
+                    title = title.Substring(0, title.Length - 1).TrimEnd();
+                }
+
+                ISldWorks app = AddinContext.SldWorks;
+                if (app != null && !string.IsNullOrWhiteSpace(title))
+                {
+                    int errors = 0;
+                    ModelDoc2 restored = app.ActivateDoc3(
+                        title, true, (int)swRebuildOnActivation_e.swDontRebuildActiveDoc, ref errors) as ModelDoc2;
+                    if (restored != null)
+                    {
+                        restored.GraphicsRedraw2();
+                    }
+                    Application.DoEvents();
+                }
+            }
+            catch
+            {
+                // Completion notification must still be shown if SolidWorks cannot reactivate the document.
+            }
+
+            EnsureSolidWorksReady();
+
+            string result = _actionStatusLabel != null ? (_actionStatusLabel.Text ?? string.Empty).Trim() : string.Empty;
+            string message = (operation ?? "Export") + " process has finished.";
+            if (!string.IsNullOrWhiteSpace(result))
+            {
+                message += "\n\n" + result;
+            }
+
+            ShowExportCompletion(message, _lastRunLogPath);
+            EnsureSolidWorksReady();
+        }
+
+        private void ShowExportCompletion(string message, string logPath)
+        {
+            using (var dialog = new Form())
+            using (var messageLabel = new Label())
+            using (var logLink = new LinkLabel())
+            using (var closeButton = new Button())
+            {
+                dialog.Text = "TinyMRP";
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.Size = new Size(500, 190);
+                dialog.MinimumSize = new Size(420, 170);
+                dialog.MaximizeBox = false;
+                dialog.MinimizeBox = false;
+
+                string path = logPath ?? string.Empty;
+                string plainLogSuffix = " Log: " + path;
+                messageLabel.Text = !string.IsNullOrWhiteSpace(path)
+                    ? (message ?? string.Empty).Replace(plainLogSuffix, string.Empty)
+                    : message ?? string.Empty;
+                messageLabel.Dock = DockStyle.Fill;
+                messageLabel.Padding = new Padding(12);
+
+                logLink.Text = File.Exists(path) ? "Open log: " + Path.GetFileName(path) : "Log file unavailable";
+                logLink.Enabled = File.Exists(path);
+                logLink.Dock = DockStyle.Bottom;
+                logLink.Height = 32;
+                logLink.Padding = new Padding(12, 4, 12, 4);
+                if (logLink.Enabled)
+                {
+                    logLink.Links.Add(0, logLink.Text.Length, path);
+                }
+                logLink.LinkClicked += (_, args) => TryOpenPath(args.Link.LinkData as string);
+
+                closeButton.Text = "Close";
+                closeButton.AutoSize = true;
+                closeButton.DialogResult = DialogResult.OK;
+                var buttons = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 44,
+                    FlowDirection = FlowDirection.RightToLeft,
+                    Padding = new Padding(10, 6, 10, 6)
+                };
+                buttons.Controls.Add(closeButton);
+
+                dialog.AcceptButton = closeButton;
+                dialog.CancelButton = closeButton;
+                dialog.Controls.Add(messageLabel);
+                dialog.Controls.Add(logLink);
+                dialog.Controls.Add(buttons);
+                dialog.ShowDialog(this);
+            }
+        }
+
+        private void EnsureSolidWorksReady()
+        {
+            try
+            {
+                TinyMrpPublisher publisher = AddinContext.Publisher;
+                if (publisher != null)
+                {
+                    publisher.EnsureSolidWorksReady();
+                }
+            }
+            catch
+            {
+                // The UI must remain usable even if a COM state reset fails.
+            }
         }
 
         private void OnCancelCurrentTask(object sender, EventArgs e)
@@ -2722,7 +2842,38 @@ namespace TinyMRP.SolidWorksAddin.UI
                 SyncSchemeSelection(_numberingPresetCombo, _quickSchemeCombo);
                 SyncSchemeSelection(_numberingPresetCombo, _advancedSchemeCombo);
             }
+            RefreshLastUsedPartNumber();
             MaybeAutoAssignNumbering(false);
+        }
+
+        private void RefreshLastUsedPartNumber()
+        {
+            if (_numberingLastUsedText == null)
+            {
+                return;
+            }
+
+            NumberingSchemeDefinition scheme = _numberingPresetCombo != null
+                ? _numberingPresetCombo.SelectedItem as NumberingSchemeDefinition
+                : null;
+            if (scheme == null)
+            {
+                _numberingLastUsedText.Text = "Unavailable";
+                return;
+            }
+
+            string last = scheme.LastPartNumber;
+            _numberingLastUsedText.Text = string.IsNullOrWhiteSpace(last) ? "None allocated" : last;
+        }
+
+        private void SetLastUsedPartNumber(string partNumber)
+        {
+            NumberingSchemeDefinition scheme = GetQuickSchemeSelection();
+            if (scheme != null)
+            {
+                scheme.LastPartNumber = partNumber ?? string.Empty;
+            }
+            RefreshLastUsedPartNumber();
         }
 
         private void OnNumberingPreview(object sender, EventArgs e)
@@ -2763,17 +2914,8 @@ namespace TinyMRP.SolidWorksAddin.UI
                 display = BuildDisplayCode(partNumber, revision);
             }
             UpdateQuickPreviewFields(partNumber, revision, display);
+            SetLastUsedPartNumber(NumberingJson.GetString(response.Data, "last_part_number"));
             SetNumberingStatus("Preview ready.", Color.DarkGreen);
-        }
-
-        private void OnNumberingAllocate(object sender, EventArgs e)
-        {
-            RunAllocateWorkflow(false);
-        }
-
-        private void OnNumberingAllocateRename(object sender, EventArgs e)
-        {
-            RunAllocateWorkflow(true);
         }
 
         private void OnNumberingAllocateSave(object sender, EventArgs e)
@@ -2796,14 +2938,14 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             if (!string.IsNullOrWhiteSpace(info.Model.GetPathName()))
             {
-                RunAllocateWorkflow(true);
+                RunAllocateWorkflow();
                 return;
             }
 
             RunAllocateAndSaveWorkflow(info);
         }
 
-        private void RunAllocateWorkflow(bool forceRename)
+        private void RunAllocateWorkflow()
         {
             NumberingApiClient client = GetNumberingClient();
             if (client == null)
@@ -2873,15 +3015,10 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             UpdateQuickPreviewFields(partNumber, revision, display);
+            SetLastUsedPartNumber(partNumber);
 
-            if (!ApplyNumberingToModelQuick(info, partNumber, revision, display, schemeId))
-            {
-                SetNumberingStatus("Failed to apply properties.", Color.Maroon);
-                return;
-            }
-
-            SetNumberingStatus("Allocated and applied.", Color.DarkGreen);
-            TryRenameAfterAllocation(info, partNumber, revision, forceRename);
+            SetNumberingStatus("Allocated. Renaming file...", Color.DarkGreen);
+            TryRenameAfterAllocation(info, partNumber, revision, true);
         }
 
         private void RunAllocateAndSaveWorkflow(ActiveModelInfo info)
@@ -2908,7 +3045,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             string targetFolder;
             if (!TryPromptForAllocateSaveFolder(out targetFolder))
             {
-                SetNumberingStatus("Allocate and Save cancelled.", Color.DarkOrange);
+                SetNumberingStatus("Allocate and save/rename cancelled.", Color.DarkOrange);
                 return;
             }
 
@@ -2945,18 +3082,13 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             UpdateQuickPreviewFields(partNumber, revision, display);
-
-            if (!ApplyNumberingToModelQuick(info, partNumber, revision, display, schemeId))
-            {
-                SetNumberingStatus("Failed to apply properties.", Color.Maroon);
-                return;
-            }
+            SetLastUsedPartNumber(partNumber);
 
             string extension;
             if (!TryGetSolidWorksExtension(info.Model, out extension))
             {
                 SetNumberingStatus("Unsupported SolidWorks document type.", Color.Maroon);
-                MessageBox.Show("Only part, assembly, and drawing documents are supported for Allocate and Save.", "TinyMRP",
+                MessageBox.Show("Only part, assembly, and drawing documents are supported for Allocate and save/rename.", "TinyMRP",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -2965,7 +3097,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             string pathMessage;
             if (!PartNumberRenameHelper.TryBuildUnsavedTargetPath(targetFolder, partNumber, extension, File.Exists, out targetPath, out pathMessage))
             {
-                AddinLogger.Write("Allocate and Save target rejected: " + pathMessage);
+                AddinLogger.Write("Allocate and save/rename target rejected: " + pathMessage);
                 SetNumberingStatus(pathMessage, Color.Maroon);
                 MessageBox.Show(pathMessage, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -2975,7 +3107,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             bool hadWarnings;
             if (!TrySaveAllocatedModelToPath(info, targetPath, out saveMessage, out hadWarnings))
             {
-                AddinLogger.Write("Allocate and Save failed: " + saveMessage);
+                AddinLogger.Write("Allocate and save/rename failed: " + saveMessage);
                 SetNumberingStatus("Allocated, but save failed.", Color.Maroon);
                 ShowMessageWithDetails("Save failed", "Allocated, but Save As failed.", saveMessage);
                 return;
@@ -2984,9 +3116,9 @@ namespace TinyMRP.SolidWorksAddin.UI
             string successMessage = hadWarnings
                 ? "Allocated and saved with SolidWorks warnings."
                 : "Allocated and saved.";
-            AddinLogger.Write("Allocate and Save completed: " + targetPath);
+            AddinLogger.Write("Allocate and save/rename completed: " + targetPath);
             SetNumberingStatus(successMessage, Color.DarkGreen);
-            ShowMessageWithDetails("Allocate and Save", successMessage, saveMessage);
+            ShowMessageWithDetails("Allocate and save/rename", successMessage, saveMessage);
         }
 
         private NumberingSchemeDefinition GetQuickSchemeSelection()
@@ -3042,47 +3174,6 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             _numberingStatusLabel.Text = message ?? string.Empty;
             _numberingStatusLabel.ForeColor = color;
-        }
-
-        private bool ApplyNumberingToModelQuick(ActiveModelInfo info, string partNumber, string revision, string displayCode, string schemeId)
-        {
-            if (info == null || info.Model == null)
-            {
-                return false;
-            }
-
-            var configs = new List<string>();
-            if (!string.IsNullOrWhiteSpace(info.ActiveConfiguration))
-            {
-                configs.Add(info.ActiveConfiguration);
-            }
-
-            string partProp = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
-            string revProp = AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision";
-            string displayProp = AddinContext.Config != null ? AddinContext.Config.DisplayCodeProperty : "DisplayCode";
-
-            SolidWorksPropertyWriter.ApplyNumbering(
-                info.Model,
-                configs,
-                true,
-                partNumber,
-                revision,
-                displayCode,
-                schemeId,
-                partProp,
-                revProp,
-                displayProp);
-
-            if (info.StartedFromDrawing)
-            {
-                ISldWorks app = AddinContext.SldWorks;
-                if (app != null)
-                {
-                    app.ActivateDoc(info.StartTitle);
-                }
-            }
-
-            return true;
         }
 
         private RenameOptions BuildRenameOptions()
@@ -3250,6 +3341,12 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(info.Model.GetPathName()))
+            {
+                SetNumberingStatus("Save the document with Allocate and save/rename before enabling auto-assign.", Color.DarkOrange);
+                return;
+            }
+
             if (!ShouldAutoAssignForModel(info.Model))
             {
                 return;
@@ -3257,12 +3354,6 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             string key = GetModelKey(info.Model);
             if (_autoAssignedModels.Contains(key))
-            {
-                return;
-            }
-
-            string existing = TryReadPartNumberFromModel(info);
-            if (!string.IsNullOrWhiteSpace(existing))
             {
                 return;
             }
@@ -3317,16 +3408,11 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             UpdateQuickPreviewFields(partNumber, revision, display);
-
-            if (!ApplyNumberingToModelQuick(info, partNumber, revision, display, schemeId))
-            {
-                SetNumberingStatus("Auto-assign failed to apply properties.", Color.Maroon);
-                return;
-            }
+            SetLastUsedPartNumber(partNumber);
 
             _autoAssignedModels.Add(key);
-            SetNumberingStatus("Auto-assigned part number.", Color.DarkGreen);
-            TryRenameAfterAllocation(info, partNumber, revision, false);
+            SetNumberingStatus("Auto-assigned part number. Renaming file...", Color.DarkGreen);
+            TryRenameAfterAllocation(info, partNumber, revision, true);
         }
 
         private bool ShouldAutoAssignForModel(ModelDoc2 model)
@@ -3402,35 +3488,19 @@ namespace TinyMRP.SolidWorksAddin.UI
             return true;
         }
 
-        private string TryReadPartNumberFromModel(ActiveModelInfo info)
+        private static string GetModelFileName(ModelDoc2 model)
         {
-            if (info == null || info.Model == null)
+            if (model == null)
             {
                 return string.Empty;
             }
 
-            string propName = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
-            if (string.IsNullOrWhiteSpace(propName))
+            string source = model.GetPathName();
+            if (string.IsNullOrWhiteSpace(source))
             {
-                propName = "PartNumber";
+                source = model.GetTitle();
             }
-
-            string value = GetCustomProperty(info.Model, info.ActiveConfiguration, propName);
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                value = GetCustomProperty(info.Model, string.Empty, propName);
-            }
-
-            if (info.StartedFromDrawing)
-            {
-                ISldWorks app = AddinContext.SldWorks;
-                if (app != null)
-                {
-                    app.ActivateDoc(info.StartTitle);
-                }
-            }
-
-            return value ?? string.Empty;
+            return Path.GetFileNameWithoutExtension(source ?? string.Empty);
         }
 
         private void RenameAssemblyChildren(AssemblyDoc assembly, RenameOptions options)
@@ -3655,6 +3725,66 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         // Numbering helpers
 
+        private async void OnPaneLoaded(object sender, EventArgs e)
+        {
+            if (_startupConnectionChecked)
+            {
+                return;
+            }
+
+            _startupConnectionChecked = true;
+            NumberingApiClient client = GetNumberingClient();
+            TinyMrpConfig config = AddinContext.Config;
+            if (client == null || config == null || string.IsNullOrWhiteSpace(config.AuthToken))
+            {
+                RefreshSchemes(true);
+                return;
+            }
+
+            SetNumberingStatus("Connecting to TinyMRP server...", Color.DarkOrange);
+            List<NumberingSchemeDefinition> schemes = null;
+            ApiResponse response;
+            try
+            {
+                response = await Task.Run(() => client.ListSchemes(out schemes));
+            }
+            catch (Exception ex)
+            {
+                SetNumberingStatus("Server connection failed.", Color.Maroon);
+                MessageBox.Show("Failed to connect to the TinyMRP server: " + ex.Message, "TinyMRP",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (IsDisposed)
+            {
+                return;
+            }
+            if (!response.Ok)
+            {
+                HandleApiError("Failed to connect and load numbering schemes.", response, true);
+                return;
+            }
+
+            ApplyLoadedSchemes(schemes);
+            if (!ServerProvidesLatestPartNumbers(schemes))
+            {
+                SetNumberingStatus("Connected, but backend update is required for latest part numbers.", Color.Maroon);
+                MessageBox.Show(
+                    "Connected to the TinyMRP server, but this backend does not provide latest part numbers. " +
+                    "Deploy the current TinyMRP backend before using Last part number used.",
+                    "TinyMRP backend update required",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
+            MessageBox.Show(
+                "Connected to the TinyMRP server. " + _loadedSchemes.Count +
+                " numbering scheme(s) and their latest part numbers were loaded.",
+                "TinyMRP",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
         private NumberingApiClient GetNumberingClient()
         {
             if (_numberingClient != null)
@@ -3740,11 +3870,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 _revisionActionCombo.SelectedIndex = 0;
             }
 
-            if (_applyScopeCombo != null && _applyScopeCombo.SelectedIndex < 0)
-            {
-                _applyScopeCombo.SelectedIndex = 0;
-            }
-
             if (_quickApplyModeCombo != null && _quickApplyModeCombo.SelectedIndex < 0)
             {
                 _quickApplyModeCombo.SelectedIndex = 0;
@@ -3760,11 +3885,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 _renameModeCombo.SelectedIndex = 0;
             }
 
-            if (_applyDocPropsCheck != null && !_applyDocPropsCheck.Checked)
-            {
-                _applyDocPropsCheck.Checked = true;
-            }
-
             if (_createPartCheck != null && !_createPartCheck.Checked)
             {
                 _createPartCheck.Checked = true;
@@ -3773,12 +3893,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             UpdateSegmentEditorState();
             ApplyNumberingDefaults(AddinContext.Config);
 
-            TinyMrpConfig config = AddinContext.Config;
-            if (config != null &&
-                (!string.IsNullOrWhiteSpace(config.BackendUrl) || !string.IsNullOrWhiteSpace(config.WebLink)))
-            {
-                RefreshSchemes(false);
-            }
         }
 
         private void ApplyNumberingDefaults(TinyMrpConfig config)
@@ -3833,22 +3947,8 @@ namespace TinyMRP.SolidWorksAddin.UI
             {
                 _displayCodePropText.Text = config.DisplayCodeProperty ?? "DisplayCode";
             }
-            if (_numberingPartNumberPropText != null)
-            {
-                _numberingPartNumberPropText.Text = config.PartNumberProperty ?? "PartNumber";
-            }
-            if (_numberingRevisionPropText != null)
-            {
-                _numberingRevisionPropText.Text = config.RevisionProperty ?? "Revision";
-            }
-            if (_numberingDisplayCodePropText != null)
-            {
-                _numberingDisplayCodePropText.Text = config.DisplayCodeProperty ?? "DisplayCode";
-            }
-
             SelectApplyModeCombo(_quickApplyModeCombo, config.NumberingApplyMode);
             SelectApplyModeCombo(_advancedApplyModeCombo, config.NumberingApplyMode);
-            SelectApplyModeCombo(_applyScopeCombo, config.NumberingApplyMode);
 
             if (_autoAssignGenericCheck != null)
             {
@@ -3915,7 +4015,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             RefreshSchemes(true);
         }
 
-        private void RefreshSchemes(bool showDialogs)
+        private bool RefreshSchemes(bool showDialogs)
         {
             NumberingApiClient client = GetNumberingClient();
             if (client == null)
@@ -3926,7 +4026,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                     MessageBox.Show("Backend URL is not configured.", "TinyMRP",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
-                return;
+                return false;
             }
 
             TinyMrpConfig config = AddinContext.Config;
@@ -3938,27 +4038,56 @@ namespace TinyMRP.SolidWorksAddin.UI
                     MessageBox.Show("Auth token is missing. Set it in Configuration to load schemes.", "TinyMRP",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
-                return;
+                return false;
             }
 
             ApiResponse response = client.ListSchemes(out List<NumberingSchemeDefinition> schemes);
             if (!response.Ok)
             {
                 HandleApiError("Failed to load schemes.", response, showDialogs);
-                return;
+                return false;
             }
 
+            ApplyLoadedSchemes(schemes);
+            return true;
+        }
+
+        private void ApplyLoadedSchemes(List<NumberingSchemeDefinition> schemes)
+        {
             _loadedSchemes.Clear();
             _sequenceOverrideCache.Clear();
-            _loadedSchemes.AddRange(schemes);
+            _loadedSchemes.AddRange(schemes ?? new List<NumberingSchemeDefinition>());
             PopulateSchemeCombo(_schemeCombo, _loadedSchemes, true);
             PopulateSchemeCombo(_advancedSchemeCombo, _loadedSchemes, false);
             PopulateQuickSchemeCombo();
             List<NumberingSchemeDefinition> selectableSchemes = GetQuickSchemes();
-            SetNumberingStatus(
-                selectableSchemes.Count > 0 ? "Schemes loaded." : "No active numbering schemes are available.",
-                selectableSchemes.Count > 0 ? Color.DarkGreen : Color.Maroon);
+            if (!ServerProvidesLatestPartNumbers(schemes))
+            {
+                SetNumberingStatus("Connected, but backend update is required for latest part numbers.", Color.Maroon);
+            }
+            else
+            {
+                SetNumberingStatus(
+                    selectableSchemes.Count > 0 ? "Schemes loaded." : "No active numbering schemes are available.",
+                    selectableSchemes.Count > 0 ? Color.DarkGreen : Color.Maroon);
+            }
             MaybeAutoAssignNumbering(false);
+        }
+
+        private static bool ServerProvidesLatestPartNumbers(List<NumberingSchemeDefinition> schemes)
+        {
+            if (schemes == null)
+            {
+                return false;
+            }
+            foreach (NumberingSchemeDefinition scheme in schemes)
+            {
+                if (scheme != null && !scheme.LastPartNumberAvailable)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private void PopulateSchemeCombo(ComboBox combo, List<NumberingSchemeDefinition> schemes, bool includeNew)
@@ -4488,7 +4617,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 display = BuildDisplayCode(partNumber, revision);
             }
 
-            if (!ApplyNumberingToModel(info, partNumber, revision, display, schemeId))
+            if (!ApplyAllocatedFileName(info, partNumber, revision))
             {
                 return;
             }
@@ -4501,42 +4630,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             if (_allocateResultLabel != null)
             {
                 _allocateResultLabel.Text = display;
-            }
-        }
-
-        private void OnLoadConfigurations(object sender, EventArgs e)
-        {
-            if (_configListBox == null)
-            {
-                return;
-            }
-
-            ISldWorks app = AddinContext.SldWorks;
-            if (app == null)
-            {
-                MessageBox.Show("SolidWorks is not available.", "TinyMRP",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            ActiveModelInfo info;
-            string error;
-            if (!SolidWorksDocumentHelper.TryGetActiveModel(app, out info, out error))
-            {
-                MessageBox.Show(error, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            List<string> configs = SolidWorksDocumentHelper.GetConfigurationNames(info.Model);
-            _configListBox.Items.Clear();
-            foreach (string name in configs)
-            {
-                _configListBox.Items.Add(name, string.Equals(name, info.ActiveConfiguration, StringComparison.OrdinalIgnoreCase));
-            }
-
-            if (info.StartedFromDrawing)
-            {
-                app.ActivateDoc(info.StartTitle);
             }
         }
 
@@ -4944,9 +5037,6 @@ namespace TinyMRP.SolidWorksAddin.UI
                 if (_quickPartNumberPropText != null) _quickPartNumberPropText.Text = partProp ?? _quickPartNumberPropText.Text;
                 if (_quickRevisionPropText != null) _quickRevisionPropText.Text = revProp ?? _quickRevisionPropText.Text;
                 if (_quickDisplayCodePropText != null) _quickDisplayCodePropText.Text = displayProp ?? _quickDisplayCodePropText.Text;
-                if (_numberingPartNumberPropText != null) _numberingPartNumberPropText.Text = partProp ?? _numberingPartNumberPropText.Text;
-                if (_numberingRevisionPropText != null) _numberingRevisionPropText.Text = revProp ?? _numberingRevisionPropText.Text;
-                if (_numberingDisplayCodePropText != null) _numberingDisplayCodePropText.Text = displayProp ?? _numberingDisplayCodePropText.Text;
                 if (_partNumberPropText != null) _partNumberPropText.Text = partProp ?? _partNumberPropText.Text;
                 if (_revisionPropText != null) _revisionPropText.Text = revProp ?? _revisionPropText.Text;
                 if (_displayCodePropText != null) _displayCodePropText.Text = displayProp ?? _displayCodePropText.Text;
@@ -4954,7 +5044,6 @@ namespace TinyMRP.SolidWorksAddin.UI
 
             SelectApplyModeCombo(_quickApplyModeCombo, settings.ApplyMode);
             SelectApplyModeCombo(_advancedApplyModeCombo, settings.ApplyMode);
-            SelectApplyModeCombo(_applyScopeCombo, settings.ApplyMode);
 
             UpdateQuickContextVisibility(_numberingPresetCombo != null
                 ? _numberingPresetCombo.SelectedItem as NumberingSchemeDefinition
@@ -5007,38 +5096,7 @@ namespace TinyMRP.SolidWorksAddin.UI
             return result;
         }
 
-        private void SetConfigSelection(bool selected)
-        {
-            if (_configListBox == null)
-            {
-                return;
-            }
-
-            for (int i = 0; i < _configListBox.Items.Count; i++)
-            {
-                _configListBox.SetItemChecked(i, selected);
-            }
-        }
-
-        private List<string> GetSelectedConfigNames()
-        {
-            var result = new List<string>();
-            if (_configListBox == null)
-            {
-                return result;
-            }
-
-            foreach (object item in _configListBox.CheckedItems)
-            {
-                if (item != null)
-                {
-                    result.Add(item.ToString());
-                }
-            }
-            return result;
-        }
-
-        private bool ApplyNumberingToModel(ActiveModelInfo info, string partNumber, string revision, string displayCode, string schemeId)
+        private bool ApplyAllocatedFileName(ActiveModelInfo info, string partNumber, string revision)
         {
             if (info == null || info.Model == null)
             {
@@ -5047,35 +5105,46 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return false;
             }
 
-            string scope = GetComboText(_applyScopeCombo);
-            List<string> configs = BuildTargetConfigurations(info, scope);
-            bool includeDocProps = _applyDocPropsCheck != null && _applyDocPropsCheck.Checked;
-
-            if (configs.Count == 0 && !includeDocProps)
+            if (string.IsNullOrWhiteSpace(info.Model.GetPathName()))
             {
-                MessageBox.Show("Select at least one configuration or enable document properties.", "TinyMRP",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
+                string folder;
+                if (!TryPromptForAllocateSaveFolder(out folder))
+                {
+                    return false;
+                }
+
+                string extension;
+                string targetPath = string.Empty;
+                string pathMessage = string.Empty;
+                if (!TryGetSolidWorksExtension(info.Model, out extension) ||
+                    !PartNumberRenameHelper.TryBuildUnsavedTargetPath(
+                        folder, partNumber, extension, File.Exists, out targetPath, out pathMessage))
+                {
+                    MessageBox.Show(string.IsNullOrWhiteSpace(pathMessage)
+                            ? "Unsupported SolidWorks document type."
+                            : pathMessage,
+                        "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+
+                string saveMessage;
+                bool hadWarnings;
+                if (!TrySaveAllocatedModelToPath(info, targetPath, out saveMessage, out hadWarnings))
+                {
+                    ShowMessageWithDetails("Save failed", "Allocated, but Save As failed.", saveMessage);
+                    return false;
+                }
             }
-
-            string partProp = GetPreferredText(_numberingPartNumberPropText ?? _quickPartNumberPropText, _partNumberPropText,
-                AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber");
-            string revProp = GetPreferredText(_numberingRevisionPropText ?? _quickRevisionPropText, _revisionPropText,
-                AddinContext.Config != null ? AddinContext.Config.RevisionProperty : "Revision");
-            string displayProp = GetPreferredText(_numberingDisplayCodePropText ?? _quickDisplayCodePropText, _displayCodePropText,
-                AddinContext.Config != null ? AddinContext.Config.DisplayCodeProperty : "DisplayCode");
-
-            SolidWorksPropertyWriter.ApplyNumbering(
-                info.Model,
-                configs,
-                includeDocProps,
-                partNumber,
-                revision,
-                displayCode,
-                schemeId,
-                partProp,
-                revProp,
-                displayProp);
+            else
+            {
+                var service = new SolidWorksRenameService();
+                RenameResult result = service.TryRename(info.Model, partNumber, revision, BuildRenameOptions());
+                if (!result.Ok)
+                {
+                    MessageBox.Show(result.Message, "TinyMRP", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return false;
+                }
+            }
 
             if (info.StartedFromDrawing)
             {
@@ -5087,34 +5156,6 @@ namespace TinyMRP.SolidWorksAddin.UI
             }
 
             return true;
-        }
-
-        private List<string> BuildTargetConfigurations(ActiveModelInfo info, string scope)
-        {
-            var configs = new List<string>();
-            if (info == null || info.Model == null)
-            {
-                return configs;
-            }
-
-            string applyScope = scope ?? string.Empty;
-            if (applyScope.StartsWith("All", StringComparison.OrdinalIgnoreCase))
-            {
-                configs.AddRange(SolidWorksDocumentHelper.GetConfigurationNames(info.Model));
-            }
-            else if (applyScope.StartsWith("Selected", StringComparison.OrdinalIgnoreCase))
-            {
-                configs.AddRange(GetSelectedConfigNames());
-            }
-            else
-            {
-                if (!string.IsNullOrWhiteSpace(info.ActiveConfiguration))
-                {
-                    configs.Add(info.ActiveConfiguration);
-                }
-            }
-
-            return configs;
         }
 
         private string GetComboText(ComboBox combo)
@@ -5200,16 +5241,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 return string.Empty;
             }
 
-            string propName = AddinContext.Config != null ? AddinContext.Config.PartNumberProperty : "PartNumber";
-            if (string.IsNullOrWhiteSpace(propName))
-            {
-                propName = "PartNumber";
-            }
-            string value = GetCustomProperty(info.Model, info.ActiveConfiguration, propName);
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                value = GetCustomProperty(info.Model, string.Empty, propName);
-            }
+            string value = GetModelFileName(info.Model);
 
             if (info.StartedFromDrawing)
             {
@@ -5581,6 +5613,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                 {
                     _openLogLink.Text = "Open log: " + Path.GetFileName(p);
                 }
+                UpdateStatusLogLink();
             }
             catch
             {
@@ -5590,9 +5623,14 @@ namespace TinyMRP.SolidWorksAddin.UI
 
         private void TryOpenLastRunLog()
         {
+            TryOpenPath(_lastRunLogPath);
+        }
+
+        private void TryOpenPath(string path)
+        {
             try
             {
-                string p = _lastRunLogPath ?? string.Empty;
+                string p = path ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(p) || !File.Exists(p))
                 {
                     return;
@@ -5665,6 +5703,7 @@ namespace TinyMRP.SolidWorksAddin.UI
                     return;
                 }
                 _actionStatusLabel.Text = message ?? string.Empty;
+                UpdateStatusLogLink();
             }
 
             if (_toolsStatusLabel != null)
@@ -5675,6 +5714,25 @@ namespace TinyMRP.SolidWorksAddin.UI
                     return;
                 }
                 _toolsStatusLabel.Text = message ?? string.Empty;
+            }
+        }
+
+        private void UpdateStatusLogLink()
+        {
+            if (_actionStatusLabel == null)
+            {
+                return;
+            }
+
+            _actionStatusLabel.Links.Clear();
+            string message = _actionStatusLabel.Text ?? string.Empty;
+            string path = _lastRunLogPath ?? string.Empty;
+            int start = !string.IsNullOrWhiteSpace(path)
+                ? message.IndexOf(path, StringComparison.OrdinalIgnoreCase)
+                : -1;
+            if (start >= 0 && File.Exists(path))
+            {
+                _actionStatusLabel.Links.Add(start, path.Length, path);
             }
         }
 
@@ -5860,6 +5918,18 @@ namespace TinyMRP.SolidWorksAddin.UI
                 BorderStyle = BorderStyle.FixedSingle,
                 BackColor = SystemColors.ControlLight,
                 Text = string.Empty
+            };
+        }
+
+        private static NumericUpDown CreateMeshLimitControl()
+        {
+            return new NumericUpDown
+            {
+                Minimum = 1,
+                Maximum = 10240,
+                Value = MeshExportLimit.DefaultMegabytes,
+                Width = 80,
+                ThousandsSeparator = true
             };
         }
 

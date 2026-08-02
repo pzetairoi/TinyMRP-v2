@@ -6,6 +6,7 @@ from app.services.numbering import (
     allocate_number,
     bucket_for_reset_policy,
     normalize_scheme_payload,
+    preview_number,
     revision_for_existing,
     validate_scheme_definition,
 )
@@ -64,6 +65,18 @@ def test_allocate_increments_sequence():
     assert result1["part_number"] != result2["part_number"]
     assert result1["part_number"].endswith("001")
     assert result2["part_number"].endswith("002")
+
+
+def test_preview_reports_last_part_number_used_for_scheme():
+    scheme = _simple_auto_scheme("LastUsedScheme")
+    first = _alloc(scheme)
+    second = _alloc(scheme)
+
+    preview, errors = preview_number(scheme, {})
+
+    assert not errors
+    assert first != second
+    assert preview["last_part_number"] == second
 
 
 def test_allocate_without_revision_config_yields_empty_revision():

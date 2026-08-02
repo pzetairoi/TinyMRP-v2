@@ -1,696 +1,410 @@
 {
-  "generated_at": "2026-06-30 10:29 UTC",
-  "commit": "84b9a6b",
+  "generated_at": "2026-08-02 01:31 UTC",
+  "commit": "1bab0a0",
   "items": [
     {
-      "id": "start-here-by-role",
-      "title": "Start Here By Role",
-      "level": 2
-    },
-    {
-      "id": "design-and-engineering",
-      "title": "Design and engineering",
-      "level": 3
-    },
-    {
-      "id": "purchasing-and-planning",
-      "title": "Purchasing and planning",
-      "level": 3
-    },
-    {
-      "id": "admin-and-it",
-      "title": "Admin and IT",
-      "level": 3
-    },
-    {
-      "id": "core-concepts",
-      "title": "Core Concepts",
-      "level": 2
-    },
-    {
-      "id": "how-to-use-this-help-quickly",
-      "title": "How To Use This Help Quickly",
-      "level": 2
-    },
-    {
-      "id": "help-sections",
-      "title": "Help Sections",
-      "level": 2
-    },
-    {
-      "id": "keeping-help-current",
-      "title": "Keeping Help Current",
-      "level": 2
-    },
-    {
-      "id": "deployment-options",
-      "title": "Deployment Options",
-      "level": 2
-    },
-    {
-      "id": "recommended-guided-ubuntu-deployment",
-      "title": "Recommended: Guided Ubuntu deployment",
-      "level": 3
-    },
-    {
-      "id": "hardened-windows-lan-only-no-docker",
-      "title": "Hardened Windows LAN-Only (No Docker)",
-      "level": 3
-    },
-    {
-      "id": "advanced-local-developer-runtime",
-      "title": "Advanced: Local developer runtime",
-      "level": 3
-    },
-    {
-      "id": "prerequisites",
-      "title": "Prerequisites",
-      "level": 2
-    },
-    {
-      "id": "first-time-setup-guided-ubuntu",
-      "title": "First-Time Setup (Guided Ubuntu)",
-      "level": 2
-    },
-    {
-      "id": "1-install-host-services",
-      "title": "1) Install host services",
-      "level": 3
-    },
-    {
-      "id": "2-create-an-instance",
-      "title": "2) Create an instance",
-      "level": 3
-    },
-    {
-      "id": "3-open-tinymrp",
-      "title": "3) Open TinyMRP",
-      "level": 3
-    },
-    {
-      "id": "dns-and-domain-setup",
-      "title": "DNS And Domain Setup",
-      "level": 2
-    },
-    {
-      "id": "nextcloud",
-      "title": "Nextcloud",
-      "level": 2
-    },
-    {
-      "id": "updating-and-rollback",
-      "title": "Updating And Rollback",
-      "level": 2
-    },
-    {
-      "id": "deliverables-smoke-test",
-      "title": "Deliverables Smoke Test",
-      "level": 2
-    },
-    {
-      "id": "recover-a-broken-caddy-instance",
-      "title": "Recover A Broken Caddy Instance",
-      "level": 2
-    },
-    {
-      "id": "local-vm-mode",
-      "title": "Local VM Mode",
-      "level": 2
-    },
-    {
-      "id": "windows-lan-only-setup-no-docker",
-      "title": "Windows LAN-Only Setup (No Docker)",
-      "level": 2
-    },
-    {
-      "id": "file-storage-rules",
-      "title": "File Storage Rules",
-      "level": 2
-    },
-    {
-      "id": "upload-pack-limits",
-      "title": "Upload Pack Limits",
-      "level": 2
-    },
-    {
-      "id": "local-development-advanced",
-      "title": "Local Development (Advanced)",
-      "level": 2
-    },
-    {
-      "id": "upgrade-procedure",
-      "title": "Upgrade Procedure",
-      "level": 2
-    },
-    {
-      "id": "backup-recommendations",
-      "title": "Backup Recommendations",
-      "level": 2
-    },
-    {
-      "id": "security-baseline",
-      "title": "Security Baseline",
-      "level": 2
-    },
-    {
-      "id": "help-build-command",
-      "title": "Help Build Command",
-      "level": 2
-    },
-    {
-      "id": "main-navigation",
-      "title": "Main Navigation",
-      "level": 2
-    },
-    {
-      "id": "inventory-uiparts",
-      "title": "Inventory (`/ui/parts`)",
-      "level": 2
-    },
-    {
-      "id": "what-it-does",
-      "title": "What it does",
-      "level": 3
-    },
-    {
-      "id": "important-filters",
-      "title": "Important filters",
-      "level": 3
-    },
-    {
-      "id": "pick-mode-uipartspick1",
-      "title": "Pick mode (`/ui/parts?pick=1`)",
-      "level": 3
-    },
-    {
-      "id": "part-detail-uipartpnrev",
-      "title": "Part Detail (`/ui/part/:pn?rev=...`)",
-      "level": 2
-    },
-    {
-      "id": "left-panel",
-      "title": "Left panel",
-      "level": 3
-    },
-    {
-      "id": "main-tabs",
-      "title": "Main tabs",
-      "level": 3
-    },
-    {
-      "id": "doc-packs-tab-key-controls",
-      "title": "Doc Packs tab (key controls)",
-      "level": 3
-    },
-    {
-      "id": "actions-tab-behavior",
-      "title": "Actions tab behavior",
-      "level": 3
-    },
-    {
-      "id": "bom-view-uibom-and-uibompn",
-      "title": "BOM View (`/ui/bom` and `/ui/bom/:pn`)",
-      "level": 2
-    },
-    {
-      "id": "what-it-does-2",
-      "title": "What it does",
-      "level": 3
-    },
-    {
-      "id": "typical-use",
-      "title": "Typical use",
-      "level": 3
-    },
-    {
-      "id": "dashboard-uidashboard",
-      "title": "Dashboard (`/ui/dashboard`)",
-      "level": 2
-    },
-    {
-      "id": "what-it-shows",
-      "title": "What it shows",
-      "level": 3
-    },
-    {
-      "id": "import-upload-pack-uiupload-pack",
-      "title": "Import Upload Pack (`/ui/upload-pack`)",
-      "level": 2
-    },
-    {
-      "id": "what-it-does-3",
-      "title": "What it does",
-      "level": 3
-    },
-    {
-      "id": "expected-zip-structure",
-      "title": "Expected ZIP structure",
-      "level": 3
-    },
-    {
-      "id": "tokens-uiaddintokens",
-      "title": "Tokens (`/ui/addin/tokens`)",
-      "level": 2
-    },
-    {
-      "id": "add-in-admin-uiadminaddin",
-      "title": "Add-in Admin (`/ui/admin/addin`)",
-      "level": 2
-    },
-    {
-      "id": "tools-tools",
-      "title": "Tools (`/tools`)",
-      "level": 2
-    },
-    {
-      "id": "before-you-start",
-      "title": "Before You Start",
-      "level": 2
-    },
-    {
-      "id": "get-the-installer",
-      "title": "Get The Installer",
-      "level": 2
-    },
-    {
-      "id": "run-the-installer",
-      "title": "Run The Installer",
-      "level": 2
-    },
-    {
-      "id": "enable-in-solidworks",
-      "title": "Enable In SolidWorks",
-      "level": 2
-    },
-    {
-      "id": "open-the-task-pane",
-      "title": "Open The Task Pane",
-      "level": 2
-    },
-    {
-      "id": "first-connection-recommended",
-      "title": "First Connection (Recommended)",
-      "level": 2
-    },
-    {
-      "id": "where-settings-are-stored",
-      "title": "Where Settings Are Stored",
-      "level": 2
-    },
-    {
-      "id": "manual-register-repair-if-needed",
-      "title": "Manual Register / Repair (If Needed)",
-      "level": 2
-    },
-    {
-      "id": "silent-install-it-deployment",
-      "title": "Silent Install (IT Deployment)",
-      "level": 2
-    },
-    {
-      "id": "publishbom-tab",
-      "title": "Publish/BOM Tab",
-      "level": 2
-    },
-    {
-      "id": "deliverables",
-      "title": "Deliverables",
-      "level": 3
-    },
-    {
-      "id": "publish-options",
-      "title": "Publish options",
-      "level": 3
-    },
-    {
-      "id": "associated-files",
-      "title": "Associated files",
-      "level": 3
-    },
-    {
-      "id": "upload-pack-actions",
-      "title": "Upload pack actions",
-      "level": 3
-    },
-    {
-      "id": "bom-actions",
-      "title": "BOM actions",
-      "level": 3
-    },
-    {
-      "id": "progress-and-run-controls",
-      "title": "Progress and run controls",
-      "level": 3
-    },
-    {
-      "id": "tools-tab",
-      "title": "Tools Tab",
-      "level": 2
-    },
-    {
-      "id": "model-utilities",
-      "title": "Model utilities",
-      "level": 3
-    },
-    {
-      "id": "visibility-utilities",
-      "title": "Visibility utilities",
-      "level": 3
-    },
-    {
-      "id": "numbering-tab",
-      "title": "Numbering Tab",
-      "level": 2
-    },
-    {
-      "id": "quick-actions",
-      "title": "Quick actions",
-      "level": 3
-    },
-    {
-      "id": "context-and-presets",
-      "title": "Context and presets",
-      "level": 3
-    },
-    {
-      "id": "advanced-numbering-editor",
-      "title": "Advanced numbering editor",
-      "level": 3
-    },
-    {
-      "id": "advanced-allocation-and-rename",
-      "title": "Advanced allocation and rename",
-      "level": 3
-    },
-    {
-      "id": "configuration-tab",
-      "title": "Configuration Tab",
-      "level": 2
-    },
-    {
-      "id": "quick-start",
-      "title": "Quick Start",
-      "level": 3
-    },
-    {
-      "id": "advanced",
-      "title": "Advanced",
-      "level": 3
-    },
-    {
-      "id": "recommended-daily-flows",
-      "title": "Recommended Daily Flows",
-      "level": 2
-    },
-    {
-      "id": "release-package-from-cad",
-      "title": "Release package from CAD",
-      "level": 3
-    },
-    {
-      "id": "controlled-numbering-rename",
-      "title": "Controlled numbering + rename",
-      "level": 3
-    },
-    {
-      "id": "workflow-a-cad-to-production-package",
-      "title": "Workflow A: CAD To Production Package",
-      "level": 2
-    },
-    {
-      "id": "1-prepare-cad-data",
-      "title": "1) Prepare CAD data",
-      "level": 3
-    },
-    {
-      "id": "2-publish-deliverables-from-add-in",
-      "title": "2) Publish deliverables from add-in",
-      "level": 3
-    },
-    {
-      "id": "3-build-and-import-upload-pack",
-      "title": "3) Build and import upload pack",
-      "level": 3
-    },
-    {
-      "id": "4-validate-in-part-detail",
-      "title": "4) Validate in Part Detail",
-      "level": 3
-    },
-    {
-      "id": "5-generate-doc-packs",
-      "title": "5) Generate doc packs",
-      "level": 3
-    },
-    {
-      "id": "workflow-b-progressive-ordering-across-multi-level-bom",
-      "title": "Workflow B: Progressive Ordering Across Multi-Level BOM",
-      "level": 2
-    },
-    {
-      "id": "1-create-job-bom-roots",
-      "title": "1) Create job BOM roots",
-      "level": 3
-    },
-    {
-      "id": "2-review-ordering-coverage-in-job",
-      "title": "2) Review ordering coverage in Job",
-      "level": 3
-    },
-    {
-      "id": "3-use-parts-not-yet-ordered-in-flat-or-tree-mode",
-      "title": "3) Use `Parts Not Yet Ordered` in Flat or Tree mode",
-      "level": 3
-    },
-    {
-      "id": "4-create-order-from-selected-remaining-parts",
-      "title": "4) Create order from selected remaining parts",
-      "level": 3
-    },
-    {
-      "id": "5-repeat-until-remaining-demand-is-zero",
-      "title": "5) Repeat until remaining demand is zero",
-      "level": 3
-    },
-    {
-      "id": "understanding-over-ordered-behavior",
-      "title": "Understanding Over-Ordered Behavior",
-      "level": 2
-    },
-    {
-      "id": "order-lifecycle-notes",
-      "title": "Order Lifecycle Notes",
-      "level": 2
-    },
-    {
-      "id": "scope-of-supply-and-customer-deliverables",
-      "title": "Scope Of Supply and Customer Deliverables",
-      "level": 2
-    },
-    {
-      "id": "iteration-loop-engineering-change",
-      "title": "Iteration Loop (Engineering Change)",
-      "level": 2
-    },
-    {
-      "id": "admin-dashboard-admin",
-      "title": "Admin Dashboard (`/admin`)",
-      "level": 2
-    },
-    {
-      "id": "app-settings-adminsettings",
-      "title": "App Settings (`/admin/settings`)",
-      "level": 2
-    },
-    {
-      "id": "branding",
-      "title": "Branding",
-      "level": 3
-    },
-    {
-      "id": "timezone",
-      "title": "Timezone",
-      "level": 3
-    },
-    {
-      "id": "hardware-classification",
-      "title": "Hardware classification",
-      "level": 3
-    },
-    {
-      "id": "flat-pattern-page-filter",
-      "title": "Flat pattern page filter",
-      "level": 3
-    },
-    {
-      "id": "upload-pack-limits-2",
-      "title": "Upload Pack limits",
-      "level": 3
-    },
-    {
-      "id": "users-and-roles",
-      "title": "Users And Roles",
-      "level": 2
-    },
-    {
-      "id": "users-adminusers",
-      "title": "Users (`/admin/users`)",
-      "level": 3
-    },
-    {
-      "id": "roles-adminroles",
-      "title": "Roles (`/admin/roles`)",
-      "level": 3
-    },
-    {
-      "id": "access-scoping-model-operational-view",
-      "title": "Access Scoping Model (Operational View)",
-      "level": 2
-    },
-    {
-      "id": "customer-and-supplier-master-data",
-      "title": "Customer And Supplier Master Data",
-      "level": 2
-    },
-    {
-      "id": "customers-admincustomers",
-      "title": "Customers (`/admin/customers`)",
-      "level": 3
-    },
-    {
-      "id": "suppliers-adminsuppliers",
-      "title": "Suppliers (`/admin/suppliers`)",
-      "level": 3
-    },
-    {
-      "id": "jobs-administration-adminjobs",
-      "title": "Jobs Administration (`/admin/jobs`)",
-      "level": 2
-    },
-    {
-      "id": "orders-administration-adminorders",
-      "title": "Orders Administration (`/admin/orders`)",
-      "level": 2
-    },
-    {
-      "id": "add-in-admin-uiadminaddin-2",
-      "title": "Add-in Admin (`/ui/admin/addin`)",
-      "level": 2
-    },
-    {
-      "id": "audit-and-metrics",
-      "title": "Audit And Metrics",
-      "level": 2
-    },
-    {
-      "id": "audit-adminaudit",
-      "title": "Audit (`/admin/audit/`)",
-      "level": 3
-    },
-    {
-      "id": "metrics-adminmetrics",
-      "title": "Metrics (`/admin/metrics`)",
-      "level": 3
-    },
-    {
-      "id": "high-risk-operations",
-      "title": "High-Risk Operations",
-      "level": 2
-    },
-    {
-      "id": "login-or-access-denied",
-      "title": "Login Or Access Denied",
-      "level": 2
-    },
-    {
-      "id": "inventory-is-empty-or-missing-parts",
-      "title": "Inventory Is Empty Or Missing Parts",
-      "level": 2
-    },
-    {
-      "id": "part-detail-missing-files",
-      "title": "Part Detail Missing Files",
-      "level": 2
-    },
-    {
-      "id": "drawing-or-3d-preview-missing",
-      "title": "Drawing Or 3D Preview Missing",
-      "level": 2
-    },
-    {
-      "id": "associated-files-not-visible",
-      "title": "Associated Files Not Visible",
-      "level": 2
-    },
-    {
-      "id": "upload-pack-import-errors",
-      "title": "Upload Pack Import Errors",
-      "level": 2
-    },
-    {
-      "id": "job-ordering-looks-wrong",
-      "title": "Job Ordering Looks Wrong",
-      "level": 2
-    },
-    {
-      "id": "doc-pack-output-missing-sections",
-      "title": "Doc Pack Output Missing Sections",
-      "level": 2
-    },
-    {
-      "id": "add-in-cannot-connect",
-      "title": "Add-in Cannot Connect",
-      "level": 2
-    },
-    {
-      "id": "numbering-errors-in-add-in",
-      "title": "Numbering Errors In Add-in",
-      "level": 2
-    },
-    {
-      "id": "installer-or-add-in-not-showing-in-solidworks",
-      "title": "Installer Or Add-in Not Showing In SolidWorks",
-      "level": 2
-    },
-    {
-      "id": "what-to-collect-before-escalation",
-      "title": "What To Collect Before Escalation",
-      "level": 2
-    },
-    {
-      "id": "web-ui-pages-routes",
-      "title": "Web UI pages (routes)",
-      "level": 2
-    },
-    {
-      "id": "api-endpoints",
-      "title": "API endpoints",
-      "level": 2
-    },
-    {
-      "id": "appviewsimporterpy",
-      "title": "app\\views\\importer.py",
-      "level": 3
-    },
-    {
-      "id": "appviewspartsharespy",
-      "title": "app\\views\\part_shares.py",
-      "level": 3
-    },
-    {
-      "id": "environment-variables",
-      "title": "Environment variables",
-      "level": 2
-    },
-    {
-      "id": "solidworks-add-in-options",
-      "title": "SolidWorks add-in options",
-      "level": 2
-    },
-    {
-      "id": "solidworks-add-in-tabs",
-      "title": "SolidWorks add-in tabs",
-      "level": 2
+      "id": "getting-started",
+      "title": "Getting Started",
+      "sections": [
+        {
+          "id": "the-five-minute-version",
+          "title": "The five-minute version"
+        },
+        {
+          "id": "the-one-idea-that-explains-everything",
+          "title": "The one idea that explains everything"
+        },
+        {
+          "id": "approved-vs-draft",
+          "title": "Approved vs draft"
+        },
+        {
+          "id": "what-you-can-see-depends-on-your-role",
+          "title": "What you can see depends on your role"
+        },
+        {
+          "id": "where-to-go-next",
+          "title": "Where to go next"
+        },
+        {
+          "id": "a-note-on-this-help",
+          "title": "A note on this help"
+        }
+      ]
+    },
+    {
+      "id": "using-the-web-app",
+      "title": "Using the Web App",
+      "sections": [
+        {
+          "id": "finding-your-way-around",
+          "title": "Finding your way around"
+        },
+        {
+          "id": "inventory",
+          "title": "Inventory"
+        },
+        {
+          "id": "part-details",
+          "title": "Part Details"
+        },
+        {
+          "id": "doc-packs",
+          "title": "Doc Packs"
+        },
+        {
+          "id": "bom-view",
+          "title": "BOM view"
+        },
+        {
+          "id": "dashboard",
+          "title": "Dashboard"
+        },
+        {
+          "id": "import",
+          "title": "Import"
+        },
+        {
+          "id": "jobs-and-orders",
+          "title": "Jobs and Orders"
+        },
+        {
+          "id": "tokens",
+          "title": "Tokens"
+        },
+        {
+          "id": "tools",
+          "title": "Tools"
+        },
+        {
+          "id": "admin",
+          "title": "Admin"
+        }
+      ]
+    },
+    {
+      "id": "roles-and-permissions",
+      "title": "Roles and Permissions",
+      "sections": [
+        {
+          "id": "how-access-is-decided",
+          "title": "How access is decided"
+        },
+        {
+          "id": "the-standard-roles",
+          "title": "The standard roles"
+        },
+        {
+          "id": "the-rules-that-surprise-people",
+          "title": "The rules that surprise people"
+        },
+        {
+          "id": "when-something-is-refused",
+          "title": "When something is refused"
+        },
+        {
+          "id": "for-administrators",
+          "title": "For administrators"
+        }
+      ]
+    },
+    {
+      "id": "installing-the-solidworks-add-in",
+      "title": "Installing the SolidWorks Add-in",
+      "sections": [
+        {
+          "id": "before-you-start",
+          "title": "Before You Start"
+        },
+        {
+          "id": "get-the-installer",
+          "title": "Get The Installer"
+        },
+        {
+          "id": "run-the-installer",
+          "title": "Run The Installer"
+        },
+        {
+          "id": "enable-in-solidworks",
+          "title": "Enable In SolidWorks"
+        },
+        {
+          "id": "open-the-task-pane",
+          "title": "Open The Task Pane"
+        },
+        {
+          "id": "first-connection-recommended",
+          "title": "First Connection (Recommended)"
+        },
+        {
+          "id": "where-settings-are-stored",
+          "title": "Where Settings Are Stored"
+        },
+        {
+          "id": "manual-register-repair-if-needed",
+          "title": "Manual Register / Repair (If Needed)"
+        },
+        {
+          "id": "silent-install-it-deployment",
+          "title": "Silent Install (IT Deployment)"
+        }
+      ]
+    },
+    {
+      "id": "using-the-solidworks-add-in",
+      "title": "Using the SolidWorks Add-in",
+      "sections": [
+        {
+          "id": "publishbom-tab",
+          "title": "Publish/BOM Tab"
+        },
+        {
+          "id": "tools-tab",
+          "title": "Tools Tab"
+        },
+        {
+          "id": "numbering-tab",
+          "title": "Numbering Tab"
+        },
+        {
+          "id": "configuration-tab",
+          "title": "Configuration Tab"
+        },
+        {
+          "id": "recommended-daily-flows",
+          "title": "Recommended Daily Flows"
+        }
+      ]
+    },
+    {
+      "id": "common-workflows",
+      "title": "Common Workflows",
+      "sections": [
+        {
+          "id": "workflow-a-cad-to-production-package",
+          "title": "Workflow A: CAD To Production Package"
+        },
+        {
+          "id": "workflow-b-progressive-ordering-across-multi-level-bom",
+          "title": "Workflow B: Progressive Ordering Across Multi-Level BOM"
+        },
+        {
+          "id": "understanding-over-ordered-behavior",
+          "title": "Understanding Over-Ordered Behavior"
+        },
+        {
+          "id": "order-lifecycle-notes",
+          "title": "Order Lifecycle Notes"
+        },
+        {
+          "id": "scope-of-supply-and-customer-deliverables",
+          "title": "Scope Of Supply and Customer Deliverables"
+        },
+        {
+          "id": "iteration-loop-engineering-change",
+          "title": "Iteration Loop (Engineering Change)"
+        }
+      ]
+    },
+    {
+      "id": "configuration",
+      "title": "Configuration",
+      "sections": [
+        {
+          "id": "admin-dashboard-admin",
+          "title": "Admin Dashboard (`/admin`)"
+        },
+        {
+          "id": "app-settings-adminsettings",
+          "title": "App Settings (`/admin/settings`)"
+        },
+        {
+          "id": "users-and-roles",
+          "title": "Users And Roles"
+        },
+        {
+          "id": "access-scoping-model-operational-view",
+          "title": "Access Scoping Model (Operational View)"
+        },
+        {
+          "id": "customer-and-supplier-master-data",
+          "title": "Customer And Supplier Master Data"
+        },
+        {
+          "id": "jobs-administration-adminjobs",
+          "title": "Jobs Administration (`/admin/jobs`)"
+        },
+        {
+          "id": "orders-administration-adminorders",
+          "title": "Orders Administration (`/admin/orders`)"
+        },
+        {
+          "id": "add-in-admin-uiadminaddin",
+          "title": "Add-in Admin (`/ui/admin/addin`)"
+        },
+        {
+          "id": "audit-and-metrics",
+          "title": "Audit And Metrics"
+        },
+        {
+          "id": "high-risk-operations",
+          "title": "High-Risk Operations"
+        }
+      ]
+    },
+    {
+      "id": "installation",
+      "title": "Installation",
+      "sections": [
+        {
+          "id": "deployment-options",
+          "title": "Deployment Options"
+        },
+        {
+          "id": "prerequisites",
+          "title": "Prerequisites"
+        },
+        {
+          "id": "first-time-setup-guided-ubuntu",
+          "title": "First-Time Setup (Guided Ubuntu)"
+        },
+        {
+          "id": "dns-and-domain-setup",
+          "title": "DNS And Domain Setup"
+        },
+        {
+          "id": "nextcloud",
+          "title": "Nextcloud"
+        },
+        {
+          "id": "updating-and-rollback",
+          "title": "Updating And Rollback"
+        },
+        {
+          "id": "deliverables-smoke-test",
+          "title": "Deliverables Smoke Test"
+        },
+        {
+          "id": "recover-a-broken-caddy-instance",
+          "title": "Recover A Broken Caddy Instance"
+        },
+        {
+          "id": "local-vm-mode",
+          "title": "Local VM Mode"
+        },
+        {
+          "id": "windows-lan-only-setup-no-docker",
+          "title": "Windows LAN-Only Setup (No Docker)"
+        },
+        {
+          "id": "file-storage-rules",
+          "title": "File Storage Rules"
+        },
+        {
+          "id": "upload-pack-limits-2",
+          "title": "Upload Pack Limits"
+        },
+        {
+          "id": "local-development-advanced",
+          "title": "Local Development (Advanced)"
+        },
+        {
+          "id": "upgrade-procedure",
+          "title": "Upgrade Procedure"
+        },
+        {
+          "id": "backup-recommendations",
+          "title": "Backup Recommendations"
+        },
+        {
+          "id": "security-baseline",
+          "title": "Security Baseline"
+        },
+        {
+          "id": "help-build-command",
+          "title": "Help Build Command"
+        }
+      ]
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "sections": [
+        {
+          "id": "i-cannot-see-a-part-that-i-know-exists",
+          "title": "I cannot see a part that I know exists"
+        },
+        {
+          "id": "the-approved-badge-is-wrong",
+          "title": "The approved badge is wrong"
+        },
+        {
+          "id": "files-are-missing-from-a-part",
+          "title": "Files are missing from a part"
+        },
+        {
+          "id": "the-import-created-parts-i-did-not-expect",
+          "title": "The import created parts I did not expect"
+        },
+        {
+          "id": "the-import-did-nothing-did-too-much",
+          "title": "The import did nothing / did too much"
+        },
+        {
+          "id": "an-import-says-i-lack-permission",
+          "title": "An import says I lack permission"
+        },
+        {
+          "id": "a-doc-pack-is-missing-sections",
+          "title": "A Doc Pack is missing sections"
+        },
+        {
+          "id": "a-doc-pack-is-taking-a-long-time",
+          "title": "A Doc Pack is taking a long time"
+        },
+        {
+          "id": "comments-or-markups-are-not-visible",
+          "title": "Comments or markups are not visible"
+        },
+        {
+          "id": "jobs-and-ordering-look-wrong",
+          "title": "Jobs and ordering look wrong"
+        },
+        {
+          "id": "the-add-in-cannot-connect",
+          "title": "The add-in cannot connect"
+        },
+        {
+          "id": "what-to-collect-before-asking-for-help",
+          "title": "What to collect before asking for help"
+        }
+      ]
+    },
+    {
+      "id": "reference",
+      "title": "Reference",
+      "sections": [
+        {
+          "id": "web-ui-pages-routes",
+          "title": "Web UI pages (routes)"
+        },
+        {
+          "id": "api-endpoints",
+          "title": "API endpoints"
+        },
+        {
+          "id": "environment-variables",
+          "title": "Environment variables"
+        },
+        {
+          "id": "solidworks-add-in-options",
+          "title": "SolidWorks add-in options"
+        },
+        {
+          "id": "solidworks-add-in-tabs",
+          "title": "SolidWorks add-in tabs"
+        }
+      ]
     }
   ]
 }

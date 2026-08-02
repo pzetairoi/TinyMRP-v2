@@ -117,6 +117,26 @@ def test_every_reading_role_sees_the_same_approval_state(app, client):
     assert seen == {"reviewer": True, "plain_reader": True, "workshop": True}
 
 
+def test_public_share_detail_exposes_the_same_boolean(app):
+    """The shared view renders the same badge, so it needs the same field."""
+
+    from app.models.part_share import PartShareLink
+    from app.views.part_shares import _part_detail_payload_for_share
+
+    with app.app_context():
+        part = _part("SHARE-1", "A", {"approved_by": "Jane Approver"})
+        share = PartShareLink(
+            part_number="SHARE-1",
+            revision="A",
+            token_hash="hash",
+            token_prefix="prefix",
+        ).save()
+
+        payload = _part_detail_payload_for_share(share, "raw-token", part)
+
+    assert payload["part"]["approved"] is True
+
+
 def test_unreleased_scope_follows_the_same_boolean(app, client):
     """Readers without parts.read_unreleased only see approved parts."""
 

@@ -26,6 +26,7 @@ namespace TinyMRP.SolidWorksAddin.Services
         public string NumberingApplyMode { get; set; }
         public bool AutoAssignGenericNames { get; set; }
         public bool AutoAssignAnyNames { get; set; }
+        public int MeshExportSizeLimitMb { get; set; }
         public string AddinDirectory { get; private set; }
         public string ConfigPath { get; private set; }
 
@@ -89,6 +90,7 @@ namespace TinyMRP.SolidWorksAddin.Services
             NumberingApplyMode = "active_config";
             AutoAssignGenericNames = true;
             AutoAssignAnyNames = false;
+            MeshExportSizeLimitMb = MeshExportLimit.DefaultMegabytes;
         }
 
         private void Apply(string key, string value)
@@ -149,6 +151,9 @@ namespace TinyMRP.SolidWorksAddin.Services
                 case "AutoAssignAnyNames":
                     AutoAssignAnyNames = ParseBool(value, AutoAssignAnyNames);
                     break;
+                case "MeshExportSizeLimitMb":
+                    MeshExportSizeLimitMb = ParsePositiveInt(value, MeshExportSizeLimitMb);
+                    break;
             }
         }
 
@@ -198,6 +203,7 @@ namespace TinyMRP.SolidWorksAddin.Services
                 "NumberingApplyMode=" + (NumberingApplyMode ?? "active_config"),
                 "AutoAssignGenericNames=" + (AutoAssignGenericNames ? "True" : "False"),
                 "AutoAssignAnyNames=" + (AutoAssignAnyNames ? "True" : "False"),
+                "MeshExportSizeLimitMb=" + MeshExportLimit.NormalizeMegabytes(MeshExportSizeLimitMb),
             };
 
             try
@@ -378,6 +384,12 @@ namespace TinyMRP.SolidWorksAddin.Services
         {
             bool result;
             return bool.TryParse(value, out result) ? result : fallback;
+        }
+
+        private static int ParsePositiveInt(string value, int fallback)
+        {
+            int result;
+            return int.TryParse(value, out result) && result > 0 ? result : fallback;
         }
     }
 }

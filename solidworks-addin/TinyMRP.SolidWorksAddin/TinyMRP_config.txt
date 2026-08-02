@@ -16,3 +16,4 @@ DisplayCodeProperty=DisplayCode
 NumberingApplyMode=active_config
 AutoAssignGenericNames=True
 AutoAssignAnyNames=False
+MeshExportSizeLimitMb=50

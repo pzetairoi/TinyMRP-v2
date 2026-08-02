@@ -166,6 +166,41 @@ namespace TinyMRP.SolidWorksAddin.Tests
         }
 
         [TestMethod]
+        public void UploadPackBuilder_ExcludesTransientAndFailedDeliverables()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "tinymrp_pack_" + Guid.NewGuid().ToString("N"));
+            string deliverables = Path.Combine(root, "deliverables");
+            string stlDir = Path.Combine(deliverables, "stl");
+            Directory.CreateDirectory(stlDir);
+
+            File.WriteAllText(Path.Combine(stlDir, "PN-12_REV_A.stl"), "valid");
+            File.WriteAllText(Path.Combine(stlDir, "PN-12_REV_A_123.tmp.stl"), "failed temp");
+            File.WriteAllText(Path.Combine(stlDir, "PN-12_REV_A.stl.bad"), "failed output");
+            File.WriteAllText(Path.Combine(stlDir, "PN-12_REV_A.stl.replacebak"), "replacement backup");
+
+            string zipPath = Path.Combine(root, "pack.zip");
+            UploadPackBuilder.Build(
+                zipPath,
+                deliverables,
+                string.Empty,
+                string.Empty,
+                null,
+                null,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "PN-12_REV_A" },
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "stl" });
+
+            using (var zip = ZipFile.OpenRead(zipPath))
+            {
+                Assert.IsNotNull(zip.GetEntry("deliverables/stl/PN-12_REV_A.stl"));
+                Assert.IsNull(zip.GetEntry("deliverables/stl/PN-12_REV_A_123.tmp.stl"));
+                Assert.IsNull(zip.GetEntry("deliverables/stl/PN-12_REV_A.stl.bad"));
+                Assert.IsNull(zip.GetEntry("deliverables/stl/PN-12_REV_A.stl.replacebak"));
+            }
+
+            Directory.Delete(root, true);
+        }
+
+        [TestMethod]
         public void TextFileHelper_WritesUtf8NoBom()
         {
             string root = Path.Combine(Path.GetTempPath(), "tinymrp_text_" + Guid.NewGuid().ToString("N"));

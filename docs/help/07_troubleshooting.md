@@ -1,139 +1,126 @@
 # Troubleshooting
 
-Use this page when behavior does not match expectations.
+Find your symptom, work down the list. Each entry gives the most likely cause
+first.
 
-## Login Or Access Denied
+## I cannot see a part that I know exists
 
-Checks:
+1. **Is it a draft?** Without `parts.read_unreleased` you only see approved
+   parts. Ask whoever manages roles whether you should have it.
+2. **Are you a customer or supplier user?** You only see parts reachable from
+   your own jobs and orders. A part not linked to your work is invisible by
+   design.
+3. **Are filters still applied?** Clear the search box *and* every column
+   filter. A filter left in one column silently narrows everything.
+4. **Are you on the right revision?** Search the part number alone — other
+   revisions appear as separate rows.
 
-- Confirm user can sign in.
-- Confirm role includes required permission for the page.
-- Confirm user is linked to correct customer/supplier/job if scoped externally.
+## The approved badge is wrong
 
-Common cause:
+The badge reflects the value worked out when the part was imported or last
+saved.
 
-- Permission exists but row-level scope excludes requested record.
+1. Open **Attributes & Notes** and find the approval property. Values such as
+   `pending`, `n/a`, `TBC`, `no` or a blank all mean *not approved*.
+2. If the source value looks correct but the badge disagrees, the approval
+   rules changed after the part was imported. An administrator can run the
+   rebuild on **Admin → Fields & exports** to recompute every part.
+3. If a part shows approved and you expected draft, check whether an approver
+   *name* is present — a valid name counts as approval.
 
-## Inventory Is Empty Or Missing Parts
+## Files are missing from a part
 
-Checks:
+1. **Check the file name.** Deliverables must be named
+   `PARTNUMBER_REV_REVISION.ext` — for example `3950-35_REV_A.pdf`, or
+   `3950-35_REV_.pdf` when there is no revision. A drawing image ends `_DWG`.
+2. **Check the folder.** The file must sit in the right group folder (`pdf/`,
+   `step/`, `png/`…).
+3. **Relink them.** Part Details → **Actions → Update files** rescans storage
+   for that part. For a whole database, an administrator can use **Admin →
+   Rescan files**.
+4. **Check your permissions.** Some file categories are permission-gated; you
+   may be seeing a filtered list.
 
-- Remove filters one by one (`Approved`, `Full files`, `Used in job`, search terms).
-- Confirm part revisions exist in database.
-- For scoped users, verify part is inside allowed jobs/orders/customer/supplier scope.
+## The import created parts I did not expect
 
-## Part Detail Missing Files
+Only parts listed in the FLATBOM or TREEBOM are created. If you see unexpected
+parts, look at the BOM files themselves.
 
-Checks:
+If instead you expected a part and it is **missing**, check the import
+warnings for *"Skipped … no BOM entry for …"*. That means a file's name did not
+match any BOM row, so it was skipped rather than inventing a part. CAD temp
+artefacts — names containing `.tmp` — are the usual cause and are correctly
+ignored.
 
-- Confirm file naming includes correct part number and revision.
-- Confirm file is in expected deliverables group.
-- Run `Actions -> Update files` in Part Detail.
-- For assemblies, try recursive file refresh.
+## The import did nothing / did too much
 
-## Drawing Or 3D Preview Missing
+1. **Check the three policies.** Properties, BOM and Files are independent. All
+   three set to *Skip* writes nothing at all.
+2. **Preview first.** The redline lists every intended change before anything
+   is written. If the preview is empty, applying will also do nothing.
+3. **Look for "blocked".** Blocked rows are changes your policy or permissions
+   would not allow — most often an attempt to modify an existing approved part
+   without the override permission.
 
-Drawing:
+## An import says I lack permission
 
-- Ensure drawing PNG/PDF artifacts exist for the same PN/rev.
-- Confirm drawing PNG naming conventions are respected.
+The redline lists required and missing permissions *before* you apply. The
+usual ones:
 
-3D:
+| Missing | Means |
+| --- | --- |
+| `imports.execute_low_risk` | You may preview but not apply |
+| `imports.execute_approved` | The plan replaces existing draft data |
+| `imports.override_approved` | The plan changes an existing **approved** part |
 
-- Ensure at least one of `3mf`, `ply`, `stl` exists for that revision.
-- In 3D tab, pick a file from dropdown if multiple are present.
+The last is deliberate: creating an approved part is allowed for any uploader,
+changing one is not.
 
-## Associated Files Not Visible
+## A Doc Pack is missing sections
 
-Checks:
+1. **Depth** — *top level only* excludes children.
+2. **Consumed / classified / process filters** may be excluding the parts you
+   expect.
+3. **The source files must exist.** A binder cannot include a PDF that was
+   never uploaded. Check the Files tab first.
+4. **Permissions** — you need `exports.run`, `bom.read` and `files.read`.
 
-- Confirm files were imported in `extra/<PN>/<REV_OR__no_rev__>/...`.
-- Confirm revision token (`__no_rev__` for blank rev) is correct.
-- Confirm extra files are enabled by system configuration.
+## A Doc Pack is taking a long time
 
-## Upload Pack Import Errors
+Full-BOM binders on large assemblies genuinely take minutes. The progress bar
+shows what is being prepared. Press **Cancel** to get the page back; you can
+narrow the scope and try again.
 
-Checks:
+## Comments or markups are not visible
 
-- ZIP contains `bom/` plus valid `*_FLATBOM.txt` and `*_TREEBOM.txt`.
-- Deliverables are under valid groups (`pdf`, `dxf`, `step`, etc).
-- File size and count are within configured limits.
-- Paths are not nested unsafely or using blocked patterns.
+You need `comments.read` and `markups.read` respectively. If the tab loads but
+shows an error about a job, the part may be linked to a deleted job — report it
+with the part number so it can be cleaned up.
 
-Actions:
+## Jobs and ordering look wrong
 
-- Download report JSON from results panel.
-- Review `errors` and `warnings` with stage/file context.
+1. Confirm the job BOM matches the part BOM you expect — they are separate, and
+   the job BOM is a snapshot you can edit.
+2. *Parts not yet ordered* and *over-ordered* compare ordered quantity against
+   job requirement. A part ordered against a different job will not count here.
+3. Financial columns may be blank because you lack `orders.financial.read`,
+   not because the data is missing.
 
-## Job Ordering Looks Wrong
+## The add-in cannot connect
 
-If `Parts Not Yet Ordered`, `Parts in Orders`, or `Over-Ordered` seem off:
+1. Confirm the server URL, including `http://` or `https://`.
+2. Confirm the API token is valid — tokens are shown once at creation and can
+   be revoked. Create a new one from **My Account → Tokens** if unsure.
+3. Confirm the machine can reach the server at all (open the URL in a browser).
+4. Check the token has not been revoked by an administrator.
 
-- Check order status. Draft/cancelled orders do not count for ordered coverage.
-- Confirm ordered lines use correct PN/rev.
-- If ordering both children and full parent assemblies, over-order on children is expected behavior and should appear in `Over-Ordered Parts`.
-- Compare Flat vs Tree remaining view to see aggregate vs occurrence-level demand.
+## What to collect before asking for help
 
-## Doc Pack Output Missing Sections
+Include as much of this as you can:
 
-Checks:
-
-- Confirm selected output checkboxes match desired result.
-- For binder, confirm options like `binder_add_*` and selected file types.
-- Confirm required files exist for included BOM members.
-- If flat patterns are missing, verify flat pattern naming/filter settings.
-
-## Add-in Cannot Connect
-
-Checks in add-in Configuration tab:
-
-- Backend URL reachable from workstation.
-- Backend URL is the TinyMRP origin only, not `/api` or `/api/numbering`.
-- Auth token is a TinyMRP API token, not the web password.
-- Auth token is valid and not revoked.
-- `Test connection` reports both health and auth as successful.
-
-If still failing:
-
-- Regenerate token in `/ui/addin/tokens`.
-- If the instance was recreated, or `SECRET_KEY` / `SECURITY_PASSWORD_SALT` changed, old API tokens will no longer verify. Generate a new raw API token and paste it into the add-in.
-- Existing raw API tokens cannot be recovered from the database because only their hash is stored.
-- Ask admin to verify token status in `/ui/admin/addin`.
-
-## Numbering Errors In Add-in
-
-Checks:
-
-- Scheme exists and is active.
-- Required context fields for selected scheme are populated.
-- Validation rules (charset/length/sequence requirement) are satisfied.
-
-Tools:
-
-- Use `Preview` before allocate.
-- Use scheme `Validate` in advanced editor.
-- For rename, run dry run first.
-
-## Installer Or Add-in Not Showing In SolidWorks
-
-Checks:
-
-- Installer run as admin.
-- Add-in enabled in `Tools > Add-Ins` for both Active and Start Up.
-- COM registration exists for add-in GUID.
-
-Repair path:
-
-- Re-run installer.
-- Run manual `RegAsm` register command if needed.
-
-## What To Collect Before Escalation
-
-Include:
-
-- Exact page or tab where issue occurs.
-- Part number and revision.
-- Job/order number if applicable.
-- Timestamp and user email.
-- For upload/import: report JSON.
-- For add-in: last run log from `Open last run log`.
+- The **part number and revision**, exactly as shown.
+- What you expected, and what happened instead.
+- Your **role**, if you know it.
+- For import problems, the **JSON report** from the redline — it captures the
+  whole plan.
+- The time it happened, so an administrator can find it in the audit log.

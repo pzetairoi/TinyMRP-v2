@@ -1,4 +1,4 @@
-# Customization And Admin Settings
+# Configuration
 
 This page is for admin users who maintain TinyMRP operations.
 

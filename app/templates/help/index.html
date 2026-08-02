@@ -1,77 +1,187 @@
 {% extends "security/base.html" %}
-{% from "ui/_components.html" import page_header, card_header, error_state, empty_state %}
+{% from "ui/_components.html" import page_header, error_state %}
 
 {% block title %}Help - TinyMRP{% endblock %}
 
+{% block extra_head %}
+<style>
+  .help-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 1.5rem; }
+  @media (max-width: 991px) { .help-layout { grid-template-columns: minmax(0, 1fr); } }
+
+  .help-nav { position: sticky; top: 1rem; align-self: start; max-height: calc(100vh - 2rem); overflow-y: auto; }
+  .help-nav a { display: block; padding: .2rem .5rem; border-radius: .35rem; color: inherit; text-decoration: none; font-size: .86rem; line-height: 1.35; }
+  .help-nav a:hover { background: rgba(13,110,253,.08); }
+  .help-nav-chapter > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: .35rem; }
+  .help-nav-chapter > summary::-webkit-details-marker { display: none; }
+  .help-nav-chapter > summary::before { content: "\25B8"; color: #adb5bd; font-size: .75rem; transition: transform .15s ease; }
+  .help-nav-chapter[open] > summary::before { transform: rotate(90deg); }
+  .help-nav-chapter > summary a { font-weight: 600; flex: 1; }
+  .help-nav-section { padding-left: 1.4rem !important; color: #6c757d; }
+  .help-nav-section.active { background: rgba(13,110,253,.12); color: #0d6efd; font-weight: 600; }
+
+  /* One chapter = one h1 with its folded sections underneath. */
+  .help-chapter { margin-bottom: 2.25rem; }
+  .help-chapter > h1 { font-size: 1.5rem; font-weight: 700; padding-bottom: .5rem; margin-bottom: .85rem; border-bottom: 2px solid rgba(13,110,253,.25); }
+  .help-intro { color: #495057; margin-bottom: .9rem; }
+
+  .help-section { border: 1px solid #e3e6ea; border-radius: .5rem; margin-bottom: .5rem; background: #fff; }
+  .help-section > summary { cursor: pointer; padding: .6rem .85rem; font-weight: 600; list-style: none; display: flex; align-items: center; gap: .5rem; border-radius: .5rem; }
+  .help-section > summary::-webkit-details-marker { display: none; }
+  .help-section > summary::before { content: "\25B8"; color: #adb5bd; transition: transform .15s ease; flex: 0 0 auto; }
+  .help-section[open] > summary::before { transform: rotate(90deg); }
+  .help-section > summary:hover { background: #f8f9fa; }
+  .help-section[open] > summary { border-bottom: 1px solid #eef0f2; border-radius: .5rem .5rem 0 0; }
+  .help-section-body { padding: .35rem 1.1rem 1rem; }
+
+  .help-section-body img { max-width: 100%; height: auto; display: block; margin: .9rem 0 .35rem; border: 1px solid #dee2e6; border-radius: .45rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  /* Markdown alt text doubles as the caption. */
+  .help-section-body img + em, .help-figure-caption { display: block; font-size: .82rem; color: #6c757d; margin-bottom: .9rem; }
+  .help-section-body h3 { font-size: 1.02rem; font-weight: 600; margin-top: 1.1rem; }
+  .help-section-body table { width: 100%; margin: .75rem 0; font-size: .9rem; border-collapse: collapse; }
+  .help-section-body th, .help-section-body td { border: 1px solid #e9ecef; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  .help-section-body th { background: #f8f9fa; font-weight: 600; }
+  .help-section-body code { background: #f1f3f5; padding: .1rem .3rem; border-radius: .25rem; font-size: .87em; }
+  .help-section-body pre { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: .4rem; padding: .7rem .9rem; overflow-x: auto; }
+  .help-section-body pre code { background: none; padding: 0; }
+
+  /* Markdown blockquotes carry the Note / Caution callouts. */
+  .help-section-body blockquote { border-left: 3px solid #0d6efd; background: #f5f9ff; margin: .85rem 0; padding: .6rem .9rem; border-radius: 0 .35rem .35rem 0; }
+  .help-section-body blockquote p { margin-bottom: .35rem; }
+  .help-section-body blockquote p:last-child { margin-bottom: 0; }
+
+  .help-searching .help-chapter { display: none; }
+  .help-searching .help-chapter.help-hit { display: block; }
+  .help-searching .help-section { display: none; }
+  .help-searching .help-section.help-hit { display: block; }
+
+  @media print {
+    .help-nav, .help-toolbar { display: none; }
+    .help-section-body { display: block !important; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-{% call page_header("Help", "Guides and reference for using TinyMRP.", "Help") %}
+{% call page_header("Help", "How TinyMRP works, screen by screen.", "Help") %}
   {% if toc_meta.generated_at %}
-  <div class="tm-helper-text text-end">
-    <div>Last generated: {{ toc_meta.generated_at }}</div>
-    {% if toc_meta.commit %}<div>Commit: {{ toc_meta.commit }}</div>{% endif %}
+  <div class="tm-helper-text text-end small">
+    <div>Updated {{ toc_meta.generated_at }}</div>
   </div>
   {% endif %}
 {% endcall %}
 
 {% if help_missing %}
   {{ error_state("Help content not generated yet", "Run flask help build and refresh this page to make the built documentation available.") }}
-{% endif %}
+{% else %}
 
-<div class="row g-4">
-  <div class="col-lg-3">
-    <div class="card shadow-sm tm-card h-100">
-      <div class="card-body">
-        {{ card_header("On This Page", "Search headings in the generated documentation.") }}
-        <input id="helpSearch" class="form-control form-control-sm" placeholder="Search headings..." type="search" />
-        <div id="helpSearchEmpty" class="mt-2 d-none">{{ empty_state("No matches", "Try a broader term to find matching headings.") }}</div>
-        <div class="mt-3" style="max-height: 70vh; overflow-y: auto;">
-          <ul id="helpToc" class="list-unstyled small mb-0">
-            {% for item in toc_items %}
-            <li data-toc-item class="mb-1" style="margin-left: {{ (item.level - 2) * 12 }}px;">
-              <a href="#{{ item.id }}" class="link-secondary text-decoration-none">{{ item.title }}</a>
-            </li>
-            {% endfor %}
-          </ul>
-        </div>
-      </div>
+<div class="help-layout">
+  <nav class="help-nav d-none d-lg-block" aria-label="Help contents">
+    <div class="fw-semibold small text-uppercase text-muted mb-2">Contents</div>
+    {% for chapter in toc_items %}
+    <details class="help-nav-chapter"{% if loop.first %} open{% endif %}>
+      <summary><a href="#{{ chapter.id }}">{{ chapter.title }}</a></summary>
+      {% for section in chapter.sections %}
+      <a class="help-nav-section" href="#{{ section.id }}">{{ section.title }}</a>
+      {% endfor %}
+    </details>
+    {% endfor %}
+  </nav>
+
+  <div>
+    <div class="help-toolbar d-flex flex-wrap gap-2 align-items-center mb-3">
+      <input id="helpSearch" class="form-control form-control-sm" style="max-width: 320px"
+             placeholder="Search the help..." type="search" aria-label="Search help" />
+      <button id="helpExpand" class="btn btn-sm btn-outline-secondary" type="button">Expand all</button>
+      <button id="helpCollapse" class="btn btn-sm btn-outline-secondary" type="button">Collapse all</button>
+      <span id="helpCount" class="small text-muted ms-auto" aria-live="polite"></span>
     </div>
-  </div>
-  <div class="col-lg-9">
-    <div class="card shadow-sm tm-card">
-      <div class="card-body">
-        {{ card_header("Documentation") }}
-        <div id="helpContent" class="help-content">
-          {{ help_html|safe }}
-        </div>
-      </div>
+
+    <div id="helpContent" class="help-content">
+      {{ help_html|safe }}
     </div>
   </div>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
   (function () {
-    var input = document.getElementById('helpSearch');
-    var list = document.getElementById('helpToc');
-    var empty = document.getElementById('helpSearchEmpty');
-    if (!input || !list) return;
+    var content = document.getElementById('helpContent');
+    if (!content) return;
+    var search = document.getElementById('helpSearch');
+    var count = document.getElementById('helpCount');
+    var sections = Array.prototype.slice.call(content.querySelectorAll('.help-section'));
+    var chapters = Array.prototype.slice.call(content.querySelectorAll('.help-chapter'));
 
-    var items = Array.prototype.slice.call(list.querySelectorAll('[data-toc-item]'));
-    var filter = function () {
-      var q = (input.value || '').toLowerCase().trim();
-      var visible = 0;
-      items.forEach(function (item) {
-        var text = (item.textContent || '').toLowerCase();
-        var show = !q || text.indexOf(q) !== -1;
-        item.classList.toggle('d-none', !show);
-        if (show) visible += 1;
-      });
-      if (empty) {
-        empty.classList.toggle('d-none', visible > 0);
+    function setAll(open) {
+      sections.forEach(function (s) { s.open = open; });
+    }
+    var expand = document.getElementById('helpExpand');
+    var collapse = document.getElementById('helpCollapse');
+    if (expand) expand.addEventListener('click', function () { setAll(true); });
+    if (collapse) collapse.addEventListener('click', function () { setAll(false); });
+
+    // Search the whole text, not just headings, and open whatever matched.
+    function filter() {
+      var q = (search.value || '').toLowerCase().trim();
+      if (!q) {
+        content.classList.remove('help-searching');
+        sections.concat(chapters).forEach(function (el) { el.classList.remove('help-hit'); });
+        setAll(false);
+        if (sections.length) sections[0].open = true;
+        if (count) count.textContent = '';
+        return;
       }
-    };
-    input.addEventListener('input', filter);
+      content.classList.add('help-searching');
+      var hits = 0;
+      chapters.forEach(function (c) { c.classList.remove('help-hit'); });
+      sections.forEach(function (s) {
+        var match = (s.textContent || '').toLowerCase().indexOf(q) !== -1;
+        s.classList.toggle('help-hit', match);
+        s.open = match;
+        if (match) {
+          hits += 1;
+          var chapter = s.closest('.help-chapter');
+          if (chapter) chapter.classList.add('help-hit');
+        }
+      });
+      if (count) count.textContent = hits ? hits + ' section' + (hits === 1 ? '' : 's') : 'No matches';
+    }
+    if (search) search.addEventListener('input', filter);
+
+    // A link into a folded section must open it before jumping.
+    function revealFromHash() {
+      var id = (location.hash || '').replace('#', '');
+      if (!id) return;
+      var target = document.getElementById(id) || document.getElementById('sec-' + id);
+      if (!target) return;
+      var section = target.closest ? target.closest('.help-section') : null;
+      if (section) section.open = true;
+      target.scrollIntoView({ block: 'start' });
+    }
+    window.addEventListener('hashchange', revealFromHash);
+    revealFromHash();
+
+    // Keep the sidebar in step with what is on screen, and open the chapter
+    // that owns the visible section.
+    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.help-nav-section'));
+    var byId = {};
+    navLinks.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+    if (navLinks.length && 'IntersectionObserver' in window) {
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) return;
+          var link = byId[entry.target.id];
+          if (!link) return;
+          navLinks.forEach(function (a) { a.classList.remove('active'); });
+          link.classList.add('active');
+          var chapter = link.closest('.help-nav-chapter');
+          if (chapter) chapter.open = true;
+        });
+      }, { rootMargin: '0px 0px -75% 0px' });
+      content.querySelectorAll('.help-section-title').forEach(function (el) { observer.observe(el); });
+    }
   })();
 </script>
 {% endblock %}

@@ -193,6 +193,11 @@ DEFAULT_FIELDS: List[Dict[str, Any]] = [
         "label": "Process",
         "kind": "builtin",
         "data_type": "text",
+        # Normalised to a canonical list on write and indexed, so filtering and
+        # sorting query it directly. Aliases (process2, secondprocess, ...) are
+        # collapsed by the resolver and never queried.
+        "source_path": "part.processes",
+        "fallback_paths": ["part.processes"],
         "source_locked": True,
         "sortable": True,
         "filterable": True,
