@@ -165,14 +165,14 @@ migration as frontend work.
 
 ---
 
-## Not exceptions — upgrade these instead
+## Remediation status — do not create exceptions for these
 
 Listed so nobody files an unnecessary acceptance. Detail in
 `dependency_advisory_triage.md`.
 
 | Package | Action | Note |
 | --- | --- | --- |
-| `pillow` 11.3.0 | upgrade → 12.3.0 | 25 advisories; **applicable** — decodes user uploads |
-| `cryptography` 43.0.1 | upgrade → 48.0.1 | includes the bundled-OpenSSL finding |
-| `gunicorn` 21.2.0 | upgrade → 22.0.0 | request smuggling; relevant behind Caddy |
-| `PyPDF2` 3.0.1 | migrate → `pypdf` | PyPDF2 is EOL at 3.0.1; 12 import sites |
+| `pillow` 11.3.0 | **done** → 12.3.0 (`3346b51`) | 25 applicable upload-decoder rows cleared |
+| `cryptography` 43.0.1 | **done** → 48.0.1 + CFFI 2.0.0 (`3346b51`) | bundled-OpenSSL and related rows cleared |
+| `gunicorn` 21.2.0 | **done** → 22.0.0 (`3346b51`) | request-smuggling rows cleared; Caddy path passed |
+| `PyPDF2` 3.0.1 | **pending** → `pypdf` | PyPDF2 is EOL at 3.0.1; 12 import sites |

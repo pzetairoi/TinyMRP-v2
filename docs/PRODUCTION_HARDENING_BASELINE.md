@@ -178,7 +178,8 @@ operators can rotate deployed integrations without an unannounced outage.
 
 The API-token portion of `IAM-REV-01` is closed: deactivation and ordinary,
 administrator, CLI and disposable-test credential changes revoke every token
-for the affected user. Browser-session invalidation remains open for Phase 1C.
+for the affected user. Browser-session invalidation was subsequently closed by
+Phase 1C.
 
 Final verification evidence:
 
@@ -201,23 +202,51 @@ Final verification evidence:
   preserves update/rollback/doctor behavior through six regression contracts.
 
 Residual Phase 1B risk: legacy no-expiry tokens remain valid until operators
-rotate or revoke them; the UI makes them identifiable. Sessions are not revoked
-by these events until Phase 1C, strict-mode browser compatibility remains Phase
-2, and add-in secret storage remains Phase 7.
+rotate or revoke them; the UI makes them identifiable. Strict-mode browser
+compatibility remains Phase 2, and add-in secret storage remains Phase 7.
+
+## Phase 1C completion evidence (2026-08-03)
+
+`IAM-REV-01` is closed. TinyMRP now uses Flask-Security's persisted
+`fs_uniquifier` as a server-side browser-session version and rotates it with a
+compare-and-set update whenever credentials or authorization state change. All
+previous sessions and remember cookies stop resolving immediately; deleted and
+inactive users continue to fail closed in Flask-Security's loader. Reactivation
+rotates again, preventing a previously issued cookie from becoming valid later.
+
+The control covers self-service, administrator and CLI password changes;
+deactivation/reactivation; user role assignment and role-permission changes;
+canonical role restoration; custom-role purge demotion; and disposable
+permission-test/demo credential refreshes. Self-service password change signs
+the current browser out explicitly. `session.security_event_revoke` audit events
+record the target, reason and mechanism without recording either the previous or
+replacement identifier.
+
+Eleven regressions cover active, inactive/reactivated, deleted, expired-cookie,
+explicitly revoked, self/admin/CLI password, role assignment/definition and
+canonical-role restore cases. The affected security set passed 123 tests and the
+complete host suite passed with `615 passed, 1 skipped`. The same combined tree
+exited zero under the built Python 3.11 production image. Ruff, scoped mypy,
+Bandit `-ll`, changed-file Black, Compose and deployment gates passed.
+
+The protected Caddy path was unchanged. Main, one-folder and rendered guided-VPS
+Compose configurations parsed; all deployment Bash/PowerShell scripts passed
+syntax checks; ShellCheck passed at error level; the six Caddy/VPS contracts
+passed; and a rendered internal-TLS route passed `caddy validate`.
 
 ## Phase 3B advisory-triage evidence (2026-08-03)
 
 The failing dependency gates were re-run and every current advisory was mapped
-to reachable product features. `pip-audit` still reports 34 rows across five
-packages and the production frontend audit still reports two high React Router
-rows; triage alone does not close either gate.
+to reachable product features. At triage, `pip-audit` reported 34 rows across
+five packages and the production frontend audit reported two high React Router
+rows; triage alone did not close either gate.
 
-Four Python findings have actionable remedies: Pillow 12.3.0, gunicorn 22.0.0
-and cryptography 48.0.1 are straight runtime-pin upgrades, while the EOL
-`PyPDF2` package must migrate to `pypdf` across 12 import sites. Pillow is the
-highest priority because user-supplied images reach native decoders; gunicorn's
-request-framing findings are relevant to the protected Caddy reverse-proxy
-topology.
+Four Python findings had actionable remedies: Pillow 12.3.0, gunicorn 22.0.0
+and cryptography 48.0.1 were straight runtime-pin upgrades and are now
+integrated, while the EOL `PyPDF2` package still must migrate to `pypdf` across
+12 import sites. Pillow was highest priority because user-supplied images reach
+native decoders; gunicorn's request-framing findings were relevant to the
+protected Caddy reverse-proxy topology.
 
 Two findings need explicit, time-limited exceptions if released before an
 upstream/package migration is available. Flask-Security-Too's medium finding is
@@ -230,6 +259,14 @@ a human risk owner supplies acceptance and expiry dates. Full evidence is in
 `docs/security/dependency_advisory_triage.md` and
 `docs/security/risk_acceptance_template.md`.
 
+The three straight upgrades were integrated as `3346b51`: Pillow 12.3.0,
+gunicorn 22.0.0 and cryptography 48.0.1, plus CFFI 2.0.0 required by
+cryptography's resolver metadata. The production image built, `pip check`
+passed, the complete combined Python 3.11 suite exited zero, and a disposable
+Caddy-to-Gunicorn request returned healthy. `pip-audit` now reports **2 findings
+across 2 packages**: the proposed Flask-Security-Too exception and the separately
+tracked PyPDF2-to-`pypdf` migration.
+
 ## Open production blockers
 
 The identifier should be used in commits, reviews and risk decisions.
@@ -238,11 +275,11 @@ The identifier should be used in commits, reviews and risk decisions.
 | --- | --- | --- | --- | --- |
 | SEC-XSS-01 | P0 | Closed in `a7fa72d` | 1A | Stored XSS in job/order line rendering |
 | SEC-CSP-01 | P1 | Open | 1A residual/2 | Inline scripts and handlers still require CSP `unsafe-inline` |
-| IAM-REV-01 | P0 | Partial: API tokens closed; sessions open | 1C | Deactivated users and credential changes still require server-side browser-session invalidation |
+| IAM-REV-01 | P0 | Closed 2026-08-03 (`7cd50bd`) | 1C | API-token and browser-session revocation on credential/security-state changes |
 | IAM-TOKEN-01 | P0 | Closed 2026-08-03 (`49cf24a`, `49ee2b4`) | 1B | Expiring token policy and complete token lifecycle controls |
 | AUTH-MODE-01 | P0 | Open | 2 | Strict mode is incompatible with normal browser and public-share API flows |
 | DEPLOY-SEED-01 | P0 | Closed 2026-08-03 | 3A | Canonical, idempotent, fail-closed initialization and fresh-install smoke |
-| SUPPLY-PY-01 | P0 | Open; triaged | 3B | Remediable Python upgrades/migration remain; proposed WebAuthn exception needs human owner/date |
+| SUPPLY-PY-01 | P0 | Partial: 2/2 remain | 3B | PyPDF2 migration remains; proposed WebAuthn exception needs human owner/date |
 | SUPPLY-NPM-01 | P0 | Open; triaged | 3B/6 | Two RSC-only React Router rows remain; proposed exception needs human owner/date and v8 migration tracking |
 | SUPPLY-IMM-01 | P1 | Open | 3C | Base images and Actions are not pinned to immutable digests/SHAs |
 | IMPORT-DOS-01 | P0 | Open | 4A | No cumulative uncompressed/archive compression-ratio limit |
@@ -287,9 +324,9 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 7. Use Python 3.11 and Node 24 for release evidence, regardless of host defaults.
 8. Preserve the baseline tag; do not move or recreate it.
 
-The recommended next implementation is Phase 1C, followed by Phase 2. Phase 3B
-advisory research is integrated; its three straight runtime upgrades may proceed
-in an independently claimed worktree while the PyPDF migration remains separate.
+The recommended next implementation is Phase 2. The remaining PyPDF2-to-`pypdf`
+Phase 3B migration may proceed in an independently claimed worktree; both
+proposed vulnerability exceptions still require human ownership and expiry.
 
 ## Residual Phase 0 limitations
 

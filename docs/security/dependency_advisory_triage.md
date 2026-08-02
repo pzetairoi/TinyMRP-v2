@@ -7,10 +7,9 @@ Evidence was originally collected **2026-08-03** against commit `de8d5a5` on
 availability and source applicability were independently revalidated after
 Phase 1B and before integration in commit `50d75e7`.
 
-This document is **analysis only**. It changes no manifest, workflow or
-application code. Its purpose is to say, for every advisory currently failing a
-vulnerability gate, whether TinyMRP is actually affected and what the remedy is —
-so Phase 3B upgrades are decided on evidence rather than on the raw gate count.
+The original triage commit was **analysis only**. This document now also records
+the reviewed remediation status after runtime upgrade commit `3346b51`, while
+preserving the applicability evidence that drove each decision.
 
 ## How this was produced
 
@@ -18,6 +17,10 @@ so Phase 3B upgrades are decided on evidence rather than on the raw gate count.
 pip-audit -r requirements.txt --format json     # 34 entries / 5 packages
 cd frontend && npm audit --omit=dev --audit-level=high   # 2 high entries
 ```
+
+After `3346b51`, the same Python audit reports **2 findings / 2 packages**.
+The frontend result remains 2 high entries because its separately proposed
+exception and framework migration have not changed.
 
 Advisory detail was pulled from the GitHub Advisory API and OSV. Applicability
 was then checked against the source tree; every claim below cites what was
@@ -30,24 +33,26 @@ inspected.
 
 | Package | Pinned | Entries | Applicable? | Remedy | Blocked? |
 | --- | --- | --- | --- | --- | --- |
-| pillow | 11.3.0 | 25 | **YES — highest priority** | upgrade to 12.3.0 | no |
-| cryptography | 43.0.1 | 5 rows / 4 distinct | Partly (transport/OpenSSL) | upgrade to 48.0.1 | no |
-| gunicorn | 21.2.0 | 2 | Conditional on proxy topology | upgrade to 22.0.0 | no |
+| pillow | **12.3.0** | 0 | Was applicable | **remediated in `3346b51`** | no |
+| cryptography | **48.0.1** + CFFI 2.0.0 | 0 | Was partly applicable | **remediated in `3346b51`** | no |
+| gunicorn | **22.0.0** | 0 | Was conditional on proxy topology | **remediated in `3346b51`** | no |
 | PyPDF2 | 3.0.1 | 1 | Yes, low | **package rename → `pypdf`** | needs code change |
 | Flask-Security-Too | 5.8.1 | 1 | **NO — feature not enabled** | none available | exception |
 | react-router(-dom) | 7.18.1 | 2 | **NO — unstable RSC APIs only** | none reachable | exception |
 
-Net: **4 of 6 are ordinary upgrades**, one needs a small migration, and only two
-warrant a documented risk acceptance. The gate count (34) badly overstates the
-real exposure, because 25 of the 34 are a single package and two of the
-remaining findings do not apply to this application at all.
+Net after the straight upgrades: the Python audit is down from **34/5 to 2/2**.
+PyPDF2 still needs its separately tested package migration, while
+Flask-Security-Too and React Router retain proposed (not accepted) exceptions.
 
 ---
 
-## 1. Pillow 11.3.0 — 25 advisories — APPLICABLE, fix available
+## 1. Pillow 11.3.0 → 12.3.0 — REMEDIATED
 
 **Remedy: upgrade to `pillow==12.3.0`.** Verified installable
 (`pip install --dry-run pillow==12.3.0` succeeds).
+
+**Implemented in `3346b51`.** The image/upload/docpack/markup-focused set passed
+124 tests on Python 3.11; the complete combined hardening tree also exited zero.
 
 ### Why it applies
 
@@ -78,17 +83,22 @@ This is the one Python finding that maps to a real, remotely-reachable attack
 path in this product, because upload is a core workflow. It should be treated as
 the priority item of Phase 3B rather than being averaged into a count of 34.
 
-### Verification required with the upgrade
+### Verification performed with the upgrade
 
-Pillow 11 → 12 is a major bump. Re-run the image-touching suites — thumbnail
-generation, docpack rendering, markup documents and upload-pack import — not just
-the aggregate suite. Confirm the pinned `reportlab`/`svglib` still interoperate.
+The image-touching suites covered thumbnail generation, docpack rendering,
+markup documents and upload-pack import in addition to the aggregate suite. The
+pinned `reportlab`/`svglib` combination remained compatible.
 
 ---
 
-## 2. cryptography 43.0.1 — 5 audit rows / 4 distinct advisories — PARTLY APPLICABLE, fix available
+## 2. cryptography 43.0.1 → 48.0.1 — REMEDIATED
 
 **Remedy: upgrade to `cryptography==48.0.1`.** Verified installable.
+
+**Implemented in `3346b51`.** Resolver testing exposed a required compatibility
+change: cryptography 48.0.1 requires `cffi>=2.0.0`, so the prior exact CFFI
+1.17.1 pin produced `ResolutionImpossible`. CFFI 2.0.0 was upgraded in the same
+runtime-only commit; Argon2, `pip check`, and the complete suite passed.
 
 | Advisory | CVE | Note | Fixed in |
 | --- | --- | --- | --- |
@@ -108,9 +118,13 @@ upgrade with no code change, so there is no reason to defer it.
 
 ---
 
-## 3. gunicorn 21.2.0 — 2 advisories — CONDITIONAL, fix available
+## 3. gunicorn 21.2.0 → 22.0.0 — REMEDIATED
 
 **Remedy: upgrade to `gunicorn==22.0.0`.** Verified installable.
+
+**Implemented in `3346b51`.** Gunicorn's configuration check passed, all six
+guided VPS/Caddy contracts and rendered configurations passed, and an actual
+disposable Caddy → Gunicorn 22 → TinyMRP health request returned successfully.
 
 | Advisory | CVE | Issue | Fixed in |
 | --- | --- | --- | --- |
@@ -242,12 +256,11 @@ in Phase 6 rather than in a dependency-bump commit.
 
 Ordered by real risk, not by advisory count:
 
-1. **`pillow` → 12.3.0** — only finding with a remotely-reachable memory-safety
-   path through a core workflow. Re-test image/docpack/upload suites.
-2. **`gunicorn` → 22.0.0** — request smuggling matters given the Caddy topology.
-   Validate a rendered VPS/Caddy deployment.
-3. **`cryptography` → 48.0.1** — clean upgrade, removes the bundled-OpenSSL
-   finding.
+1. **DONE — `pillow` → 12.3.0** — image/docpack/upload suites passed.
+2. **DONE — `gunicorn` → 22.0.0** — rendered and live disposable Caddy paths
+   passed.
+3. **DONE — `cryptography` → 48.0.1 + CFFI 2.0.0** — resolver, Argon2 and full
+   suite passed.
 4. **`PyPDF2` → `pypdf`** — separate commit; 12 import sites, DoS-only severity.
 5. **File two risk acceptances** — Flask-Security-Too (WebAuthn off) and
    react-router (RSC unused).
@@ -255,10 +268,12 @@ Ordered by real risk, not by advisory count:
 Keep runtime and dev-tooling upgrades in separate commits — the roadmap asks for
 this and the earlier batch on `main` did not honour it.
 
-### What this does not do
+### Remaining scope
 
-- Changes no pin. Every upgrade above still needs its own tested commit.
-- Does not close `SUPPLY-PY-01` or `SUPPLY-NPM-01`. Even after items 1–4, the
+- `SUPPLY-PY-01` and `SUPPLY-NPM-01` remain open. After items 1–3, the
+  Python gate reports only PyPDF2 and Flask-Security-Too; completing item 4
+  should leave only Flask-Security-Too.
+- Even after item 4, the
   Python gate still reports the Flask-Security-Too entry and the frontend gate
   still reports the two react-router entries, because neither has a reachable
   fix. **Those gates cannot go green by upgrading alone** — they need the filed
@@ -271,5 +286,5 @@ this and the earlier batch on `main` did not honour it.
 - `react-router-dom` publishes an 8.x, or the app migrates to `react-router` v8.
 - Any change that enables WebAuthn → the Flask-Security exception is void.
 - Any change that adopts React Router RSC APIs → the react-router exception is void.
-- Re-run both gates before every release regardless; these counts are a snapshot
-  dated 2026-08-03.
+- Re-run both gates before every release regardless; the latest 2026-08-03
+  Python snapshot is 2 findings across 2 packages.

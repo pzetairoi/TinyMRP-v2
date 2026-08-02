@@ -5,6 +5,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Security (Phase 1C — browser-session lifecycle)
+- Password changes, administrative resets, deactivation/reactivation, role
+  assignment or permission changes, CLI security changes, and disposable-user
+  credential refreshes now rotate Flask-Security's server-side session identity.
+  Existing browser sessions and remember cookies stop resolving immediately.
+- Self-service password changes explicitly sign the user out everywhere. Deleted
+  users fail closed, and reactivation rotates again so an old cookie cannot revive.
+- Session revocations are audit logged with their reason and mechanism. The audit
+  UI gives these events a human-readable access/security label.
+- Permission-test pages containing generated credentials now send
+  `Cache-Control: private, no-store`.
+
+### Security (Phase 3B — runtime dependency remediation)
+- Upgraded Pillow 11.3.0 to 12.3.0, cryptography 43.0.1 to 48.0.1, CFFI 1.17.1
+  to 2.0.0, and Gunicorn 21.2.0 to 22.0.0. CFFI 2.0 is required by the upgraded
+  cryptography wheel.
+- Python audit findings fell from 34 rows across five packages to two findings
+  across two packages. The remaining PyPDF2 finding requires the separately
+  tracked `pypdf` migration; the Flask-Security-Too WebAuthn-only finding has no
+  patched release and remains a proposed, unaccepted exception.
+- The production Python 3.11/Node 24 image, complete backend suite, image/PDF
+  workflows, and the guided VPS/Caddy configuration and live proxy path passed.
+
 ### Security (Phase 1B — API-token lifecycle)
 - New API tokens expire after 90 days by default and cannot exceed the
   operator-configured 365-day maximum. Invalid lifetime configuration fails
@@ -17,8 +40,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
   and lifecycle status. Security administrators can revoke one token or perform a
   global API-token logout, but cannot mint or retrieve another user's secret.
 - Token secrets remain hash-only at rest and are returned once. Lifecycle actions
-  are audit logged with bearer actors attributed correctly. Session invalidation
-  remains the separate Phase 1C control.
+  are audit logged with bearer actors attributed correctly. Browser-session
+  invalidation is now implemented by Phase 1C.
 
 ### Fixed
 - Container initialization now uses canonical standard roles, creates a fresh

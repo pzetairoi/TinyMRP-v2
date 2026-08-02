@@ -21,7 +21,12 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  P1C-SESSION-LIFECYCLE  IN PROGRESS  owner: Codex /root
+  None during the Phase 1C/P3B evidence closure checkpoint. Next claimable work:
+  Phase 2 strict-mode authentication (primary) and the separate PyPDF2-to-pypdf
+  migration (parallel, non-overlapping) after this checkpoint is pushed.
+
+Completed workstream scope:
+  P1C-SESSION-LIFECYCLE  DONE 2026-08-03  owner: Codex /root
     Scope: central fs_uniquifier rotation, browser-session invalidation for
            password/security-state changes, lifecycle audit and regressions.
     Reserved files:
@@ -43,22 +48,22 @@ Active workstreams as of 2026-08-03:
       docs/PRODUCTION_HARDENING_BASELINE.md
       CHANGELOG.md
       hardeningplan.txt
-  P3B-RUNTIME-UPGRADES  IN PROGRESS  owner: /root/p3b_runtime_upgrades
+  P3B-RUNTIME-UPGRADES  DONE/INTEGRATED 2026-08-03
+    owner: /root/p3b_runtime_upgrades; integrated by Codex /root
     Scope: Pillow 12.3.0, gunicorn 22.0.0 and cryptography 48.0.1 pins plus the
            required cffi 2.0.0 compatibility pin; focused compatibility/security
            tests and protected Caddy evidence.
     Reserved files:
       requirements.txt
-    Read-only verification may use all tests and deployment scripts. The owner
-    must work in a separate worktree/branch, must not edit application/auth code,
-    tests, generated assets, docs, manifests other than requirements.txt, or this
-    plan, and must return one commit for primary review.
+    Read-only verification used tests and deployment scripts. Work was completed
+    in a separate worktree/branch without editing application or auth code,
+    tests, generated assets, docs or this plan. Commit 9260513 was
+    reviewed and integrated as 3346b51.
     FINDING cryptography 48.0.1 requires cffi>=2.0.0 on CPython; retaining the
             prior cffi 1.17.1 pin makes the production Docker resolver fail with
             ResolutionImpossible. cffi 2.0.0 is therefore an in-scope required
             compatibility update, not an unrelated dependency refresh.
 
-Completed workstream scope:
   P1B-TOKEN-LIFECYCLE  DONE 2026-08-03  owner: Codex /root
     Scope: token ownership/active-user enforcement, bounded lifetime, rotation,
            revocation triggers, management UX, audit trail and regression tests.
@@ -97,6 +102,12 @@ Completed workstream scope:
                       contract, config-render and deployment-script checks.
 
 Completed workstreams:
+  P1C-SESSION-LIFECYCLE  DONE 2026-08-03  commit: 7cd50bd
+    Server-side session version rotation, lifecycle audit, 11 regressions, full
+    suite and protected VPS/Caddy gates; IAM-REV-01 closed.
+  P3B-RUNTIME-UPGRADES  DONE/INTEGRATED 2026-08-03  commit: 3346b51
+    Pillow/cryptography/CFFI/Gunicorn upgraded; production and Caddy validation;
+    pip-audit reduced from 34 findings/5 packages to 2/2.
   P1B-TOKEN-LIFECYCLE  DONE 2026-08-03  commits: 49cf24a, 49ee2b4
     Expiring tokens, owner enforcement, lifecycle UI, revocation triggers,
     global API-token logout, full suite and protected VPS/Caddy gates.
@@ -125,24 +136,25 @@ Parallel workstream definition (complete; retained for scope history):
     controls, owner and expiry for primary review.
 
 Next integration order:
-  Phase 1C session lifecycle is the next primary workstream. The independent
-  Pillow/gunicorn/cryptography runtime-pin upgrade may run in parallel once
-  claimed; PyPDF2-to-pypdf remains a separate later workstream.
+  Claim Phase 2 strict-mode authentication as the next primary workstream.
+  PyPDF2-to-pypdf may run in parallel with a separate worktree/file claim.
 ========================================================================
 
 Completed so far:
+  Phase 1C  DONE 2026-08-03 (Codex)
+                   IAM-REV-01 closed; all browser sessions/remember cookies are
+                   invalidated on credential and authorization-state changes
   Phase 1B  DONE 2026-08-03 (Codex; implementation checkpoint by user)
-                   IAM-TOKEN-01 closed; IAM-REV-01 API-token portion closed;
-                   session portion remains Phase 1C
+                   IAM-TOKEN-01 closed; IAM-REV-01 API-token portion closed
   Phase 3A  DONE 2026-08-03 (Codex + parallel Caddy audit)
                    DEPLOY-SEED-01 closed; evidence below and in
                    docs/PRODUCTION_HARDENING_BASELINE.md
   Phase 1A  DONE   stored XSS in job/order forms + 17 regression tests (Claude)
                    residual: CSP unsafe-inline removal NOT started
-  Phase 3B  PARTIAL earlier dependency upgrades plus completed advisory triage
-                   (Claude + Codex review; triage integrated as 50d75e7)
-                   residual: four remediable package changes remain; two
-                   proposed exceptions need a human owner/date before release
+  Phase 3B  PARTIAL advisory triage + straight runtime upgrades integrated
+                   (50d75e7, 608be56, 3346b51)
+                   residual: PyPDF2-to-pypdf migration; two proposed exceptions
+                   need a human owner/date before release
   Phase 3C  PARTIAL actions on current majors, but SHA pinning + digest pinning
                    + blocking gates all still TODO
   Phase 0   DONE 2026-08-02 (Codex)
@@ -170,24 +182,27 @@ Phase 0 completion details:
        shell syntax, isolated Caddy render/validate and rendered VPS Compose.
   DONE Added the audit baseline and explicit release-blocker checklist under
        docs/PRODUCTION_HARDENING_BASELINE.md.
-  OPEN Supply-chain gates: pip-audit 34 entries/5 packages; npm production
-       audit 2 high entries. These are Phase 3B blockers.
+  BASELINE Supply-chain gates were pip-audit 34 entries/5 packages and npm
+           production audit 2 high entries. Current Python result is 2/2 after
+           3346b51; frontend remains 2 high.
 
 Phase 3B advisory-triage record (integrated 2026-08-03):
   EVIDENCE docs/security/dependency_advisory_triage.md and
            docs/security/risk_acceptance_template.md, integrated in 50d75e7
            and corrected against the current Phase 1B tree in the following
            documentation checkpoint.
-  VERIFIED pip-audit remains 34 rows across five packages. cryptography accounts
-           for five rows but four distinct advisory IDs because PYSEC-2026-35 is
-           duplicated. npm production audit remains two high React Router rows.
-  ACTION Pillow 11.3.0 -> 12.3.0 is highest priority: user-controlled images
-         reach native decoders. Test upload, thumbnails, markup and docpacks.
-  ACTION gunicorn 21.2.0 -> 22.0.0 addresses request smuggling relevant behind
-         the protected Caddy proxy. Re-run rendered VPS Compose/Caddy and the six
-         deployment-contract tests.
-  ACTION cryptography 43.0.1 -> 48.0.1 clears the bundled-OpenSSL and related
-         rows. Keep these three straight runtime upgrades in one bounded commit.
+  BASELINE pip-audit reported 34 rows across five packages. cryptography
+           accounted for five rows but four distinct advisory IDs because
+           PYSEC-2026-35 was duplicated. npm production audit was two high rows.
+  DONE Pillow 11.3.0 -> 12.3.0, gunicorn 21.2.0 -> 22.0.0 and cryptography
+       43.0.1 -> 48.0.1 were integrated as 3346b51. cryptography required CFFI
+       1.17.1 -> 2.0.0; retaining the old exact pin caused ResolutionImpossible.
+  VERIFIED Production Python 3.11/Node 24 image build, pip check, 124 focused
+           image/upload/docpack/markup tests, combined full suite, Gunicorn
+           config, six deployment contracts, rendered Compose/Caddy and a live
+           disposable Caddy -> Gunicorn 22 health request all passed.
+  CURRENT pip-audit is 2 findings across 2 packages: PyPDF2 and the proposed
+          Flask-Security-Too exception. npm remains two high React Router rows.
   ACTION Replace EOL PyPDF2 with pypdf in a separate commit. There are 12 import
          sites: seven in docpacks.py, four in order_scope.py and one in
          markup_documents.py. Test crafted/invalid PDFs and binder generation.
@@ -253,9 +268,9 @@ Protected owner requirement added 2026-08-02:
   and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
 
 Current work:
-  Phase 1B is DONE and P3B advisory triage is integrated. Phase 1C session
-  lifecycle is next. The straight P3B runtime upgrades are safe to assign to a
-  separate worktree after the board records non-overlapping file ownership.
+  Phase 1C and the P3B straight runtime upgrades are DONE and integrated. The
+  next primary phase is Phase 2 strict-mode authentication. The remaining P3B
+  PyPDF migration may be claimed in parallel after this closure commit.
 
 Phase 1B decision log (recorded before implementation, 2026-08-03):
   * New API tokens expire after 90 days by default and may not exceed 365 days;
@@ -272,8 +287,8 @@ Phase 1B decision log (recorded before implementation, 2026-08-03):
     guarantees that a concurrent loser token is revoked. Administrators may
     explicitly revoke one user's token or all active API tokens, but may not
     mint or retrieve another user's secret.
-  * Phase 1B closes API-token portions of IAM-REV-01. IAM-REV-01 itself remains
-    open until Phase 1C implements server-side session invalidation.
+  * Phase 1B closed the API-token portion of IAM-REV-01; Phase 1C subsequently
+    closed its browser-session portion.
 
 Phase 1B completion record (2026-08-03):
   IMPLEMENTED Additive token lifecycle metadata/index, active/missing owner
@@ -307,12 +322,11 @@ Phase 1B completion record (2026-08-03):
            bootstrap, default 90-day token, login, health, protected API,
            restart, log secrecy and fail-closed invalid-bootstrap checks.
   RESIDUAL Legacy no-expiry tokens remain identifiable and valid until rotated;
-           browser-session revocation is Phase 1C; strict browser/API compatibility
-           is Phase 2; add-in secret storage is Phase 7.
-  NEXT Claim and implement Phase 1C. In parallel, upgrade only Pillow, gunicorn
-       and cryptography in a separately owned P3B runtime-pin workstream.
+           strict browser/API compatibility is Phase 2; add-in secret storage is
+           Phase 7. Browser-session revocation was closed by Phase 1C.
+  NEXT Complete (historical). Continue with Phase 2.
 
-Phase 1C progress record (2026-08-03; implementation checkpoint):
+Phase 1C completion record (2026-08-03; commit 7cd50bd):
   IMPLEMENTED Central compare-and-set fs_uniquifier rotation invalidates every
               existing Flask-Security browser session and remember cookie without
               changing the stable user database identity. Concurrent rotations
@@ -336,8 +350,18 @@ Phase 1C progress record (2026-08-03; implementation checkpoint):
          assignment/definition and canonical-role restore cases. The affected
          identity/admin/CLI/impersonation/purge/RLS/role/token set passes with
          123 tests. Ruff and changed-file formatting checks pass.
-  PENDING Full Python 3.11 suite, production-image checks, complete protected
-          VPS/Caddy deployment gates, documentation closure and final commit.
+  VERIFIED Full host suite: 615 passed, 1 skipped. The combined Phase 1C plus
+           upgraded-runtime tree exited zero under the built Python 3.11/Node 24
+           production image. Ruff, scoped mypy, Bandit -ll and changed-file
+           Black passed; the production image resolved all pins and pip check
+           reported no broken requirements.
+  VERIFIED Main, one-folder and rendered guided-VPS Compose passed; all deploy/
+           docker Bash scripts passed syntax and ShellCheck error-level; deploy
+           PowerShell parsed; six VPS/Caddy contracts passed; the rendered
+           internal-TLS route passed caddy validate. FILES_ACCEL_REDIRECT_PREFIX
+           remains empty and update/rollback/doctor contracts are unchanged.
+  CLOSED IAM-REV-01. Residual authentication-mode compatibility is Phase 2;
+         legacy API tokens and add-in storage remain Phase 1B/7 residuals.
 ========================================================================
 
 Progressive mitigation roadmap
@@ -405,7 +429,7 @@ Completed in parallel with Codex's Phase 0; no overlap with Phase 0 files.
        author-written with no untrusted interpolation, so they are not an XSS sink
        today, but they are what blocks CSP tightening above.
 
-1B is DONE as recorded above; 1C is NOT started.
+1B and 1C are DONE as recorded above.
 1B. API-token lifecycle — [DONE 2026-08-03, Codex]
 Require the token owner to be active on every authenticated request.
 Reject tokens when their user no longer exists.
@@ -417,11 +441,14 @@ A password is reset.
 A security administrator requests global logout.
 
 Decide whether an ordinary password change revokes all tokens or offers the user that option.
-1C. Session lifecycle
-Rotate fs_uniquifier or introduce an equivalent session-version field when credentials or security state change.
-Invalidate existing browser sessions after administrative password reset or deactivation.
-Audit these security actions.
-Test active, inactive, deleted, expired and revoked cases.
+1C. Session lifecycle — [DONE 2026-08-03, Codex, commit 7cd50bd]
+DONE Rotate fs_uniquifier with a compare-and-set server-side session-version
+     update whenever credentials or security state change.
+DONE Invalidate existing browser sessions and remember cookies after password,
+     activation and authorization changes; deleted users fail closed.
+DONE Audit these security actions without logging either session identity value.
+DONE Test active, inactive/reactivated, deleted, expired and revoked cases plus
+     self/admin/CLI password and role-change paths.
 Acceptance criteria
 Stored values cannot create executable DOM in affected forms.
 Deactivated users immediately lose browser and API access.
@@ -495,7 +522,7 @@ Objective: Produce a reliable, vulnerability-gated fresh installation.
   CLOSED DEPLOY-SEED-01. Remaining deployment/infrastructure risks belong to
        Phase 5 and the live release-candidate exercise in Phase 10.
 
-3B. Dependency remediation — [PARTIALLY DONE 2026-08-02, Claude, on main: 5a893e6 + f574515]
+3B. Dependency remediation — [PARTIAL; upgrades through 3346b51]
 Done ahead of sequence while triaging the open Dependabot PRs. Landed on main, so
 it is already in the base of this branch.
   DONE Upgraded runtime deps: requests 2.34.2, urllib3 2.7.0, idna 3.18,
@@ -514,9 +541,10 @@ it is already in the base of this branch.
   DONE Triaged every current Python and frontend advisory in 50d75e7. Detailed
        reachability, remedies and re-check triggers are in
        docs/security/dependency_advisory_triage.md.
-  TODO Upgrade Pillow to 12.3.0, gunicorn to 22.0.0 and cryptography to 48.0.1
-       as a bounded runtime-only commit. The gunicorn change must preserve and
-       validate the guided VPS/Caddy path.
+  DONE Upgraded Pillow to 12.3.0, gunicorn to 22.0.0, cryptography to 48.0.1
+       and required CFFI to 2.0.0 in runtime-only commit 3346b51. Production
+       build/full suite and rendered plus live disposable Caddy paths passed;
+       pip-audit fell from 34/5 to 2/2.
   TODO Migrate EOL PyPDF2 to pypdf in a separate commit. Twelve imports exist
        across docpacks.py, markup_documents.py and order_scope.py.
   TRIAGED React Router GHSA-qwww-vcr4-c8h2 affects unstable RSC APIs only; none
@@ -868,9 +896,10 @@ Phase 0 — controlled baseline. DONE.
 Phase 1A — stored XSS. DONE.
 Phase 3A — fresh deployments. DONE 2026-08-03; Caddy/VPS path preserved.
 Phase 1B — token lifecycle. DONE 2026-08-03.
-Phase 1C — server-side session lifecycle. NEXT.
-Phase 2 — strict-mode authentication.
-Phase 3B/3C — dependencies and supply chain.
+Phase 1C — server-side session lifecycle. DONE 2026-08-03.
+Phase 2 — strict-mode authentication. NEXT PRIMARY.
+Phase 3B — straight runtime upgrades DONE; PyPDF migration remains parallel-safe.
+Phase 3C — reproducible supply chain.
 Phase 4 — safe, atomic imports.
 Phase 5 — production infrastructure.
 Phase 6 — frontend quality and accessibility.
@@ -878,6 +907,6 @@ Phase 7 — add-in hardening.
 Phase 8 — maintainability.
 Phase 9 — commercial scope.
 Phase 10 — release validation.
-The next implementation request should be: “Integrate the reviewed Phase 3B
-advisory documentation, then implement Phase 1C server-side session lifecycle
-and revocation while preserving the Phase 3A deployment and Caddy gates.”
+The next implementation request should be: “Implement Phase 2 strict-mode
+authentication while preserving the Phase 1C lifecycle controls and Phase 3A
+VPS/Caddy gates; migrate PyPDF2 to pypdf in a separate parallel worktree.”
