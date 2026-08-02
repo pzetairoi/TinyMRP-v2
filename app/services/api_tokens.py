@@ -254,7 +254,7 @@ def rotate_token(
     return replacement, raw
 
 
-_last_used_cache = {}
+_last_used_cache: dict[str, datetime] = {}
 
 
 def touch_last_used(token: ApiToken) -> None:

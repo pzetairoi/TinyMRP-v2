@@ -216,13 +216,17 @@ Phase 1B implementation checkpoint (2026-08-03; not yet committed):
               API_TOKEN_DEFAULT_TTL_DAYS/API_TOKEN_MAX_TTL_DAYS. Guided VPS
               Compose already loads its per-instance env file and needs no
               renderer change; default behavior therefore remains compatible.
-  TESTED 10 new lifecycle regressions; 19 lifecycle/existing API-auth tests
-         pass. Help + Phase 3A bootstrap/VPS-Caddy contract set: 30 passed.
-         Frontend lint passes with one pre-existing unrelated warning; production
-         bundle builds successfully. Help and frontend generated assets updated.
-  REMAINING Run account/admin/CLI surrounding tests, full Python 3.11 suite,
-            quality/security checks, Compose/Caddy render and shell validation;
-            update baseline/changelog/final evidence; make focused P1B commit;
+  TESTED 10 new lifecycle regressions; 71 lifecycle/auth/account/admin/CLI
+         tests pass. Help + Phase 3A bootstrap/VPS-Caddy contract set: 30 passed.
+         Full host suite: 604 passed, 1 skipped. Production-image Python 3.11
+         mounted-source suite exited 0 with the same test set. Frontend lint
+         passes with one pre-existing unrelated warning; production bundle
+         builds successfully. Help and frontend generated assets updated.
+  CHECKPOINT User committed and pushed implementation as 49cf24a to
+             origin/hardening/production-readiness while verification ran.
+  REMAINING Finish quality/security checks, Compose/Caddy render and shell
+            validation; update baseline/changelog/final evidence; commit/push
+            the evidence and any verification fixes;
             review/cherry-pick 6912f78; manually reconcile c6f6068 plan findings.
 ========================================================================
 
