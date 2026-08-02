@@ -109,10 +109,12 @@ with the part number so it can be cleaned up.
 ## The add-in cannot connect
 
 1. Confirm the server URL, including `http://` or `https://`.
-2. Confirm the API token is valid — tokens are shown once at creation and can
-   be revoked. Create a new one from **My Account → Tokens** if unsure.
+2. Confirm the API token is active and has not expired — token secrets are shown
+   once at creation or rotation. Create or rotate one from **My Account → Tokens**
+   if unsure, then replace the old secret in the add-in immediately.
 3. Confirm the machine can reach the server at all (open the URL in a browser).
-4. Check the token has not been revoked by an administrator.
+4. Check the token has not been revoked by an administrator, account
+   deactivation or a password change/reset.
 
 ## What to collect before asking for help
 

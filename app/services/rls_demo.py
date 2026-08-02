@@ -119,6 +119,8 @@ def _user_email(alias: str, domain: str) -> str:
 
 
 def _upsert_user(email: str, role: Role, password: str) -> User:
+    from app.services.api_tokens import revoke_user_tokens
+
     u = User.objects(email=email).first()
     if not u:
         u = User(email=email, fs_uniquifier=secrets.token_hex(16))
@@ -126,6 +128,7 @@ def _upsert_user(email: str, role: Role, password: str) -> User:
     u.roles = [role]
     u.active = True
     u.save()
+    revoke_user_tokens(u, reason="demo_credential_refresh")
     return u
 
 
@@ -426,6 +429,8 @@ def seed_permission_test_environment(
 ) -> dict[str, object]:
     """Create the small canonical permission-test environment without tokens/files."""
 
+    from app.services.api_tokens import revoke_user_tokens
+
     normalized = _normalize_domain(domain)
     roles = _standard_role_documents()
     user_rows = []
@@ -451,6 +456,7 @@ def seed_permission_test_environment(
         user.active = True
         user.updated_at = utc_now()
         user.save()
+        revoke_user_tokens(user, reason="permission_test_credential_refresh")
         users[scenario] = user
         user_rows.append(
             {

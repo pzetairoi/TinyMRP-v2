@@ -18,6 +18,7 @@ from ..models.api_token import ApiToken
 from ..models.user_settings import UserSettings
 from app.services.app_settings import branding_root, get_app_settings
 from app.services.password_policy import validate_admin_password
+from app.services.api_tokens import revoke_user_tokens
 from app.services.processmeta import load_process_meta, sanitize_process_meta
 from app.services.standard_roles import STANDARD_ROLES
 from app.services.timezone_utils import (
@@ -585,6 +586,9 @@ def users_bulk_status():
         user.active = next_active
         user.updated_at = utc_now()
         user.save()
+        revoked_tokens = 0
+        if is_deactivate:
+            revoked_tokens = revoke_user_tokens(user, reason="account_deactivated")
         if is_deactivate and is_legacy_admin:
             active_admins -= 1
         changed += 1
@@ -593,6 +597,7 @@ def users_bulk_status():
                 f"admin.user.{action}",
                 resource_type="user",
                 resource=str(user.email),
+                meta={"revoked_api_tokens": revoked_tokens},
             )
         except Exception:
             pass
@@ -668,6 +673,7 @@ def users_edit(user_id):
         abort(404)
 
     if request.method == "POST":
+        was_active = bool(u.active)
         role_ids = request.form.getlist("roles")
         try:
             selected_roles = list(Role.objects(id__in=role_ids))
@@ -701,6 +707,7 @@ def users_edit(user_id):
         # Optional password reset
         new_pw = (request.form.get("new_password") or "").strip()
         new_pw2 = (request.form.get("confirm_password") or "").strip()
+        password_reset = False
         if new_pw or new_pw2:
             if not new_pw:
                 flash("New password cannot be empty.", "error");
@@ -713,6 +720,7 @@ def users_edit(user_id):
                 return redirect(url_for("admin.users_edit", user_id=user_id))
             u.password = hash_password(new_pw)
             u.password_changed_at = utc_now()
+            password_reset = True
             try:
                 log_action("admin.user.password", resource_type="user", resource=str(u.email))
             except Exception:
@@ -720,11 +728,32 @@ def users_edit(user_id):
 
         u.updated_at = utc_now()
         u.save()
+        revoke_reason = None
+        if password_reset:
+            revoke_reason = "administrator_password_reset"
+        elif was_active and not requested_active:
+            revoke_reason = "account_deactivated"
+        revoked_tokens = (
+            revoke_user_tokens(u, reason=revoke_reason) if revoke_reason else 0
+        )
+        if revoked_tokens:
+            try:
+                log_action(
+                    "api_token.security_event_revoke",
+                    resource_type="user",
+                    resource=str(u.email),
+                    meta={"reason": revoke_reason, "revoked_count": revoked_tokens},
+                )
+            except Exception:
+                pass
         try:
             log_action("admin.user.edit_roles", resource_type="user", resource=str(u.email))
         except Exception:
             pass
-        flash("User updated.", "success")
+        message = "User updated."
+        if revoked_tokens:
+            message += f" Revoked {revoked_tokens} API token(s)."
+        flash(message, "success")
         return redirect(url_for("admin.users_list"))
 
     return render_template(

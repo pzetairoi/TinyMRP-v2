@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
 
-from flask import request, current_app, has_request_context
+from flask import request, current_app, g, has_request_context
 from flask_login import current_user
 
 from app.models.audit import AuditLog
@@ -44,6 +44,8 @@ def log_action(action: str, resource_type: Optional[str] = None, resource: Optio
                 user = current_user if getattr(current_user, "is_authenticated", False) else None
             except Exception:
                 user = None
+            if user is None:
+                user = getattr(g, "api_user", None)
         roles = []
         if user is not None:
             try:

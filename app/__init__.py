@@ -187,6 +187,24 @@ def create_app(config_object=None):
     app.config.setdefault("REMEMBER_COOKIE_SECURE", False)
     app.config.setdefault("PERMANENT_SESSION_LIFETIME", timedelta(minutes=30))
     app.config.setdefault("SESSION_REFRESH_EACH_REQUEST", True)
+    for setting_name, fallback in (
+        ("API_TOKEN_DEFAULT_TTL_DAYS", 90),
+        ("API_TOKEN_MAX_TTL_DAYS", 365),
+    ):
+        raw_value = os.getenv(setting_name)
+        if raw_value is None:
+            raw_value = app.config.get(setting_name, fallback)
+        try:
+            parsed_value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"{setting_name} must be a positive integer") from exc
+        if parsed_value < 1:
+            raise RuntimeError(f"{setting_name} must be a positive integer")
+        app.config[setting_name] = parsed_value
+    if app.config["API_TOKEN_DEFAULT_TTL_DAYS"] > app.config["API_TOKEN_MAX_TTL_DAYS"]:
+        raise RuntimeError(
+            "API_TOKEN_DEFAULT_TTL_DAYS cannot exceed API_TOKEN_MAX_TTL_DAYS"
+        )
     # Cap "remember me" cookies (default Flask-Login is 365 days — far too long).
     try:
         app.config.setdefault(

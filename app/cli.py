@@ -18,6 +18,7 @@ from app.services.attrs import harvest_part_attrs, merge_save_part_attrs
 from app.services.part_annotations import bulk_sync_annotation_search_fields
 from app.services.part_materialized import rebuild_part_materialized_fields
 from app.services.password_policy import validate_admin_password
+from app.services.api_tokens import revoke_user_tokens
 from app.services.timezone_utils import utc_iso, utc_now
 
 
@@ -156,7 +157,8 @@ def set_password(email, password):
     u.password_changed_at = utc_now()
     u.updated_at = utc_now()
     u.save()
-    click.echo("Password updated")
+    revoked_tokens = revoke_user_tokens(u, reason="cli_password_reset")
+    click.echo(f"Password updated; revoked {revoked_tokens} API token(s)")
 
 @user.command("grant-role")
 @click.option("--email", prompt=True)
@@ -242,7 +244,8 @@ def bootstrap_admin(email, password):
     if r not in (u.roles or []):
         u.roles.append(r)
     u.save()
-    click.echo("Admin user ready")
+    revoked_tokens = revoke_user_tokens(u, reason="cli_bootstrap_password_reset")
+    click.echo(f"Admin user ready; revoked {revoked_tokens} API token(s)")
 
 @user.command("seed-combos")
 @click.option("--prefix", default="test", show_default=True, help="Email prefix for generated users")
@@ -302,10 +305,14 @@ def seed_user_combos(prefix, domain, password, max_combos, attach_biz):
 
         if set_password:
             u.password = hash_password(raw)
+            u.password_changed_at = utc_now()
 
         u.roles = list(combo)
         u.active = True
+        u.updated_at = utc_now()
         u.save()
+        if set_password:
+            revoke_user_tokens(u, reason="cli_seed_password_reset")
         seeded_users.append(u)
 
         if writer and set_password:

@@ -19,6 +19,10 @@ type Token = {
   revoked_at_display?: string
   expires_at?: string
   expires_at_display?: string
+  status?: 'active' | 'revoked' | 'expired' | 'legacy_no_expiry'
+  is_active?: boolean
+  legacy_no_expiry?: boolean
+  revocation_reason?: string
 }
 
 type Scheme = {
@@ -278,6 +282,7 @@ export default function AdminAddinPage() {
   }
 
   async function revokeToken(userId: string, tokenId: string) {
+    if (!window.confirm('Revoke this token now? The connected client will lose access.')) return
     setError(null)
     setMessage(null)
     try {
@@ -288,6 +293,22 @@ export default function AdminAddinPage() {
       }
     } catch (err) {
       setError(formatApiError(err, 'Failed to revoke token.'))
+    }
+  }
+
+  async function revokeAllTokens() {
+    if (!window.confirm('Revoke every active API token for every user? This cannot be undone.')) return
+    setError(null)
+    setMessage(null)
+    try {
+      const resp = await apiFetch<{ revoked_count: number }>('/api/admin/tokens/revoke-all', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      setMessage(`Global API-token logout complete: ${resp.revoked_count} token(s) revoked.`)
+      if (selectedUser) await loadUserTokens(selectedUser)
+    } catch (err) {
+      setError(formatApiError(err, 'Failed to revoke all tokens.'))
     }
   }
 
@@ -578,6 +599,13 @@ export default function AdminAddinPage() {
     return display || fallback || '-'
   }
 
+  function tokenStatusLabel(token: Token) {
+    if (token.status === 'legacy_no_expiry') return 'Legacy · no expiry'
+    if (token.status === 'expired') return 'Expired'
+    if (token.status === 'revoked') return 'Revoked'
+    return 'Active'
+  }
+
   const draftKind = getSegmentKind(segmentDraft)
 
   return (
@@ -593,7 +621,13 @@ export default function AdminAddinPage() {
       {error && <div className="alert alert-danger">{error}</div>}
 
       <div className="card p-3 mb-4">
-        <h5>Users</h5>
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <h5 className="mb-0">Users</h5>
+          <button className="btn btn-sm btn-outline-danger" onClick={() => void revokeAllTokens()}>
+            Revoke all API tokens
+          </button>
+        </div>
+        <p className="small text-muted">Global API-token logout does not end browser sessions; session invalidation is managed separately.</p>
         <div className="table-responsive">
           <table className="table table-sm">
             <thead>
@@ -636,6 +670,7 @@ export default function AdminAddinPage() {
                     <th>Label</th>
                     <th>Created</th>
                     <th>Last used</th>
+                    <th>Expires</th>
                     <th>Status</th>
                     <th />
                   </tr>
@@ -646,9 +681,10 @@ export default function AdminAddinPage() {
                       <td>{token.label || '(no label)'}</td>
                       <td>{renderTokenDate(token.created_at_display, token.created_at)}</td>
                       <td>{renderTokenDate(token.last_used_at_display, token.last_used_at)}</td>
-                      <td>{token.revoked_at ? 'Revoked' : 'Active'}</td>
+                      <td>{token.legacy_no_expiry ? 'No expiry' : renderTokenDate(token.expires_at_display, token.expires_at)}</td>
+                      <td>{tokenStatusLabel(token)}</td>
                       <td>
-                        {!token.revoked_at && (
+                        {token.is_active && (
                           <button
                             className="btn btn-sm btn-outline-danger"
                             onClick={() => void revokeToken(selectedUser.id, token.id)}
@@ -661,7 +697,7 @@ export default function AdminAddinPage() {
                   ))}
                   {!tokens.length && (
                     <tr>
-                      <td colSpan={5} className="text-muted text-center">
+                      <td colSpan={6} className="text-muted text-center">
                         No tokens.
                       </td>
                     </tr>

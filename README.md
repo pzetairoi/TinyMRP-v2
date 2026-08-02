@@ -50,6 +50,8 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `TINYMRP_SECURITY_MODE=compat|strict`: security profile (default compat).
   - `TINYMRP_ALLOWED_ORIGINS`: comma-separated CORS allowlist (strict mode requires this).
   - `TINYMRP_CORS_CREDENTIALS=true`: allow credentials when using an explicit allowlist.
+  - `API_TOKEN_DEFAULT_TTL_DAYS=90`: lifetime applied to newly created API tokens.
+  - `API_TOKEN_MAX_TTL_DAYS=365`: maximum lifetime users may request; must be at least the default.
   - `TINYMRP_MAX_CONTENT_MB`: global request size cap (falls back to Upload Pack max).
   - `TINYMRP_RUNTIME_SECRETS_PATH`: override runtime secrets file path (compat mode only).
   - `FILE_HASH_MAX_BYTES`: compute/verify file hashes up to this size (0 to disable).
@@ -162,8 +164,8 @@ TinyMRP_SolidWorksAddin_*.exe /VERYSILENT /SUPPRESSMSGBOXES /BACKENDURL="http://
 
 - Web dashboard:
   - `/ui/admin/addin` for Quick Start + Advanced defaults.
-  - `/ui/addin/tokens` to create/revoke API tokens (shown once).
-  - `/ui/admin/addin` for admins (token revoke + scheme preset flags).
+  - `/ui/addin/tokens` to create, rotate and revoke expiring API tokens (secrets are shown once).
+  - `/ui/admin/addin` for admins (per-token/global revocation + scheme preset flags).
 - Add-in Configuration tab has **Quick Start** (presets + minimal inputs) and **Advanced** (full defaults).
 - The add-in authenticates with a Bearer token stored in `AuthToken`.
 
@@ -218,7 +220,7 @@ Global settings:
 ### Endpoints
 
 - `GET /api/auth/check` (Bearer token)
-- `GET /api/me/tokens`, `POST /api/me/tokens`, `DELETE /api/me/tokens/<id>`
+- `GET /api/me/tokens`, `POST /api/me/tokens`, `POST /api/me/tokens/<id>/rotate`, `DELETE /api/me/tokens/<id>`
 - `GET /api/me/settings`, `PUT /api/me/settings`
 - `GET /api/numbering/schemes`
 - `POST /api/numbering/schemes`

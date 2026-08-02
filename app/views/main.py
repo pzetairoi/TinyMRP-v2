@@ -24,6 +24,7 @@ from app.services.authorization import (
 )
 from app.services.attrs import approval_field_values, harvest_part_attrs
 from app.services.password_policy import password_policy_summary, validate_password_change
+from app.services.api_tokens import revoke_user_tokens
 from app.services.user_profile import (
     permissions_for_user,
     profile_color_choices,
@@ -463,11 +464,18 @@ def app_password_change():
     current_user.password_changed_at = utc_now()
     current_user.updated_at = utc_now()
     current_user.save()
+    revoked_tokens = revoke_user_tokens(
+        current_user,
+        reason="self_service_password_change",
+    )
     try:
         log_action("account.password.change", resource_type="user", resource=str(current_user.email or ""))
     except Exception:
         pass
-    flash("Password changed.", "success")
+    flash(
+        f"Password changed. Revoked {revoked_tokens} API token(s); create a new token for each integration.",
+        "success",
+    )
     return redirect(url_for("main.app_home"))
 
 

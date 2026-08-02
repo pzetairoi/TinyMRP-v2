@@ -21,7 +21,42 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  None. Phase 3A is complete; no Phase 3A files remain reserved.
+  P1B-TOKEN-LIFECYCLE  IN PROGRESS  owner: Codex /root
+    Scope: token ownership/active-user enforcement, bounded lifetime, rotation,
+           revocation triggers, management UX, audit trail and regression tests.
+    Reserved files:
+      app/__init__.py
+      app/cli.py
+      app/models/api_token.py
+      app/services/api_auth.py
+      app/services/audit.py
+      app/services/api_tokens.py
+      app/services/rls_demo.py
+      app/views/admin.py
+      app/views/main.py
+      app/views/me.py
+      app/templates/admin/**
+      app/templates/me/**
+      frontend/src/pages/ApiTokensPage.tsx
+      frontend/src/pages/AdminAddinPage.tsx
+      app/static/parts-ui/** (generated from the claimed frontend sources)
+      docker-compose.yml
+      docker-compose.onefolder.yml
+      tests/test_api_auth.py
+      tests/test_admin_access_usability.py
+      tests/test_token_lifecycle.py (new)
+      .env.dev.example
+      .env.docker.example
+      .env.server.example
+      README.md
+      docs/help/07_troubleshooting.md
+      app/static/help/help.html
+      app/static/help/help_toc.json
+      docs/PRODUCTION_HARDENING_BASELINE.md
+      CHANGELOG.md
+      hardeningplan.txt
+    Integration gate: full Python suite plus the protected Phase 3A VPS/Caddy
+                      contract, config-render and deployment-script checks.
 
 Completed workstreams:
   P3A-BOOTSTRAP  DONE 2026-08-03  owner: Codex /root
@@ -32,9 +67,14 @@ Completed workstreams:
     tests/test_vps_caddy_deployment_contract.py. No Caddy defect was exposed.
   P3A-HANDOFF  DONE 2026-08-03  owner: Codex /root
     Final consistency sweep, Python 3.11 verification, evidence and roadmap.
+  P3B-ADVISORY-TRIAGE  DONE/AWAITING INTEGRATION 2026-08-03  owner: Claude
+    Existing parallel branch p3b-onto-3a was discovered after the board had
+    accidentally lost its earlier completion status. Security docs commit:
+    6912f78. Plan-only follow-up: c6f6068 (do not cherry-pick over this active
+    handoff; incorporate its findings manually). Review/integrate after P1B.
 
-Available parallel workstream (safe to claim on a separate branch/worktree):
-  P3B-ADVISORY-TRIAGE  AVAILABLE
+Parallel workstream definition (complete; retained for scope history):
+  P3B-ADVISORY-TRIAGE  DONE on p3b-onto-3a
     Scope: applicability research and time-limited exception templates for the
            current Python/React Router advisories; documentation only.
     Allowed files:
@@ -45,8 +85,9 @@ Available parallel workstream (safe to claim on a separate branch/worktree):
     controls, owner and expiry for primary review.
 
 Next integration order:
-  Commit Phase 3A -> Phase 1B token lifecycle -> Phase 1C session lifecycle.
-  P3B-ADVISORY-TRIAGE may run in parallel because it is documentation-only.
+  Phase 1B token lifecycle -> integrate reviewed P3B advisory documentation ->
+  Phase 1C session lifecycle. Do not begin Phase 1C while Phase 1B is active;
+  both touch authentication revocation state.
 ========================================================================
 
 Completed so far:
@@ -138,10 +179,51 @@ Protected owner requirement added 2026-08-02:
   and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
 
 Current work:
-  Phase 3A DONE. Next primary implementation is Phase 1B (API-token lifecycle),
-  then Phase 1C (session lifecycle), followed by Phase 2. Do not implement 1B
-  and 1C in parallel because both touch user security-state revocation. The
-  documentation-only P3B-ADVISORY-TRIAGE workstream above is safe in parallel.
+  Phase 1B IN PROGRESS in P1B-TOKEN-LIFECYCLE. Phase 1C remains blocked from
+  parallel implementation because both phases touch authentication revocation
+  state. P3B-ADVISORY-TRIAGE is complete on p3b-onto-3a and awaits review.
+
+Phase 1B decision log (recorded before implementation, 2026-08-03):
+  * New API tokens expire after 90 days by default and may not exceed 365 days;
+    both values are operator-configurable, validated positive integers and the
+    default may never exceed the maximum.
+  * Existing non-expiring tokens remain usable for a controlled compatibility
+    window, but are labelled legacy/no-expiry in both user and administrator UI
+    so operators can rotate them. Phase 1B does not silently break deployed
+    SolidWorks integrations.
+  * Ordinary self-service password changes revoke every API token, as do admin
+    password resets, CLI password resets, permission-test credential refreshes
+    and account deactivation. Reactivation never restores revoked tokens.
+  * Rotation is user-controlled, returns the replacement secret once, and
+    guarantees that a concurrent loser token is revoked. Administrators may
+    explicitly revoke one user's token or all active API tokens, but may not
+    mint or retrieve another user's secret.
+  * Phase 1B closes API-token portions of IAM-REV-01. IAM-REV-01 itself remains
+    open until Phase 1C implements server-side session invalidation.
+
+Phase 1B implementation checkpoint (2026-08-03; not yet committed):
+  IMPLEMENTED Additive token lifecycle metadata/index, active/missing owner
+              enforcement, 90/365-day validated policy, legacy visibility,
+              one-time-secret rotation, idempotent revoke helpers and global
+              API-token logout.
+  IMPLEMENTED User and administrator React UI now show expiry, last use and
+              active/expired/revoked/legacy status. Users can rotate/revoke;
+              administrators can revoke one or all but cannot mint user tokens.
+  IMPLEMENTED Automatic revocation on self-service/admin/CLI password changes,
+              bulk/single deactivation and disposable test-user credential
+              refresh. Bearer-token audit events now retain the acting user.
+  IMPLEMENTED Config examples and both Compose paths expose positive validated
+              API_TOKEN_DEFAULT_TTL_DAYS/API_TOKEN_MAX_TTL_DAYS. Guided VPS
+              Compose already loads its per-instance env file and needs no
+              renderer change; default behavior therefore remains compatible.
+  TESTED 10 new lifecycle regressions; 19 lifecycle/existing API-auth tests
+         pass. Help + Phase 3A bootstrap/VPS-Caddy contract set: 30 passed.
+         Frontend lint passes with one pre-existing unrelated warning; production
+         bundle builds successfully. Help and frontend generated assets updated.
+  REMAINING Run account/admin/CLI surrounding tests, full Python 3.11 suite,
+            quality/security checks, Compose/Caddy render and shell validation;
+            update baseline/changelog/final evidence; make focused P1B commit;
+            review/cherry-pick 6912f78; manually reconcile c6f6068 plan findings.
 ========================================================================
 
 Progressive mitigation roadmap
@@ -209,8 +291,8 @@ Completed in parallel with Codex's Phase 0; no overlap with Phase 0 files.
        author-written with no untrusted interpolation, so they are not an XSS sink
        today, but they are what blocks CSP tightening above.
 
-1B and 1C below are NOT started.
-1B. API-token lifecycle
+1B is IN PROGRESS as recorded above; 1C is NOT started.
+1B. API-token lifecycle — [IN PROGRESS 2026-08-03, Codex]
 Require the token owner to be active on every authenticated request.
 Reject tokens when their user no longer exists.
 Add default and maximum token lifetimes.
