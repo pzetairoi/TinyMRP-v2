@@ -754,6 +754,29 @@
   const canViewParts = {{ 'true' if has_perm('parts.read') else 'false' }};
   const fallbackLogo = "{{ url_for('branding.logo') }}";
 
+  // Part numbers, descriptions and thumbnail URLs are stored, user-controlled
+  // values. They are written with textContent / property assignment only —
+  // never interpolated into an HTML string — so hostile content cannot create
+  // executable DOM. See tests/test_stored_xss_regression.py.
+  function el(tag, props){
+    const node = document.createElement(tag);
+    Object.assign(node, props || {});
+    return node;
+  }
+
+  // Only allow image sources that cannot execute script. Thumbnails are
+  // same-origin app paths; anything else (javascript:, data:, vbscript:)
+  // falls back to the branding logo.
+  function safeImageSrc(url){
+    const raw = String(url == null ? '' : url).trim();
+    if(!raw) return fallbackLogo;
+    if(/^[a-z][a-z0-9+.-]*:/i.test(raw)){
+      return /^https?:/i.test(raw) ? raw : fallbackLogo;
+    }
+    // Relative/absolute path: reject protocol-relative "//host" forms.
+    return raw.startsWith('//') ? fallbackLogo : raw;
+  }
+
   function setCheckboxGroup(name, checked){
     document.querySelectorAll(`input[name="${name}"]`).forEach(cb => { cb.checked = checked; });
   }
@@ -914,28 +937,61 @@
       if(f.qtyMin !== null && (row.qty || 0) < f.qtyMin) return;
       if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
       const tr = document.createElement('tr');
-      const pnLink = row.pn && canViewParts
-        ? `<a href="/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}">${row.pn}</a>`
-        : (row.pn || '');
-      tr.innerHTML = `
-        <td style="width:64px;">
-          ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : `<img src="${fallbackLogo}" class="img-thumbnail" style="max-height:48px;max-width:64px;">`}
-        </td>
-        <td>${pnLink}</td>
-        <td>${row.desc || ''}</td>
-        <td>${row.rev || ''}</td>
-        <td style="max-width:120px;">
-          <input type="number" step="1" min="0" class="form-control form-control-sm bom-qty" value="${row.qty || 1}" data-idx="${idx}">
-        </td>
-        <td>
-          <div class="d-flex gap-1">
-            {% if not is_readonly and has_perm('jobs.bom.update') %}
-            <button type="button" class="btn btn-sm btn-outline-secondary" data-action="replace" data-idx="${idx}">Replace</button>
-            <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove" data-idx="${idx}">Remove</button>
-            {% endif %}
-          </div>
-        </td>
-      `;
+
+      const thumbTd = el('td');
+      thumbTd.style.width = '64px';
+      const img = el('img', { className: 'img-thumbnail', src: safeImageSrc(row.thumb) });
+      img.style.maxHeight = '48px';
+      img.style.maxWidth = '64px';
+      thumbTd.appendChild(img);
+      tr.appendChild(thumbTd);
+
+      const pnTd = el('td');
+      if(row.pn && canViewParts){
+        const href = `/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}`;
+        pnTd.appendChild(el('a', { href, textContent: row.pn }));
+      }else{
+        pnTd.textContent = row.pn || '';
+      }
+      tr.appendChild(pnTd);
+
+      tr.appendChild(el('td', { textContent: row.desc || '' }));
+      tr.appendChild(el('td', { textContent: row.rev || '' }));
+
+      const qtyTd = el('td');
+      qtyTd.style.maxWidth = '120px';
+      const qtyInput = el('input', {
+        type: 'number', step: '1', min: '0',
+        className: 'form-control form-control-sm bom-qty',
+        value: row.qty || 1,
+      });
+      qtyInput.setAttribute('data-idx', idx);
+      qtyTd.appendChild(qtyInput);
+      tr.appendChild(qtyTd);
+
+      const actionsTd = el('td');
+      const actions = el('div', { className: 'd-flex gap-1' });
+      {% if not is_readonly and has_perm('jobs.bom.update') %}
+      const replaceBtn = el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-outline-secondary',
+        textContent: 'Replace',
+      });
+      replaceBtn.setAttribute('data-action', 'replace');
+      replaceBtn.setAttribute('data-idx', idx);
+      actions.appendChild(replaceBtn);
+      const removeBtn = el('button', {
+        type: 'button',
+        className: 'btn btn-sm btn-outline-danger',
+        textContent: 'Remove',
+      });
+      removeBtn.setAttribute('data-action', 'remove');
+      removeBtn.setAttribute('data-idx', idx);
+      actions.appendChild(removeBtn);
+      {% endif %}
+      actionsTd.appendChild(actions);
+      tr.appendChild(actionsTd);
+
       tbody.appendChild(tr);
       ensureThumb(idx);
     });

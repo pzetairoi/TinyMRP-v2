@@ -496,6 +496,36 @@
   const isReadOnly = {{ 'true' if is_readonly else 'false' }};
   const canUpdateFinancial = {{ 'true' if can_update_financial else 'false' }};
 
+  // Part numbers, descriptions, UoM, notes and thumbnail URLs are stored,
+  // user-controlled values. They are written with textContent / property
+  // assignment only — never interpolated into an HTML string — so hostile
+  // content cannot create executable DOM (including breaking out of a
+  // value="..." attribute). See tests/test_stored_xss_regression.py.
+  function el(tag, props){
+    const node = document.createElement(tag);
+    Object.assign(node, props || {});
+    return node;
+  }
+
+  // Only allow image sources that cannot execute script. Thumbnails are
+  // same-origin app paths; anything else (javascript:, data:, vbscript:)
+  // falls back to the branding logo.
+  function safeImageSrc(url){
+    const raw = String(url == null ? '' : url).trim();
+    if(!raw) return fallbackLogo;
+    if(/^[a-z][a-z0-9+.-]*:/i.test(raw)){
+      return /^https?:/i.test(raw) ? raw : fallbackLogo;
+    }
+    return raw.startsWith('//') ? fallbackLogo : raw;
+  }
+
+  function lineInput(props, idx){
+    const node = el('input', props);
+    node.setAttribute('data-idx', idx);
+    if(isReadOnly) node.disabled = true;
+    return node;
+  }
+
   function parseOrderLines(txt){
     const out = [];
     for(const raw of (txt || '').split(/\r?\n/)){
@@ -600,42 +630,112 @@
       if(f.qtyMax !== null && (row.qty || 0) > f.qtyMax) return;
       const totals = computeRowTotals(row);
       const tr = document.createElement('tr');
-      const pnLink = row.pn && canViewParts
-        ? `<a href="/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}">${row.pn}</a>`
-        : (row.pn || '');
-      tr.innerHTML = `
-        <td style="width:64px;">
-          ${row.thumb ? `<img src="${row.thumb}" class="img-thumbnail" style="max-height:48px;max-width:64px;">` : `<img src="${fallbackLogo}" class="img-thumbnail" style="max-height:48px;max-width:64px;">`}
-        </td>
-        <td>${pnLink}</td>
-        <td>${row.desc || ''}</td>
-        <td>${row.rev || ''}</td>
-        <td style="max-width:120px;">
-          <input type="number" step="1" min="0" class="form-control form-control-sm ol-qty" value="${row.qty || 1}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
-        </td>
-        <td style="max-width:100px;">
-          <input type="text" class="form-control form-control-sm ol-uom" value="${row.uom || 'EA'}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
-        </td>
-        {% if can_read_financial %}<td style="max-width:120px;">
-          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-price" value="${row.unit_price || 0}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
-        </td>
-        <td style="max-width:90px;">
-          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-disc" value="${row.discount_pct || 0}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
-        </td>
-        <td style="max-width:90px;">
-          <input type="number" step="0.01" min="0" class="form-control form-control-sm ol-tax" value="${row.tax_pct || 0}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
-        </td>
-        <td class="small text-muted ol-total" data-idx="${idx}">${totals.total.toFixed(2)}</td>{% endif %}
-        <td>
-          <input type="text" class="form-control form-control-sm ol-note" value="${row.note || ''}" data-idx="${idx}" ${isReadOnly ? 'disabled' : ''}>
-        </td>
-        <td>
-          <div class="d-flex gap-1">
-            ${isReadOnly ? '' : `<button type="button" class="btn btn-sm btn-outline-secondary" data-action="replace" data-idx="${idx}">Replace</button>
-            <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove" data-idx="${idx}">Remove</button>`}
-          </div>
-        </td>
-      `;
+
+      const thumbTd = el('td');
+      thumbTd.style.width = '64px';
+      const img = el('img', { className: 'img-thumbnail', src: safeImageSrc(row.thumb) });
+      img.style.maxHeight = '48px';
+      img.style.maxWidth = '64px';
+      thumbTd.appendChild(img);
+      tr.appendChild(thumbTd);
+
+      const pnTd = el('td');
+      if(row.pn && canViewParts){
+        const href = `/ui/part/${encodeURIComponent(row.pn)}?rev=${encodeURIComponent(row.rev || '')}`;
+        pnTd.appendChild(el('a', { href, textContent: row.pn }));
+      }else{
+        pnTd.textContent = row.pn || '';
+      }
+      tr.appendChild(pnTd);
+
+      tr.appendChild(el('td', { textContent: row.desc || '' }));
+      tr.appendChild(el('td', { textContent: row.rev || '' }));
+
+      const qtyTd = el('td');
+      qtyTd.style.maxWidth = '120px';
+      qtyTd.appendChild(lineInput({
+        type: 'number', step: '1', min: '0',
+        className: 'form-control form-control-sm ol-qty',
+        value: row.qty || 1,
+      }, idx));
+      tr.appendChild(qtyTd);
+
+      const uomTd = el('td');
+      uomTd.style.maxWidth = '100px';
+      uomTd.appendChild(lineInput({
+        type: 'text',
+        className: 'form-control form-control-sm ol-uom',
+        value: row.uom || 'EA',
+      }, idx));
+      tr.appendChild(uomTd);
+
+      {% if can_read_financial %}
+      const priceTd = el('td');
+      priceTd.style.maxWidth = '120px';
+      priceTd.appendChild(lineInput({
+        type: 'number', step: '0.01', min: '0',
+        className: 'form-control form-control-sm ol-price',
+        value: row.unit_price || 0,
+      }, idx));
+      tr.appendChild(priceTd);
+
+      const discTd = el('td');
+      discTd.style.maxWidth = '90px';
+      discTd.appendChild(lineInput({
+        type: 'number', step: '0.01', min: '0',
+        className: 'form-control form-control-sm ol-disc',
+        value: row.discount_pct || 0,
+      }, idx));
+      tr.appendChild(discTd);
+
+      const taxTd = el('td');
+      taxTd.style.maxWidth = '90px';
+      taxTd.appendChild(lineInput({
+        type: 'number', step: '0.01', min: '0',
+        className: 'form-control form-control-sm ol-tax',
+        value: row.tax_pct || 0,
+      }, idx));
+      tr.appendChild(taxTd);
+
+      const totalTd = el('td', {
+        className: 'small text-muted ol-total',
+        textContent: totals.total.toFixed(2),
+      });
+      totalTd.setAttribute('data-idx', idx);
+      tr.appendChild(totalTd);
+      {% endif %}
+
+      const noteTd = el('td');
+      noteTd.appendChild(lineInput({
+        type: 'text',
+        className: 'form-control form-control-sm ol-note',
+        value: row.note || '',
+      }, idx));
+      tr.appendChild(noteTd);
+
+      const actionsTd = el('td');
+      const actions = el('div', { className: 'd-flex gap-1' });
+      if(!isReadOnly){
+        const replaceBtn = el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-outline-secondary',
+          textContent: 'Replace',
+        });
+        replaceBtn.setAttribute('data-action', 'replace');
+        replaceBtn.setAttribute('data-idx', idx);
+        actions.appendChild(replaceBtn);
+        const removeBtn = el('button', {
+          type: 'button',
+          className: 'btn btn-sm btn-outline-danger',
+          textContent: 'Remove',
+        });
+        removeBtn.setAttribute('data-action', 'remove');
+        removeBtn.setAttribute('data-idx', idx);
+        actions.appendChild(removeBtn);
+      }
+      actionsTd.appendChild(actions);
+      tr.appendChild(actionsTd);
+
       tbody.appendChild(tr);
       ensureThumbOrder(idx);
     });

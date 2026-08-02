@@ -1,0 +1,573 @@
+========================================================================
+STATUS LOG — keep this current so work is not repeated
+========================================================================
+Branch: hardening/production-readiness
+Driver: Codex. Anything below marked [DONE ... Claude] was done in parallel
+and deliberately avoided Codex's Phase 0 files.
+
+Codex Phase 0 footprint at time of writing (do not edit these in parallel):
+  app/services/runtime_secrets.py, tests/test_auth_recovery.py, .gitattributes
+
+Completed so far:
+  Phase 1A  DONE   stored XSS in job/order forms + 17 regression tests (Claude)
+                   residual: CSP unsafe-inline removal NOT started
+  Phase 3B  PARTIAL dependency upgrades landed on main (Claude)
+                   residual: react-router advisory has no fix available;
+                   Flask-Security advisory not investigated
+  Phase 3C  PARTIAL actions on current majors, but SHA pinning + digest pinning
+                   + blocking gates all still TODO
+  Phase 0   IN PROGRESS (Codex)
+
+Known pre-existing failure, unrelated to any of the above — do not chase it as a
+regression, but it is a real bug worth fixing:
+  tests/test_admin_access_usability.py::
+    test_permission_test_seed_uses_only_curated_canonical_matrix
+  Asserts Cache-Control == "no-store" but gets "no-store=True, private=True".
+  The app sets the header as a plain string at app/views/admin_roles.py:361, so
+  something downstream re-serializes it. Reproduces identically on the
+  pre-upgrade dependency pins.
+========================================================================
+
+Progressive mitigation roadmap
+The recommended sequence below keeps each phase reviewable and deployable. Phases 0–5 are production blockers; phases 6–10 build commercial maturity.
+Each phase should end with:
+A focused change set.
+Automated regression tests.
+Updated deployment or operator documentation.
+A short residual-risk report.
+A clean commit suitable for rollback.
+Phase 0 — Establish a controlled baseline
+Objective: Create an immutable, reproducible starting point before remediation begins.
+Work
+Review the currently staged dependency, workflow and generated frontend changes.
+Decide which changes are intentional.
+Remove generated or accidental changes where appropriate.
+Run the complete baseline verification suite.
+Record:Python and Node versions.
+Dependency lock state.
+Docker image versions.
+Application and add-in versions.
+Current test and coverage results.
+
+Create a remediation branch and baseline tag.
+Add a concise audit findings document under docs/.
+Establish a release-blocker checklist.
+Acceptance criteria
+Clean working tree.
+Full tests pass from a fresh environment.
+Frontend production build is reproducible.
+Docker Compose configuration validates.
+Baseline is committed and tagged.
+No generated build output changes unexpectedly after a second build.
+Estimated effort
+0.5–2 engineering days.
+Request to use
+Implement Phase 0 of the production mitigation plan.
+
+Phase 1 — Eliminate immediate browser and identity vulnerabilities
+Objective: Close the highest-impact attack paths without redesigning the whole authentication system.
+
+1A. Stored XSS remediation — [DONE 2026-08-02, Claude, branch hardening/production-readiness]
+Completed in parallel with Codex's Phase 0; no overlap with Phase 0 files.
+  DONE Replaced template-string innerHTML construction in the job and order forms.
+       - app/templates/admin/jobs_form.html   renderBomTable()
+       - app/templates/admin/orders_form.html renderOrderTable()
+       Rows are now built with createElement + textContent/property assignment.
+       Confirmed stored (not merely reflected): row.desc is populated from the
+       /api/part_detail response, so a hostile part description executed in every
+       job/order referencing that part. In orders, row.uom and row.note also broke
+       out of value="..." attributes.
+  DONE Image paths treated as structured values: safeImageSrc() in both templates
+       allows only http(s) or same-origin relative paths, rejects protocol-relative
+       "//host", and falls back to the branding logo. Part links keep
+       encodeURIComponent and are built as <a> nodes.
+  DONE Swept all templates and frontend code for the other sinks. Findings:
+       - insertAdjacentHTML / outerHTML / document.write: none in app code.
+       - dangerouslySetInnerHTML: none in frontend/src.
+       - javascript: URLs: none in frontend/src.
+       - Remaining .innerHTML uses are `= ''` constant clears only (safe).
+       - One {{ ... |safe }} remains at app/templates/help/index.html:100
+         (server-authored help content, not user input) — see Phase 1A residual below.
+  DONE Regression tests: tests/test_stored_xss_regression.py (17 tests).
+       Source-level invariants, so they pin the *class* of bug rather than one
+       payload. Verified they FAIL against the pre-fix templates and pass after.
+       Includes a repo-wide guard against new unsafe innerHTML assignments.
+  VERIFIED Jinja parses in both templates; rendered JS is syntactically valid via
+       `node --check` across all four {% if %} branch combinations (jobs
+       edit/readonly, orders with/without can_read_financial). Full suite:
+       567 passed, 1 failed — that failure is the pre-existing Cache-Control
+       assertion in test_admin_access_usability.py, unrelated to this change.
+
+1A residual / NOT done (deliberately left):
+  TODO "Begin removing the need for CSP unsafe-inline."
+       Not started. These templates still use inline <script> blocks and a few
+       inline onclick= handlers (e.g. jobs_form.html setCheckboxGroup buttons),
+       so unsafe-inline is still required. Removing it means moving these blocks
+       to external files with a nonce/hash strategy — a separate change that
+       touches the CSP header and every admin template, and is better done after
+       Phase 2 settles the auth surface.
+  NOTE inline event attributes (onclick=) still exist in admin templates. They are
+       author-written with no untrusted interpolation, so they are not an XSS sink
+       today, but they are what blocks CSP tightening above.
+
+1B and 1C below are NOT started.
+1B. API-token lifecycle
+Require the token owner to be active on every authenticated request.
+Reject tokens when their user no longer exists.
+Add default and maximum token lifetimes.
+Display expiry and last-used information in the token UI.
+Add token rotation and explicit revocation.
+Revoke tokens when:A user is deactivated.
+A password is reset.
+A security administrator requests global logout.
+
+Decide whether an ordinary password change revokes all tokens or offers the user that option.
+1C. Session lifecycle
+Rotate fs_uniquifier or introduce an equivalent session-version field when credentials or security state change.
+Invalidate existing browser sessions after administrative password reset or deactivation.
+Audit these security actions.
+Test active, inactive, deleted, expired and revoked cases.
+Acceptance criteria
+Stored values cannot create executable DOM in affected forms.
+Deactivated users immediately lose browser and API access.
+New user tokens expire by default.
+Password-reset behavior is explicit and tested.
+Security lifecycle events appear in the audit log.
+Existing authorized workflows continue to work.
+Estimated effort
+3–6 days.
+Request to use
+Implement Phase 1, starting with Phase 1A.
+
+The subphases can be implemented separately.
+Phase 2 — Make production authentication coherent
+Objective: Ensure strict production mode supports the actual browser, API and public-share workflows.
+Design decision
+Choose and document one of these models:
+Recommended: Session authentication with CSRF protection for the same-origin browser UI; bearer tokens for integrations and the SolidWorks add-in.
+Bearer-token authentication for both browser and integrations, requiring a larger frontend token-management redesign.
+The first model fits the existing application better.
+Work
+Define endpoint categories:Browser/session API.
+Integration/bearer API.
+Public share API.
+Health/readiness endpoints.
+
+Replace the global /api/* bearer requirement with explicit policy by endpoint category.
+Preserve CSRF protection on session-authenticated state changes.
+Add narrowly scoped public-share authorization instead of a broad public exemption.
+Make authorization failures return consistent JSON errors.
+Update frontend API handling to check response.ok.
+Display authentication and authorization errors instead of empty datasets.
+Add integration tests covering:Strict-mode browser login and normal navigation.
+Browser CRUD requests.
+Bearer-token requests.
+Invalid and expired tokens.
+Public shares.
+CSRF rejection.
+Permission and row-scope enforcement.
+
+Make strict mode the default after all tests pass.
+Acceptance criteria
+The complete React UI works in strict mode.
+Public shares work without exposing unrelated APIs.
+API tokens remain unsuitable for browser-session substitution.
+Strict mode becomes the documented and deployed default.
+Compat mode is either removed or clearly marked as development-only.
+Estimated effort
+4–8 days.
+Request to use
+Implement Phase 2 using session authentication for the same-origin browser and bearer tokens for integrations.
+
+Phase 3 — Repair deployment and supply-chain gates
+Objective: Produce a reliable, vulnerability-gated fresh installation.
+3A. Container initialization
+Replace the legacy entrypoint role definitions with the canonical standard-role service.
+Remove the missing PERMISSIONS import.
+Make seeding idempotent.
+Make unrecoverable initialization failures stop container startup.
+Avoid printing generated credentials into long-lived logs.
+Introduce a deliberate bootstrap-admin workflow.
+Add a fresh-database Compose smoke test that verifies:Mongo availability.
+Role creation.
+Administrator bootstrap.
+Login.
+Health/readiness.
+A protected API request.
+
+3B. Dependency remediation — [PARTIALLY DONE 2026-08-02, Claude, on main: 5a893e6 + f574515]
+Done ahead of sequence while triaging the open Dependabot PRs. Landed on main, so
+it is already in the base of this branch.
+  DONE Upgraded runtime deps: requests 2.34.2, urllib3 2.7.0, idna 3.18,
+       charset-normalizer 3.4.9, python-dotenv, psutil, tzdata.
+  DONE Upgraded dev tooling: ruff 0.16.0, black 26.5.1, bandit 1.9.4,
+       pytest-cov 7.1.0, pip-audit 2.10.1, cyclonedx-bom 7.3.0 (4.x->7.x major —
+       verified the CI invocation still works), pre-commit 4.6.0.
+  DONE Regression tested: clean venv, full suite 549 passed / 1 pre-existing
+       failure, ruff and bandit clean.
+  DONE Dependency-update automation already exists (Dependabot). Triaged all 17
+       open PRs: 11 applied and closed, 5 left open with written rationale on each.
+  PARTIAL "Keep runtime and development dependency updates in separate commits."
+       NOT honoured — 5a893e6 mixes runtime and dev updates in one commit. Left as
+       is since it is already pushed; worth splitting on any future batch.
+
+  TODO "Upgrade React Router and regenerate the lockfile."
+       Moved to 7.18.1 (from the 7.8.x line) but this does NOT clear the gate.
+       react-router is under GHSA-qwww-vcr4-c8h2, advisory range >=7.12.0-pre.0
+       with NO fixed version published. `npm audit --omit=dev --audit-level=high`
+       therefore still fails. Important: main was ALREADY failing this gate with
+       five react-router advisories before the bump; the change reduced five to
+       one. npm's only suggested fix is downgrading to 7.11.0, which reinstates the
+       other five. There is currently no version that passes — recheck upstream.
+  TODO Investigate the Flask-Security advisory (Flask-Security-Too 5.8.1 is still
+       the pin) and document whether configured features are affected. Not started.
+  TODO Formal vulnerability-gate exception format (applicability, compensating
+       control, owner, expiry). Not started — the react-router item above is
+       exactly the case that needs it, since the gate cannot pass today.
+
+Still-open Dependabot PRs and why (do not just merge these):
+  #35 eslint 10  — blocked: eslint-plugin-react-hooks@5.2.0 peers on eslint <=9.
+  #36 vite 8     — swaps the build engine to rolldown; needs a hands-on migration.
+  #34 typescript 7 — no CI value: nothing runs tsc, and `tsc --noEmit` already
+                     fails on the current 5.8 pin, so there is no green baseline.
+  #43 python 3.14 — must move together with CI python-version and the py311
+                    targets in pyproject.toml; reportlab already warns on 3.14.
+  #28 node 26    — should move together with the node-version pin in security.yml.
+3C. Reproducible supply chain — [BARELY STARTED]
+  DONE (partial) GitHub Actions updated to current majors on main (5a893e6):
+       metadata-action v6, build-push-action v7, login-action v4,
+       setup-python v7, trivy-action 0.36.0. NOTE this is version pinning, NOT the
+       SHA pinning this phase asks for — still a TODO below.
+  NOTE SBOM generation already exists for release images and the backend
+       (release-image.yml + security.yml both emit CycloneDX and upload it).
+       "Generate an SBOM for every release" is therefore largely satisfied;
+       verify it covers the frontend too.
+  TODO Pin container base images by digest for release builds. Not started.
+  TODO Pin GitHub Actions to immutable commit SHAs. Not started.
+  TODO Store dependency audit reports as CI artifacts. Not started.
+  TODO Review broad secret-scanner exclusions (.gitleaks.toml). Not started.
+  TODO Make CI gates blocking. Currently non-blocking / advisory:
+       - Black runs with continue-on-error (repo-wide reformat still pending:
+         162 files would be reformatted at the current pin — see Phase 8).
+       - shellcheck is marked informational in security.yml.
+       These must not be flipped to blocking until Phase 8 burns the findings down.
+Acceptance criteria
+A clean machine can create a working deployment without manual database repair.
+Initialization failure prevents a false-successful deployment.
+High and critical dependency gates pass or have approved, time-limited exceptions.
+Release images and workflows are reproducible.
+A fresh-install smoke test runs in CI.
+Estimated effort
+4–8 days, depending on dependency compatibility.
+Request to use
+Implement Phase 3A, the fresh-container initialization and smoke test.
+
+Phase 4 — Protect imports and business data integrity
+Objective: Prevent archive-based denial of service and partial imports.
+4A. Upload limits
+Enforce:Compressed request limit.
+Per-entry uncompressed limit.
+Total uncompressed limit.
+Maximum entry count.
+Maximum compression ratio.
+Maximum filename/path length.
+Allowed file-type policy.
+
+Reject encrypted, malformed and ambiguous archives.
+Stream large content rather than loading entire files into memory.
+Use dedicated staging directories with bounded storage.
+Ensure timeout and cleanup behavior is deterministic.
+Add adversarial archive tests without committing dangerous large fixtures.
+4B. Atomic import behavior
+Separate import into:Parse and validate.
+Prepare an execution plan.
+Stage files.
+Commit database and file changes.
+Generate derived artifacts.
+
+Use MongoDB transactions where the deployment topology supports them.
+Otherwise implement a durable import journal and compensating rollback.
+Give every import a unique operation ID.
+Make retries idempotent.
+Record created, changed, skipped and rolled-back objects.
+Do not silently leave partial Parts/BOM records after filesystem failure.
+Add fault-injection tests for:Disk failure.
+Metadata failure.
+Thumbnail failure.
+Duplicate operations.
+Process interruption.
+
+Acceptance criteria
+Oversized expansion is rejected before dangerous resource consumption.
+Failed imports leave the system in the previous consistent state or a clearly recoverable journaled state.
+Retrying an interrupted import does not duplicate data.
+Operators can diagnose and reconcile every import operation.
+Estimated effort
+6–12 days.
+Request to use
+Implement Phase 4A, archive safety and resource limits.
+
+Phase 5 — Production infrastructure and operational resilience
+Objective: Make deployment secure, observable and recoverable.
+Security defaults
+Require MongoDB authentication.
+Create a least-privilege application database user.
+Remove weak and compatibility-mode defaults.
+Fail startup when placeholder secrets are used.
+Define an approved secret-delivery mechanism.
+Move rate limiting to Redis or another shared store.
+Decide explicitly whether rate-limit storage failure is fail-open or fail-closed by endpoint risk.
+Apply global and endpoint-specific limits.
+Health and monitoring
+Create separate endpoints:
+Liveness: process is responsive.
+Readiness: MongoDB and required storage are usable.
+Diagnostics: authenticated detailed status for operators.
+Readiness should verify:
+MongoDB query.
+File-root existence and writeability where appropriate.
+Free disk thresholds.
+Required configuration.
+Background-worker state once workers are introduced.
+Add:
+Structured JSON logging.
+Request/correlation IDs.
+Authentication and authorization failure metrics.
+Import and document-pack duration/error metrics.
+Disk and backup age alerts.
+Central log retention guidance.
+Alert thresholds and an operator runbook.
+Backup and recovery
+Encrypt backups.
+Generate and verify checksums.
+Send backups off-host.
+Define retention tiers.
+Exclude or securely handle plaintext secrets.
+Test complete restoration of:MongoDB data.
+Deliverables.
+Configuration.
+Users and roles.
+
+Schedule automated restore verification.
+Define commercial RPO and RTO targets.
+Acceptance criteria
+Default production Compose configuration uses authenticated MongoDB.
+Rate limits are consistent across workers.
+Readiness fails when critical dependencies fail.
+Alerts exist for storage, database, backup and application failures.
+A documented restore drill succeeds from an off-host backup.
+Estimated effort
+6–12 days.
+Request to use
+Implement Phase 5, beginning with authenticated MongoDB and readiness checks.
+
+Phase 6 — Frontend reliability, usability and accessibility
+Objective: Turn the polished interface into a testable and accessible commercial UI.
+Testing foundation
+Add Vitest and React Testing Library.
+Add Playwright for critical browser workflows.
+Add axe accessibility checks.
+Cover:Login/logout.
+Part search and detail.
+Import preview and failure.
+Job/order editing.
+Role and permission behavior.
+Token management.
+Public shares.
+Mobile/tablet layouts.
+
+Usability
+Add an application error boundary.
+Add a real 404 page.
+Standardize loading, empty, permission-denied and server-error states.
+Replace console-only failures with actionable messages.
+Avoid silently translating API failures into empty lists.
+Reduce dense table friction with responsive column selection or card layouts.
+Split the part-detail interface into smaller navigable sections.
+Preserve unsaved-change warnings.
+Review destructive-action confirmation patterns.
+Accessibility
+Add a skip link and stable main-content target.
+Associate every label and input.
+Add live regions for asynchronous success and error messages.
+Verify keyboard-only operation.
+Improve modal focus management.
+Add reduced-motion support.
+Validate color contrast.
+Give icon-only controls accessible names.
+Establish WCAG 2.2 AA as the target.
+Performance
+Introduce route-level lazy loading.
+Lazy-load 3D and markup functionality only when needed.
+Set bundle-size budgets in CI.
+Measure real page performance with representative datasets.
+Acceptance criteria
+Critical workflows pass in Chromium, Firefox and WebKit.
+Automated axe tests have no serious or critical violations.
+Keyboard-only critical workflows are usable.
+API failures produce clear user-facing states.
+Bundle sizes meet defined budgets.
+Estimated effort
+7–15 days.
+Request to use
+Implement Phase 6, beginning with the frontend test and accessibility foundation.
+
+Phase 7 — SolidWorks add-in commercial hardening
+Objective: Make the desktop integration trustworthy and supportable.
+Work
+Move token storage to per-user protected storage.
+Never fall back to plaintext silently.
+Migrate existing plaintext configurations safely.
+Avoid accepting secrets through command-line installer parameters.
+Add server-certificate and backend URL validation.
+Add token expiry and revocation UX.
+Redact tokens from logs and diagnostic exports.
+Align backend, add-in and installer versioning.
+Obtain a commercial code-signing certificate.
+Sign the add-in assemblies and installer.
+Add installer upgrade/uninstall tests.
+Test supported SolidWorks and Windows versions.
+Define update and rollback behavior.
+Acceptance criteria
+Tokens are never stored in plaintext.
+Multi-user machines do not share credentials.
+Installer and binaries have valid trusted signatures.
+Upgrade and uninstall preserve or securely remove configuration as documented.
+Compatibility matrix and support boundaries are published.
+Estimated effort
+4–10 days, excluding certificate procurement.
+Request to use
+Implement Phase 7’s secure per-user token-storage migration.
+
+Phase 8 — Maintainability and engineering controls
+Objective: Reduce regression risk and make future commercial development sustainable.
+Work
+Enforce Black and the agreed Ruff rule set.
+Expand mypy incrementally from the current two modules.
+Remove unused imports, variables and redefinitions.
+Review broad except Exception handlers.
+Stop swallowing operationally significant failures.
+Break up the largest backend services, views and frontend components.
+Define service boundaries for:Parts/BOM.
+Files.
+Imports.
+Jobs/orders.
+Authorization.
+Document generation.
+
+Add a data/schema migration framework.
+Add optimistic concurrency or version fields for collaborative edits.
+Raise coverage thresholds progressively, with risk-weighted module targets.
+Add API-contract tests.
+Introduce CODEOWNERS and mandatory security review for sensitive areas.
+Acceptance criteria
+Formatting and lint gates are blocking.
+Static typing covers security and business-critical services.
+Critical mutation paths have concurrency protection.
+Database changes have forward and rollback procedures.
+Large modules have an agreed decomposition plan and measurable progress.
+Estimated effort
+Ongoing; initial gate hardening approximately 5–10 days.
+Request to use
+Implement Phase 8’s blocking formatting, linting and type-checking baseline.
+
+Phase 9 — Product and commercial scope
+Objective: Decide what the product is being sold as and close the corresponding functional gaps.
+Track A: Engineering BOM/document-control product
+This is the shorter route to market. Position features around:
+Parts and revisions.
+BOM control.
+Engineering files.
+Drawing review and markup.
+Controlled document packs.
+Jobs and purchasing/sales coordination.
+SolidWorks integration.
+Avoid claims of comprehensive production planning or inventory control.
+Track B: Full MRP product
+A separate product roadmap is needed for:
+Stock and available-to-promise ledger.
+Warehouses, bins and transfers.
+Purchase receipts and material issues.
+MRP explosion and demand netting.
+Lead times, safety stock and reorder policies.
+Routings and work centres.
+Capacity planning.
+Costing and variances.
+Lot/serial traceability.
+Cycle counting and stock adjustments.
+Planning exception messages.
+Accounting/export integrations.
+Commercial documentation
+Product terms/EULA.
+Privacy policy and DPA.
+Retention/deletion policy.
+Support and SLA definitions.
+Vulnerability disclosure contact.
+Third-party software notices.
+Trademark and bundled-asset provenance.
+Customer onboarding/offboarding procedures.
+Export and data portability commitments.
+Accessibility statement.
+Acceptance criteria
+Marketing claims match implemented capabilities.
+Every supported workflow has an owner and documented support boundary.
+Third-party redistribution obligations are documented.
+Customer contractual and privacy materials are approved by counsel.
+Request to use
+Help me execute Phase 9 for the engineering BOM/document-control market position.
+
+Phase 10 — Release-candidate validation
+Objective: Make the final commercial release decision using production-equivalent evidence.
+Required validation
+Freeze and tag a release candidate.
+Deploy from scratch in a production-equivalent environment.
+Run:Full automated suite.
+Compose smoke test.
+Browser matrix.
+Accessibility audit.
+Dependency and container scans.
+Secret scan.
+SAST.
+External penetration test.
+Load and endurance tests.
+Large dataset/import tests.
+Backup and complete restore drill.
+Upgrade and rollback drill.
+SolidWorks installer/upgrade tests.
+
+Resolve findings or formally accept residual risks.
+Produce:SBOM.
+Release notes.
+Deployment guide.
+Operations runbook.
+Support escalation process.
+Signed artifacts.
+Final go/no-go record.
+
+Acceptance criteria
+No unresolved critical or high findings without explicit, time-limited executive risk acceptance.
+Load objectives, RPO and RTO are achieved.
+Clean installation, upgrade, rollback and restore all succeed.
+Release artifacts are signed and reproducible.
+Production monitoring and escalation paths are active.
+Estimated effort
+1–3 weeks plus external penetration testing.
+Request to use
+Begin Phase 10 release-candidate validation and produce the final go/no-go report.
+
+Recommended implementation order
+The shortest safe path is:
+Phase 0 — controlled baseline.
+Phase 1A — stored XSS.
+Phase 1B/1C — tokens and sessions.
+Phase 2 — strict-mode authentication.
+Phase 3A — fresh deployments.
+Phase 3B/3C — dependencies and supply chain.
+Phase 4 — safe, atomic imports.
+Phase 5 — production infrastructure.
+Phase 6 — frontend quality and accessibility.
+Phase 7 — add-in hardening.
+Phase 8 — maintainability.
+Phase 9 — commercial scope.
+Phase 10 — release validation.
+The first clean implementation request should be: “Implement Phase 0 of the production mitigation plan.”
