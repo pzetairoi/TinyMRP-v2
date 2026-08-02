@@ -330,7 +330,7 @@ def combine_markup_documents(
     root_label: str = "",
     build_ts=None,
 ) -> bytes:
-    from PyPDF2 import PdfReader, PdfWriter
+    from pypdf import PdfReader, PdfWriter
 
     docs = list(documents)
     readers = [PdfReader(io.BytesIO(document.pdf_bytes)) for document in docs]

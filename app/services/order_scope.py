@@ -163,40 +163,41 @@ def _collect_order_parts(order: Order, include_children: bool) -> List[Tuple[str
 
 def _merge_pdf_paths(paths: List[str]) -> Tuple[bytes, List[int]]:
     try:
-        from PyPDF2 import PdfMerger, PdfReader
+        from pypdf import PdfReader, PdfWriter
     except Exception:
         return b"", []
-    merger = PdfMerger()
+    writer = PdfWriter()
     starts: List[int] = []
     total = 1
     for p in paths:
         try:
             rdr = PdfReader(p)
+            page_count = len(rdr.pages)
+            writer.append(rdr)
             starts.append(total)
-            total += len(rdr.pages)
-            merger.append(p)
+            total += page_count
         except Exception:
             continue
     buf = io.BytesIO()
-    merger.write(buf)
-    merger.close()
+    writer.write(buf)
+    writer.close()
     return buf.getvalue(), starts
 
 
 def _merge_pdf_bytes(segments: List[bytes]) -> bytes:
     try:
-        from PyPDF2 import PdfMerger
+        from pypdf import PdfWriter
     except Exception:
         return b""
-    merger = PdfMerger()
+    writer = PdfWriter()
     for b in segments:
         try:
-            merger.append(io.BytesIO(b))
+            writer.append(io.BytesIO(b))
         except Exception:
             continue
     buf = io.BytesIO()
-    merger.write(buf)
-    merger.close()
+    writer.write(buf)
+    writer.close()
     return buf.getvalue()
 
 
@@ -237,7 +238,7 @@ def _order_index_pdf(entries: List[Tuple[str, int]], cover_pages: int) -> Option
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
         from reportlab.pdfbase.pdfmetrics import stringWidth
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
     except Exception:
         return None
     if not entries:
@@ -290,7 +291,7 @@ def _build_order_binder(
     file_types: Optional[Iterable[str]],
 ) -> Optional[bytes]:
     try:
-        from PyPDF2 import PdfReader
+        from pypdf import PdfReader
     except Exception:
         return None
     groups = set(_norm_file_types(file_types))

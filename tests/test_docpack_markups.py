@@ -2,7 +2,7 @@ import io
 import zipfile
 
 from PIL import Image
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 from app.models.artifact import PartFile
 from app.models.part import Part

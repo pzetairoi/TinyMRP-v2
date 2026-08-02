@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from reportlab.pdfgen import canvas
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 from app.models.app_settings import AppSettings
 from app.models.part import Part
@@ -32,7 +32,7 @@ def _write_pdf_with_outline(path: str, labels: list[str]) -> None:
         c.showPage()
     c.save()
     try:
-        from PyPDF2 import PdfReader, PdfWriter
+        from pypdf import PdfReader, PdfWriter
     except Exception:
         return
     reader = PdfReader(path)

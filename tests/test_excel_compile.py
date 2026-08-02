@@ -5,7 +5,7 @@ import zipfile
 
 import openpyxl
 from reportlab.pdfgen import canvas
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 from app.models.auth import Role, User
 from app.models.part import Part

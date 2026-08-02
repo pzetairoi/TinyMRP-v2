@@ -1487,7 +1487,7 @@ def _visual_list_pdf(
             hw_pdf = None
         if hw_pdf:
             try:
-                from PyPDF2 import PdfReader, PdfWriter
+                from pypdf import PdfReader, PdfWriter
             except Exception:
                 return base_pdf
             writer = PdfWriter()
@@ -2171,13 +2171,13 @@ def _overlay_numbers_and_stamps(
         return pdf_bytes
     try:
         from reportlab.pdfgen import canvas
-        from PyPDF2 import PdfReader, PdfWriter
+        from pypdf import PdfReader, PdfWriter
     except Exception as exc:
         try:
-            current_app.logger.error("PDF overlay failed: missing reportlab or PyPDF2")
+            current_app.logger.error("PDF overlay failed: missing reportlab or pypdf")
         except Exception:
             pass
-        raise RuntimeError("PDF numbering/stamping requires reportlab and PyPDF2.") from exc
+        raise RuntimeError("PDF numbering/stamping requires reportlab and pypdf.") from exc
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     # stamp images (optional)
@@ -2253,16 +2253,14 @@ def _overlay_numbers_and_stamps(
         c.save()
         obuf.seek(0)
         # merge overlay
-        from PyPDF2 import PdfReader as _PdfReader
+        from pypdf import PdfReader as _PdfReader
         overlay = _PdfReader(obuf).pages[0]
-        try:
-            page.merge_page(overlay)
-        except Exception:
-            try:
-                page.mergePage(overlay)  # older API
-            except Exception:
-                pass
         writer.add_page(page)
+        output_page = writer.pages[-1]
+        try:
+            output_page.merge_page(overlay)
+        except Exception:
+            pass
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()
@@ -2271,23 +2269,24 @@ def _overlay_numbers_and_stamps(
 def _merge_pdfs(paths: List[str]) -> Tuple[bytes, List[int]]:
     """Merge PDFs in order. Return (bytes, start_pages) where start_pages[i] is 1-based start page of doc i."""
     try:
-        from PyPDF2 import PdfMerger, PdfReader
+        from pypdf import PdfReader, PdfWriter
     except Exception:
         return b"", []
-    merger = PdfMerger()
+    writer = PdfWriter()
     starts: List[int] = []
     total = 1
     for p in paths:
         try:
             rdr = PdfReader(p)
+            page_count = len(rdr.pages)
+            writer.append(rdr)
             starts.append(total)
-            total += len(rdr.pages)
-            merger.append(rdr)
+            total += page_count
         except Exception:
             continue
     buf = io.BytesIO()
-    merger.write(buf)
-    merger.close()
+    writer.write(buf)
+    writer.close()
     return (buf.getvalue(), starts)
 
 
@@ -2296,7 +2295,7 @@ def _merge_pdfs_filtered(paths: List[str], *, fp_tokens: List[str]) -> Tuple[byt
     Return (bytes, start_pages, kept_indices) where start_pages aligns to kept_indices.
     """
     try:
-        from PyPDF2 import PdfReader, PdfWriter
+        from pypdf import PdfReader, PdfWriter
     except Exception:
         return b"", [], []
     writer = PdfWriter()
@@ -3090,7 +3089,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             from reportlab.lib.pagesizes import A4
             from reportlab.lib.units import mm
             from reportlab.pdfbase.pdfmetrics import stringWidth
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
 
             desc_cache: Dict[Tuple[str, str], str] = {}
             multi_by_pn: Dict[str, int] = {}
@@ -3211,7 +3210,7 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
         if binder_pdf_paths and opts.binder_add_visual_list:
             try:
                 # Compute cover/index/visual page counts now that index is finalized
-                from PyPDF2 import PdfReader
+                from pypdf import PdfReader
                 cover_pages = 0
                 vis_pages = 0
                 index_pages = 0

@@ -1,6 +1,6 @@
 import io
 
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 from app.models.part import Part
 from app.models.bom import BOMLink
