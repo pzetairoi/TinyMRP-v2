@@ -316,6 +316,13 @@ def reconcile_standard_roles(*, dry_run: bool = False, apply: bool = False) -> d
             role.description = definition.description
             role.permissions = list(definition.permissions)
             role.save()
+            if "permissions" in drift_fields:
+                from app.services.session_lifecycle import revoke_role_sessions
+
+                revoke_role_sessions(
+                    role,
+                    reason="standard_role_permissions_restored",
+                )
             report["updated"].append(slug)
 
     return report

@@ -26,14 +26,20 @@ Active workstreams as of 2026-08-03:
            password/security-state changes, lifecycle audit and regressions.
     Reserved files:
       app/services/session_lifecycle.py (new)
+      app/services/standard_roles.py
       app/views/main.py
       app/views/admin.py
+      app/views/admin_audit.py
+      app/views/admin_roles.py
       app/cli.py
       app/services/rls_demo.py
+      app/services/purge.py
       tests/test_session_lifecycle.py (new)
       tests/test_account_profile.py
       tests/test_admin_access_usability.py
+      tests/test_audit_log.py
       tests/test_cli_security.py
+      tests/test_permission_registry.py
       docs/PRODUCTION_HARDENING_BASELINE.md
       CHANGELOG.md
       hardeningplan.txt
@@ -305,6 +311,33 @@ Phase 1B completion record (2026-08-03):
            is Phase 2; add-in secret storage is Phase 7.
   NEXT Claim and implement Phase 1C. In parallel, upgrade only Pillow, gunicorn
        and cryptography in a separately owned P3B runtime-pin workstream.
+
+Phase 1C progress record (2026-08-03; implementation checkpoint):
+  IMPLEMENTED Central compare-and-set fs_uniquifier rotation invalidates every
+              existing Flask-Security browser session and remember cookie without
+              changing the stable user database identity. Concurrent rotations
+              retry safely and the replacement value is never audited.
+  IMPLEMENTED Session invalidation now accompanies self/admin/CLI password
+              changes, deactivation and reactivation, user role-assignment
+              changes, role permission/slug changes, canonical-role permission
+              restoration, custom-role purge demotion and disposable demo/test
+              credential refresh. Deleted users already fail closed in the
+              Flask-Security loader; reactivation rotates again so it cannot
+              revive an older cookie.
+  IMPLEMENTED Self-service password change explicitly signs out the current
+              browser after invalidating all other sessions. Lifecycle events use
+              session.security_event_revoke with a friendly audit label, reason
+              and mechanism, and password/admin events record browser/API impact.
+  FIXED The permission-test credential result had regressed to Cache-Control:
+        no-store only, despite its existing regression requiring private. It now
+        emits private, no-store so generated passwords cannot enter shared caches.
+  TESTED 11 new session regressions cover active, inactive/reactivated, deleted,
+         expired-cookie, explicitly revoked, self/admin/CLI password, role
+         assignment/definition and canonical-role restore cases. The affected
+         identity/admin/CLI/impersonation/purge/RLS/role/token set passes with
+         123 tests. Ruff and changed-file formatting checks pass.
+  PENDING Full Python 3.11 suite, production-image checks, complete protected
+          VPS/Caddy deployment gates, documentation closure and final commit.
 ========================================================================
 
 Progressive mitigation roadmap

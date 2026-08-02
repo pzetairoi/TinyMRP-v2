@@ -2,6 +2,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask import abort
 from mongoengine.errors import DoesNotExist, ValidationError
+from flask_login import logout_user
 from flask_security import auth_required, current_user
 from flask_security.utils import hash_password
 from app.services.audit import log_action
@@ -19,6 +20,7 @@ from ..models.user_settings import UserSettings
 from app.services.app_settings import branding_root, get_app_settings
 from app.services.password_policy import validate_admin_password
 from app.services.api_tokens import revoke_user_tokens
+from app.services.session_lifecycle import revoke_user_sessions
 from app.services.processmeta import load_process_meta, sanitize_process_meta
 from app.services.standard_roles import STANDARD_ROLES
 from app.services.timezone_utils import (
@@ -589,6 +591,10 @@ def users_bulk_status():
         revoked_tokens = 0
         if is_deactivate:
             revoked_tokens = revoke_user_tokens(user, reason="account_deactivated")
+        session_reason = (
+            "account_deactivated" if is_deactivate else "account_reactivated"
+        )
+        revoke_user_sessions(user, reason=session_reason)
         if is_deactivate and is_legacy_admin:
             active_admins -= 1
         changed += 1
@@ -597,7 +603,10 @@ def users_bulk_status():
                 f"admin.user.{action}",
                 resource_type="user",
                 resource=str(user.email),
-                meta={"revoked_api_tokens": revoked_tokens},
+                meta={
+                    "revoked_api_tokens": revoked_tokens,
+                    "revoked_browser_sessions": True,
+                },
             )
         except Exception:
             pass
@@ -674,6 +683,7 @@ def users_edit(user_id):
 
     if request.method == "POST":
         was_active = bool(u.active)
+        current_role_ids = {str(role.id) for role in (u.roles or [])}
         role_ids = request.form.getlist("roles")
         try:
             selected_roles = list(Role.objects(id__in=role_ids))
@@ -686,9 +696,8 @@ def users_edit(user_id):
             and not current_user.has_role("admin")
         ):
             abort(403)
+        requested_role_ids = {str(role.id) for role in selected_roles}
         if str(u.id) == str(current_user.id):
-            current_role_ids = {str(role.id) for role in (u.roles or [])}
-            requested_role_ids = {str(role.id) for role in selected_roles}
             if requested_role_ids - current_role_ids:
                 abort(403)
         requested_active = (
@@ -721,13 +730,18 @@ def users_edit(user_id):
             u.password = hash_password(new_pw)
             u.password_changed_at = utc_now()
             password_reset = True
-            try:
-                log_action("admin.user.password", resource_type="user", resource=str(u.email))
-            except Exception:
-                pass
 
         u.updated_at = utc_now()
         u.save()
+        security_changes = []
+        if password_reset:
+            security_changes.append("administrator_password_reset")
+        if was_active != requested_active:
+            security_changes.append(
+                "account_reactivated" if requested_active else "account_deactivated"
+            )
+        if current_role_ids != requested_role_ids:
+            security_changes.append("role_assignment_changed")
         revoke_reason = None
         if password_reset:
             revoke_reason = "administrator_password_reset"
@@ -736,6 +750,8 @@ def users_edit(user_id):
         revoked_tokens = (
             revoke_user_tokens(u, reason=revoke_reason) if revoke_reason else 0
         )
+        if security_changes:
+            revoke_user_sessions(u, reason="+".join(security_changes))
         if revoked_tokens:
             try:
                 log_action(
@@ -746,14 +762,40 @@ def users_edit(user_id):
                 )
             except Exception:
                 pass
+        if password_reset:
+            try:
+                log_action(
+                    "admin.user.password",
+                    resource_type="user",
+                    resource=str(u.email),
+                    meta={
+                        "revoked_api_tokens": revoked_tokens,
+                        "revoked_browser_sessions": bool(security_changes),
+                    },
+                )
+            except Exception:
+                pass
         try:
-            log_action("admin.user.edit_roles", resource_type="user", resource=str(u.email))
+            log_action(
+                "admin.user.edit_roles",
+                resource_type="user",
+                resource=str(u.email),
+                meta={
+                    "security_changes": security_changes,
+                    "revoked_browser_sessions": bool(security_changes),
+                },
+            )
         except Exception:
             pass
         message = "User updated."
         if revoked_tokens:
             message += f" Revoked {revoked_tokens} API token(s)."
+        if security_changes:
+            message += " Existing browser sessions were signed out."
         flash(message, "success")
+        if security_changes and str(u.id) == str(current_user.id):
+            logout_user()
+            return redirect(url_for("security.login"))
         return redirect(url_for("admin.users_list"))
 
     return render_template(

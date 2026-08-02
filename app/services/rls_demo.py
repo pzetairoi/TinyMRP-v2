@@ -120,8 +120,10 @@ def _user_email(alias: str, domain: str) -> str:
 
 def _upsert_user(email: str, role: Role, password: str) -> User:
     from app.services.api_tokens import revoke_user_tokens
+    from app.services.session_lifecycle import revoke_user_sessions
 
     u = User.objects(email=email).first()
+    existed = u is not None
     if not u:
         u = User(email=email, fs_uniquifier=secrets.token_hex(16))
     u.password = hash_password(password)
@@ -129,6 +131,8 @@ def _upsert_user(email: str, role: Role, password: str) -> User:
     u.active = True
     u.save()
     revoke_user_tokens(u, reason="demo_credential_refresh")
+    if existed:
+        revoke_user_sessions(u, reason="demo_credential_refresh")
     return u
 
 
@@ -430,6 +434,7 @@ def seed_permission_test_environment(
     """Create the small canonical permission-test environment without tokens/files."""
 
     from app.services.api_tokens import revoke_user_tokens
+    from app.services.session_lifecycle import revoke_user_sessions
 
     normalized = _normalize_domain(domain)
     roles = _standard_role_documents()
@@ -457,6 +462,11 @@ def seed_permission_test_environment(
         user.updated_at = utc_now()
         user.save()
         revoke_user_tokens(user, reason="permission_test_credential_refresh")
+        if not created:
+            revoke_user_sessions(
+                user,
+                reason="permission_test_credential_refresh",
+            )
         users[scenario] = user
         user_rows.append(
             {
@@ -530,4 +540,3 @@ def reset_permission_test_environment(
         "parts": int(deleted_parts or 0),
         "bom_links": int(deleted_bom or 0),
     }
-

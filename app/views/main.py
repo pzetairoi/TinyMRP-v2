@@ -4,7 +4,7 @@ from datetime import datetime
 from bson import ObjectId
 from bson.errors import InvalidId
 from flask import Blueprint, render_template, send_file, abort, request, redirect, url_for, flash, current_app
-from flask_login import login_required
+from flask_login import login_required, logout_user
 from flask_security import auth_required, current_user
 from flask_security.utils import hash_password
 
@@ -25,6 +25,7 @@ from app.services.authorization import (
 from app.services.attrs import approval_field_values, harvest_part_attrs
 from app.services.password_policy import password_policy_summary, validate_password_change
 from app.services.api_tokens import revoke_user_tokens
+from app.services.session_lifecycle import revoke_user_sessions
 from app.services.user_profile import (
     permissions_for_user,
     profile_color_choices,
@@ -468,15 +469,29 @@ def app_password_change():
         current_user,
         reason="self_service_password_change",
     )
+    revoke_user_sessions(
+        current_user,
+        reason="self_service_password_change",
+    )
     try:
-        log_action("account.password.change", resource_type="user", resource=str(current_user.email or ""))
+        log_action(
+            "account.password.change",
+            resource_type="user",
+            resource=str(current_user.email or ""),
+            meta={
+                "revoked_api_tokens": revoked_tokens,
+                "revoked_browser_sessions": True,
+            },
+        )
     except Exception:
         pass
+    logout_user()
     flash(
-        f"Password changed. Revoked {revoked_tokens} API token(s); create a new token for each integration.",
+        "Password changed. You have been signed out on every browser. "
+        f"Revoked {revoked_tokens} API token(s); create a new token for each integration.",
         "success",
     )
-    return redirect(url_for("main.app_home"))
+    return redirect(url_for("security.login"))
 
 
 @bp.get("/downloads/macro")

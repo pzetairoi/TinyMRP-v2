@@ -28,6 +28,7 @@ from app.services.rls_demo import (
     reset_permission_test_environment,
     seed_permission_test_environment,
 )
+from app.services.session_lifecycle import revoke_role_sessions
 from app.services.standard_roles import (
     STANDARD_ROLES,
     reconcile_standard_roles,
@@ -358,7 +359,7 @@ def _render_roles_page(
         status_code,
     )
     if permission_test_result:
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -583,6 +584,8 @@ def roles_edit(role_id):
 
     if request.method == "POST":
         definition = STANDARD_ROLES.get(role.name)
+        previous_name = role.name
+        previous_permissions = set(role.permissions or [])
         name = role.name if definition else (request.form.get("name") or "").strip()
         display_name = (request.form.get("display_name") or "").strip()
         description = (request.form.get("description") or "").strip()
@@ -642,12 +645,25 @@ def roles_edit(role_id):
                 ),
                 400,
             )
+        security_changed = (
+            role.name != previous_name
+            or set(role.permissions or []) != previous_permissions
+        )
+        revoked_sessions = (
+            revoke_role_sessions(role, reason="role_definition_changed")
+            if security_changed
+            else 0
+        )
         log_action(
             "admin.role.update",
             resource_type="role",
             resource=role.name,
+            meta={"revoked_browser_sessions": revoked_sessions},
         )
-        flash("Role updated.", "success")
+        message = "Role updated."
+        if revoked_sessions:
+            message += f" Signed out {revoked_sessions} assigned user(s)."
+        flash(message, "success")
         return redirect(url_for("admin_roles.roles_list"))
     return render_template(
         "admin/roles_form.html",

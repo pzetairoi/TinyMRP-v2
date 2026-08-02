@@ -23,6 +23,7 @@ from app.models.part_annotation import PartAnnotation
 from app.models.part_drawing_markup import PartDrawingMarkup
 from app.models.part_share import PartShareLink
 from app.models.supplier import Supplier
+from app.services.session_lifecycle import revoke_user_sessions
 from app.services.standard_roles import STANDARD_ROLES
 
 # Least-privileged general role used when a purge would otherwise leave a user
@@ -115,6 +116,7 @@ def _delete_custom_roles() -> int:
             kept = [fallback]
         user.roles = kept
         user.save()
+        revoke_user_sessions(user, reason="custom_roles_purged")
     return removed
 
 

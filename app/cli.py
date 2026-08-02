@@ -19,6 +19,7 @@ from app.services.part_annotations import bulk_sync_annotation_search_fields
 from app.services.part_materialized import rebuild_part_materialized_fields
 from app.services.password_policy import validate_admin_password
 from app.services.api_tokens import revoke_user_tokens
+from app.services.session_lifecycle import revoke_user_sessions
 from app.services.timezone_utils import utc_iso, utc_now
 
 
@@ -137,6 +138,7 @@ def grant_admin(email):
     if r not in u.roles:
         u.roles.append(r)
         u.save()
+        revoke_user_sessions(u, reason="cli_role_assignment_changed")
     click.echo("Granted administrator role")
 
 @user.command("set-password")
@@ -158,7 +160,11 @@ def set_password(email, password):
     u.updated_at = utc_now()
     u.save()
     revoked_tokens = revoke_user_tokens(u, reason="cli_password_reset")
-    click.echo(f"Password updated; revoked {revoked_tokens} API token(s)")
+    revoke_user_sessions(u, reason="cli_password_reset")
+    click.echo(
+        "Password updated; signed out existing browser sessions; "
+        f"revoked {revoked_tokens} API token(s)"
+    )
 
 @user.command("grant-role")
 @click.option("--email", prompt=True)
@@ -176,6 +182,7 @@ def grant_role(email, role_name):
     if r not in u.roles:
         u.roles.append(r)
         u.save()
+        revoke_user_sessions(u, reason="cli_role_assignment_changed")
     click.echo("Role granted")
 
 @user.command("revoke-role")
@@ -194,6 +201,7 @@ def revoke_role(email, role_name):
     if r in (u.roles or []):
         u.roles = [x for x in (u.roles or []) if x != r]
         u.save()
+        revoke_user_sessions(u, reason="cli_role_assignment_changed")
     click.echo("Role revoked")
     
 @user.command("seed-roles")
@@ -235,6 +243,7 @@ def bootstrap_admin(email, password):
         raise SystemExit(1)
     r = _canonical_administrator_role()
     u = _get_user(email)
+    existed = u is not None
     if not u:
         u = User(email=email.lower(), fs_uniquifier=secrets.token_hex(16))
     u.password = hash_password(password)
@@ -245,7 +254,12 @@ def bootstrap_admin(email, password):
         u.roles.append(r)
     u.save()
     revoked_tokens = revoke_user_tokens(u, reason="cli_bootstrap_password_reset")
-    click.echo(f"Admin user ready; revoked {revoked_tokens} API token(s)")
+    if existed:
+        revoke_user_sessions(u, reason="cli_bootstrap_password_reset")
+    click.echo(
+        "Admin user ready; existing browser sessions signed out; "
+        f"revoked {revoked_tokens} API token(s)"
+    )
 
 @user.command("seed-combos")
 @click.option("--prefix", default="test", show_default=True, help="Email prefix for generated users")
@@ -290,6 +304,11 @@ def seed_user_combos(prefix, domain, password, max_combos, attach_biz):
         email = f"{prefix}.{label}@{domain}".lower()
 
         u = User.objects(email=email).first()
+        existed = u is not None
+        previous_role_ids = {
+            str(role.id) for role in ((u.roles or []) if u is not None else [])
+        }
+        was_active = bool(u.active) if u is not None else False
         if not u:
             u = User(email=email, fs_uniquifier=secrets.token_hex(16))
             created += 1
@@ -313,6 +332,13 @@ def seed_user_combos(prefix, domain, password, max_combos, attach_biz):
         u.save()
         if set_password:
             revoke_user_tokens(u, reason="cli_seed_password_reset")
+        security_changed = (
+            set_password
+            or was_active != bool(u.active)
+            or previous_role_ids != {str(role.id) for role in (u.roles or [])}
+        )
+        if existed and security_changed:
+            revoke_user_sessions(u, reason="cli_seed_security_state_changed")
         seeded_users.append(u)
 
         if writer and set_password:
@@ -1030,7 +1056,6 @@ def init_app(app):
         click.echo({"orders": n_orders, "jobs": n_jobs, "suppliers": n_sup, "customers": n_cust})
 
     app.cli.add_command(biz)
-
 
 
 

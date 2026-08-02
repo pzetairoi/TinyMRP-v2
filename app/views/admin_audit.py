@@ -16,7 +16,7 @@ AUDIT_CATEGORIES = {
     "change": ("Changed", ("part.notes.update", "part.comments.add", "part.files.refresh", "part.delete")),
     "upload": ("Uploaded", ("upload.", "import.")),
     "export": ("Exported", ("arena.export.", "docpack.build", "download.")),
-    "access": ("Access & admin", ("account.", "admin.", "share.")),
+    "access": ("Access & admin", ("account.", "admin.", "session.", "share.")),
 }
 
 ACTION_LABELS = {
@@ -38,6 +38,7 @@ ACTION_LABELS = {
     "docpack.build": "Built a document pack",
     "account.profile.update": "Updated their profile",
     "account.password.change": "Changed their password",
+    "session.security_event_revoke": "Signed out existing browser sessions",
     "admin.settings.update": "Changed application settings",
 }
 
