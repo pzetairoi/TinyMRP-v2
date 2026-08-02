@@ -21,7 +21,7 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  P3C-WORKFLOW-PINS  IN PROGRESS  owner: Codex /root
+  P3C-WORKFLOW-PINS  DONE/INTEGRATED 2026-08-03  owner: Codex /root
     Scope: pin every third-party GitHub Action to a verified immutable commit;
            retain Python/npm/Trivy audit reports and backend/frontend/image
            CycloneDX SBOMs even when their corresponding blocking gate fails.
@@ -50,11 +50,12 @@ Active workstreams as of 2026-08-03:
              produced a valid 107-component lockfile CycloneDX SBOM. The exact
              requirements audit still exits 1 for its single proposed exception,
              and its backend CycloneDX JSON generation passes.
+    CHECKPOINT 4984637 is pushed on origin/hardening/production-readiness.
 
-  P3C-IMAGE-PINS  AVAILABLE FOR PARALLEL CLAIM  owner: none
+  P3C-IMAGE-PINS  IN PROGRESS  owner: Codex /root
     Scope: pin Dockerfile and supported deployment images to verified multi-arch
            manifest digests without changing service topology or Caddy behavior.
-    Candidate files after claim:
+    Reserved files:
       docker/app/Dockerfile
       docker-compose.yml
       docker-compose.onefolder.yml
@@ -63,15 +64,28 @@ Active workstreams as of 2026-08-03:
       deploy/scripts/lib/nextcloud.sh
       tests/test_vps_caddy_deployment_contract.py
       tests/test_container_bootstrap.py
+      tests/test_supply_chain_contract.py
+      hardeningplan.txt
+    VERIFIED REGISTRY SNAPSHOT 2026-08-03 multi-arch manifest digests:
+      docker/dockerfile:1  sha256:87999aa3...f9cb89
+      node:24-alpine       sha256:f70403e8...f7a6b3
+      python:3.11-slim-bookworm sha256:b1899299...ad5cba
+      mongo:6.0            sha256:8b6d8f5b...bad3ac
+      nginx:1.27-alpine    sha256:65645c7b...2f2a10
+      caddy:2-alpine       sha256:5f5c8640...d58648
+      mariadb:11           sha256:efb4959e...890c4
+      nextcloud:apache     sha256:58bc7333...f3ecd
     Protected gate: production build, both static and rendered Compose paths,
       fresh bootstrap, all deployment script checks, rendered/live Caddy path.
 
-  P3C-SECRET-SCAN  IN PROGRESS  owner: /root/p3b_advisory_triage
+  P3C-SECRET-SCAN  DONE/INTEGRATED 2026-08-03
+    owner: /root/p3b_advisory_triage + /root
     Scope: restore the upstream default detection rules, replace broad generated/
            docs exclusions with the narrow minimum, and add focused source
            contracts. Work in a separate worktree based on 38e2ef0.
     Reserved files:
       .gitleaks.toml
+      .gitleaksignore
       tests/test_gitleaks_contract.py (new)
     FINDING The custom config did not extend the upstream defaults and defined
             no rules of its own, making the prior CI scan vacuous. A full-history
@@ -84,9 +98,17 @@ Active workstreams as of 2026-08-03:
              origin/hardening/p3c-secret-scan-codex with only the two reserved
              files; three focused tests and Ruff pass. Effective scanning also
              found one plainly named strict-mode test fixture, which /root has
-             replaced with a computed non-secret placeholder. The two deleted
-             history candidates remain unsuppressed and release-blocking pending
-             human classification/rotation confirmation.
+             replaced with a computed non-secret placeholder. Its exact old
+             fingerprint is the sole `.gitleaksignore` entry; a regression
+             forbids broader ignores. The two deleted history candidates remain
+             unsuppressed and release-blocking pending human classification/
+             rotation confirmation.
+    VERIFIED A tracked-HEAD archive scans clean. Gitleaks v8.28.0 scanned all
+             407 commits and exits 1 with exactly two findings after the precise
+             non-secret fixture ignore; both are the deleted environment-file
+             candidates. Nine combined Gitleaks/workflow contracts pass.
+    CHECKPOINT Secret config integrated as ad24b87; exact history-ignore and
+               disposition evidence are in the following primary checkpoint.
 
 Completed workstream scope:
   P2-STRICT-AUTH  DONE 2026-08-03  owner: Codex /root

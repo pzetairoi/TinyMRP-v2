@@ -1,0 +1,3 @@
+# Verified non-secret test fixture, replaced in 4984637. Keep this exact
+# fingerprint only; the deleted .env.example findings remain release-blocking.
+80783b3039e08cff56f0f2cab7a1862eee81a190:tests/test_strict_auth_mode.py:generic-api-key:25

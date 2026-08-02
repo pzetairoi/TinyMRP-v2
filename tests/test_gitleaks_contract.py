@@ -72,3 +72,16 @@ def test_gitleaks_allowlist_cannot_hide_human_authored_or_fixture_paths() -> Non
     )
     for path in paths_that_must_be_scanned:
         assert not any(re.search(pattern, path) for pattern in patterns)
+
+
+def test_gitleaks_history_ignore_is_one_verified_non_secret_fixture() -> None:
+    ignore_lines = {
+        line.strip()
+        for line in (REPO_ROOT / ".gitleaksignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert ignore_lines == {
+        "80783b3039e08cff56f0f2cab7a1862eee81a190:"
+        "tests/test_strict_auth_mode.py:generic-api-key:25"
+    }
