@@ -406,7 +406,8 @@ def test_permission_test_seed_uses_only_curated_canonical_matrix(client, app, tm
     seeded = client.post("/admin/roles/permission-test/seed")
 
     assert seeded.status_code == 200
-    assert seeded.headers["Cache-Control"] == "no-store"
+    assert seeded.cache_control.no_store is True
+    assert seeded.cache_control.private is True
     body = seeded.get_data(as_text=True)
     assert "Copy all" in body
     assert "Credentials are shown only in this immediate response" in body

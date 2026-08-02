@@ -78,6 +78,9 @@ def _write_runtime_file(path: str, data: dict) -> None:
 
 
 def _acquire_lock(path: str, timeout: float = 5.0) -> str | None:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     lock_path = f"{path}.lock"
     start = time.time()
     while True:

@@ -163,6 +163,13 @@ def create_app(config_object=None):
     app.config.setdefault("SECURITY_PASSWORD_HASH", "argon2")
     app.config.setdefault("SECURITY_PASSWORD_LENGTH_MIN", int(os.getenv("SECURITY_PASSWORD_LENGTH_MIN") or "12"))
     app.config.setdefault("SECURITY_RETURN_GENERIC_RESPONSES", True)
+    # Flask-Security applies these through Werkzeug's cache-control mapping.
+    # Token directives use None; bool values serialize as "private=True" and
+    # "no-store=True" with current pinned Werkzeug releases.
+    app.config.setdefault(
+        "SECURITY_CACHE_CONTROL",
+        {"private": None, "no-store": None},
+    )
     app.config.setdefault("MONGO_URI", "mongodb://localhost:27017/tinymrp-v2")
     app.config.setdefault("SECURITY_REGISTERABLE", False)
     app.config.setdefault("SECURITY_RECOVERABLE", False)

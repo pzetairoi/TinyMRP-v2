@@ -2,11 +2,8 @@
 STATUS LOG — keep this current so work is not repeated
 ========================================================================
 Branch: hardening/production-readiness
-Driver: Codex. Anything below marked [DONE ... Claude] was done in parallel
-and deliberately avoided Codex's Phase 0 files.
-
-Codex Phase 0 footprint at time of writing (do not edit these in parallel):
-  app/services/runtime_secrets.py, tests/test_auth_recovery.py, .gitattributes
+Driver: Codex. Anything below marked [DONE ... Claude] was done in parallel.
+Phase 0 is complete; no Phase 0 files remain reserved for parallel work.
 
 Completed so far:
   Phase 1A  DONE   stored XSS in job/order forms + 17 regression tests (Claude)
@@ -16,16 +13,46 @@ Completed so far:
                    Flask-Security advisory not investigated
   Phase 3C  PARTIAL actions on current majors, but SHA pinning + digest pinning
                    + blocking gates all still TODO
-  Phase 0   IN PROGRESS (Codex)
+  Phase 0   DONE 2026-08-02 (Codex)
+                   baseline tag: hardening-baseline-2026-08-02
+                   evidence: docs/PRODUCTION_HARDENING_BASELINE.md
 
-Known pre-existing failure, unrelated to any of the above — do not chase it as a
-regression, but it is a real bug worth fixing:
-  tests/test_admin_access_usability.py::
-    test_permission_test_seed_uses_only_curated_canonical_matrix
-  Asserts Cache-Control == "no-store" but gets "no-store=True, private=True".
-  The app sets the header as a plain string at app/views/admin_roles.py:361, so
-  something downstream re-serializes it. Reproduces identically on the
-  pre-upgrade dependency pins.
+Phase 0 completion details:
+  DONE Created hardening/production-readiness from origin/main f574515.
+  DONE Classified dependency/workflow/generated-bundle commits 5a893e6 and
+       f574515 as intentional and preserved them.
+  DONE Added LF attributes for frontend/build assets and shell scripts so a
+       Windows checkout does not create spurious generated-bundle changes.
+  DONE Fixed clean-start runtime secrets: lock acquisition creates a missing
+       parent directory before creating runtime_secrets.json.lock.
+  DONE Fixed pinned Flask-Security/Werkzeug cache-control compatibility. The
+       app now emits standard `private, no-store` directives, and the old exact
+       string test is semantic. The formerly known failure is resolved.
+  DONE Clean CPython 3.11.11 environment: 568 passed, 1 skipped, 585 warnings,
+       71.04% coverage; dependency compatibility check passed.
+  DONE Node 24.18.1/npm 11.19.0: clean install, lint (one warning), build; two
+       consecutive builds were byte-stable.
+  DONE Ruff configured rules, scoped mypy and Bandit -ll pass. Black remains
+       non-blocking with 162 files requiring formatting.
+  DONE Main/one-folder Compose parse, production image build, 62 add-in tests,
+       shell syntax, isolated Caddy render/validate and rendered VPS Compose.
+  DONE Added the audit baseline and explicit release-blocker checklist under
+       docs/PRODUCTION_HARDENING_BASELINE.md.
+  OPEN Supply-chain gates: pip-audit 34 entries/5 packages; npm production
+       audit 2 high entries. These are Phase 3B blockers.
+
+Protected owner requirement added 2026-08-02:
+  The guided Ubuntu/VPS deployment scripts using Caddy MUST remain supported.
+  Any phase touching auth, files, containers, health, networking, environment
+  or deployment must validate Bash syntax, rendered Caddy config, rendered
+  instance Compose, empty FILES_ACCEL_REDIRECT_PREFIX, update/rollback behavior
+  and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
+
+Next recommended work:
+  Phase 3A first: fix the entrypoint's removed PERMISSIONS import/legacy role
+  slugs and make seeding fail startup correctly. This is prioritized ahead of
+  1B because a fresh VPS/Caddy instance currently cannot reliably bootstrap.
+  Then resume Phase 1B/1C followed by Phase 2.
 ========================================================================
 
 Progressive mitigation roadmap
@@ -36,33 +63,16 @@ Automated regression tests.
 Updated deployment or operator documentation.
 A short residual-risk report.
 A clean commit suitable for rollback.
-Phase 0 — Establish a controlled baseline
+Phase 0 — Establish a controlled baseline — [DONE 2026-08-02, Codex]
 Objective: Create an immutable, reproducible starting point before remediation begins.
-Work
-Review the currently staged dependency, workflow and generated frontend changes.
-Decide which changes are intentional.
-Remove generated or accidental changes where appropriate.
-Run the complete baseline verification suite.
-Record:Python and Node versions.
-Dependency lock state.
-Docker image versions.
-Application and add-in versions.
-Current test and coverage results.
-
-Create a remediation branch and baseline tag.
-Add a concise audit findings document under docs/.
-Establish a release-blocker checklist.
-Acceptance criteria
-Clean working tree.
-Full tests pass from a fresh environment.
-Frontend production build is reproducible.
-Docker Compose configuration validates.
-Baseline is committed and tagged.
-No generated build output changes unexpectedly after a second build.
+Completion evidence and residual risks are in
+docs/PRODUCTION_HARDENING_BASELINE.md. All listed Phase 0 acceptance criteria
+were met. The Caddy/VPS fresh-bootstrap limitation is an explicitly open Phase
+3A production blocker, not an unrecorded Phase 0 success.
 Estimated effort
 0.5–2 engineering days.
 Request to use
-Implement Phase 0 of the production mitigation plan.
+Completed. Do not repeat Phase 0; preserve hardening-baseline-2026-08-02.
 
 Phase 1 — Eliminate immediate browser and identity vulnerabilities
 Objective: Close the highest-impact attack paths without redesigning the whole authentication system.
@@ -557,11 +567,11 @@ Begin Phase 10 release-candidate validation and produce the final go/no-go repor
 
 Recommended implementation order
 The shortest safe path is:
-Phase 0 — controlled baseline.
-Phase 1A — stored XSS.
+Phase 0 — controlled baseline. DONE.
+Phase 1A — stored XSS. DONE.
+Phase 3A — fresh deployments. NEXT, prioritized for Caddy/VPS compatibility.
 Phase 1B/1C — tokens and sessions.
 Phase 2 — strict-mode authentication.
-Phase 3A — fresh deployments.
 Phase 3B/3C — dependencies and supply chain.
 Phase 4 — safe, atomic imports.
 Phase 5 — production infrastructure.
@@ -570,4 +580,5 @@ Phase 7 — add-in hardening.
 Phase 8 — maintainability.
 Phase 9 — commercial scope.
 Phase 10 — release validation.
-The first clean implementation request should be: “Implement Phase 0 of the production mitigation plan.”
+The next implementation request should be: “Implement Phase 3A while preserving
+and testing the guided VPS/Caddy deployment path.”

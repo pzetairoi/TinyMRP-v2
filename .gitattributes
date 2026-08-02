@@ -1,0 +1,30 @@
+# Keep frontend inputs and generated bundles byte-stable across Windows and Linux.
+frontend/** text eol=lf
+app/static/parts-ui/** text eol=lf
+
+# Do not apply text conversion to binary frontend assets.
+frontend/**/*.png binary
+frontend/**/*.jpg binary
+frontend/**/*.jpeg binary
+frontend/**/*.gif binary
+frontend/**/*.ico binary
+frontend/**/*.webp binary
+frontend/**/*.woff binary
+frontend/**/*.woff2 binary
+frontend/**/*.ttf binary
+frontend/**/*.eot binary
+frontend/**/*.wasm binary
+app/static/parts-ui/**/*.png binary
+app/static/parts-ui/**/*.jpg binary
+app/static/parts-ui/**/*.jpeg binary
+app/static/parts-ui/**/*.gif binary
+app/static/parts-ui/**/*.ico binary
+app/static/parts-ui/**/*.webp binary
+app/static/parts-ui/**/*.woff binary
+app/static/parts-ui/**/*.woff2 binary
+app/static/parts-ui/**/*.ttf binary
+app/static/parts-ui/**/*.eot binary
+app/static/parts-ui/**/*.wasm binary
+
+# These files execute in Linux containers and hosts.
+*.sh text eol=lf

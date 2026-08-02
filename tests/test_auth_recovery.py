@@ -79,3 +79,13 @@ def test_runtime_secrets_persisted(tmp_path, monkeypatch):
     app2 = _make_app(monkeypatch, runtime_path)
     assert app2.config.get("SECRET_KEY") == secret1
     assert app2.config.get("SECURITY_PASSWORD_SALT") == salt1
+
+
+def test_runtime_secrets_create_missing_parent_directory(tmp_path, monkeypatch):
+    runtime_path = tmp_path / "missing" / "nested" / "runtime_secrets.json"
+
+    app = _make_app(monkeypatch, runtime_path)
+
+    assert app.config.get("SECRET_KEY")
+    assert app.config.get("SECURITY_PASSWORD_SALT")
+    assert runtime_path.exists()
