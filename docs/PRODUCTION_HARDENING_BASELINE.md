@@ -167,6 +167,44 @@ Final verification evidence:
 No public DNS, ACME account or live VPS was mutated. Those are release-environment
 checks for Phase 10 rather than evidence of a remaining Phase 3A code defect.
 
+## Phase 1B completion evidence (2026-08-03)
+
+`IAM-TOKEN-01` is closed. New API tokens use a validated 90-day default and
+365-day maximum, verify that their owner still exists and is active on every
+request, expose expiry/last-use/status in user and administrator interfaces,
+and support one-time-secret rotation plus explicit single/global revocation.
+Existing no-expiry tokens remain usable but are labelled `legacy_no_expiry` so
+operators can rotate deployed integrations without an unannounced outage.
+
+The API-token portion of `IAM-REV-01` is closed: deactivation and ordinary,
+administrator, CLI and disposable-test credential changes revoke every token
+for the affected user. Browser-session invalidation remains open for Phase 1C.
+
+Final verification evidence:
+
+- Ten new lifecycle regression tests; 71 focused lifecycle/auth/account/admin/
+  CLI tests passed. The complete suite passed with `604 passed, 1 skipped` on
+  the host and exited zero against the same mounted source in the production
+  Python 3.11 image.
+- Ruff, scoped mypy including the token service, pinned Black on the new/fully
+  changed modules, Bandit `-ll`, `pip check`, frontend lint/build and gitleaks
+  passed. Frontend lint retains one unrelated pre-existing warning.
+- Main and one-folder Compose parsed. Bash syntax, ShellCheck error-level and
+  PowerShell parsing passed. The rendered per-instance Compose and an internal-
+  TLS Caddy route passed `docker compose config` and `caddy validate`.
+- A newly built production image and isolated fresh stack verified canonical
+  first-admin bootstrap, a default-expiring bearer token, browser login, public
+  health, protected API access, restart continuity/idempotence, password log
+  secrecy and fail-closed invalid bootstrap. The stack/volume were removed.
+- The guided VPS/Caddy renderer was not rewritten: it still loads the instance
+  environment, keeps `FILES_ACCEL_REDIRECT_PREFIX` empty, isolates Mongo and
+  preserves update/rollback/doctor behavior through six regression contracts.
+
+Residual Phase 1B risk: legacy no-expiry tokens remain valid until operators
+rotate or revoke them; the UI makes them identifiable. Sessions are not revoked
+by these events until Phase 1C, strict-mode browser compatibility remains Phase
+2, and add-in secret storage remains Phase 7.
+
 ## Open production blockers
 
 The identifier should be used in commits, reviews and risk decisions.
@@ -175,8 +213,8 @@ The identifier should be used in commits, reviews and risk decisions.
 | --- | --- | --- | --- | --- |
 | SEC-XSS-01 | P0 | Closed in `a7fa72d` | 1A | Stored XSS in job/order line rendering |
 | SEC-CSP-01 | P1 | Open | 1A residual/2 | Inline scripts and handlers still require CSP `unsafe-inline` |
-| IAM-REV-01 | P0 | Open | 1B/1C | Deactivated users and credential changes do not reliably revoke API/session access |
-| IAM-TOKEN-01 | P0 | Open | 1B | User tokens default to no expiry and lack complete lifecycle controls |
+| IAM-REV-01 | P0 | Partial: API tokens closed; sessions open | 1C | Deactivated users and credential changes still require server-side browser-session invalidation |
+| IAM-TOKEN-01 | P0 | Closed 2026-08-03 (`49cf24a`, `49ee2b4`) | 1B | Expiring token policy and complete token lifecycle controls |
 | AUTH-MODE-01 | P0 | Open | 2 | Strict mode is incompatible with normal browser and public-share API flows |
 | DEPLOY-SEED-01 | P0 | Closed 2026-08-03 | 3A | Canonical, idempotent, fail-closed initialization and fresh-install smoke |
 | SUPPLY-PY-01 | P0 | Open | 3B | Python vulnerability gate reports 34 entries in 5 packages |
@@ -224,10 +262,9 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 7. Use Python 3.11 and Node 24 for release evidence, regardless of host defaults.
 8. Preserve the baseline tag; do not move or recreate it.
 
-The recommended next implementation is Phase 1B, followed by Phase 1C and Phase
-2. Token and session lifecycle work should be sequential because both mutate
-user security-state revocation. Phase 3B advisory research may run in parallel
-as documented in `hardeningplan.txt`.
+The recommended next implementation is Phase 1C, followed by Phase 2. Phase 3B
+advisory research is complete and its reviewed documentation is queued for
+integration as documented in `hardeningplan.txt`.
 
 ## Residual Phase 0 limitations
 

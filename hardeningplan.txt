@@ -21,10 +21,14 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  P1B-TOKEN-LIFECYCLE  IN PROGRESS  owner: Codex /root
+  None while the Phase 1B evidence commit is prepared. Phase 1C may be claimed
+  after P3B documentation integration; its files are not yet reserved.
+
+Completed workstream scope:
+  P1B-TOKEN-LIFECYCLE  DONE 2026-08-03  owner: Codex /root
     Scope: token ownership/active-user enforcement, bounded lifetime, rotation,
            revocation triggers, management UX, audit trail and regression tests.
-    Reserved files:
+    Files formerly reserved (released after the final evidence commit):
       app/__init__.py
       app/cli.py
       app/models/api_token.py
@@ -59,6 +63,9 @@ Active workstreams as of 2026-08-03:
                       contract, config-render and deployment-script checks.
 
 Completed workstreams:
+  P1B-TOKEN-LIFECYCLE  DONE 2026-08-03  commits: 49cf24a, 49ee2b4
+    Expiring tokens, owner enforcement, lifecycle UI, revocation triggers,
+    global API-token logout, full suite and protected VPS/Caddy gates.
   P3A-BOOTSTRAP  DONE 2026-08-03  owner: Codex /root
     Canonical, idempotent, fail-closed bootstrap; deliberate credentials;
     fresh-Compose smoke; standalone/one-folder migration; operator docs.
@@ -85,12 +92,14 @@ Parallel workstream definition (complete; retained for scope history):
     controls, owner and expiry for primary review.
 
 Next integration order:
-  Phase 1B token lifecycle -> integrate reviewed P3B advisory documentation ->
-  Phase 1C session lifecycle. Do not begin Phase 1C while Phase 1B is active;
-  both touch authentication revocation state.
+  Integrate reviewed P3B advisory documentation -> Phase 1C session lifecycle.
+  Phase 1B is complete, so its former file reservations no longer block 1C.
 ========================================================================
 
 Completed so far:
+  Phase 1B  DONE 2026-08-03 (Codex; implementation checkpoint by user)
+                   IAM-TOKEN-01 closed; IAM-REV-01 API-token portion closed;
+                   session portion remains Phase 1C
   Phase 3A  DONE 2026-08-03 (Codex + parallel Caddy audit)
                    DEPLOY-SEED-01 closed; evidence below and in
                    docs/PRODUCTION_HARDENING_BASELINE.md
@@ -179,9 +188,8 @@ Protected owner requirement added 2026-08-02:
   and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
 
 Current work:
-  Phase 1B IN PROGRESS in P1B-TOKEN-LIFECYCLE. Phase 1C remains blocked from
-  parallel implementation because both phases touch authentication revocation
-  state. P3B-ADVISORY-TRIAGE is complete on p3b-onto-3a and awaits review.
+  Phase 1B DONE. P3B-ADVISORY-TRIAGE is complete on p3b-onto-3a and is the next
+  integration action. Phase 1C may start after that documentation-only commit.
 
 Phase 1B decision log (recorded before implementation, 2026-08-03):
   * New API tokens expire after 90 days by default and may not exceed 365 days;
@@ -201,7 +209,7 @@ Phase 1B decision log (recorded before implementation, 2026-08-03):
   * Phase 1B closes API-token portions of IAM-REV-01. IAM-REV-01 itself remains
     open until Phase 1C implements server-side session invalidation.
 
-Phase 1B implementation checkpoint (2026-08-03; not yet committed):
+Phase 1B completion record (2026-08-03):
   IMPLEMENTED Additive token lifecycle metadata/index, active/missing owner
               enforcement, 90/365-day validated policy, legacy visibility,
               one-time-secret rotation, idempotent revoke helpers and global
@@ -223,11 +231,20 @@ Phase 1B implementation checkpoint (2026-08-03; not yet committed):
          passes with one pre-existing unrelated warning; production bundle
          builds successfully. Help and frontend generated assets updated.
   CHECKPOINT User committed and pushed implementation as 49cf24a to
-             origin/hardening/production-readiness while verification ran.
-  REMAINING Finish quality/security checks, Compose/Caddy render and shell
-            validation; update baseline/changelog/final evidence; commit/push
-            the evidence and any verification fixes;
-            review/cherry-pick 6912f78; manually reconcile c6f6068 plan findings.
+             origin/hardening/production-readiness while verification ran;
+             verification/type checkpoint 49ee2b4 is also pushed.
+  VERIFIED Ruff, scoped mypy, changed-file Black, Bandit -ll, pip check,
+           frontend lint/build, gitleaks, Bash syntax, ShellCheck error-level,
+           PowerShell parse, main/one-folder/rendered VPS Compose and rendered
+           internal-TLS Caddy all pass.
+  VERIFIED A clean production build and isolated fresh stack passed canonical
+           bootstrap, default 90-day token, login, health, protected API,
+           restart, log secrecy and fail-closed invalid-bootstrap checks.
+  RESIDUAL Legacy no-expiry tokens remain identifiable and valid until rotated;
+           browser-session revocation is Phase 1C; strict browser/API compatibility
+           is Phase 2; add-in secret storage is Phase 7.
+  NEXT Review/cherry-pick 6912f78 and manually reconcile c6f6068 plan findings,
+       then claim and implement Phase 1C.
 ========================================================================
 
 Progressive mitigation roadmap
@@ -295,8 +312,8 @@ Completed in parallel with Codex's Phase 0; no overlap with Phase 0 files.
        author-written with no untrusted interpolation, so they are not an XSS sink
        today, but they are what blocks CSP tightening above.
 
-1B is IN PROGRESS as recorded above; 1C is NOT started.
-1B. API-token lifecycle — [IN PROGRESS 2026-08-03, Codex]
+1B is DONE as recorded above; 1C is NOT started.
+1B. API-token lifecycle — [DONE 2026-08-03, Codex]
 Require the token owner to be active on every authenticated request.
 Reject tokens when their user no longer exists.
 Add default and maximum token lifetimes.
@@ -751,7 +768,8 @@ The shortest safe path is:
 Phase 0 — controlled baseline. DONE.
 Phase 1A — stored XSS. DONE.
 Phase 3A — fresh deployments. DONE 2026-08-03; Caddy/VPS path preserved.
-Phase 1B/1C — tokens and sessions. NEXT (sequential, shared revocation state).
+Phase 1B — token lifecycle. DONE 2026-08-03.
+Phase 1C — server-side session lifecycle. NEXT.
 Phase 2 — strict-mode authentication.
 Phase 3B/3C — dependencies and supply chain.
 Phase 4 — safe, atomic imports.
@@ -761,5 +779,6 @@ Phase 7 — add-in hardening.
 Phase 8 — maintainability.
 Phase 9 — commercial scope.
 Phase 10 — release validation.
-The next implementation request should be: “Implement Phase 1B API-token
-lifecycle and revocation, preserving the Phase 3A deployment and Caddy gates.”
+The next implementation request should be: “Integrate the reviewed Phase 3B
+advisory documentation, then implement Phase 1C server-side session lifecycle
+and revocation while preserving the Phase 3A deployment and Caddy gates.”

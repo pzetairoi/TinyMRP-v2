@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Security (Phase 1B — API-token lifecycle)
+- New API tokens expire after 90 days by default and cannot exceed the
+  operator-configured 365-day maximum. Invalid lifetime configuration fails
+  closed; existing no-expiry tokens remain visible as legacy so deployed
+  SolidWorks clients can be rotated deliberately instead of breaking silently.
+- Token authentication now rejects inactive or deleted owners on every request.
+  Account deactivation and self-service, administrator, CLI or disposable-test
+  password resets revoke the user's API tokens; reactivation does not restore them.
+- Users can rotate or explicitly revoke tokens and see created, expiry, last-used
+  and lifecycle status. Security administrators can revoke one token or perform a
+  global API-token logout, but cannot mint or retrieve another user's secret.
+- Token secrets remain hash-only at rest and are returned once. Lifecycle actions
+  are audit logged with bearer actors attributed correctly. Session invalidation
+  remains the separate Phase 1C control.
+
 ### Fixed
 - Container initialization now uses canonical standard roles, creates a fresh
   `administrator` only from explicit operator credentials, never logs generated
