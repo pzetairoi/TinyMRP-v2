@@ -22,7 +22,7 @@ SAME_ORIGIN = {"Origin": STRICT_BASE_URL}
 @pytest.fixture
 def strict_app(monkeypatch):
     monkeypatch.setenv("TINYMRP_SECURITY_MODE", "strict")
-    monkeypatch.setenv("SECRET_KEY", "strict-test-secret-key-123456789")
+    monkeypatch.setenv("SECRET_KEY", "s" * 64)
     monkeypatch.setenv("SECURITY_PASSWORD_SALT", "strict-test-password-salt-123456789")
     app_module.init_mongo = lambda _app: None
     application = app_module.create_app()

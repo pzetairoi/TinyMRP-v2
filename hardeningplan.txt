@@ -37,6 +37,19 @@ Active workstreams as of 2026-08-03:
             peeled release commit is ed142fd0673e97e23eac54620cfb913e5ce36c25.
     Gate: parse workflow YAML and embedded Bash, run frontend npm ci/SBOM/build,
           validate audit/SBOM artifacts and immutable-action source contracts.
+    IMPLEMENTED All external Actions use verified 40-character commits with
+                release-version comments; runners use ubuntu-24.04; checkout
+                credentials are not persisted and Gitleaks fetches full history.
+    IMPLEMENTED Python/npm/Trivy scans write machine-readable JSON before their
+                explicit blocking step. Backend, frontend-lockfile and image
+                CycloneDX SBOMs plus audit reports upload for 30 days even when
+                the matching vulnerability gate fails. Syft is fixed at v1.50.0.
+    VERIFIED Five new source contracts pass; actionlint 1.7.10 including embedded
+             ShellCheck passes. Node 24 clean install, expected npm-audit exit 1,
+             frontend SBOM, lint and production build passed. Local Syft v1.50.0
+             produced a valid 107-component lockfile CycloneDX SBOM. The exact
+             requirements audit still exits 1 for its single proposed exception,
+             and its backend CycloneDX JSON generation passes.
 
   P3C-IMAGE-PINS  AVAILABLE FOR PARALLEL CLAIM  owner: none
     Scope: pin Dockerfile and supported deployment images to verified multi-arch
@@ -67,6 +80,13 @@ Active workstreams as of 2026-08-03:
             them blocking unless a human confirms rotation/disposition.
     The workflow owner separately owns checkout `fetch-depth: 0`; this stream
     must not edit workflow, roadmap, generated assets or application files.
+    RETURNED Commit d7364e1 is pushed on
+             origin/hardening/p3c-secret-scan-codex with only the two reserved
+             files; three focused tests and Ruff pass. Effective scanning also
+             found one plainly named strict-mode test fixture, which /root has
+             replaced with a computed non-secret placeholder. The two deleted
+             history candidates remain unsuppressed and release-blocking pending
+             human classification/rotation confirmation.
 
 Completed workstream scope:
   P2-STRICT-AUTH  DONE 2026-08-03  owner: Codex /root
