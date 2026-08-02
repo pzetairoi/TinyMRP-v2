@@ -21,9 +21,59 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  None during the Phase 1C/P3B evidence closure checkpoint. Next claimable work:
-  Phase 2 strict-mode authentication (primary) and the separate PyPDF2-to-pypdf
-  migration (parallel, non-overlapping) after this checkpoint is pushed.
+  P2-STRICT-AUTH  IN PROGRESS  owner: Codex /root
+    Scope: coherent endpoint-category policy; same-origin session plus CSRF for
+           the browser UI; bearer-only integration endpoints; narrow public
+           share/health access; consistent API errors; frontend error handling;
+           strict production defaults, documentation and regression evidence.
+    Reserved files:
+      app/__init__.py
+      app/services/security_mode.py
+      app/services/api_auth.py
+      app/views/part_shares.py
+      frontend/src/lib/api.ts
+      frontend/src/components/ImageStrip.tsx
+      frontend/src/components/MentionTextarea.tsx
+      frontend/src/components/ThreeMFViewer.tsx
+      frontend/src/components/markups/DrawingMarkupWorkspace.tsx
+      frontend/src/pages/BomPage.tsx
+      frontend/src/pages/DashboardPage.tsx
+      frontend/src/pages/PartDetailPage.tsx
+      frontend/src/pages/PartsPage.tsx
+      frontend/src/pages/UploadPackPage.tsx
+      app/static/parts-ui/** (generated from the claimed frontend sources)
+      tests/test_security_hardening.py
+      tests/test_strict_auth_mode.py (new)
+      .env.dev.example
+      .env.docker.example
+      .env.server.example
+      docker-compose.yml
+      docker-compose.onefolder.yml
+      README.md
+      docs/help/06b_server_installation.md
+      docs/help/07_troubleshooting.md
+      app/static/help/help.html
+      app/static/help/help_toc.json
+      docs/PRODUCTION_HARDENING_BASELINE.md
+      CHANGELOG.md
+      hardeningplan.txt
+    Protected integration gate: Phase 1C lifecycle regressions, full backend and
+      frontend checks, production image, both Compose paths, guided VPS render,
+      six Caddy contracts, shell syntax/ShellCheck and rendered Caddy validation.
+
+  P3B-PYPDF-MIGRATION  IN PROGRESS  owner: /root/p3b_pypdf_migration
+    Scope: replace the EOL PyPDF2 dependency/import surface with an exact tested
+           pypdf pin; add focused compatibility and malicious/invalid-input
+           regressions; report production-image and protected Caddy evidence.
+    Reserved files:
+      requirements.txt
+      app/services/docpacks.py
+      app/services/markup_documents.py
+      app/services/order_scope.py
+      tests/test_pypdf_migration.py (new)
+    This stream may read but must not edit authentication, frontend, deployment,
+    documentation, generated assets or roadmap files. It must use a separate
+    worktree/branch from d5d3647 and return one focused pushed commit.
 
 Completed workstream scope:
   P1C-SESSION-LIFECYCLE  DONE 2026-08-03  owner: Codex /root
@@ -136,8 +186,10 @@ Parallel workstream definition (complete; retained for scope history):
     controls, owner and expiry for primary review.
 
 Next integration order:
-  Claim Phase 2 strict-mode authentication as the next primary workstream.
-  PyPDF2-to-pypdf may run in parallel with a separate worktree/file claim.
+  Implement and verify P2-STRICT-AUTH on the primary branch while the isolated
+  P3B-PYPDF-MIGRATION runs in its separate worktree. Review and integrate the
+  PDF commit only after its focused evidence passes, then run the combined full
+  suite and protected guided VPS/Caddy gate before closing either board entry.
 ========================================================================
 
 Completed so far:
