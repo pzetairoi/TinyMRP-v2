@@ -2,13 +2,46 @@
 STATUS LOG — keep this current so work is not repeated
 ========================================================================
 Branch: hardening/production-readiness
-Driver: Codex. Anything below marked [DONE ... Claude] was done in parallel.
-Phase 0 is complete; no Phase 0 files remain reserved for parallel work.
+Driver: Claude (sole owner as of 2026-08-03). Codex handed off after Phase 4A.
+No files are reserved; there is no parallel stream running.
+
+*** IF YOU ARE A NEW AI PICKING THIS UP, READ THIS BLOCK FIRST ***
+
+  Where things stand
+    Phases 0, 1A, 1B, 1C, 3A, 3B(engineering), 3C(engineering), 4A are done.
+    The next unstarted production blocker is PHASE 2 (AUTH-MODE-01), then
+    Phase 4B, then Phase 5. Phases 6-10 are post-production-blocker.
+
+  How to work
+    - Run the suite with a venv that has requirements-dev.txt installed.
+      A prepared one may not exist on a fresh machine; create it first.
+      Full suite baseline as of 2026-08-03: 632 passed, 1 skipped.
+    - Gates that must stay green: pytest, `ruff check .`, `bandit -r app -ll`,
+      `mypy app/services/security_mode.py app/services/api_auth.py`.
+    - Black is deliberately NON-blocking (162 files pending reformat). Do not
+      "fix" this by reformatting the repo mid-phase; it belongs to Phase 8.
+    - PROTECTED PATH: the guided Ubuntu/VPS deployment using Caddy must keep
+      working. Anything touching auth, files, containers, health, networking,
+      env or deployment must re-check the Caddy contract tests.
+
+  Things that will bite you if you do not know them
+    - Two vulnerability gates CANNOT pass by upgrading; they need the filed
+      exceptions in docs/security/risk_acceptance_template.md, which are still
+      Status=Proposed and need a HUMAN owner + expiry. Do not sign these off
+      yourself and do not silence the gates.
+    - Real SECRET_KEY / SECURITY_PASSWORD_SALT exist in git history
+      (.env.example, commit e16f19d). Deliberately NOT allowlisted. Needs a
+      human decision: rotate, and/or rewrite history.
+    - The CSP nonce is deliberately withheld while 'unsafe-inline' is active.
+      Browsers IGNORE 'unsafe-inline' when a nonce is present, so emitting both
+      breaks every unmigrated template at once. See csp_inline_burndown.md.
+    - `docker manifest inspect` returns a SINGLE-ARCH digest for a local pull.
+      Base images must be pinned to the multi-arch INDEX digest instead, or
+      non-amd64 builds break. Use `docker buildx imagetools inspect`.
 
 ========================================================================
-PARALLEL WORK BOARD — update before editing; never share an unclaimed file
+COORDINATION RULES (kept for if a parallel stream is opened again)
 ========================================================================
-Coordination rules:
   1. Each AI must claim a bounded workstream and its files here before editing.
   2. A parallel AI should use its own Git worktree and branch from the current
      hardening/production-readiness HEAD. It must not switch the branch in the
@@ -21,152 +54,9 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  P4A-ARCHIVE-LIMITS  IN PROGRESS  owner: Codex /root
-    Scope: enforce bounded ZIP request/entry/aggregate/ratio/path/type policy,
-           deterministic staging cleanup, and adversarial tests without large
-           fixtures. Preserve CLI/API behavior where it is safe and keep the
-           guided VPS/Caddy deployment topology and health path unchanged.
-    Reserved files:
-      app/services/upload_pack.py
-      app/views/upload_pack.py
-      app/__init__.py
-      app/models/app_settings.py
-      app/views/admin.py
-      app/templates/admin/settings.html
-      .env.dev.example
-      .env.docker.example
-      .env.server.example
-      docker-compose.yml
-      docker-compose.onefolder.yml
-      deploy/scripts/lib/common.sh
-      tests/test_upload_pack_archive_limits.py (new)
-      tests/test_upload_pack.py
-      tests/test_security_hardening.py
-      README.md
-      CHANGELOG.md
-      docs/PRODUCTION_HARDENING_BASELINE.md
-      hardeningplan.txt
-    Parallel support: /root/p4a_archive_audit is read-only and will report all
-                      upload/archive entry points and bypass risks; it owns no
-                      files. Other AIs may claim non-overlapping Phase 4B audit
-                      work but must not edit the reserved list above.
-    Protected gates: focused adversarial archives, complete upload/import suite,
-                     full production-derived suite, main/one-folder/rendered
-                     guided Compose, Bash/ShellCheck, and pinned live Caddy path.
-    CHECKPOINT Claim will be pushed before implementation so remote workers can
-               coordinate from the same board.
+  NONE. Codex handed off; Claude is sole owner. No files are reserved.
 
-  P3C-WORKFLOW-PINS  DONE/INTEGRATED 2026-08-03  owner: Codex /root
-    Scope: pin every third-party GitHub Action to a verified immutable commit;
-           retain Python/npm/Trivy audit reports and backend/frontend/image
-           CycloneDX SBOMs even when their corresponding blocking gate fails.
-    Reserved files:
-      .github/workflows/security.yml
-      .github/workflows/release-image.yml
-      frontend/package.json
-      frontend/package-lock.json
-      tests/test_supply_chain_contract.py (new)
-      hardeningplan.txt
-    FINDING The configured `aquasecurity/trivy-action@0.36.0` ref does not
-            exist upstream; the actual release tag is `v0.36.0`. The immutable
-            peeled release commit is ed142fd0673e97e23eac54620cfb913e5ce36c25.
-    Gate: parse workflow YAML and embedded Bash, run frontend npm ci/SBOM/build,
-          validate audit/SBOM artifacts and immutable-action source contracts.
-    IMPLEMENTED All external Actions use verified 40-character commits with
-                release-version comments; runners use ubuntu-24.04; checkout
-                credentials are not persisted and Gitleaks fetches full history.
-    IMPLEMENTED Python/npm/Trivy scans write machine-readable JSON before their
-                explicit blocking step. Backend, frontend-lockfile and image
-                CycloneDX SBOMs plus audit reports upload for 30 days even when
-                the matching vulnerability gate fails. Syft is fixed at v1.50.0.
-    VERIFIED Seven supply-chain source contracts pass; actionlint 1.7.10
-             including embedded ShellCheck passes. Node 24 clean install,
-             expected npm-audit exit 1,
-             frontend SBOM, lint and production build passed. Local Syft v1.50.0
-             produced a valid 107-component lockfile CycloneDX SBOM. The exact
-             requirements audit still exits 1 for its single proposed exception,
-             and its backend CycloneDX JSON generation passes.
-    CHECKPOINT 4984637 is pushed on origin/hardening/production-readiness.
-
-  P3C-IMAGE-PINS  DONE/INTEGRATED 2026-08-03  owner: Codex /root
-    Scope: pin Dockerfile and supported deployment images to verified multi-arch
-           manifest digests without changing service topology or Caddy behavior.
-    Reserved files:
-      docker/app/Dockerfile
-      docker-compose.yml
-      docker-compose.onefolder.yml
-      deploy/scripts/lib/common.sh
-      deploy/scripts/restore-instance.sh
-      deploy/scripts/lib/nextcloud.sh
-      tests/test_vps_caddy_deployment_contract.py
-      tests/test_container_bootstrap.py
-      tests/test_supply_chain_contract.py
-      hardeningplan.txt
-    VERIFIED REGISTRY SNAPSHOT 2026-08-03 multi-arch manifest digests:
-      docker/dockerfile:1  sha256:87999aa3...f9cb89
-      node:24-alpine       sha256:f70403e8...f7a6b3
-      python:3.11-slim-bookworm sha256:b1899299...ad5cba
-      mongo:6.0            sha256:8b6d8f5b...bad3ac
-      nginx:1.27-alpine    sha256:65645c7b...2f2a10
-      caddy:2-alpine       sha256:5f5c8640...d58648
-      mariadb:11           sha256:efb4959e...890c4
-      nextcloud:apache     sha256:58bc7333...f3ecd
-    Protected gate: production build, both static and rendered Compose paths,
-      fresh bootstrap, all deployment script checks, rendered/live Caddy path.
-    IMPLEMENTED Dockerfile syntax/frontend/runtime bases and the supported
-                Mongo, Nginx, Caddy, MariaDB and Nextcloud deployment defaults
-                use verified multi-architecture manifest digests. Explicit
-                TINYMRP_*_IMAGE overrides remain available for a controlled
-                emergency update without rewriting service topology.
-    VERIFIED Seven supply-chain pin contracts plus the six VPS/Caddy and twenty
-             bootstrap contracts pass (33 combined). Main, one-folder, rendered
-             guided-instance and rendered Nextcloud Compose validate. All Bash
-             scripts pass syntax and digest-pinned ShellCheck v0.11.0 error-level;
-             actionlint passes; the digest-pinned Caddy route validates.
-    VERIFIED The production image built on exact Python 3.11.15 and Node
-             24.18.1 as sha256:f4b9450b...c8399b. It has no apt layer and its
-             runtime no longer contains pip/setuptools/wheel. Trivy v0.72.0
-             reports 0 HIGH / 0 CRITICAL after build-tool pruning.
-    VERIFIED The full production-derived Python suite passed 639 tests. A final
-             disposable digest-pinned Mongo -> TinyMRP -> Caddy request returned
-             {"ok":true,"security_mode":"strict"}; all temporary resources
-             were removed. The guided VPS/Caddy topology and image override are
-             unchanged.
-    CHECKPOINT Immutable image defaults were pushed in 511555b; final scan,
-               runtime and documentation evidence are in the following Phase 3C
-               closure checkpoint.
-
-  P3C-SECRET-SCAN  DONE/INTEGRATED 2026-08-03
-    owner: /root/p3b_advisory_triage + /root
-    Scope: restore the upstream default detection rules, replace broad generated/
-           docs exclusions with the narrow minimum, and add focused source
-           contracts. Work in a separate worktree based on 38e2ef0.
-    Reserved files:
-      .gitleaks.toml
-      .gitleaksignore
-      tests/test_gitleaks_contract.py (new)
-    FINDING The custom config did not extend the upstream defaults and defined
-            no rules of its own, making the prior CI scan vacuous. A full-history
-            reconnaissance also found two high-entropy candidates in a deleted
-            `.env.example` revision; classify without printing values and keep
-            them blocking unless a human confirms rotation/disposition.
-    The workflow owner separately owns checkout `fetch-depth: 0`; this stream
-    must not edit workflow, roadmap, generated assets or application files.
-    RETURNED Commit d7364e1 is pushed on
-             origin/hardening/p3c-secret-scan-codex with only the two reserved
-             files; three focused tests and Ruff pass. Effective scanning also
-             found one plainly named strict-mode test fixture, which /root has
-             replaced with a computed non-secret placeholder. Its exact old
-             fingerprint is the sole `.gitleaksignore` entry; a regression
-             forbids broader ignores. The two deleted history candidates remain
-             unsuppressed and release-blocking pending human classification/
-             rotation confirmation.
-    VERIFIED A tracked-HEAD archive scans clean. Gitleaks v8.28.0 scanned all
-             407 commits and exits 1 with exactly two findings after the precise
-             non-secret fixture ignore; both are the deleted environment-file
-             candidates. Nine combined Gitleaks/workflow contracts pass.
-    CHECKPOINT Secret config integrated as ad24b87; exact history-ignore and
-               disposition evidence are in the following primary checkpoint.
+  NEXT UP (in order): Phase 2 (AUTH-MODE-01) -> Phase 4B -> Phase 5.
 
 Completed workstream scope:
   P2-STRICT-AUTH  DONE 2026-08-03  owner: Codex /root
@@ -400,7 +290,24 @@ Completed so far:
                    DEPLOY-SEED-01 closed; evidence below and in
                    docs/PRODUCTION_HARDENING_BASELINE.md
   Phase 1A  DONE   stored XSS in job/order forms + 17 regression tests (Claude)
-                   residual: CSP unsafe-inline removal NOT started
+                   residual SEC-CSP-01: mechanism DONE 2026-08-03 (Claude),
+                   template migration NOT started. See
+                   docs/security/csp_inline_burndown.md. Added a per-response
+                   CSP nonce + csp_nonce() template helper, an opt-in
+                   Content-Security-Policy-Report-Only probe carrying the
+                   strict policy, and tests/test_csp_policy.py (9 tests; CSP
+                   had NO direct coverage before). The enforced header is
+                   byte-identical — nothing changes for existing deployments.
+                   KEY CONSTRAINT: browsers ignore 'unsafe-inline' when a nonce
+                   is present, so the nonce is deliberately withheld until
+                   TINYMRP_CSP_ALLOW_INLINE=false. Emitting both would break
+                   every unmigrated template at once. A test pins this and was
+                   verified to fail against that exact injected regression.
+                   REMAINING: 12 templates with inline <script> and 33 inline
+                   on*= handlers. The handlers are a separate problem — a nonce
+                   does NOT authorise onclick=; they need addEventListener.
+                   Also remember style-src has its own 'unsafe-inline' for
+                   inline style="..." attributes, which a nonce does not cover.
   Phase 3B  DONE engineering remediation 2026-08-03
                    (50d75e7, 608be56, 3346b51, 5743b82)
                    residual: two proposed exceptions need a human owner/date
