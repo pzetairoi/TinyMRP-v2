@@ -21,9 +21,31 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
-  None during this documentation reconciliation checkpoint. The next primary
-  workstream is Phase 1C. P3B straight runtime upgrades may run in a separate
-  worktree once their exact files are claimed below.
+  P1C-SESSION-LIFECYCLE  IN PROGRESS  owner: Codex /root
+    Scope: central fs_uniquifier rotation, browser-session invalidation for
+           password/security-state changes, lifecycle audit and regressions.
+    Reserved files:
+      app/services/session_lifecycle.py (new)
+      app/views/main.py
+      app/views/admin.py
+      app/cli.py
+      app/services/rls_demo.py
+      tests/test_session_lifecycle.py (new)
+      tests/test_account_profile.py
+      tests/test_admin_access_usability.py
+      tests/test_cli_security.py
+      docs/PRODUCTION_HARDENING_BASELINE.md
+      CHANGELOG.md
+      hardeningplan.txt
+  P3B-RUNTIME-UPGRADES  IN PROGRESS  owner: /root/p3b_runtime_upgrades
+    Scope: only Pillow 12.3.0, gunicorn 22.0.0 and cryptography 48.0.1 pins;
+           focused compatibility/security tests and protected Caddy evidence.
+    Reserved files:
+      requirements.txt
+    Read-only verification may use all tests and deployment scripts. The owner
+    must work in a separate worktree/branch, must not edit application/auth code,
+    tests, generated assets, docs, manifests other than requirements.txt, or this
+    plan, and must return one commit for primary review.
 
 Completed workstream scope:
   P1B-TOKEN-LIFECYCLE  DONE 2026-08-03  owner: Codex /root
