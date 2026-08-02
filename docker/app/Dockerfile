@@ -1,9 +1,9 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # TinyMRP application image (Phase 2 hardened).
 # Base tags are precise; Dependabot (docker ecosystem) proposes updates.
 
 # ---------- Frontend build ----------
-FROM node:24-alpine AS fe
+FROM node:24-alpine@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3 AS fe
 WORKDIR /fe
 
 # Install deps first for layer caching (lockfile optional)
@@ -15,7 +15,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---------- Python app ----------
-FROM python:3.11-slim-bookworm AS app
+FROM python:3.11-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba AS app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

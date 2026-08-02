@@ -44,7 +44,7 @@ def test_per_instance_compose_renderer_keeps_mongo_private_and_app_behind_caddy(
     app = renderer.split("\n  app:", 1)[1].split("\nnetworks:", 1)[0]
     networks = renderer.split("\nnetworks:", 1)[1]
 
-    assert "image: mongo:6.0" in mongo
+    assert "image: $(mongo_image)" in mongo
     assert "ports:" not in mongo
     assert "      - private" in mongo
     assert "      - proxy" not in mongo

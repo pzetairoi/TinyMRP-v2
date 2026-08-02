@@ -70,7 +70,7 @@ if [ "$DO_VERIFY" -eq 1 ]; then
   [ -s "$ARCHIVE" ] || die "Mongo archive missing/empty: ${ARCHIVE}"
   VERIFY_NAME="tinymrp-restore-verify-$$"
   info "Verify: restoring ${ARCHIVE} into throwaway container ${VERIFY_NAME}"
-  docker run -d --rm --name "$VERIFY_NAME" --network none mongo:6.0 >/dev/null
+  docker run -d --rm --name "$VERIFY_NAME" --network none "$(mongo_image)" >/dev/null
   trap 'docker stop "$VERIFY_NAME" >/dev/null 2>&1 || true' EXIT
   # wait for throwaway mongod
   for _ in $(seq 1 30); do

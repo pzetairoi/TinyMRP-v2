@@ -302,7 +302,7 @@ name: ${project_name}
 
 services:
   db:
-    image: mariadb:11
+    image: $(mariadb_image)
     container_name: ${db_container_name}
     restart: unless-stopped
     command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
@@ -316,7 +316,7 @@ services:
       - private
 
   app:
-    image: nextcloud:apache
+    image: $(nextcloud_image)
     container_name: ${app_container_name}
     restart: unless-stopped
     env_file:

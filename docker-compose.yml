@@ -12,7 +12,7 @@
 
 services:
   mongo:
-    image: mongo:6.0
+    image: ${TINYMRP_MONGO_IMAGE:-mongo:6.0@sha256:8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -89,7 +89,7 @@ services:
       retries: 10
 
   nginx:
-    image: nginx:1.27-alpine
+    image: ${TINYMRP_NGINX_IMAGE:-nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

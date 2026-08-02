@@ -77,6 +77,19 @@ Active workstreams as of 2026-08-03:
       nextcloud:apache     sha256:58bc7333...f3ecd
     Protected gate: production build, both static and rendered Compose paths,
       fresh bootstrap, all deployment script checks, rendered/live Caddy path.
+    IMPLEMENTED Dockerfile syntax/frontend/runtime bases and the supported
+                Mongo, Nginx, Caddy, MariaDB and Nextcloud deployment defaults
+                use verified multi-architecture manifest digests. Explicit
+                TINYMRP_*_IMAGE overrides remain available for a controlled
+                emergency update without rewriting service topology.
+    VERIFIED Seven supply-chain pin contracts plus the six VPS/Caddy and twenty
+             bootstrap contracts pass (33 combined). Main, one-folder, rendered
+             guided-instance and rendered Nextcloud Compose validate. All Bash
+             scripts pass syntax and ShellCheck error-level; actionlint passes;
+             the digest-pinned Caddy route validates. The production image built
+             from the pinned Dockerfile as image b912dd7e...e406e84.
+    NEXT Run the complete production-derived suite and live disposable
+         Caddy-to-app health path, then document digest refresh ownership.
 
   P3C-SECRET-SCAN  DONE/INTEGRATED 2026-08-03
     owner: /root/p3b_advisory_triage + /root

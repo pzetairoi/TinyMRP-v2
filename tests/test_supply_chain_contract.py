@@ -82,3 +82,63 @@ def test_frontend_sbom_uses_the_pinned_directory_scanner():
     assert "output-file: frontend/sbom-frontend.cdx.json" in source
     assert source.count("syft-version: v1.50.0") == 1
     assert "upload-artifact: false" in source
+
+
+def test_application_build_stages_use_verified_manifest_digests():
+    dockerfile = Path("docker/app/Dockerfile").read_text(encoding="utf-8")
+
+    assert dockerfile.startswith(
+        "# syntax=docker/dockerfile:1@sha256:"
+        "87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89"
+    )
+    assert (
+        "FROM node:24-alpine@sha256:"
+        "f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3 AS fe"
+        in dockerfile
+    )
+    assert (
+        "FROM python:3.11-slim-bookworm@sha256:"
+        "b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba AS app"
+        in dockerfile
+    )
+
+
+def test_supported_compose_and_guided_deployment_images_are_digest_pinned():
+    main_compose = Path("docker-compose.yml").read_text(encoding="utf-8")
+    onefolder_compose = Path("docker-compose.onefolder.yml").read_text(encoding="utf-8")
+    common = Path("deploy/scripts/lib/common.sh").read_text(encoding="utf-8")
+    nextcloud = Path("deploy/scripts/lib/nextcloud.sh").read_text(encoding="utf-8")
+    restore = Path("deploy/scripts/restore-instance.sh").read_text(encoding="utf-8")
+
+    mongo = (
+        "mongo:6.0@sha256:"
+        "8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac"
+    )
+    nginx = (
+        "nginx:1.27-alpine@sha256:"
+        "65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"
+    )
+    caddy = (
+        "caddy:2-alpine@sha256:"
+        "5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648"
+    )
+    mariadb = (
+        "mariadb:11@sha256:"
+        "efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4"
+    )
+    nextcloud_image = (
+        "nextcloud:apache@sha256:"
+        "58bc73331d541e0efe46c517ff7539e2e43427342b2a2feeb013b186fb4f3ecd"
+    )
+
+    for compose in (main_compose, onefolder_compose):
+        assert f"${{TINYMRP_MONGO_IMAGE:-{mongo}}}" in compose
+        assert f"${{TINYMRP_NGINX_IMAGE:-{nginx}}}" in compose
+
+    for marker in (mongo, caddy, mariadb, nextcloud_image):
+        assert common.count(marker) == 1
+    assert 'image="$(caddy_image)"' in common
+    assert common.count('"$(caddy_image)"') == 3
+    assert "image: $(mariadb_image)" in nextcloud
+    assert "image: $(nextcloud_image)" in nextcloud
+    assert '"$(mongo_image)"' in restore

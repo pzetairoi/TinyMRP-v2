@@ -55,6 +55,22 @@ tinymrp_root() {
   printf '%s\n' "${TINYMRP_ROOT:-/srv/tinymrp}"
 }
 
+mongo_image() {
+  printf '%s\n' "${TINYMRP_MONGO_IMAGE:-mongo:6.0@sha256:8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac}"
+}
+
+caddy_image() {
+  printf '%s\n' "${TINYMRP_CADDY_IMAGE:-caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648}"
+}
+
+mariadb_image() {
+  printf '%s\n' "${TINYMRP_MARIADB_IMAGE:-mariadb:11@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4}"
+}
+
+nextcloud_image() {
+  printf '%s\n' "${TINYMRP_NEXTCLOUD_IMAGE:-nextcloud:apache@sha256:58bc73331d541e0efe46c517ff7539e2e43427342b2a2feeb013b186fb4f3ecd}"
+}
+
 host_dir() {
   printf '%s\n' "${TINYMRP_HOST_DIR:-$(tinymrp_root)/host}"
 }
@@ -653,7 +669,7 @@ name: ${project_name}
 
 services:
   mongo:
-    image: mongo:6.0
+    image: $(mongo_image)
     container_name: ${mongo_container_name}
     restart: unless-stopped
     security_opt:
@@ -786,7 +802,9 @@ EOF
 }
 
 ensure_caddy_image() {
-  docker image inspect caddy:2-alpine >/dev/null 2>&1 || docker pull caddy:2-alpine >/dev/null
+  local image
+  image="$(caddy_image)"
+  docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image" >/dev/null
 }
 
 validate_caddy_config() {
@@ -795,7 +813,7 @@ validate_caddy_config() {
   docker run --rm \
     -v "$(caddy_root_config):/etc/caddy/Caddyfile:ro" \
     -v "$(caddy_routes_dir):/etc/caddy/routes:ro" \
-    caddy:2-alpine \
+    "$(caddy_image)" \
     caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 }
 
@@ -822,7 +840,7 @@ ensure_caddy_container() {
       -v "$(caddy_routes_dir):/etc/caddy/routes:ro" \
       -v "$(caddy_data_dir):/data" \
       -v "$(caddy_state_dir):/config" \
-      caddy:2-alpine >/dev/null
+      "$(caddy_image)" >/dev/null
   fi
 }
 
