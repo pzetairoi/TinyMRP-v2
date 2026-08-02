@@ -38,14 +38,19 @@ Active workstreams as of 2026-08-03:
       CHANGELOG.md
       hardeningplan.txt
   P3B-RUNTIME-UPGRADES  IN PROGRESS  owner: /root/p3b_runtime_upgrades
-    Scope: only Pillow 12.3.0, gunicorn 22.0.0 and cryptography 48.0.1 pins;
-           focused compatibility/security tests and protected Caddy evidence.
+    Scope: Pillow 12.3.0, gunicorn 22.0.0 and cryptography 48.0.1 pins plus the
+           required cffi 2.0.0 compatibility pin; focused compatibility/security
+           tests and protected Caddy evidence.
     Reserved files:
       requirements.txt
     Read-only verification may use all tests and deployment scripts. The owner
     must work in a separate worktree/branch, must not edit application/auth code,
     tests, generated assets, docs, manifests other than requirements.txt, or this
     plan, and must return one commit for primary review.
+    FINDING cryptography 48.0.1 requires cffi>=2.0.0 on CPython; retaining the
+            prior cffi 1.17.1 pin makes the production Docker resolver fail with
+            ResolutionImpossible. cffi 2.0.0 is therefore an in-scope required
+            compatibility update, not an unrelated dependency refresh.
 
 Completed workstream scope:
   P1B-TOKEN-LIFECYCLE  DONE 2026-08-03  owner: Codex /root
