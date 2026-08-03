@@ -216,6 +216,14 @@ def create_app(config_object=None):
     app.config.setdefault("EXCEL_COMPILE_MAX_BYTES", int(os.getenv("EXCEL_COMPILE_MAX_BYTES") or "10485760"))
     app.config.setdefault("SECURITY_HEADERS_ENABLED", True)
     app.config.setdefault("FORCE_HTTPS", False)
+    # /api/ready fails below this much free space on the deliverables volume.
+    # A full disk corrupts imports mid-write, so it is better to drop out of
+    # the load balancer than to accept work that cannot be completed.
+    # 0 disables the check, matching the convention used by the upload limits.
+    app.config.setdefault(
+        "READINESS_MIN_FREE_DISK_MB",
+        int(os.getenv("READINESS_MIN_FREE_DISK_MB") or "512"),
+    )
     app.config.setdefault("UPLOAD_PACK_MAX_ZIP_MB", int(os.getenv("UPLOAD_PACK_MAX_ZIP_MB") or "1024"))
     app.config.setdefault("UPLOAD_PACK_MAX_FILE_MB", int(os.getenv("UPLOAD_PACK_MAX_FILE_MB") or "1024"))
     app.config.setdefault("UPLOAD_PACK_MAX_FILES", int(os.getenv("UPLOAD_PACK_MAX_FILES") or "5000"))
@@ -516,6 +524,22 @@ def create_app(config_object=None):
                 return None
 
     if bool(app.config.get("SECURITY_HEADERS_ENABLED")):
+
+        @app.before_request
+        def _csp_nonce():
+            # One fresh nonce per response. secrets.token_urlsafe is CSPRNG-backed;
+            # a guessable nonce would defeat the policy entirely.
+            import secrets
+
+            g.csp_nonce = secrets.token_urlsafe(16)
+            return None
+
+        @app.context_processor
+        def _csp_nonce_context():
+            # Templates use <script nonce="{{ csp_nonce() }}">. Returns "" when
+            # no request context has run, so rendering never raises.
+            return {"csp_nonce": lambda: getattr(g, "csp_nonce", "")}
+
         @app.after_request
         def _security_headers(resp):
             resp.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -543,8 +567,22 @@ def create_app(config_object=None):
                 "1", "true", "yes", "on",
             )
             inline_token = ["'unsafe-inline'"] if allow_inline else []
-            script_src = ["'self'", *inline_token, "https://cdn.jsdelivr.net"]
-            style_src = ["'self'", *inline_token, "https://cdn.jsdelivr.net"]
+
+            # Per-response nonce for the inline-script burn-down. Templates opt in
+            # with <script nonce="{{ csp_nonce() }}">; a nonced script keeps
+            # working after 'unsafe-inline' is dropped, so templates can migrate
+            # one at a time instead of in one risky change.
+            #
+            # Note browsers IGNORE 'unsafe-inline' when a nonce is present, so
+            # the nonce is only emitted once inline is disallowed. Adding it
+            # while allow_inline is true would break every not-yet-migrated
+            # template at once — the exact big-bang this is meant to avoid.
+            nonce_token = []
+            if not allow_inline:
+                nonce_token = [f"'nonce-{getattr(g, 'csp_nonce', '')}'"]
+
+            script_src = ["'self'", *inline_token, *nonce_token, "https://cdn.jsdelivr.net"]
+            style_src = ["'self'", *inline_token, *nonce_token, "https://cdn.jsdelivr.net"]
             if not allow_frame_embedding:
                 csp = " ".join([
                     "default-src 'self';",
@@ -560,6 +598,34 @@ def create_app(config_object=None):
                 if security_mode == "strict":
                     csp = " ".join([csp, "form-action 'self';", "upgrade-insecure-requests;"])
                 resp.headers.setdefault("Content-Security-Policy", csp)
+
+                # Optional report-only probe for the 'unsafe-inline' burn-down.
+                # Emits the STRICTER policy (no 'unsafe-inline') alongside the
+                # enforced one, so browsers report what would break without
+                # actually breaking it. Set TINYMRP_CSP_REPORT_URI to collect.
+                # This is how to size the migration before flipping
+                # TINYMRP_CSP_ALLOW_INLINE=false for real.
+                if allow_inline and str(
+                    os.getenv("TINYMRP_CSP_REPORT_ONLY_STRICT") or ""
+                ).strip().lower() in ("1", "true", "yes", "on"):
+                    nonce = getattr(g, "csp_nonce", "")
+                    strict_script = ["'self'", f"'nonce-{nonce}'", "https://cdn.jsdelivr.net"]
+                    strict_style = ["'self'", f"'nonce-{nonce}'", "https://cdn.jsdelivr.net"]
+                    ro = " ".join([
+                        "default-src 'self';",
+                        "base-uri 'self';",
+                        "object-src 'none';",
+                        "frame-ancestors 'none';",
+                        f"script-src {' '.join(strict_script)};",
+                        f"style-src {' '.join(strict_style)};",
+                        f"img-src {' '.join(img_src)};",
+                        "font-src 'self' data: https://cdn.jsdelivr.net;",
+                        f"connect-src {' '.join(connect_src)};",
+                    ])
+                    report_uri = (os.getenv("TINYMRP_CSP_REPORT_URI") or "").strip()
+                    if report_uri:
+                        ro = " ".join([ro, f"report-uri {report_uri};"])
+                    resp.headers.setdefault("Content-Security-Policy-Report-Only", ro)
             return resp
 
     # CORS handling (dynamic allowlist; safe by default)

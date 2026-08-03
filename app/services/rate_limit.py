@@ -71,7 +71,10 @@ def init_rate_limiting(app: Flask):
             path = (request.path or "").rstrip("/")
             if not path.startswith("/api"):
                 return True
-            return path == "/api/health"
+            # Liveness and readiness are polled continuously by container
+            # healthchecks and load balancers; rate-limiting them would make an
+            # instance look unhealthy purely because it was being monitored.
+            return path in ("/api/health", "/api/ready")
 
     limiter.init_app(app)
     app.extensions["tinymrp_limiter"] = limiter

@@ -9,6 +9,7 @@ import stat
 import tempfile
 import time
 import unicodedata
+import uuid
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -19,6 +20,7 @@ from pymongo import DeleteMany, InsertOne, UpdateOne
 from app.models.artifact import PartFile
 from app.models.bom import BOMLink
 from app.models.extra_file import PartExtraFile
+from app.models.import_journal import ImportJournal
 from app.models.part import Part
 from app.services.attrs import normalize_record_attrs
 from app.services.canonical_fields import (
@@ -1550,6 +1552,82 @@ def _bulk_updates(collection: Any, operations: list[UpdateOne]) -> None:
                 operation._doc,
                 upsert=operation._upsert,
             )
+def _journal_start(
+    plan: dict[str, Any],
+    *,
+    uploaded_by: str,
+    seed_tag: str,
+) -> ImportJournal | None:
+    """Open a journal entry before any effect is applied.
+
+    Journalling must never be the reason an import fails, so every journal
+    operation is best-effort: if the journal cannot be written the import still
+    runs, it is simply less diagnosable.
+    """
+    try:
+        planned_files = sum(
+            1
+            for entry in plan["parts"]
+            for item in entry["files"]
+            if item["action"] in {"add", "replace"} and "_file" in item
+        )
+        journal = ImportJournal(
+            operation_id=uuid.uuid4().hex,
+            status="started",
+            stage="parts",
+            uploaded_by=uploaded_by or "",
+            seed_tag=seed_tag or "",
+            planned_parts=len(plan.get("parts") or []),
+            planned_files=planned_files,
+        )
+        journal.save()
+        return journal
+    except Exception:  # pragma: no cover - journal must not break imports
+        return None
+
+
+def _journal_update(journal: ImportJournal | None, **fields: Any) -> None:
+    if journal is None:
+        return
+    try:
+        for key, value in fields.items():
+            setattr(journal, key, value)
+        journal.save()
+    except Exception:  # pragma: no cover - best effort
+        pass
+
+
+def _rollback_created_parts(
+    created_pairs: list[tuple[str, str]],
+    journal: ImportJournal | None,
+) -> None:
+    """Remove parts this import brought into existence.
+
+    Only parts CREATED by this run are removed. Parts that already existed are
+    deliberately left alone: their prior field values were overwritten in place
+    and are not recoverable here, so deleting them would destroy data rather
+    than restore it. Those are reported for manual reconciliation instead.
+    """
+    actions: list[str] = []
+    followup: list[str] = []
+    for pn, rev in created_pairs:
+        try:
+            Part.objects(part_number=pn, revision=rev).delete()
+            BOMLink._get_collection().delete_many({"parent_pn": pn, "parent_rev": rev})
+            actions.append(f"deleted created part {pn}:{rev or '(blank)'}")
+        except Exception as exc:  # pragma: no cover - defensive
+            followup.append(
+                f"could not remove created part {pn}:{rev or '(blank)'}: {exc}"
+            )
+    _journal_update(
+        journal,
+        status="rolled_back",
+        rollback_actions=actions,
+        manual_followup=followup,
+        finished_at=utc_now(),
+    )
+
+
 def execute_import_plan(
     plan: dict[str, Any],
     *,
@@ -1579,6 +1657,10 @@ def execute_import_plan(
     parts_created = 0
     parts_updated = 0
     changed_pairs: set[tuple[str, str]] = set()
+    # Parts this run brings into existence. Tracked separately from
+    # changed_pairs because only these can be safely removed on rollback.
+    created_pairs: list[tuple[str, str]] = []
+    journal = _journal_start(plan, uploaded_by=uploaded_by, seed_tag=seed_tag)
     try:
         # A written BOM row needs its parent and child to exist, and a stored
         # file needs its owner, even when the Properties policy is Skip. Those
@@ -1618,6 +1700,7 @@ def execute_import_plan(
                     attrs={"seed": seed_tag},
                 )
                 parts_created += 1
+                created_pairs.append(pair)
             else:
                 parts_updated += 1
             _apply_properties(part, entry, aliases)
@@ -1634,8 +1717,19 @@ def execute_import_plan(
             part.save(sync_materialized=False)
             plan["_state"]["parts"][pair] = part
             changed_pairs.add(pair)
+        # Record what the database now holds before touching the filesystem.
+        # If the file commit fails, this is the evidence an operator needs.
+        _journal_update(
+            journal,
+            stage="boms",
+            parts_created=parts_created,
+            parts_updated=parts_updated,
+            touched_parts=[f"{pn}\x1f{rev}" for pn, rev in sorted(changed_pairs)],
+        )
         links_created = _write_boms(plan)
+        _journal_update(journal, stage="files", links_created=links_created)
         _commit_files(stage_root, staged)
+        _journal_update(journal, stage="file_metadata", files_written=len(staged))
         _write_file_metadata(staged, uploaded_by, seed_tag)
         managed_changed = {
             item["pair"]
@@ -1661,6 +1755,13 @@ def execute_import_plan(
         )
         thumb_pairs = managed_changed if generate_thumbs else set()
         thumbnails = generate_thumbs_for_parts(sorted(thumb_pairs)) if thumb_pairs else 0
+        _journal_update(
+            journal,
+            status="committed",
+            stage="done",
+            files_written=len(staged),
+            finished_at=utc_now(),
+        )
         return {
             "parts_created": parts_created,
             "parts_updated": parts_updated,
@@ -1671,7 +1772,34 @@ def execute_import_plan(
             "files_discovered": files_discovered,
             "thumbnails_generated": int(thumbnails or 0),
             "materialized_part_saves": len(changed_pairs),
+            "operation_id": journal.operation_id if journal is not None else "",
         }
+    except Exception as exc:
+        # The filesystem commit rolls itself back, but the database writes above
+        # it do not. Undo the parts this run created, and record everything that
+        # cannot be undone so an operator can reconcile deliberately rather than
+        # discovering the damage later.
+        _journal_update(
+            journal,
+            status="failed",
+            error=f"{type(exc).__name__}: {exc}",
+            finished_at=utc_now(),
+        )
+        updated_existing = sorted(
+            f"{pn}:{rev or '(blank)'}"
+            for pn, rev in changed_pairs
+            if (pn, rev) not in set(created_pairs)
+        )
+        _rollback_created_parts(created_pairs, journal)
+        if updated_existing:
+            _journal_update(
+                journal,
+                manual_followup=[
+                    "pre-existing parts were modified in place and cannot be "
+                    "restored automatically: " + ", ".join(updated_existing)
+                ],
+            )
+        raise
     finally:
         shutil.rmtree(stage_root, ignore_errors=True)
 def _changed_existing_pairs(plan: dict[str, Any]) -> list[tuple[str, str]]:
