@@ -13,7 +13,11 @@ No files are reserved; there is no parallel stream running.
     docs/PRODUCTION_HARDENING_BASELINE.md — trust that table over prose here.
 
     Remaining OPEN production blockers, in the order to attack them:
-      IMPORT-ATOMIC-01  P0  Phase 4B  partial imports leave inconsistent state
+      IMPORT-ATOMIC-01  P0  Phase 4B  PARTIALLY MITIGATED 2026-08-03 — journal,
+                                      operation ID and rollback of created
+                                      parts are in; transactions, idempotent
+                                      retries and an operator view are not.
+                                      See the 4B section for the exact residue.
       OPS-DBAUTH-01     P0  Phase 5   Mongo auth optional/default-off
       OPS-HEALTH-01     P0  Phase 5   health endpoint proves nothing
       OPS-RATE-01       P1  Phase 5   in-memory, fail-open rate limiting
@@ -831,24 +835,56 @@ Stream large content rather than loading entire files into memory.
 Use dedicated staging directories with bounded storage.
 Ensure timeout and cleanup behavior is deterministic.
 Add adversarial archive tests without committing dangerous large fixtures.
-4B. Atomic import behavior
-Separate import into:Parse and validate.
-Prepare an execution plan.
-Stage files.
-Commit database and file changes.
-Generate derived artifacts.
+4B. Atomic import behavior — [PARTIAL 2026-08-03, Claude] journal + rollback in
+  ALREADY PRESENT before this work (verified, unchanged): the pipeline is
+       already separated into parse/validate (parse_import_package), plan
+       (build_import_plan), stage (_stage_files), commit (_commit_files) and
+       derived artifacts (thumbnails). _commit_files already rolls the
+       FILESYSTEM back on failure, restoring backups of replaced files.
 
-Use MongoDB transactions where the deployment topology supports them.
-Otherwise implement a durable import journal and compensating rollback.
-Give every import a unique operation ID.
-Make retries idempotent.
-Record created, changed, skipped and rolled-back objects.
-Do not silently leave partial Parts/BOM records after filesystem failure.
-Add fault-injection tests for:Disk failure.
-Metadata failure.
-Thumbnail failure.
-Duplicate operations.
-Process interruption.
+  THE ACTUAL DEFECT, now fixed: the database writes that run BEFORE the file
+       commit had no rollback. execute_import_plan saved Parts and rewrote BOM
+       links, then called _commit_files; if that raised, the parts and links
+       stayed, the exception propagated, and nothing recorded what had landed.
+       The `finally` only removed the staging directory.
+
+  DONE Durable import journal — new app/models/import_journal.py
+       (collection `import_journal`). Written BEFORE any effect is applied and
+       updated as each stage completes, so a run that dies mid-import still
+       leaves evidence. Records status (started/committed/failed/rolled_back),
+       the failing stage, counts, the identities touched, the compensating
+       actions performed, and anything needing manual follow-up.
+  DONE Unique operation ID per attempt, returned to the caller as
+       result["operation_id"] so an operator can find the record.
+  DONE Compensating rollback — parts CREATED by a failed run are deleted along
+       with their BOM links.
+       DELIBERATE LIMIT: pre-existing parts modified in place are NOT deleted.
+       Their prior field values are not captured anywhere, so deleting them
+       would destroy data rather than restore it. They are recorded in
+       journal.manual_followup instead, and a test pins that behaviour.
+  DONE Record created/changed/rolled-back objects (touched_parts,
+       rollback_actions, manual_followup).
+  DONE Journalling is best-effort by design: if the journal cannot be written
+       the import still proceeds. A diagnostic aid must never become a new
+       failure mode. Pinned by a test that breaks ImportJournal.save().
+  DONE Fault-injection tests — tests/test_import_journal.py, 8 tests, covering
+       failure during properties, during BOM write, and during file commit.
+       Verified the key test FAILS when the rollback call is removed.
+       Full suite after the change: 655 passed, 1 skipped. ruff/bandit/mypy ok.
+
+  STILL TODO in 4B (NOT done here — do not mark 4B complete):
+    - MongoDB transactions where the topology supports them. Not attempted;
+      the journal is the "otherwise" branch of the roadmap. A replica-set
+      deployment could wrap the DB writes in a real transaction and reduce the
+      journal to an audit record.
+    - Idempotent retries. There is no dedupe key, so re-running the same pack
+      after a failure repeats the work rather than resuming it.
+    - Fault injection for thumbnail failure, duplicate operations and process
+      interruption specifically. Only disk/metadata/commit paths are covered.
+    - No operator-facing view of the journal. The collection is queryable but
+      there is no admin page or CLI to list or reconcile failed imports, which
+      the acceptance criterion "operators can diagnose and reconcile every
+      import operation" ultimately needs.
 
 Acceptance criteria
 Oversized expansion is rejected before dangerous resource consumption.
