@@ -8,14 +8,30 @@ No files are reserved; there is no parallel stream running.
 *** IF YOU ARE A NEW AI PICKING THIS UP, READ THIS BLOCK FIRST ***
 
   Where things stand
-    Phases 0, 1A, 1B, 1C, 3A, 3B(engineering), 3C(engineering), 4A are done.
-    The next unstarted production blocker is PHASE 2 (AUTH-MODE-01), then
-    Phase 4B, then Phase 5. Phases 6-10 are post-production-blocker.
+    Done: Phases 0, 1A, 1B, 1C, 2, 3A, 3B(engineering), 3C(engineering), 4A.
+    The authoritative status is the blocker register in
+    docs/PRODUCTION_HARDENING_BASELINE.md — trust that table over prose here.
+
+    Remaining OPEN production blockers, in the order to attack them:
+      IMPORT-ATOMIC-01  P0  Phase 4B  partial imports leave inconsistent state
+      OPS-DBAUTH-01     P0  Phase 5   Mongo auth optional/default-off
+      OPS-HEALTH-01     P0  Phase 5   health endpoint proves nothing
+      OPS-RATE-01       P1  Phase 5   in-memory, fail-open rate limiting
+      SUPPLY-LOCK-01    P1  Phase 3C  no --require-hashes provenance lock
+      SEC-CSP-01        P1  1A resid. mechanism landed, templates unmigrated
+      QA-FE-01          P1  Phase 6   no frontend/browser/a11y tests
+
+    Blockers that need a HUMAN, not an AI (do not close these yourself):
+      SUPPLY-SECRET-01  P0  rotate/classify the secrets in git history
+      SUPPLY-PY-01      P0  WebAuthn exception needs an owner + expiry
+      SUPPLY-NPM-01     P0  React Router exception needs an owner + expiry
 
   How to work
     - Run the suite with a venv that has requirements-dev.txt installed.
       A prepared one may not exist on a fresh machine; create it first.
-      Full suite baseline as of 2026-08-03: 632 passed, 1 skipped.
+      Full suite baseline as of 2026-08-03: 647 passed, 1 skipped.
+      If you get ModuleNotFoundError on collection, your venv is stale against
+      requirements.txt — reinstall requirements-dev.txt before debugging.
     - Gates that must stay green: pytest, `ruff check .`, `bandit -r app -ll`,
       `mypy app/services/security_mode.py app/services/api_auth.py`.
     - Black is deliberately NON-blocking (162 files pending reformat). Do not
