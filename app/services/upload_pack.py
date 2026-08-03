@@ -5,8 +5,10 @@ import mimetypes
 import os
 import re
 import shutil
+import stat
 import tempfile
 import time
+import unicodedata
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -73,6 +75,60 @@ _DELIVERABLE_GROUPS = {
     "datasheet",
 }
 _DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+_ALLOWED_COMPRESSION_METHODS = {zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED}
+_DELIVERABLE_EXTENSIONS = {
+    "png": {"png"},
+    "pdf": {"pdf"},
+    "dxf": {"dxf"},
+    "step": {"step", "stp"},
+    "edr": {"edr", "eprt", "easm", "edrw"},
+    "3mf": {"3mf"},
+    "ply": {"ply"},
+    "stl": {"stl"},
+    "datasheet": {"pdf", "jpg", "jpeg", "png"},
+}
+
+
+class ArchiveLimitError(ValueError):
+    """The archive exceeds a configured resource budget."""
+
+
+class ArchiveTimeoutError(ArchiveLimitError):
+    """Archive validation exceeded its configured wall-clock budget."""
+
+
+def _positive_limit(config: object, name: str, fallback: int) -> int:
+    try:
+        value = int(getattr(config, "get", lambda *_: fallback)(name, fallback))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{name} must be a positive integer") from exc
+    if value < 1:
+        raise RuntimeError(f"{name} must be a positive integer")
+    return value
+
+
+def _archive_limits(config: object) -> dict[str, int]:
+    mebibyte = 1024 * 1024
+    return {
+        "compressed": _positive_limit(config, "UPLOAD_PACK_MAX_ZIP_MB", 200)
+        * mebibyte,
+        "entry": _positive_limit(config, "UPLOAD_PACK_MAX_FILE_MB", 256)
+        * mebibyte,
+        "total": _positive_limit(config, "UPLOAD_PACK_MAX_TOTAL_MB", 1024)
+        * mebibyte,
+        "entries": _positive_limit(config, "UPLOAD_PACK_MAX_FILES", 5000),
+        "ratio": _positive_limit(config, "UPLOAD_PACK_MAX_COMPRESSION_RATIO", 100),
+        "path": _positive_limit(config, "UPLOAD_PACK_MAX_PATH_CHARS", 240),
+        "seconds": _positive_limit(config, "UPLOAD_PACK_MAX_SECONDS", 120),
+    }
+
+
+def _check_archive_deadline(deadline: float) -> None:
+    if time.monotonic() > deadline:
+        raise ArchiveTimeoutError("ZIP validation exceeded configured time limit")
+
+
 class ImportPermissionError(ValueError):
     def __init__(self, missing: Iterable[str]):
         self.missing_permissions = sorted(set(missing))
@@ -105,12 +161,19 @@ def _json_value(value: Any) -> Any:
         return value
     return str(value)
 def _safe_zip_name(name: str) -> str | None:
-    if not name or "\x00" in name:
+    if (
+        not name
+        or "\x00" in name
+        or any(ord(character) < 32 for character in name)
+    ):
         return None
-    normalized = os.path.normpath(name.replace("\\", "/").lstrip("/")).replace("\\", "/")
-    if normalized in {"", ".", ".."} or normalized.startswith("../") or _DRIVE_RE.match(normalized):
+    normalized = unicodedata.normalize("NFC", name.replace("\\", "/"))
+    if normalized.startswith("/") or _DRIVE_RE.match(normalized):
         return None
-    return normalized
+    segments = normalized.split("/")
+    if not segments or any(segment in {"", ".", ".."} for segment in segments):
+        return None
+    return "/".join(segments)
 def _safe_destination(root: str, relative: str) -> str:
     destination = os.path.abspath(os.path.join(root, relative.replace("/", os.sep)))
     if os.path.commonpath([os.path.normcase(destination), os.path.normcase(os.path.abspath(root))]) != os.path.normcase(os.path.abspath(root)):
@@ -255,6 +318,61 @@ def _policy_options(
         if values[name] not in allowed:
             raise ValueError(f"invalid {name}: {values[name]}")
     return values
+
+
+def _validated_zip_members(
+    zf: zipfile.ZipFile,
+    limits: dict[str, int],
+    deadline: float,
+) -> dict[str, zipfile.ZipInfo]:
+    infos = zf.infolist()
+    if len(infos) > limits["entries"]:
+        raise ArchiveLimitError("ZIP exceeds configured entry count limit")
+
+    members: dict[str, zipfile.ZipInfo] = {}
+    seen: set[str] = set()
+    total_size = 0
+    for info in infos:
+        _check_archive_deadline(deadline)
+        raw_name = info.filename[:-1] if info.is_dir() else info.filename
+        safe = _safe_zip_name(raw_name)
+        if not safe:
+            raise ValueError("unsafe or ambiguous ZIP entry path")
+        if len(safe) > limits["path"]:
+            raise ArchiveLimitError("ZIP entry path exceeds configured length limit")
+        collision_key = safe.casefold()
+        if collision_key in seen:
+            raise ValueError("ZIP contains duplicate or ambiguous entry paths")
+        seen.add(collision_key)
+        if info.flag_bits & 0x1:
+            raise ValueError("encrypted ZIP entries are not supported")
+        unix_mode = (info.external_attr >> 16) & 0xFFFF
+        if unix_mode and stat.S_ISLNK(unix_mode):
+            raise ValueError("ZIP links are not supported")
+        if info.is_dir():
+            continue
+        if info.compress_type not in _ALLOWED_COMPRESSION_METHODS:
+            raise ValueError("unsupported ZIP compression method")
+        if info.file_size > limits["entry"]:
+            raise ArchiveLimitError("ZIP entry exceeds configured size limit")
+        total_size += info.file_size
+        if total_size > limits["total"]:
+            raise ArchiveLimitError("ZIP exceeds configured uncompressed size limit")
+        if info.file_size and info.file_size > limits["ratio"] * max(
+            info.compress_size, 1
+        ):
+            raise ArchiveLimitError("ZIP entry exceeds configured compression ratio")
+        members[safe] = info
+    return members
+
+
+def _validate_deliverable_extension(group: str, filename: str) -> str:
+    extension = os.path.splitext(filename)[1].lstrip(".").casefold()
+    if extension not in _DELIVERABLE_EXTENSIONS.get(group, set()):
+        raise ValueError(f"unsupported file type for {group} deliverables")
+    return extension
+
+
 def parse_import_package(
     file_bytes: bytes,
     filename: str,
@@ -263,11 +381,12 @@ def parse_import_package(
     """Validate and parse every ZIP member exactly once."""
     started = time.perf_counter()
     config = current_app.config if has_app_context() else {}
-    max_zip = int(config.get("UPLOAD_PACK_MAX_ZIP_MB") or 0) * 1024 * 1024
-    max_file = int(config.get("UPLOAD_PACK_MAX_FILE_MB") or 0) * 1024 * 1024
-    max_files = int(config.get("UPLOAD_PACK_MAX_FILES") or 0)
-    if max_zip and len(file_bytes) > max_zip:
-        raise ValueError("ZIP exceeds configured size limit")
+    limits = _archive_limits(config)
+    deadline = time.monotonic() + limits["seconds"]
+    if Path(filename).suffix.casefold() != ".zip":
+        raise ValueError("upload package must be a .zip file")
+    if len(file_bytes) > limits["compressed"]:
+        raise ArchiveLimitError("ZIP exceeds configured compressed size limit")
     diagnostics: dict[str, Any] = {
         "warnings": [],
         "errors": [],
@@ -296,19 +415,13 @@ def parse_import_package(
     except zipfile.BadZipFile as exc:
         raise ValueError("invalid ZIP package") from exc
     with archive as zf:
-        infos = [info for info in zf.infolist() if not info.is_dir()]
-        if max_files and len(infos) > max_files:
-            raise ValueError("ZIP exceeds configured file count limit")
-        safe_infos: dict[str, zipfile.ZipInfo] = {}
-        for info in infos:
-            safe = _safe_zip_name(info.filename)
-            if not safe:
-                raise ValueError(f"Unsafe ZIP entry blocked: {info.filename}")
-            if max_file and info.file_size > max_file:
-                raise ValueError(f"ZIP entry too large: {info.filename}")
-            safe_infos[safe] = info
-        flat_names = [name for name in safe_infos if name.endswith("_FLATBOM.txt")]
-        tree_names = [name for name in safe_infos if name.endswith("_TREEBOM.txt")]
+        safe_infos = _validated_zip_members(zf, limits, deadline)
+        flat_names = [
+            name for name in safe_infos if name.casefold().endswith("_flatbom.txt")
+        ]
+        tree_names = [
+            name for name in safe_infos if name.casefold().endswith("_treebom.txt")
+        ]
         if len(flat_names) > 1 or len(tree_names) > 1:
             raise ValueError("package must contain at most one FLATBOM and one TREEBOM")
         if flat_names:
@@ -367,6 +480,7 @@ def parse_import_package(
         manifest = _load_manifest(zf)
         bom_names = set(flat_names + tree_names)
         for safe, info in safe_infos.items():
+            _check_archive_deadline(deadline)
             if safe in bom_names or safe in {"extra/_manifest.json", "extra/manifest.json"}:
                 continue
             segments = safe.split("/")
@@ -382,6 +496,7 @@ def parse_import_package(
                     group, filename_only = head, os.path.basename(segments[-1])
                 if group not in _DELIVERABLE_GROUPS:
                     raise ValueError(f"Unknown deliverables group: {group}")
+                extension = _validate_deliverable_extension(group, filename_only)
                 identity = _deliverable_identity(filename_only)
                 if identity:
                     pn, rev, drawing = identity
@@ -424,7 +539,6 @@ def parse_import_package(
                     continue
                 if not _claim_pair(parts, (pn, rev), safe, diagnostics):
                     continue
-                extension = os.path.splitext(filename_only)[1].lstrip(".").casefold()
                 content = zf.read(info)
                 files.append(
                     {
