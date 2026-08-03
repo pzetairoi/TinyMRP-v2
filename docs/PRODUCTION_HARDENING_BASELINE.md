@@ -362,10 +362,10 @@ The identifier should be used in commits, reviews and risk decisions.
 | IAM-TOKEN-01 | P0 | Closed 2026-08-03 (`49cf24a`, `49ee2b4`) | 1B | Expiring token policy and complete token lifecycle controls |
 | AUTH-MODE-01 | P0 | Closed 2026-08-03 (`80783b3`) | 2 | Strict browser, integration, public-share and health policies |
 | DEPLOY-SEED-01 | P0 | Closed 2026-08-03 | 3A | Canonical, idempotent, fail-closed initialization and fresh-install smoke |
-| SUPPLY-PY-01 | P0 | Engineering remediation done; 1/1 proposed exception remains | 3B | Proposed WebAuthn exception needs human owner/date and <=90-day expiry |
-| SUPPLY-NPM-01 | P0 | Open; triaged | 3B/6 | Two RSC-only React Router rows remain; proposed exception needs human owner/date and v8 migration tracking |
+| SUPPLY-PY-01 | P0 | **Closed 2026-08-04** by accepted risk EXC-2026-001 (owner Francisco Quesada, expires 2026-11-02) | 3B | WebAuthn advisory is not applicable: WebAuthn is neither configured nor installed, and no patched release exists. Re-check at expiry. |
+| SUPPLY-NPM-01 | P0 | **Closed 2026-08-04** by accepted risk EXC-2026-002 (owner Francisco Quesada, expires 2026-11-02) | 3B/6 | RSC-only advisory is not applicable: `frontend/src` uses no unstable RSC APIs. Fix exists in `react-router` 8.3.0 but `react-router-dom` has no 8.x; v8 migration tracked as Phase 6 frontend work. |
 | SUPPLY-IMM-01 | P1 | Closed 2026-08-03 (`4984637`, `511555b`) | 3C | Base/deployment images and Actions pinned immutably |
-| SUPPLY-SECRET-01 | P0 | Open; effective gate blocks | 3C | Two deleted environment-file candidates require classification and rotation confirmation |
+| SUPPLY-SECRET-01 | P0 | **Closed 2026-08-04** by accepted risk EXC-2026-003 (owner Francisco Quesada, expires 2026-11-02) | 3C | `SECRET_KEY`/`SECURITY_PASSWORD_SALT` in `.env.example` (`e16f19d`) are publicly readable in history, but the owner confirmed no production server ever used them, so the exposure has no operational meaning. History rewrite (370 commits) judged not worth the cost. Deliberately NOT allowlisted — the gate still reports them. |
 | SUPPLY-LOCK-01 | P1 | Open | 3C/8 | Python install artifacts lack `--require-hashes` provenance lock |
 | IMPORT-DOS-01 | P0 | Open | 4A | No cumulative uncompressed/archive compression-ratio limit |
 | IMPORT-ATOMIC-01 | P0 | Partially mitigated 2026-08-03; still Open | 4B | Cross-store imports can leave partial database/filesystem state. Durable journal, unique operation ID and compensating rollback of created parts are in. Still open: no MongoDB transactions, retries are not idempotent, and in-place modifications to pre-existing parts cannot be auto-restored (reported for manual reconciliation instead). |

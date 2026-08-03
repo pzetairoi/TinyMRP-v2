@@ -56,9 +56,22 @@ fix requires a migration tracked as <item>.
 
 ## Active exceptions
 
-Both records below are **Proposed**, not Accepted. They need a named owner and a
-sign-off date from whoever owns release risk. Everything else is filled in from
-the evidence in `dependency_advisory_triage.md`.
+All three records below are **Accepted**, signed by Francisco Quesada on
+2026-08-04 and expiring **2026-11-02**. The applicability evidence is in
+`dependency_advisory_triage.md` and `secret_scanning_review.md`.
+
+### Review queue — what to fix when these expire
+
+Ordered by what actually removes the exception rather than renewing it:
+
+| ID | Fix that closes it | Blocked on |
+| --- | --- | --- |
+| EXC-2026-002 | migrate `react-router-dom` → `react-router` v8 | upstream published no `react-router-dom` 8.x; belongs with Phase 6 frontend work |
+| EXC-2026-001 | upgrade past `Flask-Security-Too` 5.8.1 | no patched release exists yet |
+| EXC-2026-003 | nothing to fix; re-confirm no deployment used the values | n/a — closes permanently once re-confirmed |
+
+At expiry, re-run both gates and re-check each advisory for a published fix. If
+a fix exists, **upgrade instead of renewing**.
 
 ### EXC-2026-001 — Flask-Security-Too WebAuthn reauthentication bypass
 
@@ -69,10 +82,10 @@ the evidence in `dependency_advisory_triage.md`.
 | Severity (upstream) | Medium |
 | Gate | pip-audit |
 | Blocker ID | SUPPLY-PY-01 |
-| Status | **Proposed** — needs owner + acceptance date |
-| Owner | _unassigned_ |
-| Accepted on | _pending_ |
-| Expires | _pending — suggest 90 days from acceptance_ |
+| Status | **Accepted** |
+| Owner | Francisco Quesada (fcoquesada@gmail.com) |
+| Accepted on | 2026-08-04 |
+| Expires | **2026-11-02** (90 days) |
 
 **Applicability analysis.** Not applicable to this deployment. The defect is on
 the WebAuthn reauthentication path (`webauthn.py`): a session is marked
@@ -119,10 +132,10 @@ record.
 | Severity (upstream) | High |
 | Gate | npm audit (`--omit=dev --audit-level=high`) |
 | Blocker ID | SUPPLY-NPM-01 |
-| Status | **Proposed** — needs owner + acceptance date |
-| Owner | _unassigned_ |
-| Accepted on | _pending_ |
-| Expires | _pending — suggest 90 days from acceptance_ |
+| Status | **Accepted** |
+| Owner | Francisco Quesada (fcoquesada@gmail.com) |
+| Accepted on | 2026-08-04 |
+| Expires | **2026-11-02** (90 days) |
 
 **Applicability analysis.** Not applicable. The advisory states it "only affects
 your application if you are using the unstable RSC APIs." TinyMRP does not:
@@ -162,6 +175,57 @@ ones.
 **Re-check plan.** At expiry, re-run `npm audit --omit=dev --audit-level=high`
 and check whether `react-router-dom` has published an 8.x. Track the v8
 migration as frontend work.
+
+---
+
+### EXC-2026-003 — Historical secrets in git history
+
+| Field | Value |
+| --- | --- |
+| Finding | `SECRET_KEY` and `SECURITY_PASSWORD_SALT` in `.env.example`, commit `e16f19d` (2025-08-16) |
+| Gate | gitleaks (full-history scan) |
+| Blocker ID | SUPPLY-SECRET-01 |
+| Status | **Accepted** |
+| Owner | Francisco Quesada (fcoquesada@gmail.com) |
+| Accepted on | 2026-08-04 |
+| Expires | **2026-11-02** (90 days) |
+
+**Applicability analysis.** Two real high-entropy values were committed in the
+repository's initial commit and remain reachable from git history. The
+repository is **public**, so they have been publicly readable since 2025-08-16.
+
+The exposure is nevertheless worthless: **the owner has confirmed no production
+server ever used these values.** They were an example file. A `SECRET_KEY` that
+never signed a session and a `SECURITY_PASSWORD_SALT` that never salted a stored
+password grant an attacker nothing.
+
+The file was deleted (`ff020f2` / `114059c`); neither value appears in `HEAD` or
+the working tree.
+
+**Why no remediation.** Purging them requires rewriting history with
+`git filter-repo` or BFG. That rewrites **all 370 commits**, changes every
+commit hash, and forces every clone and open branch to be recreated — including
+the Dependabot branches. That cost is not justified for values with no
+operational meaning. Rotation is likewise a no-op: there is nothing deployed to
+rotate.
+
+**Compensating controls.**
+- `.gitignore` covers `.env`, `.env.local` and `.env.*.local`, so a real
+  environment file cannot be committed the same way again.
+- Secret scanning is now genuinely effective (it previously detected nothing —
+  see `secret_scanning_review.md`), so a *new* leak would be caught.
+- The two findings are deliberately **not allowlisted**. The gate continues to
+  report them, which is the intended behaviour: this record is the disposition,
+  not a suppression.
+
+**Voiding conditions.**
+- Discovery that any deployment did use these values → rotate immediately and
+  treat as a live incident.
+- Any *new* secret appearing in history → this record does not cover it.
+
+**Re-check plan.** At expiry, re-confirm no deployment ever used these values.
+Once that is confirmed a second time, this can be closed permanently rather
+than renewed; the underlying facts cannot change.
 
 ---
 

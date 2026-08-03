@@ -31,10 +31,18 @@ No files are reserved; there is no parallel stream running.
       SEC-CSP-01        P1  1A resid. mechanism landed, templates unmigrated
       QA-FE-01          P1  Phase 6   no frontend/browser/a11y tests
 
-    Blockers that need a HUMAN, not an AI (do not close these yourself):
-      SUPPLY-SECRET-01  P0  rotate/classify the secrets in git history
-      SUPPLY-PY-01      P0  WebAuthn exception needs an owner + expiry
-      SUPPLY-NPM-01     P0  React Router exception needs an owner + expiry
+    Blockers that needed a HUMAN — ALL SIGNED OFF 2026-08-04, none open:
+      SUPPLY-PY-01      CLOSED by EXC-2026-001 (WebAuthn; not applicable)
+      SUPPLY-NPM-01     CLOSED by EXC-2026-002 (RSC-only; not applicable)
+      SUPPLY-SECRET-01  CLOSED by EXC-2026-003 (owner confirmed no production
+                        server ever used the leaked values, so the public
+                        exposure has no operational meaning; a 370-commit
+                        history rewrite was judged not worth the cost)
+      All three are owned by Francisco Quesada and EXPIRE 2026-11-02. At expiry
+      re-check for published fixes and UPGRADE rather than renew. Details and
+      the review queue are in docs/security/risk_acceptance_template.md.
+      Do NOT allowlist the two gitleaks findings: the gate is meant to keep
+      reporting them, and EXC-2026-003 is the disposition, not a suppression.
 
   How to work
     - Run the suite with a venv that has requirements-dev.txt installed.
