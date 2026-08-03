@@ -21,6 +21,41 @@ Coordination rules:
      updates the production-blocker register.
 
 Active workstreams as of 2026-08-03:
+  P4A-ARCHIVE-LIMITS  IN PROGRESS  owner: Codex /root
+    Scope: enforce bounded ZIP request/entry/aggregate/ratio/path/type policy,
+           deterministic staging cleanup, and adversarial tests without large
+           fixtures. Preserve CLI/API behavior where it is safe and keep the
+           guided VPS/Caddy deployment topology and health path unchanged.
+    Reserved files:
+      app/services/upload_pack.py
+      app/views/upload_pack.py
+      app/__init__.py
+      app/models/app_settings.py
+      app/views/admin.py
+      app/templates/admin/settings.html
+      .env.dev.example
+      .env.docker.example
+      .env.server.example
+      docker-compose.yml
+      docker-compose.onefolder.yml
+      deploy/scripts/lib/common.sh
+      tests/test_upload_pack_archive_limits.py (new)
+      tests/test_upload_pack.py
+      tests/test_security_hardening.py
+      README.md
+      CHANGELOG.md
+      docs/PRODUCTION_HARDENING_BASELINE.md
+      hardeningplan.txt
+    Parallel support: /root/p4a_archive_audit is read-only and will report all
+                      upload/archive entry points and bypass risks; it owns no
+                      files. Other AIs may claim non-overlapping Phase 4B audit
+                      work but must not edit the reserved list above.
+    Protected gates: focused adversarial archives, complete upload/import suite,
+                     full production-derived suite, main/one-folder/rendered
+                     guided Compose, Bash/ShellCheck, and pinned live Caddy path.
+    CHECKPOINT Claim will be pushed before implementation so remote workers can
+               coordinate from the same board.
+
   P3C-WORKFLOW-PINS  DONE/INTEGRATED 2026-08-03  owner: Codex /root
     Scope: pin every third-party GitHub Action to a verified immutable commit;
            retain Python/npm/Trivy audit reports and backend/frontend/image
