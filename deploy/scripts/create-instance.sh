@@ -176,7 +176,14 @@ APP_CONTAINER_NAME="${APP_CONTAINER_NAME:-tinymrp-${INSTANCE_NAME}-app}"
 MONGO_CONTAINER_NAME="${MONGO_CONTAINER_NAME:-tinymrp-${INSTANCE_NAME}-mongo}"
 PRIVATE_NETWORK_NAME="${PRIVATE_NETWORK_NAME:-tinymrp-${INSTANCE_NAME}}"
 MONGO_DB="${MONGO_DB:-tinymrp_${INSTANCE_NAME//-/_}}"
-MONGO_URI="${MONGO_URI:-mongodb://${MONGO_CONTAINER_NAME}:27017/${MONGO_DB}}"
+# OPS-DBAUTH-01: a brand-new instance has no existing data volume, so Mongo
+# authentication can be enabled from the start without the user-creation dance
+# that an in-place upgrade needs. Credentials are generated here rather than
+# asked for, so the secure path is also the effortless one.
+# Setting MONGO_URI explicitly still wins, which keeps the escape hatch open.
+MONGO_ROOT_USER="${MONGO_ROOT_USER:-tinymrp_${INSTANCE_NAME//-/_}}"
+MONGO_ROOT_PASSWORD="${MONGO_ROOT_PASSWORD:-$(random_secret 32)}"
+MONGO_URI="${MONGO_URI:-mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@${MONGO_CONTAINER_NAME}:27017/${MONGO_DB}?authSource=admin}"
 SECRET_KEY="${SECRET_KEY:-$(random_secret 48)}"
 SECURITY_PASSWORD_SALT="${SECURITY_PASSWORD_SALT:-$(random_secret 48)}"
 FILES_LOCAL_ROOT="/data/deliverables"
@@ -230,6 +237,10 @@ upsert_env_value "$INSTANCE_ENV" "FILES_PUBLIC_URLS" "$FILES_PUBLIC_URLS"
 upsert_env_value "$INSTANCE_ENV" "FILES_ACCEL_REDIRECT_PREFIX" "$FILES_ACCEL_REDIRECT_PREFIX"
 upsert_env_value "$INSTANCE_ENV" "SECRET_KEY" "$SECRET_KEY"
 upsert_env_value "$INSTANCE_ENV" "SECURITY_PASSWORD_SALT" "$SECURITY_PASSWORD_SALT"
+# Mongo root credentials must reach the mongo container's MONGO_INITDB_ROOT_*
+# variables on first boot, which is the only moment Mongo will create them.
+upsert_env_value "$INSTANCE_ENV" "MONGO_ROOT_USER" "$MONGO_ROOT_USER"
+upsert_env_value "$INSTANCE_ENV" "MONGO_ROOT_PASSWORD" "$MONGO_ROOT_PASSWORD"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_SECURITY_MODE" "$TINYMRP_SECURITY_MODE"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_ALLOWED_ORIGINS" "$TINYMRP_ALLOWED_ORIGINS"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_CORS_CREDENTIALS" "$TINYMRP_CORS_CREDENTIALS"

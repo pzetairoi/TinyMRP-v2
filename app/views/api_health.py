@@ -116,10 +116,21 @@ def ready():
         "disk": _check_disk(),
     }
     ok = all(bool(check.get("ok")) for check in checks.values())
+
+    # Report the Mongo authentication posture (OPS-DBAUTH-01) without letting it
+    # affect readiness: an unauthenticated database is a misconfiguration to fix,
+    # not a reason to pull a working instance out of the load balancer. Only the
+    # coarse classification is exposed, never the URI or host, because this
+    # endpoint is unauthenticated.
+    auth_status = current_app.config.get("MONGO_AUTH_STATUS") or {}
+    warnings = []
+    if auth_status.get("risk") == "unauthenticated":
+        warnings.append("mongodb_unauthenticated")
     payload = {
         "ok": ok,
         "service": "tinymrp",
         "server_version": _server_version(),
         "checks": checks,
+        "warnings": warnings,
     }
     return jsonify(payload), (200 if ok else 503)

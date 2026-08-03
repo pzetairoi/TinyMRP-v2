@@ -1,0 +1,70 @@
+name: 5080
+
+services:
+  mongo:
+    image: mongo:6.0@sha256:8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac
+    container_name: netx
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      MONGO_INITDB_DATABASE: app-container
+      # OPS-DBAUTH-01. Read from the instance .env. Mongo only creates these
+      # users on FIRST boot of an empty data directory; setting them against an
+      # existing volume has no effect, which is why auth cannot simply be
+      # switched on for an already-running instance.
+      # Empty values leave authentication disabled, preserving the previous
+      # behaviour for instances created before this change.
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-}
+    volumes:
+      - type: bind
+        source: /data/x/deliverables
+        target: /data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - private
+
+  app:
+    image: tinymrp-app:latest
+    build:
+      context: tinymrp-x-mongo
+      dockerfile: docker/app/Dockerfile
+    container_name: /data/x/mongo
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - tinymrp_x
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: 8000
+        target: /data/deliverables
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+    networks:
+      - private
+      - proxy
+
+networks:
+  private:
+    name: tinymrp-app:latest
+    internal: true
+  proxy:
+    external: true
+    name: tinymrp_proxy

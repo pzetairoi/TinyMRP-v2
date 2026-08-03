@@ -649,7 +649,21 @@ docker_compose() {
 docker_compose_file() {
   local compose_file="$1"
   shift
-  docker_compose -f "$compose_file" "$@"
+  # The instance .env must be passed with --env-file, not only through the
+  # service-level `env_file:` key. `env_file:` populates the CONTAINER's
+  # environment; it does NOT feed ${VAR} interpolation in the compose file
+  # itself. Mongo's MONGO_INITDB_ROOT_* values are interpolated, so without
+  # this they would resolve to empty and the database would silently start
+  # with authentication disabled (OPS-DBAUTH-01).
+  # Instances are laid out as <instance_dir>/compose.yml + <instance_dir>/.env
+  # (see instance_compose_file / instance_env_file).
+  local instance_env
+  instance_env="$(dirname "$compose_file")/.env"
+  if [ -f "$instance_env" ]; then
+    docker_compose --env-file "$instance_env" -f "$compose_file" "$@"
+  else
+    docker_compose -f "$compose_file" "$@"
+  fi
 }
 
 render_instance_compose() {
@@ -676,6 +690,14 @@ services:
       - no-new-privileges:true
     environment:
       MONGO_INITDB_DATABASE: ${mongo_db}
+      # OPS-DBAUTH-01. Read from the instance .env. Mongo only creates these
+      # users on FIRST boot of an empty data directory; setting them against an
+      # existing volume has no effect, which is why auth cannot simply be
+      # switched on for an already-running instance.
+      # Empty values leave authentication disabled, preserving the previous
+      # behaviour for instances created before this change.
+      MONGO_INITDB_ROOT_USERNAME: \${MONGO_ROOT_USER:-}
+      MONGO_INITDB_ROOT_PASSWORD: \${MONGO_ROOT_PASSWORD:-}
     volumes:
       - type: bind
         source: ${mongo_data_dir}

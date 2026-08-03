@@ -327,6 +327,31 @@ def create_app(config_object=None):
         if v and str(v).strip():  # only override if not empty
             app.config[k] = v
 
+    # OPS-DBAUTH-01: Mongo auth is opt-in because enabling it on an existing
+    # data volume requires creating users first. It was also silent, so
+    # "unauthenticated" was the default AND invisible. Warn on every startup.
+    # Deliberately a warning, not a hard failure: refusing to boot would break
+    # every running deployment on upgrade, which is a worse outcome than a
+    # loud, repeated log line. TINYMRP_REQUIRE_MONGO_AUTH=true opts in to
+    # fail-closed for operators who want the guarantee.
+    from app.services.mongo_auth import describe_mongo_auth
+
+    mongo_auth_status = describe_mongo_auth(str(app.config.get("MONGO_URI") or ""))
+    app.config["MONGO_AUTH_STATUS"] = mongo_auth_status
+    if mongo_auth_status["risk"] != "ok":
+        require_auth = str(
+            os.getenv("TINYMRP_REQUIRE_MONGO_AUTH") or ""
+        ).strip().lower() in ("1", "true", "yes", "on")
+        if require_auth:
+            raise RuntimeError(
+                "TINYMRP_REQUIRE_MONGO_AUTH is set but "
+                f"{mongo_auth_status['message']}"
+            )
+        if mongo_auth_status["risk"] == "unauthenticated":
+            logger.warning("SECURITY: %s", mongo_auth_status["message"])
+        else:
+            logger.info("%s", mongo_auth_status["message"])
+
     # Resolve secrets safely (persist in compat mode if missing/empty)
     from app.services.runtime_secrets import resolve_runtime_secrets
     try:

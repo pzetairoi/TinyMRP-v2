@@ -18,8 +18,13 @@ No files are reserved; there is no parallel stream running.
                                       parts are in; transactions, idempotent
                                       retries and an operator view are not.
                                       See the 4B section for the exact residue.
-      OPS-DBAUTH-01     P0  Phase 5   Mongo auth optional/default-off
-                                      <- NEXT UNSTARTED P0
+      OPS-DBAUTH-01     P0  Phase 5   PARTIALLY MITIGATED 2026-08-04 — new
+                                      guided instances start authenticated and
+                                      unauthenticated ones now warn loudly;
+                                      still uses the ROOT user rather than a
+                                      least-privilege one, and existing
+                                      instances are not migrated.
+                                      <- NEXT: the least-privilege app user
       OPS-HEALTH-01     P0  Phase 5   PARTIALLY MITIGATED 2026-08-03 —
                                       /api/ready added and proves db/storage/
                                       disk; still no authenticated diagnostics
@@ -912,9 +917,62 @@ Implement Phase 4A, archive safety and resource limits.
 
 Phase 5 — Production infrastructure and operational resilience
 Objective: Make deployment secure, observable and recoverable.
-Security defaults
-Require MongoDB authentication.
-Create a least-privilege application database user.
+Security defaults — [PARTIAL 2026-08-04, Claude] Mongo auth (OPS-DBAUTH-01)
+  THE CONSTRAINT that shapes this whole item: Mongo only creates
+       MONGO_INITDB_ROOT_* users on the FIRST boot of an EMPTY data directory.
+       Setting them against an existing volume does nothing. So auth genuinely
+       cannot be forced on for already-running instances without a manual
+       user-creation step — this is not laziness in the original design.
+       What WAS wrong is that "unauthenticated" was also SILENT.
+
+  DONE Auth on by default for NEW guided instances. create-instance.sh now
+       generates MONGO_ROOT_USER/MONGO_ROOT_PASSWORD (random_secret, which is
+       token_urlsafe so it is URI-safe without escaping) and builds an
+       authenticated MONGO_URI with ?authSource=admin. A new instance has no
+       existing volume, so this is safe. Explicit MONGO_URI still wins.
+  DONE The rendered per-instance compose now actually PASSES the credentials.
+       It previously never set MONGO_INITDB_ROOT_* at all, so env vars alone
+       would have produced a URI with credentials against a database that had
+       none. Empty values still leave auth disabled = old instances unaffected.
+  *** DONE and NON-OBVIOUS: docker_compose_file() now passes --env-file. ***
+       A service-level `env_file:` key populates the CONTAINER environment; it
+       does NOT feed ${VAR} interpolation in the compose file itself. Without
+       --env-file the interpolated MONGO_INITDB_ROOT_* resolve to EMPTY and the
+       database starts unauthenticated while every config file looks correct.
+       Verified end-to-end against the real <dir>/compose.yml + <dir>/.env
+       layout: credentials resolve with the fix, empty without it.
+  DONE Startup warning + app/services/mongo_auth.py. Classifies the URI as
+       ok / local-only / unauthenticated. Loopback-only is informational (a dev
+       database is not an incident); networked-without-credentials logs a
+       SECURITY warning on every boot. Deliberately a warning, NOT a hard
+       failure — refusing to boot would break every existing deployment on
+       upgrade, which is worse than a loud log line.
+  DONE TINYMRP_REQUIRE_MONGO_AUTH=true opts in to fail-closed for operators who
+       want the guarantee.
+  DONE /api/ready reports `warnings: ["mongodb_unauthenticated"]` but stays
+       200. An unauthenticated database is a misconfiguration to fix, not a
+       reason to pull a working instance out of the load balancer.
+  DONE tests/test_mongo_auth_posture.py, 16 tests. Two assert nothing leaks:
+       the classifier message never echoes the URI, and /api/ready never
+       exposes a connection string. Found and fixed a real IPv6 parsing bug
+       while writing them ("[::1]:27017" was misread as a non-loopback host).
+  VERIFIED mongosh `db.adminCommand('ping')` still returns 1 under auth, so the
+       container healthcheck needs no credentials and was left unchanged.
+       Full suite 693 passed, 1 skipped. ruff/bandit clean. Bash syntax OK.
+       Protected Caddy contract + readiness suites green (32 tests).
+
+  STILL TODO here (OPS-DBAUTH-01 stays OPEN):
+    - Least-privilege application DB user. The generated credential is the
+      ROOT user; the app should use a scoped user limited to its own database.
+      This is the main remaining gap in this item.
+    - Existing instances are NOT migrated. Enabling auth on a running instance
+      still needs the documented manual user-creation procedure.
+    - docker-compose.yml (the non-guided single-host path) still defaults to
+      empty credentials. Only the guided create-instance.sh path defaults to
+      authenticated.
+    - NOT executed on a live VPS. The rendering and interpolation were verified
+      locally with `docker compose config`; a real guided install was not run.
+
 Remove weak and compatibility-mode defaults.
 Fail startup when placeholder secrets are used.
 Define an approved secret-delivery mechanism.
