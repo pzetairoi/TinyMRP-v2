@@ -44,15 +44,16 @@ Active workstreams as of 2026-08-03:
                 explicit blocking step. Backend, frontend-lockfile and image
                 CycloneDX SBOMs plus audit reports upload for 30 days even when
                 the matching vulnerability gate fails. Syft is fixed at v1.50.0.
-    VERIFIED Five new source contracts pass; actionlint 1.7.10 including embedded
-             ShellCheck passes. Node 24 clean install, expected npm-audit exit 1,
+    VERIFIED Seven supply-chain source contracts pass; actionlint 1.7.10
+             including embedded ShellCheck passes. Node 24 clean install,
+             expected npm-audit exit 1,
              frontend SBOM, lint and production build passed. Local Syft v1.50.0
              produced a valid 107-component lockfile CycloneDX SBOM. The exact
              requirements audit still exits 1 for its single proposed exception,
              and its backend CycloneDX JSON generation passes.
     CHECKPOINT 4984637 is pushed on origin/hardening/production-readiness.
 
-  P3C-IMAGE-PINS  IN PROGRESS  owner: Codex /root
+  P3C-IMAGE-PINS  DONE/INTEGRATED 2026-08-03  owner: Codex /root
     Scope: pin Dockerfile and supported deployment images to verified multi-arch
            manifest digests without changing service topology or Caddy behavior.
     Reserved files:
@@ -85,11 +86,20 @@ Active workstreams as of 2026-08-03:
     VERIFIED Seven supply-chain pin contracts plus the six VPS/Caddy and twenty
              bootstrap contracts pass (33 combined). Main, one-folder, rendered
              guided-instance and rendered Nextcloud Compose validate. All Bash
-             scripts pass syntax and ShellCheck error-level; actionlint passes;
-             the digest-pinned Caddy route validates. The production image built
-             from the pinned Dockerfile as image b912dd7e...e406e84.
-    NEXT Run the complete production-derived suite and live disposable
-         Caddy-to-app health path, then document digest refresh ownership.
+             scripts pass syntax and digest-pinned ShellCheck v0.11.0 error-level;
+             actionlint passes; the digest-pinned Caddy route validates.
+    VERIFIED The production image built on exact Python 3.11.15 and Node
+             24.18.1 as sha256:f4b9450b...c8399b. It has no apt layer and its
+             runtime no longer contains pip/setuptools/wheel. Trivy v0.72.0
+             reports 0 HIGH / 0 CRITICAL after build-tool pruning.
+    VERIFIED The full production-derived Python suite passed 639 tests. A final
+             disposable digest-pinned Mongo -> TinyMRP -> Caddy request returned
+             {"ok":true,"security_mode":"strict"}; all temporary resources
+             were removed. The guided VPS/Caddy topology and image override are
+             unchanged.
+    CHECKPOINT Immutable image defaults were pushed in 511555b; final scan,
+               runtime and documentation evidence are in the following Phase 3C
+               closure checkpoint.
 
   P3C-SECRET-SCAN  DONE/INTEGRATED 2026-08-03
     owner: /root/p3b_advisory_triage + /root
@@ -287,6 +297,16 @@ Completed workstream scope:
                       contract, config-render and deployment-script checks.
 
 Completed workstreams:
+  P3C-IMAGE-PINS  DONE/INTEGRATED 2026-08-03  commits: 511555b + closure
+    Verified manifest digests across Dockerfile/static Compose/guided Caddy,
+    restore and Nextcloud paths; exact CI runtime/scanner versions; clean final
+    image scan; 639-test suite; disposable strict Mongo/app/Caddy proof.
+  P3C-WORKFLOW-PINS  DONE/INTEGRATED 2026-08-03  commit: 4984637 + closure
+    Immutable Actions, retained audit/SBOM evidence, explicit blocking gates,
+    exact CI runtime/scanner tools and protected source contracts.
+  P3C-SECRET-SCAN  DONE/INTEGRATED 2026-08-03  commits: ad24b87, 7952311
+    Effective upstream rules restored and full history scanned. Two deleted
+    environment-file candidates remain deliberately unsuppressed and blocking.
   P2-STRICT-AUTH  DONE 2026-08-03  commit: 80783b3 + final evidence checkpoint
     Explicit endpoint categories, same-origin session/CSRF policy, integration
     bearer policy, narrow public shares, consistent errors, frontend error UX,
@@ -328,8 +348,8 @@ Parallel workstream definition (complete; retained for scope history):
     controls, owner and expiry for primary review.
 
 Next integration order:
-  Phase 2 and Phase 3B are integrated. Claim Phase 3C reproducible supply-chain
-  work before editing; preserve the guided VPS/Caddy deployment contracts.
+  Phase 3C engineering is integrated. Claim a bounded Phase 4A upload/archive
+  workstream before editing; preserve the guided VPS/Caddy deployment contracts.
 ========================================================================
 
 Completed so far:
@@ -350,8 +370,11 @@ Completed so far:
                    (50d75e7, 608be56, 3346b51, 5743b82)
                    residual: two proposed exceptions need a human owner/date
                    and <=90-day expiry before release
-  Phase 3C  PARTIAL actions on current majors, but SHA pinning + digest pinning
-                   + blocking gates all still TODO
+  Phase 3C  ENGINEERING CORE DONE 2026-08-03
+                   Actions and images immutable; audit/SBOM evidence retained;
+                   final image 0 HIGH/0 CRITICAL; full-history secret gate
+                   effective. Release remains blocked on human dependency-risk
+                   acceptance and two historical-secret dispositions.
   Phase 0   DONE 2026-08-02 (Codex)
                    baseline tag: hardening-baseline-2026-08-02
                    evidence: docs/PRODUCTION_HARDENING_BASELINE.md
@@ -464,9 +487,11 @@ Protected owner requirement added 2026-08-02:
   and fresh bootstrap. Do not replace the Caddy path with Nginx-only behavior.
 
 Current work:
-  Phase 2 strict-mode authentication and Phase 3B runtime/pypdf remediation are
-  DONE. Phase 3C reproducible supply-chain gates are next and currently
-  unclaimed so another AI can take a bounded item in parallel.
+  Phase 2 strict-mode authentication, Phase 3B dependency engineering and the
+  Phase 3C reproducible supply-chain engineering core are DONE. Phase 4A upload
+  and archive resource limits are next and currently unclaimed so another AI
+  can take a bounded item in parallel. Do not weaken the strict-mode or guided
+  VPS/Caddy gates while implementing import protections.
 
 Phase 1B decision log (recorded before implementation, 2026-08-03):
   * New API tokens expire after 90 days by default and may not exceed 365 days;
@@ -786,24 +811,40 @@ Still-open Dependabot PRs and why (do not just merge these):
   #43 python 3.14 — must move together with CI python-version and the py311
                     targets in pyproject.toml; reportlab already warns on 3.14.
   #28 node 26    — should move together with the node-version pin in security.yml.
-3C. Reproducible supply chain — [BARELY STARTED]
-  DONE (partial) GitHub Actions updated to current majors on main (5a893e6):
-       metadata-action v6, build-push-action v7, login-action v4,
-       setup-python v7, trivy-action 0.36.0. NOTE this is version pinning, NOT the
-       SHA pinning this phase asks for — still a TODO below.
-  NOTE SBOM generation already exists for release images and the backend
-       (release-image.yml + security.yml both emit CycloneDX and upload it).
-       "Generate an SBOM for every release" is therefore largely satisfied;
-       verify it covers the frontend too.
-  TODO Pin container base images by digest for release builds. Not started.
-  TODO Pin GitHub Actions to immutable commit SHAs. Not started.
-  TODO Store dependency audit reports as CI artifacts. Not started.
-  TODO Review broad secret-scanner exclusions (.gitleaks.toml). Not started.
-  TODO Make CI gates blocking. Currently non-blocking / advisory:
-       - Black runs with continue-on-error (repo-wide reformat still pending:
-         162 files would be reformatted at the current pin — see Phase 8).
-       - shellcheck is marked informational in security.yml.
-       These must not be flipped to blocking until Phase 8 burns the findings down.
+3C. Reproducible supply chain — [ENGINEERING CORE DONE 2026-08-03; RELEASE BLOCKED]
+  DONE Every external GitHub Action is pinned to a verified immutable commit.
+       Runners use Ubuntu 24.04; Python 3.11.15, pip 26.2, Node 24.18.1,
+       ShellCheck v0.11.0, Trivy v0.72.0 and Syft v1.50.0 are explicit.
+  DONE Dockerfile and all supported static/guided deployment defaults use
+       verified multi-architecture manifest digests for Dockerfile frontend,
+       Node, Python, Mongo, Nginx, Caddy, MariaDB and Nextcloud. Controlled
+       TINYMRP_*_IMAGE overrides remain available for emergencies.
+  DONE Python/npm/Trivy JSON and backend/frontend/final-image CycloneDX SBOMs
+       upload for 30 days before explicit blocking steps.
+  DONE Gitleaks now extends upstream default rules and scans full history. Broad
+       exclusions were removed; the only ignored fingerprint is a replaced,
+       verified non-secret test fixture and is protected by regression tests.
+  DONE The production image no longer invokes apt or retains pip, setuptools or
+       wheel. Trivy initially found two HIGH vendored build-tool findings and
+       reports 0 HIGH / 0 CRITICAL after their removal.
+  DONE ShellCheck error severity is blocking. Black remains non-blocking solely
+       for the recorded 162-file Phase 8 formatting migration; it is a quality
+       backlog and is not represented as a green formatting gate.
+  VERIFIED Actionlint (including embedded shell), Bash syntax, pinned
+           ShellCheck, supply/Gitleaks/Caddy/bootstrap contracts, static and
+           rendered Compose, rendered Caddy, Node install/SBOM/lint/build and
+           the 639-test production-derived Python 3.11.15 suite passed.
+  VERIFIED Final image sha256:f4b9450b...c8399b passed a disposable pinned
+           Mongo -> strict TinyMRP -> pinned Caddy health path. This preserves
+           the supported guided VPS/Caddy deployment architecture.
+  BLOCKED EXC-2026-001 and EXC-2026-002 still need a named human owner, sign-off
+          date and <=90-day expiry; the CI dependency gates intentionally fail.
+  BLOCKED SUPPLY-SECRET-01: full-history Gitleaks exits 1 with exactly two
+          candidates in a deleted `.env.example`; classify them and confirm
+          credential rotation before release. Do not suppress them generically.
+  RESIDUAL SUPPLY-LOCK-01: Python artifacts are exact-version pinned but are not
+           yet installed with `pip --require-hashes`; track provenance locking
+           in Phase 8 unless it is promoted earlier by release governance.
 Acceptance criteria
 A clean machine can create a working deployment without manual database repair.
 Initialization failure prevents a false-successful deployment.
@@ -1118,7 +1159,8 @@ Phase 1B — token lifecycle. DONE 2026-08-03.
 Phase 1C — server-side session lifecycle. DONE 2026-08-03.
 Phase 2 — strict-mode authentication. DONE 2026-08-03; AUTH-MODE-01 closed.
 Phase 3B — dependency engineering remediation DONE; human exceptions remain.
-Phase 3C — reproducible supply chain.
+Phase 3C — reproducible supply chain. ENGINEERING CORE DONE 2026-08-03;
+human dependency-risk and historical-secret dispositions still block release.
 Phase 4 — safe, atomic imports.
 Phase 5 — production infrastructure.
 Phase 6 — frontend quality and accessibility.
@@ -1126,5 +1168,6 @@ Phase 7 — add-in hardening.
 Phase 8 — maintainability.
 Phase 9 — commercial scope.
 Phase 10 — release validation.
-The next implementation request should be: “Implement Phase 3C reproducible
-supply-chain gates while preserving and testing the guided VPS/Caddy path.”
+The next implementation request should be: “Implement Phase 4A upload and
+archive resource limits while preserving and testing the guided VPS/Caddy
+path.”

@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+### Security (Phase 3C — reproducible supply-chain controls)
+- Pinned every third-party GitHub Action to a verified commit and fixed the
+  release workflow's invalid Trivy tag. CI runners and Python/pip/Node/
+  ShellCheck/Trivy/Syft tool versions are explicit.
+- Backend, frontend lockfile, and final-image CycloneDX SBOMs now accompany
+  machine-readable pip-audit, npm-audit, and Trivy reports. Evidence uploads for
+  30 days before the corresponding blocking gate is enforced.
+- Pinned Dockerfile and supported Mongo/Nginx/Caddy/MariaDB/Nextcloud defaults to
+  verified multi-architecture manifest digests. Guided VPS/Caddy rendering and
+  a disposable pinned Caddy-to-app health request pass.
+- Restored Gitleaks' upstream rules and full-history checkout. The tracked tree
+  is clean; two deleted environment-file candidates remain unsuppressed and
+  release-blocking pending human classification/rotation confirmation.
+- Removed the mutable apt layer and runtime pip/setuptools/wheel toolchain. The
+  final Trivy v0.72.0 fixed-finding gate reports zero HIGH and zero CRITICAL.
+
 ### Security (Phase 2 — coherent production authentication)
 - Strict is now the application, main Compose and guided VPS/Caddy default;
   compatibility mode is explicit for local development, the plain-HTTP

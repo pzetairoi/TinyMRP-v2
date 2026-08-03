@@ -22,18 +22,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Runtime system deps only. All Python deps ship manylinux wheels, so no compiler
-# toolchain is needed; curl is used by the container healthcheck.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # Install Python dependencies first — best layer caching (code changes don't
 # invalidate the dependency layer).
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Build/install tooling is not needed at runtime. Removing setuptools also
+# removes its vulnerable vendored jaraco.context and wheel metadata.
+RUN python -m pip install --no-cache-dir -r requirements.txt \
+    && python -m pip check \
+    && python -m pip uninstall -y setuptools wheel \
+    && python -m pip uninstall -y pip
 
 # Copy the application (build context is trimmed by .dockerignore: no .git,
 # tests, node_modules, env files, add-in sources, etc.)
@@ -55,7 +54,7 @@ USER appuser
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=5 \
-  CMD curl -fsS http://localhost:8000/api/health || exit 1
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).read()"]
 
 # Entrypoint seeds default roles (and optionally a first admin) on first boot
 ENTRYPOINT ["/bin/sh", "/app/docker/app/entrypoint.sh"]

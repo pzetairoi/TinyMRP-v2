@@ -71,15 +71,15 @@ Phase 0 added narrowly scoped baseline corrections:
 | Component | Declared/release value | Phase 0 observation |
 | --- | --- | --- |
 | Application | `VERSION` = 2.0.0 | 2.0.0 |
-| Python | CI/Docker target 3.11 | Clean tests on CPython 3.11.11 |
-| Node.js | `.nvmrc`/CI/Docker target 24 | Clean frontend checks on 24.18.1 |
+| Python | CI/Docker target 3.11.15 | Phase 3C pinned-image suite on CPython 3.11.15 |
+| Node.js | `.nvmrc` target 24; CI/image 24.18.1 | Clean frontend checks on 24.18.1 |
 | npm | Lockfile-driven | 11.19.0 used for clean install |
 | Docker Engine | Host tool | 25.0.3 |
 | Docker Compose | Host tool | 2.24.6-desktop.1 |
-| App base images | `node:24-alpine`, `python:3.11-slim-bookworm` | Image build passed; tags remain mutable until Phase 3C |
-| Database image | `mongo:6.0` | Locally resolved digest `sha256:95ec2fde...ff03a` |
-| Nginx image | `nginx:1.27-alpine` | Locally resolved digest `sha256:65645c7b...f2a10` |
-| Caddy image | `caddy:2-alpine` | Validated digest `sha256:5f5c8640...58648` |
+| App base images | Node/Python tags plus manifest digests | `f70403e8...f7a6b3` / `b1899299...ad5cba` |
+| Database image | `mongo:6.0@sha256:8b6d8f5b...bad3ac` | Static/guided/restore paths validated |
+| Nginx image | `nginx:1.27-alpine@sha256:65645c7b...2f2a10` | Main and one-folder Compose validated |
+| Caddy image | `caddy:2-alpine@sha256:5f5c8640...d58648` | Render, config and live proxy path validated |
 | SolidWorks installer | 1.0.2 | `TinyMRP_SolidWorksAddin_1.0.2_20260802_112728.exe` |
 | Add-in assembly/build | 1.0.0 / build file | Build number 346; Debug test run did not increment it |
 
@@ -310,6 +310,46 @@ suite, parity/adversarial regressions and protected Caddy gates also passed.
 Requirements-file `pip-audit` now reports **1 finding in 1 package**: the
 proposed Flask-Security-Too exception.
 
+## Phase 3C supply-chain evidence (2026-08-03)
+
+`SUPPLY-IMM-01` is closed. Every external GitHub Action is pinned to a verified
+40-character commit, CI runners/toolchains are versioned (Python 3.11.15,
+pip 26.2, Node 24.18.1, digest-pinned ShellCheck v0.11.0, Trivy v0.72.0 and
+Syft v1.50.0), and Dockerfile plus
+supported Mongo/Nginx/Caddy/MariaDB/Nextcloud defaults use verified multi-arch
+manifest digests. The invalid `aquasecurity/trivy-action@0.36.0` reference was
+corrected by pinning the peeled v0.36.0 commit. Update ownership and emergency
+override rules are in `docs/security/supply_chain_policy.md`.
+
+Python/npm/Trivy reports and backend/frontend-lockfile/final-image CycloneDX
+SBOMs upload for 30 days before explicit blocking steps. The final Docker image
+no longer runs `apt-get` or contains pip/setuptools/wheel. Pruning setuptools
+removed its vulnerable vendored build tooling; Trivy v0.72.0 then reported
+**0 HIGH and 0 CRITICAL** fixed findings.
+
+Verification evidence:
+
+- Nine workflow/Gitleaks contracts, actionlint with embedded ShellCheck, Bash
+  syntax, and ShellCheck error-level passed. Node 24.18.1 clean install, expected
+  npm-audit failure, frontend SBOM, lint and production build passed.
+- Seven image-pin contracts plus six guided VPS/Caddy and twenty bootstrap
+  contracts passed. Main, one-folder, rendered guided and rendered Nextcloud
+  Compose passed; the digest-pinned internal-TLS route passed Caddy validation.
+- The pinned production image `sha256:f4b9450b...c8399b` built successfully.
+  The combined source tree
+  passed **639 tests** in its production-derived Python 3.11.15 environment.
+  A disposable pinned Mongo → TinyMRP → Caddy health request returned
+  `{"ok":true,"security_mode":"strict"}` and cleaned up all test resources.
+- Effective Gitleaks defaults are restored. A tracked-HEAD archive is clean;
+  scanning 407 commits exits 1 with exactly two unsuppressed candidates in a
+  deleted `.env.example`. They remain a release blocker pending classification
+  and credential-rotation confirmation.
+
+Phase 3C is engineering-complete for immutable image/action pins and retained
+evidence, but release gates are not green: the two proposed dependency
+exceptions lack human acceptance, the two historical secret candidates lack
+human disposition, and Python artifact hashes remain future provenance work.
+
 ## Open production blockers
 
 The identifier should be used in commits, reviews and risk decisions.
@@ -324,7 +364,9 @@ The identifier should be used in commits, reviews and risk decisions.
 | DEPLOY-SEED-01 | P0 | Closed 2026-08-03 | 3A | Canonical, idempotent, fail-closed initialization and fresh-install smoke |
 | SUPPLY-PY-01 | P0 | Engineering remediation done; 1/1 proposed exception remains | 3B | Proposed WebAuthn exception needs human owner/date and <=90-day expiry |
 | SUPPLY-NPM-01 | P0 | Open; triaged | 3B/6 | Two RSC-only React Router rows remain; proposed exception needs human owner/date and v8 migration tracking |
-| SUPPLY-IMM-01 | P1 | Open | 3C | Base images and Actions are not pinned to immutable digests/SHAs |
+| SUPPLY-IMM-01 | P1 | Closed 2026-08-03 (`4984637`, `511555b`) | 3C | Base/deployment images and Actions pinned immutably |
+| SUPPLY-SECRET-01 | P0 | Open; effective gate blocks | 3C | Two deleted environment-file candidates require classification and rotation confirmation |
+| SUPPLY-LOCK-01 | P1 | Open | 3C/8 | Python install artifacts lack `--require-hashes` provenance lock |
 | IMPORT-DOS-01 | P0 | Open | 4A | No cumulative uncompressed/archive compression-ratio limit |
 | IMPORT-ATOMIC-01 | P0 | Open | 4B | Cross-store imports can leave partial database/filesystem state |
 | OPS-DBAUTH-01 | P0 | Open | 5 | Mongo authentication is optional/default-off in supported deployments |
@@ -367,9 +409,10 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 7. Use Python 3.11 and Node 24 for release evidence, regardless of host defaults.
 8. Preserve the baseline tag; do not move or recreate it.
 
-Phase 2 strict authentication and Phase 3B's pypdf migration are complete. Both
-proposed vulnerability exceptions still require human ownership and expiry.
-Phase 3C reproducible supply-chain work is next.
+Phase 2, Phase 3B engineering remediation, and Phase 3C immutable-pin/evidence
+engineering are complete. Proposed vulnerability exceptions and historical
+secret candidates still require human disposition. Phase 4A archive/resource
+limits are the next engineering workstream.
 
 ## Residual Phase 0 limitations
 
@@ -380,7 +423,7 @@ Phase 3C reproducible supply-chain work is next.
 - Phase 3A brought a real isolated fresh Compose stack online and validated the
   generated VPS/Caddy configuration, but did not mutate a live VPS, DNS or ACME
   environment.
-- Mutable image tags mean the locally observed digests are evidence, not a
-  reproducible release guarantee.
+- Image and Action content is immutable by default. Python package artifact
+  hashes and GitHub-hosted runner internals remain reproducibility limits.
 - The broad warning count, Black backlog and low-coverage modules remain later
   engineering-quality work.

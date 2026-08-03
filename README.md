@@ -79,7 +79,9 @@ Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 - **strict (default)**: the same-origin browser uses its authenticated session and an origin/referer CSRF check; integrations and the SolidWorks add-in use bearer tokens. `/api/auth/check` is bearer-only, public-share APIs require their scoped share capability, and `/api/health` is anonymous. Browser-only APIs reject bearer substitution. CORS is disabled unless an origin is explicitly allowed, cookies are Secure + SameSite=Strict, and startup fails if secrets are missing or weak.
 - **compat (development/migration only)**: preserves legacy behavior for local HTTP and staged upgrades. It retains the session-origin CSRF guard and safer CORS defaults, but may persist generated runtime secrets when explicit secrets are missing. Do not expose compat mode to the public internet.
 
-See `SECURITY.md` for the full threat model and `MIGRATION.md` for a safe rollout checklist.
+See `SECURITY.md` for the full threat model, `MIGRATION.md` for a safe rollout
+checklist, and `docs/security/supply_chain_policy.md` for immutable pin updates
+and release-gate evidence.
 
 ### Runtime secrets (compat mode)
 

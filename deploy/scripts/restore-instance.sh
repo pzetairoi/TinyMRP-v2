@@ -133,7 +133,9 @@ if [ "$DO_DATABASE" -eq 1 ] || [ "$DO_DELIVERABLES" -eq 1 ]; then
     info "Health check"
     sleep 3
     for _ in $(seq 1 20); do
-      if docker exec "$APP_CONTAINER_NAME" curl -fsS http://localhost:8000/api/health >/dev/null 2>&1; then
+      if docker exec "$APP_CONTAINER_NAME" python -c \
+        "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).read()" \
+        >/dev/null 2>&1; then
         info "Instance healthy after restore."
         exit 0
       fi

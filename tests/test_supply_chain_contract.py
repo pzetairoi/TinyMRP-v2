@@ -34,6 +34,11 @@ def test_security_workflow_uses_versioned_runner_and_full_history_secret_scan():
     assert "fetch-depth: 0" in source
     assert "persist-credentials: false" in source
     assert "gitleaks/gitleaks-action@" in source
+    assert source.count('python-version: "3.11.15"') == 2
+    assert source.count('node-version: "24.18.1"') == 1
+    assert source.count("python -m pip install --upgrade pip==26.2") == 2
+    assert "koalaman/shellcheck:v0.11.0@sha256:" in source
+    assert "apt-get install" not in source
 
 
 def test_dependency_reports_and_sboms_upload_before_blocking_gates():
@@ -66,6 +71,7 @@ def test_release_scan_evidence_is_retained_before_publish_gate():
 
     assert "ubuntu-latest" not in source
     assert "trivy-image.json" in source
+    assert "version: v0.72.0" in source
     assert "sbom-image.cdx.json" in source
     assert "continue-on-error: true" in source
     assert source.index("Upload image supply-chain evidence") < source.index(
@@ -101,6 +107,11 @@ def test_application_build_stages_use_verified_manifest_digests():
         "b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba AS app"
         in dockerfile
     )
+    assert "apt-get" not in dockerfile
+    assert "urllib.request.urlopen('http://localhost:8000/api/health', timeout=4)" in dockerfile
+    assert "python -m pip check" in dockerfile
+    assert "python -m pip uninstall -y setuptools wheel" in dockerfile
+    assert "python -m pip uninstall -y pip" in dockerfile
 
 
 def test_supported_compose_and_guided_deployment_images_are_digest_pinned():
