@@ -16,7 +16,10 @@ API_AUTH_SESSION = "session"
 API_AUTH_BEARER = "bearer"
 API_AUTH_SESSION_OR_BEARER = "session_or_bearer"
 
-_HEALTH_ENDPOINTS = frozenset({"api_health.health"})
+# Liveness and readiness must answer before any credential exists - an
+# orchestrator polls them to decide whether the instance is usable at all.
+# Both report booleans and coarse figures only, never configuration values.
+_HEALTH_ENDPOINTS = frozenset({"api_health.health", "api_health.ready"})
 _PUBLIC_SHARE_ENDPOINTS = frozenset(
     {
         "part_shares.public_share_field_config",

@@ -370,7 +370,7 @@ The identifier should be used in commits, reviews and risk decisions.
 | IMPORT-DOS-01 | P0 | Open | 4A | No cumulative uncompressed/archive compression-ratio limit |
 | IMPORT-ATOMIC-01 | P0 | Partially mitigated 2026-08-03; still Open | 4B | Cross-store imports can leave partial database/filesystem state. Durable journal, unique operation ID and compensating rollback of created parts are in. Still open: no MongoDB transactions, retries are not idempotent, and in-place modifications to pre-existing parts cannot be auto-restored (reported for manual reconciliation instead). |
 | OPS-DBAUTH-01 | P0 | Open | 5 | Mongo authentication is optional/default-off in supported deployments |
-| OPS-HEALTH-01 | P0 | Open | 5 | Health endpoint does not prove database/storage readiness |
+| OPS-HEALTH-01 | P0 | Partially mitigated 2026-08-03; still Open | 5 | Health endpoint does not prove database/storage readiness. `/api/ready` now verifies a real Mongo ping, file-root existence/writeability and a free-disk threshold, returning 503 when unusable; `/api/health` keeps its protected liveness contract. Still open: no authenticated diagnostics endpoint, and no orchestration consumes `/api/ready` yet (Compose/Caddy healthchecks and deploy scripts still poll `/api/health`). |
 | OPS-RATE-01 | P1 | Open | 5 | In-memory/fail-open rate limiting across workers |
 | ADDIN-TOKEN-01 | P0 | Open | 7 | Add-in token storage has plaintext and multi-user risks |
 | ADDIN-SIGN-01 | P0 for external distribution | Open | 7 | Installer is unsigned |

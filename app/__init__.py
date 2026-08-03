@@ -216,6 +216,14 @@ def create_app(config_object=None):
     app.config.setdefault("EXCEL_COMPILE_MAX_BYTES", int(os.getenv("EXCEL_COMPILE_MAX_BYTES") or "10485760"))
     app.config.setdefault("SECURITY_HEADERS_ENABLED", True)
     app.config.setdefault("FORCE_HTTPS", False)
+    # /api/ready fails below this much free space on the deliverables volume.
+    # A full disk corrupts imports mid-write, so it is better to drop out of
+    # the load balancer than to accept work that cannot be completed.
+    # 0 disables the check, matching the convention used by the upload limits.
+    app.config.setdefault(
+        "READINESS_MIN_FREE_DISK_MB",
+        int(os.getenv("READINESS_MIN_FREE_DISK_MB") or "512"),
+    )
     app.config.setdefault("UPLOAD_PACK_MAX_ZIP_MB", int(os.getenv("UPLOAD_PACK_MAX_ZIP_MB") or "1024"))
     app.config.setdefault("UPLOAD_PACK_MAX_FILE_MB", int(os.getenv("UPLOAD_PACK_MAX_FILE_MB") or "1024"))
     app.config.setdefault("UPLOAD_PACK_MAX_FILES", int(os.getenv("UPLOAD_PACK_MAX_FILES") or "5000"))

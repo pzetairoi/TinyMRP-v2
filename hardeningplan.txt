@@ -19,7 +19,13 @@ No files are reserved; there is no parallel stream running.
                                       retries and an operator view are not.
                                       See the 4B section for the exact residue.
       OPS-DBAUTH-01     P0  Phase 5   Mongo auth optional/default-off
-      OPS-HEALTH-01     P0  Phase 5   health endpoint proves nothing
+                                      <- NEXT UNSTARTED P0
+      OPS-HEALTH-01     P0  Phase 5   PARTIALLY MITIGATED 2026-08-03 —
+                                      /api/ready added and proves db/storage/
+                                      disk; still no authenticated diagnostics
+                                      endpoint and nothing consumes /api/ready
+                                      yet (orchestration still polls
+                                      /api/health). See the Phase 5 section.
       OPS-RATE-01       P1  Phase 5   in-memory, fail-open rate limiting
       SUPPLY-LOCK-01    P1  Phase 3C  no --require-hashes provenance lock
       SEC-CSP-01        P1  1A resid. mechanism landed, templates unmigrated
@@ -907,17 +913,48 @@ Define an approved secret-delivery mechanism.
 Move rate limiting to Redis or another shared store.
 Decide explicitly whether rate-limit storage failure is fail-open or fail-closed by endpoint risk.
 Apply global and endpoint-specific limits.
-Health and monitoring
-Create separate endpoints:
-Liveness: process is responsive.
-Readiness: MongoDB and required storage are usable.
-Diagnostics: authenticated detailed status for operators.
-Readiness should verify:
-MongoDB query.
-File-root existence and writeability where appropriate.
-Free disk thresholds.
-Required configuration.
-Background-worker state once workers are introduced.
+Health and monitoring — [PARTIAL 2026-08-03, Claude] liveness/readiness split in
+  THE DEFECT, now fixed: /api/health returned ok=true unconditionally. It
+       proved the process was serving and nothing else, so an instance whose
+       database was unreachable still reported healthy — and the container
+       HEALTHCHECK, install-server.sh, doctor.sh, restore-instance.sh and the
+       rendered Caddy/Compose healthchecks all trusted it.
+
+  DONE Liveness: /api/health, DELIBERATELY UNCHANGED. Its exact JSON shape is
+       a protected contract consumed by the deploy scripts listed above. Do not
+       make it conditional. A test pins the contract, and a second test pins
+       that liveness stays 200 even when a dependency is broken — if liveness
+       went red on a database blip the container would be killed and restarted,
+       which cannot fix a database outage and turns a degraded instance into a
+       crash loop.
+  DONE Readiness: NEW /api/ready, returns 503 when a dependency is unusable so
+       an orchestrator/load balancer can stop routing to it.
+       Verifies: MongoDB answers an actual ping command (not merely that a
+       client object exists); the deliverables root exists AND is writable (an
+       unmounted or read-only volume is the classic silent failure — the app
+       serves fine until the first import, then loses data); free disk against
+       READINESS_MIN_FREE_DISK_MB (default 512, 0 disables).
+       Unconfigured storage is explicitly NOT a failure: file features may
+       simply be unused.
+       Exempted from rate limiting and from strict-mode auth alongside
+       /api/health — an orchestrator polls it before any credential exists,
+       and continuous polling must not make an instance look unhealthy.
+       Reports booleans and coarse figures ONLY; two tests assert it does not
+       echo the storage path or any connection string, because it is
+       unauthenticated.
+  DONE tests/test_readiness_endpoint.py, 10 tests. Protected Caddy contract,
+       strict-auth and security-hardening suites re-run green (24 passed).
+       Full suite: 665 passed, 1 skipped. ruff/bandit/mypy clean.
+
+  STILL TODO here (OPS-HEALTH-01 stays OPEN):
+    - Diagnostics endpoint: authenticated, detailed status for operators.
+      Not started. /api/ready is deliberately terse because it is public.
+    - Readiness does not yet verify "required configuration" or
+      background-worker state (no workers exist yet).
+    - Nothing consumes /api/ready yet. The Compose/Caddy healthchecks and
+      deploy scripts still poll /api/health. Wiring readiness into the
+      orchestration is a deployment change and needs the protected VPS/Caddy
+      path re-validated end to end, which was NOT done here.
 Add:
 Structured JSON logging.
 Request/correlation IDs.
