@@ -804,14 +804,40 @@ it is already in the base of this branch.
            compensating controls and voiding conditions. They are not accepted:
            a named human owner, sign-off date and expiry are still required.
 
-Still-open Dependabot PRs and why (do not just merge these):
-  #35 eslint 10  — blocked: eslint-plugin-react-hooks@5.2.0 peers on eslint <=9.
-  #36 vite 8     — swaps the build engine to rolldown; needs a hands-on migration.
-  #34 typescript 7 — no CI value: nothing runs tsc, and `tsc --noEmit` already
-                     fails on the current 5.8 pin, so there is no green baseline.
-  #43 python 3.14 — must move together with CI python-version and the py311
-                    targets in pyproject.toml; reportlab already warns on 3.14.
-  #28 node 26    — should move together with the node-version pin in security.yml.
+REPOSITORY CLEANUP 2026-08-04 (Claude, at the owner's request)
+  The repo now has exactly TWO branches: `main` and
+  `hardening/production-readiness`. Everything else was deleted for visibility.
+
+  Deleted after verifying their work was already integrated:
+    hardening/p3b-pypdf-migration    -> pypdf 6.14.2 is in requirements.txt
+    hardening/p3b-runtime-upgrades   -> pillow 12.3.0 / cryptography 48.0.1 /
+                                        gunicorn 22.0.0 are in requirements.txt
+    hardening/p3c-secret-scan-codex  -> the [extend] gitleaks fix and
+                                        .gitleaksignore are present
+    security/rbac-owasp-hardening    -> 0 commits not already merged
+  Plus ~24 stale local parallel-worktree branches.
+
+  ALL 12 open Dependabot PRs were CLOSED and their branches deleted (#28, #43,
+  #75-#84). Dependabot will re-open anything it still considers relevant on its
+  next scheduled run. Do not read the empty PR list as "no updates pending".
+
+  IMPORTANT for whoever handles the next Dependabot wave: runtime dependencies
+  are now HASH-LOCKED. Bumping a pin in requirements.txt is no longer enough —
+  requirements.lock must be regenerated with
+      python scripts/lock_requirements.py
+  or CI fails the drift check and the image build fails --require-hashes.
+  A Dependabot PR that edits only requirements.txt WILL break the build.
+
+  Known-blocked upgrades, still true (previously tracked as PR numbers that no
+  longer exist):
+    eslint 10     — eslint-plugin-react-hooks@5.2.0 peers on eslint <=9.
+    vite 8        — swaps the build engine to rolldown; hands-on migration.
+    typescript 7  — no CI value: nothing runs tsc, and `tsc --noEmit` already
+                    fails on the current 5.8 pin, so there is no green baseline.
+    python 3.14   — must move with the CI python-version and the py311 targets
+                    in pyproject.toml; reportlab already warns on 3.14.
+    node 26       — should move with the node-version pin in security.yml.
+    react-router  — see EXC-2026-002; react-router-dom has no 8.x.
 3C. Reproducible supply chain — [ENGINEERING CORE DONE 2026-08-03; RELEASE BLOCKED]
   DONE 2026-08-04 (Claude) Hash-locked Python installs — SUPPLY-LOCK-01 CLOSED.
        requirements.lock pins all 60 packages by sha256 and the release image
