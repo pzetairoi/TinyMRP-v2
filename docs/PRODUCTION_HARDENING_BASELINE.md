@@ -374,7 +374,7 @@ The identifier should be used in commits, reviews and risk decisions.
 | OPS-RATE-01 | P1 | **Mitigated 2026-08-04** | 5 | In-memory/fail-open rate limiting across workers. `docker-compose.yml` now ships Redis and the app defaults to it, so limits are shared across gunicorn workers; the missing `redis` Python client (which made Redis config a silent no-op) is now pinned at 7.4.1. Failure policy is explicit via `RATE_LIMIT_FAIL_CLOSED` (default fail-open). Verified against a real Redis end to end. Still open: no per-endpoint budgets for expensive routes, `RATE_LIMIT_API` unset by default, and the guided VPS per-instance compose does not yet ship Redis. |
 | ADDIN-TOKEN-01 | P0 | Open | 7 | Add-in token storage has plaintext and multi-user risks |
 | ADDIN-SIGN-01 | P0 for external distribution | Open | 7 | Installer is unsigned |
-| QA-FE-01 | P1 | Open | 6 | No frontend unit, browser or automated accessibility tests |
+| QA-FE-01 | P1 | Partially addressed 2026-08-05; still Open | 6 | No frontend unit, browser or automated accessibility tests. Vitest + React Testing Library are wired and 76 unit tests cover all of `src/lib/` (API error handling, BOM occurrence keys, field-config access rules and filter grammar), running blocking in CI. Still open: no component/page tests, no Playwright browser workflows, no axe accessibility checks, and no enforced coverage threshold. |
 | COMM-SCOPE-01 | P0 for marketing | Open | 9 | Current product is an engineering BOM/document portal, not a complete MRP |
 | COMM-LEGAL-01 | P0 for paid rollout | Open | 9 | Commercial/privacy/support/third-party notice package incomplete |
 

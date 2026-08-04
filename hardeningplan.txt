@@ -40,7 +40,11 @@ No files are reserved; there is no parallel stream running.
                                       release image installs with
                                       --require-hashes and CI fails on drift.
       SEC-CSP-01        P1  1A resid. mechanism landed, templates unmigrated
-      QA-FE-01          P1  Phase 6   no frontend/browser/a11y tests
+      QA-FE-01          P1  Phase 6   FOUNDATION DONE 2026-08-05 — Vitest +
+                                      RTL wired, 76 unit tests over src/lib/,
+                                      blocking in CI. Still no component/page
+                                      tests, no Playwright, no axe, no coverage
+                                      threshold. <- NEXT: component tests
 
     Blockers that needed a HUMAN — ALL SIGNED OFF 2026-08-04, none open:
       SUPPLY-PY-01      CLOSED by EXC-2026-001 (WebAuthn; not applicable)
@@ -68,6 +72,17 @@ No files are reserved; there is no parallel stream running.
         silently loses a part, a BOM link or a deliverable is NOT.
     The SolidWorks add-in (solidworks-addin/) is OUT OF SCOPE — do not touch
     it. It needs real SolidWorks to test and the owner handles it.
+
+  *** STANDING INSTRUCTION from the owner 2026-08-05 ***
+    Reduce AI-generated fat progressively, on every pass. Each change should
+    leave the code leaner than it found it: fewer one-use helpers, fewer
+    intermediate variables that only restate the next line, no restating in a
+    comment what the code already says, and no duplicated setup that a small
+    shared helper covers. This applies to tests too - consolidate cases that
+    assert the same rule instead of enumerating near-identical ones.
+    Do NOT trade away coverage or the explanatory comments that record WHY a
+    non-obvious decision was made; those are the ones that stop the next
+    person reintroducing a bug. Cut restatement, keep reasoning.
 
   How to work
     - Run the suite with a venv that has requirements-dev.txt installed.
@@ -1164,18 +1179,44 @@ Implement Phase 5, beginning with authenticated MongoDB and readiness checks.
 
 Phase 6 — Frontend reliability, usability and accessibility
 Objective: Turn the polished interface into a testable and accessible commercial UI.
-Testing foundation
-Add Vitest and React Testing Library.
-Add Playwright for critical browser workflows.
-Add axe accessibility checks.
-Cover:Login/logout.
-Part search and detail.
-Import preview and failure.
-Job/order editing.
-Role and permission behavior.
-Token management.
-Public shares.
-Mobile/tablet layouts.
+Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
+  DONE Vitest 3.2.4 + React Testing Library + jsdom installed and wired.
+       `npm run test`, `test:watch`, `test:coverage` in frontend/package.json.
+       vitest.config.ts is SEPARATE from vite.config.ts on purpose: the build
+       config writes to ../app/static/parts-ui, and a test run must never be
+       able to touch the shipped bundle.
+       Vitest 3 accepts node ^20.0.0, so it runs on the local Node 20.14 and on
+       the CI Node 24 pin.
+  DONE 76 unit tests across the whole of src/lib/ (the pure logic layer):
+       - api.test.ts (16): the module that stops an API failure becoming an
+         empty list. Covers non-2xx, `ok:false` on a 200, structured
+         code/message/details, non-JSON gateway HTML, empty bodies, and that
+         apiFetch keeps `credentials: same-origin` (strict mode authenticates
+         the browser UI by session cookie, so dropping it breaks every call).
+       - bomTree.test.ts (10): pins the occurrence-vs-part key invariant. The
+         same PN/rev legitimately appears under several parents; keying by part
+         identity would collapse one row when another expands.
+       - fieldConfig.test.ts (50): field selection is presentation-level access
+         control — a stale preference must NOT surface a column the backend
+         withheld. Plus the filter grammar (ranges, comparators, booleans).
+  DONE CI runs them BLOCKING in the frontend job, before the build. Green from
+       the start, so there is no burn-down to defer and no reason to let it rot
+       as advisory (unlike Black, which has a real 162-file backlog).
+  VERIFIED `npm ci` from scratch resolves and the suite passes; lint and build
+       unchanged; `npm audit --omit=dev` still reports only the two known
+       react-router rows (EXC-2026-002) — no new devDependency adds a finding.
+
+  STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
+    - NO component or page tests yet. Every test so far is pure logic; nothing
+      renders a React tree.
+    - Playwright and axe are NOT installed. All the workflow coverage below
+      (login/logout, part search and detail, import preview and failure,
+      job/order editing, role and permission behaviour, token management,
+      public shares, mobile/tablet layouts) remains untouched.
+    - 3D viewer and canvas markup cannot be tested under jsdom — they need
+      WebGL, so they belong to the Playwright work, not Vitest.
+    - No coverage threshold is enforced; `test:coverage` exists but CI does not
+      gate on a number.
 
 Usability
 Add an application error boundary.

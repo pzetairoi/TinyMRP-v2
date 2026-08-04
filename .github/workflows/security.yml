@@ -289,6 +289,10 @@ jobs:
           syft-version: v1.50.0
           upload-artifact: false
           upload-release-assets: false
+      # QA-FE-01. Blocking from the start: the suite is green now, so there is
+      # no burn-down to defer and no reason to let it rot as advisory.
+      - name: Unit tests (Vitest)
+        run: npm run test
       - name: Build
         run: npm run build
       - name: Upload frontend supply-chain evidence
