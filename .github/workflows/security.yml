@@ -189,6 +189,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip==26.2
           pip install -r requirements-dev.txt
+      # SUPPLY-LOCK-01. The lock is only a provenance guarantee while it matches
+      # requirements.txt, so drift must fail the build rather than be noticed
+      # later. Verifies both that the lock installs under --require-hashes and
+      # that regenerating it produces no change.
+      - name: Hash-locked install resolves
+        run: |
+          python -m pip install --require-hashes --dry-run -r requirements.lock
+      - name: requirements.lock is in step with requirements.txt
+        run: |
+          cp requirements.lock requirements.lock.committed
+          python scripts/lock_requirements.py
+          if ! diff -u requirements.lock.committed requirements.lock; then
+            echo "::error::requirements.lock is stale. Run: python scripts/lock_requirements.py"
+            exit 1
+          fi
       - name: pip-audit (runtime dependencies)
         id: pip_audit
         run: |

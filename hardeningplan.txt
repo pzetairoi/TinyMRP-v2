@@ -35,7 +35,10 @@ No files are reserved; there is no parallel stream running.
                                       default; failure policy now explicit.
                                       Residue: no per-endpoint budgets, and
                                       guided VPS instances lack Redis.
-      SUPPLY-LOCK-01    P1  Phase 3C  no --require-hashes provenance lock
+      SUPPLY-LOCK-01    P1  Phase 3C  CLOSED 2026-08-04 — requirements.lock
+                                      pins all 60 packages by sha256; the
+                                      release image installs with
+                                      --require-hashes and CI fails on drift.
       SEC-CSP-01        P1  1A resid. mechanism landed, templates unmigrated
       QA-FE-01          P1  Phase 6   no frontend/browser/a11y tests
 
@@ -810,6 +813,30 @@ Still-open Dependabot PRs and why (do not just merge these):
                     targets in pyproject.toml; reportlab already warns on 3.14.
   #28 node 26    — should move together with the node-version pin in security.yml.
 3C. Reproducible supply chain — [ENGINEERING CORE DONE 2026-08-03; RELEASE BLOCKED]
+  DONE 2026-08-04 (Claude) Hash-locked Python installs — SUPPLY-LOCK-01 CLOSED.
+       requirements.lock pins all 60 packages by sha256 and the release image
+       installs with --require-hashes, so an artifact whose hash is absent is
+       refused and a substituted wheel cannot enter a build.
+       *** THE NON-OBVIOUS PART: the lock MUST contain the whole resolved tree,
+       not just the direct pins. pip refuses --require-hashes unless EVERY
+       package in the resolution is pinned and hashed. A direct-only lock
+       appears to work where the transitive packages already exist and fails on
+       a clean machine — exactly where provenance matters. 44 direct + 16
+       transitive = 60. The tree comes from pip's own resolver report
+       (`pip install --dry-run --report`) rather than hand-parsing.
+       Every published artifact hash per version is listed so Linux containers
+       and Windows dev boxes validate against one file.
+       scripts/lock_requirements.py regenerates it; CI runs the script and
+       fails on any diff, because a lock that drifts from requirements.txt is
+       not a guarantee.
+       VERIFIED: a tampered hash is REJECTED ("THESE PACKAGES DO NOT MATCH THE
+       HASHES..."), the production image builds with --require-hashes, and
+       flask/pymongo/redis/pypdf/PIL all import inside it.
+       NOTE `pip install --dry-run` does NOT verify hashes — it resolves
+       without downloading. Any test of tamper-rejection must do a real
+       install or it proves nothing.
+       STILL TODO: requirements-dev.txt is not locked (test/lint tooling only,
+       so it never ships in the image).
   DONE Every external GitHub Action is pinned to a verified immutable commit.
        Runners use Ubuntu 24.04; Python 3.11.15, pip 26.2, Node 24.18.1,
        ShellCheck v0.11.0, Trivy v0.72.0 and Syft v1.50.0 are explicit.

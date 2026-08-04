@@ -26,10 +26,14 @@ WORKDIR /app
 
 # Install Python dependencies first — best layer caching (code changes don't
 # invalidate the dependency layer).
-COPY requirements.txt ./
+COPY requirements.txt requirements.lock ./
+# Install from the hash-locked set (SUPPLY-LOCK-01): --require-hashes refuses
+# any artifact whose sha256 is not listed, so a compromised or substituted
+# wheel on the index cannot enter a release image. requirements.txt is still
+# copied because CI checks the two stay in step.
 # Build/install tooling is not needed at runtime. Removing setuptools also
 # removes its vulnerable vendored jaraco.context and wheel metadata.
-RUN python -m pip install --no-cache-dir -r requirements.txt \
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock \
     && python -m pip check \
     && python -m pip uninstall -y setuptools wheel \
     && python -m pip uninstall -y pip
