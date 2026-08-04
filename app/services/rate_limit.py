@@ -56,11 +56,40 @@ def init_rate_limiting(app: Flask):
     login_limit = (os.getenv("RATE_LIMIT_LOGIN") or "10 per minute;100 per hour").strip()
     api_limit = (os.getenv("RATE_LIMIT_API") or "").strip()
 
+    # OPS-RATE-01. Two distinct problems live here.
+    #
+    # 1. memory:// storage is PER WORKER. gunicorn runs 2 workers by default, so
+    #    a "10 per minute" login limit is really 20 attempts per minute against
+    #    the deployment. Redis makes the budget genuinely shared.
+    # 2. Storage-failure policy must be an explicit decision, not an accident.
+    #    swallow_errors=True means a Redis outage silently disables limiting
+    #    (fail-open). That is the right default for the whole app - losing rate
+    #    limiting is far better than refusing all traffic - but it is a real
+    #    security downgrade during an outage and it was previously unrecorded.
+    #    RATE_LIMIT_FAIL_CLOSED=true inverts it for deployments that would
+    #    rather reject requests than serve them unthrottled.
+    fail_closed = _truthy(os.getenv("RATE_LIMIT_FAIL_CLOSED"), default=False)
+    using_shared_storage = not storage_uri.startswith("memory:")
+
+    app.config["RATE_LIMIT_STORAGE_URI"] = storage_uri
+    app.config["RATE_LIMIT_SHARED_STORAGE"] = using_shared_storage
+    app.config["RATE_LIMIT_FAIL_CLOSED"] = fail_closed
+
+    if not using_shared_storage:
+        logger.warning(
+            "Rate limiting uses per-worker memory storage, so configured limits "
+            "are multiplied by the worker count. Set RATE_LIMIT_STORAGE_URI to a "
+            "shared store (e.g. redis://redis:6379/0) for a real budget."
+        )
+
     limiter = Limiter(
         key_func=get_remote_address,
         storage_uri=storage_uri,
         headers_enabled=True,
-        swallow_errors=True,  # storage outage must never take the app down
+        # swallow_errors=True -> a storage outage degrades to no limiting
+        # (fail-open). False -> the storage error propagates and the request
+        # fails (fail-closed).
+        swallow_errors=not fail_closed,
         default_limits=[api_limit] if api_limit else [],
     )
 

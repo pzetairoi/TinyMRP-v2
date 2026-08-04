@@ -29,6 +29,33 @@ services:
       timeout: 5s
       retries: 5
 
+  # Shared rate-limit storage (OPS-RATE-01). Without it, Flask-Limiter keeps
+  # counters in each gunicorn worker's memory, so a "10 per minute" login limit
+  # is really 10-per-worker and the real budget is multiplied by the worker
+  # count. Redis gives every worker one shared budget.
+  #
+  # Holds only ephemeral counters - no application data - so losing this volume
+  # costs nothing but a reset of the current rate-limit windows.
+  redis:
+    image: ${TINYMRP_REDIS_IMAGE:-redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2}
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Not published to the host: only the app needs to reach it.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /tmp
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     build:
       context: .
@@ -66,7 +93,13 @@ services:
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
       RATE_LIMIT_LOGIN: ${RATE_LIMIT_LOGIN:-}
       RATE_LIMIT_API: ${RATE_LIMIT_API:-}
-      RATE_LIMIT_STORAGE_URI: ${RATE_LIMIT_STORAGE_URI:-}
+      # Defaults to the bundled redis service so limits are shared across
+      # gunicorn workers (OPS-RATE-01). Set RATE_LIMIT_STORAGE_URI=memory:// to
+      # opt out, or point it at an external Redis.
+      RATE_LIMIT_STORAGE_URI: ${RATE_LIMIT_STORAGE_URI:-redis://redis:6379/0}
+      # Storage outage policy. Default fail-OPEN: losing rate limiting is far
+      # better than refusing all traffic. Set true to reject instead.
+      RATE_LIMIT_FAIL_CLOSED: ${RATE_LIMIT_FAIL_CLOSED:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-text}
       # Admin seeding — NO default credentials (see header note).
@@ -76,6 +109,11 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+      # service_started, not service_healthy: rate limiting degrades to
+      # fail-open if Redis is unavailable, so waiting on its health would delay
+      # startup for a non-critical dependency.
+      redis:
+        condition: service_started
     volumes:
       # Mounted read-write: the app generates thumbnails under <root>/thumbs
       # and stores extra files under <root>/extra.
@@ -109,3 +147,4 @@ services:
 
 volumes:
   mongo_data:
+  redis_data:

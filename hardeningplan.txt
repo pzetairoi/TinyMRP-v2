@@ -31,7 +31,10 @@ No files are reserved; there is no parallel stream running.
                                       endpoint and nothing consumes /api/ready
                                       yet (orchestration still polls
                                       /api/health). See the Phase 5 section.
-      OPS-RATE-01       P1  Phase 5   in-memory, fail-open rate limiting
+      OPS-RATE-01       P1  Phase 5   MITIGATED 2026-08-04 — Redis shipped and
+                                      default; failure policy now explicit.
+                                      Residue: no per-endpoint budgets, and
+                                      guided VPS instances lack Redis.
       SUPPLY-LOCK-01    P1  Phase 3C  no --require-hashes provenance lock
       SEC-CSP-01        P1  1A resid. mechanism landed, templates unmigrated
       QA-FE-01          P1  Phase 6   no frontend/browser/a11y tests
@@ -48,6 +51,20 @@ No files are reserved; there is no parallel stream running.
       the review queue are in docs/security/risk_acceptance_template.md.
       Do NOT allowlist the two gitleaks findings: the gate is meant to keep
       reporting them, and EXC-2026-003 is the disposition, not a suppression.
+
+  *** DEPLOYMENT REALITY — stated by the owner 2026-08-04, read this ***
+    Real companies are running TinyMRP in production right now. The owner has
+    root access to those machines and their databases, and is willing to
+    absorb breakage and report the error message for a fix.
+    So: BREAKING THINGS IS ACCEPTABLE. DESTROYING DATA IS NOT.
+      - Never drop, truncate or overwrite existing collections or documents.
+      - Never delete or rewrite files under the deliverables root.
+      - Migrations must be additive and reversible; prefer new fields/
+        collections over mutating existing ones in place.
+      - A change that merely fails loudly on startup is FINE. A change that
+        silently loses a part, a BOM link or a deliverable is NOT.
+    The SolidWorks add-in (solidworks-addin/) is OUT OF SCOPE — do not touch
+    it. It needs real SolidWorks to test and the owner handles it.
 
   How to work
     - Run the suite with a venv that has requirements-dev.txt installed.
@@ -976,9 +993,48 @@ Security defaults — [PARTIAL 2026-08-04, Claude] Mongo auth (OPS-DBAUTH-01)
 Remove weak and compatibility-mode defaults.
 Fail startup when placeholder secrets are used.
 Define an approved secret-delivery mechanism.
-Move rate limiting to Redis or another shared store.
-Decide explicitly whether rate-limit storage failure is fail-open or fail-closed by endpoint risk.
-Apply global and endpoint-specific limits.
+
+Rate limiting — [DONE 2026-08-04, Claude] OPS-RATE-01 shared storage
+  DONE Move rate limiting to Redis. docker-compose.yml now ships a `redis`
+       service (7-alpine, pinned by MULTI-ARCH INDEX digest) and the app
+       defaults to redis://redis:6379/0. Set RATE_LIMIT_STORAGE_URI=memory://
+       to opt out, or point at an external Redis.
+  *** THE TRAP: the `redis` PYTHON CLIENT was not in requirements.txt. ***
+       Flask-Limiter silently falls back to per-worker memory when the client
+       is missing, so pointing RATE_LIMIT_STORAGE_URI at Redis would have
+       looked correct and done nothing. Added redis==7.4.1 — capped below
+       8.0.0 because limits 5.8.0 declares redis<8.0.0. `pip check` clean.
+       tests/test_rate_limit_storage.py asserts the client is importable and
+       under that cap, precisely so this cannot silently regress.
+  DONE Explicit storage-failure policy. swallow_errors was hardcoded True,
+       meaning a storage outage silently disabled limiting. That IS the right
+       default (losing throttling beats refusing all traffic) but it was an
+       accident rather than a decision. Now driven by RATE_LIMIT_FAIL_CLOSED,
+       default false = fail-open, and recorded in app.config.
+  DONE memory:// now logs a WARNING that limits are multiplied by the worker
+       count, so the weakness is visible instead of silent.
+  VERIFIED against a REAL Redis, not mocks:
+       - two independent limiter instances share one budget over Redis
+         (hits: True,True,True,False) while memory:// does not
+         (True,True,True,True) — this reproduces the original defect;
+       - the app itself throttles through RedisStorage end to end:
+         6 requests against a 3/min budget returned 302,302,302,429,429,429.
+       Full suite 704 passed, 1 skipped. ruff/bandit clean. compose validates.
+  NOTE Redis holds ONLY ephemeral counters. Losing redis_data costs nothing
+       but a reset of the current windows — no application data lives there.
+       app depends_on redis with condition: service_started (not
+       service_healthy) so a slow Redis never delays app startup.
+
+  STILL TODO in this item:
+    - "Apply global and endpoint-specific limits." Login endpoints are limited
+      and RATE_LIMIT_API provides a global /api budget, but it is UNSET by
+      default, so out of the box only auth endpoints are throttled. Choosing
+      per-endpoint budgets for the expensive routes (docpack build, upload
+      pack, exports) is not done.
+    - The guided VPS/Caddy per-instance compose does NOT yet ship Redis; only
+      the main docker-compose.yml does. Guided instances still use per-worker
+      memory storage.
+    - Not executed on a live VPS.
 Health and monitoring — [PARTIAL 2026-08-03, Claude] liveness/readiness split in
   THE DEFECT, now fixed: /api/health returned ok=true unconditionally. It
        proved the process was serving and nothing else, so an instance whose
