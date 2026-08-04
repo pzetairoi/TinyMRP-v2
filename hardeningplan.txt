@@ -1206,9 +1206,24 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
        unchanged; `npm audit --omit=dev` still reports only the two known
        react-router rows (EXC-2026-002) — no new devDependency adds a finding.
 
+  DONE 2026-08-05 first COMPONENT tests (90 total now, +14):
+       - ThumbImg.test.tsx (5): the thumbnail fallback cascade. Storage scans
+         mean a missing file is routine, so this must try each candidate then
+         settle on the branding logo without looping or blanking.
+       - FieldSelector.test.tsx (9): the required-field rule at the checkbox
+         (fieldConfig enforces it in data; the UI must not let a user remove a
+         column the backend insists on), plus the menu geometry.
+       LEANER: computeMenuPosition moved out of FieldSelector.tsx into
+       src/lib/menuPosition.ts. Exporting a function beside a component breaks
+       react-refresh (eslint react-refresh/only-export-components caught it),
+       and the geometry is pure arithmetic that belongs in lib/. FieldSelector
+       dropped 254 -> 224 lines.
+       Two test-writing gotchas worth knowing: an <img> with alt="" has role
+       "presentation", not "img"; and FieldSelector renders its field list
+       twice for responsive layout, so component queries need getAllBy*.
+
   STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
-    - NO component or page tests yet. Every test so far is pure logic; nothing
-      renders a React tree.
+    - No PAGE tests. PartDetailPage alone is 4167 lines and untested.
     - Playwright and axe are NOT installed. All the workflow coverage below
       (login/logout, part search and detail, import preview and failure,
       job/order editing, role and permission behaviour, token management,

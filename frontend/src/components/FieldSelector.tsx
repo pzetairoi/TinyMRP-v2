@@ -2,38 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties, ReactNode } from 'react'
 import type { FieldDefinition } from '../lib/fieldConfig'
+import { computeMenuPosition, type MenuPosition } from '../lib/menuPosition'
 
-const MENU_MARGIN = 8
-const MENU_DEFAULT_WIDTH = 320
-const MENU_MIN_HEIGHT = 160
-
-type MenuPosition = { top: number; left: number; maxHeight: number }
-
-function computeMenuPosition(
-  triggerRect: DOMRect,
-  menuAlign: 'start' | 'end',
-  menuSize: { width: number; height: number } | null,
-): MenuPosition {
-  const viewportW = window.innerWidth
-  const viewportH = window.innerHeight
-  const width = menuSize?.width ?? MENU_DEFAULT_WIDTH
-
-  let left = menuAlign === 'start' ? triggerRect.left : triggerRect.right - width
-  left = Math.max(MENU_MARGIN, Math.min(left, viewportW - width - MENU_MARGIN))
-
-  const spaceBelow = viewportH - triggerRect.bottom - MENU_MARGIN
-  const spaceAbove = triggerRect.top - MENU_MARGIN
-  // Only flip upward once we know the menu's real height (post-mount) and it
-  // would genuinely fit better above the trigger than below it.
-  const openUpward = !!menuSize && menuSize.height > spaceBelow && spaceAbove > spaceBelow
-
-  const maxHeight = Math.max(MENU_MIN_HEIGHT, openUpward ? spaceAbove : spaceBelow)
-  const top = openUpward
-    ? Math.max(MENU_MARGIN, triggerRect.top - 4 - Math.min(menuSize!.height, maxHeight))
-    : triggerRect.bottom + 4
-
-  return { top, left, maxHeight }
-}
 
 type Props = {
   title: string
