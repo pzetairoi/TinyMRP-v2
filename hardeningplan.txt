@@ -395,13 +395,22 @@ Completed so far:
                    Guarded by tests/test_csp_inline_handlers.py (3 tests): no
                    inline handler may return, the shared script must exist with
                    its actions, and base.html must load it.
+                   NONCES DONE 2026-08-06: all 18 inline <script> blocks across
+                   12 templates now carry nonce="{{ csp_nonce() }}". The
+                   attribute is INERT while 'unsafe-inline' is still active, so
+                   this lands safely ahead of the flip. Verified the helper
+                   renders a real value inside a request context, and a 4th
+                   guard test fails if any bare <script> returns.
                    STILL REMAINING before 'unsafe-inline' can be dropped:
-                     - 12 templates still contain inline <script> blocks. These
-                       need nonce="{{ csp_nonce() }}" adding, which is inert
-                       until the flag flips (the mechanism already exists).
                      - style-src carries its own 'unsafe-inline' for inline
                        style="..." attributes, which a nonce does NOT cover.
-                     - Then flip TINYMRP_CSP_ALLOW_INLINE=false and verify.
+                       This is now the ONLY code blocker left for script-src.
+                     - Flip TINYMRP_CSP_ALLOW_INLINE=false and exercise the
+                       admin UI in a browser. NOT done: needs a human clicking
+                       through, which no test here substitutes for.
+                     - Suggested order: run with
+                       TINYMRP_CSP_REPORT_ONLY_STRICT=true first and collect
+                       violations, rather than flipping blind.
   Phase 3B  DONE engineering remediation 2026-08-03
                    (50d75e7, 608be56, 3346b51, 5743b82)
                    residual: two proposed exceptions need a human owner/date

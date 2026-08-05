@@ -58,3 +58,22 @@ def test_base_template_loads_the_shared_script():
         "base.html must load the delegated handler script, or data-act buttons "
         "do nothing on pages that extend it"
     )
+
+
+def test_every_inline_script_block_carries_a_nonce():
+    """An inline <script> without a nonce dies the moment inline is disallowed.
+
+    The attribute is inert while 'unsafe-inline' is still active, so these can
+    be added safely ahead of the flip - but only if none is missed.
+    """
+    offenders = []
+    for path in sorted(TEMPLATES.rglob("*.html")):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "<script>" in line:
+                offenders.append(f"{path.relative_to(TEMPLATES)}:{lineno}")
+
+    assert not offenders, (
+        "Inline <script> blocks with no nonce will stop executing once "
+        'TINYMRP_CSP_ALLOW_INLINE=false. Add nonce="{{ csp_nonce() }}":\n'
+        + "\n".join(offenders)
+    )

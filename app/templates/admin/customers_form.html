@@ -205,13 +205,13 @@
 </div>
 {% endblock %}
 {% block extra_scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   function setCheckboxGroup(name, checked){
     document.querySelectorAll(`input[name="${name}"]`).forEach(cb => { cb.checked = checked; });
   }
 </script>
 {% if is_readonly %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   document.addEventListener('DOMContentLoaded', function(){
     const form = document.querySelector('form');
     if(!form) return;

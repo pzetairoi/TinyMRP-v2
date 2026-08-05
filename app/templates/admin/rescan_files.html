@@ -42,7 +42,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
   const url = "{{ url_for('admin.rescan_files_progress') }}";
   const wrap = document.getElementById("rescan-progress");

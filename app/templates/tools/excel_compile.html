@@ -256,7 +256,7 @@
     </form>
   </div>
 </div>
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
   var form = document.querySelector('form[enctype="multipart/form-data"]');
   if (!form) return;

@@ -746,7 +746,7 @@
 </div>
 {% endblock %}
 {% block extra_scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   let bomRows = [];
   let replaceIdx = null;
   let remainingView = 'flat';
@@ -1135,7 +1135,7 @@
   }
 
 </script>
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
   document.querySelectorAll('.docpack-export-form').forEach(function (form) {
     var binderToggle = form.querySelector('input[name="pdf_binder"]');
@@ -1178,7 +1178,7 @@
 })();
 </script>
 {% if is_readonly %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   document.addEventListener('DOMContentLoaded', function(){
     const form = document.querySelector('form');
     if(!form) return;

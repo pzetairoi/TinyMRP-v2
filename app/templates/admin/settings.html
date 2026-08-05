@@ -110,7 +110,7 @@
     <button class="btn btn-sm btn-link text-danger tm-process-row__remove" type="button" data-remove-process aria-label="Remove process">Remove</button>
   </div>
 </template>
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
   const list = document.getElementById('processRows');
   const template = document.getElementById('processRowTemplate');
