@@ -29,3 +29,24 @@ export function withBomOccurrenceKeys(nodes: TreeNode[], parentPath = "bom"): Tr
     };
   });
 }
+
+/** Replace one node's children, leaving the rest of the tree untouched. */
+export function setNodeChildren(tree: TreeNode[], key: string, children: TreeNode[]): TreeNode[] {
+  return (tree || []).map((node) => {
+    if (String(node.key) === String(key)) return { ...node, children };
+    if (node.children?.length) {
+      return { ...node, children: setNodeChildren(node.children as TreeNode[], key, children) };
+    }
+    return node;
+  });
+}
+
+/** Depth-first lookup by occurrence key. */
+export function findNode(tree: TreeNode[], key: string): TreeNode | undefined {
+  for (const node of tree || []) {
+    if (String(node.key) === String(key)) return node;
+    const hit = node.children?.length ? findNode(node.children as TreeNode[], key) : undefined;
+    if (hit) return hit;
+  }
+  return undefined;
+}

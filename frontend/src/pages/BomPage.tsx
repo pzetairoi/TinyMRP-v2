@@ -28,7 +28,7 @@ import {
 
 // Import the ImageStrip component to display images for the part
 import ImageStrip from "../components/ImageStrip"
-import { withBomOccurrenceKeys } from '../lib/bomTree'
+import { findNode, setNodeChildren, withBomOccurrenceKeys } from '../lib/bomTree'
 import { apiErrorMessage, apiFetch } from '../lib/api'
 
 
@@ -125,30 +125,6 @@ export default function BomPage() {
       cancelled = true
     }
   }, [pn, rev])
-
-  // Helper to immutably set children for a node key
-  function setNodeChildren(tree: TreeNode[], key: string, children: TreeNode[]): TreeNode[] {
-    return tree.map((n) => {
-      if (String(n.key) === String(key)) {
-        return { ...n, children }
-      }
-      if (n.children && n.children.length) {
-        return { ...n, children: setNodeChildren(n.children as TreeNode[], key, children) }
-      }
-      return n
-    })
-  }
-
-  function findNode(tree: TreeNode[], key: string): TreeNode | undefined {
-    for (const n of tree) {
-      if (String(n.key) === String(key)) return n
-      if (n.children && n.children.length) {
-        const hit = findNode(n.children as TreeNode[], key)
-        if (hit) return hit
-      }
-    }
-    return undefined
-  }
 
   async function loadChildrenFor(key: string) {
     setTreeError(null)

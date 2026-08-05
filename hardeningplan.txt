@@ -1244,8 +1244,20 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
        synthesises "Request failed (<status>)" for a bodyless error. The test
        asserts real behaviour, not intended behaviour.
 
+  DONE 2026-08-05 BomPage (112 tests now, +10). A BOM that fails to load must
+       not render as an empty tree — that reads as "this assembly has no
+       children", which is a manufacturing answer rather than an error. Pins
+       the role="alert" announcement and that the tree is CLEARED on failure
+       (stale rows beside an error would be worse than none).
+       LEANER: setNodeChildren and findNode moved out of BomPage.tsx into
+       src/lib/bomTree.ts, beside withBomOccurrenceKeys where the rest of the
+       tree logic already lives. Pure recursive functions do not belong inside
+       a component. BomPage 526 -> 502 lines, and both are now covered by 7
+       new unit tests including the "does not mutate React state" invariant.
+
   STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
-    - Only 2 of 8 pages covered. PartDetailPage alone is 4167 lines.
+    - 3 of 8 pages covered. PartDetailPage alone is 4167 lines.
+    - Untouched: PartsPage, UploadPackPage, AdminFieldsPage, AdminAddinPage.
     - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
       Playwright needs CI to boot the app plus Mongo, so it is a bigger step.
     - Playwright and axe are NOT installed. All the workflow coverage below

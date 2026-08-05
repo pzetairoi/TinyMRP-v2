@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TreeNode } from 'primereact/treenode'
-import { withBomOccurrenceKeys } from './bomTree'
+import { findNode, setNodeChildren, withBomOccurrenceKeys } from './bomTree'
 
 /**
  * QA-FE-01. The invariant here is easy to break and hard to notice: a BOM key
@@ -90,5 +90,57 @@ describe('withBomOccurrenceKeys', () => {
     const keys = collectKeys(withBomOccurrenceKeys(deep))
     expect(keys).toHaveLength(4)
     expect(new Set(keys).size).toBe(4)
+  })
+})
+
+describe('setNodeChildren', () => {
+  const tree = [node('A', 'A', [node('B')]), node('C')]
+
+  it('replaces the children of the addressed node only', () => {
+    const withKeys = withBomOccurrenceKeys(tree)
+    const targetKey = String(withKeys[0].key)
+    const next = setNodeChildren(withKeys, targetKey, [node('NEW')])
+
+    expect((next[0].children as TreeNode[])[0].data).toMatchObject({ pn: 'NEW' })
+    expect(next[1]).toBe(withKeys[1])
+  })
+
+  it('reaches nested nodes', () => {
+    const withKeys = withBomOccurrenceKeys([node('A', 'A', [node('B', 'A', [node('C')])])])
+    const inner = (withKeys[0].children as TreeNode[])[0]
+    const next = setNodeChildren(withKeys, String(inner.key), [node('X')])
+    const updated = (next[0].children as TreeNode[])[0]
+
+    expect((updated.children as TreeNode[])[0].data).toMatchObject({ pn: 'X' })
+  })
+
+  it('does not mutate the input tree', () => {
+    // The tree is React state; mutating in place would skip re-renders.
+    const withKeys = withBomOccurrenceKeys(tree)
+    const before = JSON.stringify(withKeys)
+    setNodeChildren(withKeys, String(withKeys[0].key), [node('NEW')])
+    expect(JSON.stringify(withKeys)).toBe(before)
+  })
+
+  it('returns the tree unchanged for an unknown key', () => {
+    const withKeys = withBomOccurrenceKeys(tree)
+    expect(setNodeChildren(withKeys, 'no-such-key', [])).toEqual(withKeys)
+  })
+})
+
+describe('findNode', () => {
+  const withKeys = withBomOccurrenceKeys([node('A', 'A', [node('B', 'A', [node('C')])])])
+
+  it('finds a nested node by key', () => {
+    const inner = (withKeys[0].children as TreeNode[])[0]
+    expect(findNode(withKeys, String(inner.key))).toBe(inner)
+  })
+
+  it('returns undefined when the key is absent', () => {
+    expect(findNode(withKeys, 'missing')).toBeUndefined()
+  })
+
+  it('tolerates an empty tree', () => {
+    expect(findNode([], 'x')).toBeUndefined()
   })
 })
