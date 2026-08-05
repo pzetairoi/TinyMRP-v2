@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, send_file, current_app, r
 import os
 import secrets
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from flask_login import current_user, login_required
 from app.services.acl import permissions_required
 from app.services.authorization import (
@@ -72,7 +72,7 @@ def _addin_installers():
                         'name': name,
                         'url': url_for('tools.addin_download', filename=name),
                         'size': os.path.getsize(p),
-                        'modified': format_display_ts(datetime.fromtimestamp(mtime, tz=timezone.utc), fmt="%Y-%m-%d %H:%M %Z"),
+                        'modified': format_display_ts(datetime.fromtimestamp(mtime, tz=UTC), fmt="%Y-%m-%d %H:%M %Z"),
                         'mtime': mtime,
                     })
     except Exception:

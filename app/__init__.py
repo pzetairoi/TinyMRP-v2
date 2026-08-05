@@ -48,7 +48,7 @@ def _load_vite_manifest(app):
     path = _find_manifest(app.static_folder)
     app.config["VITE_MANIFEST_PATH"] = path
     if path:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             app.config["VITE_MANIFEST"] = _json.load(f)
     else:
         app.config["VITE_MANIFEST"] = None
@@ -74,7 +74,7 @@ def create_app(config_object=None):
     if not (app.config.get("APP_VERSION") or os.getenv("APP_VERSION")):
         try:
             version_file = os.path.join(os.path.dirname(__file__), "..", "VERSION")
-            with open(version_file, "r", encoding="utf-8") as fh:
+            with open(version_file, encoding="utf-8") as fh:
                 app.config["APP_VERSION"] = fh.read().strip()
         except Exception:
             pass

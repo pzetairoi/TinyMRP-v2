@@ -360,7 +360,7 @@ def delete_part_and_refs_cascade(
     }
 
     def _sum_into(res: Dict[str, int]) -> None:
-        for k in totals.keys():
+        for k in totals:
             try:
                 totals[k] += int(res.get(k) or 0)
             except Exception:

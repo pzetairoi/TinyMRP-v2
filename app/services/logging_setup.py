@@ -15,7 +15,7 @@ import logging
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from flask import Flask, g, has_request_context, request
 
@@ -38,7 +38,7 @@ class _RequestContextFilter(logging.Filter):
 class _JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),

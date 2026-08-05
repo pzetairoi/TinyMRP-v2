@@ -468,7 +468,7 @@ def _group_file_overview_rows(rows: list[dict[str, Any]], current_rev: str) -> d
             "files": files,
         }
 
-    other_revs = sorted(rev for rev in grouped.keys() if rev != current_rev)
+    other_revs = sorted(rev for rev in grouped if rev != current_rev)
     return {
         "current_revision": section_for(current_rev),
         "other_revisions": [section_for(rev) for rev in other_revs],

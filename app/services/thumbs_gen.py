@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Iterable, Tuple
 import io
 import uuid
@@ -227,7 +227,7 @@ def generate_thumbs_for_artifacts(docs: Iterable[PartFile]) -> int:
                 continue
             # set bookkeeping
             d.thumb_rel_path = thumb_rel
-            d.thumb_mtime = datetime.fromtimestamp(os.path.getmtime(thumb_abs), tz=timezone.utc)
+            d.thumb_mtime = datetime.fromtimestamp(os.path.getmtime(thumb_abs), tz=UTC)
             d.save()
             count += 1
         else:
@@ -235,7 +235,7 @@ def generate_thumbs_for_artifacts(docs: Iterable[PartFile]) -> int:
             if not d.thumb_rel_path:
                 d.thumb_rel_path = thumb_rel
                 try:
-                    d.thumb_mtime = datetime.fromtimestamp(os.path.getmtime(thumb_abs), tz=timezone.utc)
+                    d.thumb_mtime = datetime.fromtimestamp(os.path.getmtime(thumb_abs), tz=UTC)
                 except Exception:
                     pass
                 d.save()

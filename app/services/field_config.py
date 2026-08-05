@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, UTC
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -852,7 +852,7 @@ def text_terms_match(value: Any, filter_value: Any) -> bool:
 def date_filter_value(value: Any) -> Optional[datetime]:
     if isinstance(value, datetime):
         if value.tzinfo is not None:
-            return value.astimezone(timezone.utc).replace(tzinfo=None)
+            return value.astimezone(UTC).replace(tzinfo=None)
         return value
     if isinstance(value, date):
         return datetime.combine(value, time.min)
@@ -863,7 +863,7 @@ def date_filter_value(value: Any) -> Optional[datetime]:
     try:
         parsed = datetime.fromisoformat(normalized)
         if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            parsed = parsed.astimezone(UTC).replace(tzinfo=None)
         return parsed
     except ValueError:
         pass

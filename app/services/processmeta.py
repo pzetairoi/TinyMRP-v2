@@ -94,7 +94,7 @@ def default_process_meta(path: str | None = None) -> Dict[str, Dict[str, Any]]:
     data = None
     if path and os.path.isfile(path):
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             data = None

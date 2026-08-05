@@ -24,7 +24,7 @@ def _help_toc_path() -> str:
 
 def _load_json(path: str) -> dict[str, Any]:
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, dict):
                 return data
@@ -40,7 +40,7 @@ def help_index():
     help_missing = False
     html_path = _help_html_path()
     if os.path.isfile(html_path):
-        with open(html_path, "r", encoding="utf-8") as f:
+        with open(html_path, encoding="utf-8") as f:
             help_html = f.read()
     else:
         help_missing = True

@@ -1443,6 +1443,17 @@ Remove unused imports, variables and redefinitions.
        production today. Verified: 704 tests, ruff/bandit/mypy all clean.
        This was deletion of provably unreachable code — no logic, ordering or
        control flow touched.
+  DONE 2026-08-06 second pass: 28 further simplifications across 13 files
+       (C416/C403 redundant comprehensions, RET504 pointless assign-then-return,
+       PIE810 repeated startswith/endswith, UP015 redundant open modes, UP017
+       datetime.UTC, SIM118 .keys() in membership tests), plus the 6 imports
+       those changes orphaned. Safe fixes only again.
+       DELIBERATELY SKIPPED: UP006/UP045 would rewrite ~1100 type annotations
+       to PEP585/604. That is enormous churn across every file for no runtime
+       benefit, and it would bury any real change in review noise. SIM105
+       (103 hits) rewrites try/except/pass to contextlib.suppress, which reads
+       worse in the tight loops where it appears here. Neither is worth the
+       risk on a codebase running in production.
 Review broad except Exception handlers.
 Stop swallowing operationally significant failures.
 Break up the largest backend services, views and frontend components.

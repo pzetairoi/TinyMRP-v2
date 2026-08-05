@@ -7,7 +7,7 @@ import os
 import re
 import secrets
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         if parsed.tzinfo is not None:
-            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            parsed = parsed.astimezone(UTC).replace(tzinfo=None)
         return parsed
     except (TypeError, ValueError):
         return None

@@ -22,7 +22,7 @@ def vite_assets():
     if not os.path.isfile(manifest_path):
         return {"js": None, "css": None}
 
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
 
     # Find the entry marked isEntry (Vite)

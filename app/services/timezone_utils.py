@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timezone, tzinfo
+from datetime import datetime, tzinfo, UTC
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo, available_timezones
@@ -61,7 +61,7 @@ def _safe_zoneinfo(name: str | None) -> tzinfo | None:
     if not text:
         return None
     if text.upper() == "UTC":
-        return timezone.utc
+        return UTC
     try:
         return ZoneInfo(text)
     except Exception:
@@ -108,7 +108,7 @@ def utc_now() -> datetime:
     Return a naive UTC datetime suitable for MongoEngine DateTimeField storage.
     """
 
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def as_utc_naive(value: datetime | None) -> datetime | None:
@@ -121,7 +121,7 @@ def as_utc_naive(value: datetime | None) -> datetime | None:
         return None
     if value.tzinfo is None:
         return value.replace(tzinfo=None)
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def as_utc_aware(value: datetime | None) -> datetime | None:
@@ -132,8 +132,8 @@ def as_utc_aware(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def utc_iso(value: datetime | None) -> str | None:
@@ -186,7 +186,7 @@ def resolve_timezone() -> tzinfo:
     Return ZoneInfo for resolve_timezone_name().
     """
 
-    return _safe_zoneinfo(resolve_timezone_name()) or timezone.utc
+    return _safe_zoneinfo(resolve_timezone_name()) or UTC
 
 
 def timezone_choices() -> list[str]:
