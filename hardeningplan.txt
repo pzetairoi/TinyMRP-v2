@@ -1281,9 +1281,25 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
        it even though behaviour is unchanged. Updated it to span both files.
        Expect the same if you extract anything else from PartsPage. ***
 
+  DONE 2026-08-05 approval interpretation (190 tests now, +49). Extracted 153
+       lines out of PartDetailPage.tsx (4167 -> 4014) into src/lib/approval.ts:
+       the approval value sets plus explicitApprovalStatus,
+       approvalTextVariants, approvalIdentityText and the record/alias helpers.
+       This is the highest-value logic covered so far. SolidWorks custom
+       properties are free text, so a part's approval state arrives as a
+       boolean, a number, "Yes", "APPROVED", "not_approved", a reviewer's name
+       or blank. The asymmetry is the point: showing an UNAPPROVED part as
+       approved is the expensive direction, so anything unrecognised must
+       return null (unknown) rather than defaulting either way. Tests pin that
+       a typo ("aproved") never reads as approved, and that "not approved"
+       resolves negative even though it contains "approved".
+
   STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
-    - 3 of 8 pages have page-level tests; UploadPackPage and PartsPage have
-      only their extracted helpers covered. PartDetailPage is 4167 lines.
+    - 3 of 8 pages have page-level tests. UploadPackPage, PartsPage and
+      PartDetailPage have only their extracted helpers covered.
+    - PartDetailPage is still 4014 lines with ~10 more module-level pure
+      functions (groupFiles, formatBytes, processTokens, identity helpers)
+      that are good candidates for the same treatment.
     - Untouched: AdminFieldsPage, AdminAddinPage.
     - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
       Playwright needs CI to boot the app plus Mongo, so it is a bigger step.
