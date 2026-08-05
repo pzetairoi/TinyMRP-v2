@@ -1234,8 +1234,20 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
        Gotcha: Rotate/Revoke only render when a token has is_active, so
        fixtures need it or the buttons are simply absent.
 
+  DONE 2026-08-05 DashboardPage (102 tests now, +5). The first screen a user
+       sees, so a failed load rendering as a page of zeros is actively
+       misleading — it says the shop has no parts rather than that we could not
+       ask. Also pins that a failed permission lookup does not blank the page,
+       and that unmounting mid-request triggers no late state update.
+       FINDING: the page's own "Failed to load dashboard" fallback is
+       effectively UNREACHABLE through the API path — readApiResponse already
+       synthesises "Request failed (<status>)" for a bodyless error. The test
+       asserts real behaviour, not intended behaviour.
+
   STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
-    - Only 1 of 8 pages is covered. PartDetailPage alone is 4167 lines.
+    - Only 2 of 8 pages covered. PartDetailPage alone is 4167 lines.
+    - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
+      Playwright needs CI to boot the app plus Mongo, so it is a bigger step.
     - Playwright and axe are NOT installed. All the workflow coverage below
       (login/logout, part search and detail, import preview and failure,
       job/order editing, role and permission behaviour, token management,
@@ -1314,6 +1326,14 @@ Work
 Enforce Black and the agreed Ruff rule set.
 Expand mypy incrementally from the current two modules.
 Remove unused imports, variables and redefinitions.
+  DONE 2026-08-05 (Claude) first pass: `ruff --select F401,F841,F811 --fix`
+       over app/ removed 76 dead imports/variables/redefinitions across 43
+       files. SAFE fixes only. 11 findings remain that need judgement rather
+       than automation (mostly redefinitions that may be deliberate shadowing);
+       left alone rather than risking a behaviour change in code running in
+       production today. Verified: 704 tests, ruff/bandit/mypy all clean.
+       This was deletion of provably unreachable code — no logic, ordering or
+       control flow touched.
 Review broad except Exception handlers.
 Stop swallowing operationally significant failures.
 Break up the largest backend services, views and frontend components.
