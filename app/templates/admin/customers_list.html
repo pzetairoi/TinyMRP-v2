@@ -91,7 +91,7 @@
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_customers.customers_view', cust_id=c.id) }}">View</a>
             {% endif %}
             {% if has_perm('customers.archive') %}
-            <form method="post" action="{{ url_for('admin_customers.customers_delete', cust_id=c.id) }}" onsubmit="return confirm('Delete this customer?');">
+            <form method="post" action="{{ url_for('admin_customers.customers_delete', cust_id=c.id) }}" data-confirm="Delete this customer?">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>

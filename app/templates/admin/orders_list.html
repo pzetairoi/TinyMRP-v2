@@ -117,7 +117,7 @@
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_orders.orders_view', order_id=o.id) }}">View</a>
             {% endif %}
             {% if has_perm('orders.archive') %}
-            <form method="post" action="{{ url_for('admin_orders.orders_delete', order_id=o.id) }}" onsubmit="return confirm('Delete this order?');">
+            <form method="post" action="{{ url_for('admin_orders.orders_delete', order_id=o.id) }}" data-confirm="Delete this order?">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>

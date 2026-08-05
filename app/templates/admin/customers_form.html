@@ -94,8 +94,8 @@
             </div>
             {% if not is_readonly %}
             <div class="d-flex gap-2 mt-2">
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setCheckboxGroup('users', true)">Select all</button>
-              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="setCheckboxGroup('users', false)">Clear</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-act="checkgroup" data-group="users" data-checked="1">Select all</button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-act="checkgroup" data-group="users" data-checked="0">Clear</button>
             </div>
             {% endif %}
           </div>

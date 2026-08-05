@@ -207,9 +207,9 @@
                     <th>
                       <div class="d-flex gap-1">
                         {% if not is_readonly %}
-                        <button class="btn btn-sm btn-outline-primary" type="button" onclick="openPartPickerForOrder()">Add part(s)</button>
+                        <button class="btn btn-sm btn-outline-primary" type="button" data-act="open-order-part-picker">Add part(s)</button>
                         {% endif %}
-                        <button class="btn btn-sm btn-outline-secondary" type="button" onclick="clearOrderFilters()">Clear</button>
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-act="clear-order-filters">Clear</button>
                       </div>
                     </th>
                   </tr>
@@ -306,8 +306,8 @@
                       {% endfor %}
                     </div>
                     <div class="mt-2">
-                      <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="document.querySelectorAll('.order-ft-cb').forEach(function(c){c.checked=true;})">Select all</button>
-                      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.querySelectorAll('.order-ft-cb').forEach(function(c){c.checked=false;})">Select none</button>
+                      <button type="button" class="btn btn-sm btn-outline-secondary me-2" data-act="check-selector" data-selector=".order-ft-cb" data-checked="1">Select all</button>
+                      <button type="button" class="btn btn-sm btn-outline-secondary" data-act="check-selector" data-selector=".order-ft-cb" data-checked="0">Select none</button>
                     </div>
                   </div>
                 </div>
@@ -463,8 +463,8 @@
                   {% endfor %}
                 </div>
                 <div class="mt-2">
-                  <button type="button" class="btn btn-sm btn-outline-secondary me-2" onclick="document.querySelectorAll('.scope-ft-cb').forEach(function(c){c.checked=true;})">Select all</button>
-                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.querySelectorAll('.scope-ft-cb').forEach(function(c){c.checked=false;})">Select none</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary me-2" data-act="check-selector" data-selector=".scope-ft-cb" data-checked="1">Select all</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" data-act="check-selector" data-selector=".scope-ft-cb" data-checked="0">Select none</button>
                 </div>
               </div>
             </div>
@@ -856,6 +856,16 @@
       if(note) note.style.display = 'none';
     }
   }
+
+  // SEC-CSP-01: page-specific actions; the shared ones live in
+  // static/js/admin-actions.js.
+  document.addEventListener('click', function(ev){
+    const el = ev.target.closest('[data-act]');
+    if(!el) return;
+    const act = el.getAttribute('data-act');
+    if(act === 'open-order-part-picker') return openPartPickerForOrder();
+    if(act === 'clear-order-filters') return clearOrderFilters();
+  });
 
   document.addEventListener('DOMContentLoaded', function(){
     const ta = document.getElementById('order_lines');

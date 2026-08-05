@@ -86,7 +86,7 @@
             <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_view', sup_id=s.id) }}">View</a>
             {% endif %}
             {% if has_perm('suppliers.archive') %}
-            <form method="post" action="{{ url_for('admin_suppliers.suppliers_delete', sup_id=s.id) }}" onsubmit="return confirm('Delete this supplier?');">
+            <form method="post" action="{{ url_for('admin_suppliers.suppliers_delete', sup_id=s.id) }}" data-confirm="Delete this supplier?">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
             </form>

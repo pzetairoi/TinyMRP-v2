@@ -6,7 +6,7 @@
   <div class="d-flex flex-wrap gap-2">
     {% if has_perm('suppliers.read') %}<a class="btn btn-outline-secondary" href="{{ url_for('admin_suppliers.suppliers_list') }}">Suppliers</a>{% endif %}
     {% if has_perm('jobs.archive') and has_perm('orders.update') %}
-    <form method="post" action="{{ url_for('admin_jobs.jobs_purge_deleted') }}" onsubmit="return confirm('Permanently delete all deleted jobs? This cannot be undone.');">
+    <form method="post" action="{{ url_for('admin_jobs.jobs_purge_deleted') }}" data-confirm="Permanently delete all deleted jobs? This cannot be undone.">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-outline-danger" type="submit" {% if (deleted_count or 0) <= 0 %}disabled{% endif %}>
         Purge deleted{% if deleted_count %} ({{ deleted_count }}){% endif %}
@@ -163,7 +163,7 @@
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin_orders.orders_list') }}?job={{ j.id }}">Orders</a>
             {% endif %}
             {% if has_perm('jobs.archive') and has_perm('orders.update') %}
-            <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=j.id) }}" onsubmit="return confirm('Delete job {{ j.job_number }}?{% if j.order_count %}\n\n{{ j.order_count }} order(s) will be unlinked from this job (the orders themselves are kept).{% endif %}{% if j.part_count and (j.customer_id or j.vendor_count) %}\n\nAccess warning: {{ j.customer_name }}{% if j.vendor_count %} and {{ j.vendor_count }} supplier(s){% endif %} will lose portal access to the {{ j.part_count }} part(s) this job grants.{% endif %}\n\nContinue?');">
+            <form method="post" action="{{ url_for('admin_jobs.jobs_delete', job_id=j.id) }}" data-confirm="Delete job {{ j.job_number }}?{% if j.order_count %}\n\n{{ j.order_count }} order(s) will be unlinked from this job (the orders themselves are kept).{% endif %}{% if j.part_count and (j.customer_id or j.vendor_count) %}\n\nAccess warning: {{ j.customer_name }}{% if j.vendor_count %} and {{ j.vendor_count }} supplier(s){% endif %} will lose portal access to the {{ j.part_count }} part(s) this job grants.{% endif %}\n\nContinue?">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
             </form>

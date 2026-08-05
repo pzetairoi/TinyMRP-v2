@@ -357,7 +357,7 @@ The identifier should be used in commits, reviews and risk decisions.
 | ID | Priority | Status | Required phase | Blocker |
 | --- | --- | --- | --- | --- |
 | SEC-XSS-01 | P0 | Closed in `a7fa72d` | 1A | Stored XSS in job/order line rendering |
-| SEC-CSP-01 | P1 | Open | 1A residual/2 | Inline scripts and handlers still require CSP `unsafe-inline` |
+| SEC-CSP-01 | P1 | Partially mitigated 2026-08-06; still Open | 1A residual/2 | Inline scripts and handlers still require CSP `unsafe-inline`. All 34 inline `on*=` handlers - the hard blocker, since a nonce does not authorise them - are converted to `data-act` attributes with delegated listeners, guarded by 3 tests. A per-response nonce and a report-only probe already exist. Still open: 12 templates carry inline `<script>` blocks needing the nonce attribute, `style-src` has its own `unsafe-inline` for inline `style=` attributes, and the flag has not been flipped. |
 | IAM-REV-01 | P0 | Closed 2026-08-03 (`7cd50bd`) | 1C | API-token and browser-session revocation on credential/security-state changes |
 | IAM-TOKEN-01 | P0 | Closed 2026-08-03 (`49cf24a`, `49ee2b4`) | 1B | Expiring token policy and complete token lifecycle controls |
 | AUTH-MODE-01 | P0 | Closed 2026-08-03 (`80783b3`) | 2 | Strict browser, integration, public-share and health policies |

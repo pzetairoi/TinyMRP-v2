@@ -377,11 +377,31 @@ Completed so far:
                    TINYMRP_CSP_ALLOW_INLINE=false. Emitting both would break
                    every unmigrated template at once. A test pins this and was
                    verified to fail against that exact injected regression.
-                   REMAINING: 12 templates with inline <script> and 33 inline
-                   on*= handlers. The handlers are a separate problem — a nonce
-                   does NOT authorise onclick=; they need addEventListener.
-                   Also remember style-src has its own 'unsafe-inline' for
-                   inline style="..." attributes, which a nonce does not cover.
+                   HANDLERS DONE 2026-08-06: all 34 inline on*= attributes are
+                   gone (33 found by the original grep plus an onerror in
+                   base.html that grep missed). They were THE hard blocker —
+                   a nonce authorises <script> blocks but NOT on*= attributes.
+                   Converted to data-act attributes driven by delegated
+                   listeners: app/static/js/admin-actions.js for the shared
+                   ones (checkgroup, check-selector, confirm-submit,
+                   hide-on-error) plus small page-local delegators in
+                   jobs_form and orders_form.
+                   The shared file is EXTERNAL on purpose: an external script
+                   needs neither a nonce nor 'unsafe-inline', so it survives
+                   whichever way the policy is tightened.
+                   Note hide-on-error registers in the CAPTURE phase, because
+                   error events on <img> do not bubble and a delegated listener
+                   on document would never see them.
+                   Guarded by tests/test_csp_inline_handlers.py (3 tests): no
+                   inline handler may return, the shared script must exist with
+                   its actions, and base.html must load it.
+                   STILL REMAINING before 'unsafe-inline' can be dropped:
+                     - 12 templates still contain inline <script> blocks. These
+                       need nonce="{{ csp_nonce() }}" adding, which is inert
+                       until the flag flips (the mechanism already exists).
+                     - style-src carries its own 'unsafe-inline' for inline
+                       style="..." attributes, which a nonce does NOT cover.
+                     - Then flip TINYMRP_CSP_ALLOW_INLINE=false and verify.
   Phase 3B  DONE engineering remediation 2026-08-03
                    (50d75e7, 608be56, 3346b51, 5743b82)
                    residual: two proposed exceptions need a human owner/date

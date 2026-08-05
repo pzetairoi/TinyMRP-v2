@@ -66,7 +66,7 @@
       <div class="container">
         <!-- Brand / logo -->
         <a class="navbar-brand d-flex align-items-center" href="{{ url_for('main.index') }}">
-          <img src="{{ url_for('branding.logo') }}" alt="" onerror="this.style.display='none'">
+          <img src="{{ url_for('branding.logo') }}" alt="" data-act="hide-on-error">
           <span>TinyMRP</span>
         </a>
 
@@ -445,6 +445,7 @@
       })();
     </script>
     {% endif %}
+    <script src="{{ url_for('static', filename='js/admin-actions.js') }}"></script>
     {% block extra_scripts %}{% endblock %}
   </body>
 </html>
