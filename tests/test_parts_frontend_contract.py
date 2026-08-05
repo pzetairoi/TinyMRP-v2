@@ -1,7 +1,15 @@
 from pathlib import Path
 
 
-PARTS_PAGE = Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "PartsPage.tsx"
+_FRONTEND = Path(__file__).resolve().parents[1] / "frontend" / "src"
+PARTS_PAGE = _FRONTEND / "pages" / "PartsPage.tsx"
+# Column-filter defaults and legacy-meta normalisation were extracted from the
+# page into their own module, so the typed-filter contract now spans both files.
+COLUMN_FILTERS = _FRONTEND / "lib" / "columnFilters.ts"
+
+
+def _parts_filter_source() -> str:
+    return PARTS_PAGE.read_text(encoding="utf-8") + COLUMN_FILTERS.read_text(encoding="utf-8")
 
 
 def test_normal_parts_header_uses_only_search_and_column_selection():
@@ -29,7 +37,7 @@ def test_job_only_picker_control_is_preserved():
 
 
 def test_parts_columns_expose_typed_row_filters():
-    source = PARTS_PAGE.read_text(encoding="utf-8")
+    source = _parts_filter_source()
 
     assert 'filterDisplay="row"' in source
     assert "showFilterMenu={false}" in source

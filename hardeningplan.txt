@@ -1265,10 +1265,26 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
        an UNKNOWN action falls back to muted rather than inheriting "safe"
        green — so a future backend action cannot silently look harmless.
 
+  DONE 2026-08-05 parts column filters (141 tests now, +13). Extracted
+       defaultColumnMatchMode / defaultColumnFilterMeta / ensureColumnFilters
+       from PartsPage.tsx into src/lib/columnFilters.ts (747 -> 706 lines).
+       Worth covering because the normalisation has to absorb filter metas
+       persisted by OLDER builds ({operator, constraints:[...]}), and getting
+       it wrong silently drops a user's saved filters — which reads as "search
+       is broken" rather than as a migration bug.
+       Also pins two easily-lost subtleties: a boolean filter starts at null,
+       not '' (which would coerce to false and hide every true row), and the
+       function returns the SAME object when nothing changed, because a fresh
+       object each render would retrigger the effect that calls it.
+       *** GOTCHA: tests/test_parts_frontend_contract.py asserts literal
+       strings against PartsPage.tsx, so extracting code from that file BREAKS
+       it even though behaviour is unchanged. Updated it to span both files.
+       Expect the same if you extract anything else from PartsPage. ***
+
   STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
-    - 3 of 8 pages have page-level tests; UploadPackPage has only its helpers.
-      PartDetailPage alone is 4167 lines.
-    - Untouched: PartsPage, AdminFieldsPage, AdminAddinPage.
+    - 3 of 8 pages have page-level tests; UploadPackPage and PartsPage have
+      only their extracted helpers covered. PartDetailPage is 4167 lines.
+    - Untouched: AdminFieldsPage, AdminAddinPage.
     - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
       Playwright needs CI to boot the app plus Mongo, so it is a bigger step.
     - Playwright and axe are NOT installed. All the workflow coverage below
