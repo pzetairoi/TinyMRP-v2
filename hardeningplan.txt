@@ -1297,9 +1297,13 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
   STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
     - 3 of 8 pages have page-level tests. UploadPackPage, PartsPage and
       PartDetailPage have only their extracted helpers covered.
-    - PartDetailPage is still 4014 lines with ~10 more module-level pure
-      functions (groupFiles, formatBytes, processTokens, identity helpers)
-      that are good candidates for the same treatment.
+    - PartDetailPage is down to 3975 lines (from 4167). File grouping and size
+      formatting moved to src/lib/fileDisplay.ts on 2026-08-05 (+32 tests,
+      222 total). groupKeyOf earns its tests: SolidWorks emits several
+      extensions per logical artefact (eprt/edr, stp/step, jpg/jpeg/png) and
+      collapsing them wrongly either duplicates rows or hides a deliverable.
+      Still ~6 module-level pure functions left there (processTokens, the
+      identity/avatar helpers) as candidates for the same treatment.
     - Untouched: AdminFieldsPage, AdminAddinPage.
     - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
       Playwright needs CI to boot the app plus Mongo, so it is a bigger step.
