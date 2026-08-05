@@ -18,8 +18,22 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reportsDirectory: './coverage',
-      include: ['src/lib/**', 'src/components/**', 'src/pages/**'],
-      exclude: ['src/**/*.d.ts', 'src/test/**'],
+      // Thresholds apply to src/lib only, on purpose. That is the pure logic
+      // layer, and it is genuinely covered (>90%). Including the pages would
+      // force the number down to something like 13%, and a threshold set that
+      // low ratchets nothing - it would pass even if every lib test were
+      // deleted. A meaningful gate over the covered code beats a decorative
+      // one over everything.
+      //
+      // When a page gains real tests, add it here rather than lowering these.
+      include: ['src/lib/**'],
+      exclude: ['src/**/*.d.ts', 'src/test/**', 'src/**/*.test.{ts,tsx}'],
+      thresholds: {
+        statements: 90,
+        branches: 90,
+        functions: 85,
+        lines: 90,
+      },
     },
   },
 })

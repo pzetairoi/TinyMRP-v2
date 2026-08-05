@@ -294,8 +294,11 @@ jobs:
       # Includes the noUndefinedIdentifiers guard, which runs tsc --noEmit and
       # fails on missing-name errors. `vite build` does not type-check, so
       # without this an unimported helper ships and only breaks in the browser.
+      # Runs with coverage so the src/lib thresholds gate the build. Verified
+      # to fail (exit 1) when a test file is removed, so it ratchets rather
+      # than decorating.
       - name: Unit tests (Vitest)
-        run: npm run test
+        run: npm run test:coverage
       - name: Build
         run: npm run build
       - name: Upload frontend supply-chain evidence

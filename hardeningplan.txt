@@ -1354,8 +1354,17 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
       public shares, mobile/tablet layouts) remains untouched.
     - 3D viewer and canvas markup cannot be tested under jsdom — they need
       WebGL, so they belong to the Playwright work, not Vitest.
-    - No coverage threshold is enforced; `test:coverage` exists but CI does not
-      gate on a number.
+  DONE 2026-08-06 coverage threshold, BLOCKING in CI. Thresholds are scoped to
+       src/lib ONLY (statements/branches/lines 90, functions 85), which the
+       layer genuinely meets at 92%.
+       WHY NOT THE WHOLE TREE: including the pages drags the number to ~13%,
+       and a threshold set that low ratchets nothing — it would still pass if
+       every lib test were deleted. A meaningful gate over the covered code
+       beats a decorative one over everything.
+       VERIFIED it actually fails: deleting approval.test.ts drops coverage to
+       69.78% and `npm run test:coverage` exits 1.
+       When a page gains real tests, ADD it to coverage.include rather than
+       lowering these numbers.
 
 Usability
 Add an application error boundary.
