@@ -1222,8 +1222,20 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
        "presentation", not "img"; and FieldSelector renders its field list
        twice for responsive layout, so component queries need getAllBy*.
 
+  DONE 2026-08-05 first PAGE test (97 total now, +7):
+       ApiTokensPage.test.tsx covers the Phase 1B token lifecycle UI, chosen
+       because its failure modes are unrecoverable for the user: the secret is
+       shown exactly once, rotate/revoke confirm before breaking connected
+       clients, and a failed load must surface rather than render as "you have
+       no tokens".
+       Shared src/test/mockApi.ts extracted at the same time - a per-route
+       fetch stub keyed "<METHOD> <path>" - so the next page test does not grow
+       its own copy.
+       Gotcha: Rotate/Revoke only render when a token has is_active, so
+       fixtures need it or the buttons are simply absent.
+
   STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
-    - No PAGE tests. PartDetailPage alone is 4167 lines and untested.
+    - Only 1 of 8 pages is covered. PartDetailPage alone is 4167 lines.
     - Playwright and axe are NOT installed. All the workflow coverage below
       (login/logout, part search and detail, import preview and failure,
       job/order editing, role and permission behaviour, token management,
