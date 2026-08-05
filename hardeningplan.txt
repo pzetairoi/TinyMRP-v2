@@ -1317,6 +1317,25 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
       config.*, user.*, window.* and __proto__.* all resolve to '' rather than
       being passed through. No page-level test yet.
     - Untouched: AdminAddinPage (1043 lines).
+
+  *** INCIDENT 2026-08-06 — READ BEFORE EXTRACTING ANYTHING ELSE ***
+  Extracting helpers out of PartDetailPage shipped a BROKEN PAGE to the running
+  app: "groupFiles is not defined" at runtime. Ten identifiers (groupFiles,
+  formatBytes, hasDisplayValue, processTokens, readRecordValue,
+  collectRecordValues, canonicalFieldAliases, approvalIdentityText and more)
+  were referenced with NO import, plus partDetailFieldFallbackAliases was left
+  behind while the constant it reads moved to lib/.
+  WHY NOTHING CAUGHT IT: `vite build` transpiles WITHOUT type-checking, so it
+  built cleanly; `npm run lint` passed; the Vitest suite passed because it
+  tests the extracted modules, not the page that lost the imports.
+  FIX: added frontend/src/lib/noUndefinedIdentifiers.test.ts, which runs
+  `tsc --noEmit` and fails on TS2304/TS2552 only — the two codes meaning "this
+  identifier does not exist". Deliberately NOT the whole type-check, because
+  there is a pre-existing backlog (missing CSS module declarations, PrimeReact
+  generics) that would make a full gate useless. Verified it FAILS when an
+  import is removed. Also wired into CI before the build.
+  LESSON: after any extraction, run `npx tsc --noEmit -p tsconfig.app.json`.
+  A green build and green tests do not prove the page still loads.
     - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
       Playwright needs CI to boot the app plus Mongo, so it is a bigger step.
     - Playwright and axe are NOT installed. All the workflow coverage below

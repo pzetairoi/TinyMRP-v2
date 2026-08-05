@@ -291,6 +291,9 @@ jobs:
           upload-release-assets: false
       # QA-FE-01. Blocking from the start: the suite is green now, so there is
       # no burn-down to defer and no reason to let it rot as advisory.
+      # Includes the noUndefinedIdentifiers guard, which runs tsc --noEmit and
+      # fails on missing-name errors. `vite build` does not type-check, so
+      # without this an unimported helper ships and only breaks in the browser.
       - name: Unit tests (Vitest)
         run: npm run test
       - name: Build

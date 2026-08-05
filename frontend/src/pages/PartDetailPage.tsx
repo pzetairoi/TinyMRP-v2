@@ -13,6 +13,15 @@ import FieldSelector from "../components/FieldSelector";
 import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
 import { withBomOccurrenceKeys } from "../lib/bomTree";
 import { apiErrorMessage, apiFetch, readApiResponse } from "../lib/api";
+import {
+  approvalIdentityText,
+  canonicalFieldAliases,
+  collectRecordValues,
+  partDetailFieldFallbackAliases,
+  readRecordValue,
+} from "../lib/approval";
+import { formatBytes, groupFiles, hasDisplayValue } from "../lib/fileDisplay";
+import { processTokens } from "../lib/processTokens";
 import type {
   DrawingImageRow,
   MarkupDraft,
@@ -336,9 +345,6 @@ function identityAvatar(profile?: IdentityProfile | null, fallback = "", size: "
   )
 }
 
-function partDetailFieldFallbackAliases(fieldId: string): string[] {
-  return PART_DETAIL_FIELD_FALLBACK_ALIASES[fieldId] || [fieldId]
-}
 
 // ---------- Component ----------
 export default function PartDetailPage() {

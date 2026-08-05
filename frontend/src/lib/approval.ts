@@ -1,3 +1,5 @@
+import type { FieldConfigPayload } from './fieldConfig'
+
 /**
  * Approval-state interpretation for part detail.
  *
@@ -160,4 +162,8 @@ export function approvalIdentityText(value: unknown): string {
   if (explicitApprovalStatus(value) !== null) return ""
   if (typeof value !== "string") return ""
   return value.trim()
+}
+
+export function partDetailFieldFallbackAliases(fieldId: string): string[] {
+  return PART_DETAIL_FIELD_FALLBACK_ALIASES[fieldId] || [fieldId]
 }
