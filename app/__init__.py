@@ -607,7 +607,21 @@ def create_app(config_object=None):
                 nonce_token = [f"'nonce-{getattr(g, 'csp_nonce', '')}'"]
 
             script_src = ["'self'", *inline_token, *nonce_token, "https://cdn.jsdelivr.net"]
-            style_src = ["'self'", *inline_token, *nonce_token, "https://cdn.jsdelivr.net"]
+
+            # style-src is deliberately decoupled from script-src.
+            #
+            # The 86 inline style= attributes in the templates are static CSS -
+            # column widths, max-heights - and the few dynamic ones interpolate
+            # only formatted numbers. None can execute code: style= carries no
+            # script, and `expression()` died with IE. Rewriting them all to
+            # classes would be a large visual-regression risk across 14
+            # templates for no security gain.
+            #
+            # A nonce does not cover style ATTRIBUTES either (only <style>
+            # blocks), so dropping 'unsafe-inline' here would break the layout
+            # without a full rewrite. script-src is where XSS actually lands,
+            # and it can now be tightened on its own.
+            style_src = ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"]
             if not allow_frame_embedding:
                 csp = " ".join([
                     "default-src 'self';",

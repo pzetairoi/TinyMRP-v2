@@ -88,12 +88,17 @@ def test_inline_allowed_by_default_but_no_nonce(monkeypatch):
 
 
 def test_disabling_inline_emits_a_nonce(monkeypatch):
-    """With inline disallowed, script-src/style-src carry a nonce instead."""
+    """With inline disallowed, script-src carries a nonce instead.
+
+    Scoped to script-src: style-src deliberately keeps 'unsafe-inline' for the
+    static style= attributes, which a nonce cannot cover anyway.
+    """
     app = _make_app(monkeypatch, TINYMRP_CSP_ALLOW_INLINE="false")
     with app.test_client() as client:
         csp = _csp(client)
 
-    assert "'unsafe-inline'" not in csp, "'unsafe-inline' should be gone"
+    script_src = re.search(r"script-src ([^;]+)", csp).group(1)
+    assert "'unsafe-inline'" not in script_src, "script-src must drop it"
     nonces = re.findall(r"'nonce-([A-Za-z0-9_-]+)'", csp)
     assert nonces, "expected a nonce once inline is disallowed"
     assert len(nonces[0]) >= 16, "nonce looks too short to be unguessable"
@@ -183,3 +188,40 @@ def test_other_security_headers_still_set(monkeypatch):
     assert resp.headers.get("X-Content-Type-Options") == "nosniff"
     assert resp.headers.get("X-Frame-Options") == "DENY"
     assert resp.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+
+
+def _directive(csp: str, name: str) -> str:
+    match = re.search(rf"{name} ([^;]+)", csp)
+    return match.group(1) if match else ""
+
+
+def test_script_src_can_harden_without_touching_style_src(monkeypatch):
+    """The two directives are decoupled on purpose (SEC-CSP-01).
+
+    Inline style= attributes are static CSS that cannot execute code, and a
+    nonce does not cover style ATTRIBUTES anyway - only <style> blocks. So
+    dropping 'unsafe-inline' from style-src would break the layout across 14
+    templates for no security gain, while script-src is where XSS actually
+    lands and can be tightened on its own.
+    """
+    app = _make_app(monkeypatch, TINYMRP_CSP_ALLOW_INLINE="false")
+    with app.test_client() as client:
+        csp = _csp(client)
+
+    script_src = _directive(csp, "script-src")
+    style_src = _directive(csp, "style-src")
+
+    assert "'unsafe-inline'" not in script_src, "script-src must harden"
+    assert "'nonce-" in script_src, "script-src must carry the nonce instead"
+    assert "'unsafe-inline'" in style_src, (
+        "style-src must keep allowing inline style= attributes; removing it "
+        "breaks column widths across the admin templates"
+    )
+
+
+def test_style_src_never_carries_a_nonce(monkeypatch):
+    """A nonce in style-src would be misleading: it does not cover style=."""
+    for flag in ("true", "false"):
+        app = _make_app(monkeypatch, TINYMRP_CSP_ALLOW_INLINE=flag)
+        with app.test_client() as client:
+            assert "'nonce-" not in _directive(_csp(client), "style-src")

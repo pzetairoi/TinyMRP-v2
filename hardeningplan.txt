@@ -401,16 +401,28 @@ Completed so far:
                    this lands safely ahead of the flip. Verified the helper
                    renders a real value inside a request context, and a 4th
                    guard test fails if any bare <script> returns.
-                   STILL REMAINING before 'unsafe-inline' can be dropped:
-                     - style-src carries its own 'unsafe-inline' for inline
-                       style="..." attributes, which a nonce does NOT cover.
-                       This is now the ONLY code blocker left for script-src.
+                   STYLE-SRC DECOUPLED 2026-08-06 — script-src is now
+                   CODE-COMPLETE. style_src no longer inherits the inline/nonce
+                   tokens, so setting TINYMRP_CSP_ALLOW_INLINE=false hardens
+                   script-src (self + nonce, no 'unsafe-inline') while leaving
+                   style-src working. Verified end to end and pinned by 2 tests.
+                   WHY style-src KEEPS 'unsafe-inline' — a deliberate decision,
+                   not an omission: the 86 inline style= attributes are static
+                   CSS (column widths, max-heights) and the few dynamic ones
+                   interpolate only formatted numbers. NONE can execute code:
+                   style= carries no script and expression() died with IE.
+                   A nonce does not cover style ATTRIBUTES either, only <style>
+                   blocks — so dropping it would demand rewriting 86 attributes
+                   across 14 templates, a real visual-regression risk, for zero
+                   security gain. script-src is where XSS lands.
+
+                   REMAINING — needs a HUMAN, no code left:
                      - Flip TINYMRP_CSP_ALLOW_INLINE=false and exercise the
-                       admin UI in a browser. NOT done: needs a human clicking
-                       through, which no test here substitutes for.
-                     - Suggested order: run with
-                       TINYMRP_CSP_REPORT_ONLY_STRICT=true first and collect
-                       violations, rather than flipping blind.
+                       admin UI in a browser. No test substitutes for this.
+                     - Do it in this order: set
+                       TINYMRP_CSP_REPORT_ONLY_STRICT=true first, collect the
+                       violation reports, THEN flip. Flipping blind on a
+                       deployment with live companies is the one risk here.
   Phase 3B  DONE engineering remediation 2026-08-03
                    (50d75e7, 608be56, 3346b51, 5743b82)
                    residual: two proposed exceptions need a human owner/date
