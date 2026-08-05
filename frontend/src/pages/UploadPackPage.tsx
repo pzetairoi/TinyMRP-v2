@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./uploadpack.css";
 import { apiErrorMessage, apiFetch } from "../lib/api";
+import { actionClass, valueText } from "../lib/importPlan";
 
 type Capability = Record<string, boolean>;
 type Change = {
@@ -150,24 +151,6 @@ const stateBadgeClass: Record<PlanPart["target_state"], string> = {
   existing_unapproved: "text-bg-secondary",
   existing_approved: "text-bg-warning",
 };
-
-function valueText(value: unknown) {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function actionClass(action: string) {
-  if (action === "add") return "text-success";
-  if (["remove", "replace", "clear"].includes(action)) return "text-danger";
-  if (["blocked", "skipped"].includes(action)) return "text-warning";
-  if (["change", "quantity_change"].includes(action)) return "text-primary";
-  return "text-muted";
-}
 
 function saveJson(name: string, data: unknown) {
   const url = URL.createObjectURL(

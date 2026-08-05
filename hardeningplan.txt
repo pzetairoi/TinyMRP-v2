@@ -1255,9 +1255,20 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
        a component. BomPage 526 -> 502 lines, and both are now covered by 7
        new unit tests including the "does not mutate React state" invariant.
 
+  DONE 2026-08-05 import-plan helpers (128 tests now, +16). valueText and
+       actionClass moved out of UploadPackPage.tsx into src/lib/importPlan.ts
+       (998 -> 981 lines) and covered. These matter more than their size
+       suggests: the plan preview is how an operator decides whether to run an
+       import against LIVE data, so a value rendered as a blank cell, or a
+       destructive action coloured as if it were safe, corrupts that decision.
+       Pinned specifically: remove/replace/clear must read as destructive, and
+       an UNKNOWN action falls back to muted rather than inheriting "safe"
+       green — so a future backend action cannot silently look harmless.
+
   STILL TODO (QA-FE-01 stays OPEN — this is the foundation, not the coverage):
-    - 3 of 8 pages covered. PartDetailPage alone is 4167 lines.
-    - Untouched: PartsPage, UploadPackPage, AdminFieldsPage, AdminAddinPage.
+    - 3 of 8 pages have page-level tests; UploadPackPage has only its helpers.
+      PartDetailPage alone is 4167 lines.
+    - Untouched: PartsPage, AdminFieldsPage, AdminAddinPage.
     - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
       Playwright needs CI to boot the app plus Mongo, so it is a bigger step.
     - Playwright and axe are NOT installed. All the workflow coverage below
