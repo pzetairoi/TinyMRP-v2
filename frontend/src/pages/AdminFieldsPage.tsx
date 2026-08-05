@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { normalizeSourcePath, parseApprovalRuleValues, slugFieldId } from '../lib/fieldAdmin'
 import { apiFetch } from '../lib/api'
 import type { ApiError } from '../lib/api'
 import {
@@ -21,27 +22,6 @@ const CONTEXT_HELP: Record<string, { title: string; description: string }> = {
   where_used: { title: 'Where used', description: 'Columns shown when finding assemblies, jobs, and orders that reference a part.' },
   excel_bom: { title: 'Excel BOM export', description: 'Optional columns available in generated Excel bill-of-material exports.' },
   arena_bom: { title: 'Arena BOM export', description: 'Optional columns mapped into Arena-compatible BOM exports.' },
-}
-
-function slugFieldId(value: string) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-}
-
-function normalizeSourcePath(value: string) {
-  const parts = String(value || '')
-    .split('.')
-    .map((part) => String(part || '').trim())
-    .filter(Boolean)
-  if (parts.length < 2) return ''
-  const [head, ...tail] = parts
-  if (!['attrs', 'part'].includes(head.toLowerCase())) return ''
-  const normalizedTail = tail.map((part) => slugFieldId(part)).filter(Boolean)
-  if (!normalizedTail.length) return ''
-  return [head.toLowerCase(), ...normalizedTail].join('.')
 }
 
 function cloneContexts(contexts: Record<string, FieldContext>) {
@@ -81,13 +61,6 @@ function approvalRuleDrafts(rules: ApprovalRules | undefined): Record<keyof Appr
     unapproved_values: cloned.unapproved_values.join(', '),
     identity_placeholders: cloned.identity_placeholders.join(', '),
   }
-}
-
-function parseApprovalRuleValues(value: string) {
-  return value
-    .split(/[,;\n]/)
-    .map((item) => item.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' '))
-    .filter((item, index, values) => item && values.indexOf(item) === index)
 }
 
 export default function AdminFieldsPage() {

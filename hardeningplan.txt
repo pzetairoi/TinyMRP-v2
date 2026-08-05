@@ -1310,7 +1310,13 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
       Remaining candidates there: the identity/avatar helpers (identityLabel,
       identityAvatar, initialsForLabel), which are JSX-returning and so are
       component extractions rather than lib moves.
-    - Untouched: AdminFieldsPage, AdminAddinPage.
+    - AdminFieldsPage: helpers extracted to src/lib/fieldAdmin.ts on 2026-08-06
+      (+30 tests, 269 total; page 872 -> 845 lines). normalizeSourcePath is a
+      WHITELIST, not a tidy-up: only `attrs.*` and `part.*` roots resolve, so
+      an operator cannot point a field at an arbitrary path. Tests assert that
+      config.*, user.*, window.* and __proto__.* all resolve to '' rather than
+      being passed through. No page-level test yet.
+    - Untouched: AdminAddinPage (1043 lines).
     - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
       Playwright needs CI to boot the app plus Mongo, so it is a bigger step.
     - Playwright and axe are NOT installed. All the workflow coverage below
