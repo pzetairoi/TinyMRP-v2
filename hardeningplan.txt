@@ -1302,8 +1302,14 @@ Testing foundation — [STARTED 2026-08-05, Claude] QA-FE-01 partially addressed
       222 total). groupKeyOf earns its tests: SolidWorks emits several
       extensions per logical artefact (eprt/edr, stp/step, jpg/jpeg/png) and
       collapsing them wrongly either duplicates rows or hides a deliverable.
-      Still ~6 module-level pure functions left there (processTokens, the
-      identity/avatar helpers) as candidates for the same treatment.
+      processTokens moved to src/lib/processTokens.ts on 2026-08-05 (+17
+      tests, 239 total): process lists arrive as "Milling, Turning",
+      "milling / turning" or an array, and if they do not normalise to the
+      same tokens then process filtering silently misses parts — a wrong
+      answer that looks like a correct empty result.
+      Remaining candidates there: the identity/avatar helpers (identityLabel,
+      identityAvatar, initialsForLabel), which are JSX-returning and so are
+      component extractions rather than lib moves.
     - Untouched: AdminFieldsPage, AdminAddinPage.
     - Decided 2026-08-05 with the owner: more Vitest coverage BEFORE Playwright.
       Playwright needs CI to boot the app plus Mongo, so it is a bigger step.

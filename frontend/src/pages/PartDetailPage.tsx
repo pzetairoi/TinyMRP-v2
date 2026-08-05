@@ -340,17 +340,6 @@ function partDetailFieldFallbackAliases(fieldId: string): string[] {
   return PART_DETAIL_FIELD_FALLBACK_ALIASES[fieldId] || [fieldId]
 }
 
-function processTokens(value: unknown): string[] {
-  if (value === undefined || value === null) return []
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => processTokens(item))
-  }
-  return String(value)
-    .split(/\s*(?:,|;|\/|\||&|\+|\r|\n)\s*/)
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean)
-}
-
 // ---------- Component ----------
 export default function PartDetailPage() {
   const route = useParams();
