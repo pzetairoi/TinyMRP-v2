@@ -5,7 +5,6 @@ from mongoengine.errors import ValidationError
 
 from app.models.auth import User
 from app.models.api_token import ApiToken
-from app.models.user_settings import UserSettings
 from app.services.audit import log_action
 from app.services.api_auth import api_auth_required, get_request_user
 from app.services.api_tokens import (

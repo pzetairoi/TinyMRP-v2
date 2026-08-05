@@ -6,7 +6,6 @@ from app.services.canonical_fields import (
     APPROVED_STATUS_ATTR_ALIASES,
     APPROVED_BY_ATTR_ALIASES,
     APPROVED_DATE_ATTR_ALIASES,
-    approval_void_regex,
     canonical_attr_key,
     canonical_attrs_for_part,
     default_normalized_attr_alias_map,

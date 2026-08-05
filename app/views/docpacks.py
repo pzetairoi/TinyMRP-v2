@@ -33,7 +33,6 @@ bp = Blueprint("docpacks_api", __name__, url_prefix="/api/docpacks")
 @require_permission("files.read")
 def options():
     from app.models.part import Part
-    from app.models.bom import BOMLink
     from app.models.artifact import PartFile
     from app.services.docpacks import _flatten_bom
     from app.services.markup_documents import markup_document_count_for_pairs

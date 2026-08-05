@@ -7,7 +7,6 @@ from mongoengine.queryset.visitor import Q
 
 from app.models.job import Job, JobBOMLine, JobStage
 from app.models.customer import Customer
-from app.models.part import Part
 from app.models.supplier import Supplier
 from app.models.auth import User
 from app.services.api_auth import api_auth_required

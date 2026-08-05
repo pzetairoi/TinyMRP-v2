@@ -43,7 +43,6 @@ from app.services.thumbs import _dedup_urls
 from app.views.bom_tree import (
     _child_links,
     _coverage_groups as _bom_coverage_groups,
-    _has_children,
     _is_hardware_node,
     _link_occurrence_qtys,
     _node,

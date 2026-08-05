@@ -4,7 +4,7 @@ import csv
 import io
 import math
 import os
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 from app.models.artifact import PartFile
 from app.models.bom import BOMLink

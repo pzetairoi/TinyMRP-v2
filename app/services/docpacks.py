@@ -12,8 +12,7 @@ from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs, ALIASES
 from app.services.authorization import part_is_released
 from app.services.canonical_fields import canonical_processes_for_part
-from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
-from app.services.processmeta import normalize_processes
+from app.services.field_config import get_field_config, resolve_part_field_values
 from app.services.filenames import build_output_name
 from app.services.part_norm import clean_rev as _clean_rev
 from app.services.app_settings import format_display_ts, get_display_dt, resolve_brand_logo_path
@@ -1079,7 +1078,6 @@ def _visual_list_pdf(
         from reportlab.lib.units import mm
         from reportlab.pdfbase.pdfmetrics import stringWidth
         import qrcode
-        from PIL import Image as PILImage
     except Exception:
         return None
     root = (current_app.config.get("FILE_ROOT_LOCAL") or "").rstrip("/\\")

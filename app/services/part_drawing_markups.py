@@ -9,7 +9,6 @@ from app.models.artifact import PartFile
 from app.models.part import Part
 from app.models.part_drawing_markup import (
     THREAD_PRIORITIES,
-    THREAD_STATUSES,
     PartDrawingMarkup,
     PartDrawingMarkupMessage,
     PartDrawingMarkupThread,

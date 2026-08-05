@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from flask import Blueprint, request, jsonify
-from flask_security import current_user
 from mongoengine.errors import NotUniqueError, DoesNotExist, ValidationError
 
 from app.extensions import csrf

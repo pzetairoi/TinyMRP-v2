@@ -1,6 +1,6 @@
 # app/views/parts.py
 from flask import Blueprint, request, jsonify, current_app, send_file
-from typing import Any, Optional
+from typing import Any
 from datetime import datetime, timedelta
 from flask_login import login_required, current_user
 from mongoengine.errors import DoesNotExist
@@ -21,7 +21,6 @@ from app.services.attrs import approval_field_values, approval_filter_raw, harve
 from app.models.artifact import PartFile
 from app.models.extra_file import PartExtraFile
 from app.views.whereused import _rows_for_child_pn
-from app.services.processmeta import normalize_processes
 from app.services.insights import (
     classify_part,
     normalized_processes as normalize_process_list,
@@ -39,8 +38,6 @@ from app.services.filescan import (
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.extra_files import extra_file_url_for
 from app.services.acl import (
-    allowed_parts_for,
-    part_is_allowed,
     user_has_permission,
 )
 from app.services.authorization import (

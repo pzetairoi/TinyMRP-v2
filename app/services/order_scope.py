@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 import io
 import os
 from typing import Iterable, List, Optional, Tuple
@@ -13,7 +12,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-from app.models.order import Order, OrderLine
+from app.models.order import Order
 from app.models.part import Part
 from app.models.artifact import PartFile
 from app.services.attrs import harvest_part_attrs

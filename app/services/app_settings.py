@@ -10,9 +10,6 @@ from flask import current_app, has_app_context
 from app.models.app_settings import AppSettings
 from app.services.timezone_utils import (
     format_display_ts as _format_display_ts,
-    resolve_timezone,
-    resolve_timezone_name,
-    timezone_choices,
     to_display_dt,
     utc_now,
 )

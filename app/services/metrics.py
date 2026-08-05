@@ -7,7 +7,7 @@ import shutil
 import threading
 from collections import deque
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Deque, Dict, Optional
 
 from app.services.timezone_utils import format_display_ts, utc_now

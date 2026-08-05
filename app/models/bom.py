@@ -1,6 +1,5 @@
 # app/models/bom.py
 from mongoengine import Document, StringField, FloatField, ListField, DateTimeField, BooleanField, DictField
-from datetime import datetime
 from app.models.part import Part  # <-- absolute import
 from app.services.timezone_utils import utc_now
 

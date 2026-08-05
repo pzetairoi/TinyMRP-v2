@@ -1,6 +1,5 @@
 # app/models/part.py
 from mongoengine import BooleanField, DateTimeField, DictField, Document, IntField, ListField, StringField
-from datetime import datetime
 from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"

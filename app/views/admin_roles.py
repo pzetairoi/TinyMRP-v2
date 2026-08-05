@@ -21,8 +21,6 @@ from app.services.audit import log_action
 from app.services.authorization import require_permission
 from app.services.permissions import (
     CANONICAL_PERMISSION_GROUPS,
-    duplicate_permissions,
-    unknown_permissions,
 )
 from app.services.rls_demo import (
     reset_permission_test_environment,

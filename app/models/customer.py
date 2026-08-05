@@ -1,4 +1,4 @@
-from mongoengine import Document, StringField, ListField, ReferenceField, IntField, FloatField, BooleanField, EmbeddedDocumentField
+from mongoengine import Document, StringField, ListField, ReferenceField, FloatField, BooleanField, EmbeddedDocumentField
 
 DB_ALIAS = "tinymrp-v2"
 

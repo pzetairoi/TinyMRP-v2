@@ -5,9 +5,7 @@ import re
 from datetime import datetime, timezone, tzinfo
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 from zoneinfo import ZoneInfo, available_timezones
-from xml.etree import ElementTree as ET
 
 from flask import current_app, g, has_app_context, has_request_context
 

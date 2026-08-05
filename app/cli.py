@@ -432,13 +432,10 @@ def seed_bom():
 
 ##########################seed generation commands##########################
 # app/cli.py (append at bottom, below existing imports / groups)
-import random, string, datetime as dt
-from mongoengine.errors import NotUniqueError
+import random, string
 from flask.cli import with_appcontext
 import click
 
-from .models.part import Part
-from .models.bom import BOMLink
 
 def _now():
     return utc_now()
@@ -738,9 +735,8 @@ def import_zip_cmd(path, tag, data_mode, bom_mode, file_mode, approval_mode, dry
 ################################################################
 #File discovery commands
 
-import click, os
+import click
 from flask.cli import with_appcontext
-from flask import current_app
 from app.services.filescan import discover_part_files, upsert_part_files
 from app.models.artifact import PartFile
 
@@ -786,7 +782,6 @@ import click
 from flask.cli import with_appcontext
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.models.part import Part
-from app.services.timezone_utils import utc_now
 
 @click.group()
 def thumbs():

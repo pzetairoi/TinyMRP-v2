@@ -1,5 +1,4 @@
-from datetime import datetime
-from mongoengine import FloatField, BooleanField, Document, StringField, DateTimeField, IntField, DictField, signals
+from mongoengine import FloatField, BooleanField, Document, StringField, DateTimeField, DictField, signals
 from app.services.timezone_utils import utc_now
  
 

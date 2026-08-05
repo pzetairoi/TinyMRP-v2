@@ -7,7 +7,6 @@ from app.models.bom import BOMLink
 from app.services.thumbs import preview_png_urls_for
 from app.services.attrs import harvest_part_attrs
 from app.services.canonical_fields import canonical_process_label_for_part
-from app.services.processmeta import normalize_processes
 from flask_login import current_user
 from app.services.authorization import (
     authorised_part_pairs,

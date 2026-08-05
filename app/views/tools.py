@@ -2,7 +2,6 @@ from flask import Blueprint, render_template, request, send_file, current_app, r
 import os
 import secrets
 import tempfile
-from io import BytesIO
 from datetime import datetime, timezone
 from flask_login import current_user, login_required
 from app.services.acl import permissions_required

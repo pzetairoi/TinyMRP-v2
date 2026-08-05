@@ -7,7 +7,6 @@ from app.services.acl import (
     permissions_required,
     customer_scope_ids,
     supplier_scope_ids,
-    user_has_permission,
 )
 from app.services.authorization import (
     authorised_get,
@@ -25,7 +24,7 @@ from app.services.field_policies import (
     filter_response_fields,
     response_context,
 )
-from mongoengine.errors import DoesNotExist, ValidationError
+from mongoengine.errors import DoesNotExist
 from mongoengine.queryset.visitor import Q
 
 from app.models.order import Order, OrderLine

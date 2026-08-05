@@ -1,4 +1,3 @@
-from datetime import datetime
 
 from mongoengine import DateTimeField, DictField, Document, ListField, StringField
 from app.services.timezone_utils import utc_now

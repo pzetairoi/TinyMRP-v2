@@ -23,7 +23,6 @@ from app.services.canonical_fields import (
 from app.services.filescan import datasheet_attr_present, datasheet_url_from_attrs
 from app.services.part_annotations import annotation_payload
 from app.services.part_norm import clean_rev
-from app.services.processmeta import normalize_processes
 from app.services.timezone_utils import utc_now
 
 

@@ -167,7 +167,7 @@ def audit_list():
         client = get_connection(alias=alias)
         client.admin.command('ping')
         ping_ok = True
-    except Exception as e:
+    except Exception:
         ping_ok = False
     return render_template(
         "admin/audit_list.html",

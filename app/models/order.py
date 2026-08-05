@@ -1,5 +1,4 @@
-from mongoengine import Document, EmbeddedDocument, EmbeddedDocumentField, StringField, FloatField, ListField, ReferenceField, DateTimeField, IntField, NULLIFY
-from datetime import datetime
+from mongoengine import Document, EmbeddedDocument, EmbeddedDocumentField, StringField, FloatField, ListField, ReferenceField, DateTimeField, NULLIFY
 
 DB_ALIAS = "tinymrp-v2"
 
