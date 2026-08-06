@@ -4,7 +4,9 @@ import os
 import shutil
 
 from flask import Blueprint, current_app, jsonify
+from flask_security import auth_required
 
+from app.services.authorization import require_permission
 from app.services.security_mode import security_mode
 
 bp = Blueprint("api_health", __name__, url_prefix="/api")
@@ -134,3 +136,60 @@ def ready():
         "warnings": warnings,
     }
     return jsonify(payload), (200 if ok else 503)
+
+
+@bp.get("/diagnostics")
+@auth_required()
+@require_permission("system.maintenance")
+def diagnostics():
+    """Authenticated, detailed status for operators (OPS-HEALTH-01).
+
+    The third endpoint the roadmap asks for, alongside liveness and readiness.
+    Those two are public and therefore deliberately terse - they report
+    booleans and coarse figures only. This one is behind the same
+    `system.maintenance` permission as the admin diagnostics page and can
+    afford detail.
+
+    Config values still go through the diagnostics service's redaction, so a
+    maintenance operator does not get handed secrets in plaintext just because
+    they can reach this route.
+    """
+    payload: dict[str, object] = {
+        "ok": True,
+        "service": "tinymrp",
+        "server_version": _server_version(),
+        "security_mode": security_mode(),
+        "checks": {
+            "database": _check_database(),
+            "storage": _check_storage(),
+            "disk": _check_disk(),
+        },
+        "mongo_auth": current_app.config.get("MONGO_AUTH_STATUS") or {},
+        "rate_limit": {
+            "shared_storage": bool(current_app.config.get("RATE_LIMIT_SHARED_STORAGE")),
+            "fail_closed": bool(current_app.config.get("RATE_LIMIT_FAIL_CLOSED")),
+        },
+    }
+
+    # Each section is optional: a diagnostics endpoint that 500s when one probe
+    # fails is useless precisely when it is needed most.
+    try:
+        from app.services.diagnostics import environment_report
+
+        payload["environment"] = environment_report()
+    except Exception as exc:  # pragma: no cover - defensive
+        current_app.logger.exception("diagnostics environment report failed")
+        payload["environment_error"] = f"{type(exc).__name__}: {exc}"
+
+    try:
+        from app.services.metrics import get_metrics_store
+
+        file_root = current_app.config.get("FILE_ROOT_LOCAL") or current_app.root_path
+        payload["metrics"] = get_metrics_store().snapshot(file_root=file_root)
+    except Exception as exc:  # pragma: no cover - defensive
+        payload["metrics_error"] = f"{type(exc).__name__}: {exc}"
+
+    payload["ok"] = all(
+        bool(check.get("ok")) for check in payload["checks"].values()  # type: ignore[union-attr]
+    )
+    return jsonify(payload)

@@ -1177,9 +1177,23 @@ Health and monitoring — [PARTIAL 2026-08-03, Claude] liveness/readiness split 
        strict-auth and security-hardening suites re-run green (24 passed).
        Full suite: 665 passed, 1 skipped. ruff/bandit/mypy clean.
 
+  DONE 2026-08-06 Diagnostics endpoint — the third of the three the roadmap
+       asks for. GET /api/diagnostics, behind @auth_required() AND
+       @require_permission("system.maintenance"), the same permission as the
+       existing admin diagnostics page.
+       Returns the readiness checks plus the Mongo auth posture, rate-limit
+       storage/failure policy, the environment report and the metrics
+       snapshot. Config values go through the diagnostics service's existing
+       REDACTION, so reaching this route does not hand an operator secrets in
+       plaintext.
+       Every optional section is wrapped: a diagnostics endpoint that 500s
+       when one probe fails is useless exactly when it is needed most.
+       Deliberately NOT added to _HEALTH_ENDPOINTS — health and ready are
+       auth-exempt because an orchestrator polls them before credentials
+       exist; this one carries detail and must stay guarded. A test asserts
+       that distinction, and another asserts it is unreachable unauthenticated.
+
   STILL TODO here (OPS-HEALTH-01 stays OPEN):
-    - Diagnostics endpoint: authenticated, detailed status for operators.
-      Not started. /api/ready is deliberately terse because it is public.
     - Readiness does not yet verify "required configuration" or
       background-worker state (no workers exist yet).
     - Nothing consumes /api/ready yet. The Compose/Caddy healthchecks and

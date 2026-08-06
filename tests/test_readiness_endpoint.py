@@ -187,3 +187,32 @@ def test_readiness_does_not_leak_configuration(monkeypatch, tmp_path):
 
     assert "mongodb://" not in raw
     assert str(tmp_path) not in raw, "the storage path must not be echoed"
+
+
+# --- diagnostics: authenticated detail (OPS-HEALTH-01) -----------------------
+
+
+def test_diagnostics_requires_authentication(monkeypatch, tmp_path):
+    """Unlike health and ready, this one carries detail and must be guarded."""
+    app = _make_app(monkeypatch, tmp_path=tmp_path, READINESS_MIN_FREE_DISK_MB=0)
+    with app.test_client() as client:
+        resp = client.get("/api/diagnostics")
+
+    # Either rejected outright or redirected to login - never 200 with data.
+    assert resp.status_code != 200
+    assert b"environment" not in resp.data
+
+
+def test_diagnostics_is_not_in_the_public_health_category(monkeypatch):
+    """/api/health and /api/ready are exempt from auth; diagnostics is not."""
+    from app.services import security_mode as mode
+
+    assert "api_health.health" in mode._HEALTH_ENDPOINTS
+    assert "api_health.ready" in mode._HEALTH_ENDPOINTS
+    assert "api_health.diagnostics" not in mode._HEALTH_ENDPOINTS
+
+
+def test_diagnostics_route_is_registered(monkeypatch):
+    app = _make_app(monkeypatch)
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert "/api/diagnostics" in rules
