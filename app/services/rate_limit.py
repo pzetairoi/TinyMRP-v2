@@ -11,6 +11,8 @@ Environment / config:
 - RATE_LIMIT_LOGIN         default "10 per minute;100 per hour" (login + password endpoints).
 - RATE_LIMIT_API           optional global budget for /api/* per client address
                            (e.g. "600 per minute"). Empty/unset = no global API limit.
+- RATE_LIMIT_EXPENSIVE     overrides the per-route budget for every expensive
+                           endpoint at once (e.g. "20 per hour").
 """
 
 from __future__ import annotations
@@ -28,13 +30,17 @@ logger = logging.getLogger(__name__)
 # builds can saturate the box while staying well inside any per-minute API
 # allowance. Each entry is (endpoint, default limit); the limit is overridable
 # with RATE_LIMIT_EXPENSIVE.
+# Budgets are deliberately GENEROUS. These are authenticated users doing real
+# work, so the threat is a runaway client or a pathological pack, not fraud.
+# Breaking a legitimate import session is worse than the abuse a tight limit
+# would prevent.
 _EXPENSIVE_ENDPOINTS = (
-    "docpacks_api.build_order",
-    "part_shares.public_share_docpack_build",
-    "upload_pack_api.upload_pack",
-    "upload_pack_api.upload_extra_files",
-    "tools.excel_compile",
-    "tools.excel_compile_download",
+    ("docpacks_api.build_order", "30 per hour"),
+    ("part_shares.public_share_docpack_build", "30 per hour"),
+    ("upload_pack_api.upload_pack", "60 per hour"),
+    ("upload_pack_api.upload_extra_files", "60 per hour"),
+    ("tools.excel_compile", "60 per hour"),
+    ("tools.excel_compile_download", "60 per hour"),
 )
 
 _AUTH_ENDPOINTS = (
@@ -50,6 +56,27 @@ def _truthy(value: str | None, default: bool = True) -> bool:
     if value is None or not str(value).strip():
         return default
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _expensive_key() -> str:
+    """Budget the expensive routes per USER, not per client address.
+
+    A whole company normally reaches the server from one public IP, so an
+    address-keyed budget would be shared by everyone in the office - which
+    turns a generous limit into a tight one for exactly the people doing real
+    work. Falls back to the address for the unauthenticated public-share
+    docpack route, where there is no user to key on.
+    """
+    from flask_limiter.util import get_remote_address
+
+    try:
+        from flask_login import current_user
+
+        if getattr(current_user, "is_authenticated", False):
+            return f"user:{current_user.get_id()}"
+    except Exception:
+        pass
+    return f"addr:{get_remote_address()}"
 
 
 def init_rate_limiting(app: Flask):
@@ -131,20 +158,9 @@ def init_rate_limiting(app: Flask):
                 login_limit, error_message="Too many attempts. Try again later."
             )(view)
 
-    # Per-endpoint limits for the expensive routes are NOT wired here.
-    #
-    # Attempted 2026-08-07 and withdrawn: Flask-Limiter records a decorated
-    # limit at DECORATION time, so wrapping an already-registered view
-    # (limiter.limit(...)(app.view_functions[name])) silently applies nothing -
-    # verified, the limit never reached limit_manager._decorated_limits and no
-    # 429 was ever returned. The auth endpoints work only because they REPLACE
-    # app.view_functions[endpoint] with the wrapper.
-    #
-    # Doing this properly means decorating the views at definition time in
-    # app/views/*.py, which is a change across six modules and belongs with the
-    # owner's per-route budget decision rather than being guessed here.
-    # _EXPENSIVE_ENDPOINTS is kept, and a test asserts every name still
-    # resolves, so the list does not rot before that work happens.
+    # Expensive-route budgets cannot be applied here: this runs long before the
+    # blueprints are registered, so app.view_functions is still empty for them.
+    # create_app calls apply_expensive_limits() once the routes exist.
 
     # 429 responses as JSON for API paths, friendly text otherwise. Audit-logged.
     @app.errorhandler(429)
@@ -170,3 +186,40 @@ def init_rate_limiting(app: Flask):
 
     logger.info("Rate limiting enabled (storage=%s, login=%s, api=%s)", storage_uri, login_limit, api_limit or "off")
     return limiter
+
+
+def apply_expensive_limits(app: Flask) -> list[str]:
+    """Throttle the expensive routes. Call AFTER every blueprint is registered.
+
+    Separate from init_rate_limiting on purpose, and this is the whole reason
+    the first attempt failed: rate limiting is initialised early in create_app,
+    hundreds of lines before the blueprints exist, so the lookup found nothing
+    and skipped all six routes in silence. The endpoint names were correct -
+    they were simply asked for too early. The existing name-resolution test did
+    not catch it because it inspects the FINISHED app, by which time every
+    route is present.
+
+    Returns the endpoints actually throttled so a caller (and the tests) can
+    tell enforcement from a silent skip.
+    """
+    limiter = app.extensions.get("tinymrp_limiter")
+    if limiter is None:
+        return []
+
+    override = (os.getenv("RATE_LIMIT_EXPENSIVE") or "").strip()
+    applied: list[str] = []
+    for endpoint, default_limit in _EXPENSIVE_ENDPOINTS:
+        view = app.view_functions.get(endpoint)
+        if view is None:
+            # A rename must not break startup, but it must not pass unnoticed
+            # either: an unthrottled expensive route is the failure this whole
+            # item exists to prevent.
+            logger.warning("rate limit skipped: endpoint %s not registered", endpoint)
+            continue
+        app.view_functions[endpoint] = limiter.limit(
+            override or default_limit,
+            key_func=_expensive_key,
+            error_message="This operation is temporarily rate limited. Try again shortly.",
+        )(view)
+        applied.append(endpoint)
+    return applied

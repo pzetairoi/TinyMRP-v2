@@ -164,11 +164,27 @@ WHAT hardeningplan.txt IS NOW
       I tried exactly that and the existing contract test caught it. Migrating
       an existing instance is an OWNER action - see O7. ***
 
-  E5. Per-endpoint rate limits                    MEDIUM       OPS-RATE-01
-      *** READ the withdrawn attempt in hardeningplan.txt Phase 5 first. ***
-      Wrapping a registered view does NOTHING. The limits must be applied by
-      decorating the views at DEFINITION time across ~6 modules in app/views/.
-      Budgets per route are an owner input; propose defaults and confirm.
+  E5. Per-endpoint rate limits                  DONE 2026-08-07
+      *** The recorded reason for the earlier withdrawal was WRONG, and the
+      real one is more useful. It was not that Flask-Limiter records limits at
+      decoration time. It was ORDERING: init_rate_limiting runs at
+      app/__init__.py:463 and the blueprints register at 847+, so
+      app.view_functions was empty for all six routes and the loop skipped
+      every one of them in silence. The endpoint names were correct all along;
+      they were asked for too early. ***
+      Fixed by splitting out apply_expensive_limits(app), called after the
+      blueprints exist. A missing endpoint now logs a warning instead of
+      vanishing.
+      Budgets (owner: generous, since these are authenticated users doing real
+      work and breaking an import session is worse than the abuse a tight
+      limit prevents): upload-pack and exports 60/hour, docpacks 30/hour.
+      RATE_LIMIT_EXPENSIVE overrides them all at once.
+      Keyed by USER, not by address: a company reaches the server through one
+      NAT, so an address-keyed budget would be split across the whole office.
+      Falls back to the address for the unauthenticated public-share route.
+      VERIFIED by a real 429, and verified the test detects the absence of the
+      wiring - the old name-resolution test never could, because it inspects
+      the finished app, by which time every route is present.
 
   E6. Page-level tests for the remaining 5 pages  MEDIUM       QA-FE-01
       PartsPage, PartDetailPage, UploadPackPage, AdminFieldsPage,
@@ -229,7 +245,10 @@ WHAT hardeningplan.txt IS NOW
   OWNER TRACK                          ENGINEERING TRACK
   ---------------------------------    ---------------------------------
   O1 CSP browser check (30 min)        E1 Error boundary + 404  [DONE]
-  O6 Confirm Trivy gate intent         E2 except-pass triage  <- NEXT
+  O6 Re-decide Trivy with correct data E3 Wire /api/ready  [DONE]
+  O7 Redis for existing instances      E4 Redis guided compose  [DONE]
+                                       E5 Per-endpoint limits  [DONE]
+                                       E2 except-pass triage  <- NEXT
   O4 Decide Track A vs Track B         E3 Wire /api/ready
   O2 Migrate existing instances        E4 Redis in guided compose
   O3 One real guided VPS install       E6 Remaining page tests

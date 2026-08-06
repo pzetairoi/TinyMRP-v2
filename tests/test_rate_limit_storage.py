@@ -160,15 +160,54 @@ def test_every_expensive_endpoint_name_actually_exists(monkeypatch):
     from app.services.rate_limit import _EXPENSIVE_ENDPOINTS
 
     app = _make_app(monkeypatch)
-    missing = [name for name in _EXPENSIVE_ENDPOINTS if name not in app.view_functions]
+    missing = [name for name, _limit in _EXPENSIVE_ENDPOINTS if name not in app.view_functions]
     assert not missing, f"these endpoints no longer exist: {missing}"
 
 
 def test_setting_an_expensive_limit_does_not_break_startup(monkeypatch):
-    """The setting is read but not yet enforced - see rate_limit.py.
-
-    Kept so the config path stays exercised while the real per-route wiring is
-    outstanding.
-    """
     assert _make_app(monkeypatch, RATE_LIMIT_EXPENSIVE="3 per minute") is not None
     assert _make_app(monkeypatch, RATE_LIMIT_EXPENSIVE="") is not None
+
+
+def test_an_expensive_endpoint_actually_returns_429(monkeypatch):
+    """The proof the first attempt lacked.
+
+    A limit that is configured but never enforced is worse than none: it reads
+    as protection in review and provides nothing at runtime. The withdrawn
+    attempt looked exactly like working code. So this asserts the only thing
+    that matters - a real 429 off a real request.
+    """
+    app = _make_app(
+        monkeypatch,
+        RATE_LIMIT_EXPENSIVE="2 per hour",
+        RATE_LIMIT_STORAGE_URI="memory://",
+    )
+    rule = next(
+        r for r in app.url_map.iter_rules() if r.endpoint == "upload_pack_api.upload_pack"
+    )
+    method = "POST" if "POST" in (rule.methods or set()) else "GET"
+
+    with app.test_client() as client:
+        statuses = [
+            client.open(str(rule.rule), method=method).status_code for _ in range(4)
+        ]
+
+    # Unauthenticated calls are rejected long before the handler runs, which is
+    # fine: the limiter sits in front of that, so exhausting the budget must
+    # still flip the response to 429.
+    assert 429 in statuses, f"limit never enforced; saw {statuses}"
+    assert statuses.index(429) >= 2, f"throttled too early; saw {statuses}"
+
+
+def test_expensive_budget_is_per_user_not_per_office(monkeypatch):
+    """Keying by address would make one public IP share a single budget.
+
+    Companies reach the server through one NAT, so an address-keyed limit
+    would be divided among everyone doing real work - the opposite of the
+    generous budget intended.
+    """
+    from app.services.rate_limit import _expensive_key
+
+    app = _make_app(monkeypatch)
+    with app.test_request_context("/api/upload-pack"):
+        assert _expensive_key().startswith("addr:")

@@ -1004,6 +1004,17 @@ def create_app(config_object=None):
 
 
 
+    # Expensive-route rate limits, applied HERE and not in init_rate_limiting:
+    # that runs before any blueprint exists, so the lookup would find nothing
+    # and skip every route in silence (OPS-RATE-01).
+    if app.config.get("RATE_LIMIT_ENABLED"):
+        try:
+            from app.services.rate_limit import apply_expensive_limits
+
+            apply_expensive_limits(app)
+        except Exception:
+            app.logger.exception("Failed to apply expensive-route rate limits")
+
     # Make files_base available in all templates for the frontend runtime
     @app.context_processor
     def inject_files_base():
