@@ -269,3 +269,31 @@ def test_public_share_part_detail_treats_placeholder_approval_alias_as_unapprove
     assert detail["part"]["field_values"]["approved"] is False
     assert detail["part"]["field_values"]["approved_by"] == ""
     assert detail["part"]["field_values"]["approved_date"] == "2026-06-24"
+
+
+def test_share_list_resolves_a_blank_revision(client):
+    """A blank rev means "this part's actual revision", not the empty string.
+
+    PartDetailPage fetches shares before its revision state has resolved, so it
+    sends rev= empty. Requiring revision == "" 404'd every part that has a real
+    revision, which reached users as a page that only worked after F5.
+    """
+    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin = _make_user("blank-rev@example.com", roles=[admin_role])
+    Part(part_number="REVPART", revision="1", description="has a revision").save()
+    _login(client, admin)
+
+    resp = client.get("/api/parts/REVPART/shares?rev=")
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.get_json()["ok"] is True
+
+
+def test_share_list_still_honours_an_explicit_revision(client):
+    """A revision that genuinely does not exist must still 404."""
+    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin = _make_user("explicit-rev@example.com", roles=[admin_role])
+    Part(part_number="REVPART2", revision="1", description="x").save()
+    _login(client, admin)
+
+    assert client.get("/api/parts/REVPART2/shares?rev=1").status_code == 200
+    assert client.get("/api/parts/REVPART2/shares?rev=99").status_code == 404

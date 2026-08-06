@@ -690,8 +690,19 @@ Root cause was NOT the frontend: it already loads lazily, one level at a time.
   ROOT. A deeper fix would authorise lazily per expanded level instead of
   proving the whole tree up front — that changes security semantics, so it was
   NOT attempted here.
-  NOT REPRODUCED: the "page does not exist until F5" report. /ui/part/<pn>
-  routes all resolve; needs a concrete failing URL to chase.
+  "PAGE DOES NOT EXIST UNTIL F5" — FOUND AND FIXED 2026-08-06. The user
+  supplied the failing request:
+      GET /api/parts/J200684/shares?rev=   -> 404
+  from a page at /ui/part/J200684?rev=1. The revision was EMPTY in the call
+  even though the page had one: PartDetailPage fetches share links before its
+  revision state resolves. list_part_shares filtered revision__iexact="" and
+  so missed every part that has a real revision.
+  FIX: a blank rev now means "whichever revision this part actually has" —
+  exact-match first, newest otherwise. An explicitly WRONG revision still 404s,
+  which a second test pins. Verified against the real database (J200684 rev='1'
+  resolves for both rev= and rev=1) and the test fails against the old code.
+  NOTE the same blank-vs-missing revision assumption may exist on other
+  endpoints; this fixed the reported one only.
 ========================================================================
 
 Progressive mitigation roadmap

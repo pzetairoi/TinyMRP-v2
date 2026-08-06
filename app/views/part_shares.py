@@ -1152,12 +1152,21 @@ def list_part_shares(pn: str):
         )
     ):
         return jsonify({"ok": False, "error": "forbidden"}), 403
-    rev = normalize_share_revision(request.args.get("rev"))
-    part = (
-        scope_queryset(Part.objects, current_user, "parts")
-        .filter(part_number__iexact=pn, revision__iexact=rev)
-        .first()
-    )
+    # A blank rev means "whichever revision this part actually has", not
+    # "the revision literally equal to empty string". The detail page fetches
+    # shares before its revision state has resolved, so it sends rev= empty and
+    # every part with a real revision 404'd - which surfaced as a page that
+    # only worked after F5.
+    scoped = scope_queryset(Part.objects, current_user, "parts")
+    requested_rev = request.args.get("rev")
+    rev = normalize_share_revision(requested_rev)
+    if rev:
+        part = scoped.filter(part_number__iexact=pn, revision__iexact=rev).first()
+    else:
+        part = (
+            scoped.filter(part_number__iexact=pn, revision__iexact="").first()
+            or scoped.filter(part_number__iexact=pn).order_by("-updated_at").first()
+        )
     if not part:
         return jsonify({"ok": False, "error": "not_found"}), 404
     rows = [
