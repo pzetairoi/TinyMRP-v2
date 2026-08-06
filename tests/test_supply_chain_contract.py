@@ -108,7 +108,7 @@ def test_application_build_stages_use_verified_manifest_digests():
         in dockerfile
     )
     assert "apt-get" not in dockerfile
-    assert "urllib.request.urlopen('http://localhost:8000/api/health', timeout=4)" in dockerfile
+    assert "urllib.request.urlopen('http://localhost:8000/api/ready', timeout=4)" in dockerfile
     assert "python -m pip check" in dockerfile
     assert "python -m pip uninstall -y setuptools wheel" in dockerfile
     assert "python -m pip uninstall -y pip" in dockerfile

@@ -216,3 +216,28 @@ def test_diagnostics_route_is_registered(monkeypatch):
     app = _make_app(monkeypatch)
     rules = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/api/diagnostics" in rules
+
+
+def test_every_container_healthcheck_uses_readiness_not_liveness():
+    """OPS-HEALTH-01: readiness was built, tested, and wired to nothing.
+
+    /api/health returns ok=true unconditionally, so a container whose Mongo was
+    unreachable or whose deliverables volume was unmounted still reported
+    healthy and failed on the first real request. Every healthcheck now asks
+    the endpoint that actually proves the dependencies work.
+
+    The Dockerfile matters most: that HEALTHCHECK is baked into the image, so
+    it applies however the container is launched.
+    """
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    for relative in (
+        "docker/app/Dockerfile",
+        "docker-compose.yml",
+        "docker-compose.onefolder.yml",
+        "deploy/scripts/lib/common.sh",
+    ):
+        text = (repo_root / relative).read_text(encoding="utf-8")
+        assert "urlopen('http://localhost:8000/api/ready'" in text, relative
+        assert "urlopen('http://localhost:8000/api/health'" not in text, relative

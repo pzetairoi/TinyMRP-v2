@@ -130,14 +130,24 @@ WHAT hardeningplan.txt IS NOW
       write, auth, import or file-commit path must log at minimum.
       Exit: no silent suppression on a path that can lose or corrupt data.
 
-  E3. Wire /api/ready into orchestration          SMALL        OPS-HEALTH-01
-      Start with docker/app/Dockerfile:61 — it is baked into the image, so it
-      applies to every deployment regardless of how it is launched. Then the
-      two compose files, then the five deploy scripts.
-      CAUTION: readiness returns 503 while dependencies warm up. Any consumer
-      that treats 503 as fatal during startup will break the guided path.
-      Re-run the Caddy contract tests.
-      Exit: a container with an unreachable Mongo is reported unhealthy.
+  E3. Wire /api/ready into orchestration        DONE 2026-08-07
+      Every container healthcheck now asks readiness instead of liveness:
+      docker/app/Dockerfile (baked into the image, so it applies however the
+      container is launched), both compose files, and the per-instance
+      renderer. HEALTHCHECK start-period raised 25s -> 60s because readiness
+      pings Mongo, which is still warming while the app boots.
+      A contract test asserts none of the four still points at /api/health.
+      CONSEQUENCE, deliberate and worth knowing: "healthy" is now a real
+      claim, so an instance whose Mongo is unreachable, whose deliverables
+      volume is unmounted, or which has under 512 MB free will FAIL an update
+      and roll back. That is correct - do not deploy onto a broken instance -
+      but it means a degraded instance must be fixed before it can be updated.
+      READINESS_MIN_FREE_DISK_MB=0 disables the disk check if it ever blocks
+      an emergency fix.
+      NOT done here: the deploy scripts' own curl checks (doctor.sh,
+      install-server.sh, update-instance.sh) still probe /api/health directly.
+      They gate on container health anyway, so they inherit readiness; adding
+      a readiness-detail report to doctor.sh is a nice-to-have, not a gap.
 
   E4. Redis in the guided per-instance compose   DONE 2026-08-07
       The rendered per-instance compose now ships Redis (private network only,

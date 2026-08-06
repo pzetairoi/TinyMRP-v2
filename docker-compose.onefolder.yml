@@ -70,7 +70,7 @@ services:
         source: ${TINYMRP_DELIVERABLES_DIR:?Set TINYMRP_DELIVERABLES_DIR (host deliverables folder, e.g. C:/CADEXPORT/Deliverables)}/.tinymrp/instance
         target: /app/instance
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ready', timeout=4).read()"]
       interval: 15s
       timeout: 5s
       retries: 10

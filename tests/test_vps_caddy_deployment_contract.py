@@ -60,7 +60,7 @@ def test_per_instance_compose_renderer_keeps_mongo_private_and_app_behind_caddy(
     assert "condition: service_healthy" in app
     assert "source: ${deliverables_dir}" in app
     assert "target: /data/deliverables" in app
-    assert "urllib.request.urlopen('http://localhost:8000/api/health', timeout=4)" in app
+    assert "urllib.request.urlopen('http://localhost:8000/api/ready', timeout=4)" in app
     assert "ports:" not in app
     assert "      - private" in app
     assert "      - proxy" in app

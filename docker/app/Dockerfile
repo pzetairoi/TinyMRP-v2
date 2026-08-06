@@ -57,8 +57,14 @@ USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=5 \
-  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).read()"]
+# /api/ready, not /api/health (OPS-HEALTH-01). Liveness returned ok=true
+# unconditionally, so "healthy" only ever meant "the process is running" - a
+# container with an unreachable Mongo or an unmounted deliverables volume
+# reported healthy and failed on the first real request.
+# start-period is generous because readiness pings Mongo, which is still
+# electing/warming while the app boots; failures during that window do not count.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ready', timeout=4).read()"]
 
 # Entrypoint seeds default roles (and optionally a first admin) on first boot
 ENTRYPOINT ["/bin/sh", "/app/docker/app/entrypoint.sh"]

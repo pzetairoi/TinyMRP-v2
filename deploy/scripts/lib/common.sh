@@ -778,7 +778,7 @@ services:
         source: ${deliverables_dir}
         target: /data/deliverables
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ready', timeout=4).read()"]
       interval: 15s
       timeout: 5s
       retries: 20
