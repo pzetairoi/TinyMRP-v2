@@ -59,6 +59,11 @@ mongo_image() {
   printf '%s\n' "${TINYMRP_MONGO_IMAGE:-mongo:6.0@sha256:8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac}"
 }
 
+redis_image() {
+  printf '%s
+' "${TINYMRP_REDIS_IMAGE:-redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2}"
+}
+
 caddy_image() {
   printf '%s\n' "${TINYMRP_CADDY_IMAGE:-caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648}"
 }
@@ -718,6 +723,32 @@ services:
     networks:
       - private
 
+  # OPS-RATE-01. Without this every gunicorn worker kept its own in-memory
+  # counters, so the effective limit was the configured one MULTIPLIED by the
+  # worker count - which is not a limit. Holds only ephemeral counters, never
+  # application data, so /data is a tmpfs and losing it costs nothing but a
+  # reset of the current windows.
+  redis:
+    image: $(redis_image)
+    container_name: ${project_name}-redis
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /tmp
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - private
+
   app:
     image: ${app_image}
     build:
@@ -737,6 +768,11 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+      # service_started, not service_healthy: rate limiting degrades to
+      # fail-open if Redis is unavailable, so waiting on its health would delay
+      # startup for a non-critical dependency.
+      redis:
+        condition: service_started
     volumes:
       - type: bind
         source: ${deliverables_dir}

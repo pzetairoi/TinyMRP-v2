@@ -203,6 +203,10 @@ INSTANCE_URL="$(primary_url_for_domain "$DOMAIN" "$TLS_MODE")"
 TINYMRP_ALLOWED_ORIGINS="$INSTANCE_URL"
 TINYMRP_CORS_CREDENTIALS="true"
 TINYMRP_SEED_ADMIN="true"
+# OPS-RATE-01. The app defaults to memory://, which gives each gunicorn worker
+# its own counters - so the real limit was the configured one times the worker
+# count. "redis" is the compose service name on the instance's private network.
+RATE_LIMIT_STORAGE_URI="${RATE_LIMIT_STORAGE_URI:-redis://redis:6379/0}"
 
 if [ -n "$ADMIN_EMAIL_ARG" ]; then
   TINYMRP_ADMIN_EMAIL="$ADMIN_EMAIL_ARG"
@@ -248,6 +252,7 @@ upsert_env_value "$INSTANCE_ENV" "MONGO_ROOT_USER" "$MONGO_ROOT_USER"
 upsert_env_value "$INSTANCE_ENV" "MONGO_APP_USER" "$MONGO_APP_USER"
 upsert_env_value "$INSTANCE_ENV" "MONGO_APP_PASSWORD" "$MONGO_APP_PASSWORD"
 upsert_env_value "$INSTANCE_ENV" "MONGO_ROOT_PASSWORD" "$MONGO_ROOT_PASSWORD"
+upsert_env_value "$INSTANCE_ENV" "RATE_LIMIT_STORAGE_URI" "$RATE_LIMIT_STORAGE_URI"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_SECURITY_MODE" "$TINYMRP_SECURITY_MODE"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_ALLOWED_ORIGINS" "$TINYMRP_ALLOWED_ORIGINS"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_CORS_CREDENTIALS" "$TINYMRP_CORS_CREDENTIALS"

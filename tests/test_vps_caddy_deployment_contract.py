@@ -40,7 +40,9 @@ def test_per_instance_compose_renderer_keeps_mongo_private_and_app_behind_caddy(
     common = _read("deploy/scripts/lib/common.sh")
     renderer = _shell_function(common, "render_instance_compose")
 
-    mongo = renderer.split("  mongo:", 1)[1].split("\n  app:", 1)[0]
+    # redis now sits between mongo and app, so stop the slice there or these
+    # assertions quietly start covering two services.
+    mongo = renderer.split("  mongo:", 1)[1].split("\n  redis:", 1)[0]
     app = renderer.split("\n  app:", 1)[1].split("\nnetworks:", 1)[0]
     networks = renderer.split("\nnetworks:", 1)[1]
 
@@ -188,3 +190,53 @@ def test_doctor_checks_the_live_caddy_file_contract_and_routed_health():
     assert 'endpoint_responds "${INSTANCE_DOMAIN}" "${TLS_MODE}"' in check_instance
     assert 'api_health_responds "${INSTANCE_DOMAIN}" "${TLS_MODE}"' in check_instance
     assert 'docker port "${MONGO_CONTAINER_NAME}" 27017' in check_instance
+
+
+def test_per_instance_compose_ships_redis_so_limits_are_shared_across_workers():
+    """OPS-RATE-01.
+
+    Redis reached the single-host compose but never the GUIDED per-instance
+    one, so real VPS instances kept counting in memory - which means every
+    gunicorn worker held its own counters and the effective limit was the
+    configured one multiplied by the worker count.
+    """
+    common = _read("deploy/scripts/lib/common.sh")
+    renderer = _shell_function(common, "render_instance_compose")
+
+    redis = renderer.split("\n  redis:", 1)[1].split("\n  app:", 1)[0]
+    app = renderer.split("\n  app:", 1)[1].split("\nnetworks:", 1)[0]
+
+    assert "image: $(redis_image)" in redis
+    # Never published, never reachable from the proxy network.
+    assert "ports:" not in redis
+    assert "      - private" in redis
+    assert "      - proxy" not in redis
+    # Counters only: persistence off and /data on a tmpfs, so there is no
+    # instance state here to back up or restore.
+    assert '"--save", ""' in redis
+    assert '"--appendonly", "no"' in redis
+    assert "      - /data" in redis
+    assert "read_only: true" in redis
+
+    # Losing rate limiting is not worth delaying startup for, so the app must
+    # not wait on Redis health the way it waits on Mongo.
+    assert "condition: service_started" in app
+
+
+def test_instance_env_points_the_app_at_redis():
+    """A Redis nobody connects to is theatre: the app defaults to memory://."""
+    created = _read("deploy/scripts/create-instance.sh")
+    assert 'RATE_LIMIT_STORAGE_URI="${RATE_LIMIT_STORAGE_URI:-redis://redis:6379/0}"' in created
+    assert 'upsert_env_value "$INSTANCE_ENV" "RATE_LIMIT_STORAGE_URI"' in created
+
+    # NEW instances only, deliberately. Two invariants of the update path make
+    # retrofitting an existing instance from here wrong:
+    #   1. update-instance.sh never writes the instance .env, because rollback
+    #      restores the compose file and the container - an env edit would
+    #      survive the rollback it was supposed to be undone by.
+    #   2. it recreates the app with --no-deps, so an update would never start
+    #      the Redis container. Writing the URI there would point a live
+    #      instance at a host that does not exist.
+    # Migrating an existing instance is therefore an explicit owner action.
+    updated = _read("deploy/scripts/update-instance.sh")
+    assert 'upsert_env_value "$INSTANCE_ENV"' not in updated

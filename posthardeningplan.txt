@@ -94,10 +94,22 @@ WHAT hardeningplan.txt IS NOW
       vulnerability-disclosure contact, third-party notices, accessibility
       statement. Needs counsel, not engineering.
 
-  O6. Confirm the Trivy gate is meant to be advisory
-      .github/workflows/release-image.yml:52 is continue-on-error, so a
-      critical CVE in the image does not block a release. If that is not
-      intended, it is a one-line change.
+  O6. Trivy gate — AUDIT FINDING WAS WRONG, decision still open
+      The gate DOES block. `continue-on-error: true` exists only so the SBOM
+      and evidence upload run first; "Enforce image vulnerability gate" then
+      fails the job. Effective policy today: a FIXABLE HIGH or CRITICAL blocks
+      a release (ignore-unfixed: true).
+      The owner answered "block only CRITICAL" on the wrong premise, which
+      would LOOSEN the gate rather than tighten it. Left unchanged pending a
+      decision made with the correct information.
+
+  O7. Give existing instances shared rate limiting
+      New instances get Redis from E4. Existing ones keep memory:// until
+      migrated by hand, because the update path is deliberately app-only and
+      rollback-safe (see E4). Per instance: add RATE_LIMIT_STORAGE_URI to its
+      .env and bring the full stack up once so Redis starts.
+      Low urgency: the failure mode is a limit that is looser than configured,
+      not an outage.
 
 ------------------------------------------------------------------------
 2B. ENGINEERING — ordered by value per unit of risk
@@ -127,11 +139,20 @@ WHAT hardeningplan.txt IS NOW
       Re-run the Caddy contract tests.
       Exit: a container with an unreachable Mongo is reported unhealthy.
 
-  E4. Redis in the guided per-instance compose    SMALL        OPS-RATE-01
-      deploy/scripts/lib/common.sh has zero Redis references, so real VPS
-      instances still rate-limit per-worker in memory.
-      Exit: a rendered per-instance compose contains Redis and the app points
-      at it; contract test asserts this.
+  E4. Redis in the guided per-instance compose   DONE 2026-08-07
+      The rendered per-instance compose now ships Redis (private network only,
+      no ports, persistence off, /data on tmpfs) and create-instance.sh writes
+      RATE_LIMIT_STORAGE_URI into the instance .env. NEW instances only.
+      *** Retrofitting an EXISTING instance from update-instance.sh is wrong,
+      and the contract test now says so. Two invariants block it:
+        1. update-instance.sh never writes the instance .env - rollback
+           restores the compose and container, so an env edit would survive
+           the rollback that was meant to undo it.
+        2. it recreates the app with --no-deps, so an update never starts the
+           Redis container. Writing the URI there would point a live instance
+           at a host that does not exist.
+      I tried exactly that and the existing contract test caught it. Migrating
+      an existing instance is an OWNER action - see O7. ***
 
   E5. Per-endpoint rate limits                    MEDIUM       OPS-RATE-01
       *** READ the withdrawn attempt in hardeningplan.txt Phase 5 first. ***
