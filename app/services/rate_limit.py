@@ -22,6 +22,21 @@ from flask import Flask, jsonify, request
 
 logger = logging.getLogger(__name__)
 
+# Endpoints whose cost is measured in seconds and disk I/O rather than
+# milliseconds: building document packs, importing a pack, and exports. A
+# global /api budget does not protect these - a handful of concurrent docpack
+# builds can saturate the box while staying well inside any per-minute API
+# allowance. Each entry is (endpoint, default limit); the limit is overridable
+# with RATE_LIMIT_EXPENSIVE.
+_EXPENSIVE_ENDPOINTS = (
+    "docpacks_api.build_order",
+    "part_shares.public_share_docpack_build",
+    "upload_pack_api.upload_pack",
+    "upload_pack_api.upload_extra_files",
+    "tools.excel_compile",
+    "tools.excel_compile_download",
+)
+
 _AUTH_ENDPOINTS = (
     "security.login",
     "security.change_password",
@@ -115,6 +130,21 @@ def init_rate_limiting(app: Flask):
             app.view_functions[endpoint] = limiter.limit(
                 login_limit, error_message="Too many attempts. Try again later."
             )(view)
+
+    # Per-endpoint limits for the expensive routes are NOT wired here.
+    #
+    # Attempted 2026-08-07 and withdrawn: Flask-Limiter records a decorated
+    # limit at DECORATION time, so wrapping an already-registered view
+    # (limiter.limit(...)(app.view_functions[name])) silently applies nothing -
+    # verified, the limit never reached limit_manager._decorated_limits and no
+    # 429 was ever returned. The auth endpoints work only because they REPLACE
+    # app.view_functions[endpoint] with the wrapper.
+    #
+    # Doing this properly means decorating the views at definition time in
+    # app/views/*.py, which is a change across six modules and belongs with the
+    # owner's per-route budget decision rather than being guessed here.
+    # _EXPENSIVE_ENDPOINTS is kept, and a test asserts every name still
+    # resolves, so the list does not rot before that work happens.
 
     # 429 responses as JSON for API paths, friendly text otherwise. Audit-logged.
     @app.errorhandler(429)

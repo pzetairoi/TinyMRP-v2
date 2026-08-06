@@ -181,9 +181,14 @@ MONGO_DB="${MONGO_DB:-tinymrp_${INSTANCE_NAME//-/_}}"
 # that an in-place upgrade needs. Credentials are generated here rather than
 # asked for, so the secure path is also the effortless one.
 # Setting MONGO_URI explicitly still wins, which keeps the escape hatch open.
-MONGO_ROOT_USER="${MONGO_ROOT_USER:-tinymrp_${INSTANCE_NAME//-/_}}"
+MONGO_ROOT_USER="${MONGO_ROOT_USER:-tinymrp_root_${INSTANCE_NAME//-/_}}"
+# Least-privilege user the APPLICATION connects as (OPS-DBAUTH-01). Root is
+# used only to create it on first boot; the app itself never holds root, so a
+# compromised app credential cannot reach other databases or administer Mongo.
+MONGO_APP_USER="${MONGO_APP_USER:-tinymrp_app_${INSTANCE_NAME//-/_}}"
+MONGO_APP_PASSWORD="${MONGO_APP_PASSWORD:-$(random_secret 32)}"
 MONGO_ROOT_PASSWORD="${MONGO_ROOT_PASSWORD:-$(random_secret 32)}"
-MONGO_URI="${MONGO_URI:-mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@${MONGO_CONTAINER_NAME}:27017/${MONGO_DB}?authSource=admin}"
+MONGO_URI="${MONGO_URI:-mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@${MONGO_CONTAINER_NAME}:27017/${MONGO_DB}?authSource=${MONGO_DB}}"
 SECRET_KEY="${SECRET_KEY:-$(random_secret 48)}"
 SECURITY_PASSWORD_SALT="${SECURITY_PASSWORD_SALT:-$(random_secret 48)}"
 FILES_LOCAL_ROOT="/data/deliverables"
@@ -240,6 +245,8 @@ upsert_env_value "$INSTANCE_ENV" "SECURITY_PASSWORD_SALT" "$SECURITY_PASSWORD_SA
 # Mongo root credentials must reach the mongo container's MONGO_INITDB_ROOT_*
 # variables on first boot, which is the only moment Mongo will create them.
 upsert_env_value "$INSTANCE_ENV" "MONGO_ROOT_USER" "$MONGO_ROOT_USER"
+upsert_env_value "$INSTANCE_ENV" "MONGO_APP_USER" "$MONGO_APP_USER"
+upsert_env_value "$INSTANCE_ENV" "MONGO_APP_PASSWORD" "$MONGO_APP_PASSWORD"
 upsert_env_value "$INSTANCE_ENV" "MONGO_ROOT_PASSWORD" "$MONGO_ROOT_PASSWORD"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_SECURITY_MODE" "$TINYMRP_SECURITY_MODE"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_ALLOWED_ORIGINS" "$TINYMRP_ALLOWED_ORIGINS"

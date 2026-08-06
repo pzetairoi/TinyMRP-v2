@@ -21,8 +21,15 @@ services:
       # Empty values leave authentication disabled (backward compatible).
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-}
+      # Scoped application user, created on FIRST boot only (OPS-DBAUTH-01).
+      # The app connects as this instead of root, so a compromised application
+      # credential cannot reach other databases or administer the server.
+      MONGO_APP_USER: ${MONGO_APP_USER:-}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:-}
     volumes:
       - mongo_data:/data/db
+      # Runs once, on an empty data directory, already authenticated as root.
+      - ./docker/mongo:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s

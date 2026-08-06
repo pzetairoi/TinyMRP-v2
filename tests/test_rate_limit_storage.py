@@ -144,3 +144,31 @@ def test_health_and_ready_remain_exempt_from_limits(monkeypatch):
         for _ in range(5):
             assert client.get("/api/health").status_code == 200
             assert client.get("/api/ready").status_code in (200, 503)
+
+
+# --- expensive endpoints (OPS-RATE-01 residue) -------------------------------
+
+
+def test_every_expensive_endpoint_name_actually_exists(monkeypatch):
+    """A drifted endpoint name silently protects nothing.
+
+    The wiring skips endpoints it cannot find so a rename cannot break startup
+    - which also means a typo would leave the route unthrottled with no error.
+    My first attempt named all six wrongly and this test is why that was
+    caught.
+    """
+    from app.services.rate_limit import _EXPENSIVE_ENDPOINTS
+
+    app = _make_app(monkeypatch)
+    missing = [name for name in _EXPENSIVE_ENDPOINTS if name not in app.view_functions]
+    assert not missing, f"these endpoints no longer exist: {missing}"
+
+
+def test_setting_an_expensive_limit_does_not_break_startup(monkeypatch):
+    """The setting is read but not yet enforced - see rate_limit.py.
+
+    Kept so the config path stays exercised while the real per-route wiring is
+    outstanding.
+    """
+    assert _make_app(monkeypatch, RATE_LIMIT_EXPENSIVE="3 per minute") is not None
+    assert _make_app(monkeypatch, RATE_LIMIT_EXPENSIVE="") is not None

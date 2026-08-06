@@ -698,10 +698,18 @@ services:
       # behaviour for instances created before this change.
       MONGO_INITDB_ROOT_USERNAME: \${MONGO_ROOT_USER:-}
       MONGO_INITDB_ROOT_PASSWORD: \${MONGO_ROOT_PASSWORD:-}
+      # Scoped application user created on first boot (OPS-DBAUTH-01). The app
+      # connects as this rather than root.
+      MONGO_APP_USER: \${MONGO_APP_USER:-}
+      MONGO_APP_PASSWORD: \${MONGO_APP_PASSWORD:-}
     volumes:
       - type: bind
         source: ${mongo_data_dir}
         target: /data/db
+      - type: bind
+        source: ${repo_root_path}/docker/mongo
+        target: /docker-entrypoint-initdb.d
+        read_only: true
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s

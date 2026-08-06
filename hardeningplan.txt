@@ -1202,10 +1202,21 @@ Security defaults — [PARTIAL 2026-08-04, Claude] Mongo auth (OPS-DBAUTH-01)
        Full suite 693 passed, 1 skipped. ruff/bandit clean. Bash syntax OK.
        Protected Caddy contract + readiness suites green (32 tests).
 
+  DONE 2026-08-07 Least-privilege application DB user — the main gap closed.
+       docker/mongo/10-app-user.js runs in /docker-entrypoint-initdb.d, which
+       Mongo executes ONCE on the first boot of an empty data directory, already
+       authenticated as root. It creates MONGO_APP_USER with readWrite on the
+       application database ONLY (not dbOwner: the app never creates users).
+       create-instance.sh now generates that credential and the app's MONGO_URI
+       uses it with authSource=<db>; root exists only to create it.
+       Skipped silently when MONGO_APP_USER/PASSWORD are unset, so existing
+       instances are unaffected.
+       VERIFIED against a real Mongo container, not just config:
+         - the scoped user CAN write to its own database
+         - reading the admin database is refused (Unauthorized)
+         - creating another user is refused (Unauthorized) — no escalation
+
   STILL TODO here (OPS-DBAUTH-01 stays OPEN):
-    - Least-privilege application DB user. The generated credential is the
-      ROOT user; the app should use a scoped user limited to its own database.
-      This is the main remaining gap in this item.
     - Existing instances are NOT migrated. Enabling auth on a running instance
       still needs the documented manual user-creation procedure.
     - docker-compose.yml (the non-guided single-host path) still defaults to
@@ -1252,9 +1263,19 @@ Rate limiting — [DONE 2026-08-04, Claude] OPS-RATE-01 shared storage
   STILL TODO in this item:
     - "Apply global and endpoint-specific limits." Login endpoints are limited
       and RATE_LIMIT_API provides a global /api budget, but it is UNSET by
-      default, so out of the box only auth endpoints are throttled. Choosing
-      per-endpoint budgets for the expensive routes (docpack build, upload
-      pack, exports) is not done.
+      default, so out of the box only auth endpoints are throttled.
+      *** ATTEMPTED AND WITHDRAWN 2026-08-07 — read before retrying. ***
+      Flask-Limiter records a decorated limit at DECORATION time, so wrapping an
+      already-registered view (limiter.limit(...)(app.view_functions[name]))
+      applies NOTHING. Verified: the limit never reached
+      limit_manager._decorated_limits and no 429 was ever returned. The auth
+      endpoints work only because they REPLACE app.view_functions[endpoint].
+      limit_manager.add_endpoint_hint does not register a limit either;
+      add_decorated_limit needs a LimitGroup, not a parsed limit.
+      Doing this properly means decorating the views at definition time across
+      six modules in app/views/, and picking per-route budgets is an owner
+      decision. _EXPENSIVE_ENDPOINTS is kept with a test asserting every name
+      still resolves, so the list cannot rot before that work happens.
     - The guided VPS/Caddy per-instance compose does NOT yet ship Redis; only
       the main docker-compose.yml does. Guided instances still use per-worker
       memory storage.
