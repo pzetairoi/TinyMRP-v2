@@ -582,9 +582,20 @@ def create_app(config_object=None):
             files_prefix = (app.config.get("FILES_URL_PREFIX") or "").strip()
             img_src = ["'self'", "data:", "blob:", "https:"]
             connect_src = ["'self'"]
-            if files_prefix:
-                img_src.append(files_prefix)
-                connect_src.append(files_prefix)
+            # Only an ABSOLUTE origin belongs in a CSP source list. FILES_URL_PREFIX
+            # is normally a same-origin path such as "/deliverables", and a path is
+            # not a valid host: browsers reject the whole source with
+            # "Couldn't parse invalid host /deliverables" and drop it. Same-origin
+            # paths are already covered by 'self', so adding them achieved nothing
+            # except a console warning on every page load.
+            if files_prefix and "://" in files_prefix:
+                from urllib.parse import urlsplit
+
+                parsed = urlsplit(files_prefix)
+                if parsed.scheme and parsed.netloc:
+                    origin = f"{parsed.scheme}://{parsed.netloc}"
+                    img_src.append(origin)
+                    connect_src.append(origin)
             # 'unsafe-inline' is still required by the legacy Jinja admin pages.
             # Once those inline scripts move to static files, set
             # TINYMRP_CSP_ALLOW_INLINE=false to drop it (burn-down: plan Phase 1.5).

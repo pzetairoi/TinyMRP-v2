@@ -225,3 +225,51 @@ def test_style_src_never_carries_a_nonce(monkeypatch):
         app = _make_app(monkeypatch, TINYMRP_CSP_ALLOW_INLINE=flag)
         with app.test_client() as client:
             assert "'nonce-" not in _directive(_csp(client), "style-src")
+
+
+def test_a_path_style_files_prefix_never_reaches_the_csp(monkeypatch):
+    """FILES_URL_PREFIX is normally a path, and a path is not a valid CSP host.
+
+    Injecting "/deliverables" made browsers log
+    "Couldn't parse invalid host /deliverables" and discard the source on every
+    page load. Same-origin paths are already covered by 'self'.
+    """
+    app = _make_app(monkeypatch)
+    app.config["FILES_URL_PREFIX"] = "/deliverables"
+    with app.test_client() as client:
+        csp = _csp(client)
+
+    assert "/deliverables" not in csp
+    assert "'self'" in _directive(csp, "img-src")
+
+
+def test_an_absolute_files_origin_is_still_allowed(monkeypatch):
+    """A real external file host must keep working."""
+    app = _make_app(monkeypatch)
+    app.config["FILES_URL_PREFIX"] = "https://files.example.com/deliverables"
+    with app.test_client() as client:
+        csp = _csp(client)
+
+    # The origin only - a CSP source carries no path.
+    assert "https://files.example.com" in _directive(csp, "img-src")
+    assert "https://files.example.com" in _directive(csp, "connect-src")
+    assert "https://files.example.com/deliverables" not in csp
+
+
+def test_csp_sources_are_all_syntactically_valid(monkeypatch):
+    """Guard the whole header, not just the prefix that caused this bug.
+
+    Every source must be a keyword, a scheme, or a host - never a bare path.
+    """
+    app = _make_app(monkeypatch)
+    app.config["FILES_URL_PREFIX"] = "/deliverables"
+    with app.test_client() as client:
+        csp = _csp(client)
+
+    for directive in csp.split(";"):
+        parts = directive.split()
+        for source in parts[1:]:
+            assert not source.startswith("/"), (
+                f"{source!r} in {parts[0]!r} is a path, which browsers reject "
+                "as an invalid host"
+            )

@@ -416,6 +416,19 @@ Completed so far:
                    across 14 templates, a real visual-regression risk, for zero
                    security gain. script-src is where XSS lands.
 
+                   BUG FIXED 2026-08-06 (reported from a real browser):
+                     "Content-Security-Policy: Couldn't parse invalid host
+                     /deliverables" on every page load. FILES_URL_PREFIX is
+                     normally a PATH (/deliverables), and a path is not a valid
+                     CSP host — browsers rejected the source and discarded it.
+                     Same-origin paths are already covered by 'self', so
+                     appending it achieved nothing but a console warning.
+                     Now only an ABSOLUTE origin is appended, reduced to
+                     scheme://host (a CSP source carries no path). 3 tests,
+                     verified to fail against the old code, including a
+                     structural one asserting NO source in ANY directive starts
+                     with "/" — so this class of bug cannot return.
+
                    REMAINING — needs a HUMAN, no code left:
                      - Flip TINYMRP_CSP_ALLOW_INLINE=false and exercise the
                        admin UI in a browser. No test substitutes for this.
