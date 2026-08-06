@@ -655,6 +655,45 @@ Phase 1C completion record (2026-08-03; commit 7cd50bd):
          legacy API tokens and add-in storage remain Phase 1B/7 residuals.
 ========================================================================
 
+========================================================================
+PERFORMANCE INCIDENT 2026-08-06 — BOM tree took 27 s (user-reported)
+========================================================================
+Measured against the real local database (J200684: 2034 nodes, 10 levels).
+Root cause was NOT the frontend: it already loads lazily, one level at a time.
+
+  1. authorised_part_pairs built one anchored $regex clause PER PAIR inside a
+     single $or. Anchored regexes cannot use an index, so Mongo
+     collection-scanned once per clause — ~16 s of a single call.
+     FIX: one case-insensitive $in over part_number, revision compared in
+     Python. Verified IDENTICAL results for admin / customer / anonymous.
+     *** My first attempt used a plain $in and broke case-insensitive
+     matching — 18 tests caught it. Part numbers are matched case-insensitively
+     throughout; do not "optimise" that away. ***
+  2. _bom_is_fully_authorised walked the WHOLE tree depth-first, one query per
+     node (~1775 round trips at ~19 ms). It runs on every request, including
+     the lazy root that renders no children.
+     FIX: breadth-first, one query per LEVEL.
+  3. _node called preview_png_urls_for (~65 ms, disk I/O) and _has_children
+     (~25 ms) PER CHILD. preview_png_urls_map already existed and was unused.
+     FIX: resolve both per sibling-set. _has_children_map is 134x faster with
+     identical answers.
+
+  RESULT for J200684: 35.6 s -> 1.76 s (20x). Normal assemblies 43-350 ms.
+
+  UI: BomPage now shows a role="status" spinner and CLEARS the previous rows
+  before loading. Both symptoms the user reported — "looks empty but is still
+  loading" and "you can still see the child's BOM while the parent loads" —
+  were the same missing state.
+
+  STILL SLOW: J200684 at 1.76 s is better but not good. The remaining cost is
+  the authorisation walk visiting 2034 nodes to answer a question about the
+  ROOT. A deeper fix would authorise lazily per expanded level instead of
+  proving the whole tree up front — that changes security semantics, so it was
+  NOT attempted here.
+  NOT REPRODUCED: the "page does not exist until F5" report. /ui/part/<pn>
+  routes all resolve; needs a concrete failing URL to chase.
+========================================================================
+
 Progressive mitigation roadmap
 The recommended sequence below keeps each phase reviewable and deployable. Phases 0–5 are production blockers; phases 6–10 build commercial maturity.
 Each phase should end with:

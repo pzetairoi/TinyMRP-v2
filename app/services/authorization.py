@@ -868,20 +868,38 @@ def authorised_part_pairs(
         from app.models.part import Part
 
         scoped = scope_queryset(Part.objects, user, "parts", permission=permission)
-        clauses = [
-            {
-                "part_number": {"$regex": f"^{re.escape(pn)}$", "$options": "i"},
-                "revision": {"$regex": f"^{re.escape(rev)}$", "$options": "i"},
-            }
-            for pn, rev in normalized.values()
-        ]
-        found = scoped.filter(Q(__raw__={"$or": clauses})).only(
-            "part_number", "revision"
-        )
-        return frozenset(
-            (str(part.part_number or "").strip().casefold(), str(part.revision or "").strip().casefold())
+
+        # Fetch by part_number with an indexable $in, then match the exact
+        # (pn, rev) identity case-insensitively in Python.
+        #
+        # This used to build one case-insensitive $regex clause PER PAIR inside
+        # a single $or. Regex anchors like that cannot use an index, so Mongo
+        # collection-scanned once per clause: a 2034-node BOM walk spent about
+        # 16 seconds in this one function. The identity semantics are unchanged
+        # - only exact case-insensitive matches are returned - but the database
+        # now does a single indexed lookup and the comparison happens in memory.
+        # One case-insensitive $in over part_number only, instead of one anchored
+        # $regex per (pn, rev) pair. Revision is matched in Python below, so the
+        # database does a single lookup rather than a collection scan per clause.
+        wanted_names = {pn for pn, _rev in normalized.values()}
+        found = scoped.filter(
+            Q(__raw__={
+                "part_number": {
+                    "$in": [
+                        re.compile(f"^{re.escape(name)}$", re.IGNORECASE)
+                        for name in wanted_names
+                    ]
+                }
+            })
+        ).only("part_number", "revision")
+        available = {
+            (
+                str(part.part_number or "").strip().casefold(),
+                str(part.revision or "").strip().casefold(),
+            )
             for part in found
-        )
+        }
+        return frozenset(key for key in normalized if key in available)
     except Exception:
         return frozenset()
 

@@ -90,6 +90,10 @@ export default function BomPage() {
   // --- BOM Tree ---
   const [nodes, setNodes] = useState<TreeNode[]>([])
   const [treeError, setTreeError] = useState<string | null>(null)
+  // Large assemblies take seconds to authorise and load. Without this the
+  // table looks EMPTY while it works, which reads as "this assembly has no
+  // children" - a wrong answer rather than a slow one.
+  const [treeLoading, setTreeLoading] = useState(true)
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({})
   const [fieldConfig, setFieldConfig] = useState<FieldConfigPayload | null>(null)
   const [fieldPreferences, setFieldPreferences] = useState<FieldPreferences | null>(null)
@@ -111,6 +115,11 @@ export default function BomPage() {
     let cancelled = false
     ;(async () => {
       setTreeError(null)
+      setTreeLoading(true)
+      // Clear immediately: navigating from a child to its parent used to leave
+      // the PREVIOUS assembly's rows on screen during the load, which looks
+      // like the new part's BOM.
+      setNodes([])
       try {
         const root = await apiFetch<TreeNode[]>(`/api/bom_tree?pn=${encodeURIComponent(pn)}&rev=${encodeURIComponent(rev || '')}`)
         if (!cancelled) setNodes(withBomOccurrenceKeys(root))
@@ -119,6 +128,8 @@ export default function BomPage() {
           setNodes([])
           setTreeError(apiErrorMessage(e, 'Failed to load the BOM tree.'))
         }
+      } finally {
+        if (!cancelled) setTreeLoading(false)
       }
     })()
     return () => {
@@ -334,6 +345,12 @@ export default function BomPage() {
 
 <div className="mb-4">
   {treeError && <div className="alert alert-danger" role="alert">{treeError}</div>}
+  {treeLoading && !treeError && (
+    <div className="d-flex align-items-center gap-2 text-muted small mb-2" role="status" aria-live="polite">
+      <span className="spinner-border spinner-border-sm" aria-hidden="true" />
+      <span>Loading BOM… large assemblies can take a few seconds.</span>
+    </div>
+  )}
   <div className="d-flex justify-content-end gap-2 mb-2">
     {bomFields.length > 0 && (
       <FieldSelector
