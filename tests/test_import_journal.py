@@ -309,3 +309,47 @@ def test_execute_records_the_key_on_the_journal(db, monkeypatch):
     result = upload_pack.execute_import_plan(_plan([("PN-K", "A")]), idempotency_key="abc123")
     journal = ImportJournal.objects.get(operation_id=result["operation_id"])
     assert journal.idempotency_key == "abc123"
+
+
+# --- operator-facing view (IMPORT-ATOMIC-01 residue) -------------------------
+
+
+def test_journal_row_exposes_what_reconciliation_needs(db):
+    """A row that hides the failure reason cannot be reconciled."""
+    from app.views.upload_pack import _journal_row
+
+    entry = ImportJournal(
+        operation_id="op-1",
+        status="rolled_back",
+        stage="files",
+        uploaded_by="ops@example.com",
+        parts_created=2,
+        touched_parts=["PN-1\x1fA", "PN-2\x1fB"],
+        rollback_actions=["deleted created part PN-1:A"],
+        manual_followup=["pre-existing part PN-9 was modified in place"],
+        error="RuntimeError: cross-store file commit failed",
+    )
+    entry.save()
+
+    row = _journal_row(entry)
+    assert row["status"] == "rolled_back"
+    assert row["stage"] == "files"
+    assert "cross-store" in row["error"]
+    assert row["rollback_actions"] == ["deleted created part PN-1:A"]
+    assert row["manual_followup"]
+    # The \x1f separator is an internal storage detail, not something to show.
+    assert row["touched_parts"] == ["PN-1:A", "PN-2:B"]
+
+
+def test_journal_endpoints_are_registered(db, monkeypatch):
+    """The journal is only reconcilable if it is actually reachable."""
+    import app as app_module
+
+    monkeypatch.setenv("SECRET_KEY", "journal-test-key")
+    monkeypatch.setenv("SECURITY_PASSWORD_SALT", "journal-test-salt")
+    app_module.init_mongo = lambda _app: None
+    app = app_module.create_app()
+
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert "/api/import/operations" in rules
+    assert "/api/import/operations/<operation_id>" in rules

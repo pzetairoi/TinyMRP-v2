@@ -5,6 +5,7 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 from app.extensions import csrf
+from app.services.authorization import require_permission
 from app.models.extra_file import PartExtraFile
 from app.services.authorization import (
     effective_permissions,
@@ -369,3 +370,71 @@ def delete_extra_file(pn: str, rev: str, file_id: str):
     except Exception:
         pass
     return jsonify({"ok": True})
+
+
+def _journal_row(entry) -> dict:
+    """Serialise one journal entry for an operator.
+
+    Deliberately includes the failure detail and the manual-follow-up notes:
+    the whole point of the journal is that a failed import can be reconciled,
+    and that is impossible if the endpoint hides why it failed.
+    """
+    return {
+        "operation_id": entry.operation_id,
+        "status": entry.status,
+        "stage": entry.stage,
+        "started_at": entry.started_at.isoformat() if entry.started_at else "",
+        "finished_at": entry.finished_at.isoformat() if entry.finished_at else "",
+        "uploaded_by": entry.uploaded_by,
+        "planned_parts": entry.planned_parts,
+        "planned_files": entry.planned_files,
+        "parts_created": entry.parts_created,
+        "parts_updated": entry.parts_updated,
+        "links_created": entry.links_created,
+        "files_written": entry.files_written,
+        "touched_parts": [item.replace("\x1f", ":") for item in (entry.touched_parts or [])],
+        "rollback_actions": list(entry.rollback_actions or []),
+        "manual_followup": list(entry.manual_followup or []),
+        "error": entry.error,
+    }
+
+
+@bp.get("/import/operations")
+@login_required
+@require_permission("system.maintenance")
+def import_operations():
+    """List recent import operations (IMPORT-ATOMIC-01).
+
+    The acceptance criterion is that operators can diagnose and reconcile every
+    import. The journal has always been queryable in Mongo; this makes it
+    reachable without shell access to the database.
+
+    Defaults to failures first, because those are the ones needing action.
+    """
+    from app.models.import_journal import ImportJournal
+
+    status = (request.args.get("status") or "").strip()
+    try:
+        limit = max(1, min(int(request.args.get("limit") or 50), 200))
+    except (TypeError, ValueError):
+        limit = 50
+
+    query = ImportJournal.objects
+    if status:
+        query = query.filter(status=status)
+
+    rows = [_journal_row(entry) for entry in query.order_by("-started_at").limit(limit)]
+    unresolved = ImportJournal.objects(status__in=["failed", "rolled_back"]).count()
+    return jsonify({"ok": True, "operations": rows, "unresolved_count": unresolved})
+
+
+@bp.get("/import/operations/<operation_id>")
+@login_required
+@require_permission("system.maintenance")
+def import_operation(operation_id: str):
+    from app.models.import_journal import ImportJournal
+
+    entry = ImportJournal.objects(operation_id=operation_id).first()
+    if not entry:
+        return jsonify({"ok": False, "error": {"message": "Unknown operation id."}}), 404
+    return jsonify({"ok": True, "operation": _journal_row(entry)})

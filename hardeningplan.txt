@@ -1037,10 +1037,18 @@ Add adversarial archive tests without committing dangerous large fixtures.
       continuing from where the journal stopped.
     - Fault injection for thumbnail failure, duplicate operations and process
       interruption specifically. Only disk/metadata/commit paths are covered.
-    - No operator-facing view of the journal. The collection is queryable but
-      there is no admin page or CLI to list or reconcile failed imports, which
-      the acceptance criterion "operators can diagnose and reconcile every
-      import operation" ultimately needs.
+    - Operator-facing view — DONE 2026-08-06. Two endpoints behind
+      system.maintenance:
+        GET /api/import/operations           (?status=, ?limit=, newest first)
+        GET /api/import/operations/<op_id>
+      They expose what reconciliation actually needs: the failing stage, the
+      error, the compensating actions taken, the manual-followup notes and the
+      identities touched (with the internal  separator rendered as ':').
+      unresolved_count reports failed+rolled_back so an operator can see at a
+      glance whether anything needs attention.
+      STILL MISSING: an admin PAGE. The data is reachable over the API without
+      shell access to Mongo, which was the blocking part, but there is no UI
+      rendering it yet.
 
 Acceptance criteria
 Oversized expansion is rejected before dangerous resource consumption.
