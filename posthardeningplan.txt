@@ -103,11 +103,14 @@ WHAT hardeningplan.txt IS NOW
 2B. ENGINEERING — ordered by value per unit of risk
 ------------------------------------------------------------------------
 
-  E1. Error boundary + 404 route                  SMALL        Phase 6
-      Today a render error in any component blanks the whole SPA silently.
-      Highest-impact usability fix remaining, and it is genuinely small.
-      Exit: a thrown error in a page renders a recoverable message; an unknown
-      URL renders a real 404; both covered by tests.
+  E1. Error boundary + 404 route            DONE 2026-08-07 (97792a8)
+      RouteError on the root route catches render errors for every page;
+      NotFoundPage replaced a catch-all that rendered PartsPage — a dead link
+      used to look like a successful navigation, so it was never reported.
+      Verified the tests detect ABSENCE of the mechanism: removing
+      errorElement fails the 3 boundary tests and leaves the 2 not-found ones
+      passing. 309 frontend tests, tsc guard clean, bundle rebuilt (it is
+      tracked and ships, so a fix that skips the build reaches nobody).
 
   E2. Triage the 182 `except Exception: pass`     MEDIUM       Phase 8
       Not a blanket rewrite. Classify each: legitimate suppression (best-effort
@@ -194,8 +197,8 @@ WHAT hardeningplan.txt IS NOW
 
   OWNER TRACK                          ENGINEERING TRACK
   ---------------------------------    ---------------------------------
-  O1 CSP browser check (30 min)        E1 Error boundary + 404
-  O6 Confirm Trivy gate intent         E2 except-pass triage
+  O1 CSP browser check (30 min)        E1 Error boundary + 404  [DONE]
+  O6 Confirm Trivy gate intent         E2 except-pass triage  <- NEXT
   O4 Decide Track A vs Track B         E3 Wire /api/ready
   O2 Migrate existing instances        E4 Redis in guided compose
   O3 One real guided VPS install       E6 Remaining page tests

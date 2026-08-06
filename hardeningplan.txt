@@ -133,9 +133,14 @@ FINDINGS — code-level, actionable, not previously tracked
      becomes undebuggable in production. Needs triage, not a blanket rewrite.
   B. NO error boundary anywhere in frontend/src. Zero matches for
      ErrorBoundary/componentDidCatch. A render error in any component blanks
-     the ENTIRE SPA with no message. This is the most expensive remaining
-     usability defect, and it is a small fix.
-  C. NO catch-all route. No `path="*"` — a mistyped URL lands nowhere defined.
+     the ENTIRE SPA with no message. FIXED 2026-08-07: a RouteError element on
+     the root route catches it for every page. Verified by removing
+     errorElement and watching exactly the 3 boundary tests fail.
+  C. CORRECTED 2026-08-07, and the correction matters. A catch-all route DOES
+     exist (main.tsx declares it as an object property `path: '*'`, which the
+     JSX-shaped grep missed). What it DID was the defect: it rendered
+     PartsPage, so a dead link looked like a successful navigation to the
+     inventory and was never reported as broken. Now a real 404. FIXED.
   D. /api/ready HAS NO CONSUMERS. Its only references outside its own
      implementation are tests. Eight files still poll /api/health:
        docker/app/Dockerfile:61          <- baked into the image; start here
