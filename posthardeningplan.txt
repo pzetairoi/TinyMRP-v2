@@ -47,7 +47,7 @@ WHAT hardeningplan.txt IS NOW
 
   Gates, as of 2026-08-07:
     backend      730 passed, 1 skipped
-    frontend     302 tests, blocking coverage threshold on src/lib (92%)
+    frontend     309 tests, blocking coverage threshold on src/lib (92%)
     ruff         clean       bandit  clean       mypy  clean (2 modules)
     Black        NON-blocking, 162-file backlog (deliberate)
     coverage     backend gate is --cov-fail-under=55
