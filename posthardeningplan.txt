@@ -80,10 +80,22 @@ WHAT hardeningplan.txt IS NOW
       window per instance: enable auth, create the app user, update MONGO_URI.
       Data must not be destroyed — see the deployment-reality rules.
 
-  O3. Execute one real guided VPS install
-      The Caddy/VPS path has contract tests and a local isolated stack behind
-      it, but NO live install has ever been run. Until it has, "it deploys" is
-      an assumption.
+  O3. Execute one real guided VPS install       IN PROGRESS 2026-08-07
+      Access granted to SERVER-A (Ubuntu 24.04.4, Docker 29.6.1, 4 cores,
+      49 GB free). Key-based SSH installed; alias `tinymrp-vps`.
+      *** THAT BOX IS NOT DISPOSABLE. It serves three production services
+      through ONE shared Caddy:
+        tinymrp.com / www   -> tinymrp-main-app  (52 parts, real data)
+        cloud.tinymrp.com   -> Nextcloud + MariaDB
+        vikunja.tinymrp.com -> Vikunja
+      Breaking Caddy takes down all three, not just TinyMRP. ***
+      Owner supplied test.tinymrp.com and cloud.test.tinymrp.com, already
+      resolving to the VPS, and chose to rebuild 'main' as well.
+      Sequence being followed, deliberately: back up main -> PROVE the restore
+      works (done, see E7) -> build the test instance -> only then rebuild main,
+      from a backup already demonstrated to restore.
+      The VPS repo sits on security/rbac-owasp-hardening at 3905502, so the
+      live instance predates every change on this branch.
 
   O4. Decide the product position                             COMM-SCOPE-01
       Track A (engineering BOM/document control — what exists) or Track B
@@ -196,6 +208,30 @@ WHAT hardeningplan.txt IS NOW
       Checksums, encryption, an off-host copy, and — most important — one
       rehearsed restore. A backup nobody has restored is not a backup.
       Exit: a documented restore drill succeeds from an off-host copy.
+
+      *** RESTORE DRILL PASSED 2026-08-07 - the first one ever rehearsed, on
+      the real VPS, instance 'main'. This was the single largest unverified
+      assumption in the project: a backup nobody has restored is a file, not a
+      backup. ***
+      Method: backup-instance.sh produced a 21 MB set (mongodump +
+      deliverables + config + manifest) with ZERO downtime, then the archive
+      was restored into a THROWAWAY mongo:6.0 container - never near live data.
+      Evidence:
+        - 515 documents restored, 0 failed
+        - every collection count matches the live instance exactly:
+          parts 52, bom 56, part_files 178, audit_logs 208, roles 18,
+          users 1, user_settings 1, numbering_schemes 1
+        - deliverables tarball reads cleanly; 267 files in the archive against
+          267 on disk (the 284 raw tar entries are 267 files + 17 directories)
+        - config captured: compose.yml, instance.env, route.caddy
+        - the live instance stayed up and healthy throughout
+      STILL OPEN here: the script writes no checksums, so the verification
+      above was done by hand, and every copy sits on the same host. The owner
+      chose to skip encryption; off-host copying stays an owner decision.
+
+  E7b. Backup checksums and a --verify mode      SMALL        Phase 5
+      Write sha256 beside each artefact so the drill above becomes repeatable
+      instead of a one-off done by hand.
 
   E8. Accessibility baseline                      MEDIUM       Phase 6
       Skip link and stable main target, prefers-reduced-motion in our own CSS,
