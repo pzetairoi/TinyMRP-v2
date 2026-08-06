@@ -409,10 +409,15 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 7. Use Python 3.11 and Node 24 for release evidence, regardless of host defaults.
 8. Preserve the baseline tag; do not move or recreate it.
 
-Phase 2, Phase 3B engineering remediation, and Phase 3C immutable-pin/evidence
-engineering are complete. Proposed vulnerability exceptions and historical
-secret candidates still require human disposition. Phase 4A archive/resource
-limits are the next engineering workstream.
+Phases 0-3 and 4A are complete, and all three proposed exceptions were
+dispositioned on 2026-08-04 (EXC-2026-001/002/003, expiring 2026-11-02).
+
+**The forward-looking execution document is `posthardeningplan.txt`.** A
+2026-08-07 audit re-verified this register against the code and found work the
+roadmap did not record: 182 silently-swallowed exceptions, no frontend error
+boundary, `/api/ready` wired to nothing, and Redis missing from the guided
+per-instance compose. This table remains the authoritative blocker status;
+`posthardeningplan.txt` says what to do about it and in what order.
 
 ## Residual Phase 0 limitations
 

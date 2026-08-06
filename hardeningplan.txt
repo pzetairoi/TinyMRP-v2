@@ -7,57 +7,50 @@ No files are reserved; there is no parallel stream running.
 
 *** IF YOU ARE A NEW AI PICKING THIS UP, READ THIS BLOCK FIRST ***
 
-  Where things stand
-    Done: Phases 0, 1A, 1B, 1C, 2, 3A, 3B(engineering), 3C(engineering), 4A.
-    The authoritative status is the blocker register in
+  Where things stand — RE-VERIFIED BY AUDIT 2026-08-07
+    *** THIS FILE IS NOW THE HISTORICAL RECORD. If you are here to DO work,
+        read posthardeningplan.txt instead — that is the execution document.
+        This file's remaining value is WHY things were built as they were,
+        plus the incidents and gotchas that must not be relearned. ***
+
+    Security hardening is substantially complete. PRODUCT-QUALITY hardening is
+    largely not started. The 2026-08-07 audit checked the CODE rather than
+    trusting the prose in this file, and found several items this plan did not
+    record at all. They are listed under "AUDIT 2026-08-07" below.
+
+      Done ............. Phases 0, 1A, 1B, 1C, 2, 3A, 3B(eng), 3C(eng), 4A
+      Done w/ residue .. Phase 4B (~70%), Phase 5 (~60%)
+      Barely started ... Phase 6 (~15% — test foundation only), Phase 8 (~15%)
+      Not started ...... Phase 9, Phase 10
+
+    The authoritative blocker status is the register in
     docs/PRODUCTION_HARDENING_BASELINE.md — trust that table over prose here.
 
-    Remaining OPEN production blockers, in the order to attack them:
-      IMPORT-ATOMIC-01  P0  Phase 4B  PARTIALLY MITIGATED 2026-08-03 — journal,
-                                      operation ID and rollback of created
-                                      parts are in; transactions, idempotent
-                                      retries and an operator view are not.
-                                      See the 4B section for the exact residue.
-      OPS-DBAUTH-01     P0  Phase 5   PARTIALLY MITIGATED 2026-08-04 — new
-                                      guided instances start authenticated and
-                                      unauthenticated ones now warn loudly;
-                                      still uses the ROOT user rather than a
-                                      least-privilege one, and existing
-                                      instances are not migrated.
-                                      <- NEXT: the least-privilege app user
-      OPS-HEALTH-01     P0  Phase 5   PARTIALLY MITIGATED 2026-08-03 —
-                                      /api/ready added and proves db/storage/
-                                      disk; still no authenticated diagnostics
-                                      endpoint and nothing consumes /api/ready
-                                      yet (orchestration still polls
-                                      /api/health). See the Phase 5 section.
-      OPS-RATE-01       P1  Phase 5   MITIGATED 2026-08-04 — Redis shipped and
-                                      default; failure policy now explicit.
-                                      Residue: no per-endpoint budgets, and
-                                      guided VPS instances lack Redis.
-      SUPPLY-LOCK-01    P1  Phase 3C  CLOSED 2026-08-04 — requirements.lock
-                                      pins all 60 packages by sha256; the
-                                      release image installs with
-                                      --require-hashes and CI fails on drift.
-      SEC-CSP-01        P1  1A resid. mechanism landed, templates unmigrated
-      QA-FE-01          P1  Phase 6   FOUNDATION DONE 2026-08-05 — Vitest +
-                                      RTL wired, 76 unit tests over src/lib/,
-                                      blocking in CI. Still no component/page
-                                      tests, no Playwright, no axe, no coverage
-                                      threshold. <- NEXT: component tests
-
-    Blockers that needed a HUMAN — ALL SIGNED OFF 2026-08-04, none open:
-      SUPPLY-PY-01      CLOSED by EXC-2026-001 (WebAuthn; not applicable)
-      SUPPLY-NPM-01     CLOSED by EXC-2026-002 (RSC-only; not applicable)
-      SUPPLY-SECRET-01  CLOSED by EXC-2026-003 (owner confirmed no production
-                        server ever used the leaked values, so the public
-                        exposure has no operational meaning; a 370-commit
-                        history rewrite was judged not worth the cost)
-      All three are owned by Francisco Quesada and EXPIRE 2026-11-02. At expiry
-      re-check for published fixes and UPGRADE rather than renew. Details and
-      the review queue are in docs/security/risk_acceptance_template.md.
-      Do NOT allowlist the two gitleaks findings: the gate is meant to keep
-      reporting them, and EXC-2026-003 is the disposition, not a suppression.
+    OPEN blockers excluding the add-in (ADDIN-*, owner declared out of scope):
+      SEC-CSP-01        P1  Code-complete 2026-08-06. Needs ONLY an owner
+                            browser check. Cheapest open blocker by far.
+      IMPORT-ATOMIC-01  P0  Journal, compensating rollback, idempotency key and
+                            operator endpoints are in. Missing: Mongo
+                            transactions, true resume, admin UI.
+      OPS-DBAUTH-01     P0  Least-privilege app user DONE 2026-08-07, verified
+                            against a real Mongo (admin read and createUser both
+                            refused). Residue is DEPLOYMENT, not code: existing
+                            instances unmigrated, and the non-guided
+                            docker-compose.yml still defaults to empty creds.
+      OPS-HEALTH-01     P1  /api/ready works and is tested, but NOTHING CONSUMES
+                            IT. 8 files still poll /api/health, including the
+                            HEALTHCHECK baked into docker/app/Dockerfile.
+      OPS-RATE-01       P1  Redis shipped and default in the root compose.
+                            Residue: absent from the GUIDED per-instance compose
+                            (zero references in deploy/scripts/lib/common.sh),
+                            and no per-endpoint budgets — see the WITHDRAWN
+                            attempt recorded in the Phase 5 section before
+                            retrying it.
+      QA-FE-01          P1  302 frontend tests; blocking coverage gate on
+                            src/lib. 5 of 8 pages have no page-level test; no
+                            Playwright, no axe.
+      COMM-SCOPE-01     P0  Owner decision. Product positioning.
+      COMM-LEGAL-01     P0  Owner decision. Needs counsel.
 
   *** DEPLOYMENT REALITY — stated by the owner 2026-08-04, read this ***
     Real companies are running TinyMRP in production right now. The owner has
@@ -87,7 +80,8 @@ No files are reserved; there is no parallel stream running.
   How to work
     - Run the suite with a venv that has requirements-dev.txt installed.
       A prepared one may not exist on a fresh machine; create it first.
-      Full suite baseline as of 2026-08-03: 647 passed, 1 skipped.
+      Full suite baseline as of 2026-08-07: 730 passed, 1 skipped.
+      Frontend: 302 tests (cd frontend && npm run test).
       If you get ModuleNotFoundError on collection, your venv is stale against
       requirements.txt — reinstall requirements-dev.txt before debugging.
     - Gates that must stay green: pytest, `ruff check .`, `bandit -r app -ll`,
@@ -99,19 +93,87 @@ No files are reserved; there is no parallel stream running.
       env or deployment must re-check the Caddy contract tests.
 
   Things that will bite you if you do not know them
-    - Two vulnerability gates CANNOT pass by upgrading; they need the filed
-      exceptions in docs/security/risk_acceptance_template.md, which are still
-      Status=Proposed and need a HUMAN owner + expiry. Do not sign these off
-      yourself and do not silence the gates.
+    - Two vulnerability gates CANNOT pass by upgrading. They are dispositioned
+      by EXC-2026-001/002, SIGNED OFF 2026-08-04, EXPIRING 2026-11-02. At expiry
+      re-check for published fixes and UPGRADE rather than renew. Do not silence
+      the gates in the meantime.
     - Real SECRET_KEY / SECURITY_PASSWORD_SALT exist in git history
-      (.env.example, commit e16f19d). Deliberately NOT allowlisted. Needs a
-      human decision: rotate, and/or rewrite history.
+      (.env.example, commit e16f19d). Dispositioned by EXC-2026-003: the owner
+      confirmed no production server ever used them. Deliberately NOT
+      allowlisted — the gate is meant to keep reporting them.
     - The CSP nonce is deliberately withheld while 'unsafe-inline' is active.
       Browsers IGNORE 'unsafe-inline' when a nonce is present, so emitting both
       breaks every unmigrated template at once. See csp_inline_burndown.md.
     - `docker manifest inspect` returns a SINGLE-ARCH digest for a local pull.
       Base images must be pinned to the multi-arch INDEX digest instead, or
       non-amd64 builds break. Use `docker buildx imagetools inspect`.
+
+========================================================================
+AUDIT 2026-08-07 — findings this plan did NOT record
+========================================================================
+Method: read the code, not this file. Every item below is a grep result or a
+file inspection, cited so it can be re-checked. Two independent passes agreed.
+
+WHERE THIS PLAN OVERSTATED ITSELF
+  - Phase 6 reads as "started" because the test foundation is real. But of its
+    ~25 usability/accessibility/performance items, ONE is done (lazy-loading
+    the 3D viewer) plus the loading indicators added after the owner's
+    2026-08-06 performance report. The rest of the phase is the untouched list.
+  - Phase 8 records "Remove unused imports — DONE" twice. True, but that is the
+    cheapest of its ~14 items. The expensive ones are all untouched.
+  - The final line of this file said Phase 4A was "the next workstream". It has
+    been done since 2026-08-04.
+
+FINDINGS — code-level, actionable, not previously tracked
+  A. 461 `except Exception` handlers in app/, of which 182 are followed by a
+     bare `pass`. Phase 8 asks explicitly to "review broad except Exception
+     handlers" and "stop swallowing operationally significant failures".
+     NOT STARTED. These are not equivalent: suppressing a thumbnail-render
+     failure in a loop is legitimate; suppressing a write path is how a bug
+     becomes undebuggable in production. Needs triage, not a blanket rewrite.
+  B. NO error boundary anywhere in frontend/src. Zero matches for
+     ErrorBoundary/componentDidCatch. A render error in any component blanks
+     the ENTIRE SPA with no message. This is the most expensive remaining
+     usability defect, and it is a small fix.
+  C. NO catch-all route. No `path="*"` — a mistyped URL lands nowhere defined.
+  D. /api/ready HAS NO CONSUMERS. Its only references outside its own
+     implementation are tests. Eight files still poll /api/health:
+       docker/app/Dockerfile:61          <- baked into the image; start here
+       docker-compose.yml:131
+       docker-compose.onefolder.yml:73
+       deploy/scripts/lib/common.sh:745, :1099
+       deploy/scripts/doctor.sh:414
+       deploy/scripts/install-server.sh:251
+       deploy/scripts/update-instance.sh:129, :349
+       deploy/scripts/restore-instance.sh:137
+     The readiness work is built and tested but wired to nothing.
+  E. Redis is ABSENT from the guided per-instance compose. Zero occurrences in
+     deploy/scripts/lib/common.sh. Real VPS instances therefore still rate-limit
+     in-memory and per-worker — the exact defect OPS-RATE-01 was raised for.
+  F. Backups are unencrypted, unchecksummed and on-host.
+     deploy/scripts/backup-instance.sh does mongodump + tar + date rotation.
+     Phase 5 asks for encryption, checksums, off-host copies and a restore
+     drill. None exist. No restore has ever been rehearsed.
+  G. Accessibility essentially untouched: no skip link, and no
+     prefers-reduced-motion in any stylesheet WE own (the only matches are
+     inside node_modules — primeicons handles its own icon animations, which
+     is free but covers nothing of ours). Only 2 aria-live regions.
+     Partly good news: 63 htmlFor and 48 aria-label — labelling is largely there.
+  H. No CODEOWNERS. No schema/data migration framework. No optimistic
+     concurrency except `version` on app/models/part_drawing_markup.py:66 —
+     so two users editing the same part silently last-write-wins.
+  I. Soft gates worth knowing about:
+       - Black: continue-on-error, 162-file backlog (deliberate, Phase 8).
+       - Trivy image scan: continue-on-error in
+         .github/workflows/release-image.yml:52. It COLLECTS HIGH/CRITICAL
+         evidence rather than failing, so a critical CVE in the image does not
+         block a release. Looks deliberate; confirm it is.
+       - Backend coverage gate is --cov-fail-under=55.
+  J. Largest modules, for the Phase 8 decomposition item that has no numbers
+     attached to it yet:
+       app/services/docpacks.py 3336 | app/views/parts.py 2325
+       app/services/upload_pack.py 1968 | app/services/field_config.py 1781
+       frontend PartDetailPage.tsx 3970 (down from 4167)
 
 ========================================================================
 COORDINATION RULES (kept for if a parallel stream is opened again)
@@ -130,7 +192,7 @@ COORDINATION RULES (kept for if a parallel stream is opened again)
 Active workstreams as of 2026-08-03:
   NONE. Codex handed off; Claude is sole owner. No files are reserved.
 
-  NEXT UP (in order): Phase 2 (AUTH-MODE-01) -> Phase 4B -> Phase 5.
+  NEXT UP: see posthardeningplan.txt, which supersedes this line.
 
 Completed workstream scope:
   P2-STRICT-AUTH  DONE 2026-08-03  owner: Codex /root
@@ -1766,13 +1828,15 @@ Phase 2 — strict-mode authentication. DONE 2026-08-03; AUTH-MODE-01 closed.
 Phase 3B — dependency engineering remediation DONE; human exceptions remain.
 Phase 3C — reproducible supply chain. ENGINEERING CORE DONE 2026-08-03;
 human dependency-risk and historical-secret dispositions still block release.
-Phase 4 — safe, atomic imports.
-Phase 5 — production infrastructure.
-Phase 6 — frontend quality and accessibility.
-Phase 7 — add-in hardening.
-Phase 8 — maintainability.
-Phase 9 — commercial scope.
-Phase 10 — release validation.
-The next implementation request should be: “Implement Phase 4A upload and
-archive resource limits while preserving and testing the guided VPS/Caddy
-path.”
+Phase 4 — safe, atomic imports. 4A DONE 2026-08-04. 4B ~70%.
+Phase 5 — production infrastructure. ~60%; residue is deployment wiring.
+Phase 6 — frontend quality and accessibility. ~15%; test foundation only.
+Phase 7 — add-in hardening. OUT OF SCOPE by owner decision.
+Phase 8 — maintainability. ~15%; the cheap item is done, the rest is not.
+Phase 9 — commercial scope. NOT STARTED; owner + counsel.
+Phase 10 — release validation. NOT STARTED.
+
+THE NEXT IMPLEMENTATION REQUEST IS DEFINED IN posthardeningplan.txt.
+That file supersedes this ordering. It carries the audited state, the
+remaining work split by who can actually do it, and the shortest route to a
+professional finish.

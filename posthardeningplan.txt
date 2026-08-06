@@ -1,0 +1,258 @@
+========================================================================
+POST-HARDENING PLAN — the route to a professional finish
+========================================================================
+Created 2026-08-07 by Claude, from an audit that read the CODE rather than
+trusting hardeningplan.txt's own prose. Branch: hardening/production-readiness.
+
+WHAT THIS FILE IS
+  The execution document. It says what is done, what is left, WHO can do each
+  remaining thing, and the shortest order that ends in a defensible release.
+
+WHAT hardeningplan.txt IS NOW
+  The historical record. Keep it. Its value is the reasoning and the incident
+  write-ups — why the CSP nonce is withheld while unsafe-inline is active, why
+  part numbers are matched case-insensitively, why the per-endpoint rate-limit
+  attempt was withdrawn, what shipped a broken page on 2026-08-06 and what
+  guard now prevents it. Read it before touching those areas. Do not use it to
+  decide what to work on next; use this file.
+
+
+========================================================================
+1. WHERE THE PROJECT ACTUALLY STANDS
+========================================================================
+
+  In one sentence: nobody can steal the data, but this is not yet a
+  commercial product.
+
+    Security hardening ......... substantially complete
+    Operational hardening ...... built, partly unwired
+    Product-quality hardening .. barely started
+
+  Phase        Subject                              State
+  -----------  -----------------------------------  ----------------------
+  0            Controlled baseline                  DONE
+  1A/1B/1C     XSS, token lifecycle, sessions       DONE
+  2            Strict-mode authentication           DONE
+  3A           Fresh deployments, seeding           DONE
+  3B           Dependency remediation               DONE (3 signed exceptions)
+  3C           Reproducible supply chain            DONE
+  4A           Archive/resource limits              DONE
+  4B           Atomic imports                       ~70%
+  5            Production infrastructure            ~60%
+  6            Frontend quality/accessibility       ~15%
+  7            SolidWorks add-in                    OUT OF SCOPE (owner)
+  8            Maintainability                      ~15%
+  9            Commercial scope                     NOT STARTED
+  10           Release validation                   NOT STARTED
+
+  Gates, as of 2026-08-07:
+    backend      730 passed, 1 skipped
+    frontend     302 tests, blocking coverage threshold on src/lib (92%)
+    ruff         clean       bandit  clean       mypy  clean (2 modules)
+    Black        NON-blocking, 162-file backlog (deliberate)
+    coverage     backend gate is --cov-fail-under=55
+    Trivy        NON-blocking; collects evidence, does not fail a release
+
+  Three risk acceptances expire 2026-11-02 (EXC-2026-001/002/003). At expiry,
+  re-check for published fixes and UPGRADE rather than renew.
+
+
+========================================================================
+2. WHAT IS LEFT — split by who can actually do it
+========================================================================
+
+------------------------------------------------------------------------
+2A. OWNER ONLY — engineering cannot close these
+------------------------------------------------------------------------
+
+  O1. CSP browser check                         ~30 min      UNBLOCKS SEC-CSP-01
+      All 34 inline handlers are delegated, all 18 inline scripts carry a
+      nonce, style-src is decoupled. Only a human with a browser can confirm.
+        1. Start with TINYMRP_CSP_REPORT_ONLY_STRICT=true
+        2. Exercise the admin UI — jobs, orders, fields, roles, add-in
+        3. Watch the console for CSP violations
+        4. If clean, set TINYMRP_CSP_ALLOW_INLINE=false and repeat
+      This is the highest value-per-minute action available to anyone.
+
+  O2. Migrate existing Mongo instances to authentication
+      Mongo only creates users on the FIRST boot of an EMPTY data directory,
+      so this cannot be automated onto a running instance. Needs a maintenance
+      window per instance: enable auth, create the app user, update MONGO_URI.
+      Data must not be destroyed — see the deployment-reality rules.
+
+  O3. Execute one real guided VPS install
+      The Caddy/VPS path has contract tests and a local isolated stack behind
+      it, but NO live install has ever been run. Until it has, "it deploys" is
+      an assumption.
+
+  O4. Decide the product position                             COMM-SCOPE-01
+      Track A (engineering BOM/document control — what exists) or Track B
+      (full MRP — a separate roadmap). Marketing claims must match code.
+
+  O5. Commercial/legal package                                COMM-LEGAL-01
+      EULA, privacy policy + DPA, retention/deletion, support and SLA,
+      vulnerability-disclosure contact, third-party notices, accessibility
+      statement. Needs counsel, not engineering.
+
+  O6. Confirm the Trivy gate is meant to be advisory
+      .github/workflows/release-image.yml:52 is continue-on-error, so a
+      critical CVE in the image does not block a release. If that is not
+      intended, it is a one-line change.
+
+------------------------------------------------------------------------
+2B. ENGINEERING — ordered by value per unit of risk
+------------------------------------------------------------------------
+
+  E1. Error boundary + 404 route                  SMALL        Phase 6
+      Today a render error in any component blanks the whole SPA silently.
+      Highest-impact usability fix remaining, and it is genuinely small.
+      Exit: a thrown error in a page renders a recoverable message; an unknown
+      URL renders a real 404; both covered by tests.
+
+  E2. Triage the 182 `except Exception: pass`     MEDIUM       Phase 8
+      Not a blanket rewrite. Classify each: legitimate suppression (best-effort
+      loops, optional probes) stays and gets a one-line why; anything on a
+      write, auth, import or file-commit path must log at minimum.
+      Exit: no silent suppression on a path that can lose or corrupt data.
+
+  E3. Wire /api/ready into orchestration          SMALL        OPS-HEALTH-01
+      Start with docker/app/Dockerfile:61 — it is baked into the image, so it
+      applies to every deployment regardless of how it is launched. Then the
+      two compose files, then the five deploy scripts.
+      CAUTION: readiness returns 503 while dependencies warm up. Any consumer
+      that treats 503 as fatal during startup will break the guided path.
+      Re-run the Caddy contract tests.
+      Exit: a container with an unreachable Mongo is reported unhealthy.
+
+  E4. Redis in the guided per-instance compose    SMALL        OPS-RATE-01
+      deploy/scripts/lib/common.sh has zero Redis references, so real VPS
+      instances still rate-limit per-worker in memory.
+      Exit: a rendered per-instance compose contains Redis and the app points
+      at it; contract test asserts this.
+
+  E5. Per-endpoint rate limits                    MEDIUM       OPS-RATE-01
+      *** READ the withdrawn attempt in hardeningplan.txt Phase 5 first. ***
+      Wrapping a registered view does NOTHING. The limits must be applied by
+      decorating the views at DEFINITION time across ~6 modules in app/views/.
+      Budgets per route are an owner input; propose defaults and confirm.
+
+  E6. Page-level tests for the remaining 5 pages  MEDIUM       QA-FE-01
+      PartsPage, PartDetailPage, UploadPackPage, AdminFieldsPage,
+      AdminAddinPage. Their extracted helpers are covered; the pages are not.
+      Add each to coverage.include as it gains real tests — do NOT lower the
+      existing thresholds.
+
+  E7. Backup integrity                            MEDIUM       Phase 5
+      Checksums, encryption, an off-host copy, and — most important — one
+      rehearsed restore. A backup nobody has restored is not a backup.
+      Exit: a documented restore drill succeeds from an off-host copy.
+
+  E8. Accessibility baseline                      MEDIUM       Phase 6
+      Skip link and stable main target, prefers-reduced-motion in our own CSS,
+      live regions for async success/error, keyboard-only pass, focus
+      management in modals, accessible names on icon-only controls.
+      Labelling is already largely in place (63 htmlFor, 48 aria-label).
+
+  E9. Optimistic concurrency on part edits        MEDIUM       Phase 8
+      Two users editing the same part today: last write wins, silently.
+      part_drawing_markup.py already has the pattern to copy.
+      Must be additive — a new field, never a mutation of existing documents.
+
+  E10. Playwright + axe                           LARGE        QA-FE-01
+      Needs CI to boot the app plus Mongo. Also the only way to test the 3D
+      viewer and canvas markup, which jsdom cannot run.
+      Deliberately last: it is the biggest step and the least certain.
+
+  DELIBERATELY NOT DOING (and why)
+    - Mongo transactions for imports. Needs a replica set. The journal is the
+      designed "otherwise" branch and it works.
+    - Repo-wide Black reformat. 162 files of churn would bury every real diff.
+    - UP006/UP045 annotation rewrites (~1100 sites) and SIM105 (103 sites).
+      Enormous churn, no runtime benefit, on code running in production.
+    - Admin UI over the import journal. The data is reachable over the API,
+      which was the blocking part. A page is polish.
+    - Breaking up docpacks.py (3336 lines) et al. Real debt, but high-risk
+      surgery with no test safety net underneath it yet. Wants E6 first.
+
+------------------------------------------------------------------------
+2C. RELEASE VALIDATION — Phase 10, once 2A and 2B land
+------------------------------------------------------------------------
+  Tag a release candidate. Deploy from scratch in a production-equivalent
+  environment. Run the full suite, the compose smoke test, dependency and
+  container scans, the secret scan and SAST. Produce an SBOM, release notes, a
+  deployment guide, an operations runbook and a signed go/no-go record.
+  External penetration testing and load/endurance testing remain owner calls
+  on budget. Every unresolved finding needs an explicit, time-limited written
+  risk acceptance — the EXC-2026-00x format already in use.
+
+
+========================================================================
+3. THE SHORTEST PROFESSIONAL FINISH
+========================================================================
+
+  Run these two tracks in parallel. They do not block each other.
+
+  OWNER TRACK                          ENGINEERING TRACK
+  ---------------------------------    ---------------------------------
+  O1 CSP browser check (30 min)        E1 Error boundary + 404
+  O6 Confirm Trivy gate intent         E2 except-pass triage
+  O4 Decide Track A vs Track B         E3 Wire /api/ready
+  O2 Migrate existing instances        E4 Redis in guided compose
+  O3 One real guided VPS install       E6 Remaining page tests
+  O5 Start counsel on the legal pack   E7 Backup integrity + restore drill
+                                       E8 Accessibility baseline
+
+  Then, together: Phase 10 release validation.
+
+  MINIMUM BAR FOR A DEFENSIBLE RELEASE
+    - Every P0 blocker closed or covered by a written, time-limited acceptance
+    - One real deployment executed, and one restore rehearsed
+    - No silent failure on any path that can lose data
+    - Marketing claims match what the code actually does
+    - Legal package reviewed by counsel
+
+  The single largest risk to this project is NOT a missing feature. It is that
+  the guided VPS path and the backup/restore path have never been executed for
+  real. Both are owner actions. Everything else is tractable engineering.
+
+
+========================================================================
+4. STANDING RULES — carried over, still binding
+========================================================================
+  DEPLOYMENT REALITY (owner, 2026-08-04)
+    Real companies run TinyMRP now. The owner has root on those machines and
+    will absorb breakage and report the error.
+    BREAKING THINGS IS ACCEPTABLE. DESTROYING DATA IS NOT.
+      - Never drop, truncate or overwrite existing collections or documents
+      - Never delete or rewrite files under the deliverables root
+      - Migrations must be additive and reversible
+      - Failing loudly at startup is FINE. Silently losing a part, a BOM link
+        or a deliverable is NOT.
+
+  OUT OF SCOPE
+    solidworks-addin/ — needs real SolidWorks to test; the owner handles it.
+
+  PROTECTED PATH
+    The guided Ubuntu/VPS deployment using Caddy must keep working. Anything
+    touching auth, files, containers, health, networking, env or deployment
+    must re-check the Caddy contract tests.
+
+  REDUCE FAT PROGRESSIVELY (owner, 2026-08-05)
+    Every pass leaves the code leaner: fewer one-use helpers, fewer variables
+    that restate the next line, no comment repeating what the code says.
+    Cut restatement — keep the reasoning that stops a bug being reintroduced.
+
+  VERIFICATION DISCIPLINE — the rule that produced this file
+    Do not claim a gate is closed because tests pass. Prove the mechanism does
+    what it claims: the least-privilege Mongo user was verified by trying to
+    read `admin` and create a user and being refused; the coverage threshold
+    was verified by deleting a test file and watching CI fail; the undefined-
+    identifier guard was verified by removing an import.
+    If a change cannot be proven to work, WITHDRAW it and write down why.
+    Shipping something that looks like protection but is not is worse than
+    shipping nothing — see the withdrawn rate-limit attempt.
+
+  Gates that must stay green:
+    pytest | ruff check . | bandit -r app -ll
+    mypy app/services/security_mode.py app/services/api_auth.py
+    cd frontend && npm run test && npx tsc --noEmit -p tsconfig.app.json
