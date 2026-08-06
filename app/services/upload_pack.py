@@ -1552,11 +1552,48 @@ def _bulk_updates(collection: Any, operations: list[UpdateOne]) -> None:
                 operation._doc,
                 upsert=operation._upsert,
             )
+def import_idempotency_key(file_bytes: bytes, options: dict[str, Any]) -> str:
+    """Fingerprint a pack plus the policies it will run under.
+
+    The same bytes imported with different modes is a DIFFERENT operation - a
+    fill-blanks run and a replace-all run touch different data - so the policy
+    options are part of the key, not just the archive.
+
+    Used to recognise a repeat, not to block one: re-importing deliberately is
+    legitimate, so the caller decides what to do with the answer.
+    """
+    digest = hashlib.sha256(file_bytes).hexdigest()
+    policy = "|".join(
+        f"{key}={options.get(key, '')}"
+        for key in ("data_mode", "bom_mode", "file_mode", "approval_mode")
+    )
+    return hashlib.sha256(f"{digest}|{policy}".encode()).hexdigest()
+
+
+def previous_successful_import(key: str) -> ImportJournal | None:
+    """The last COMMITTED run of this exact pack+policy combination, if any.
+
+    Only committed runs count. A failed or rolled-back attempt should be
+    retried, which is the whole point of retrying.
+    """
+    if not key:
+        return None
+    try:
+        return (
+            ImportJournal.objects(idempotency_key=key, status="committed")
+            .order_by("-finished_at")
+            .first()
+        )
+    except Exception:  # pragma: no cover - journal must never break imports
+        return None
+
+
 def _journal_start(
     plan: dict[str, Any],
     *,
     uploaded_by: str,
     seed_tag: str,
+    idempotency_key: str = "",
 ) -> ImportJournal | None:
     """Open a journal entry before any effect is applied.
 
@@ -1577,6 +1614,7 @@ def _journal_start(
             stage="parts",
             uploaded_by=uploaded_by or "",
             seed_tag=seed_tag or "",
+            idempotency_key=idempotency_key or "",
             planned_parts=len(plan.get("parts") or []),
             planned_files=planned_files,
         )
@@ -1634,6 +1672,7 @@ def execute_import_plan(
     uploaded_by: str = "",
     seed_tag: str = "upload-pack",
     generate_thumbs: bool = True,
+    idempotency_key: str = "",
 ) -> dict[str, Any]:
     """Execute only effects already selected in the authorised plan."""
     runtime_config = current_app.config if has_app_context() else {}
@@ -1660,7 +1699,9 @@ def execute_import_plan(
     # Parts this run brings into existence. Tracked separately from
     # changed_pairs because only these can be safely removed on rollback.
     created_pairs: list[tuple[str, str]] = []
-    journal = _journal_start(plan, uploaded_by=uploaded_by, seed_tag=seed_tag)
+    journal = _journal_start(
+        plan, uploaded_by=uploaded_by, seed_tag=seed_tag, idempotency_key=idempotency_key
+    )
     try:
         # A written BOM row needs its parent and child to exist, and a stored
         # file needs its owner, even when the Properties policy is Skip. Those
@@ -1865,6 +1906,12 @@ def import_upload_pack(
         denied = list(scope_check(mutated)) if mutated else []
         if denied:
             raise ImportScopeError(denied)
+    # IMPORT-ATOMIC-01: recognise a repeat so an operator retrying after a
+    # failure can see the pack already landed, instead of silently importing it
+    # twice. Reported, never enforced - a deliberate re-import is legitimate.
+    idempotency_key = import_idempotency_key(file_bytes, options)
+    previous = previous_successful_import(idempotency_key)
+
     metrics: dict[str, Any] = {}
     if not dry_run:
         metrics = execute_import_plan(
@@ -1872,6 +1919,7 @@ def import_upload_pack(
             uploaded_by=uploaded_by,
             seed_tag=seed_tag,
             generate_thumbs=generate_thumbs,
+            idempotency_key=idempotency_key,
         )
     elapsed = time.perf_counter() - started
     capabilities = {
@@ -1882,6 +1930,13 @@ def import_upload_pack(
     return {
         "zip": filename,
         "dry_run": bool(dry_run),
+        "idempotency_key": idempotency_key,
+        # Set when this exact pack+policy combination already committed. The UI
+        # can warn "this looks like a repeat"; nothing is blocked.
+        "previously_imported_operation_id": (previous.operation_id if previous else ""),
+        "previously_imported_at": (
+            previous.finished_at.isoformat() if previous and previous.finished_at else ""
+        ),
         "root": root[0],
         "root_rev": root[1],
         # Preview-only image of the top level part, inline so it needs no

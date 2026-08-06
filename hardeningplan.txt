@@ -1022,8 +1022,19 @@ Add adversarial archive tests without committing dangerous large fixtures.
       the journal is the "otherwise" branch of the roadmap. A replica-set
       deployment could wrap the DB writes in a real transaction and reduce the
       journal to an audit record.
-    - Idempotent retries. There is no dedupe key, so re-running the same pack
-      after a failure repeats the work rather than resuming it.
+    - Idempotent retries — PARTIALLY DONE 2026-08-06. Every import now computes
+      an idempotency key (sha256 of the pack bytes + the four policy modes)
+      stored on the journal and indexed. import_upload_pack looks for a
+      previously COMMITTED run of that exact combination and returns
+      previously_imported_operation_id / previously_imported_at in its result.
+      The policy modes are part of the key ON PURPOSE: the same bytes under
+      fill_blanks vs replace_all is a DIFFERENT operation, and treating them as
+      one would let a destructive re-import look like a harmless repeat.
+      Failed and rolled_back runs are ignored — those SHOULD be retried.
+      REPORTED, NOT ENFORCED: a deliberate re-import is legitimate, so nothing
+      is blocked. What is still missing is (a) a UI that surfaces the warning
+      and (b) true resume — a retry still redoes the whole pack rather than
+      continuing from where the journal stopped.
     - Fault injection for thumbnail failure, duplicate operations and process
       interruption specifically. Only disk/metadata/commit paths are covered.
     - No operator-facing view of the journal. The collection is queryable but

@@ -38,6 +38,11 @@ class ImportJournal(Document):
     """
 
     operation_id = StringField(required=True, unique=True)
+
+    # Content+options fingerprint, so re-running the SAME pack with the SAME
+    # policies can be recognised as a repeat rather than duplicating work.
+    # Not unique: a deliberate re-import is legitimate, and the caller decides.
+    idempotency_key = StringField(default="")
     status = StringField(required=True, default="started")
     stage = StringField(default="")
 
@@ -78,5 +83,5 @@ class ImportJournal(Document):
     meta = {
         "db_alias": DB_ALIAS,
         "collection": "import_journal",
-        "indexes": ["operation_id", "status", "-started_at"],
+        "indexes": ["operation_id", "idempotency_key", "status", "-started_at"],
     }

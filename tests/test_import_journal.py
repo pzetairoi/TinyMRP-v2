@@ -19,6 +19,7 @@ from mongoengine import connect, disconnect
 from app.models.import_journal import ImportJournal
 from app.models.part import Part
 from app.services import upload_pack
+from app.services.timezone_utils import utc_now
 
 
 @pytest.fixture()
@@ -236,3 +237,75 @@ def test_journal_failure_does_not_break_the_import(db, monkeypatch):
 
     assert result["parts_created"] == 1
     assert result["operation_id"] == "", "no id when the journal could not be written"
+
+
+# --- idempotency (IMPORT-ATOMIC-01 residue) ----------------------------------
+
+
+def _opts(**over):
+    base = {
+        "data_mode": "fill_blanks",
+        "bom_mode": "fill_if_empty",
+        "file_mode": "add_missing",
+        "approval_mode": "preserve",
+    }
+    base.update(over)
+    return base
+
+
+def test_same_pack_and_policies_produce_the_same_key():
+    key1 = upload_pack.import_idempotency_key(b"ZIPBYTES", _opts())
+    key2 = upload_pack.import_idempotency_key(b"ZIPBYTES", _opts())
+    assert key1 == key2
+
+
+def test_different_content_produces_a_different_key():
+    assert upload_pack.import_idempotency_key(b"A", _opts()) != (
+        upload_pack.import_idempotency_key(b"B", _opts())
+    )
+
+
+def test_the_same_pack_under_different_policies_is_a_different_operation():
+    """A fill-blanks run and a replace-all run touch different data.
+
+    Treating them as the same operation would let a destructive re-import look
+    like a harmless repeat.
+    """
+    fill = upload_pack.import_idempotency_key(b"ZIP", _opts(data_mode="fill_blanks"))
+    replace = upload_pack.import_idempotency_key(b"ZIP", _opts(data_mode="replace_all"))
+    assert fill != replace
+
+
+def test_previous_successful_import_finds_only_committed_runs(db):
+    key = "k1"
+    ImportJournal(operation_id="op-failed", idempotency_key=key, status="failed").save()
+    assert upload_pack.previous_successful_import(key) is None
+
+    ImportJournal(
+        operation_id="op-ok", idempotency_key=key, status="committed", finished_at=utc_now()
+    ).save()
+    found = upload_pack.previous_successful_import(key)
+    assert found is not None and found.operation_id == "op-ok"
+
+
+def test_previous_successful_import_ignores_a_rolled_back_run(db):
+    # A rolled-back attempt SHOULD be retried; that is the point of retrying.
+    ImportJournal(operation_id="op-rb", idempotency_key="k2", status="rolled_back").save()
+    assert upload_pack.previous_successful_import("k2") is None
+
+
+def test_previous_successful_import_tolerates_an_empty_key(db):
+    assert upload_pack.previous_successful_import("") is None
+
+
+def test_execute_records_the_key_on_the_journal(db, monkeypatch):
+    monkeypatch.setattr(upload_pack, "_write_boms", lambda plan: 0)
+    monkeypatch.setattr(upload_pack, "_field_maps", lambda cfg: ({}, {}))
+    monkeypatch.setattr(upload_pack, "_apply_properties", lambda *a, **k: None)
+    monkeypatch.setattr(upload_pack, "_apply_approval", lambda *a, **k: None)
+    monkeypatch.setattr(upload_pack, "sync_part_materialized_fields", lambda *a, **k: None)
+    monkeypatch.setattr(upload_pack, "upsert_part_files_detailed", lambda r: {"count": 0})
+
+    result = upload_pack.execute_import_plan(_plan([("PN-K", "A")]), idempotency_key="abc123")
+    journal = ImportJournal.objects.get(operation_id=result["operation_id"])
+    assert journal.idempotency_key == "abc123"
