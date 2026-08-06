@@ -279,9 +279,27 @@ def test_bom_reads_deny_inaccessible_descendants_and_scope_where_used(client):
     ).save()
     _login(client, portal)
 
-    assert client.get(
-        f"/api/bom_tree?pn={parent.part_number}&rev={parent.revision}"
-    ).status_code == 403
+    # Lazy per-level authorisation (2026-08-06): an inaccessible descendant is
+    # now HIDDEN rather than refusing the whole tree, so a portal user sees the
+    # branches they are entitled to. The security property that still matters -
+    # and is asserted below - is that the draft child never appears in the
+    # payload. Proving the entire subtree up front cost ~6 s on a real
+    # assembly and was paid on every expansion.
+    tree = client.get(f"/api/bom_tree?pn={parent.part_number}&rev={parent.revision}")
+    assert tree.status_code == 200
+    assert child.part_number not in tree.get_data(as_text=True), (
+        "an unauthorised descendant must never be returned"
+    )
+
+    children = client.get(
+        f"/api/bom_tree?parent={parent.part_number}&parent_rev={parent.revision}"
+    )
+    assert children.status_code == 200
+    assert child.part_number not in children.get_data(as_text=True), (
+        "expanding the parent must not reveal the draft child"
+    )
+
+    # bom_flat still proves the whole subtree, so it keeps refusing outright.
     assert client.get(
         f"/api/bom_flat?pn={parent.part_number}&rev={parent.revision}"
     ).status_code == 403
@@ -488,3 +506,48 @@ def test_multiple_roles_combine_only_contributing_part_scopes():
         draft.part_number,
         draft.revision,
     ).allowed
+
+
+def test_lazy_bom_authorisation_hides_only_the_forbidden_branch(client):
+    """Partial access must show the allowed branches, never the denied one.
+
+    This is the security contract of the 2026-08-06 lazy-authorisation change.
+    Before it, one inaccessible descendant refused the entire tree; now the
+    tree renders and the forbidden child is filtered out. The property that
+    must never regress is the second assertion: a part outside the caller's
+    scope is not in the payload.
+    """
+    parent = _released("LAZY-100", "A")
+    allowed_child = _released("LAZY-200", "A")
+    denied_child = _draft("LAZY-900", "A")
+    for kid in (allowed_child, denied_child):
+        BOMLink(
+            parent_pn=parent.part_number,
+            parent_rev=parent.revision,
+            child_pn=kid.part_number,
+            child_rev=kid.revision,
+            qty=1,
+        ).save()
+
+    portal = _user("lazy-portal@stage3b1.test", _standard_role("customer"))
+    customer = Customer(name="Lazy Customer", users=[portal]).save()
+    Job(
+        job_number="LAZY-SCOPE",
+        customer=customer,
+        bom=[
+            JobBOMLine(pn=parent.part_number, rev=parent.revision, qty=1),
+            JobBOMLine(pn=allowed_child.part_number, rev=allowed_child.revision, qty=1),
+        ],
+    ).save()
+    _login(client, portal)
+
+    resp = client.get(
+        f"/api/bom_tree?parent={parent.part_number}&parent_rev={parent.revision}"
+    )
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+
+    assert allowed_child.part_number in body, "an authorised branch must still render"
+    assert denied_child.part_number not in body, (
+        "a part outside the caller's scope must never reach the client"
+    )

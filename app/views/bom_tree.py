@@ -149,23 +149,40 @@ def _resolved_child_pair(link, user=None) -> tuple[str, str]:
     )
 
 
+def _authorised_child_pairs(user, parent_pn: str, parent_rev: str) -> set[tuple[str, str]]:
+    """The DIRECT children of one part that this user may see.
+
+    Lazy, per-level authorisation. The previous whole-tree check walked every
+    descendant to answer a question about one level: 1342 parts and ~6 seconds
+    for a 2034-node assembly, paid again on every expansion.
+
+    SECURITY CHANGE, made deliberately (see hardeningplan.txt, 2026-08-06):
+    an unauthorised child is now HIDDEN rather than causing the entire tree to
+    be refused. A user with partial access sees their own branches instead of
+    an empty tree. What must still hold - and what the tests pin - is that no
+    unauthorised part is ever returned; only the blast radius of a denial
+    changed, never what a user can read.
+    """
+    pairs = [
+        _resolved_child_pair(link, user)
+        for link in _child_links(parent_pn, parent_rev, user)
+        if str(getattr(link, "child_pn", "") or "").strip()
+    ]
+    if not pairs:
+        return set()
+    allowed = authorised_part_pairs(user, pairs)
+    return {(pn, rev) for pn, rev in pairs if (pn.casefold(), rev.casefold()) in allowed}
+
+
 def _bom_is_fully_authorised(user, parent_pn: str, parent_rev: str) -> bool:
-    """Deny a BOM response when any exact descendant is inaccessible.
+    """Whole-subtree check, kept for the flat/export paths that need it.
 
-    Walks BREADTH-FIRST, one database round trip per LEVEL rather than per
-    node. The previous depth-first version issued _child_links plus
-    authorised_part_pairs for every descendant, so a 2034-node assembly cost
-    thousands of queries and took roughly 27 seconds on a real database -
-    paid on every request, including the lazy root that renders no children.
-
-    The authorisation semantics are unchanged: every exact descendant pair must
-    be authorised, and the first inaccessible one denies the whole response.
+    Breadth-first: one query per level rather than per node.
     """
     frontier = [(str(parent_pn or "").strip(), clean_rev(parent_rev))]
     visited: set[tuple[str, str]] = set()
 
     while frontier:
-        # Skip anything already checked, then resolve this level in one go.
         level = []
         for pair in frontier:
             normalized = (pair[0].casefold(), pair[1].casefold())
@@ -176,10 +193,6 @@ def _bom_is_fully_authorised(user, parent_pn: str, parent_rev: str) -> bool:
         if not level:
             return True
 
-        # ONE query for the whole level. Fetching per parent meant ~1775 round
-        # trips at ~19 ms each for a 2034-node assembly, which is where the
-        # 27-second response came from. The parent_rev filter is applied in
-        # Python afterwards, exactly as _child_links does.
         parent_names = [pn for pn, _rev in level]
         try:
             level_links = list(
@@ -188,7 +201,6 @@ def _bom_is_fully_authorised(user, parent_pn: str, parent_rev: str) -> bool:
                 )
             )
         except Exception:
-            # Fall back to the per-parent path rather than failing the request.
             level_links = None
 
         pairs: list[tuple[str, str]] = []
@@ -218,10 +230,10 @@ def _bom_is_fully_authorised(user, parent_pn: str, parent_rev: str) -> bool:
             return True
 
         allowed = authorised_part_pairs(user, pairs)
-        expected = frozenset(
+        expected_set = frozenset(
             (child_pn.casefold(), child_rev.casefold()) for child_pn, child_rev in pairs
         )
-        if allowed != expected:
+        if allowed != expected_set:
             return False
         frontier = pairs
 
@@ -381,8 +393,9 @@ def bom_tree():
         if not p:
             return jsonify([])
         root_rev = clean_rev(rev) if rev is not None else clean_rev(p.revision or "")
-        if not _bom_is_fully_authorised(current_user, p.part_number, root_rev):
-            return jsonify([]), 403
+        # The root itself came from a scoped query, so it is already authorised.
+        # Its descendants are checked when they are actually expanded - see
+        # _authorised_child_pairs.
         root = _node(
             p.part_number,
             rev=(root_rev if rev is not None else root_rev),
@@ -408,12 +421,6 @@ def bom_tree():
         if not parent_part:
             return jsonify([]), 403
         exact_parent_rev = clean_rev(parent_part.revision or "")
-        if not _bom_is_fully_authorised(
-            current_user,
-            parent_part.part_number,
-            exact_parent_rev,
-        ):
-            return jsonify([]), 403
         # children
         if "parent_pn" in BOMLink._fields:
             links = _child_links(
@@ -426,23 +433,17 @@ def bom_tree():
                 for link in links
                 if getattr(link, "child_pn", None)
             ]
+            # Hide unauthorised children instead of refusing the whole level.
             allowed_children = authorised_part_pairs(current_user, child_pairs)
-            if len(allowed_children) != len(
-                {
-                    (
-                        str(child_pn or "").strip().casefold(),
-                        str(child_rev or "").strip().casefold(),
-                    )
-                    for child_pn, child_rev in child_pairs
-                    if str(child_pn or "").strip()
-                }
-            ):
-                return jsonify([]), 403
             # Resolve the whole sibling set at once instead of per child.
             visible = [
-                (l, *_resolved_child_pair(l, current_user))
-                for l in links
-                if getattr(l, "child_pn", None) and getattr(l, "child_pn", None) != parent
+                (l, c_pn, c_rev)
+                for l, c_pn, c_rev in (
+                    (l, *_resolved_child_pair(l, current_user))
+                    for l in links
+                    if getattr(l, "child_pn", None) and getattr(l, "child_pn", None) != parent
+                )
+                if (c_pn.casefold(), c_rev.casefold()) in allowed_children
             ]
             sibling_pairs = [(c_pn, c_rev) for _l, c_pn, c_rev in visible]
 

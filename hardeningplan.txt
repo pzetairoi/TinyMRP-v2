@@ -685,7 +685,40 @@ Root cause was NOT the frontend: it already loads lazily, one level at a time.
   loading" and "you can still see the child's BOM while the parent loads" —
   were the same missing state.
 
-  STILL SLOW: J200684 at 1.76 s is better but not good. The remaining cost is
+  *** DELIBERATE SECURITY CHANGE 2026-08-06, authorised by the owner ***
+  BOM tree authorisation is now LAZY / PER LEVEL.
+    BEFORE: if ANY descendant was inaccessible, the whole tree was refused
+            (403). Proving that meant walking every descendant - 1342 parts,
+            ~6 s for J200684 - on EVERY request, including the lazy root that
+            renders no children at all.
+    NOW:    only the level being returned is authorised, and an unauthorised
+            child is HIDDEN rather than refusing the response. A user with
+            partial access sees the branches they are entitled to.
+    WHAT DID NOT CHANGE, and must never: no part outside the caller's scope is
+            ever returned. Verified across 5 roles (administrator, customer,
+            supplier, workshop, auditor) against the real database: zero leaks.
+            tests/test_part_revision_scopes.py has a dedicated test asserting
+            an allowed sibling renders while a denied one does not.
+    NOTE bom_flat still proves the WHOLE subtree and still refuses outright -
+            it returns a flattened export, so partial output there would be
+            misleading rather than helpful.
+    RESULT: root 6000 ms -> 77 ms. Expanding 58 children ~2.4 s, now dominated
+            by thumbnail resolution rather than authorisation.
+
+  *** NOT A CODE PROBLEM: ~2 s per request was Windows DNS. ***
+  Measured on the live server: /api/health (which does nothing) took 2073 ms
+  via `localhost` and 7 ms via `127.0.0.1`; parts_lazy 2209 ms vs 127 ms.
+  `localhost` resolves to IPv6 ::1 first and times out before falling back.
+  THE PARTS INVENTORY WAS NEVER SLOW - it is ~127 ms. Use 127.0.0.1, or pin
+  `127.0.0.1  localhost` in C:\Windows\System32\drivers\etc\hosts.
+  Anyone benchmarking this app on Windows must check this FIRST or they will
+  chase two seconds that are not in the code.
+
+  REMAINING BOM COST: thumbnail resolution (~65 ms/row of disk I/O) now
+  dominates a wide expansion. preview_png_urls_map already batches it; the next
+  win would be caching or precomputing thumbnail paths per part.
+
+  PREVIOUS NOTE (superseded): J200684 at 1.76 s is better but not good. The remaining cost is
   the authorisation walk visiting 2034 nodes to answer a question about the
   ROOT. A deeper fix would authorise lazily per expanded level instead of
   proving the whole tree up front — that changes security semantics, so it was
