@@ -60,8 +60,7 @@ mongo_image() {
 }
 
 redis_image() {
-  printf '%s
-' "${TINYMRP_REDIS_IMAGE:-redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2}"
+  printf '%s\n' "${TINYMRP_REDIS_IMAGE:-redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2}"
 }
 
 caddy_image() {
@@ -691,6 +690,11 @@ render_instance_compose() {
   local private_network_name="$9"
   local app_image="${10:-tinymrp-app:latest}"
 
+  local mongo_command='["mongod", "--bind_ip_all"]'
+  if [ -n "${MONGO_AUTH_ENABLED:-}" ]; then
+    mongo_command='["mongod", "--bind_ip_all", "--auth"]'
+  fi
+
   cat <<EOF
 name: ${project_name}
 
@@ -699,6 +703,13 @@ services:
     image: $(mongo_image)
     container_name: ${mongo_container_name}
     restart: unless-stopped
+    # MONGO_AUTH_ENABLED exists for instances created BEFORE authentication was
+    # the default. The official image only enables auth while initialising an
+    # EMPTY data directory, so an existing volume needs --auth passed
+    # explicitly. Resolved here in bash rather than by compose interpolation,
+    # because a half-interpolated command line is a container that will not
+    # start. Set by deploy/scripts/enable-mongo-auth.sh.
+    command: ${mongo_command}
     security_opt:
       - no-new-privileges:true
     environment:
