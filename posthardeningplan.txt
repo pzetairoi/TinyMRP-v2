@@ -45,8 +45,8 @@ HOW TO USE THIS FILE
   O1  CSP browser check      ~30 min, closes a P1   WAITING ON YOU
   O2  Mongo authentication across the fleet         1 of 4 instances
   O3  Guided install from scratch                   BLOCKED: needs a TTY
-  O4  Product position, Track A vs Track B          WAITING ON YOU
-  O5  Legal/commercial package                      WAITING ON YOU
+  O4  Product position                              DECIDED 2026-08-07
+  O5  Legal/commercial package                      DRAFTING
   O6  Trivy gate                                    DECIDED: keep as is
   O7  Redis for existing instances                  3 of 4 instances
   L1  Strict security mode across the fleet         3 of 4 - ADD-IN VERIFIED
@@ -135,14 +135,49 @@ HOW TO USE THIS FILE
         - a redis container appears beside app and mongo
         - the instance .env carries MONGO_APP_USER and authSource in MONGO_URI
 
-  O4. Product position                                    COMM-SCOPE-01
-      Track A (engineering BOM/document control - what exists) or Track B
-      (full MRP - a separate roadmap). Marketing claims must match the code.
+  O4. Product position — DECIDED 2026-08-07 by the owner
+      TRACK A. TinyMRP is NOT a complete MRP and must never be marketed as one.
 
-  O5. Commercial/legal package                            COMM-LEGAL-01
-      EULA, privacy policy + DPA, retention/deletion, support and SLA,
-      vulnerability-disclosure contact, third-party notices, accessibility
-      statement. Needs counsel, not engineering.
+      WHAT IT IS, in the owner's words: a way for small engineering offices to
+      pass information easily to purchasing and to the workshop. It handles
+      jobs and purchase listings, parts and revisions, BOMs, engineering files,
+      drawing review and controlled document packs, with SolidWorks
+      integration.
+
+      WHAT IT IS NOT, and must not be claimed: there is NO inventory. No stock
+      ledger, no warehouses or bins, no receipts or material issues, no MRP
+      explosion or demand netting, no lead times or reorder policies, no
+      routings, work centres or capacity planning, no costing, no lot or serial
+      traceability, no cycle counting.
+
+      The word "MRP" in the product name is therefore a liability in marketing
+      copy unless the scope is stated plainly beside it.
+
+  O5. Commercial/legal package — drafting, owner reviews with counsel
+      LICENCE DECIDED 2026-08-07: The Unlicense STAYS. The owner was told
+      plainly that this is a public-domain dedication - anyone may copy,
+      modify, sell and compete using TinyMRP, owing nothing - and confirmed
+      that is intended.
+
+      *** THE CONSEQUENCE THAT SHAPES EVERYTHING ELSE HERE: you cannot impose
+      use restrictions on software you have dedicated to the public domain. So
+      there can be no EULA in the usual sense - no "you may not redistribute",
+      no per-seat limits, no field-of-use terms. Any such clause would
+      contradict the licence and be unenforceable.
+      What CAN be agreed is everything that is not the software: hosting,
+      support, response times, data handling, backups, confidentiality of the
+      customer's own data. The document must therefore be a SERVICE AND
+      SUPPORT AGREEMENT, not a software licence. Drafting it as a EULA would
+      produce something that reads binding and is not. ***
+
+      Drafts to produce, all marked clearly as pending legal review:
+        - service and support agreement (not a EULA - see above)
+        - privacy policy and a data-processing addendum
+        - retention and deletion policy
+        - support scope and response targets
+        - vulnerability disclosure contact and process
+        - third-party software notices
+        - accessibility statement
 
   O6. Trivy — DECIDED 2026-08-07: leave as is.
       It blocks a release on a HIGH or CRITICAL image vulnerability THAT HAS A
