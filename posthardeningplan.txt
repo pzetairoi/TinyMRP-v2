@@ -52,7 +52,7 @@ WHAT hardeningplan.txt IS NOW
   O7  Redis for the existing instance                  DONE (main)
 
   LIVE STATUS
-    www.tinymrp.com runs tinymrp-app:c99696c527be (all hardening), healthy,
+    SITE-MAIN runs tinymrp-app:c99696c527be (all hardening), healthy,
     doctor 0 failures. Nextcloud and Vikunja unaffected.
     Backup of 'main' taken AND restore-verified.
     Still on the live box: security mode is "compat" (L1) and Mongo is
@@ -61,7 +61,7 @@ WHAT hardeningplan.txt IS NOW
   GATES: 739 backend, 317 frontend, ruff/mypy/bandit clean, build OK.
 
   WHAT BLOCKS O3, the biggest remaining unknown:
-    1. test.tinymrp.com resolves to SERVER-B, not the VPS.
+    1. SITE-TEST resolves to SERVER-B, not the VPS.
     2. The installer needs a TTY to show or accept the admin password, which
        this assistant cannot provide. Commands to run yourself are in 2D.
 
@@ -71,15 +71,15 @@ WHAT hardeningplan.txt IS NOW
 ========================================================================
 
   SERVER-A  (SERVER-A)
-    main    tinymrp.com / www        52 parts    23 MB   PRODUCTION
+    main    SITE-MAIN / www        52 parts    23 MB   PRODUCTION
                                      -> on latest main, Mongo AUTHENTICATED,
                                         redis running, /api/ready healthy
-    plus Nextcloud (cloud.tinymrp.com) and Vikunja on the shared Caddy
+    plus Nextcloud (CLOUD-MAIN) and Vikunja on the shared Caddy
 
   SERVER-B   (SERVER-B)     ALL still on old commit 3905502
-    demo    demo.tinymrp.com         12 parts    5.2 MB  disposable
-    mecs    mecs.tinymrp.com       1479 parts    2.8 GB  PRODUCTION
-    test    test.tinymrp.com       1789 parts    6.8 GB  *** SEE BELOW ***
+    demo    SITE-DEMO         12 parts    5.2 MB  disposable
+    mecs    SITE-MECS       1479 parts    2.8 GB  PRODUCTION
+    test    SITE-TEST       1789 parts    6.8 GB  *** SEE BELOW ***
     plus two Nextclouds (cloud.mecs / cloud.test) on a shared Caddy
 
   *** "test" IS NOT A SANDBOX. It holds MORE parts and more than twice the
@@ -169,15 +169,15 @@ WHAT hardeningplan.txt IS NOW
   FIXED: the unattended path is now bounded (DNS_WAIT_MAX_ATTEMPTS, default 20
   = ~5 minutes) and dies naming --skip-dns-check as the escape hatch. The
   interactive prompt is kept - a human watching can see what is wrong.
-  The trigger was real: test.tinymrp.com resolves to SERVER-B, NOT the
+  The trigger was real: SITE-TEST resolves to SERVER-B, NOT the
   VPS (SERVER-A), so the guard was right to refuse. Let's Encrypt could
   not have issued a certificate either.
-  OWNER: repoint test.tinymrp.com at SERVER-A to validate the full path
+  OWNER: repoint SITE-TEST at SERVER-A to validate the full path
   including ACME, or run with --local-mode internal-tls to validate everything
   except real certificate issuance.
 
   *** LIVE-INSTANCE FINDINGS 2026-08-07 - main is deployed and running ***
-  www.tinymrp.com now runs tinymrp-app:c99696c527be. Doctor: 0 failures.
+  SITE-MAIN now runs tinymrp-app:c99696c527be. Doctor: 0 failures.
   Nextcloud and Vikunja unaffected. /api/ready reports ok=true (database ok,
   storage ok, 48 GB free). First time any of this hardening has run on a real
   server.
@@ -205,7 +205,7 @@ WHAT hardeningplan.txt IS NOW
   automatic rollback.
   Nothing broke - and that is the other half of the finding. The rollback
   worked exactly as designed on a LIVE production instance: previous image
-  restored, www.tinymrp.com still serving, doctor reporting 0 failures. That is
+  restored, SITE-MAIN still serving, doctor reporting 0 failures. That is
   a Phase 10 rollback drill, passed, for free.
   LESSON for anyone updating an existing instance to this branch: build the
   image FIRST and pass --image. A compose healthcheck applies the moment the
@@ -217,11 +217,11 @@ WHAT hardeningplan.txt IS NOW
       49 GB free). Key-based SSH installed; alias `tinymrp-vps`.
       *** THAT BOX IS NOT DISPOSABLE. It serves three production services
       through ONE shared Caddy:
-        tinymrp.com / www   -> tinymrp-main-app  (52 parts, real data)
-        cloud.tinymrp.com   -> Nextcloud + MariaDB
-        vikunja.tinymrp.com -> Vikunja
+        SITE-MAIN / www   -> tinymrp-main-app  (52 parts, real data)
+        CLOUD-MAIN   -> Nextcloud + MariaDB
+        TASKS -> Vikunja
       Breaking Caddy takes down all three, not just TinyMRP. ***
-      Owner supplied test.tinymrp.com and cloud.test.tinymrp.com, already
+      Owner supplied SITE-TEST and CLOUD-TEST, already
       resolving to the VPS, and chose to rebuild 'main' as well.
       Sequence being followed, deliberately: back up main -> PROVE the restore
       works (done, see E7) -> build the test instance -> only then rebuild main,
@@ -506,13 +506,13 @@ Run it in your own terminal, where it is interactive:
   ssh ubuntu@SERVER-A
   cd /opt/TinyMRP-v2 && sudo git pull
 
-  # Option A - after repointing test.tinymrp.com at SERVER-A.
+  # Option A - after repointing SITE-TEST at SERVER-A.
   # Validates the FULL path including a real Let's Encrypt certificate.
-  sudo ./deploy/scripts/create-instance.sh test test.tinymrp.com       --admin-email admin@tinymrp.com
+  sudo ./deploy/scripts/create-instance.sh test SITE-TEST       --admin-email admin@SITE-MAIN
 
   # Option B - without touching DNS. Validates everything except real
   # certificate issuance, and burns no Let's Encrypt quota.
-  sudo ./deploy/scripts/create-instance.sh test test.tinymrp.com       --admin-email admin@tinymrp.com --skip-dns-check       --local-mode internal-tls
+  sudo ./deploy/scripts/create-instance.sh test SITE-TEST       --admin-email admin@SITE-MAIN --skip-dns-check       --local-mode internal-tls
 
 Add --admin-password '<your choice>' to set it yourself; omit it and the
 script generates one and PRINTS it at the end - that is the only time it is
@@ -520,7 +520,7 @@ shown, so copy it then.
 
 What to watch for, since this is the first guided install ever run:
   - the Caddy route installs, validates and reloads WITHOUT disturbing
-    tinymrp.com, cloud.tinymrp.com or vikunja.tinymrp.com on the same proxy
+    SITE-MAIN, CLOUD-MAIN or TASKS on the same proxy
   - the app reaches healthy - it must satisfy /api/ready now, not /api/health
   - a redis container appears beside app and mongo (new in this branch)
   - the instance .env contains MONGO_APP_USER and an authSource in MONGO_URI
