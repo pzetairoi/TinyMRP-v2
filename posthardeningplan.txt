@@ -30,6 +30,9 @@ HOW TO USE THIS FILE
   E8  Accessibility baseline                        PARTIAL (structure)
   E9  Concurrent note edits                         DONE
   E10 Playwright + axe                              NOT STARTED
+  B1  BOM child links sent the wrong revision       DONE
+  B2  bom_flat storage scans                        DONE
+  B3  Parts inventory latency                       FIXED, UNMEASURED
 
   OWNER                                             STATE
   ------------------------------------------------  --------------------
@@ -42,7 +45,10 @@ HOW TO USE THIS FILE
   O7  Redis for existing instances                  3 of 4 instances
   L1  Strict security mode across the fleet         2 of 4 (demo, test)
 
-  GATES: 739 backend, 317 frontend, ruff/mypy/bandit clean, build OK.
+  GATES: 746 backend, 322 frontend, ruff/mypy/bandit clean, build OK.
+
+  WAITING ON A MEASUREMENT: B3's final fix is deployed to test but has not been
+  timed. Load /ui/parts with LOG_LEVEL=DEBUG on that instance to confirm it.
 
 
 ========================================================================
@@ -211,49 +217,74 @@ HOW TO USE THIS FILE
 
 
 ========================================================================
-4b. PARTS INVENTORY PERFORMANCE — measured, partly fixed, still open
+4b. BUGS REPORTED FROM THE LIVE TEST INSTANCE
 ========================================================================
-  Reported as "takes ages". Measured with the endpoint's own instrumentation
-  (LOG_LEVEL=DEBUG, logger tinymrp.parts_lazy) rather than guessed.
 
-    BEFORE  config=46 filters=0.2 query=71 thumbs=524 review=0 rows=64
-            total=705ms   (25 rows, 1789 records)
-    AFTER   thumbs=370-476            total=529-678ms
+  B1. BOM child links sent the parent's revision — FIXED 2026-08-07
+      Reported as "part details ok but buggy with the links". The address bar
+      was correct and every request still failed.
+      React does not unmount the detail page when only a route param changes,
+      so the previously loaded part stayed in state and supplied ITS revision
+      until the new fetch landed. Clicking a child whose revision is blank,
+      from a parent at revision "1", sent part_detail, files_overview, shares,
+      images and docpack options all out with rev=1 - a page of 404s.
+      A loaded part now supplies the revision only while it IS the part in the
+      URL. Extracted to src/lib/partIdentity.ts with 5 tests, matched
+      case-insensitively because the backend matches part numbers that way.
+      Very likely the same root cause as the older report that a child's BOM
+      stayed visible while its parent loaded.
 
-  A ~25% improvement. HONEST: far less than expected, and the reason is that
-  my first assumption was wrong.
+  B2. bom_flat stormed the storage — FIXED 2026-08-07
+      Clicking a large child timed out. bom_flat was the unoptimised sibling of
+      bom_tree: when bom_tree went from 35s to 77ms it gained batched lookups,
+      and bom_flat kept calling preview_png_urls_for once per unique part at
+      ~65 ms each. Now one link walk collects every distinct part and all
+      thumbnails resolve in a single batch.
 
-  RULED OUT, so nobody re-investigates:
-    - parts_lazy already paginates (.skip/.limit, 25 rows)
-    - preview_png_urls_map already batches at the DATABASE level: one query
-      per page
-    - the created_at sort is indexed
-    - /api/field-config is 55 KB but that is SIZE, not latency; its
-      computation shows as config=~46 ms, real but not the problem
+  B3. Parts inventory latency — THREE PASSES, THE LAST ONE UNMEASURED
+      Measured with the endpoint's own instrumentation, never guessed.
 
-  WHAT WAS WRONG WITH MY FIX: I assumed each part's files sat in their own
-  directory, so one scandir would replace many stats. The storage is FLAT -
-  33 directories for 10990 files, with thumbs/png holding 2457 on its own. The
-  cache does work as designed (one scandir instead of ~90 stats) but that one
-  scandir reads 2457 entries, which eats most of the saving.
+        BEFORE   config=46 filters=0.2 query=71 thumbs=524 rows=64  total=705ms
+        PASS 1   thumbs=370-476                                     total=529-678ms
+        PASS 3   deployed to test, NOT YET TIMED
 
-  ALSO FIXED: _validate_candidate re-resolved the storage ROOT for every
-  candidate - the same one or two paths, dozens of times per request. Now
-  memoised per request.
+      RULED OUT, so nobody re-investigates: parts_lazy already paginates
+      (25 rows), preview_png_urls_map already batches at the DATABASE level,
+      the created_at sort is indexed, and /api/field-config is 55 KB of SIZE
+      not latency (its computation is the config=~46 ms bucket - real, but not
+      the problem).
 
-  STILL OPEN, and this is where the remaining time is:
-    Path.resolve() is still called per candidate, and on a container bind
-    mount that walks the path every time. Options worth measuring before
-    choosing: resolve the candidate relative to an already-resolved root
-    instead of from scratch; or persist a thumbnail-exists flag on PartFile at
-    write time so the read path never touches the filesystem at all. The
-    second is the real fix and it is additive - a new field, backfilled.
+      Pass 1 - a request-scoped directory listing cache. Only ~25%, and the
+      reason is worth keeping: I assumed each part's files sat in their own
+      directory. The storage is FLAT - 33 directories for 10990 files, with
+      thumbs/png holding 2457 alone - so the one scandir reads 2457 entries and
+      eats most of the saving.
 
-  CONSTRAINT for whoever picks this up: this is file_security.py, the
-  path-traversal guard. Speed must never come from weakening containment.
-  tests/test_file_security_listing_cache.py pins that boundary: a file that
-  genuinely exists outside the root is still refused, traversal is still
-  refused, and the cache is proved off outside a request.
+      Pass 2 - _validate_candidate re-resolved the storage ROOT for every
+      candidate, the same path dozens of times per request. Memoised.
+
+      Pass 3, the real fix - stop asking the filesystem at all.
+      thumb_mtime already existed on PartFile and is written the moment a
+      thumbnail is generated, so availability is answered from the record.
+      Records without it still fall back to disk, so older data is unchanged.
+      SAFE FOR TWO REASONS, both stated because "trust the DB" is normally the
+      wrong instinct in file_security.py:
+        - a wrong YES cannot grant access. It only decides which URL goes on a
+          row; serving still resolves with must_exist=True, so a deleted file
+          is a 404, never a bypass.
+        - a 404 is not a broken page. ThumbImg walks its candidates and settles
+          on the branding logo, so a stale record degrades to a placeholder.
+
+      NEXT: load /ui/parts on test with LOG_LEVEL=DEBUG and compare. If thumbs
+      is still the dominant bucket, the remaining cost is Path.resolve() per
+      candidate and the option not yet tried is resolving relative to an
+      already-resolved root.
+
+      CONSTRAINT for whoever continues: this is file_security.py, the
+      path-traversal guard. Speed must never come from weakening containment.
+      tests/test_file_security_listing_cache.py pins that boundary - a file
+      that genuinely exists outside the root is still refused, traversal is
+      still refused, and the cache is proved off outside a request context.
 
 ========================================================================
 5. THE SHORTEST FINISH
