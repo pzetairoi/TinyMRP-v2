@@ -87,7 +87,7 @@ fi
 
 warn "This restarts ${INSTANCE_NAME}. The site will be briefly unavailable."
 info "Backing up before touching anything"
-"${SCRIPT_DIR}/backup-instance.sh" "$INSTANCE_NAME" >/dev/null || die "Backup failed; refusing to continue."
+bash "${SCRIPT_DIR}/backup-instance.sh" "$INSTANCE_NAME" >/dev/null || die "Backup failed; refusing to continue."
 
 info "Creating users (no application data is modified)"
 docker exec -i "$MONGO_CONTAINER_NAME" mongosh --quiet <<MONGOEOF || die "User creation failed. The instance is untouched and still unauthenticated."
