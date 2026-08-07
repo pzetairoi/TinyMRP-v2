@@ -387,6 +387,40 @@ WHAT hardeningplan.txt IS NOW
 
 
 ========================================================================
+2D. RUN THIS YOURSELF - the guided install needs a terminal
+========================================================================
+The install cannot be driven from this assistant: without a TTY the script
+degrades to unattended mode, which now fails cleanly instead of hanging but
+still cannot show you the generated admin password or let you type one.
+
+Run it in your own terminal, where it is interactive:
+
+  ssh ubuntu@SERVER-A
+  cd /opt/TinyMRP-v2 && sudo git pull
+
+  # Option A - after repointing test.tinymrp.com at SERVER-A.
+  # Validates the FULL path including a real Let's Encrypt certificate.
+  sudo ./deploy/scripts/create-instance.sh test test.tinymrp.com       --admin-email admin@tinymrp.com
+
+  # Option B - without touching DNS. Validates everything except real
+  # certificate issuance, and burns no Let's Encrypt quota.
+  sudo ./deploy/scripts/create-instance.sh test test.tinymrp.com       --admin-email admin@tinymrp.com --skip-dns-check       --local-mode internal-tls
+
+Add --admin-password '<your choice>' to set it yourself; omit it and the
+script generates one and PRINTS it at the end - that is the only time it is
+shown, so copy it then.
+
+What to watch for, since this is the first guided install ever run:
+  - the Caddy route installs, validates and reloads WITHOUT disturbing
+    tinymrp.com, cloud.tinymrp.com or vikunja.tinymrp.com on the same proxy
+  - the app reaches healthy - it must satisfy /api/ready now, not /api/health
+  - a redis container appears beside app and mongo (new in this branch)
+  - the instance .env contains MONGO_APP_USER and an authSource in MONGO_URI
+
+If anything fails, nothing is left half-built that I cannot inspect
+afterwards - and `main` is backed up, with the restore already proven.
+
+========================================================================
 3. THE SHORTEST PROFESSIONAL FINISH
 ========================================================================
 
