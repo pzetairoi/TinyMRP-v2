@@ -44,12 +44,12 @@ WHAT hardeningplan.txt IS NOW
   OWNER                                                STATE
   ---------------------------------------------------  ------------------
   O1  CSP browser check          ~30 min, closes a P1  WAITING ON YOU
-  O2  Migrate live Mongo to authenticated              WAITING ON YOU
+  O2  Migrate live Mongo to authenticated              DONE (main)
   O3  Guided install on the VPS                        BLOCKED: DNS + TTY
   O4  Product position, Track A vs B                   WAITING ON YOU
   O5  Legal/commercial package                         WAITING ON YOU
-  O6  Trivy gate - re-decide with correct facts        WAITING ON YOU
-  O7  Redis for the existing instance                  WAITING ON YOU
+  O6  Trivy gate                                       DECIDED: keep
+  O7  Redis for the existing instance                  DONE (main)
 
   LIVE STATUS
     www.tinymrp.com runs tinymrp-app:c99696c527be (all hardening), healthy,
@@ -64,6 +64,31 @@ WHAT hardeningplan.txt IS NOW
     1. test.tinymrp.com resolves to SERVER-B, not the VPS.
     2. The installer needs a TTY to show or accept the admin password, which
        this assistant cannot provide. Commands to run yourself are in 2D.
+
+
+========================================================================
+0b. FLEET INVENTORY — discovered 2026-08-07, TWO servers not one
+========================================================================
+
+  SERVER-A  (SERVER-A)
+    main    tinymrp.com / www        52 parts    23 MB   PRODUCTION
+                                     -> on latest main, Mongo AUTHENTICATED,
+                                        redis running, /api/ready healthy
+    plus Nextcloud (cloud.tinymrp.com) and Vikunja on the shared Caddy
+
+  SERVER-B   (SERVER-B)     ALL still on old commit 3905502
+    demo    demo.tinymrp.com         12 parts    5.2 MB  disposable
+    mecs    mecs.tinymrp.com       1479 parts    2.8 GB  PRODUCTION
+    test    test.tinymrp.com       1789 parts    6.8 GB  *** SEE BELOW ***
+    plus two Nextclouds (cloud.mecs / cloud.test) on a shared Caddy
+
+  *** "test" IS NOT A SANDBOX. It holds MORE parts and more than twice the
+  data of the mecs production instance. Whatever its name suggests, deleting
+  or reinstalling it would destroy real work. The only genuinely disposable
+  instance on either box is `demo` (12 parts, 5.2 MB). ***
+
+  All four instances run TINYMRP_SECURITY_MODE="compat", so Phase 2 strict
+  authentication is inactive everywhere in the fleet, not just on main.
 
 ========================================================================
 1. WHERE THE PROJECT ACTUALLY STANDS
@@ -123,6 +148,14 @@ WHAT hardeningplan.txt IS NOW
       This is the highest value-per-minute action available to anyone.
 
   O2. Migrate existing Mongo instances to authentication
+      DONE for `main` on 2026-08-07 via the new
+      deploy/scripts/enable-mongo-auth.sh. Verified afterwards that anonymous
+      access is refused ("command aggregate requires authentication") and that
+      the application credential cannot read the admin database.
+      REMAINING: demo, mecs and test on SERVER-B. Same script, but each
+      needs its own short maintenance window.
+
+  O2-orig. Migrate existing Mongo instances
       Mongo only creates users on the FIRST boot of an EMPTY data directory,
       so this cannot be automated onto a running instance. Needs a maintenance
       window per instance: enable auth, create the app user, update MONGO_URI.
