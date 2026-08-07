@@ -34,6 +34,7 @@ HOW TO USE THIS FILE
   B2  bom_flat storage scans                        DONE
   B3  Parts inventory latency                       FIXED, UNMEASURED
   B4  bom_flat still N+1 on the DATABASE            OPEN - causes 502s
+  B5  where-used link gives "not found"             OPEN - lead recorded
   E11 Remove dead files, configs, templates         NOT STARTED
   E12 Group the SolidWorks files on Tools + help    NOT STARTED
 
@@ -338,6 +339,36 @@ HOW TO USE THIS FILE
 
   INTERIM RELIEF if it bites before then: raising gunicorn --timeout turns a
   502 into a slow page, which is less alarming but not a fix.
+
+========================================================================
+4c-b. B5 — a where-used link answers "not found"
+========================================================================
+  Reported: clicking where-used on a parent lands on /ui/part/<pn>?rev= and
+  shows "not found".
+
+  RULED OUT already, so start from here rather than repeating it:
+    - the part EXISTS: one row, revision blank, and the URL carries a blank
+      revision too, so the data is not the problem
+    - it is NOT the stale-revision bug (B1). That fix IS deployed: the bundle
+      the browser loads, index-fUqBhSZ0.js, was built in commit 15e42b0 which
+      is the fix itself
+    - the links are constructed correctly - /ui/part/${pn}?rev=${rev} with both
+      parts encoded
+
+  THE LEAD: PartDetailPage builds part links two different ways. Lines 829/834
+  use <Link to=...>, which routes inside the SPA. Lines 772/791 use a raw
+  <a href=...>, which is a FULL PAGE LOAD and therefore hits Flask, not the
+  browser router. A "not found" from that path comes from the SERVER route for
+  /ui/part/<pn>, which is a different code path from the /api/part_detail
+  lookups already investigated.
+  Check the server-side /ui/part/<pn> handler first, and while there, decide
+  whether those two <a href> links should be <Link> like their neighbours - a
+  full reload of a heavy SPA is also why those clicks feel slow.
+
+  NOTE: this may have been failing all along and only became VISIBLE when the
+  catch-all route started rendering a real 404 instead of quietly showing the
+  parts inventory (E1). Worth confirming, because it changes whether this is a
+  regression or an old bug finally surfacing.
 
 ========================================================================
 4d. E11 / E12 — repository cleanup and the Tools page
