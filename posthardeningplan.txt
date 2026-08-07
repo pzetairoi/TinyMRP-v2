@@ -20,7 +20,7 @@ HOW TO USE THIS FILE
   ENGINEERING                                       STATE
   ------------------------------------------------  --------------------
   E1  Error boundary + real 404                     DONE
-  E2  Silent exception handlers                     22 of 184 + 1 SECURITY FIX
+  E2  Silent exception handlers                     25 of 184 + 1 SECURITY FIX
   E3  /api/ready wired into every healthcheck       DONE
   E4  Redis in the guided per-instance compose      DONE
   E5  Per-endpoint rate limits, enforced            DONE
@@ -34,9 +34,11 @@ HOW TO USE THIS FILE
   B2  bom_flat storage scans                        DONE
   B3  Parts inventory latency                       FIXED, UNMEASURED
   B4  bom_flat still N+1 on the DATABASE            OPEN - causes 502s
-  B5  where-used link gives "not found"             OPEN - lead recorded
-  E11 Remove dead files, configs, templates         NOT STARTED
-  E12 Group the SolidWorks files on Tools + help    NOT STARTED
+  B5  where-used link gives "not found"             OPEN - cause found
+  B6  Imports failed on EVERY hardened deploy       DONE - was critical
+  B7  Failed import did not say what landed         DONE
+  E11 Remove dead files, configs, templates         DONE (first pass)
+  E12 Group SolidWorks files on Tools + help        DONE
 
   OWNER                                             STATE
   ------------------------------------------------  --------------------
@@ -49,7 +51,7 @@ HOW TO USE THIS FILE
   O7  Redis for existing instances                  3 of 4 instances
   L1  Strict security mode across the fleet         2 of 4 (demo, test)
 
-  GATES: 746 backend, 322 frontend, ruff/mypy/bandit clean, build OK.
+  GATES: 759 backend, 322 frontend, ruff/mypy/bandit clean, build OK.
 
   WAITING ON A MEASUREMENT: B3's final fix is deployed to test but has not been
   timed. Load /ui/parts with LOG_LEVEL=DEBUG on that instance to confirm it.
@@ -369,6 +371,58 @@ HOW TO USE THIS FILE
   catch-all route started rendering a real 404 instead of quietly showing the
   parts inventory (E1). Worth confirming, because it changes whether this is a
   regression or an old bug finally surfacing.
+
+========================================================================
+4c-c. B6 — imports were broken on EVERY hardened deployment  [FIXED]
+========================================================================
+  The most serious defect found in this whole effort, and it was invisible
+  until the app ran on a real hardened host.
+
+  Reported twice with different packs: "cross-store file commit failed at
+  <part> revision (blank)". Every import that wrote a file failed.
+
+  CAUSE: _commit_files ends with os.replace, which is atomic but cannot cross
+  a filesystem boundary - it raises EXDEV. Staging went to the system temp
+  directory, and the hardened container runs a read-only root with a tmpfs
+  /tmp, so temp is a DIFFERENT DEVICE from the bind-mounted deliverables
+  volume. Measured on the instance: /tmp device 162, /data/deliverables 2065.
+  The container hardening and the import path were each correct alone and
+  incompatible together. No test could have caught it - both halves passed.
+
+  FIX: stage inside the deliverables root, which _stage_files already
+  received. The commit stays ATOMIC rather than degrading to a copy; a copy
+  failing halfway would leave a truncated file where a whole one used to be.
+
+  WHAT WENT RIGHT: the journal behaved exactly as designed. Both failed runs
+  rolled back cleanly, reversed every created part, and needed no manual
+  follow-up. The data was never at risk - only the operator's ability to see
+  that, which is B7.
+
+========================================================================
+4c-d. B7 — a failed import now says whether anything landed  [FIXED]
+========================================================================
+  The operator saw an exception and could not tell a clean abort from a
+  half-applied import. That is the only question that matters afterwards: it
+  decides whether you retry or reconcile by hand.
+  The journal already knew. The failure response now carries it in plain
+  words - nothing kept and how many changes were reversed, or that it needs
+  checking by hand - plus the operation id.
+
+========================================================================
+4c-e. B5 — where-used "not found": TWO authorisation paths disagree
+========================================================================
+  The 404 is NOT missing data. /ui/part/<pn> in app/views/ui.py ends with
+      if not authorised_get(scoped, current_user, pn, ...): abort(404)
+  so it is an authorisation denial presented as "not found" - correct on its
+  own (do not leak existence), but it contradicts the page that linked there.
+
+  THE REAL PROBLEM: where-used scopes with scope_queryset and
+  authorised_part_pairs, while the detail route uses authorised_get. Two
+  mechanisms, two answers for the same part. One of them is wrong:
+    - if where-used is more permissive, it LEAKS parts the user may not see
+    - if the detail route is stricter, it is a usability bug
+  Deciding which needs the owner's intent for that role, so it is written down
+  rather than guessed at. Reconciling them on one mechanism is the fix.
 
 ========================================================================
 4d. E11 / E12 — repository cleanup and the Tools page
