@@ -564,11 +564,20 @@ def bom_flat():
     # One storage scan for the whole subtree instead of one per part. This is
     # the difference between a large assembly answering in under a second and
     # the browser giving up on it.
+    # Resolve the whole subtree UP FRONT: thumbnails in one batch, and every
+    # part document in a single query. row_for used to issue one part query per
+    # distinct part, which on a 163-part assembly meant hundreds of round trips.
+    subtree_pairs = _flat_subtree_pairs(root_part.part_number, root_rev, current_user)
+
     flat_thumbs: dict[tuple[str, str], list[str]] = {}
-    if has_permission(current_user, "files.read"):
-        subtree_pairs = _flat_subtree_pairs(root_part.part_number, root_rev, current_user)
-        if subtree_pairs:
-            flat_thumbs = preview_png_urls_map(subtree_pairs, user=current_user)
+    if subtree_pairs and has_permission(current_user, "files.read"):
+        flat_thumbs = preview_png_urls_map(subtree_pairs, user=current_user)
+
+    flat_parts: dict[tuple[str, str], Part] = {}
+    if subtree_pairs:
+        names = sorted({pn for pn, _rev in subtree_pairs})
+        for doc in scoped_parts.filter(part_number__in=names):
+            flat_parts[(doc.part_number, clean_rev(doc.revision or ""))] = doc
 
     def row_for(child_pn: str, child_rev: str) -> dict:
         key = (child_pn, clean_rev(child_rev))
@@ -578,10 +587,25 @@ def bom_flat():
 
         cached = part_cache.get(key)
         if cached is None:
-            part_doc = scoped_parts.filter(
-                part_number__iexact=child_pn,
-                revision__iexact=key[1],
-            ).first()
+            # Batched above. Part numbers are matched case-insensitively
+            # everywhere, so try the exact pair, then a folded match, and only
+            # query when the pair was not in the subtree walk at all.
+            part_doc = flat_parts.get(key)
+            if part_doc is None:
+                folded = (key[0].casefold(), key[1].casefold())
+                part_doc = next(
+                    (
+                        doc
+                        for (pn_k, rev_k), doc in flat_parts.items()
+                        if (pn_k.casefold(), rev_k.casefold()) == folded
+                    ),
+                    None,
+                )
+            if part_doc is None:
+                part_doc = scoped_parts.filter(
+                    part_number__iexact=child_pn,
+                    revision__iexact=key[1],
+                ).first()
             attrs = harvest_part_attrs(part_doc) if part_doc else {}
             effective_rev = clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
             proc_label = _process_label(part_doc, attrs)
@@ -725,18 +749,10 @@ def bom_flat():
             for link in child_links
             if getattr(link, "child_pn", None)
         ]
-        allowed_descendants = authorised_part_pairs(current_user, descendant_pairs)
-        if len(allowed_descendants) != len(
-            {
-                (
-                    str(next_pn or "").strip().casefold(),
-                    str(next_rev or "").strip().casefold(),
-                )
-                for next_pn, next_rev in descendant_pairs
-                if str(next_pn or "").strip()
-            }
-        ):
-            return jsonify([]), 403
+        # No per-node authorisation here. _bom_is_fully_authorised proved the
+        # ENTIRE subtree before the descent started, so re-proving every node
+        # was one authorisation query per part - hundreds on a real assembly,
+        # and the difference between a slow page and a 502.
         for link in child_links:
             next_pn = getattr(link, "child_pn", None)
             if not next_pn:
