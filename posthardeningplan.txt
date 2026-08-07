@@ -49,7 +49,7 @@ HOW TO USE THIS FILE
   O5  Legal/commercial package                      WAITING ON YOU
   O6  Trivy gate                                    DECIDED: keep as is
   O7  Redis for existing instances                  3 of 4 instances
-  L1  Strict security mode across the fleet         2 of 4 (demo, test)
+  L1  Strict security mode across the fleet         3 of 4 - ADD-IN VERIFIED
 
   GATES: 764 backend, 322 frontend, ruff/mypy/bandit clean, build OK.
 
@@ -71,7 +71,7 @@ HOW TO USE THIS FILE
 
   SERVER-A
     main    52 parts,   23 MB   PRODUCTION
-            latest main | Mongo AUTHENTICATED | redis running | compat mode
+            latest main | Mongo AUTHENTICATED | redis | STRICT since 2026-08-07
             also hosts a Nextcloud and a Vikunja on the SAME shared Caddy
 
   SERVER-B                                          15 GB free - watch this
@@ -88,7 +88,7 @@ HOW TO USE THIS FILE
   reinstalling it would destroy real work. The only genuinely disposable
   instance on either server is demo. ***
 
-  demo and test now run STRICT mode; main and mecs remain on compat (see L1).
+  demo, test and main run STRICT mode. Only mecs remains on compat (see L1).
 
   Access: key ~/.ssh/tinymrp_deploy, tagged claude-tinymrp-deploy-20260807 in
   each server's authorized_keys. Remove that line to revoke; nothing else
@@ -157,17 +157,20 @@ HOW TO USE THIS FILE
       .env, then bring the FULL stack up once so redis starts. It cannot be
       done through update-instance.sh - see section 6.
 
-  L1. Strict security mode — 2 of 4 done
-      DONE 2026-08-07 on demo and test. Both came up healthy, both report
-      security_mode "strict" on /api/health, and both still serve. Applied
-      with automatic revert if the app failed to become healthy; it was not
-      needed.
-      *** WHAT THIS DOES NOT PROVE: that the SolidWorks add-in still works.
-      Strict mode rejects bearer substitution on browser APIs and enforces an
-      origin/referer CSRF check. Only you can test the add-in, and test is now
-      the right place to do it - it has real data and it is not production. ***
-      REMAINING: main and mecs, once the add-in is confirmed against test.
-
+  L1. Strict security mode — 3 of 4 done, and the risk is now retired
+      *** THE ADD-IN WAS TESTED AGAINST STRICT MODE AND WORKS. That was the
+      last big unknown in this whole effort: strict rejects bearer
+      substitution on browser APIs and enforces an origin/referer CSRF check,
+      and only the owner could tell whether the SolidWorks integration
+      survived it. It does. ***
+      Rolled out to demo and test on 2026-08-07, then to main once the add-in
+      was confirmed. Each was applied with automatic revert if the app failed
+      to become healthy; it was never needed. All three report security_mode
+      "strict" and all three still serve.
+      Phase 2 authentication hardening is therefore ACTIVE IN PRODUCTION for
+      the first time - previously it existed only in the test suite.
+      REMAINING: mecs, which the owner has kept hands-off. One environment
+      variable and a restart, whenever they choose.
 
 ========================================================================
 4. WHAT IS LEFT — engineering
