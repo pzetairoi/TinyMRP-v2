@@ -33,8 +33,8 @@ HOW TO USE THIS FILE
   B1  BOM child links sent the wrong revision       DONE
   B2  bom_flat storage scans                        DONE
   B3  Parts inventory latency                       FIXED, UNMEASURED
-  B4  bom_flat still N+1 on the DATABASE            OPEN - causes 502s
-  B5  where-used link gives "not found"             OPEN - cause found
+  B4  bom_flat N+1 on the DATABASE                  DONE - batched
+  B5  where-used link gives "not found"             DONE - case-sensitivity
   B6  Imports failed on EVERY hardened deploy       DONE - was critical
   B7  Failed import did not say what landed         DONE
   E11 Remove dead files, configs, templates         DONE (first pass)
@@ -51,7 +51,14 @@ HOW TO USE THIS FILE
   O7  Redis for existing instances                  3 of 4 instances
   L1  Strict security mode across the fleet         2 of 4 (demo, test)
 
-  GATES: 759 backend, 322 frontend, ruff/mypy/bandit clean, build OK.
+  GATES: 764 backend, 322 frontend, ruff/mypy/bandit clean, build OK.
+
+  HELP SCREENSHOTS: five placeholder images now appear in the help, each one
+  stating what to capture and which file to save over. Replace them one at a
+  time - app/static/help/img/<name>.png. Nothing else needs changing; the help
+  already references them.
+  FOUND WHILE DOING IT: drawing markups have NO help section at all, only a
+  troubleshooting entry. A whole feature is undocumented.
 
   WAITING ON A MEASUREMENT: B3's final fix is deployed to test but has not been
   timed. Load /ui/parts with LOG_LEVEL=DEBUG on that instance to confirm it.
