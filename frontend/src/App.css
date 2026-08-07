@@ -216,3 +216,47 @@ body.wide-page main.container {
   overflow-wrap: break-word;
   word-break: break-word;
 }
+
+/* --- Accessibility baseline (Phase 6, E8) --------------------------------- */
+
+/* Visible only when focused. Keyboard users get a way past the navigation;
+   sighted mouse users never see it. Must not be display:none - that would
+   remove it from the tab order, which is the entire point of it. */
+.tm-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 1000;
+  padding: 0.75rem 1rem;
+  background: var(--tm-bg, #fff);
+  border: 2px solid currentColor;
+  border-radius: 0 0 0.5rem 0;
+  text-decoration: none;
+  font-weight: 600;
+}
+.tm-skip-link:focus,
+.tm-skip-link:focus-visible {
+  left: 0;
+}
+
+/* The jump target must not draw a permanent focus ring: it takes focus
+   programmatically via tabIndex={-1}, which is not a user-initiated focus. */
+#main-content:focus {
+  outline: none;
+}
+
+/* Respect the OS-level "reduce motion" preference. Vestibular disorders make
+   large transitions genuinely painful, and this is a data-dense application
+   with a lot of expanding trees and sliding panels.
+   Motion is reduced to near-zero rather than removed, because 0s can break
+   scripts that wait on transitionend. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

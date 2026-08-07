@@ -1,4 +1,4 @@
-import{r as Ue,j as et}from"./index-D2s1YFm2.js";/**
+import{r as Ue,j as et}from"./index-BYGLm1wb.js";/**
  * @license
  * Copyright 2010-2026 Three.js Authors
  * SPDX-License-Identifier: MIT

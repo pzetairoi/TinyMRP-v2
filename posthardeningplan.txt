@@ -302,13 +302,43 @@ WHAT hardeningplan.txt IS NOW
       possible moment to find out. Contract test asserts the verification
       aborts rather than warns.
 
-  E8. Accessibility baseline                      MEDIUM       Phase 6
+  E8. Accessibility baseline               PARTIAL 2026-08-07
+      DONE: skip link (first focusable element on every page, visible only on
+      focus), a <main id="main-content"> landmark - the SPA previously had NO
+      landmark at all - and a prefers-reduced-motion block covering the whole
+      tree. Motion is reduced to 0.01ms rather than 0, because 0 can break
+      scripts waiting on transitionend.
+      Three tests pin it, including that the skip link is FIRST: one that is
+      not first saves no tabbing, which is its only purpose. Worth pinning
+      because nobody using a mouse ever sees it, so a refactor deletes it
+      silently.
+      Already in place before this: 63 htmlFor and 48 aria-label, so labelling
+      was largely done.
+      STILL TODO: keyboard-only pass over the real workflows, modal focus
+      management, colour-contrast validation, accessible names on icon-only
+      controls, and more live regions (only 2 aria-live today). Those need a
+      browser and axe - see E10.
+
+  E8-orig. Accessibility work list                MEDIUM       Phase 6
       Skip link and stable main target, prefers-reduced-motion in our own CSS,
       live regions for async success/error, keyboard-only pass, focus
       management in modals, accessible names on icon-only controls.
       Labelling is already largely in place (63 htmlFor, 48 aria-label).
 
-  E9. Optimistic concurrency on part edits        MEDIUM       Phase 8
+  E9. Optimistic concurrency on part edits   NOT STARTED - premise questioned
+      Owner chose "warn and allow save". Before building it I went looking for
+      the UI write path and did not find one: merge_save_part_attrs has exactly
+      two callers, both in app/cli.py. Part writes come from the SolidWorks
+      add-in, the CLI and the import pipeline - not from two people editing the
+      same part in a browser.
+      So the scenario the item describes may not exist, and building version
+      fields for it would be ceremony. VERIFY FIRST: confirm which paths a
+      normal user can actually write a part through (part_annotations.py has
+      several part.save() calls and is the likeliest candidate - notes and
+      comments). If concurrent browser editing is real there, do it; if the
+      only writers are machines, close this as not applicable and say why.
+
+  E9-orig. Optimistic concurrency                 MEDIUM       Phase 8
       Two users editing the same part today: last write wins, silently.
       part_drawing_markup.py already has the pattern to copy.
       Must be additive — a new field, never a mutation of existing documents.
