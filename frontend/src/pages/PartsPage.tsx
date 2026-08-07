@@ -4,7 +4,7 @@ import type { DataTableFilterMeta } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
 import FieldSelector from '../components/FieldSelector'
-import { apiErrorMessage, apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch, isCancelledRequest } from '../lib/api'
 import { defaultColumnFilterMeta, defaultColumnMatchMode, ensureColumnFilters } from '../lib/columnFilters'
 import {
   contextFields,
@@ -179,7 +179,7 @@ export default function PartsPage() {
         setRows(j.data || [])
         setTotal(j.totalRecords || 0)
       } catch (err: any) {
-        if (cancelled || err?.name === 'AbortError') return
+        if (cancelled || isCancelledRequest(err)) return
         setRows([])
         setTotal(0)
         setLoadError(apiErrorMessage(err, 'Failed to load parts.'))

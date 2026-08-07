@@ -29,7 +29,7 @@ import {
 // Import the ImageStrip component to display images for the part
 import ImageStrip from "../components/ImageStrip"
 import { findNode, setNodeChildren, withBomOccurrenceKeys } from '../lib/bomTree'
-import { apiErrorMessage, apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch, isCancelledRequest } from '../lib/api'
 
 
 // Backend must return Where-Used rows as objects with these keys:
@@ -126,7 +126,7 @@ export default function BomPage() {
       } catch (e) {
         if (!cancelled) {
           setNodes([])
-          setTreeError(apiErrorMessage(e, 'Failed to load the BOM tree.'))
+          if (!isCancelledRequest(e)) setTreeError(apiErrorMessage(e, 'Failed to load the BOM tree.'))
         }
       } finally {
         if (!cancelled) setTreeLoading(false)
@@ -148,7 +148,7 @@ export default function BomPage() {
       setNodes((prev) => setNodeChildren(prev, key, kids))
       setExpandedKeys((prev) => ({ ...prev, [key]: true }))
     } catch (e) {
-      setTreeError(apiErrorMessage(e, 'Failed to load the selected BOM branch.'))
+      if (!isCancelledRequest(e)) setTreeError(apiErrorMessage(e, 'Failed to load the selected BOM branch.'))
     }
   }
 
@@ -294,7 +294,8 @@ export default function BomPage() {
           setWuTotal(j.totalRecords || 0)
         }
       } catch (e) {
-        if (!cancelled) {
+        // A request killed by navigating away is not a failure to report.
+        if (!cancelled && !isCancelledRequest(e)) {
           setWuRows([])
           setWuTotal(0)
           setWhereUsedError(apiErrorMessage(e, 'Failed to load where-used results.'))

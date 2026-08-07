@@ -13,7 +13,7 @@ import "./partdetail.css";
 import FieldSelector from "../components/FieldSelector";
 import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
 import { withBomOccurrenceKeys } from "../lib/bomTree";
-import { apiErrorMessage, apiFetch, readApiResponse } from "../lib/api";
+import { apiErrorMessage, apiFetch, readApiResponse, isCancelledRequest } from '../lib/api';
 import {
   approvalIdentityText,
   canonicalFieldAliases,

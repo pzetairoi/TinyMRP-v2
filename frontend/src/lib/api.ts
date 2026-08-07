@@ -20,6 +20,32 @@ function normalizedApiError(data: any, status: number): ApiError {
   }
 }
 
+/**
+ * Did this request fail, or was it simply cancelled?
+ *
+ * Navigating away tears down in-flight requests. On a FULL page load the
+ * browser kills them without React ever unmounting, so the rejection lands
+ * while the page is still on screen and gets rendered as a failure. Firefox
+ * words it "NetworkError when attempting to fetch resource", which is exactly
+ * what users reported seeing every time they clicked a BOM link.
+ *
+ * Nothing went wrong in those cases, so nothing should be shown. A genuine
+ * outage still surfaces: it produces a rejection too, but the user is not
+ * leaving, so the message stays and is correct.
+ */
+export function isCancelledRequest(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const name = String((error as { name?: unknown }).name || '')
+  if (name === 'AbortError') return true
+  const message = String((error as { message?: unknown }).message || '').toLowerCase()
+  return (
+    message.includes('networkerror when attempting to fetch') ||
+    message.includes('the operation was aborted') ||
+    message.includes('load failed') ||
+    message === 'failed to fetch'
+  )
+}
+
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'message' in error) {
     const message = String((error as { message?: unknown }).message || '').trim()
