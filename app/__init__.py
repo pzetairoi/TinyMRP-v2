@@ -370,6 +370,21 @@ def create_app(config_object=None):
 
     # Plain MongoEngine connect – capture the connection object
     app.config.setdefault("MONGODB_ALIAS", "tinymrp-v2")
+    # Opt-in request profiler (optimizationplan.txt). Registers nothing unless
+    # TINYMRP_PROFILE is set, so production pays no cost for its existence.
+    #
+    # MUST run before the Mongo client is created: pymongo applies a globally
+    # registered listener only to clients built AFTER registration. Wired later
+    # it installs cleanly, logs every request, and reports zero operations
+    # forever - which looks like a healthy application rather than a broken
+    # profiler.
+    try:
+        from app.services.request_profile import init_request_profiling
+
+        init_request_profiling(app)
+    except Exception:
+        app.logger.exception("Failed to initialise request profiling")
+
     init_mongo(app)
     try:
         db_conn = get_connection(alias=app.config.get("MONGODB_ALIAS", "tinymrp-v2"))
@@ -1003,16 +1018,6 @@ def create_app(config_object=None):
 
 
 
-
-    # Opt-in request profiler (optimizationplan.txt). Registers nothing at all
-    # unless TINYMRP_PROFILE is set, so production pays no cost for its
-    # existence.
-    try:
-        from app.services.request_profile import init_request_profiling
-
-        init_request_profiling(app)
-    except Exception:
-        app.logger.exception("Failed to initialise request profiling")
 
     # Expensive-route rate limits, applied HERE and not in init_rate_limiting:
     # that runs before any blueprint exists, so the lookup would find nothing
