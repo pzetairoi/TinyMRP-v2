@@ -1394,8 +1394,36 @@ def _file_coverage(
             elif item["kind"] == "managed" and item["action"] in {"add", "replace"}:
                 groups.add(item["_file"]["identity"][0])
     return groups
+def _make_stage_root(file_root: str | None = None) -> str:
+    """A staging directory ON THE SAME FILESYSTEM as the files being written.
+
+    _commit_files finishes with os.replace, which is atomic but CANNOT cross a
+    filesystem boundary - it raises EXDEV. The hardened container runs with a
+    read-only root and a tmpfs /tmp, so the system temp dir is a different
+    device from the bind-mounted deliverables volume, and every import that
+    wrote a file failed with "cross-store file commit failed".
+
+    Staging inside the deliverables root keeps the commit atomic instead of
+    trading it for a copy, which would leave a truncated file behind on a
+    partial write. The dot prefix keeps it out of the way of file scans, and
+    the caller removes it in a finally block.
+
+    Falls back to the system temp dir when there is no file root, which is the
+    case for imports that write no files and therefore never commit any.
+    """
+    if file_root:
+        try:
+            os.makedirs(file_root, exist_ok=True)
+            return tempfile.mkdtemp(prefix=".tinymrp-import-", dir=file_root)
+        except OSError:
+            # An unwritable deliverables root is a real problem, but it is the
+            # commit's problem to report - not a reason to fail here.
+            logger.warning("could not stage inside %s; falling back to temp", file_root, exc_info=True)
+    return tempfile.mkdtemp(prefix="tinymrp-import-")
+
+
 def _stage_files(plan: dict[str, Any], file_root: str) -> tuple[str, list[dict[str, Any]]]:
-    stage_root = tempfile.mkdtemp(prefix="tinymrp-import-")
+    stage_root = _make_stage_root(file_root)
     staged = []
     try:
         for entry in plan["parts"]:
@@ -1696,7 +1724,7 @@ def execute_import_plan(
     if has_file_writes and not file_root:
         raise ValueError("FILE_ROOT_LOCAL not configured")
     stage_root, staged = _stage_files(plan, file_root) if has_file_writes else (
-        tempfile.mkdtemp(prefix="tinymrp-import-"),
+        _make_stage_root(),
         [],
     )
     aliases, _fields = _field_maps(plan["_config"])
