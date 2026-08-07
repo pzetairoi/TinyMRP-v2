@@ -70,7 +70,12 @@ def bom_ui(pn):
         current_user,
         pn,
         resource_type="parts",
-        identifier_field="part_number",
+        # iexact, not an exact match. Part numbers are matched
+        # case-insensitively everywhere else - the queryset above already does
+        # it - so an exact re-filter here rejected parts the rest of the app
+        # happily shows. A where-used link could list a part this route then
+        # answered 404 for.
+        identifier_field="part_number__iexact",
     ):
         abort(404)
     assets = vite_assets()
@@ -155,7 +160,12 @@ def part_ui(pn):
         current_user,
         pn,
         resource_type="parts",
-        identifier_field="part_number",
+        # iexact, not an exact match. Part numbers are matched
+        # case-insensitively everywhere else - the queryset above already does
+        # it - so an exact re-filter here rejected parts the rest of the app
+        # happily shows. A where-used link could list a part this route then
+        # answered 404 for.
+        identifier_field="part_number__iexact",
     ):
         abort(404)
     assets = vite_assets()
