@@ -1,4 +1,76 @@
 ========================================================================
+POST-HARDENING PLAN — CLOSED 2026-08-08
+========================================================================
+
+  *** THIS PLAN IS CLOSED. Performance work continues in
+      optimizationplan.txt, which supersedes item P1 below. ***
+
+  WHAT WAS ACHIEVED
+
+    Phase 2 authentication is ACTIVE IN PRODUCTION for the first time. It was
+    marked closed on 2026-08-03 because the code existed, while every running
+    instance opted out of it. Three of four instances now run strict mode,
+    confirmed against the SolidWorks add-in by the owner.
+
+    Production runs an authenticated MongoDB with a least-privilege
+    application user, verified by being refused the admin database.
+
+    A full rebuild of production was executed from scratch - guided install,
+    real certificate, data restored, verified - with two other production
+    services on the same shared proxy never going down. That is the Phase 10
+    install and restore drill, passed.
+
+    Eleven defects were found and fixed, several of which no test could have
+    caught because they only appear on real hardware:
+
+      Backups had been silently EMPTY since Mongo authentication was enabled.
+      mongodump was refused, wrote a 23-byte gzip header, and exited 0. The
+      guard asked whether the file had bytes; an empty gzip stream does. Found
+      by verifying a backup before a rebuild that would have destroyed 52
+      parts and 178 files against nothing.
+
+      Imports were broken on EVERY hardened deployment. os.replace cannot
+      cross a filesystem, and the hardened container puts staging on a tmpfs
+      while deliverables live on a bind mount.
+
+      Bulk user deletion FAILED OPEN: the guard protecting administrators
+      swallowed its own exception and fell through to the delete.
+
+      Doc packs could lose their index and page stamps in silence - the cause
+      of a symptom the help documented as a mystery.
+
+      A BOM child inherited its parent's revision, producing a page of 404s.
+      A "network error" on every BOM link was the navigation itself.
+      The guided installer hung forever, unattended, on a DNS mismatch.
+      Redis crash-looped because cap_drop removes CAP_CHOWN.
+      Rate limits were configured but never enforced - an ordering bug.
+      The parts and BOM pages 404'd on parts the rest of the app showed.
+      restore-instance.sh had the same silent auth failure as backup.
+
+    Tests went from 730 to 771 backend and 302 to 327 frontend, with every
+    fix pinned by a test written around the failure rather than the fix.
+
+  WHAT REMAINS, AND WHO OWNS IT
+
+    OWNER
+      O1  CSP browser check - 30 minutes, closes the last P0-adjacent item
+      O2  Mongo authentication on demo, test and mecs
+      O5  Legal package: drafts are in docs/commercial/, counsel must review
+      L1  Strict mode on mecs, whenever the owner chooses
+
+    ENGINEERING
+      E2  158 of 184 silent exception handlers remain, mostly in UI paths
+      E6  4 of 5 page tests remain
+      E8  Accessibility behaviour: keyboard, focus, contrast
+      E10 Playwright and axe - the largest single item, still not started
+      P1  Performance - MOVED to optimizationplan.txt
+
+    Help screenshots: five placeholder images now appear in the running help,
+    each stating what to capture and which file to save over.
+
+  The detail of everything above is preserved below, unchanged.
+
+========================================================================
 POST-HARDENING PLAN — the route to a professional finish
 ========================================================================
 Rewritten clean 2026-08-07. Branch: main.

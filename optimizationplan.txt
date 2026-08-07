@@ -1,0 +1,193 @@
+========================================================================
+OPTIMIZATION PLAN — making TinyMRP fast and cheap again
+========================================================================
+Opened 2026-08-08. Branch: main.
+Supersedes item P1 of posthardeningplan.txt, which is now closed.
+
+WHY THIS EXISTS, in the owner's words:
+
+  "the most important thing in this project - browsing part numbers and their
+   trees fluidly - we have ruined with so much security and checking"
+
+That is accurate. Low resource use was an original goal of TinyMRP. The
+hardening work traded it away without measuring what it cost, and this plan
+buys it back with measurement rather than instinct.
+
+WRITTEN FOR A HANDOVER. Anyone picking this up - human or another AI - should
+be able to continue from section 3 without asking questions. Record what you
+measure, including the attempts that fail.
+
+
+========================================================================
+1. WHAT IS ALREADY KNOWN — do not re-derive this
+========================================================================
+
+  MEASURED ON THE LIVE test INSTANCE (1789 parts, 6.8 GB deliverables):
+
+  a) The server IS idle when idle. Profiling 30 s with no user activity
+     captured 16 operations total - about 0.5/sec, all of them the 60-second
+     notification poll from one open browser tab.
+     *** This disproves the "something is hanging or looping in the
+     background" theory. Do not spend time there again. ***
+
+  b) The waste is INSIDE each request. The headline figure of ~22 find/sec was
+     an AVERAGE over 937 minutes that included real browsing. Concentrated in
+     navigation, it means each page load is enormously amplified.
+
+  c) Individual queries are fine. bom by parent_pn: 1 ms, 3 documents
+     examined, 3 returned - properly indexed. The problem is COUNT, not cost.
+
+  d) Authorisation walk, now fixed: _bom_is_fully_authorised took 1801 ms to
+     visit 1347 parts across 10 levels, on every flat-BOM request, to answer a
+     question that could not have been "no" for an unrestricted user.
+
+  e) Capacity, now fixed: the image hardcoded 2 workers x 4 threads = 8
+     concurrent slots for the whole instance, on any hardware. A part page
+     fires roughly a dozen requests.
+
+  f) Connection churn: 24,903 connections created against 17 concurrent. Not
+     yet explained. Suggests the Mongo pool is not reused across requests.
+
+  g) parts_lazy full breakdown (this is the model for how to measure):
+       config=46 filters=0.2 query=71 thumbs=524 review=0 rows=64 total=705ms
+     for 25 rows. thumbs was 74% and is now answered from the database.
+
+  ALREADY DONE (before/after where measured):
+    - workers sized from nproc: 8 concurrent slots -> 20 and 36 on the two
+      servers in use
+    - subtree authorisation skipped when the scope filters nothing: -1801 ms
+      per flat-BOM request
+    - bom_flat: all parts in one query, per-node re-authorisation removed
+    - bom_flat thumbnails batched: one storage pass instead of ~65 ms per part
+    - thumbnail existence answered from PartFile.thumb_mtime, not the disk
+    - parts inventory: 705 ms -> 529 ms, then the database fast path (final
+      figure NOT yet measured - see 3a)
+
+  *** THE OWNER NAVIGATES WITH bom_tree. Almost all tuning so far went into
+  bom_flat. bom_tree is the hot path and has NEVER been profiled. ***
+
+
+========================================================================
+2. THE TOOL TO BUILD FIRST — a switchable request profiler
+========================================================================
+  The owner asked for something that can be turned on and off, adds no
+  overhead when off, and makes it obvious where resources go. Build this
+  BEFORE optimising anything else: every wrong guess so far came from not
+  having it.
+
+  DESIGN, and the constraints that shape it:
+
+  Enabled by TINYMRP_PROFILE=1 and nothing else. When unset, no listener is
+  registered, no timer is started, and no branch runs inside a request. Zero
+  cost is the requirement, not a goal - a profiler that slows production is
+  one nobody dares enable.
+
+  WHAT IT MUST REPORT, per request:
+    - total wall time
+    - NUMBER of Mongo operations, split by collection and by shape
+    - the slowest single operation
+    - number of filesystem stats (the thumbnail path was invisible until
+      someone counted them)
+
+  Query COUNT matters more than query time here. Every individual query
+  already runs in about a millisecond; the damage is doing it four hundred
+  times. A profiler that only reports slow queries will show nothing.
+
+  HOW TO HOOK IT:
+    pymongo exposes monitoring.CommandListener with started/succeeded/failed.
+    Register it ONCE at startup, only when the flag is set - pymongo
+    registration is process-global and cannot be undone, which is exactly why
+    it must be conditional rather than toggled per request.
+    Accumulate into flask.g per request, emit one log line in an after_request
+    handler, and log at INFO under a dedicated logger name (tinymrp.profile)
+    so it can be filtered without turning on DEBUG for everything.
+
+  Follow the shape of the existing tinymrp.parts_lazy timing line. It is the
+  reason the inventory problem was diagnosed correctly rather than guessed at,
+  and it is already proven in production.
+
+  A GOTCHA THAT WILL COST AN HOUR: driving the app with Flask's test client
+  does not authenticate under strict mode - setting _user_id in the session is
+  not enough, and every request returns 401 with zero queries. Either exercise
+  it through a real logged-in browser session while the profiler is on, or
+  profile in an app context calling the view functions directly.
+
+
+========================================================================
+3. THE WORK, IN ORDER
+========================================================================
+
+  3a. Measure bom_tree and part_detail per request       NOT STARTED
+      With the profiler from section 2. Record the query count for a small
+      part and for J200684 (1347 descendants). The ratio between them tells
+      you whether the cost is per-part or fixed.
+      Also finish the parts-inventory measurement: the database fast path for
+      thumbnails is deployed but its effect was never timed.
+
+  3b. Explain the connection churn                       NOT STARTED
+      24,903 connections created for 17 concurrent. Check whether MongoEngine
+      is reconnecting per request or per worker, and whether the pool size
+      suits the new worker count. Each gunicorn worker holds its own pool, so
+      raising workers multiplies connections - verify that did not make this
+      worse.
+
+  3c. Cut the per-row work in the BOM and parts paths    NOT STARTED
+      resolve_part_field_values and filter_response_fields run per row and
+      have never been timed. So does _coverage_groups. Time them first; they
+      may be free, in which case say so and move on.
+
+  3d. Reduce requests per page                           NOT STARTED
+      A part page fires roughly a dozen API calls. Some are independent and
+      could be one. Fewer round trips beats faster round trips, especially
+      over a real network. Count them from the access log before changing
+      anything.
+
+  3e. The notification poll                              LOW PRIORITY
+      60-second interval per page in security/base.html, four queries each,
+      restarted on every full page navigation - and BOM links are full page
+      loads. About 7 requests/minute per tab. Real but small; do it last, and
+      only after measuring that it matters.
+
+  METHOD - the same five steps that produced every win so far:
+    1. Measure before changing. Never optimise a phase you have not timed.
+    2. Count queries per request. An N+1 hides as a fast query repeated.
+    3. Fix by batching, not caching. Caching hides work behind a hit rate and
+       rots the moment data changes.
+    4. Delete checks that cannot fail rather than making them faster.
+    5. Record BOTH numbers, before and after, in the commit message.
+
+  Two optimisations in this project targeted the wrong thing because the
+  assumption sounded reasonable. Both were caught by measuring afterwards.
+  Measure first and you skip that.
+
+
+========================================================================
+4. EXIT CRITERIA
+========================================================================
+  - Browsing a large assembly on the test instance stays responsive: no hang,
+    no recovery period, verified against J200684 specifically.
+  - Mongo CPU near zero with nobody using the system. Currently true at idle;
+    keep it true.
+  - Query count per page load recorded and justified. "It is fast enough" is
+    not a number.
+  - Before and after figures recorded here for every change.
+
+
+========================================================================
+5. STANDING CONSTRAINTS
+========================================================================
+  Speed must not be bought with security. The authorisation shortcut added so
+  far is safe for one specific reason - the check it skips could not have
+  returned "no" - and its tests assert when it must NOT fire. Any further
+  shortcut needs the same argument in writing.
+
+  Real companies run this. Breaking things is acceptable; destroying data is
+  not. The mecs instance is out of scope entirely.
+
+  Infrastructure is referred to by alias. Real addresses live in
+  deploy/fleet.local.md, which is gitignored. This repository is public.
+
+  Gates that must stay green:
+    pytest | ruff check . | bandit -r app -ll
+    mypy app/services/security_mode.py app/services/api_auth.py
+    cd frontend && npm run test && npx tsc --noEmit -p tsconfig.app.json
