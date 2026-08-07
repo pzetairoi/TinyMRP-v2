@@ -240,3 +240,21 @@ def test_instance_env_points_the_app_at_redis():
     # Migrating an existing instance is therefore an explicit owner action.
     updated = _read("deploy/scripts/update-instance.sh")
     assert 'upsert_env_value "$INSTANCE_ENV"' not in updated
+
+
+def test_backup_writes_and_verifies_checksums():
+    """E7b. The restore drill on 2026-08-07 had to be verified by hand.
+
+    A backup is only trustworthy if you can prove it did not rot between being
+    written and being needed. The check runs immediately after writing, so a
+    corrupt write fails the backup instead of being discovered during a
+    restore - which is the worst possible moment to find out.
+    """
+    backup = _read("deploy/scripts/backup-instance.sh")
+
+    assert "sha256sum > SHA256SUMS" in backup
+    assert "sha256sum --quiet -c SHA256SUMS" in backup
+    # Written after the manifest so the manifest is covered by it too.
+    assert backup.index("manifest.env") < backup.index("SHA256SUMS")
+    # A failed verification must abort, not warn.
+    assert 'die "Checksum verification failed' in backup

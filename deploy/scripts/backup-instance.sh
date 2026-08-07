@@ -124,6 +124,17 @@ CURRENT_IMAGE="$(docker inspect -f '{{.Config.Image}}' "${APP_CONTAINER_NAME:-no
   [ -f "${BACKUP_DIR}/mongo-raw.tar.gz" ] && echo "MONGO_RAW_BYTES=$(stat -c%s "${BACKUP_DIR}/mongo-raw.tar.gz")"
 } > "${BACKUP_DIR}/manifest.env"
 
+# 5b) Checksums. A backup is only trustworthy if you can prove it did not rot
+# on disk between being written and being needed. Written AFTER the manifest so
+# the manifest is covered too, and verified immediately: a corrupt write should
+# fail the backup, not be discovered during a restore.
+( cd "$BACKUP_DIR" && find . -type f ! -name SHA256SUMS -print0     | sort -z | xargs -0 sha256sum > SHA256SUMS )
+if ( cd "$BACKUP_DIR" && sha256sum --quiet -c SHA256SUMS ); then
+  info "  checksums written and verified ($(wc -l < "${BACKUP_DIR}/SHA256SUMS") files)"
+else
+  die "Checksum verification failed immediately after writing the backup."
+fi
+
 # 6) Retention
 if [ "$KEEP_DAYS" -gt 0 ] 2>/dev/null; then
   PRUNED=0
