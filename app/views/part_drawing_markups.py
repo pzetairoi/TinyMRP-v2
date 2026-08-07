@@ -1,6 +1,7 @@
 # app/views/part_drawing_markups.py — drawing markup layers + review threads API
 from __future__ import annotations
 
+import logging
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
@@ -32,6 +33,8 @@ from app.services.part_drawing_markups import (
 from app.services.part_norm import clean_rev, clean_rev_or_none
 from app.services.notifications import notify_part_activity
 from app.services.part_review_status import sync_part_review_status
+
+logger = logging.getLogger(__name__)
 
 
 bp = Blueprint("part_drawing_markups_api", __name__, url_prefix="/api")
@@ -120,7 +123,7 @@ def _audit(action: str, part: Part, meta: dict | None = None) -> None:
             meta=meta or {},
         )
     except Exception:
-        pass
+        logger.exception("audit log failed for markup action %s", action)
 
 
 def _markup_response(doc, *, part: Part, pf, fingerprint: str, page_number: int, status: int = 200):
@@ -281,7 +284,10 @@ def drawing_markup_thread_create(pn: str):
             thread_id=str(thread.id),
         )
     except Exception:
-        pass
+        # Notification failures must not roll back the markup the user just
+        # saved, but silently dropping them means nobody learns that review
+        # notifications have stopped working.
+        logger.warning("markup thread notification failed", exc_info=True)
     sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number, status=201)
 
@@ -326,7 +332,7 @@ def drawing_markup_thread_reply(pn: str, thread_id: str):
             kind="thread_update",
         )
     except Exception:
-        pass
+        logger.warning("markup reply notification failed", exc_info=True)
     sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)
 
@@ -378,7 +384,7 @@ def drawing_markup_thread_patch(pn: str, thread_id: str):
             kind="thread_update",
         )
     except Exception:
-        pass
+        logger.warning("markup thread update notification failed", exc_info=True)
     sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)
 
@@ -420,6 +426,6 @@ def drawing_markup_thread_delete(pn: str, thread_id: str):
             kind="thread_update",
         )
     except Exception:
-        pass
+        logger.warning("markup thread delete notification failed", exc_info=True)
     sync_part_review_status(part)
     return _markup_response(doc, part=part, pf=pf, fingerprint=fingerprint, page_number=page_number)

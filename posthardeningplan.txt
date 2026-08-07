@@ -142,7 +142,31 @@ WHAT hardeningplan.txt IS NOW
       passing. 309 frontend tests, tsc guard clean, bundle rebuilt (it is
       tracked and ships, so a fix that skips the build reaches nobody).
 
-  E2. Triage the 182 `except Exception: pass`     MEDIUM       Phase 8
+  E2. Triage the silent exception handlers   FIRST PASS DONE 2026-08-07
+      184 broad handlers end in a bare `pass` (the count was 182 by grep; an
+      AST walk finds 184). They are NOT equivalent, so this was triage rather
+      than a rewrite - a blanket change would have been pure churn.
+      CONVERTED, the ones that can hide data or security loss:
+        upload_pack._journal_update - THE WORST. The journal is how an operator
+          reconstructs a failed import, so a silent failure made it LIE about
+          the stage reached. Now logged, still never raised into the import:
+          bookkeeping must not become data loss. Pinned by a test.
+        parts_delete._remove_existing - a file that should be gone stays.
+        authorization._denied - an access-control denial with no audit trail.
+        part_shares x4 - including creation of a PUBLIC share, where the share
+          works but nothing records who made it.
+        part_drawing_markups x5 - audit plus four review notifications, which
+          were failing with nobody able to notice.
+      LEFT ALONE deliberately: audit.log_action's own nested guards (an audit
+      failure must never break the business operation, and the innermost guard
+      is the last resort - logging there could itself throw), int coercion in
+      parts_delete._sum_into, and a config read outside app context.
+      STILL TODO: ~170 remain, concentrated in docpacks.py (36), admin.py (20),
+      parts.py (20) and __init__.py (19). Most are best-effort UI and rendering
+      paths, but they have not been read one by one.
+      Original roadmap wording follows.
+
+  E2-orig. Review broad except handlers           MEDIUM       Phase 8
       Not a blanket rewrite. Classify each: legitimate suppression (best-effort
       loops, optional probes) stays and gets a one-line why; anything on a
       write, auth, import or file-commit path must log at minimum.

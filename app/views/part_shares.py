@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 import os
 from io import BytesIO
@@ -61,6 +62,8 @@ from app.services.authorization import (
     uses_portal_presentation,
     scope_queryset,
 )
+
+logger = logging.getLogger(__name__)
 
 
 bp = Blueprint("part_shares", __name__)
@@ -1007,7 +1010,7 @@ def public_share_docpack_options(share_id: str, token: str):
             },
         )
     except Exception:
-        pass
+        logger.exception("audit log failed for public share docpack options")
     try:
         payload = _share_docpack_options_payload(
             share,
@@ -1133,7 +1136,7 @@ def public_share_docpack_build(share_id: str, token: str):
             },
         )
     except Exception:
-        pass
+        logger.exception("audit log failed for public share docpack build")
 
     resp = send_file(BytesIO(blob), mimetype=mime, as_attachment=True, download_name=name)
     return public_response_headers(resp)
@@ -1272,7 +1275,9 @@ def create_part_share_api(pn: str):
             },
         )
     except Exception:
-        pass
+        # Losing the record that a PUBLIC share was created is the
+        # security-relevant one: the share works, but nothing says who made it.
+        logger.exception("audit log failed for part share creation")
     return jsonify(
         {
             "ok": True,
@@ -1330,5 +1335,5 @@ def revoke_part_share_api(pn: str, share_id: str):
             meta={"share_id": str(share.id)},
         )
     except Exception:
-        pass
+        logger.exception("audit log failed for part share revocation")
     return jsonify({"ok": True})

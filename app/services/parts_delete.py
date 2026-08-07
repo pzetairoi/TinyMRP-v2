@@ -1,6 +1,7 @@
 # app/services/parts_delete.py — part deletion (DB refs + optional physical files)
 from __future__ import annotations
 
+import logging
 import os
 from collections import deque
 from typing import Any, Dict, List, Tuple
@@ -14,6 +15,8 @@ from app.models.part_revision import PartRevisionHistory
 from app.services.biz_utils import calculate_order_totals
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import utc_now
+
+logger = logging.getLogger(__name__)
 
 
 def _match_pn_rev(pn: str, rev: str, target_pn: str, target_rev: str) -> bool:
@@ -54,7 +57,10 @@ def _remove_existing(candidates: List[str], allowed_roots: List[str]) -> int:
                 os.remove(cand)
                 removed += 1
         except Exception:
-            pass
+            # A file that should be gone is still on disk. The count stays honest
+            # because removed is not incremented, but the caller would otherwise
+            # never learn the deletion failed.
+            logger.warning("could not remove %s during part delete", cand, exc_info=True)
     return removed
 
 

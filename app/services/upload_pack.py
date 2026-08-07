@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import hashlib
 import io
 import mimetypes
@@ -46,6 +47,8 @@ from app.services.part_materialized import sync_part_materialized_fields
 from app.services.part_norm import clean_pn, clean_rev
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.timezone_utils import utc_iso, utc_now
+
+logger = logging.getLogger(__name__)
 DATA_MODES = {"skip", "fill_blanks", "replace_unapproved", "replace_all"}
 BOM_MODES = {"skip", "fill_if_empty", "replace_unapproved", "replace_all"}
 FILE_MODES = {"skip", "add_missing", "replace_unapproved", "replace_all"}
@@ -1632,7 +1635,11 @@ def _journal_update(journal: ImportJournal | None, **fields: Any) -> None:
             setattr(journal, key, value)
         journal.save()
     except Exception:  # pragma: no cover - best effort
-        pass
+        # The journal is how an operator reconstructs a failed import, so a
+        # journal write that fails SILENTLY makes it lie. Never raise into the
+        # import itself - that would turn bookkeeping into data loss - but it
+        # must not disappear.
+        logger.exception("import journal update failed; the journal may now be stale")
 
 
 def _rollback_created_parts(

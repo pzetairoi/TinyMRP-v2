@@ -353,3 +353,29 @@ def test_journal_endpoints_are_registered(db, monkeypatch):
     rules = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/api/import/operations" in rules
     assert "/api/import/operations/<operation_id>" in rules
+
+
+def test_a_failed_journal_write_is_logged_not_swallowed(caplog):
+    """The journal is how an operator reconstructs a failed import.
+
+    It used to be updated under a bare `except Exception: pass`, so a journal
+    write that failed left the journal LYING - reporting a stage the import
+    never reached - with nothing anywhere to say so. The write still must not
+    raise into the import itself (that would turn a bookkeeping problem into a
+    data problem), so the only correct behaviour is: swallow, but log.
+    """
+    import logging
+
+    from app.services import upload_pack
+
+    class _Exploding:
+        def save(self):
+            raise RuntimeError("mongo is down")
+
+    with caplog.at_level(logging.ERROR, logger="app.services.upload_pack"):
+        upload_pack._journal_update(_Exploding(), stage="properties")
+
+    assert any(
+        "import journal update failed" in r.message or "import journal update failed" in r.getMessage()
+        for r in caplog.records
+    ), f"journal failure vanished; records={[r.getMessage() for r in caplog.records]}"

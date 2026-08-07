@@ -7,6 +7,7 @@ cache of users, roles, or permissions.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from functools import wraps
@@ -26,6 +27,8 @@ from flask_login import current_user
 from app.services.permissions import (
     PERMISSION_REGISTRY,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -212,7 +215,9 @@ def _denied(
     try:
         log_authorization_denial(user, decision)
     except Exception:
-        pass
+        # A denial nobody recorded is an access-control decision with no audit
+        # trail. The denial itself still stands; only the record was lost.
+        logger.exception("failed to record authorization denial for %s", permission)
     return decision
 
 
