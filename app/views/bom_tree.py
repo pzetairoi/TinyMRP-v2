@@ -264,6 +264,45 @@ def _link_occurrence_qtys(link: BOMLink) -> list[float]:
         qty = 1.0
     return [float(qty or 0.0)]
 
+def _from_parts_map(parts_map: dict | None, pn: str, rev: str | None):
+    """Look a child up in the batch the caller already fetched.
+
+    _node used to issue one Part query per child, so expanding a single level
+    of twenty children cost twenty round trips - measured as parts=23 inside a
+    64-query, one-second request. The children of a level are known before any
+    of them is rendered, so they can all be fetched at once.
+
+    Returns None when there is no map, which keeps the per-node query as the
+    fallback for callers that have not been converted.
+    """
+    if parts_map is None:
+        return None
+    name = str(pn or "").strip()
+    if rev is not None:
+        return parts_map.get((name.casefold(), clean_rev(rev).casefold()))
+    # No revision asked for: the caller batched the newest per part number.
+    return parts_map.get((name.casefold(), None))
+
+
+def _parts_map_for(pairs, scoped_parts) -> dict:
+    """One query for every part on a level, keyed case-insensitively."""
+    names = sorted({str(pn or "").strip() for pn, _rev in pairs if str(pn or "").strip()})
+    if not names:
+        return {}
+    found: dict = {}
+    for doc in scoped_parts.filter(part_number__in=names):
+        key = (str(doc.part_number).casefold(), clean_rev(doc.revision or "").casefold())
+        found[key] = doc
+        # Newest wins for the "no revision requested" lookup.
+        latest_key = (str(doc.part_number).casefold(), None)
+        current = found.get(latest_key)
+        if current is None or (getattr(doc, "updated_at", None) or 0) > (
+            getattr(current, "updated_at", None) or 0
+        ):
+            found[latest_key] = doc
+    return found
+
+
 def _node(
     pn: str,
     link=None,
@@ -271,6 +310,7 @@ def _node(
     config: dict | None = None,
     review_statuses: dict | None = None,
     thumbs_map: dict | None = None,
+    parts_map: dict | None = None,
     children_map: dict | None = None,
 ):
     # thumbs_map / children_map let the caller resolve a whole sibling set in
@@ -282,9 +322,13 @@ def _node(
     # Prefer specific revision when provided, else pick latest by updated_at
     rev_clean = clean_rev(rev) if rev is not None else None
     if rev is not None:
-        p = Part.objects(part_number=pn, revision=rev_clean).first()
+        p = _from_parts_map(parts_map, pn, rev_clean)
+        if p is None and parts_map is None:
+            p = Part.objects(part_number=pn, revision=rev_clean).first()
     else:
-        p = Part.objects(part_number=pn).order_by("-updated_at").first()
+        p = _from_parts_map(parts_map, pn, None)
+        if p is None and parts_map is None:
+            p = Part.objects(part_number=pn).order_by("-updated_at").first()
     attrs = harvest_part_attrs(p) if p else {}
     effective_rev = clean_rev(attrs.get("revision") or (p.revision if p else "") or (rev_clean or ""))
     proc_label = _process_label(p, attrs)
@@ -462,6 +506,8 @@ def bom_tree():
                 else {}
             )
             children_map = _has_children_map(sibling_pairs)
+            # One query for the whole level instead of one per child.
+            parts_map = _parts_map_for(sibling_pairs, scoped_parts)
 
             kids = [
                 _node(
@@ -472,6 +518,7 @@ def bom_tree():
                     review_statuses=review_statuses,
                     thumbs_map=thumbs_map,
                     children_map=children_map,
+                    parts_map=parts_map,
                 )
                 for l, c_pn, c_rev in visible
             ]
