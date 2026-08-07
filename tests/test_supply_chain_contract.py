@@ -153,3 +153,28 @@ def test_supported_compose_and_guided_deployment_images_are_digest_pinned():
     assert "image: $(mariadb_image)" in nextcloud
     assert "image: $(nextcloud_image)" in nextcloud
     assert '"$(mongo_image)"' in restore
+
+
+def test_worker_count_is_sized_to_the_host_not_hardcoded():
+    """Two workers with four threads is eight concurrent requests per instance.
+
+    A single part page fires roughly a dozen, so browsing a large assembly
+    saturated the pool and the server appeared to hang until requests timed
+    out. The image shipped that limit to every deployment regardless of the
+    hardware underneath it.
+    """
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[1]
+    dockerfile = (repo_root / "docker/app/Dockerfile").read_text(encoding="utf-8")
+    entrypoint = (repo_root / "docker/app/entrypoint.sh").read_text(encoding="utf-8")
+
+    assert '"-w", "2"' not in dockerfile, "the fixed worker count is back"
+    assert "WEB_CONCURRENCY" in entrypoint
+    assert "nproc" in entrypoint
+    # Floor and cap: a single-core box must not self-block, and workers are not
+    # free - each holds its own Mongo pool and memory.
+    assert "-lt 4" in entrypoint
+    assert "-gt 12" in entrypoint
+    # An operator must still be able to override it.
+    assert 'if [ -z "${WEB_CONCURRENCY:-}" ]' in entrypoint

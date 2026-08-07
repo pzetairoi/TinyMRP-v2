@@ -10,6 +10,7 @@ from app.services.canonical_fields import canonical_process_label_for_part
 from flask_login import current_user
 from app.services.authorization import (
     authorised_part_pairs,
+    parts_scope_is_unrestricted,
     has_permission,
     require_permission,
     scope_queryset,
@@ -179,6 +180,14 @@ def _bom_is_fully_authorised(user, parent_pn: str, parent_rev: str) -> bool:
 
     Breadth-first: one query per level rather than per node.
     """
+    # A user whose parts scope filters nothing cannot fail this check, so the
+    # walk below is pure cost. Measured on a real assembly: 1801 ms to visit
+    # 1347 parts across 10 levels, on EVERY flat-BOM request, to reach a
+    # conclusion that was never in doubt. With only 8 concurrent request slots
+    # that is what made the server appear to hang while browsing a large tree.
+    if parts_scope_is_unrestricted(user):
+        return True
+
     frontier = [(str(parent_pn or "").strip(), clean_rev(parent_rev))]
     visited: set[tuple[str, str]] = set()
 

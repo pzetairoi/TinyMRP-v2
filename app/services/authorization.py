@@ -481,6 +481,38 @@ def _scope_parts(
     return scoped
 
 
+def parts_scope_is_unrestricted(user: Any) -> bool:
+    """True when this user's parts scope filters NOTHING.
+
+    _scope_parts narrows a queryset in exactly two ways: a relationship clause
+    when the scope is not global, and an approved-only clause when the user
+    cannot read unreleased parts. If neither applies, every part is visible and
+    any per-part authorisation check can only ever return "allowed".
+
+    That matters because proving authorisation over a whole BOM subtree costs a
+    breadth-first walk of every descendant - measured at 1.8 seconds for a
+    1347-part assembly - and for an administrator it cannot fail. The work was
+    real; the question it answered was not.
+
+    Deliberately conservative: anything unexpected returns False and the caller
+    does the full walk. A wrong True would skip a real check.
+    """
+    try:
+        if not _is_authenticated(user):
+            return False
+        if not has_permission(user, "parts.read_unreleased"):
+            return False
+        if _uses_legacy_admin_bypass(user):
+            return True
+        scope = _scope_context(user)
+        if not scope.valid:
+            return False
+        modes = _scope_modes(scope, "parts", _RESOURCE_PERMISSIONS["parts"])
+        return "global" in modes
+    except Exception:
+        return False
+
+
 def relationship_ids(user: Any, relationship: str) -> tuple[Any, ...]:
     """Return request-cached linked customer or supplier identifiers."""
 

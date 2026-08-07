@@ -71,8 +71,11 @@ ENTRYPOINT ["/bin/sh", "/app/docker/app/entrypoint.sh"]
 
 # Hardened gunicorn defaults: worker recycling limits memory creep and blunts
 # slow-leak exploits; explicit timeouts protect against stuck workers.
+# Worker COUNT is deliberately absent here: the entrypoint sets WEB_CONCURRENCY
+# from the host's core count. A fixed 2 left every deployment with eight
+# concurrent slots regardless of the hardware it was running on.
 CMD ["gunicorn", \
-     "-k", "gthread", "--threads", "4", "-w", "2", \
+     "-k", "gthread", "--threads", "4", \
      "-b", "0.0.0.0:8000", \
      "--timeout", "120", "--graceful-timeout", "30", "--keep-alive", "5", \
      "--max-requests", "1000", "--max-requests-jitter", "100", \

@@ -72,5 +72,25 @@ while [ "$TRY" -le "$MAX_TRIES" ]; do
   TRY=$((TRY+1))
 done
 
+# Size the worker pool to the machine instead of shipping a fixed 2.
+#
+# Two workers with four threads is eight concurrent requests for the WHOLE
+# instance. A single part page fires roughly a dozen, so browsing a large
+# assembly saturated the pool and the server appeared to hang until requests
+# timed out. That is a capacity problem, not a code one.
+#
+# gunicorn reads WEB_CONCURRENCY natively, so -w is no longer passed. The
+# formula is the usual (2 x cores) + 1, floored at 4 so even a single-core box
+# can serve a page without self-blocking, and capped at 12 because each worker
+# holds its own Mongo pool and memory.
+if [ -z "${WEB_CONCURRENCY:-}" ]; then
+  CORES="$(nproc 2>/dev/null || echo 1)"
+  WEB_CONCURRENCY=$(( (CORES * 2) + 1 ))
+  [ "$WEB_CONCURRENCY" -lt 4 ] && WEB_CONCURRENCY=4
+  [ "$WEB_CONCURRENCY" -gt 12 ] && WEB_CONCURRENCY=12
+  export WEB_CONCURRENCY
+  echo "[entrypoint] ${CORES} core(s) -> ${WEB_CONCURRENCY} gunicorn workers (override with WEB_CONCURRENCY)"
+fi
+
 echo "[entrypoint] Launching: $*"
 exec "$@"
