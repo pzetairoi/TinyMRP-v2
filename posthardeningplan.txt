@@ -211,6 +211,42 @@ HOW TO USE THIS FILE
 
 
 ========================================================================
+4b. OPEN BUG — parts inventory, MEASURED not guessed
+========================================================================
+  Reported: /ui/parts "takes ages". Measured on the real instance with the
+  endpoint's own instrumentation (LOG_LEVEL=DEBUG, logger tinymrp.parts_lazy):
+
+    config=46  filters=0.2  query=71  thumbs=524  review=0  rows=64
+    total=705ms   page_rows=25  total_records=1789
+
+  thumbs is 74% of the response, for a page of TWENTY-FIVE rows.
+
+  RULED OUT, so nobody re-investigates:
+    - parts_lazy already paginates (.skip/.limit, 25 rows) - correct
+    - preview_png_urls_map already batches at the DATABASE level: one
+      PartFile.objects(part_number__in=...) query for the whole page
+    - the created_at sort is indexed (parts_created_at_idx exists)
+
+  THE ACTUAL CAUSE: after that single batched query, each returned PNG record
+  goes through managed_thumbnail_available() ->
+  resolve_managed_path(must_exist=True).is_file(), which is ONE FILESYSTEM
+  STAT PER FILE. Twenty-five parts with several PNGs each is dozens of stats
+  against a 6.8 GB tree.
+
+  THE FIX, deliberately NOT attempted yet: replace the per-file stat with one
+  directory listing per thumbs folder and a membership test. The shape is the
+  same as the bom_flat fix - one batched lookup instead of N.
+  WHY IT WAS DEFERRED: resolve_managed_path lives in file_security.py and is
+  the path-traversal guard. Speeding it up must not weaken it, and that
+  deserves a careful pass rather than a rushed one. Compute the path exactly
+  as today; only the EXISTENCE check should be batched.
+
+  HONEST CAVEAT: 705 ms of server time is slow but it is not "ages". If the
+  page still feels far worse than that, something outside this endpoint is
+  also involved - /api/field-config alone returns 55 KB on every page load and
+  has not been measured yet.
+
+========================================================================
 5. THE SHORTEST FINISH
 ========================================================================
 
