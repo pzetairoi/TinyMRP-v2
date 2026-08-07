@@ -24,6 +24,48 @@ WHAT hardeningplan.txt IS NOW
 
 
 ========================================================================
+0. PROGRESS BOARD — updated 2026-08-07
+========================================================================
+
+  ENGINEERING                                          STATE
+  ---------------------------------------------------  ------------------
+  E1  Error boundary + real 404                        DONE
+  E2  Silent exception handlers                        FIRST PASS (14/184)
+  E3  Wire /api/ready into every healthcheck           DONE
+  E4  Redis in the guided per-instance compose         DONE
+  E5  Per-endpoint rate limits, enforced               DONE
+  E6  Page tests for the remaining 5 pages             NOT STARTED
+  E7  Backup restore drill                             DONE - PASSED
+  E7b Backup checksums                                 DONE
+  E8  Accessibility baseline                           PARTIAL (structure)
+  E9  Concurrent note edits                            DONE
+  E10 Playwright + axe                                 NOT STARTED
+
+  OWNER                                                STATE
+  ---------------------------------------------------  ------------------
+  O1  CSP browser check          ~30 min, closes a P1  WAITING ON YOU
+  O2  Migrate live Mongo to authenticated              WAITING ON YOU
+  O3  Guided install on the VPS                        BLOCKED: DNS + TTY
+  O4  Product position, Track A vs B                   WAITING ON YOU
+  O5  Legal/commercial package                         WAITING ON YOU
+  O6  Trivy gate - re-decide with correct facts        WAITING ON YOU
+  O7  Redis for the existing instance                  WAITING ON YOU
+
+  LIVE STATUS
+    www.tinymrp.com runs tinymrp-app:c99696c527be (all hardening), healthy,
+    doctor 0 failures. Nextcloud and Vikunja unaffected.
+    Backup of 'main' taken AND restore-verified.
+    Still on the live box: security mode is "compat" (L1) and Mongo is
+    unauthenticated (L2).
+
+  GATES: 739 backend, 312 frontend, ruff/mypy/bandit clean, build OK.
+
+  WHAT BLOCKS O3, the biggest remaining unknown:
+    1. test.tinymrp.com resolves to SERVER-B, not the VPS.
+    2. The installer needs a TTY to show or accept the admin password, which
+       this assistant cannot provide. Commands to run yourself are in 2D.
+
+========================================================================
 1. WHERE THE PROJECT ACTUALLY STANDS
 ========================================================================
 
@@ -340,7 +382,25 @@ WHAT hardeningplan.txt IS NOW
       management in modals, accessible names on icon-only controls.
       Labelling is already largely in place (63 htmlFor, 48 aria-label).
 
-  E9. Optimistic concurrency on part edits   NOT STARTED - premise questioned
+  E9. Concurrent note edits                 DONE 2026-08-07
+      The premise needed narrowing first, and that changed the work. Parts are
+      not editable from the browser at all - merge_save_part_attrs has two
+      callers, both in app/cli.py, and part writes come from the add-in, the
+      CLI and the import pipeline. But annotations ARE browser-editable, and
+      one of them matters: NOTES. Comments are append-only and status and
+      priority are single-field toggles, so notes is the only path where a user
+      types prose that another user can silently destroy.
+      Implemented as the owner chose - warn and save, not reject. Rejecting
+      would discard the text the user just typed, which is the same harm from
+      the other direction.
+      The detail that makes it useful: the response returns the REPLACED text.
+      A warning that says "you overwrote someone" without handing back what was
+      lost is barely better than silence.
+      base_updated_at is optional, so an older client keeps the previous
+      behaviour rather than breaking, and an unparseable timestamp reports no
+      conflict rather than inventing one.
+
+  E9-orig. Optimistic concurrency on parts   NOT APPLICABLE as written
       Owner chose "warn and allow save". Before building it I went looking for
       the UI write path and did not find one: merge_save_part_attrs has exactly
       two callers, both in app/cli.py. Part writes come from the SolidWorks

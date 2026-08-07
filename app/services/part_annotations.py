@@ -312,11 +312,56 @@ def migrate_legacy_annotations(part: Part) -> dict[str, Any]:
     return payload
 
 
-def set_part_notes(part: Part, notes: str) -> dict[str, Any]:
+def _is_stale(base_updated_at: Any, stored_at: Any) -> bool:
+    """True when the editor loaded an older copy than the one now stored.
+
+    Parsing failures return False on purpose: an unreadable timestamp from a
+    client must not manufacture a conflict warning that did not happen.
+    """
+    from datetime import datetime
+
+    try:
+        if isinstance(base_updated_at, str):
+            base = datetime.fromisoformat(base_updated_at.replace("Z", "+00:00"))
+        else:
+            base = base_updated_at
+        if base.tzinfo is None or stored_at.tzinfo is None:
+            base = base.replace(tzinfo=None)
+            stored_at = stored_at.replace(tzinfo=None)
+        return stored_at > base
+    except Exception:
+        return False
+
+
+def set_part_notes(part: Part, notes: str, base_updated_at: Any = None) -> dict[str, Any]:
+    """Replace the free-text notes on a part.
+
+    Notes are the ONE place a browser user types prose that another browser
+    user can silently overwrite - comments are append-only, and status and
+    priority are single-field toggles. So this is where a lost update actually
+    costs someone their work.
+
+    base_updated_at is what the editor loaded. If the stored copy has moved on
+    since then the save still goes through (a hard reject would lose the text
+    the user just typed, which is the same harm from the other direction), but
+    the result reports the conflict AND returns the text that was replaced. A
+    warning that says "you overwrote someone" without handing back what was
+    lost is barely better than silence.
+    """
     migrate_legacy_annotations(part)
     notes_text = _normalize_notes(notes)
     doc = _get_doc(part)
     comments = list(getattr(doc, "comments", []) or []) if doc else []
+
+    conflict = None
+    if base_updated_at is not None and doc is not None:
+        stored_at = getattr(doc, "updated_at", None)
+        if stored_at is not None and _is_stale(base_updated_at, stored_at):
+            conflict = {
+                "conflict": True,
+                "replaced_notes": _normalize_notes(getattr(doc, "notes", "")),
+                "replaced_at": stored_at.isoformat(),
+            }
 
     if notes_text or comments:
         if not doc:
@@ -341,6 +386,11 @@ def set_part_notes(part: Part, notes: str) -> dict[str, Any]:
     part.comments_search = str(payload.get("comments_search") or "")
     part.updated_at = utc_now()
     part.save()
+    if conflict:
+        payload = {**payload, **conflict}
+    payload["notes_updated_at"] = (
+        doc.updated_at.isoformat() if doc is not None and getattr(doc, "updated_at", None) else None
+    )
     return payload
 
 

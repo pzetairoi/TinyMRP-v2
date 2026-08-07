@@ -1847,7 +1847,10 @@ def part_notes_update(pn):
         migrate_legacy_annotations(p)
     except Exception:
         pass
-    payload = set_part_notes(p, notes)
+    # What the editor had loaded, if the client sent it. Optional: an older
+    # client simply gets the previous last-write-wins behaviour rather than an
+    # error.
+    payload = set_part_notes(p, notes, base_updated_at=data.get("base_updated_at"))
     try:
         log_action(
             "part.notes.update",
@@ -1857,7 +1860,19 @@ def part_notes_update(pn):
         )
     except Exception:
         pass
-    return jsonify({"ok": True, "notes": str((payload or {}).get("notes") or notes)})
+    body = {
+        "ok": True,
+        "notes": str((payload or {}).get("notes") or notes),
+        "notes_updated_at": (payload or {}).get("notes_updated_at"),
+    }
+    if (payload or {}).get("conflict"):
+        # The save went through. The client is told what it replaced so the
+        # user can recover the other person's text instead of discovering the
+        # loss later, or never.
+        body["conflict"] = True
+        body["replaced_notes"] = payload.get("replaced_notes")
+        body["replaced_at"] = payload.get("replaced_at")
+    return jsonify(body)
 
 
 @bp.post("/parts/<pn>/comments")
