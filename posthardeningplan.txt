@@ -1,603 +1,335 @@
 ========================================================================
 POST-HARDENING PLAN — the route to a professional finish
 ========================================================================
-Created 2026-08-07 by Claude, from an audit that read the CODE rather than
-trusting hardeningplan.txt's own prose.
+Rewritten clean 2026-08-07. Branch: main.
 
-*** BRANCH: main. As of 2026-08-07 the whole hardening branch (78 commits) was
-fast-forwarded into main and hardening/production-readiness was deleted, local
-and remote. There is no hardening branch any more - work directly on main, or
-branch from it. The VPS still runs security/rbac-owasp-hardening at 3905502,
-so deploying main there is the first time any of this reaches a real server.***
+HOW TO USE THIS FILE
+  This is the execution document: what is done, what is left, and who can
+  actually close each item. hardeningplan.txt is now the HISTORICAL record -
+  read it for WHY things were built as they were and for the incident
+  write-ups, not to decide what to work on next.
 
-WHAT THIS FILE IS
-  The execution document. It says what is done, what is left, WHO can do each
-  remaining thing, and the shortest order that ends in a defensible release.
-
-WHAT hardeningplan.txt IS NOW
-  The historical record. Keep it. Its value is the reasoning and the incident
-  write-ups — why the CSP nonce is withheld while unsafe-inline is active, why
-  part numbers are matched case-insensitively, why the per-endpoint rate-limit
-  attempt was withdrawn, what shipped a broken page on 2026-08-06 and what
-  guard now prevents it. Read it before touching those areas. Do not use it to
-  decide what to work on next; use this file.
+  Infrastructure is referred to by ALIAS. The real addresses and domains live
+  in deploy/fleet.local.md, which is gitignored. This repository is public.
 
 
 ========================================================================
-0. PROGRESS BOARD — updated 2026-08-07
+1. PROGRESS BOARD
 ========================================================================
 
-  ENGINEERING                                          STATE
-  ---------------------------------------------------  ------------------
-  E1  Error boundary + real 404                        DONE
-  E2  Silent exception handlers                        FIRST PASS (14/184)
-  E3  Wire /api/ready into every healthcheck           DONE
-  E4  Redis in the guided per-instance compose         DONE
-  E5  Per-endpoint rate limits, enforced               DONE
-  E6  Page tests for the remaining 5 pages             1 of 5 (upload pack)
-  E7  Backup restore drill                             DONE - PASSED
-  E7b Backup checksums                                 DONE
-  E8  Accessibility baseline                           PARTIAL (structure)
-  E9  Concurrent note edits                            DONE
-  E10 Playwright + axe                                 NOT STARTED
+  ENGINEERING                                       STATE
+  ------------------------------------------------  --------------------
+  E1  Error boundary + real 404                     DONE
+  E2  Silent exception handlers                     14 of 184 triaged
+  E3  /api/ready wired into every healthcheck       DONE
+  E4  Redis in the guided per-instance compose      DONE
+  E5  Per-endpoint rate limits, enforced            DONE
+  E6  Page tests for the remaining pages            1 of 5
+  E7  Backup restore drill                          DONE - PASSED TWICE
+  E7b Backup checksums                              DONE
+  E8  Accessibility baseline                        PARTIAL (structure)
+  E9  Concurrent note edits                         DONE
+  E10 Playwright + axe                              NOT STARTED
 
-  OWNER                                                STATE
-  ---------------------------------------------------  ------------------
-  O1  CSP browser check          ~30 min, closes a P1  WAITING ON YOU
-  O2  Migrate live Mongo to authenticated              DONE (main)
-  O3  Guided install on the VPS                        BLOCKED: DNS + TTY
-  O4  Product position, Track A vs B                   WAITING ON YOU
-  O5  Legal/commercial package                         WAITING ON YOU
-  O6  Trivy gate                                       DECIDED: keep
-  O7  Redis for the existing instance                  DONE (main)
-
-  LIVE STATUS
-    SITE-MAIN runs tinymrp-app:c99696c527be (all hardening), healthy,
-    doctor 0 failures. Nextcloud and Vikunja unaffected.
-    Backup of 'main' taken AND restore-verified.
-    Still on the live box: security mode is "compat" (L1) and Mongo is
-    unauthenticated (L2).
+  OWNER                                             STATE
+  ------------------------------------------------  --------------------
+  O1  CSP browser check      ~30 min, closes a P1   WAITING ON YOU
+  O2  Mongo authentication across the fleet         1 of 4 instances
+  O3  Guided install from scratch                   BLOCKED: needs a TTY
+  O4  Product position, Track A vs Track B          WAITING ON YOU
+  O5  Legal/commercial package                      WAITING ON YOU
+  O6  Trivy gate                                    DECIDED: keep as is
+  O7  Redis for existing instances                  3 of 4 instances
+  L1  Strict security mode across the fleet         WAITING ON YOU
 
   GATES: 739 backend, 317 frontend, ruff/mypy/bandit clean, build OK.
 
-  WHAT BLOCKS O3, the biggest remaining unknown:
-    1. SITE-TEST resolves to SERVER-B, not the VPS.
-    2. The installer needs a TTY to show or accept the admin password, which
-       this assistant cannot provide. Commands to run yourself are in 2D.
+
+========================================================================
+2. FLEET — four instances on two servers
+========================================================================
+  Aliases only. Real addresses in deploy/fleet.local.md (gitignored).
+
+  SERVER-A
+    main    52 parts,   23 MB   PRODUCTION
+            latest main | Mongo AUTHENTICATED | redis running | compat mode
+            also hosts a Nextcloud and a Vikunja on the SAME shared Caddy
+
+  SERVER-B                                          15 GB free - watch this
+    demo    12 parts,  5.2 MB   disposable
+            latest main | redis + shared rate limiting | compat mode
+    test  1789 parts,  6.8 GB   *** NOT A SANDBOX - see below ***
+            latest main | redis + shared rate limiting | compat mode
+    mecs  1479 parts,  2.8 GB   PRODUCTION - OWNER SAID DO NOT TOUCH
+            still on the pre-hardening image | untouched, and verified so
+    also hosts two Nextclouds on a shared Caddy
+
+  *** The instance named "test" holds MORE parts and more than twice the data
+  of the mecs production instance. Its name is misleading: deleting or
+  reinstalling it would destroy real work. The only genuinely disposable
+  instance on either server is demo. ***
+
+  Every instance runs TINYMRP_SECURITY_MODE="compat", so Phase 2 strict
+  authentication is inactive across the WHOLE fleet (see L1).
+
+  Access: key ~/.ssh/tinymrp_deploy, tagged claude-tinymrp-deploy-20260807 in
+  each server's authorized_keys. Remove that line to revoke; nothing else
+  needs rotating. The password used to bootstrap it appeared in a chat
+  transcript and should be changed.
 
 
 ========================================================================
-0b. FLEET INVENTORY — discovered 2026-08-07, TWO servers not one
+3. WHAT IS LEFT — owner
 ========================================================================
 
-  SERVER-A  (SERVER-A)
-    main    SITE-MAIN / www        52 parts    23 MB   PRODUCTION
-                                     -> on latest main, Mongo AUTHENTICATED,
-                                        redis running, /api/ready healthy
-    plus Nextcloud (CLOUD-MAIN) and Vikunja on the shared Caddy
+  O1. CSP browser check                    ~30 min, closes a P1
+      All 34 inline handlers are delegated and all 18 inline scripts carry a
+      nonce. Only a human with a browser can confirm nothing broke.
+        1. start with TINYMRP_CSP_REPORT_ONLY_STRICT=true
+        2. exercise the admin UI - jobs, orders, fields, roles, add-in
+        3. watch the console for CSP violations
+        4. if clean, set TINYMRP_CSP_ALLOW_INLINE=false and repeat
+      Best value per minute of anything left in this document.
 
-  SERVER-B   (SERVER-B)     ALL still on old commit 3905502
-    demo    SITE-DEMO         12 parts    5.2 MB  disposable
-    mecs    SITE-MECS       1479 parts    2.8 GB  PRODUCTION
-    test    SITE-TEST       1789 parts    6.8 GB  *** SEE BELOW ***
-    plus two Nextclouds (cloud.mecs / cloud.test) on a shared Caddy
+  O2. Mongo authentication — 3 instances remain
+      DONE on main via deploy/scripts/enable-mongo-auth.sh. Verified after:
+      anonymous access refused, and the application credential denied the
+      admin database.
+      Remaining: demo, test, mecs. Same script, one short maintenance window
+      each. It backs up first and refuses to continue if the backup fails.
 
-  *** "test" IS NOT A SANDBOX. It holds MORE parts and more than twice the
-  data of the mecs production instance. Whatever its name suggests, deleting
-  or reinstalling it would destroy real work. The only genuinely disposable
-  instance on either box is `demo` (12 parts, 5.2 MB). ***
+  O3. Guided install from scratch — BLOCKED, needs your terminal
+      Not a defect any more, just a limit: without a TTY the installer cannot
+      display the generated admin password or accept one you type, and that
+      password is printed exactly once.
+      Run it yourself, on SERVER-B, where DNS already resolves correctly:
 
-  All four instances run TINYMRP_SECURITY_MODE="compat", so Phase 2 strict
-  authentication is inactive everywhere in the fleet, not just on main.
+        cd /opt/TinyMRP-v2 && sudo git pull
+        sudo ./deploy/scripts/create-instance.sh <name> <domain> \
+            --admin-email you@example.com
 
-========================================================================
-1. WHERE THE PROJECT ACTUALLY STANDS
-========================================================================
+      Add --admin-password '<choice>' to set it, or let it generate one and
+      COPY IT when printed. Use a NEW instance name - never an existing one.
+      What to watch, since no guided install has ever been run:
+        - the Caddy route installs, validates and reloads WITHOUT disturbing
+          the other sites on that shared proxy
+        - the app reaches healthy against /api/ready
+        - a redis container appears beside app and mongo
+        - the instance .env carries MONGO_APP_USER and authSource in MONGO_URI
 
-  In one sentence: nobody can steal the data, but this is not yet a
-  commercial product.
+  O4. Product position                                    COMM-SCOPE-01
+      Track A (engineering BOM/document control - what exists) or Track B
+      (full MRP - a separate roadmap). Marketing claims must match the code.
 
-    Security hardening ......... substantially complete
-    Operational hardening ...... built, partly unwired
-    Product-quality hardening .. barely started
-
-  Phase        Subject                              State
-  -----------  -----------------------------------  ----------------------
-  0            Controlled baseline                  DONE
-  1A/1B/1C     XSS, token lifecycle, sessions       DONE
-  2            Strict-mode authentication           DONE
-  3A           Fresh deployments, seeding           DONE
-  3B           Dependency remediation               DONE (3 signed exceptions)
-  3C           Reproducible supply chain            DONE
-  4A           Archive/resource limits              DONE
-  4B           Atomic imports                       ~70%
-  5            Production infrastructure            ~60%
-  6            Frontend quality/accessibility       ~15%
-  7            SolidWorks add-in                    OUT OF SCOPE (owner)
-  8            Maintainability                      ~15%
-  9            Commercial scope                     NOT STARTED
-  10           Release validation                   NOT STARTED
-
-  Gates, as of 2026-08-07:
-    backend      730 passed, 1 skipped
-    frontend     309 tests, blocking coverage threshold on src/lib (92%)
-    ruff         clean       bandit  clean       mypy  clean (2 modules)
-    Black        NON-blocking, 162-file backlog (deliberate)
-    coverage     backend gate is --cov-fail-under=55
-    Trivy        NON-blocking; collects evidence, does not fail a release
-
-  Three risk acceptances expire 2026-11-02 (EXC-2026-001/002/003). At expiry,
-  re-check for published fixes and UPGRADE rather than renew.
-
-
-========================================================================
-2. WHAT IS LEFT — split by who can actually do it
-========================================================================
-
-------------------------------------------------------------------------
-2A. OWNER ONLY — engineering cannot close these
-------------------------------------------------------------------------
-
-  O1. CSP browser check                         ~30 min      UNBLOCKS SEC-CSP-01
-      All 34 inline handlers are delegated, all 18 inline scripts carry a
-      nonce, style-src is decoupled. Only a human with a browser can confirm.
-        1. Start with TINYMRP_CSP_REPORT_ONLY_STRICT=true
-        2. Exercise the admin UI — jobs, orders, fields, roles, add-in
-        3. Watch the console for CSP violations
-        4. If clean, set TINYMRP_CSP_ALLOW_INLINE=false and repeat
-      This is the highest value-per-minute action available to anyone.
-
-  O2. Migrate existing Mongo instances to authentication
-      DONE for `main` on 2026-08-07 via the new
-      deploy/scripts/enable-mongo-auth.sh. Verified afterwards that anonymous
-      access is refused ("command aggregate requires authentication") and that
-      the application credential cannot read the admin database.
-      REMAINING: demo, mecs and test on SERVER-B. Same script, but each
-      needs its own short maintenance window.
-
-  O2-orig. Migrate existing Mongo instances
-      Mongo only creates users on the FIRST boot of an EMPTY data directory,
-      so this cannot be automated onto a running instance. Needs a maintenance
-      window per instance: enable auth, create the app user, update MONGO_URI.
-      Data must not be destroyed — see the deployment-reality rules.
-
-  *** INSTALLER FINDING 2026-08-07 - guided install hangs unattended ***
-  create-instance.sh waits for DNS in a loop that PROMPTED when a TTY was
-  present and slept forever when it was not. Driven over `ssh host cmd` it
-  retried silently for over half an hour, created nothing, and never failed.
-  A hang is worse than an error: no reason, no exit code, nothing to act on.
-  FIXED: the unattended path is now bounded (DNS_WAIT_MAX_ATTEMPTS, default 20
-  = ~5 minutes) and dies naming --skip-dns-check as the escape hatch. The
-  interactive prompt is kept - a human watching can see what is wrong.
-  The trigger was real: SITE-TEST resolves to SERVER-B, NOT the
-  VPS (SERVER-A), so the guard was right to refuse. Let's Encrypt could
-  not have issued a certificate either.
-  OWNER: repoint SITE-TEST at SERVER-A to validate the full path
-  including ACME, or run with --local-mode internal-tls to validate everything
-  except real certificate issuance.
-
-  *** LIVE-INSTANCE FINDINGS 2026-08-07 - main is deployed and running ***
-  SITE-MAIN now runs tinymrp-app:c99696c527be. Doctor: 0 failures.
-  Nextcloud and Vikunja unaffected. /api/ready reports ok=true (database ok,
-  storage ok, 48 GB free). First time any of this hardening has run on a real
-  server.
-  TWO THINGS THE REGISTER DID NOT SHOW, both visible only on the live box:
-
-  L1. TINYMRP_SECURITY_MODE="compat" on the live instance.
-      AUTH-MODE-01 is marked CLOSED, and it is - in code. But the running
-      instance OPTS OUT of it. Every strict-mode policy Phase 2 delivered
-      (browser session + origin/referer CSRF, bearer-only /api/auth/check,
-      rejection of bearer substitution on browser APIs) is INACTIVE in
-      production. "Closed" meant the code exists, not that it is switched on.
-      OWNER ACTION: flipping to strict is a real risk, not a formality - the
-      SolidWorks add-in and any integration may depend on compat behaviour.
-      Test on the test instance before touching main.
-
-  L2. MONGO_URI carries no credentials - the live database is unauthenticated.
-      Exactly what OPS-DBAUTH-01 predicted, now confirmed rather than assumed,
-      and /api/ready surfaces it as warnings:["mongodb_unauthenticated"]. The
-      warning mechanism works. See O2 for why this cannot be automated.
-
-  *** DEPLOYMENT FINDING 2026-08-07 - found only by deploying for real ***
-  `update-instance.sh <name>` WITHOUT --image regenerates the compose file but
-  does NOT rebuild the image. So it applied the new /api/ready healthcheck
-  against an image that predates the endpoint: eleven 404s, never healthy,
-  automatic rollback.
-  Nothing broke - and that is the other half of the finding. The rollback
-  worked exactly as designed on a LIVE production instance: previous image
-  restored, SITE-MAIN still serving, doctor reporting 0 failures. That is
-  a Phase 10 rollback drill, passed, for free.
-  LESSON for anyone updating an existing instance to this branch: build the
-  image FIRST and pass --image. A compose healthcheck applies the moment the
-  file is regenerated, but the image only changes when you say so, so any
-  healthcheck referencing a new endpoint is a breaking change for older images.
-
-  O3. Execute one real guided VPS install       IN PROGRESS 2026-08-07
-      Access granted to SERVER-A (Ubuntu 24.04.4, Docker 29.6.1, 4 cores,
-      49 GB free). Key-based SSH installed; alias `tinymrp-vps`.
-      *** THAT BOX IS NOT DISPOSABLE. It serves three production services
-      through ONE shared Caddy:
-        SITE-MAIN / www   -> tinymrp-main-app  (52 parts, real data)
-        CLOUD-MAIN   -> Nextcloud + MariaDB
-        TASKS -> Vikunja
-      Breaking Caddy takes down all three, not just TinyMRP. ***
-      Owner supplied SITE-TEST and CLOUD-TEST, already
-      resolving to the VPS, and chose to rebuild 'main' as well.
-      Sequence being followed, deliberately: back up main -> PROVE the restore
-      works (done, see E7) -> build the test instance -> only then rebuild main,
-      from a backup already demonstrated to restore.
-      The VPS repo sits on security/rbac-owasp-hardening at 3905502, so the
-      live instance predates every change on this branch.
-
-  O4. Decide the product position                             COMM-SCOPE-01
-      Track A (engineering BOM/document control — what exists) or Track B
-      (full MRP — a separate roadmap). Marketing claims must match code.
-
-  O5. Commercial/legal package                                COMM-LEGAL-01
+  O5. Commercial/legal package                            COMM-LEGAL-01
       EULA, privacy policy + DPA, retention/deletion, support and SLA,
       vulnerability-disclosure contact, third-party notices, accessibility
       statement. Needs counsel, not engineering.
 
-  O6. Trivy gate — AUDIT FINDING WAS WRONG, decision still open
-      The gate DOES block. `continue-on-error: true` exists only so the SBOM
-      and evidence upload run first; "Enforce image vulnerability gate" then
-      fails the job. Effective policy today: a FIXABLE HIGH or CRITICAL blocks
-      a release (ignore-unfixed: true).
-      The owner answered "block only CRITICAL" on the wrong premise, which
-      would LOOSEN the gate rather than tighten it. Left unchanged pending a
-      decision made with the correct information.
+  O6. Trivy — DECIDED 2026-08-07: leave as is.
+      It blocks a release on a HIGH or CRITICAL image vulnerability THAT HAS A
+      FIX. Unfixable ones are ignored, so it only fires on something
+      actionable. (An earlier audit note claiming it did not block was wrong:
+      the continue-on-error only lets the SBOM upload run before the
+      enforcement step fails the job.)
 
-  O7. Give existing instances shared rate limiting
-      New instances get Redis from E4. Existing ones keep memory:// until
-      migrated by hand, because the update path is deliberately app-only and
-      rollback-safe (see E4). Per instance: add RATE_LIMIT_STORAGE_URI to its
-      .env and bring the full stack up once so Redis starts.
-      Low urgency: the failure mode is a limit that is looser than configured,
-      not an outage.
+  O7. Redis for existing instances — 1 remains
+      DONE on main, demo and test. Remaining: mecs.
+      Per instance: add RATE_LIMIT_STORAGE_URI=redis://redis:6379/0 to its
+      .env, then bring the FULL stack up once so redis starts. It cannot be
+      done through update-instance.sh - see section 6.
 
-------------------------------------------------------------------------
-2B. ENGINEERING — ordered by value per unit of risk
-------------------------------------------------------------------------
+  L1. Strict security mode — the largest untaken risk
+      Every instance runs "compat", so all of Phase 2 is inactive in
+      production. AUTH-MODE-01 is marked closed and it is - in CODE. The
+      running instances opt out of it. "Closed" meant the code exists, not
+      that it is switched on.
+      Flipping it is a real risk: the SolidWorks add-in and other integrations
+      may depend on compat behaviour, and only you can test the add-in.
+      Do demo first, then test, then production. It is one environment
+      variable, so reverting takes a minute.
 
-  E1. Error boundary + 404 route            DONE 2026-08-07 (97792a8)
-      RouteError on the root route catches render errors for every page;
-      NotFoundPage replaced a catch-all that rendered PartsPage — a dead link
-      used to look like a successful navigation, so it was never reported.
-      Verified the tests detect ABSENCE of the mechanism: removing
-      errorElement fails the 3 boundary tests and leaves the 2 not-found ones
-      passing. 309 frontend tests, tsc guard clean, bundle rebuilt (it is
-      tracked and ships, so a fix that skips the build reaches nobody).
 
-  E2. Triage the silent exception handlers   FIRST PASS DONE 2026-08-07
-      184 broad handlers end in a bare `pass` (the count was 182 by grep; an
-      AST walk finds 184). They are NOT equivalent, so this was triage rather
-      than a rewrite - a blanket change would have been pure churn.
-      CONVERTED, the ones that can hide data or security loss:
-        upload_pack._journal_update - THE WORST. The journal is how an operator
-          reconstructs a failed import, so a silent failure made it LIE about
-          the stage reached. Now logged, still never raised into the import:
-          bookkeeping must not become data loss. Pinned by a test.
-        parts_delete._remove_existing - a file that should be gone stays.
-        authorization._denied - an access-control denial with no audit trail.
-        part_shares x4 - including creation of a PUBLIC share, where the share
-          works but nothing records who made it.
-        part_drawing_markups x5 - audit plus four review notifications, which
-          were failing with nobody able to notice.
-      LEFT ALONE deliberately: audit.log_action's own nested guards (an audit
-      failure must never break the business operation, and the innermost guard
-      is the last resort - logging there could itself throw), int coercion in
-      parts_delete._sum_into, and a config read outside app context.
-      STILL TODO: ~170 remain, concentrated in docpacks.py (36), admin.py (20),
-      parts.py (20) and __init__.py (19). Most are best-effort UI and rendering
-      paths, but they have not been read one by one.
-      Original roadmap wording follows.
+========================================================================
+4. WHAT IS LEFT — engineering
+========================================================================
 
-  E2-orig. Review broad except handlers           MEDIUM       Phase 8
-      Not a blanket rewrite. Classify each: legitimate suppression (best-effort
-      loops, optional probes) stays and gets a one-line why; anything on a
-      write, auth, import or file-commit path must log at minimum.
-      Exit: no silent suppression on a path that can lose or corrupt data.
+  E2. Silent exception handlers — 170 of 184 remain
+      Triage, not a rewrite: suppressing a thumbnail render inside a loop is
+      legitimate; suppressing a write is how a defect becomes undebuggable.
+      DONE: the 14 that can hide data or security loss - the import journal
+      (which was LYING about the stage reached when a write failed), file
+      deletion, an authorization denial with no audit trail, public share
+      creation, and five review notifications.
+      LEFT ALONE on purpose: audit.log_action's own nested guards. An audit
+      failure must never break the operation it is recording.
+      REMAINING, concentrated in docpacks.py (36), admin.py (20), parts.py
+      (20) and __init__.py (19). Mostly best-effort UI and rendering paths,
+      but they have not been read one by one.
 
-  E3. Wire /api/ready into orchestration        DONE 2026-08-07
-      Every container healthcheck now asks readiness instead of liveness:
-      docker/app/Dockerfile (baked into the image, so it applies however the
-      container is launched), both compose files, and the per-instance
-      renderer. HEALTHCHECK start-period raised 25s -> 60s because readiness
-      pings Mongo, which is still warming while the app boots.
-      A contract test asserts none of the four still points at /api/health.
-      CONSEQUENCE, deliberate and worth knowing: "healthy" is now a real
-      claim, so an instance whose Mongo is unreachable, whose deliverables
-      volume is unmounted, or which has under 512 MB free will FAIL an update
-      and roll back. That is correct - do not deploy onto a broken instance -
-      but it means a degraded instance must be fixed before it can be updated.
-      READINESS_MIN_FREE_DISK_MB=0 disables the disk check if it ever blocks
-      an emergency fix.
-      NOT done here: the deploy scripts' own curl checks (doctor.sh,
-      install-server.sh, update-instance.sh) still probe /api/health directly.
-      They gate on container health anyway, so they inherit readiness; adding
-      a readiness-detail report to doctor.sh is a nice-to-have, not a gap.
-
-  E4. Redis in the guided per-instance compose   DONE 2026-08-07
-      The rendered per-instance compose now ships Redis (private network only,
-      no ports, persistence off, /data on tmpfs) and create-instance.sh writes
-      RATE_LIMIT_STORAGE_URI into the instance .env. NEW instances only.
-      *** Retrofitting an EXISTING instance from update-instance.sh is wrong,
-      and the contract test now says so. Two invariants block it:
-        1. update-instance.sh never writes the instance .env - rollback
-           restores the compose and container, so an env edit would survive
-           the rollback that was meant to undo it.
-        2. it recreates the app with --no-deps, so an update never starts the
-           Redis container. Writing the URI there would point a live instance
-           at a host that does not exist.
-      I tried exactly that and the existing contract test caught it. Migrating
-      an existing instance is an OWNER action - see O7. ***
-
-  E5. Per-endpoint rate limits                  DONE 2026-08-07
-      *** The recorded reason for the earlier withdrawal was WRONG, and the
-      real one is more useful. It was not that Flask-Limiter records limits at
-      decoration time. It was ORDERING: init_rate_limiting runs at
-      app/__init__.py:463 and the blueprints register at 847+, so
-      app.view_functions was empty for all six routes and the loop skipped
-      every one of them in silence. The endpoint names were correct all along;
-      they were asked for too early. ***
-      Fixed by splitting out apply_expensive_limits(app), called after the
-      blueprints exist. A missing endpoint now logs a warning instead of
-      vanishing.
-      Budgets (owner: generous, since these are authenticated users doing real
-      work and breaking an import session is worse than the abuse a tight
-      limit prevents): upload-pack and exports 60/hour, docpacks 30/hour.
-      RATE_LIMIT_EXPENSIVE overrides them all at once.
-      Keyed by USER, not by address: a company reaches the server through one
-      NAT, so an address-keyed budget would be split across the whole office.
-      Falls back to the address for the unauthenticated public-share route.
-      VERIFIED by a real 429, and verified the test detects the absence of the
-      wiring - the old name-resolution test never could, because it inspects
-      the finished app, by which time every route is present.
-
-  E6. Page-level tests                      1 OF 5 DONE 2026-08-07
-      UploadPackPage covered first, deliberately: it is the screen where an
-      operator decides whether to run an import against LIVE data, so its
-      failure modes are the expensive kind.
-      The invariant pinned is FAIL-CLOSED. Capability lookups are
-      presentation-level access control, and a lookup that FAILS must never
-      leave a destructive action reachable - enabling "Apply import" because we
-      could not ask what the user may do is far worse than disabling it
-      wrongly. Also pinned: preview rights alone never enable Apply, and a user
-      without preview rights is told why instead of facing a dead button.
-      GOTCHA for the next page test: mockApi treats an entry without a `body`
-      key as the body itself, so `{ status: 500 }` silently returns 200. Error
-      paths need `{ status: 500, body: {...} }`.
+  E6. Page tests — 4 of 5 remain
+      DONE: UploadPackPage, chosen first because it is where an operator
+      decides whether to import against live data. Pins fail-closed capability
+      gating: a permission lookup that FAILS must never leave a destructive
+      action reachable.
       REMAINING: PartsPage, PartDetailPage, AdminFieldsPage, AdminAddinPage.
+      GOTCHA: mockApi treats an entry with no `body` key as the body itself,
+      so { status: 500 } silently returns 200. Error paths need
+      { status: 500, body: {...} }.
 
-  E6-orig. Page-level tests for 5 pages          MEDIUM       QA-FE-01
-      PartsPage, PartDetailPage, UploadPackPage, AdminFieldsPage,
-      AdminAddinPage. Their extracted helpers are covered; the pages are not.
-      Add each to coverage.include as it gains real tests — do NOT lower the
-      existing thresholds.
+  E8. Accessibility — structure done, behaviour not
+      DONE: skip link (first focusable element, visible only on focus), a
+      <main id="main-content"> landmark where there was NO landmark at all,
+      and prefers-reduced-motion across the tree. Labelling was already
+      largely in place (63 htmlFor, 48 aria-label).
+      REMAINING: keyboard-only pass over real workflows, modal focus
+      management, colour contrast, accessible names on icon-only controls,
+      more live regions (only 2 today). All need a browser - see E10.
 
-  E7. Backup integrity                            MEDIUM       Phase 5
-      Checksums, encryption, an off-host copy, and — most important — one
-      rehearsed restore. A backup nobody has restored is not a backup.
-      Exit: a documented restore drill succeeds from an off-host copy.
-
-      *** RESTORE DRILL PASSED 2026-08-07 - the first one ever rehearsed, on
-      the real VPS, instance 'main'. This was the single largest unverified
-      assumption in the project: a backup nobody has restored is a file, not a
-      backup. ***
-      Method: backup-instance.sh produced a 21 MB set (mongodump +
-      deliverables + config + manifest) with ZERO downtime, then the archive
-      was restored into a THROWAWAY mongo:6.0 container - never near live data.
-      Evidence:
-        - 515 documents restored, 0 failed
-        - every collection count matches the live instance exactly:
-          parts 52, bom 56, part_files 178, audit_logs 208, roles 18,
-          users 1, user_settings 1, numbering_schemes 1
-        - deliverables tarball reads cleanly; 267 files in the archive against
-          267 on disk (the 284 raw tar entries are 267 files + 17 directories)
-        - config captured: compose.yml, instance.env, route.caddy
-        - the live instance stayed up and healthy throughout
-      STILL OPEN here: the script writes no checksums, so the verification
-      above was done by hand, and every copy sits on the same host. The owner
-      chose to skip encryption; off-host copying stays an owner decision.
-
-  E7b. Backup checksums                    DONE 2026-08-07
-      backup-instance.sh writes SHA256SUMS covering every artefact INCLUDING
-      the manifest, and verifies it immediately. A corrupt write now fails the
-      backup instead of being discovered during a restore, which is the worst
-      possible moment to find out. Contract test asserts the verification
-      aborts rather than warns.
-
-  E8. Accessibility baseline               PARTIAL 2026-08-07
-      DONE: skip link (first focusable element on every page, visible only on
-      focus), a <main id="main-content"> landmark - the SPA previously had NO
-      landmark at all - and a prefers-reduced-motion block covering the whole
-      tree. Motion is reduced to 0.01ms rather than 0, because 0 can break
-      scripts waiting on transitionend.
-      Three tests pin it, including that the skip link is FIRST: one that is
-      not first saves no tabbing, which is its only purpose. Worth pinning
-      because nobody using a mouse ever sees it, so a refactor deletes it
-      silently.
-      Already in place before this: 63 htmlFor and 48 aria-label, so labelling
-      was largely done.
-      STILL TODO: keyboard-only pass over the real workflows, modal focus
-      management, colour-contrast validation, accessible names on icon-only
-      controls, and more live regions (only 2 aria-live today). Those need a
-      browser and axe - see E10.
-
-  E8-orig. Accessibility work list                MEDIUM       Phase 6
-      Skip link and stable main target, prefers-reduced-motion in our own CSS,
-      live regions for async success/error, keyboard-only pass, focus
-      management in modals, accessible names on icon-only controls.
-      Labelling is already largely in place (63 htmlFor, 48 aria-label).
-
-  E9. Concurrent note edits                 DONE 2026-08-07
-      The premise needed narrowing first, and that changed the work. Parts are
-      not editable from the browser at all - merge_save_part_attrs has two
-      callers, both in app/cli.py, and part writes come from the add-in, the
-      CLI and the import pipeline. But annotations ARE browser-editable, and
-      one of them matters: NOTES. Comments are append-only and status and
-      priority are single-field toggles, so notes is the only path where a user
-      types prose that another user can silently destroy.
-      Implemented as the owner chose - warn and save, not reject. Rejecting
-      would discard the text the user just typed, which is the same harm from
-      the other direction.
-      The detail that makes it useful: the response returns the REPLACED text.
-      A warning that says "you overwrote someone" without handing back what was
-      lost is barely better than silence.
-      base_updated_at is optional, so an older client keeps the previous
-      behaviour rather than breaking, and an unparseable timestamp reports no
-      conflict rather than inventing one.
-
-  E9-orig. Optimistic concurrency on parts   NOT APPLICABLE as written
-      Owner chose "warn and allow save". Before building it I went looking for
-      the UI write path and did not find one: merge_save_part_attrs has exactly
-      two callers, both in app/cli.py. Part writes come from the SolidWorks
-      add-in, the CLI and the import pipeline - not from two people editing the
-      same part in a browser.
-      So the scenario the item describes may not exist, and building version
-      fields for it would be ceremony. VERIFY FIRST: confirm which paths a
-      normal user can actually write a part through (part_annotations.py has
-      several part.save() calls and is the likeliest candidate - notes and
-      comments). If concurrent browser editing is real there, do it; if the
-      only writers are machines, close this as not applicable and say why.
-
-  E9-orig. Optimistic concurrency                 MEDIUM       Phase 8
-      Two users editing the same part today: last write wins, silently.
-      part_drawing_markup.py already has the pattern to copy.
-      Must be additive — a new field, never a mutation of existing documents.
-
-  E10. Playwright + axe                           LARGE        QA-FE-01
+  E10. Playwright + axe — NOT STARTED, the largest single item
       Needs CI to boot the app plus Mongo. Also the only way to test the 3D
       viewer and canvas markup, which jsdom cannot run.
-      Deliberately last: it is the biggest step and the least certain.
 
-  DELIBERATELY NOT DOING (and why)
-    - Mongo transactions for imports. Needs a replica set. The journal is the
-      designed "otherwise" branch and it works.
-    - Repo-wide Black reformat. 162 files of churn would bury every real diff.
-    - UP006/UP045 annotation rewrites (~1100 sites) and SIM105 (103 sites).
-      Enormous churn, no runtime benefit, on code running in production.
-    - Admin UI over the import journal. The data is reachable over the API,
+  E7 residue. Backups are unencrypted and on-host.
+      Checksums are written and verified. The owner chose to skip encryption.
+      Off-host copying remains an owner decision. NOTE: SERVER-B has only
+      15 GB free against a 6.8 GB instance, so a full backup there is tight,
+      and a careless one could fill a disk shared with production.
+
+  DELIBERATELY NOT DOING, and why
+    - Mongo transactions for imports: needs a replica set. The journal is the
+      designed alternative and it works.
+    - Repo-wide Black reformat: 162 files of churn would bury every real diff.
+    - UP006/UP045 annotation rewrites (~1100 sites), SIM105 (103 sites):
+      enormous churn, no runtime benefit, on code running in production.
+    - Admin UI over the import journal: the data is reachable over the API,
       which was the blocking part. A page is polish.
-    - Breaking up docpacks.py (3336 lines) et al. Real debt, but high-risk
-      surgery with no test safety net underneath it yet. Wants E6 first.
-
-------------------------------------------------------------------------
-2C. RELEASE VALIDATION — Phase 10, once 2A and 2B land
-------------------------------------------------------------------------
-  Tag a release candidate. Deploy from scratch in a production-equivalent
-  environment. Run the full suite, the compose smoke test, dependency and
-  container scans, the secret scan and SAST. Produce an SBOM, release notes, a
-  deployment guide, an operations runbook and a signed go/no-go record.
-  External penetration testing and load/endurance testing remain owner calls
-  on budget. Every unresolved finding needs an explicit, time-limited written
-  risk acceptance — the EXC-2026-00x format already in use.
+    - Breaking up docpacks.py (3336 lines) and friends: real debt, but
+      high-risk surgery with no test safety net under it yet. Wants E6 first.
+    - Optimistic concurrency on PARTS: parts are not browser-editable at all.
+      Only notes were, and that is done (E9).
 
 
 ========================================================================
-2D. RUN THIS YOURSELF - the guided install needs a terminal
-========================================================================
-The install cannot be driven from this assistant: without a TTY the script
-degrades to unattended mode, which now fails cleanly instead of hanging but
-still cannot show you the generated admin password or let you type one.
-
-Run it in your own terminal, where it is interactive:
-
-  ssh ubuntu@SERVER-A
-  cd /opt/TinyMRP-v2 && sudo git pull
-
-  # Option A - after repointing SITE-TEST at SERVER-A.
-  # Validates the FULL path including a real Let's Encrypt certificate.
-  sudo ./deploy/scripts/create-instance.sh test SITE-TEST       --admin-email admin@SITE-MAIN
-
-  # Option B - without touching DNS. Validates everything except real
-  # certificate issuance, and burns no Let's Encrypt quota.
-  sudo ./deploy/scripts/create-instance.sh test SITE-TEST       --admin-email admin@SITE-MAIN --skip-dns-check       --local-mode internal-tls
-
-Add --admin-password '<your choice>' to set it yourself; omit it and the
-script generates one and PRINTS it at the end - that is the only time it is
-shown, so copy it then.
-
-What to watch for, since this is the first guided install ever run:
-  - the Caddy route installs, validates and reloads WITHOUT disturbing
-    SITE-MAIN, CLOUD-MAIN or TASKS on the same proxy
-  - the app reaches healthy - it must satisfy /api/ready now, not /api/health
-  - a redis container appears beside app and mongo (new in this branch)
-  - the instance .env contains MONGO_APP_USER and an authSource in MONGO_URI
-
-If anything fails, nothing is left half-built that I cannot inspect
-afterwards - and `main` is backed up, with the restore already proven.
-
-========================================================================
-3. THE SHORTEST PROFESSIONAL FINISH
+5. THE SHORTEST FINISH
 ========================================================================
 
-  Run these two tracks in parallel. They do not block each other.
+  Two tracks, independent of each other.
 
-  OWNER TRACK                          ENGINEERING TRACK
-  ---------------------------------    ---------------------------------
-  O1 CSP browser check (30 min)        E1 Error boundary + 404  [DONE]
-  O6 Re-decide Trivy with correct data E3 Wire /api/ready  [DONE]
-  O7 Redis for existing instances      E4 Redis guided compose  [DONE]
-                                       E5 Per-endpoint limits  [DONE]
-                                       E2 except-pass triage  <- NEXT
-  O4 Decide Track A vs Track B         E3 Wire /api/ready
-  O2 Migrate existing instances        E4 Redis in guided compose
-  O3 One real guided VPS install       E6 Remaining page tests
-  O5 Start counsel on the legal pack   E7 Backup integrity + restore drill
-                                       E8 Accessibility baseline
+  OWNER                              ENGINEERING
+  ---------------------------------  ---------------------------------
+  O1 CSP browser check (30 min)      E2 finish the handler triage
+  L1 strict mode: demo, then test    E6 remaining page tests
+  O2 Mongo auth: demo, test, mecs    E8 keyboard and focus work
+  O7 redis on mecs                   E10 Playwright + axe
+  O3 one guided install from zero
+  O4 product position
+  O5 legal package (counsel)
 
-  Then, together: Phase 10 release validation.
+  Then together: Phase 10 release validation - tag a candidate, deploy from
+  scratch, full suite, scans, SBOM, runbook, signed go/no-go record.
 
   MINIMUM BAR FOR A DEFENSIBLE RELEASE
-    - Every P0 blocker closed or covered by a written, time-limited acceptance
-    - One real deployment executed, and one restore rehearsed
-    - No silent failure on any path that can lose data
-    - Marketing claims match what the code actually does
-    - Legal package reviewed by counsel
-
-  The single largest risk to this project is NOT a missing feature. It is that
-  the guided VPS path and the backup/restore path have never been executed for
-  real. Both are owner actions. Everything else is tractable engineering.
+    - every P0 closed, or covered by a written time-limited acceptance
+    - one install from scratch executed, one restore rehearsed  [restore DONE]
+    - no silent failure on any path that can lose data
+    - marketing claims match what the code does
+    - legal package reviewed by counsel
 
 
 ========================================================================
-4. STANDING RULES — carried over, still binding
+6. THINGS THAT WILL BITE YOU
 ========================================================================
-  DEPLOYMENT REALITY (owner, 2026-08-04)
-    Real companies run TinyMRP now. The owner has root on those machines and
-    will absorb breakage and report the error.
-    BREAKING THINGS IS ACCEPTABLE. DESTROYING DATA IS NOT.
-      - Never drop, truncate or overwrite existing collections or documents
-      - Never delete or rewrite files under the deliverables root
-      - Migrations must be additive and reversible
-      - Failing loudly at startup is FINE. Silently losing a part, a BOM link
-        or a deliverable is NOT.
+  Learned the expensive way. Read before touching deployment.
+
+  update-instance.sh does NOT rebuild the image.
+      Without --image it regenerates the compose file only. That applied a new
+      /api/ready healthcheck against an image predating the endpoint: eleven
+      404s, never healthy, automatic rollback. Build first, pass --image.
+      A compose healthcheck applies the moment the file is regenerated; the
+      image changes only when you ask for it.
+
+  update-instance.sh never writes the instance .env, and uses --no-deps.
+      Both deliberate. Rollback restores the compose file and container, so an
+      env edit would survive the rollback meant to undo it; and --no-deps
+      means it recreates ONLY the app, so a new sidecar (redis) never starts.
+      Anything touching .env or sidecars needs its own attended script.
+
+  Mongo only enables auth while initialising an EMPTY data directory.
+      Setting MONGO_INITDB_ROOT_* against an existing volume does nothing, and
+      says nothing. That is why enable-mongo-auth.sh exists.
+
+  cap_drop: ALL removes CAP_CHOWN.
+      The redis entrypoint chowns /data when it starts as root, so the
+      container crash-looped on "chown: Operation not permitted". Fixed with
+      user: redis. The contract tests passed throughout - they assert the
+      service is DECLARED correctly. Only starting it on a real box found it.
+
+  The installer's DNS wait had no timeout when there is no TTY.
+      It prompted with a terminal and slept forever without one, so an
+      unattended install hung instead of failing. Now bounded
+      (DNS_WAIT_MAX_ATTEMPTS). A hang is worse than an error.
+
+  Flask-Limiter: the problem was ordering, not decoration.
+      init_rate_limiting runs hundreds of lines before the blueprints are
+      registered, so an endpoint lookup there finds nothing and skips in
+      silence. apply_expensive_limits() is called after the routes exist.
+
+  vite build does NOT type-check.
+      An extraction once shipped a page that could not load. The
+      noUndefinedIdentifiers test runs tsc --noEmit and fails on TS2304/TS2552
+      only. Run it after any extraction.
+
+  Part numbers are matched case-insensitively throughout. Do not "optimise"
+  that away - an $in of compiled case-insensitive regexes is deliberate.
+
+
+========================================================================
+7. STANDING RULES
+========================================================================
+  DEPLOYMENT REALITY (owner)
+    Real companies run TinyMRP now. Breaking things is acceptable. DESTROYING
+    DATA IS NOT.
+      - never drop, truncate or overwrite existing collections or documents
+      - never delete or rewrite files under the deliverables root
+      - migrations must be additive and reversible
+      - failing loudly at startup is FINE; silently losing a part, a BOM link
+        or a deliverable is NOT
 
   OUT OF SCOPE
-    solidworks-addin/ — needs real SolidWorks to test; the owner handles it.
+    solidworks-addin/ - needs real SolidWorks to test; the owner handles it.
+    The mecs instance - the owner said do not touch it.
 
   PROTECTED PATH
-    The guided Ubuntu/VPS deployment using Caddy must keep working. Anything
-    touching auth, files, containers, health, networking, env or deployment
-    must re-check the Caddy contract tests.
+    The guided Caddy deployment must keep working, and on BOTH servers that
+    Caddy is SHARED with other production sites. Breaking it takes down more
+    than TinyMRP. Anything touching auth, files, containers, health,
+    networking, env or deployment must re-check the Caddy contract tests.
 
-  REDUCE FAT PROGRESSIVELY (owner, 2026-08-05)
+  KEEP THE REPOSITORY CLEAN OF INFRASTRUCTURE
+    This repo is public. Never commit IP addresses, real customer domains or
+    server hostnames. Use aliases and keep the mapping in
+    deploy/fleet.local.md, which is gitignored.
+
+  REDUCE FAT PROGRESSIVELY
     Every pass leaves the code leaner: fewer one-use helpers, fewer variables
-    that restate the next line, no comment repeating what the code says.
-    Cut restatement — keep the reasoning that stops a bug being reintroduced.
+    that restate the next line, no comment repeating what the code says. Cut
+    restatement - keep the reasoning that stops a bug being reintroduced.
 
-  VERIFICATION DISCIPLINE — the rule that produced this file
-    Do not claim a gate is closed because tests pass. Prove the mechanism does
-    what it claims: the least-privilege Mongo user was verified by trying to
-    read `admin` and create a user and being refused; the coverage threshold
-    was verified by deleting a test file and watching CI fail; the undefined-
-    identifier guard was verified by removing an import.
+  VERIFICATION DISCIPLINE — the rule that produced everything above
+    Do not claim a gate is closed because tests pass. Prove the mechanism:
+      - the least-privilege Mongo user was verified by trying to read admin
+        and being refused
+      - the coverage threshold was verified by deleting a test and watching
+        CI fail
+      - the undefined-identifier guard was verified by removing an import
+      - the rate limit was verified by a real 429, after an earlier attempt
+        that looked like working code and enforced nothing
+      - the backup was verified by restoring it and counting every document
     If a change cannot be proven to work, WITHDRAW it and write down why.
-    Shipping something that looks like protection but is not is worse than
-    shipping nothing — see the withdrawn rate-limit attempt.
+    Something that looks like protection but is not is worse than nothing.
 
-  Gates that must stay green:
+  GATES THAT MUST STAY GREEN
     pytest | ruff check . | bandit -r app -ll
     mypy app/services/security_mode.py app/services/api_auth.py
     cd frontend && npm run test && npx tsc --noEmit -p tsconfig.app.json
