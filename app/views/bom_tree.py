@@ -94,7 +94,38 @@ def _has_children_map(pairs) -> dict[tuple[str, str], bool]:
     }
 
 
+def _coverage_from_part(part) -> set[str]:
+    """File-group coverage read from the part document, with no query at all.
+
+    part.file_groups is materialised at IMPORT by sync_part_materialized_fields
+    and refreshed by the rebuild commands. It holds exactly what this function
+    used to recompute: the lowercase set of file groups present for the part.
+
+    Recomputing it from PartFile cost one query per node - measured at 3852
+    part_files queries in a single flat-BOM request. The answer was already
+    denormalised onto the part; the query path simply was not reading it.
+
+    Permission filtering stays, because coverage is shown to the user and not
+    every role may see every group. That part is in memory and free.
+    """
+    if part is None or not has_permission(current_user, "files.read"):
+        return set()
+    return {
+        group
+        for group in (
+            str(g or "").strip().lower() for g in (getattr(part, "file_groups", None) or [])
+        )
+        if group and managed_file_group_allowed(current_user, group)
+    }
+
+
 def _coverage_groups(pn: str, rev: str) -> set[str]:
+    """Recompute coverage from PartFile. Fallback only.
+
+    Kept for parts whose materialised fields have never been built - an
+    instance predating them, or a part imported before the rebuild was run.
+    Prefer _coverage_from_part, which needs no query.
+    """
     if not has_permission(current_user, "files.read"):
         return set()
     groups: set[str] = set()
@@ -382,9 +413,13 @@ def _node(
             if has_permission(current_user, "files.read")
             else []
         )
-    coverage = _coverage_from_map(coverage_map, pn, effective_rev)
-    if coverage is None:
-        coverage = _coverage_groups(pn, effective_rev)
+    # The part document already carries this, written at import time.
+    if p is not None and getattr(p, "file_groups", None) is not None:
+        coverage = _coverage_from_part(p)
+    else:
+        coverage = _coverage_from_map(coverage_map, pn, effective_rev)
+        if coverage is None:
+            coverage = _coverage_groups(pn, effective_rev)
     review = (review_statuses or {}).get(
         (str(pn or "").strip(), clean_rev(effective_rev)),
         {"count": 0, "severity": "", "pending": False},
@@ -723,9 +758,12 @@ def bom_flat():
                     thumbs = flat_thumbs.get(key)
                 if thumbs is None:
                     thumbs = preview_png_urls_for(child_pn, effective_rev, user=current_user)
-            coverage = _coverage_from_map(flat_coverage, child_pn, effective_rev)
-            if coverage is None:
-                coverage = _coverage_groups(child_pn, effective_rev)
+            if part_doc is not None and getattr(part_doc, "file_groups", None) is not None:
+                coverage = _coverage_from_part(part_doc)
+            else:
+                coverage = _coverage_from_map(flat_coverage, child_pn, effective_rev)
+                if coverage is None:
+                    coverage = _coverage_groups(child_pn, effective_rev)
             values = resolve_part_field_values(
                 part_doc,
                 context_field_ids("bom_tree", config),
