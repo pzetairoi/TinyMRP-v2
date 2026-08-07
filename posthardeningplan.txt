@@ -69,19 +69,24 @@ HOW TO USE THIS FILE
 ========================================================================
   Aliases only. Real addresses in deploy/fleet.local.md (gitignored).
 
+  ALL THREE reachable instances verified 2026-08-07 on faf9d6c9f3cf:
+  healthy, strict mode, redis running, /api/ready ok. mecs deliberately
+  untouched. Every public endpoint on both shared Caddies still serves,
+  including the Nextclouds and Vikunja.
+
   SERVER-A
     main    52 parts,   23 MB   PRODUCTION
-            latest main | Mongo AUTHENTICATED | redis | STRICT since 2026-08-07
-            also hosts a Nextcloud and a Vikunja on the SAME shared Caddy
+            latest | Mongo AUTHENTICATED | redis | STRICT | ready: ok
+            shares its Caddy with a Nextcloud and a Vikunja - both verified up
 
   SERVER-B                                          15 GB free - watch this
     demo    12 parts,  5.2 MB   disposable
-            latest main | redis + shared limits | STRICT MODE since 2026-08-07
+            latest | redis | STRICT | ready: ok (mongodb_unauthenticated)
     test  1789 parts,  6.8 GB   *** NOT A SANDBOX - see below ***
-            latest main | redis + shared limits | STRICT MODE since 2026-08-07
+            latest | redis | STRICT | ready: ok (mongodb_unauthenticated)
     mecs  1479 parts,  2.8 GB   PRODUCTION - OWNER SAID DO NOT TOUCH
-            still on the pre-hardening image | untouched, and verified so
-    also hosts two Nextclouds on a shared Caddy
+            pre-hardening image, compat, no redis - untouched and verified so
+    shares its Caddy with two Nextclouds - both verified up
 
   *** The instance named "test" holds MORE parts and more than twice the data
   of the mecs production instance. Its name is misleading: deleting or
