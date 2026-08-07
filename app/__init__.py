@@ -1004,6 +1004,16 @@ def create_app(config_object=None):
 
 
 
+    # Opt-in request profiler (optimizationplan.txt). Registers nothing at all
+    # unless TINYMRP_PROFILE is set, so production pays no cost for its
+    # existence.
+    try:
+        from app.services.request_profile import init_request_profiling
+
+        init_request_profiling(app)
+    except Exception:
+        app.logger.exception("Failed to initialise request profiling")
+
     # Expensive-route rate limits, applied HERE and not in init_rate_limiting:
     # that runs before any blueprint exists, so the lookup would find nothing
     # and skip every route in silence (OPS-RATE-01).
