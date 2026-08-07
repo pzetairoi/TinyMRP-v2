@@ -379,3 +379,61 @@ def test_a_failed_journal_write_is_logged_not_swallowed(caplog):
         "import journal update failed" in r.message or "import journal update failed" in r.getMessage()
         for r in caplog.records
     ), f"journal failure vanished; records={[r.getMessage() for r in caplog.records]}"
+
+
+def test_a_failed_import_tells_the_operator_whether_anything_landed():
+    """Reported as confusing: an import failed with
+
+        cross-store file commit failed at 6206301-003 revision (blank)
+
+    and the operator could not tell whether any of it had been applied. The
+    journal already knew - status rolled_back, every created part reversed,
+    nothing needing a human - but nothing surfaced it, so the only question
+    that matters went unanswered.
+    """
+    from app.models.import_journal import ImportJournal
+    from app.views.upload_pack import _recovery_note_for_failed_import
+
+    ImportJournal(
+        operation_id="op-clean",
+        uploaded_by="tester@example.com",
+        status="rolled_back",
+        stage="files",
+        rollback_actions=["deleted created part A:(blank)", "deleted created part B:(blank)"],
+        manual_followup=[],
+    ).save()
+
+    note = _recovery_note_for_failed_import("tester@example.com")
+    assert note["recovery_status"] == "rolled_back"
+    assert "Nothing was kept" in note["recovery_summary"]
+    assert "2 change(s) reversed" in note["recovery_summary"]
+    assert note["manual_followup"] == []
+
+
+def test_an_import_needing_reconciliation_says_so_instead():
+    """A partial undo is a different situation and must not read as clean."""
+    from app.models.import_journal import ImportJournal
+    from app.views.upload_pack import _recovery_note_for_failed_import
+
+    ImportJournal(
+        operation_id="op-dirty",
+        uploaded_by="dirty@example.com",
+        status="failed",
+        stage="properties",
+        rollback_actions=[],
+        manual_followup=["part X was modified in place and cannot be restored"],
+    ).save()
+
+    note = _recovery_note_for_failed_import("dirty@example.com")
+    assert "needs checking by hand" in note["recovery_summary"]
+    assert note["manual_followup"]
+
+
+def test_a_successful_import_produces_no_recovery_note():
+    from app.models.import_journal import ImportJournal
+    from app.views.upload_pack import _recovery_note_for_failed_import
+
+    ImportJournal(
+        operation_id="op-ok", uploaded_by="ok@example.com", status="committed"
+    ).save()
+    assert _recovery_note_for_failed_import("ok@example.com") == {}

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import json
 from typing import List
 from flask import Blueprint, current_app, jsonify, request
@@ -33,6 +34,8 @@ from app.services.upload_pack import (
     import_upload_pack,
 )
 from app.views.api_helpers import add_datetime_fields
+
+logger = logging.getLogger(__name__)
 bp = Blueprint("upload_pack_api", __name__, url_prefix="/api")
 def _extra_file_payload(ef: PartExtraFile) -> dict:
     payload = {
@@ -105,6 +108,56 @@ def import_capabilities():
             }
         }
     )
+def _recovery_note_for_failed_import(uploader: str) -> dict:
+    """What happened to the data after an import failed, in plain words.
+
+    The journal records whether the compensating rollback ran and whether
+    anything was left needing a human. Without surfacing it, an operator sees
+    an exception and cannot tell a clean abort from a half-applied import -
+    which is the difference between retrying and reconciling by hand.
+    """
+    try:
+        from app.models.import_journal import ImportJournal
+
+        # The importer owns the operation id, so find this uploader's most
+        # recent run rather than threading it back out through the exception.
+        entry = (
+            ImportJournal.objects(uploaded_by=uploader)
+            .order_by("-started_at")
+            .first()
+        )
+        if entry is None or entry.status == "committed":
+            return {}
+        followup = list(entry.manual_followup or [])
+        rolled_back = list(entry.rollback_actions or [])
+        if entry.status == "rolled_back" and not followup:
+            summary = (
+                "Nothing was kept. The import was undone completely"
+                + (f" ({len(rolled_back)} change(s) reversed)" if rolled_back else "")
+                + ". You can safely fix the cause and try again."
+            )
+        elif followup:
+            summary = (
+                "This import was only partly undone and needs checking by hand. "
+                "See the items listed under manual_followup."
+            )
+        else:
+            summary = (
+                "The import did not complete. Its state is recorded under "
+                f"operation {entry.operation_id}."
+            )
+        return {
+            "operation_id": entry.operation_id,
+            "recovery_status": entry.status,
+            "recovery_summary": summary,
+            "manual_followup": followup,
+        }
+    except Exception:
+        # Never let the explanation replace the original error.
+        logger.exception("could not build a recovery note for the last import by %s", uploader)
+        return {}
+
+
 @bp.post("/upload/pack")
 @csrf.exempt
 @login_required
@@ -164,12 +217,19 @@ def upload_pack():
             current_app.logger.exception("Upload pack failed: %s", filename)
         except Exception:
             pass
+        # Tell the operator what STATE they are in, not just what threw.
+        # A bare "cross-store file commit failed at <part>" leaves them unable
+        # to answer the only question that matters - did any of this land? -
+        # and the journal already knows. Reported here so they do not have to
+        # go looking for an API to ask.
+        recovery = _recovery_note_for_failed_import(_uploaded_by())
         return (
             jsonify(
                 {
                     "error": "upload failed",
                     "detail": str(exc),
                     "exception_type": type(exc).__name__,
+                    **recovery,
                 }
             ),
             500,
