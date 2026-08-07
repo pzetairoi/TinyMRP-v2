@@ -20,7 +20,7 @@ HOW TO USE THIS FILE
   ENGINEERING                                       STATE
   ------------------------------------------------  --------------------
   E1  Error boundary + real 404                     DONE
-  E2  Silent exception handlers                     25 of 184 + 1 SECURITY FIX
+  E2  Silent exception handlers                     28 of 184 + 2 REAL BUGS
   E3  /api/ready wired into every healthcheck       DONE
   E4  Redis in the guided per-instance compose      DONE
   E5  Per-endpoint rate limits, enforced            DONE
