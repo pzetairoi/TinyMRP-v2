@@ -453,6 +453,11 @@ export default function PartDetailPage() {
   // Doc Packs state
   type DocOpts = { file_types: string[]; processes: string[]; markup_document_count: number };
   const [docOpts, setDocOpts] = useState<DocOpts>({ file_types: [], processes: [], markup_document_count: 0 });
+  // Doc-pack options are NOT loaded with the page. Measured on a real
+  // instance: /api/docpacks/options?depth=full cost 589 Mongo queries and
+  // 4.2 seconds, walking an entire assembly subtree to populate a dropdown
+  // that most visits never open. Nothing is fetched until the tab is.
+  const [docOptsWanted, setDocOptsWanted] = useState(false);
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [docProgress, setDocProgress] = useState(0);
@@ -511,6 +516,13 @@ export default function PartDetailPage() {
   // (part_detail, files_overview, shares, images, docpack options) even though
   // the address bar was correct.
   const effectiveRev = effectiveRevisionFor(pn, rev, part);
+
+  // Navigating to another part must not carry the previous part's options,
+  // and must not silently re-fetch them either.
+  useEffect(() => {
+    setDocOptsWanted(false);
+    setDocOpts({ file_types: [], processes: [], markup_document_count: 0 });
+  }, [pn, effectiveRev]);
   const revToken = effectiveRev ? effectiveRev : "__no_rev__";
   const sharedAllowsChildren = !!publicShareInfo?.allow_children;
   const sharedAllowsDocpacks = !!publicShareInfo?.allow_docpacks;
@@ -1114,6 +1126,7 @@ function isExternalDatasheetUrl(url: string): boolean {
     let cancelled = false;
     (async () => {
       setDocError(null);
+      if (!docOptsWanted) return;
       try {
         if (isSharedView && !sharedAllowsDocpacks) {
           if (!cancelled) setDocOpts({ file_types: [], processes: [], markup_document_count: 0 });
@@ -1134,7 +1147,7 @@ function isExternalDatasheetUrl(url: string): boolean {
       }
     })();
     return () => { cancelled = true };
-  }, [depth, isSharedView, pn, rev, shareApiBase, sharedAllowsDocpacks]);
+  }, [depth, docOptsWanted, isSharedView, pn, rev, shareApiBase, sharedAllowsDocpacks]);
 
   // ---------- Process metadata ----------
   type ProcMeta = { color: string; icon: string };
@@ -1974,6 +1987,12 @@ function isExternalDatasheetUrl(url: string): boolean {
 
   // ---------- Render ----------
   const [tabIndex, setTabIndex] = useState(0)
+  // Doc Packs is the fourth panel; the three before it are unconditional.
+  // Opening it is what makes the options worth fetching.
+  const DOC_PACKS_TAB_INDEX = 3
+  useEffect(() => {
+    if (tabIndex === DOC_PACKS_TAB_INDEX) setDocOptsWanted(true)
+  }, [tabIndex])
   useEffect(() => {
     setTabIndex(0)
     setShareCreateUrl("")
