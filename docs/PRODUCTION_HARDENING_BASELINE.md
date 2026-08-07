@@ -399,8 +399,9 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 ## Handoff rules
 
 1. Read this document and the status block at the top of `hardeningplan.txt`.
-2. Work only on `hardening/production-readiness` unless the owner selects a new
-   branch.
+2. Work on `main`. The `hardening/production-readiness` branch was
+   fast-forwarded into `main` on 2026-08-07 (78 commits) and then deleted; it
+   no longer exists locally or on the remote.
 3. Do not rewrite or delete the Caddy deployment path. Treat its six checks
    above as compatibility tests.
 4. Keep one concern per commit and update the roadmap status after every commit.

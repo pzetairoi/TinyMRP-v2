@@ -1,7 +1,7 @@
 ========================================================================
 STATUS LOG — keep this current so work is not repeated
 ========================================================================
-Branch: hardening/production-readiness
+Branch: main (hardening/production-readiness was merged and deleted 2026-08-07)
 Driver: Claude (sole owner as of 2026-08-03). Codex handed off after Phase 4A.
 No files are reserved; there is no parallel stream running.
 

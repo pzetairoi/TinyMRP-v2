@@ -2,7 +2,13 @@
 POST-HARDENING PLAN — the route to a professional finish
 ========================================================================
 Created 2026-08-07 by Claude, from an audit that read the CODE rather than
-trusting hardeningplan.txt's own prose. Branch: hardening/production-readiness.
+trusting hardeningplan.txt's own prose.
+
+*** BRANCH: main. As of 2026-08-07 the whole hardening branch (78 commits) was
+fast-forwarded into main and hardening/production-readiness was deleted, local
+and remote. There is no hardening branch any more - work directly on main, or
+branch from it. The VPS still runs security/rbac-owasp-hardening at 3905502,
+so deploying main there is the first time any of this reaches a real server.***
 
 WHAT THIS FILE IS
   The execution document. It says what is done, what is left, WHO can do each
