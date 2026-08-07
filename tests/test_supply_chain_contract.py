@@ -174,7 +174,11 @@ def test_worker_count_is_sized_to_the_host_not_hardcoded():
     assert "nproc" in entrypoint
     # Floor and cap: a single-core box must not self-block, and workers are not
     # free - each holds its own Mongo pool and memory.
-    assert "-lt 4" in entrypoint
-    assert "-gt 12" in entrypoint
+    # Floor and cap are deliberately conservative: a host may run several
+    # instances side by side, and the first attempt at this - (2 x cores) + 1
+    # floored at 4 - exhausted a shared VPS and took production down with it.
+    assert "-lt 2" in entrypoint
+    assert "-gt 6" in entrypoint
+    assert "several instances" in entrypoint, "the multi-tenant warning must survive"
     # An operator must still be able to override it.
     assert 'if [ -z "${WEB_CONCURRENCY:-}" ]' in entrypoint
