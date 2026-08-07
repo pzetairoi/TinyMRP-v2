@@ -312,9 +312,23 @@ longer use.
 
 ## Tools
 
-Downloads for the SolidWorks add-in installer and the custom property tab
-templates, plus **Excel Compile**, which turns a spreadsheet of part data into a
-compiled ZIP.
+Downloads for the SolidWorks toolchain, plus **Excel Compile**, which turns a
+spreadsheet of part data into a compiled ZIP.
+
+The download list is generated from what is actually installed on the server,
+so it never goes stale. Files are grouped by what you would go looking for:
+
+- **Add-in installer** — the Windows installer for the SolidWorks add-in, newest
+  first, plus a direct "Download latest" link.
+- **SolidWorks setup** — install these once per workstation so SolidWorks writes
+  the custom properties TinyMRP reads back. The two `.prtprp` / `.asmprp` files
+  are the custom property tabs for parts and assemblies; `TinyMRP.swp` is the
+  macro.
+- **BOM table templates** — SolidWorks BOM table formats whose columns match
+  what the importer expects. Using one of these avoids having to remap columns
+  on every import.
+- **Excel helpers** — workbooks for editing properties in bulk and the template
+  for the document compiler.
 
 ---
 

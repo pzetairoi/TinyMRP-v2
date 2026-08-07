@@ -34,25 +34,75 @@ def _excel_compile_root() -> str:
         pass
     return root
 
+
+# What lives in static/misc, grouped by what an engineer would go looking for.
+#
+# Driven by the FILESYSTEM rather than a hand-written list of links. The page
+# used to name four files one by one, so the other eight in that folder were
+# shipped to every install and reachable by nobody - and nothing failed, which
+# is why it went unnoticed. A dropped file now disappears from the page instead
+# of becoming a broken link, and a new one appears without a template edit.
+#
+# Order matters: the first matching group wins.
+_MISC_GROUPS = (
+    (
+        "SolidWorks setup",
+        "Install these once so SolidWorks writes the properties TinyMRP reads.",
+        ("tinymrp_part_customtab.prtprp", "tinymrp_assy_customtab.asmprp", "TinyMRP.swp"),
+    ),
+    (
+        "BOM table templates",
+        "SolidWorks BOM table formats that match the columns TinyMRP imports.",
+        (".sldbomtbt",),
+    ),
+    (
+        "Excel helpers",
+        "Workbooks for bulk property editing and the document compiler.",
+        (".xlsm", ".xlsx", ".bas"),
+    ),
+)
+
+# Never offered for download: branding, icons and stray test fixtures.
+_MISC_HIDDEN = (".ico", ".png", ".bmp", ".3mf")
+
+
+def _misc_groups():
+    """Group the downloadable files in static/misc for the Tools page."""
+    root = os.path.join(current_app.root_path, "static", "misc")
+    try:
+        names = sorted(n for n in os.listdir(root) if os.path.isfile(os.path.join(root, n)))
+    except OSError:
+        # A missing folder means nothing to offer, not a broken page.
+        return []
+
+    remaining = [n for n in names if not n.lower().endswith(_MISC_HIDDEN)]
+    groups = []
+    for title, description, patterns in _MISC_GROUPS:
+        matched = [
+            n for n in remaining
+            if n in patterns or any(p.startswith(".") and n.lower().endswith(p) for p in patterns)
+        ]
+        if not matched:
+            continue
+        remaining = [n for n in remaining if n not in matched]
+        groups.append({
+            "title": title,
+            "description": description,
+            "files": [
+                {
+                    "name": n,
+                    "url": url_for("static", filename=f"misc/{n}"),
+                    "size": os.path.getsize(os.path.join(root, n)),
+                }
+                for n in matched
+            ],
+        })
+    return groups
+
+
 bp = Blueprint("tools", __name__, url_prefix="/tools")
 
 
-def _static_tools():
-    root = os.path.join(current_app.root_path, 'static', 'tools')
-    items = []
-    try:
-        if os.path.isdir(root):
-            for name in sorted(os.listdir(root)):
-                p = os.path.join(root, name)
-                if os.path.isfile(p):
-                    items.append({
-                        'name': name,
-                        'url': f"/static/tools/{name}",
-                        'size': os.path.getsize(p)
-                    })
-    except Exception:
-        pass
-    return items
 
 
 def _addin_root():
@@ -85,9 +135,12 @@ def _addin_installers():
 @login_required
 @permissions_required("exports.run")
 def tools_index():
-    files = _static_tools()
     addin_files = _addin_installers()
-    return render_template("tools/index.html", files=files, addin_files=addin_files)
+    return render_template(
+        "tools/index.html",
+        addin_files=addin_files,
+        misc_groups=_misc_groups(),
+    )
 
 
 @bp.get("/addin/latest")

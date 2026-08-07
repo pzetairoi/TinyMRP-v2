@@ -53,3 +53,37 @@ def test_a_failed_deletion_is_counted_and_reported():
     assert "failed += 1" in source
     assert "Failed to delete" in source
     assert "could not be verified as safe to delete" in source
+
+
+def test_tools_misc_listing_is_driven_by_the_filesystem(app):
+    """E12. The page used to name four files by hand.
+
+    The other eight in static/misc shipped to every install and were reachable
+    by nobody, and nothing failed - which is exactly why it went unnoticed for
+    so long. Listing the folder means a removed file disappears instead of
+    becoming a broken link, and a new one needs no template edit.
+    """
+    from app.views.tools import _misc_groups
+
+    with app.test_request_context("/"):
+        groups = _misc_groups()
+
+    listed = {f["name"] for g in groups for f in g["files"]}
+    # The files an engineer actually needs, previously only partly reachable.
+    assert "tinymrp_part_customtab.prtprp" in listed
+    assert "TinyMRP.swp" in listed, "the macro itself was never linked"
+    assert any(n.endswith(".sldbomtbt") for n in listed), "BOM templates were never linked"
+
+    # Branding and icons are not downloads.
+    assert not any(n.lower().endswith((".ico", ".png", ".bmp")) for n in listed)
+    # Every group carries an explanation; several files are unusable without one.
+    assert all(g["description"] for g in groups)
+
+
+def test_tools_misc_listing_survives_a_missing_folder(app, monkeypatch):
+    """A missing folder means nothing to offer, not a 500."""
+    from app.views import tools
+
+    monkeypatch.setattr(tools.os, "listdir", lambda _p: (_ for _ in ()).throw(OSError("gone")))
+    with app.test_request_context("/"):
+        assert tools._misc_groups() == []

@@ -30,13 +30,17 @@
           <div class="fw-semibold small mb-1">Macro</div>
           <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.download_macro') }}">Download Macro</a>
         </div>
-        <div>
-          <div class="fw-semibold small mb-1">Custom tab properties</div>
+        {% for group in misc_groups %}
+        <div class="{% if not loop.last %}mb-3{% endif %}">
+          <div class="fw-semibold small mb-1">{{ group.title }}</div>
+          <div class="text-muted small mb-1">{{ group.description }}</div>
           <ul class="list-unstyled small mb-0">
-            <li><a href="{{ url_for('static', filename='misc/tinymrp_part_customtab.prtprp') }}">Custom tab property for SolidWorks (Parts)</a></li>
-            <li><a href="{{ url_for('static', filename='misc/tinymrp_assy_customtab.asmprp') }}">Custom tab property for SolidWorks (Assemblies)</a></li>
+            {% for f in group.files %}
+            <li><a href="{{ f.url }}">{{ f.name }}</a></li>
+            {% endfor %}
           </ul>
         </div>
+        {% endfor %}
       </div>
     </div>
     <div class="card shadow-sm tm-card mb-3">
