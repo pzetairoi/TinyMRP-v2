@@ -752,6 +752,12 @@ services:
     container_name: ${project_name}-redis
     restart: unless-stopped
     read_only: true
+    # Run as redis directly. The official entrypoint chowns /data when it
+    # starts as root, and cap_drop: ALL removes CAP_CHOWN - so the container
+    # crash-looped on "chown: Operation not permitted". Starting as the target
+    # user skips that step entirely. Found on a real deployment; no amount of
+    # config review would have shown it.
+    user: redis
     cap_drop:
       - ALL
     security_opt:
