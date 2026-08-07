@@ -1,6 +1,7 @@
 // frontend/src/pages/PartDetailPage.tsx
 import React, { useEffect, useMemo, useState, Suspense, useRef } from "react";
 import { useLocation, useParams, Link } from "react-router-dom";
+import { effectiveRevisionFor } from "../lib/partIdentity";
 import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
 import { TreeTable } from "primereact/treetable";
@@ -500,7 +501,16 @@ export default function PartDetailPage() {
   const [bomError, setBomError] = useState<string | null>(null);
   const [bomExpanded, setBomExpanded] = useState<Record<string, boolean>>({});
 
-  const effectiveRev = (part?.revision ?? rev ?? "").trim();
+  // Only trust the loaded part's revision while it IS the part in the URL.
+  //
+  // React keeps this component mounted when you navigate between parts - same
+  // route, different param - so `part` still holds the PREVIOUS one until the
+  // new fetch lands. Without this guard, clicking a BOM child inherited the
+  // parent's revision for that window and every request went out with the
+  // wrong rev: on a child whose revision is blank, that meant a page of 404s
+  // (part_detail, files_overview, shares, images, docpack options) even though
+  // the address bar was correct.
+  const effectiveRev = effectiveRevisionFor(pn, rev, part);
   const revToken = effectiveRev ? effectiveRev : "__no_rev__";
   const sharedAllowsChildren = !!publicShareInfo?.allow_children;
   const sharedAllowsDocpacks = !!publicShareInfo?.allow_docpacks;
