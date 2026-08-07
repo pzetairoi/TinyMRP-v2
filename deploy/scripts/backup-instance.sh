@@ -95,12 +95,17 @@ docker exec "$MONGO_CONTAINER_NAME" mongodump --quiet "${MONGO_AUTH_ARGS[@]}" \
 # Prove the archive CONTAINS something rather than merely existing. This is the
 # check that should have been here from the start: the previous one asked
 # whether the file had bytes, which a refused dump satisfies.
-DUMP_DOCS="$(docker exec -i "$MONGO_CONTAINER_NAME" mongorestore --archive --gzip --dryRun 2>&1 \
-  < "${BACKUP_DIR}/mongo.archive.gz" | grep -oE "[0-9]+ document" | grep -oE "^[0-9]+" | tail -1)"
-if [ "${DUMP_DOCS:-0}" -lt 1 ]; then
-  die "mongodump produced an archive with NO DOCUMENTS. If this instance uses authentication, MONGO_ROOT_USER and MONGO_ROOT_PASSWORD must be set in ${ENV_FILE}. Refusing to record a backup that would not restore."
+#
+# Measured UNCOMPRESSED, deliberately. mongorestore --dryRun always reports
+# "0 document(s) restored" because it prepares collections without reading
+# them, so counting its output can never work - it rejects good archives as
+# readily as empty ones. Decompressed size is a fact about the archive itself
+# and needs nothing else running to establish.
+DUMP_BYTES="$(gzip -dc "${BACKUP_DIR}/mongo.archive.gz" 2>/dev/null | wc -c)"
+if [ "${DUMP_BYTES:-0}" -lt 1024 ]; then
+  die "mongodump produced an archive with essentially no content (${DUMP_BYTES} bytes uncompressed). If this instance uses authentication, MONGO_ROOT_USER and MONGO_ROOT_PASSWORD must be set in ${ENV_FILE}. Refusing to record a backup that would not restore."
 fi
-info "  mongodump captured ${DUMP_DOCS} document(s)"
+info "  mongodump captured $((DUMP_BYTES / 1024)) KiB of data"
 
 # 2) Deliverables snapshot
 if [ "$WITH_DELIVERABLES" -eq 1 ]; then

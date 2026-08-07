@@ -299,9 +299,12 @@ def test_backup_proves_it_captured_data_and_uses_credentials():
     assert "MONGO_AUTH_ARGS" in backup
     assert "--authenticationDatabase admin" in backup
 
-    # The guard must count documents, not bytes.
-    assert "--dryRun" in backup
-    assert "NO DOCUMENTS" in backup
+    # The guard must measure CONTENT, not file size. It cannot use
+    # mongorestore --dryRun: that always reports zero documents because it
+    # never reads them, so it would reject good archives too.
+    assert 'gzip -dc' in backup
+    assert 'essentially no content' in backup
+    assert '--dryRun' not in backup
     assert '[ -s "${BACKUP_DIR}/mongo.archive.gz" ] || die' not in backup, (
         "the byte-size guard is back; it passes an archive that restores nothing"
     )
