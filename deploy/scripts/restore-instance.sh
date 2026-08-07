@@ -65,6 +65,13 @@ load_env_file "$ENV_FILE"
 : "${MONGO_CONTAINER_NAME:?}"
 : "${MONGO_DB:?}"
 
+# Credentials for an instance migrated by enable-mongo-auth.sh. Without them
+# both mongodump and mongorestore are refused, silently.
+MONGO_AUTH_ARGS=()
+if [ -n "${MONGO_ROOT_USER:-}" ] && [ -n "${MONGO_ROOT_PASSWORD:-}" ]; then
+  MONGO_AUTH_ARGS=(-u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin)
+fi
+
 # ------------------------------------------------------------------ verify ---
 if [ "$DO_VERIFY" -eq 1 ]; then
   [ -s "$ARCHIVE" ] || die "Mongo archive missing/empty: ${ARCHIVE}"
@@ -104,9 +111,17 @@ if [ "$DO_DATABASE" -eq 1 ]; then
   # Safety net: dump the current DB first
   PRE_RESTORE="${BACKUP_DIR}/pre-restore-$(date -u +%Y%m%d-%H%M%S).archive.gz"
   info "Saving current database to ${PRE_RESTORE}"
-  docker exec "$MONGO_CONTAINER_NAME" mongodump --quiet -d "$MONGO_DB" --archive --gzip > "$PRE_RESTORE"
+  docker exec "$MONGO_CONTAINER_NAME" mongodump --quiet "${MONGO_AUTH_ARGS[@]}"     -d "$MONGO_DB" --archive --gzip > "$PRE_RESTORE"
+  # The safety copy is the only way back if this restore is wrong, so prove it
+  # captured something. Without credentials mongodump is refused on an
+  # authenticated instance and writes 23 bytes while exiting 0 - the same
+  # failure that made every backup empty.
+  PRE_BYTES="$(gzip -dc "$PRE_RESTORE" 2>/dev/null | wc -c)"
+  if [ "${PRE_BYTES:-0}" -lt 1024 ] && [ "${ALLOW_EMPTY_PRE_RESTORE:-0}" != "1" ]; then
+    die "Could not save the current database before restoring (${PRE_BYTES} bytes). Set MONGO_ROOT_USER/MONGO_ROOT_PASSWORD in the instance .env, or pass ALLOW_EMPTY_PRE_RESTORE=1 if the database is genuinely empty."
+  fi
   info "Restoring ${ARCHIVE} into live instance"
-  docker exec -i "$MONGO_CONTAINER_NAME" mongorestore --quiet --archive --gzip --drop < "$ARCHIVE"
+  docker exec -i "$MONGO_CONTAINER_NAME" mongorestore --quiet "${MONGO_AUTH_ARGS[@]}" \n    --archive --gzip --drop < "$ARCHIVE"
   if [ -n "${APP_CONTAINER_NAME:-}" ]; then
     docker restart "$APP_CONTAINER_NAME" >/dev/null 2>&1 || true
   fi
