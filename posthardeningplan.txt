@@ -34,7 +34,7 @@ WHAT hardeningplan.txt IS NOW
   E3  Wire /api/ready into every healthcheck           DONE
   E4  Redis in the guided per-instance compose         DONE
   E5  Per-endpoint rate limits, enforced               DONE
-  E6  Page tests for the remaining 5 pages             NOT STARTED
+  E6  Page tests for the remaining 5 pages             1 of 5 (upload pack)
   E7  Backup restore drill                             DONE - PASSED
   E7b Backup checksums                                 DONE
   E8  Accessibility baseline                           PARTIAL (structure)
@@ -58,7 +58,7 @@ WHAT hardeningplan.txt IS NOW
     Still on the live box: security mode is "compat" (L1) and Mongo is
     unauthenticated (L2).
 
-  GATES: 739 backend, 312 frontend, ruff/mypy/bandit clean, build OK.
+  GATES: 739 backend, 317 frontend, ruff/mypy/bandit clean, build OK.
 
   WHAT BLOCKS O3, the biggest remaining unknown:
     1. test.tinymrp.com resolves to SERVER-B, not the VPS.
@@ -321,7 +321,22 @@ WHAT hardeningplan.txt IS NOW
       wiring - the old name-resolution test never could, because it inspects
       the finished app, by which time every route is present.
 
-  E6. Page-level tests for the remaining 5 pages  MEDIUM       QA-FE-01
+  E6. Page-level tests                      1 OF 5 DONE 2026-08-07
+      UploadPackPage covered first, deliberately: it is the screen where an
+      operator decides whether to run an import against LIVE data, so its
+      failure modes are the expensive kind.
+      The invariant pinned is FAIL-CLOSED. Capability lookups are
+      presentation-level access control, and a lookup that FAILS must never
+      leave a destructive action reachable - enabling "Apply import" because we
+      could not ask what the user may do is far worse than disabling it
+      wrongly. Also pinned: preview rights alone never enable Apply, and a user
+      without preview rights is told why instead of facing a dead button.
+      GOTCHA for the next page test: mockApi treats an entry without a `body`
+      key as the body itself, so `{ status: 500 }` silently returns 200. Error
+      paths need `{ status: 500, body: {...} }`.
+      REMAINING: PartsPage, PartDetailPage, AdminFieldsPage, AdminAddinPage.
+
+  E6-orig. Page-level tests for 5 pages          MEDIUM       QA-FE-01
       PartsPage, PartDetailPage, UploadPackPage, AdminFieldsPage,
       AdminAddinPage. Their extracted helpers are covered; the pages are not.
       Add each to coverage.include as it gains real tests — do NOT lower the
