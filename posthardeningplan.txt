@@ -40,7 +40,7 @@ HOW TO USE THIS FILE
   O5  Legal/commercial package                      WAITING ON YOU
   O6  Trivy gate                                    DECIDED: keep as is
   O7  Redis for existing instances                  3 of 4 instances
-  L1  Strict security mode across the fleet         WAITING ON YOU
+  L1  Strict security mode across the fleet         2 of 4 (demo, test)
 
   GATES: 739 backend, 317 frontend, ruff/mypy/bandit clean, build OK.
 
@@ -57,9 +57,9 @@ HOW TO USE THIS FILE
 
   SERVER-B                                          15 GB free - watch this
     demo    12 parts,  5.2 MB   disposable
-            latest main | redis + shared rate limiting | compat mode
+            latest main | redis + shared limits | STRICT MODE since 2026-08-07
     test  1789 parts,  6.8 GB   *** NOT A SANDBOX - see below ***
-            latest main | redis + shared rate limiting | compat mode
+            latest main | redis + shared limits | STRICT MODE since 2026-08-07
     mecs  1479 parts,  2.8 GB   PRODUCTION - OWNER SAID DO NOT TOUCH
             still on the pre-hardening image | untouched, and verified so
     also hosts two Nextclouds on a shared Caddy
@@ -69,8 +69,7 @@ HOW TO USE THIS FILE
   reinstalling it would destroy real work. The only genuinely disposable
   instance on either server is demo. ***
 
-  Every instance runs TINYMRP_SECURITY_MODE="compat", so Phase 2 strict
-  authentication is inactive across the WHOLE fleet (see L1).
+  demo and test now run STRICT mode; main and mecs remain on compat (see L1).
 
   Access: key ~/.ssh/tinymrp_deploy, tagged claude-tinymrp-deploy-20260807 in
   each server's authorized_keys. Remove that line to revoke; nothing else
@@ -139,15 +138,16 @@ HOW TO USE THIS FILE
       .env, then bring the FULL stack up once so redis starts. It cannot be
       done through update-instance.sh - see section 6.
 
-  L1. Strict security mode — the largest untaken risk
-      Every instance runs "compat", so all of Phase 2 is inactive in
-      production. AUTH-MODE-01 is marked closed and it is - in CODE. The
-      running instances opt out of it. "Closed" meant the code exists, not
-      that it is switched on.
-      Flipping it is a real risk: the SolidWorks add-in and other integrations
-      may depend on compat behaviour, and only you can test the add-in.
-      Do demo first, then test, then production. It is one environment
-      variable, so reverting takes a minute.
+  L1. Strict security mode — 2 of 4 done
+      DONE 2026-08-07 on demo and test. Both came up healthy, both report
+      security_mode "strict" on /api/health, and both still serve. Applied
+      with automatic revert if the app failed to become healthy; it was not
+      needed.
+      *** WHAT THIS DOES NOT PROVE: that the SolidWorks add-in still works.
+      Strict mode rejects bearer substitution on browser APIs and enforces an
+      origin/referer CSRF check. Only you can test the add-in, and test is now
+      the right place to do it - it has real data and it is not production. ***
+      REMAINING: main and mecs, once the add-in is confirmed against test.
 
 
 ========================================================================
