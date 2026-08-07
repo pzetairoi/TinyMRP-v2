@@ -211,40 +211,49 @@ HOW TO USE THIS FILE
 
 
 ========================================================================
-4b. OPEN BUG — parts inventory, MEASURED not guessed
+4b. PARTS INVENTORY PERFORMANCE — measured, partly fixed, still open
 ========================================================================
-  Reported: /ui/parts "takes ages". Measured on the real instance with the
-  endpoint's own instrumentation (LOG_LEVEL=DEBUG, logger tinymrp.parts_lazy):
+  Reported as "takes ages". Measured with the endpoint's own instrumentation
+  (LOG_LEVEL=DEBUG, logger tinymrp.parts_lazy) rather than guessed.
 
-    config=46  filters=0.2  query=71  thumbs=524  review=0  rows=64
-    total=705ms   page_rows=25  total_records=1789
+    BEFORE  config=46 filters=0.2 query=71 thumbs=524 review=0 rows=64
+            total=705ms   (25 rows, 1789 records)
+    AFTER   thumbs=370-476            total=529-678ms
 
-  thumbs is 74% of the response, for a page of TWENTY-FIVE rows.
+  A ~25% improvement. HONEST: far less than expected, and the reason is that
+  my first assumption was wrong.
 
   RULED OUT, so nobody re-investigates:
-    - parts_lazy already paginates (.skip/.limit, 25 rows) - correct
-    - preview_png_urls_map already batches at the DATABASE level: one
-      PartFile.objects(part_number__in=...) query for the whole page
-    - the created_at sort is indexed (parts_created_at_idx exists)
+    - parts_lazy already paginates (.skip/.limit, 25 rows)
+    - preview_png_urls_map already batches at the DATABASE level: one query
+      per page
+    - the created_at sort is indexed
+    - /api/field-config is 55 KB but that is SIZE, not latency; its
+      computation shows as config=~46 ms, real but not the problem
 
-  THE ACTUAL CAUSE: after that single batched query, each returned PNG record
-  goes through managed_thumbnail_available() ->
-  resolve_managed_path(must_exist=True).is_file(), which is ONE FILESYSTEM
-  STAT PER FILE. Twenty-five parts with several PNGs each is dozens of stats
-  against a 6.8 GB tree.
+  WHAT WAS WRONG WITH MY FIX: I assumed each part's files sat in their own
+  directory, so one scandir would replace many stats. The storage is FLAT -
+  33 directories for 10990 files, with thumbs/png holding 2457 on its own. The
+  cache does work as designed (one scandir instead of ~90 stats) but that one
+  scandir reads 2457 entries, which eats most of the saving.
 
-  THE FIX, deliberately NOT attempted yet: replace the per-file stat with one
-  directory listing per thumbs folder and a membership test. The shape is the
-  same as the bom_flat fix - one batched lookup instead of N.
-  WHY IT WAS DEFERRED: resolve_managed_path lives in file_security.py and is
-  the path-traversal guard. Speeding it up must not weaken it, and that
-  deserves a careful pass rather than a rushed one. Compute the path exactly
-  as today; only the EXISTENCE check should be batched.
+  ALSO FIXED: _validate_candidate re-resolved the storage ROOT for every
+  candidate - the same one or two paths, dozens of times per request. Now
+  memoised per request.
 
-  HONEST CAVEAT: 705 ms of server time is slow but it is not "ages". If the
-  page still feels far worse than that, something outside this endpoint is
-  also involved - /api/field-config alone returns 55 KB on every page load and
-  has not been measured yet.
+  STILL OPEN, and this is where the remaining time is:
+    Path.resolve() is still called per candidate, and on a container bind
+    mount that walks the path every time. Options worth measuring before
+    choosing: resolve the candidate relative to an already-resolved root
+    instead of from scratch; or persist a thumbnail-exists flag on PartFile at
+    write time so the read path never touches the filesystem at all. The
+    second is the real fix and it is additive - a new field, backfilled.
+
+  CONSTRAINT for whoever picks this up: this is file_security.py, the
+  path-traversal guard. Speed must never come from weakening containment.
+  tests/test_file_security_listing_cache.py pins that boundary: a file that
+  genuinely exists outside the root is still refused, traversal is still
+  refused, and the cache is proved off outside a request.
 
 ========================================================================
 5. THE SHORTEST FINISH

@@ -139,6 +139,20 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
+def _resolved_root_cached(root: Path) -> Path:
+    """resolve() a storage root once per request instead of once per candidate."""
+    if not has_request_context():
+        return root.resolve(strict=False)
+    cache = getattr(g, "_tinymrp_resolved_roots", None)
+    if cache is None:
+        cache = {}
+        g._tinymrp_resolved_roots = cache
+    key = os.path.normcase(str(root))
+    if key not in cache:
+        cache[key] = root.resolve(strict=False)
+    return cache[key]
+
+
 def _dir_file_names(directory: Path) -> set[str] | None:
     """Names of the regular files in `directory`, cached FOR THIS REQUEST ONLY.
 
@@ -189,7 +203,11 @@ def _validate_candidate(
     must_exist: bool,
 ) -> Path:
     try:
-        resolved_root = root.resolve(strict=False)
+        # The root is the same one or two paths for every candidate in a
+        # request, and resolving it walks the whole path each time. Memoised
+        # per request; the resolution itself is unchanged, so containment is
+        # still compared against a genuinely resolved root.
+        resolved_root = _resolved_root_cached(root)
         resolved = candidate.resolve(strict=must_exist)
     except (OSError, RuntimeError, ValueError) as exc:
         raise FileSecurityError("file unavailable") from exc
