@@ -95,7 +95,7 @@ docker exec "$MONGO_CONTAINER_NAME" mongodump --quiet "${MONGO_AUTH_ARGS[@]}" \
 # Prove the archive CONTAINS something rather than merely existing. This is the
 # check that should have been here from the start: the previous one asked
 # whether the file had bytes, which a refused dump satisfies.
-DUMP_DOCS="$(docker exec -i "$MONGO_CONTAINER_NAME" mongorestore --archive --gzip --dryRun --quiet 2>&1 \
+DUMP_DOCS="$(docker exec -i "$MONGO_CONTAINER_NAME" mongorestore --archive --gzip --dryRun 2>&1 \
   < "${BACKUP_DIR}/mongo.archive.gz" | grep -oE "[0-9]+ document" | grep -oE "^[0-9]+" | tail -1)"
 if [ "${DUMP_DOCS:-0}" -lt 1 ]; then
   die "mongodump produced an archive with NO DOCUMENTS. If this instance uses authentication, MONGO_ROOT_USER and MONGO_ROOT_PASSWORD must be set in ${ENV_FILE}. Refusing to record a backup that would not restore."
