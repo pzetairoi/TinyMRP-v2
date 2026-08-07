@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import logging
 import io, os, re, tempfile, zipfile
 from datetime import datetime
 from dataclasses import dataclass
@@ -18,6 +20,8 @@ from app.services.part_norm import clean_rev as _clean_rev
 from app.services.app_settings import format_display_ts, get_display_dt, resolve_brand_logo_path
 from app.services.insights import classify_part
 from app.services.markup_documents import combine_markup_documents, markup_documents_for_pairs
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -2258,7 +2262,10 @@ def _overlay_numbers_and_stamps(
         try:
             output_page.merge_page(overlay)
         except Exception:
-            pass
+            # The page survives, but loses its page number and stamp. A pack
+            # of unstamped pages is a controlled-document problem, not a
+            # cosmetic one.
+            logger.exception("could not stamp page %d of the docpack", len(writer.pages))
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()
@@ -3202,7 +3209,12 @@ def build_docpack(opts: DocPackOptions) -> Tuple[str, bytes, str]:
             insert_pos = 1 if cover else 0
             preface_bytes.insert(insert_pos, ("Index.pdf", idx_b2))
         except Exception:
-            pass
+            # The pack still builds, but WITHOUT its index - and it looks
+            # complete to whoever receives it. This is the "a doc pack is
+            # missing sections" symptom the help documents as a mystery; it
+            # was a mystery because nothing was ever written down when it
+            # happened.
+            logger.exception("docpack index could not be built; the pack ships without one")
 
         # If we have body PDFs, compute part -> first page map and rebuild VisualList with page numbers
         if binder_pdf_paths and opts.binder_add_visual_list:

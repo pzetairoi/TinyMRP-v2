@@ -1495,6 +1495,10 @@ expect.</li>
 <li><strong>The source files must exist.</strong> A binder cannot include a PDF that was
 never uploaded. Check the Files tab first.</li>
 <li><strong>Permissions</strong> — you need <code>exports.run</code>, <code>bom.read</code> and <code>files.read</code>.</li>
+<li><strong>If none of the above explains it, check the server log.</strong> A pack that
+loses its index or a page stamp now records why. Search the log for
+<code>docpack index could not be built</code> or <code>could not stamp page</code>. Before this,
+those failures were silent and the pack simply arrived incomplete.</li>
 </ol>
 </div></details><details class="help-section" id="sec-a-doc-pack-is-taking-a-long-time"><summary><span class="help-section-title" id="a-doc-pack-is-taking-a-long-time">A Doc Pack is taking a long time</span></summary><div class="help-section-body">
 <p>Full-BOM binders on large assemblies genuinely take minutes. The progress bar

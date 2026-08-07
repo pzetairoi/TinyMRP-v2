@@ -84,6 +84,10 @@ changing one is not.
 3. **The source files must exist.** A binder cannot include a PDF that was
    never uploaded. Check the Files tab first.
 4. **Permissions** — you need `exports.run`, `bom.read` and `files.read`.
+5. **If none of the above explains it, check the server log.** A pack that loses
+   its index or a page stamp now records why. Search for `docpack index could not
+   be built` or `could not stamp page`. Before this, those failures were silent
+   and the pack simply arrived incomplete.
 
 ## A Doc Pack is taking a long time
 
