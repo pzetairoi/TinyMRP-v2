@@ -86,6 +86,28 @@ WHAT hardeningplan.txt IS NOW
       window per instance: enable auth, create the app user, update MONGO_URI.
       Data must not be destroyed — see the deployment-reality rules.
 
+  *** LIVE-INSTANCE FINDINGS 2026-08-07 - main is deployed and running ***
+  www.tinymrp.com now runs tinymrp-app:c99696c527be. Doctor: 0 failures.
+  Nextcloud and Vikunja unaffected. /api/ready reports ok=true (database ok,
+  storage ok, 48 GB free). First time any of this hardening has run on a real
+  server.
+  TWO THINGS THE REGISTER DID NOT SHOW, both visible only on the live box:
+
+  L1. TINYMRP_SECURITY_MODE="compat" on the live instance.
+      AUTH-MODE-01 is marked CLOSED, and it is - in code. But the running
+      instance OPTS OUT of it. Every strict-mode policy Phase 2 delivered
+      (browser session + origin/referer CSRF, bearer-only /api/auth/check,
+      rejection of bearer substitution on browser APIs) is INACTIVE in
+      production. "Closed" meant the code exists, not that it is switched on.
+      OWNER ACTION: flipping to strict is a real risk, not a formality - the
+      SolidWorks add-in and any integration may depend on compat behaviour.
+      Test on the test instance before touching main.
+
+  L2. MONGO_URI carries no credentials - the live database is unauthenticated.
+      Exactly what OPS-DBAUTH-01 predicted, now confirmed rather than assumed,
+      and /api/ready surfaces it as warnings:["mongodb_unauthenticated"]. The
+      warning mechanism works. See O2 for why this cannot be automated.
+
   *** DEPLOYMENT FINDING 2026-08-07 - found only by deploying for real ***
   `update-instance.sh <name>` WITHOUT --image regenerates the compose file but
   does NOT rebuild the image. So it applied the new /api/ready healthcheck
