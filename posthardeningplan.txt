@@ -33,6 +33,9 @@ HOW TO USE THIS FILE
   B1  BOM child links sent the wrong revision       DONE
   B2  bom_flat storage scans                        DONE
   B3  Parts inventory latency                       FIXED, UNMEASURED
+  B4  bom_flat still N+1 on the DATABASE            OPEN - causes 502s
+  E11 Remove dead files, configs, templates         NOT STARTED
+  E12 Group the SolidWorks files on Tools + help    NOT STARTED
 
   OWNER                                             STATE
   ------------------------------------------------  --------------------
@@ -303,6 +306,80 @@ HOW TO USE THIS FILE
       tests/test_file_security_listing_cache.py pins that boundary - a file
       that genuinely exists outside the root is still refused, traversal is
       still refused, and the cache is proved off outside a request context.
+
+========================================================================
+4c. B4 — bom_flat is still O(N) DATABASE queries  *** CAUSES 502s ***
+========================================================================
+  Reported: a part detail returns 502, and the flat BOM "takes forever".
+  Both are the same thing. gunicorn runs --timeout 120 with 2 workers, so a
+  request that outlives that is killed and the proxy answers 502.
+
+  MEASURED on the reported part: 7 levels deep, 183 link rows, 163 DISTINCT
+  parts.
+
+  The thumbnail batching (B2) fixed the FILESYSTEM side. The database side is
+  untouched: row_for() runs per distinct part and each one does
+    - scoped_parts.filter(...).first()      one query per part
+    - _coverage_groups(pn, rev)             another lookup per part
+    - resolve_part_field_values / filter_response_fields
+  plus _bom_is_fully_authorised walking the whole subtree first, and
+  authorised_part_pairs called again per node during the descent.
+
+  So ~163 parts becomes several hundred round trips. That is the remaining
+  cost, and it grows with assembly size - which is why small instances never
+  showed it.
+
+  THE FIX, same shape as every other one here: collect the distinct pairs
+  first (the walk already exists - _flat_subtree_pairs), then resolve parts,
+  coverage and field values in BATCHES, and drop the redundant per-node
+  authorisation now that the subtree is proved once up front.
+  NOT started: this is a real refactor of bom_flat's traversal, not a patch,
+  and it deserves a full pass rather than the tail of one.
+
+  INTERIM RELIEF if it bites before then: raising gunicorn --timeout turns a
+  502 into a slow page, which is less alarming but not a fix.
+
+========================================================================
+4d. E11 / E12 — repository cleanup and the Tools page
+========================================================================
+
+  E11. Remove dead and misleading files
+      Baseline measured 2026-08-07 so the reduction can be shown:
+        .git objects        71 MB   (size-pack 69 MiB)
+        tracked tree zip    6.7 MB
+        app/static          7.2 MB   <- largest tracked folder
+        solidworks-addin    1.2 MB
+      Known candidates found so far:
+        - app/templates/security/login_user.html  ORPHAN, referenced nowhere
+        - app/static/misc/TinyMRP.bmp             537 KB, no reference found
+        - app/static/misc/test.3mf                a test artefact, shipped
+        - app/static/tools/                       the tools page lists this
+          directory and it does not exist, so _static_tools() always returns
+          empty - dead code path and a misleading empty state
+        - handycommands.txt, serverdeploymentguide.txt at repo root: personal
+          notes shipped to every clone
+      Method: prove each is unreferenced before deleting, delete in ONE commit
+      per category so a mistake is trivially revertible, and re-measure.
+
+  E12. Group the SolidWorks files on the Tools page, and update the help
+      app/static/misc holds 17 entries. Only FOUR are reachable from the Tools
+      page, hardcoded one by one in tools/index.html:
+        tinymrp_part_customtab.prtprp, tinymrp_assy_customtab.asmprp,
+        excelcompile.xlsx, plus the macro via main.download_macro
+      Not surfaced anywhere, but shipped:
+        TinyMRP.swp (the macro itself), TinyMRP_BOM_TEMPLATE.sldbomtbt,
+        "BOM FOR PROCESSING.sldbomtbt", "custom property writer.xlsm",
+        excel_property_writer.bas, TinyMRP_conf.xlsm, REFMODELS/, SOLIDSETUP/
+      Proposed grouping on the Tools page:
+        Add-in          installer, macro
+        SolidWorks setup  custom tab properties, reference models, setup files
+        BOM templates   the two .sldbomtbt tables
+        Excel helpers   compile template, property writer, conf workbook
+      The listing should be DRIVEN BY THE FILESYSTEM with a declared group per
+      pattern, not another hand-maintained list of links - the current one
+      already drifted out of date, which is how eight files became invisible.
+      Then update the help so each group says what the file is FOR; several of
+      these are unusable without that.
 
 ========================================================================
 5. THE SHORTEST FINISH
