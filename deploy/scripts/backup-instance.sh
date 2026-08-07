@@ -78,10 +78,29 @@ ensure_dir "$BACKUP_DIR/config"
 info "Backing up instance '${INSTANCE_NAME}' -> ${BACKUP_DIR}"
 
 # 1) Logical Mongo dump (online, consistent per-collection)
+# Credentials are required once an instance has been migrated by
+# enable-mongo-auth.sh. Without them mongodump is REFUSED and writes an empty
+# archive - while exiting 0. Every backup taken after that migration was 23
+# bytes of gzip header, and the old size check passed them all, because an
+# empty gzip stream is not an empty FILE.
+MONGO_AUTH_ARGS=()
+if [ -n "${MONGO_ROOT_USER:-}" ] && [ -n "${MONGO_ROOT_PASSWORD:-}" ]; then
+  MONGO_AUTH_ARGS=(-u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin)
+fi
+
 info "  mongodump (${MONGO_DB})"
-docker exec "$MONGO_CONTAINER_NAME" mongodump --quiet -d "$MONGO_DB" --archive --gzip \
-  > "${BACKUP_DIR}/mongo.archive.gz"
-[ -s "${BACKUP_DIR}/mongo.archive.gz" ] || die "mongodump produced an empty archive."
+docker exec "$MONGO_CONTAINER_NAME" mongodump --quiet "${MONGO_AUTH_ARGS[@]}" \
+  -d "$MONGO_DB" --archive --gzip > "${BACKUP_DIR}/mongo.archive.gz"
+
+# Prove the archive CONTAINS something rather than merely existing. This is the
+# check that should have been here from the start: the previous one asked
+# whether the file had bytes, which a refused dump satisfies.
+DUMP_DOCS="$(docker exec -i "$MONGO_CONTAINER_NAME" mongorestore --archive --gzip --dryRun --quiet 2>&1 \
+  < "${BACKUP_DIR}/mongo.archive.gz" | grep -oE "[0-9]+ document" | grep -oE "^[0-9]+" | tail -1)"
+if [ "${DUMP_DOCS:-0}" -lt 1 ]; then
+  die "mongodump produced an archive with NO DOCUMENTS. If this instance uses authentication, MONGO_ROOT_USER and MONGO_ROOT_PASSWORD must be set in ${ENV_FILE}. Refusing to record a backup that would not restore."
+fi
+info "  mongodump captured ${DUMP_DOCS} document(s)"
 
 # 2) Deliverables snapshot
 if [ "$WITH_DELIVERABLES" -eq 1 ]; then
@@ -89,7 +108,10 @@ if [ "$WITH_DELIVERABLES" -eq 1 ]; then
     info "  deliverables (${DELIVERABLES_DIR})"
     tar -czf "${BACKUP_DIR}/deliverables.tar.gz" -C "$DELIVERABLES_DIR" .
   else
-    warn "  deliverables dir missing (${DELIVERABLES_DIR:-unset}); skipping"
+    # A silently skipped snapshot produced a "successful" backup holding only a
+    # database dump. Loud and non-zero, so a scheduled job cannot keep
+    # reporting success while capturing half the instance.
+    die "deliverables were requested but the directory is missing (${DELIVERABLES_DIR:-unset}). Pass --no-deliverables for a database-only backup."
   fi
 fi
 

@@ -277,3 +277,34 @@ def test_dns_wait_cannot_hang_an_unattended_install():
     assert "--skip-dns-check to install anyway" in common
     # The interactive path must keep prompting - a human can see what is wrong.
     assert "Press Enter to check again" in common
+
+
+def test_backup_proves_it_captured_data_and_uses_credentials():
+    """Found the hard way: every backup after enabling Mongo auth was EMPTY.
+
+    mongodump without credentials is refused on an authenticated instance. It
+    writes a 23-byte gzip header and exits 0. The old guard was
+    `[ -s file ] || die`, which asks whether the file has bytes - and an empty
+    gzip stream does. Four backups passed that check holding nothing, and one
+    of them was taken immediately before updating production.
+
+    A backup that cannot restore is worse than no backup, because it is
+    believed. So the check now proves the archive contains documents, and a
+    missing deliverables directory fails loudly instead of quietly producing a
+    half-backup that reports success.
+    """
+    backup = _read("deploy/scripts/backup-instance.sh")
+
+    # Credentials are passed when the instance has them.
+    assert "MONGO_AUTH_ARGS" in backup
+    assert "--authenticationDatabase admin" in backup
+
+    # The guard must count documents, not bytes.
+    assert "--dryRun" in backup
+    assert "NO DOCUMENTS" in backup
+    assert '[ -s "${BACKUP_DIR}/mongo.archive.gz" ] || die' not in backup, (
+        "the byte-size guard is back; it passes an archive that restores nothing"
+    )
+
+    # A skipped deliverables snapshot must abort, not warn.
+    assert "deliverables were requested but the directory is missing" in backup
