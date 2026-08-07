@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import hashlib
 import mimetypes
 import os
@@ -13,6 +15,8 @@ from flask import current_app, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeSerializer, URLSafeTimedSerializer
 
 from app.models.extra_file import PartExtraFile
+
+logger = logging.getLogger(__name__)
 
 
 _TOKEN_SALT = "tinymrp.extra.v1"
@@ -371,7 +375,14 @@ def store_associated_uploads(
                             setattr(record, field, value)
                         record.save()
                 except Exception:
-                    pass
+                    # This IS the rollback. Failing here leaves the database
+                    # holding a record the filesystem no longer matches, and
+                    # silence made that unrecoverable - nothing said which
+                    # record to reconcile.
+                    logger.exception(
+                        "rollback failed for associated upload record %s",
+                        getattr(record, "id", "?"),
+                    )
                 final_path = item["final_path"]
                 backup = item["backup"]
                 try:

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets as _secrets
 import time
 from typing import Tuple
+
+logger = logging.getLogger(__name__)
 
 
 _DEFAULT_VALUES = {
@@ -69,12 +72,14 @@ def _write_runtime_file(path: str, data: dict) -> None:
     try:
         os.chmod(tmp, 0o600)
     except Exception:
-        pass
+        # This file holds secrets. A failed chmod means it may be readable by
+        # every account on the host, and that must not pass unnoticed.
+        logger.warning("could not restrict permissions on %s", tmp, exc_info=True)
     os.replace(tmp, path)
     try:
         os.chmod(path, 0o600)
     except Exception:
-        pass
+        logger.warning("could not restrict permissions on %s", path, exc_info=True)
 
 
 def _acquire_lock(path: str, timeout: float = 5.0) -> str | None:

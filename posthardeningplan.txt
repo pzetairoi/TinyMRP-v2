@@ -20,7 +20,7 @@ HOW TO USE THIS FILE
   ENGINEERING                                       STATE
   ------------------------------------------------  --------------------
   E1  Error boundary + real 404                     DONE
-  E2  Silent exception handlers                     14 of 184 triaged
+  E2  Silent exception handlers                     22 of 184 + 1 SECURITY FIX
   E3  /api/ready wired into every healthcheck       DONE
   E4  Redis in the guided per-instance compose      DONE
   E5  Per-endpoint rate limits, enforced            DONE
@@ -160,7 +160,25 @@ HOW TO USE THIS FILE
 4. WHAT IS LEFT — engineering
 ========================================================================
 
-  E2. Silent exception handlers — 170 of 184 remain
+  E2. Silent exception handlers — 162 of 184 remain
+      *** THE TRIAGE FOUND A REAL SECURITY BUG, not just a debuggability one.
+      Bulk user deletion FAILED OPEN. The guard protecting administrators
+      swallowed its own exception and fell through to u.delete(), so a broken
+      role reference or a momentary database error deleted the very
+      administrator it exists to protect - and the same for the guard stopping
+      you deleting your own account. Deletion is irreversible, so both now skip
+      the user and say so. Pinned by a test that also fails if any bare pass is
+      reintroduced anywhere in that loop. ***
+      Also converted on this pass:
+        runtime_secrets - a failed chmod 0600 on a SECRETS file was silent, so
+          a world-readable secrets file would never have been noticed
+        extra_files - the ROLLBACK itself failed silently, leaving the database
+          holding a record the filesystem no longer matched, with nothing
+          saying which record to reconcile
+        a failed user deletion is now counted and surfaced: references are
+          cleaned up BEFORE the delete, so a failure leaves damage behind
+
+  E2-old. Earlier pass — 170 of 184 remained
       Triage, not a rewrite: suppressing a thumbnail render inside a loop is
       legitimate; suppressing a write is how a defect becomes undebuggable.
       DONE: the 14 that can hide data or security loss - the import journal

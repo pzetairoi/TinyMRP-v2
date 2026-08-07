@@ -1,3 +1,4 @@
+import logging
 # app/views/admin.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
 from flask import abort
@@ -33,6 +34,8 @@ from app.services.timezone_utils import (
 from werkzeug.utils import secure_filename
 import os
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_process_svg(raw: bytes) -> bool:
@@ -518,19 +521,31 @@ def users_bulk_delete():
     deleted = 0
     skipped_admin = 0
     skipped_self = 0
+    skipped_unverified = 0
+    failed = 0
     for u in users:
+        # Both guards below FAIL CLOSED. They used to swallow the exception and
+        # fall through to u.delete(), so a broken role reference or a momentary
+        # database error meant an administrator - or your own account - was
+        # deleted by the guard that exists to prevent exactly that. Deletion is
+        # irreversible, so "we could not prove this user is safe to delete" has
+        # to mean skip, not proceed.
         try:
             if u.has_role("admin"):
                 skipped_admin += 1
                 continue
         except Exception:
-            pass
+            logger.exception("could not check admin role for %s; skipping", getattr(u, "email", "?"))
+            skipped_unverified += 1
+            continue
         try:
             if str(u.id) == str(current_user.id):
                 skipped_self += 1
                 continue
         except Exception:
-            pass
+            logger.exception("could not compare user identity; skipping deletion")
+            skipped_unverified += 1
+            continue
         _cleanup_user_references(u)
         try:
             u.delete()
@@ -538,15 +553,25 @@ def users_bulk_delete():
             try:
                 log_action("admin.user.delete", resource_type="user", resource=str(u.email))
             except Exception:
-                pass
+                logger.exception("audit log failed for deletion of %s", getattr(u, "email", "?"))
         except Exception:
-            pass
+            # References were already cleaned up, so a failure here leaves the
+            # account behind in a modified state. The operator must be told.
+            logger.exception("failed to delete user %s", getattr(u, "email", "?"))
+            failed += 1
     if deleted:
         flash(f"Deleted {deleted} user(s).", "success")
     if skipped_admin:
         flash(f"Skipped {skipped_admin} admin user(s).", "warning")
     if skipped_self:
         flash("Skipped your own account.", "warning")
+    if skipped_unverified:
+        flash(
+            f"Skipped {skipped_unverified} user(s) that could not be verified as safe to delete.",
+            "warning",
+        )
+    if failed:
+        flash(f"Failed to delete {failed} user(s); see the server log.", "error")
     return redirect(url_for("admin.users_list"))
 
 
