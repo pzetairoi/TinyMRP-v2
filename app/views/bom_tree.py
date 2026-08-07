@@ -498,6 +498,37 @@ def bom_tree():
     return jsonify([])
 
 
+def _flat_subtree_pairs(root_pn: str, root_rev: str, user) -> list[tuple[str, str]]:
+    """Every distinct part in a flattened BOM, walking LINKS ONLY.
+
+    Exists so the thumbnails can be resolved in ONE batch. bom_flat used to
+    call preview_png_urls_for per unique part, and that measured ~65 ms each -
+    on an assembly with a few hundred distinct parts it is the whole response
+    time. The link walk here is indexed and cheap by comparison; paying for it
+    twice is far less than paying for hundreds of storage scans.
+
+    Same cycle rule as the main traversal: a pair already on the current
+    lineage is not followed again.
+    """
+    pairs: dict[tuple[str, str], None] = {}
+    root_key = (str(root_pn or "").strip(), clean_rev(root_rev))
+    stack: list[tuple[str, str, tuple[tuple[str, str], ...]]] = [
+        (root_key[0], root_key[1], (root_key,))
+    ]
+    while stack:
+        pn, rev, lineage = stack.pop()
+        for link in _child_links(pn, rev, user):
+            if not getattr(link, "child_pn", None):
+                continue
+            child_pn, child_rev = _resolved_child_pair(link, user)
+            key = (child_pn, clean_rev(child_rev))
+            if key in lineage:
+                continue
+            pairs.setdefault(key, None)
+            stack.append((key[0], key[1], lineage + (key,)))
+    return list(pairs)
+
+
 @bp.get("/bom_flat")
 @login_required
 @require_permission("bom.read")
@@ -530,6 +561,15 @@ def bom_flat():
     rows_by_key: dict[tuple[str, str], dict] = {}
     part_cache: dict[tuple[str, str], tuple[Part | None, dict, str, list[str], set[str], dict]] = {}
 
+    # One storage scan for the whole subtree instead of one per part. This is
+    # the difference between a large assembly answering in under a second and
+    # the browser giving up on it.
+    flat_thumbs: dict[tuple[str, str], list[str]] = {}
+    if has_permission(current_user, "files.read"):
+        subtree_pairs = _flat_subtree_pairs(root_part.part_number, root_rev, current_user)
+        if subtree_pairs:
+            flat_thumbs = preview_png_urls_map(subtree_pairs, user=current_user)
+
     def row_for(child_pn: str, child_rev: str) -> dict:
         key = (child_pn, clean_rev(child_rev))
         existing = rows_by_key.get(key)
@@ -545,15 +585,18 @@ def bom_flat():
             attrs = harvest_part_attrs(part_doc) if part_doc else {}
             effective_rev = clean_rev(attrs.get("revision") or (part_doc.revision if part_doc else "") or key[1])
             proc_label = _process_label(part_doc, attrs)
-            thumbs = (
-                preview_png_urls_for(
-                    child_pn,
-                    effective_rev,
-                    user=current_user,
-                )
-                if has_permission(current_user, "files.read")
-                else []
-            )
+            # Batched above. The map is keyed by the LINK-resolved revision,
+            # while effective_rev can differ when a part's attrs carry another
+            # one, so try both before falling back to a single scan - a miss
+            # must cost one lookup, not a wrong thumbnail.
+            if not has_permission(current_user, "files.read"):
+                thumbs = []
+            else:
+                thumbs = flat_thumbs.get((child_pn, clean_rev(effective_rev)))
+                if thumbs is None:
+                    thumbs = flat_thumbs.get(key)
+                if thumbs is None:
+                    thumbs = preview_png_urls_for(child_pn, effective_rev, user=current_user)
             coverage = _coverage_groups(child_pn, effective_rev)
             values = resolve_part_field_values(
                 part_doc,
