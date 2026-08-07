@@ -119,6 +119,8 @@ from app.services.user_profile import (
     profile_for_user,
 )
 
+logger = logging.getLogger(__name__)
+
 bp = Blueprint("parts_api", __name__, url_prefix="/api")
 
 _timing_logger = logging.getLogger("tinymrp.parts_lazy")
@@ -1846,7 +1848,9 @@ def part_notes_update(pn):
     try:
         migrate_legacy_annotations(p)
     except Exception:
-        pass
+        # A silent failure here means the part keeps its legacy annotations and
+        # the new ones look empty - which reads as data loss to the user.
+        logger.exception("legacy annotation migration failed for %s", getattr(p, "part_number", "?"))
     # What the editor had loaded, if the client sent it. Optional: an older
     # client simply gets the previous last-write-wins behaviour rather than an
     # error.

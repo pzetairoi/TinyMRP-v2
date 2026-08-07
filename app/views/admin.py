@@ -691,7 +691,7 @@ def users_create():
         try:
             log_action("admin.user.create", resource_type="user", resource=email)
         except Exception:
-            pass
+            logger.exception("audit log failed for user creation: %s", email)
         flash("User created.", "success")
         return redirect(url_for("admin.users_list"))
     return render_template("admin/users_form.html", role_options=_role_options())
@@ -861,7 +861,9 @@ def purge_parts():
         try:
             log_action("admin.purge_parts", resource_type="system", resource=summary or "none")
         except Exception:
-            pass
+            # Purging parts is destructive and irreversible. The record of who did
+            # it must not vanish because the logger had a bad moment.
+            logger.exception("audit log failed for a part purge (%s)", summary or "none")
         flash(f"Deleted: {summary}" if results else "Nothing was deleted.", "success")
         return redirect(url_for("admin.purge_parts"))
 

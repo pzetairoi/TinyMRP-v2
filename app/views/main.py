@@ -1,3 +1,4 @@
+import logging
 import os
 
 from bson import ObjectId
@@ -36,6 +37,8 @@ from app.services.user_profile import (
 from app.services.user_settings import get_or_create_settings
 from app.services.timezone_utils import utc_now
 from app.views.api_helpers import add_datetime_fields
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint("main", __name__)
 
@@ -436,11 +439,13 @@ def app_profile_update():
         current_user.updated_at = utc_now()
         current_user.save()
     except Exception:
-        pass
+        # settings.save() already succeeded, so failing here leaves the
+        # profile half-updated. The user is told it saved.
+        logger.exception("profile saved but the user record could not be updated for %s", getattr(current_user, "email", "?"))
     try:
         log_action("account.profile.update", resource_type="user", resource=str(current_user.email or ""))
     except Exception:
-        pass
+        logger.exception("audit log failed for a profile update")
     flash("Account profile updated.", "success")
     return redirect(url_for("main.app_home"))
 
@@ -483,7 +488,10 @@ def app_password_change():
             },
         )
     except Exception:
-        pass
+        # Losing the record that tokens and sessions were revoked removes the
+        # evidence that a credential was withdrawn - exactly what an audit
+        # trail exists for.
+        logger.exception("audit log failed for a credential revocation")
     logout_user()
     flash(
         "Password changed. You have been signed out on every browser. "
