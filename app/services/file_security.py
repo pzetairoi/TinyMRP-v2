@@ -139,6 +139,49 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
+def _dir_file_names(directory: Path) -> set[str] | None:
+    """Names of the regular files in `directory`, cached FOR THIS REQUEST ONLY.
+
+    The parts list resolves a thumbnail per file record, and each resolution
+    costs several stat calls. On a container bind mount that measured 524 ms of
+    a 705 ms response for a single 25-row page. Files belonging to one part
+    live in the same directory, so one scandir answers what dozens of stats
+    were being asked separately.
+
+    Request-scoped on purpose: a file created or removed between requests must
+    be seen. Outside a request context this returns None and callers fall back
+    to touching the filesystem directly, so nothing is cached in CLI or worker
+    code where the lifetime would be unbounded.
+
+    This is a lookup accelerator ONLY. It never decides whether a path is
+    allowed - containment is still proved by _validate_candidate against the
+    resolved root.
+    """
+    if not has_request_context():
+        return None
+    cache = getattr(g, "_tinymrp_dir_listing_cache", None)
+    if cache is None:
+        cache = {}
+        g._tinymrp_dir_listing_cache = cache
+    key = os.path.normcase(str(directory))
+    if key in cache:
+        return cache[key]
+    try:
+        names = {entry.name for entry in os.scandir(directory) if entry.is_file()}
+    except OSError:
+        names = set()
+    cache[key] = names
+    return names
+
+
+def _candidate_file_exists(candidate: Path) -> bool:
+    """Does this exact path exist as a regular file? Cached per request."""
+    names = _dir_file_names(candidate.parent)
+    if names is None:
+        return candidate.is_file()
+    return candidate.name in names
+
+
 def _validate_candidate(
     candidate: Path,
     root: Path,
@@ -199,7 +242,7 @@ def resolve_managed_path(
         candidates = [
             _validate_candidate(root.path / rel, root.path, must_exist=must_exist)
             for root in selected_roots
-            if (root.path / rel).exists() or not must_exist
+            if _candidate_file_exists(root.path / rel) or not must_exist
         ]
     else:
         stored_path = str(getattr(file_record, "path", "") or "").strip()
