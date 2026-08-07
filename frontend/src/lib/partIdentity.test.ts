@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { effectiveRevisionFor } from './partIdentity'
+import { effectiveRevisionFor, revisionFromLocation } from './partIdentity'
 
 /**
  * Reported from a live instance: clicking a BOM child produced a page of 404s
@@ -34,5 +34,35 @@ describe('effectiveRevisionFor', () => {
   it('prefers the URL revision over a matching part with no revision', () => {
     const loaded = { part_number: 'J200684' }
     expect(effectiveRevisionFor('J200684', '1', loaded)).toBe('1')
+  })
+})
+
+describe('revisionFromLocation', () => {
+  const stale = { pn: 'J200684', rev: '1' }
+
+  it('respects an EMPTY rev parameter instead of falling back', () => {
+    // The bug: "" is falsy, so `sp.get("rev") || initial.rev` reached past a
+    // meaningful blank and used the revision of whichever page loaded first.
+    expect(revisionFromLocation('?rev=', 'AWS-Z-009025', stale)).toBe('')
+  })
+
+  it('uses the parameter when it has a value', () => {
+    expect(revisionFromLocation('?rev=B', 'AWS-Z-009025', stale)).toBe('B')
+  })
+
+  it('falls back only when the parameter is absent AND the part matches', () => {
+    expect(revisionFromLocation('', 'J200684', stale)).toBe('1')
+  })
+
+  it('ignores server state describing a different part', () => {
+    expect(revisionFromLocation('', 'AWS-Z-009025', stale)).toBe('')
+  })
+
+  it('matches the part case-insensitively, as the backend does', () => {
+    expect(revisionFromLocation('', 'j200684', stale)).toBe('1')
+  })
+
+  it('tolerates missing server state', () => {
+    expect(revisionFromLocation('', 'J200684', null)).toBe('')
   })
 })

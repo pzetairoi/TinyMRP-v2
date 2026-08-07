@@ -1,7 +1,7 @@
 // frontend/src/pages/PartDetailPage.tsx
 import React, { useEffect, useMemo, useState, Suspense, useRef } from "react";
 import { useLocation, useParams, Link } from "react-router-dom";
-import { effectiveRevisionFor } from "../lib/partIdentity";
+import { effectiveRevisionFor, revisionFromLocation } from "../lib/partIdentity";
 import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
 import { TreeTable } from "primereact/treetable";
@@ -356,7 +356,7 @@ export default function PartDetailPage() {
   const shareToken = route.token || (window as any).__INITIAL__?.share_token || "";
   const isSharedView = !!shareId && !!shareToken;
   const pn = (isSharedView ? sp.get("pn") : route.pn) || (window as any).__INITIAL__?.pn || "";
-  const rev = sp.get("rev") || ((window as any).__INITIAL__?.rev ?? "");
+  const rev = revisionFromLocation(location.search, pn, (window as any).__INITIAL__);
   const shareApiBase = isSharedView
     ? `/api/share/part/${encodeURIComponent(shareId)}/${encodeURIComponent(shareToken)}`
     : "";
