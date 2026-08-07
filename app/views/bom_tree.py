@@ -104,6 +104,45 @@ def _coverage_groups(pn: str, rev: str) -> set[str]:
     return groups
 
 
+def _coverage_map_for(pairs) -> dict:
+    """File-group coverage for many parts in ONE query.
+
+    _coverage_groups asks PartFile for a single part at a time, and it is
+    called for every node of a tree. Measured on a real assembly: part_files
+    was queried 3852 times in one flat-BOM request. The parts are all known up
+    front, so this reads them together and groups in memory.
+
+    Keyed case-insensitively, because part numbers are matched that way
+    throughout this codebase.
+    """
+    if not has_permission(current_user, "files.read"):
+        return {}
+    names = sorted({str(pn or "").strip() for pn, _rev in pairs if str(pn or "").strip()})
+    if not names:
+        return {}
+    coverage: dict = {}
+    for row in PartFile.objects(part_number__in=names).only(
+        "part_number", "revision", "ext_group"
+    ):
+        group = str(getattr(row, "ext_group", "") or "").strip()
+        if not group or not managed_file_group_allowed(current_user, group):
+            continue
+        key = (
+            str(row.part_number or "").strip().casefold(),
+            clean_rev(row.revision or "").casefold(),
+        )
+        coverage.setdefault(key, set()).add(group.lower())
+    return coverage
+
+
+def _coverage_from_map(coverage_map: dict | None, pn: str, rev: str) -> set[str] | None:
+    """Read a batched coverage entry, or None when there is no batch."""
+    if coverage_map is None:
+        return None
+    key = (str(pn or "").strip().casefold(), clean_rev(rev).casefold())
+    return coverage_map.get(key, set())
+
+
 def _child_links(parent_pn: str, parent_rev: str | None, user=None):
     if "parent_pn" not in BOMLink._fields:
         p = Part.objects(part_number=parent_pn).only("id").first()
@@ -311,6 +350,7 @@ def _node(
     review_statuses: dict | None = None,
     thumbs_map: dict | None = None,
     parts_map: dict | None = None,
+    coverage_map: dict | None = None,
     children_map: dict | None = None,
 ):
     # thumbs_map / children_map let the caller resolve a whole sibling set in
@@ -342,7 +382,9 @@ def _node(
             if has_permission(current_user, "files.read")
             else []
         )
-    coverage = _coverage_groups(pn, effective_rev)
+    coverage = _coverage_from_map(coverage_map, pn, effective_rev)
+    if coverage is None:
+        coverage = _coverage_groups(pn, effective_rev)
     review = (review_statuses or {}).get(
         (str(pn or "").strip(), clean_rev(effective_rev)),
         {"count": 0, "severity": "", "pending": False},
@@ -508,6 +550,7 @@ def bom_tree():
             children_map = _has_children_map(sibling_pairs)
             # One query for the whole level instead of one per child.
             parts_map = _parts_map_for(sibling_pairs, scoped_parts)
+            coverage_map = _coverage_map_for(sibling_pairs)
 
             kids = [
                 _node(
@@ -519,6 +562,7 @@ def bom_tree():
                     thumbs_map=thumbs_map,
                     children_map=children_map,
                     parts_map=parts_map,
+                    coverage_map=coverage_map,
                 )
                 for l, c_pn, c_rev in visible
             ]
@@ -629,6 +673,8 @@ def bom_flat():
     if subtree_pairs and has_permission(current_user, "files.read"):
         flat_thumbs = preview_png_urls_map(subtree_pairs, user=current_user)
 
+    flat_coverage = _coverage_map_for(subtree_pairs) if subtree_pairs else {}
+
     flat_parts: dict[tuple[str, str], Part] = {}
     if subtree_pairs:
         names = sorted({pn for pn, _rev in subtree_pairs})
@@ -677,7 +723,9 @@ def bom_flat():
                     thumbs = flat_thumbs.get(key)
                 if thumbs is None:
                     thumbs = preview_png_urls_for(child_pn, effective_rev, user=current_user)
-            coverage = _coverage_groups(child_pn, effective_rev)
+            coverage = _coverage_from_map(flat_coverage, child_pn, effective_rev)
+            if coverage is None:
+                coverage = _coverage_groups(child_pn, effective_rev)
             values = resolve_part_field_values(
                 part_doc,
                 context_field_ids("bom_tree", config),
