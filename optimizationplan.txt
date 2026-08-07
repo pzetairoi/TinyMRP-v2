@@ -114,6 +114,58 @@ measure, including the attempts that fail.
 
 
 ========================================================================
+2b. FIRST PROFILER RESULTS — 2026-08-08, real browsing on test
+========================================================================
+  The owner's suspicion, in their words, turned out to be exactly right:
+
+    "when we load data in the web client it should be only what the user sees.
+     It makes no sense to analyse a whole assembly tree and read the data if
+     we are only going to show the first level."
+
+  Measured, per request, with TINYMRP_PROFILE=1:
+
+    GET /api/docpacks/options?depth=full   4203 ms   589 mongo ops
+        parts=262  bom=130  part_files=130  part_drawing_markups=65
+    GET /api/bom_flat                      1948 ms   372 mongo ops
+        part_files=193  bom=130  parts=43
+    GET /api/docpacks/options (another)    6732 ms   341 mongo ops
+    GET /api/bom_tree  (ONE level)         1001 ms    64 mongo ops
+        part_files=33  parts=23  app_settings=2  users=1
+    GET /api/part_detail                   2106 ms    52 mongo ops
+
+  WHAT THIS SAYS:
+
+  a) *** /api/docpacks/options?depth=full is the single worst offender and it
+     fires on EVERY part detail page load. 589 queries and 4.2 seconds to walk
+     an entire subtree, in order to populate a dropdown of options. The user
+     has not asked for a docpack at that point and may never do so. This is
+     the clearest example of reading everything to show a little. ***
+     Fix: do not compute full-depth options until the user opens that control,
+     or compute them from counts rather than by walking every part.
+
+  b) bom_tree costs 64 queries to expand ONE level. With roughly twenty
+     children that is about three queries per child - a textbook N+1. The
+     level itself is already batched; what is not batched is what happens per
+     child inside _node.
+
+  c) app_settings is read 2x and users 1x on EVERY request. Small individually,
+     but it is fixed overhead paid by every call including cheap ones.
+
+  d) part_files dominates almost every request (193, 130, 33, 20...). Whatever
+     reads it is doing so per part rather than per request.
+
+  e) Query TIME is not the problem: the slowest single operation in the whole
+     sample was 212 ms and most are under 20 ms. Confirms the profiler was
+     built to count rather than to time.
+
+  PRIORITY ORDER derived from this, replacing the guesses in section 3:
+    1. docpacks/options on page load - biggest win, and arguably it should not
+       run at all until requested
+    2. part_files access pattern - it is in every hot path
+    3. bom_tree per-child work inside _node
+    4. app_settings and users per request - cache for the request lifetime
+
+========================================================================
 3. THE WORK, IN ORDER
 ========================================================================
 
