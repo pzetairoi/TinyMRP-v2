@@ -398,6 +398,29 @@ def managed_file_path_allowed(file_record: Any) -> bool:
 
 
 def managed_thumbnail_available(file_record: Any) -> bool:
+    """Is there a thumbnail to offer for this file?
+
+    Answered from the DATABASE where possible, deliberately, because this is
+    called once per file record when listing parts and each filesystem answer
+    costs several syscalls on a container bind mount.
+
+    Two facts make trusting the database safe here:
+      - a wrong YES cannot grant access. This only decides which URL to put on
+        a row; serving that file still resolves the path with must_exist=True,
+        so a missing file is a 404, never a bypass.
+      - a 404 is not a broken page. ThumbImg already walks its candidate URLs
+        and settles on the branding logo, so a stale record degrades to a
+        fallback image.
+
+    thumb_mtime is written at the moment a thumbnail is generated, so its
+    presence means one was produced. Records without it fall back to the
+    filesystem, which keeps behaviour identical for data written before this.
+    """
+    if not str(getattr(file_record, "thumb_rel_path", "") or "").strip():
+        # Nothing recorded, so there is nothing to look for.
+        return False
+    if getattr(file_record, "thumb_mtime", None) is not None:
+        return True
     try:
         return resolve_managed_path(
             file_record,

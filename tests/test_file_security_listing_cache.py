@@ -80,3 +80,38 @@ def test_traversal_out_of_the_root_is_still_refused(app, tmp_path):
     with app.test_request_context("/"):
         with pytest.raises(FileSecurityError):
             _validate_candidate(Path(str(root / ".." / "escape.png")), root, must_exist=True)
+
+
+class _Rec:
+    def __init__(self, rel="", mtime=None):
+        self.thumb_rel_path = rel
+        self.thumb_mtime = mtime
+        self.source = ""
+        self.path = ""
+
+
+def test_thumbnail_availability_answers_from_the_database_when_it_can(app):
+    """Listing parts asks this once per file; the filesystem is the slow part.
+
+    A wrong YES cannot grant access - serving still resolves with
+    must_exist=True - and ThumbImg falls back to the branding logo, so the
+    worst case is a placeholder rather than a broken page.
+    """
+    from datetime import datetime
+
+    from app.services.file_security import managed_thumbnail_available
+
+    with app.test_request_context("/"):
+        # Nothing recorded: answered without touching the filesystem.
+        assert managed_thumbnail_available(_Rec()) is False
+        # Generated at some point: believed.
+        assert managed_thumbnail_available(_Rec("thumbs/png/a.png", datetime.now())) is True
+
+
+def test_records_without_a_generation_time_still_hit_the_filesystem(app, tmp_path):
+    """Data written before this must behave exactly as it did."""
+    from app.services.file_security import managed_thumbnail_available
+
+    with app.test_request_context("/"):
+        # No mtime, and no such file, so the filesystem answers no.
+        assert managed_thumbnail_available(_Rec("thumbs/png/nope.png")) is False
