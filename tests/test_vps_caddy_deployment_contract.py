@@ -304,7 +304,9 @@ def test_backup_proves_it_captured_data_and_uses_credentials():
     # never reads them, so it would reject good archives too.
     assert 'gzip -dc' in backup
     assert 'essentially no content' in backup
-    assert '--dryRun' not in backup
+    # The comment above the guard mentions --dryRun to explain why it is not
+    # used, so assert it is not INVOKED rather than not mentioned.
+    assert 'mongorestore --archive --gzip --dryRun' not in backup
     assert '[ -s "${BACKUP_DIR}/mongo.archive.gz" ] || die' not in backup, (
         "the byte-size guard is back; it passes an archive that restores nothing"
     )
