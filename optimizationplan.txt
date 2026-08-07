@@ -242,7 +242,10 @@ measure, including the attempts that fail.
 
   STILL OPEN, in priority order.
 
-  P-7. bom queried once per node                       NEXT, and now largest
+  P-7. bom queried once per node                       DEPRIORITISED
+       Was next. After P-12 almost nobody runs bom_flat, so repairing the
+       algorithm of something no longer called is effort in the wrong place.
+       Kept because it still bites whoever presses Flat on a big assembly.
        Measured: bom=4430 in one flat-BOM request on J200684.
        _child_links fetches one parent's children per call and the traversal
        calls it per node. Batching means restructuring the descent to work
@@ -252,10 +255,19 @@ measure, including the attempts that fail.
        bom_tree already does this correctly for the level it renders; it is the
        flat and subtree walks that do not.
 
-  P-8. app_settings re-read                            NOT STARTED
-       2x on every request, and 593 times in one docpacks/build. Configuration
-       re-read in a loop. Likely a request-scoped memo, and it is paid by even
-       the cheapest call.
+  P-8. app_settings re-read                            DONE
+       Was 2x per request and 593 times in one docpacks/build. Now memoised
+       per request - deliberately not globally, so an administrator's change
+       takes effect on the next request rather than after a restart. Nothing
+       is memoised outside a request context, so CLI and import read fresh.
+
+  P-12. Flat BOM loaded on every page view             DONE
+       8717 queries and 55 seconds on J200684, on EVERY part view, while the
+       user was looking at the tree. Now fetched only when the Flat button is
+       pressed; changing part drops the previous rows.
+       Together with P-4 this is the headline finding of the whole exercise:
+       the page was not slow because the backend is slow. It asked for three
+       expensive things on every view and the user had requested one.
 
   P-9. Connection churn                                NOT STARTED
        24,903 connections created against 17 concurrent. Check whether
@@ -270,6 +282,43 @@ measure, including the attempts that fail.
   P-11. Notification poll                              LOW PRIORITY
        60s interval per page, four queries each, restarted on every full page
        navigation. About 7 requests/minute per open tab. Real but small.
+
+  P-13. Idle CPU and RAM on the host                   NOT STARTED
+       Owner reports the VPS control panel showing load averaging above 40%
+       and RAM at 100% while idle. Several services share that box, so some of
+       it is not TinyMRP - but it should not sit at the limit.
+       WHERE TO LOOK, and note the first item cuts both ways:
+         - gunicorn workers were just raised from 2 to (2 x cores) + 1. Each
+           worker is a full Python process holding its own Mongo pool, so this
+           TRADED memory for concurrency. If RAM is the binding constraint,
+           lower WEB_CONCURRENCY on that instance and measure - the setting
+           exists precisely so it can be tuned per host.
+         - the owner's hypothesis: comments and notifications forcing
+           continuous checking, or sweeping all users. Worth testing directly.
+           Known so far: the notification poll is 60s per open tab and issues
+           four queries (users, roles, user_notifications x2). Small per tab,
+           but it is per TAB and it restarts on every full page navigation.
+         - measure per-container rather than per-host first:
+           docker stats --no-stream. An earlier reading showed the app at
+           173 MiB and Mongo at 298 MiB, which is modest - so if the host is
+           at 100%, look at what else is on it before blaming TinyMRP.
+         - Mongo's WiredTiger cache defaults to half of RAM. On a shared box
+           that alone can look like "RAM at 100%". Check whether a cache size
+           is configured; if not, that is the likely explanation and it is one
+           compose setting.
+
+  P-14. Instance updates got slow to start             NOT STARTED
+       Owner reports containers taking much longer to come up after
+       update-instance.sh than they used to.
+       LIKELY CAUSE, and it is self-inflicted: the app HEALTHCHECK was moved
+       from /api/health to /api/ready, and start-period was raised 25s -> 60s.
+       Readiness pings Mongo and checks storage, so "healthy" now genuinely
+       waits for dependencies instead of reporting the process exists. Some of
+       the delay is therefore correct and wanted.
+       What to check before changing anything: whether the container is
+       actually READY earlier than it is reported healthy - if so, the
+       healthcheck interval and retries are the cost, not the app. Also
+       whether more gunicorn workers simply take longer to fork and import.
 
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.
