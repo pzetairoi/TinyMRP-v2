@@ -258,3 +258,22 @@ def test_backup_writes_and_verifies_checksums():
     assert backup.index("manifest.env") < backup.index("SHA256SUMS")
     # A failed verification must abort, not warn.
     assert 'die "Checksum verification failed' in backup
+
+
+def test_dns_wait_cannot_hang_an_unattended_install():
+    """Found by running the guided installer for real, 2026-08-07.
+
+    The DNS wait loop prompted when a TTY was present and slept forever when it
+    was not, so an install driven by CI, a provisioning tool or a plain `ssh
+    host cmd` hung indefinitely instead of reporting the mismatch. A hang is
+    worse than a failure: nothing tells you why, and no exit code says it went
+    wrong. The retry is now bounded and dies with a message naming the escape
+    hatch.
+    """
+    common = _read("deploy/scripts/lib/common.sh")
+
+    assert "DNS_WAIT_MAX_ATTEMPTS" in common
+    assert "dns_wait_attempts" in common
+    assert "--skip-dns-check to install anyway" in common
+    # The interactive path must keep prompting - a human can see what is wrong.
+    assert "Press Enter to check again" in common

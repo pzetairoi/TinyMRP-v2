@@ -86,6 +86,21 @@ WHAT hardeningplan.txt IS NOW
       window per instance: enable auth, create the app user, update MONGO_URI.
       Data must not be destroyed — see the deployment-reality rules.
 
+  *** INSTALLER FINDING 2026-08-07 - guided install hangs unattended ***
+  create-instance.sh waits for DNS in a loop that PROMPTED when a TTY was
+  present and slept forever when it was not. Driven over `ssh host cmd` it
+  retried silently for over half an hour, created nothing, and never failed.
+  A hang is worse than an error: no reason, no exit code, nothing to act on.
+  FIXED: the unattended path is now bounded (DNS_WAIT_MAX_ATTEMPTS, default 20
+  = ~5 minutes) and dies naming --skip-dns-check as the escape hatch. The
+  interactive prompt is kept - a human watching can see what is wrong.
+  The trigger was real: test.tinymrp.com resolves to SERVER-B, NOT the
+  VPS (SERVER-A), so the guard was right to refuse. Let's Encrypt could
+  not have issued a certificate either.
+  OWNER: repoint test.tinymrp.com at SERVER-A to validate the full path
+  including ACME, or run with --local-mode internal-tls to validate everything
+  except real certificate issuance.
+
   *** LIVE-INSTANCE FINDINGS 2026-08-07 - main is deployed and running ***
   www.tinymrp.com now runs tinymrp-app:c99696c527be. Doctor: 0 failures.
   Nextcloud and Vikunja unaffected. /api/ready reports ok=true (database ok,

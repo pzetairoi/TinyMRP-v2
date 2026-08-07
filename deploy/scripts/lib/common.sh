@@ -634,6 +634,14 @@ wait_for_dns() {
     if [ -t 0 ]; then
       read -r -p "Press Enter to check again, or Ctrl+C to stop. " _ || true
     else
+      # Unattended: retry, but BOUNDED. This loop used to sleep forever with no
+      # timeout and no failure, so an install driven by CI, a provisioning tool
+      # or an SSH command with no TTY hung indefinitely instead of reporting the
+      # DNS mismatch. A hang is worse than an error - nothing tells you why.
+      dns_wait_attempts=$((${dns_wait_attempts:-0} + 1))
+      if [ "$dns_wait_attempts" -ge "${DNS_WAIT_MAX_ATTEMPTS:-20}" ]; then
+        die "DNS for ${domain} still does not point at ${expected_ipv4} after ${dns_wait_attempts} checks. Fix the record, or pass --skip-dns-check to install anyway (Caddy will not be able to obtain a public certificate until DNS is correct)."
+      fi
       sleep 15
     fi
   done
