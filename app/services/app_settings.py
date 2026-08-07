@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import current_app, has_app_context
+from flask import current_app, g, has_app_context, has_request_context
 
 from app.models.app_settings import AppSettings
 from app.services.timezone_utils import (
@@ -19,11 +19,30 @@ _FILE_SOURCE_ID_RE = re.compile(r"[^a-z0-9]+")
 
 
 def get_app_settings(create: bool = True) -> Optional[AppSettings]:
+    """The single AppSettings document, memoised FOR THE CURRENT REQUEST.
+
+    This is called from many small helpers, so it was re-read constantly: the
+    profiler measured app_settings twice on every request and 593 times in one
+    docpacks/build. It is one document that does not change during a request,
+    and re-reading it is pure overhead paid even by the cheapest call.
+
+    Request-scoped rather than cached globally, on purpose. An administrator
+    changing a setting must see it take effect on the next request, not after
+    a restart or an eviction. Outside a request context nothing is memoised,
+    so CLI commands and imports always read fresh.
+    """
+    if has_request_context():
+        cached = g.get("_tinymrp_app_settings", None) if hasattr(g, "get") else None
+        if cached is not None:
+            return cached
+
     settings = AppSettings.objects().order_by("-updated_at").first()
-    if settings or not create:
-        return settings
-    settings = AppSettings()
-    settings.save()
+    if not settings and create:
+        settings = AppSettings()
+        settings.save()
+
+    if settings is not None and has_request_context():
+        g._tinymrp_app_settings = settings
     return settings
 
 

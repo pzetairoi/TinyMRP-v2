@@ -522,6 +522,9 @@ export default function PartDetailPage() {
   useEffect(() => {
     setDocOptsWanted(false);
     setDocOpts({ file_types: [], processes: [], markup_document_count: 0 });
+    // Same reasoning for the flat BOM: another part's rows must not linger,
+    // and must not be silently re-fetched either.
+    setFlatBomRows([]);
   }, [pn, effectiveRev]);
   const revToken = effectiveRev ? effectiveRev : "__no_rev__";
   const sharedAllowsChildren = !!publicShareInfo?.allow_children;
@@ -1213,7 +1216,12 @@ function isExternalDatasheetUrl(url: string): boolean {
     };
   }, [isSharedView, pn, rev, refreshTick, shareApiBase]);
 
+  // The flat BOM is NOT loaded with the page. Measured on a real assembly:
+  // /api/bom_flat cost 8717 Mongo queries and 55 seconds for J200684, on every
+  // single part view - while the user was looking at the tree. It is fetched
+  // when the Flat button is actually pressed.
   useEffect(() => {
+    if (bomMode !== "flat") return;
     let cancelled = false;
     (async () => {
       setFlatBomLoading(true);
@@ -1236,7 +1244,7 @@ function isExternalDatasheetUrl(url: string): boolean {
     return () => {
       cancelled = true;
     };
-  }, [isSharedView, pn, rev, refreshTick, shareApiBase]);
+  }, [bomMode, isSharedView, pn, rev, refreshTick, shareApiBase]);
 
   // ---------- Load BOM (lazy children) ----------
   function setNodeChildren(
