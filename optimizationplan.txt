@@ -1,4 +1,60 @@
 ========================================================================
+OPTIMIZATION PLAN — CLOSED 2026-08-08
+========================================================================
+
+  *** CLOSED. Remaining work moved to postoptimizationplan.txt. ***
+
+  WHAT THIS ACHIEVED, measured on the live test instance with 1789 parts:
+
+    /api/docpacks/options   9665 ops / 37 s     ->    52 ops / 4.6 s
+    /api/bom_tree (1 level)   64 ops / 1001 ms  ->    21 ops / 75 ms
+    /api/part_detail          52 ops / 2106 ms  ->    29 ops / 234 ms
+    Mongo CPU while idle          39.4%         ->    0.5%
+
+  The owner's verdict on navigation, which is what this was for: stable, and
+  no problems in testing.
+
+  HOW IT WAS DONE - four ideas, in the order they proved themselves:
+
+    1. Stop asking for things nobody requested. The page fetched a full flat
+       BOM and a full doc-pack option set on EVERY part view. Neither had been
+       asked for. This was the single largest win and it changed no algorithm.
+
+    2. Read what import already computed. part.file_groups was written at
+       import and the query path was recomputing it from PartFile 3852 times
+       per request. The owner's principle, and it beat batching.
+
+    3. Batch, never per-item. Parts per level, files per pair set, markup
+       counts, children links - each collapsed from N queries to one.
+
+    4. Delete work that cannot change the answer. A 1801 ms subtree
+       authorisation walk that could only ever return "allowed" for an
+       unrestricted user, and a mongosh healthcheck costing 23 seconds of CPU
+       per minute to ask whether the database was alive.
+
+  WHAT IT COST TO LEARN - the mistakes are the useful part:
+
+    Raising gunicorn workers with the standard (2 x cores) + 1 formula took a
+    shared host down and made it unreachable, because the formula assumes one
+    application per host and that VPS ran three instances. Count the tenants
+    before multiplying anything per instance.
+
+    Twice I removed an authorisation check reasoning it could not fail. Both
+    times a test caught it; once it turned a 403 into a 200 on a path-traversal
+    record. Make checks cheap. Do not reason them away.
+
+    Swapping __iexact for a plain $in silently dropped case-differing records,
+    including the one that security test depended on. A performance change
+    quietly disabling a security check is the worst way for one to fail.
+
+    Two optimisations targeted the wrong thing because the assumption sounded
+    right. Both were caught by measuring afterwards. The profiler built in
+    section 2 exists because of that, and everything after it was measured
+    first.
+
+  The detail of all of it is preserved below, unchanged.
+
+========================================================================
 OPTIMIZATION PLAN — making TinyMRP fast and cheap again
 ========================================================================
 Opened 2026-08-08. Branch: main.

@@ -1,0 +1,171 @@
+========================================================================
+POST-OPTIMIZATION PLAN — what is left, for the owner to prioritise
+========================================================================
+Opened 2026-08-08. Branch: main.
+
+Follows hardeningplan.txt (closed), posthardeningplan.txt (closed) and
+optimizationplan.txt (closed 2026-08-08).
+
+The system is in production and performing acceptably. Nothing below is
+urgent. This exists so that whoever picks it up - the owner, or another AI -
+can choose what matters rather than rediscover what is left.
+
+WRITTEN FOR A HANDOVER. Each item says what it is, what it costs, and what is
+already known, so nobody re-derives anything.
+
+
+========================================================================
+1. WHERE THINGS STAND
+========================================================================
+
+  FLEET, by alias. Real addresses in deploy/fleet.local.md, gitignored - this
+  repository is public.
+
+    SERVER-A (4 cores, 7.7 GB, comfortable)
+      main    PRODUCTION   latest | Mongo authenticated | strict | redis
+      vikunja              untouched throughout, verified up
+      *** Nextcloud is NOT running. Torn down during the rebuild and never
+          reinstalled; cloud.tinymrp.com is unserved. See item 2.1. ***
+
+    SERVER-B (2 cores, 3.8 GB, busy - see 2.4)
+      mecs    PRODUCTION   latest | compat mode | no redis
+      test                 latest | strict | redis | profiler OFF
+      two Nextclouds       the actual resource consumers on this host
+
+  GATES: 787 backend tests, 336 frontend, ruff / mypy / bandit clean, build OK.
+
+  SECURITY POSTURE
+    Phase 2 strict authentication is live on main and test. mecs remains on
+    compat - one environment variable whenever the owner chooses.
+    Mongo authentication is live on main only. demo, test and mecs still run
+    unauthenticated databases.
+    The CSP browser check (posthardeningplan O1) is still the cheapest open
+    security item: about 30 minutes with a browser.
+
+
+========================================================================
+2. WHAT IS LEFT
+========================================================================
+
+  2.1 Reinstall the SERVER-A stack, including Nextcloud     VISIBLE GAP
+      cloud.tinymrp.com has been unserved since the from-scratch rebuild. It
+      is the only thing a user can see is missing. Its data is safe in the
+      safety copy taken beforehand: 161 MB under /srv/rebuild-safety-*, with
+      the Caddy routes and a Vikunja archive.
+      PROCEDURE, learned the hard way:
+        - back up, then PROVE the backup restores into a throwaway container
+          before destroying anything. Four consecutive backups were once
+          silently empty and only verifying caught it
+        - Vikunja shares that Caddy and must never go down; check it before,
+          during and after
+        - the admin password must be at least 12 characters or the container
+          refuses to start, having already destroyed the old instance
+
+  2.2 Mongo authentication on demo, test and mecs           SECURITY
+      deploy/scripts/enable-mongo-auth.sh exists and is proven on main. One
+      short maintenance window each. It backs up first and refuses to proceed
+      if the backup fails.
+      Note it also breaks backups until they are given credentials - that fix
+      is already in backup-instance.sh and restore-instance.sh, but check the
+      first backup after each migration actually contains data.
+
+  2.3 Strict mode on mecs                                   SECURITY
+      The add-in was verified against strict mode on test, so the risk that
+      blocked this is retired. One environment variable and a restart.
+
+  2.4 Nextcloud's resource use on SERVER-B                  OWNER DECISION
+      Two Nextclouds with their MariaDBs take about 162% of a 2-core box and a
+      gigabyte of RAM - more than everything TinyMRP runs there combined.
+      TinyMRP's whole footprint on that host is roughly 575 MB.
+      Nothing in TinyMRP will move this number. Options: drop the test
+      Nextcloud, stagger their cron and preview jobs, bound
+      innodb_buffer_pool_size on both.
+      AND BEFORE ANYONE PANICS AT A CONTROL PANEL: the host is not out of
+      memory. Linux counts page cache as used; `available` is the number that
+      matters and there was 1.5 GB of it.
+
+  2.5 _flatten_bom level batching                           PERFORMANCE
+      A doc-pack build measured 22 s and 6625 BOM queries before a
+      children-lookup memo was added. NOT re-measured since - do that first,
+      the memo may have taken most of it.
+      CARRIES REAL RISK: quantities accumulate per path, and $graphLookup
+      reports reachability rather than multiplicity, so it cannot be used
+      here. A wrong quantity on a document pack is a manufacturing error, not
+      a slow page. tests/test_exact_bom_pairs_batching.py already asserts a
+      part reached via two paths at 2x3 and 5x3 totals 21; keep it green.
+
+  2.6 The remaining tree walks                              PERFORMANCE
+      Nine were inventoried in optimizationplan.txt P-25. Only touch ones the
+      profiler shows are hot; half run once a day.
+
+  2.7 Frontend test coverage                                QUALITY
+      4 of 8 pages still have no page-level test. Playwright and axe are still
+      not installed, which also blocks automated accessibility checks and any
+      testing of the 3D viewer and canvas markup.
+
+  2.8 Silent exception handlers                             QUALITY
+      158 of 184 remain, concentrated in docpacks.py, admin.py, parts.py and
+      __init__.py. The 26 already triaged surfaced two real defects, so the
+      exercise pays - but the rest are mostly best-effort UI paths.
+
+  2.9 Commercial and legal                                  OWNER
+      Drafts are in docs/commercial/ and need counsel. The licence decision -
+      The Unlicense, public domain - means the agreement must be a service and
+      support contract, not a EULA. Restrictions cannot be imposed on software
+      dedicated to the public domain.
+
+  2.10 Help screenshots                                     COSMETIC
+      Five placeholder images in the running help state what to capture and
+      which file to overwrite. Replace them one at a time. Drawing markups
+      have no help section at all - a whole feature undocumented.
+
+
+========================================================================
+3. HOW TO WORK ON THIS SYSTEM
+========================================================================
+  Distilled from three plans and several expensive mistakes. This is the part
+  worth reading before touching anything.
+
+  MEASURE FIRST. TINYMRP_PROFILE=1 enables a per-request profiler that counts
+  Mongo operations - count, not time, because every query here already runs in
+  about a millisecond and the damage is doing it four hundred times. It costs
+  about 31% CPU under load, so turn it off afterwards. Two optimisations in
+  this project targeted the wrong thing because the assumption sounded right.
+
+  PROVE A BACKUP RESTORES BEFORE DESTROYING ANYTHING. Four consecutive backups
+  were silently empty after Mongo authentication was enabled, and the guard
+  passed them because it checked file size rather than content. A backup that
+  has not been restored is a file, not a backup.
+
+  DO NOT REMOVE AN AUTHORISATION CHECK BECAUSE IT LOOKS REDUNDANT. Tried twice
+  here, caught twice by tests, once turning a 403 into a 200 on a
+  path-traversal record. Make checks cheap instead - resolve the data once and
+  hand it in. That worked every time.
+
+  COUNT THE TENANTS BEFORE MULTIPLYING ANYTHING PER INSTANCE. Raising gunicorn
+  workers with the standard formula took a shared host down and made it
+  unreachable. Nothing inside a container can see its neighbours; only the
+  operator can. WEB_CONCURRENCY is the per-host override and exists for this.
+
+  WORK BELONGS AT IMPORT, QUERIES SHOULD ONLY READ. Before writing a batch
+  query, check whether import already computed the answer onto the document.
+  part.file_groups and canonical.approved are both materialised and indexed.
+
+  DESTROYING DATA IS NOT ACCEPTABLE. Breaking things is. Never drop, truncate
+  or overwrite existing collections, documents or deliverables. Migrations
+  must be additive and reversible. Failing loudly at startup is fine; silently
+  losing a part, a BOM link or a deliverable is not.
+
+  THE CADDY IS SHARED. On both servers it fronts other production services -
+  Vikunja on one, two Nextclouds on the other. Breaking it takes down more
+  than TinyMRP.
+
+  solidworks-addin/ IS OUT OF SCOPE. It needs real SolidWorks to test.
+
+  KEEP INFRASTRUCTURE OUT OF THE REPOSITORY. It is public. Aliases only; the
+  real mapping lives in deploy/fleet.local.md, which is gitignored.
+
+  GATES THAT MUST STAY GREEN
+    pytest | ruff check . | bandit -r app -ll
+    mypy app/services/security_mode.py app/services/api_auth.py
+    cd frontend && npm run test && npx tsc --noEmit -p tsconfig.app.json
