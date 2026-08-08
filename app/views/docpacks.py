@@ -70,13 +70,28 @@ def options():
     # include the root itself for artifacts
     flat.append((pn, rev or "", 1.0))
 
-    # ext_groups seen
+    # ext_groups seen across the subtree.
+    #
+    # This used to run one PartFile query PER PART - measured at 130 queries in
+    # a single options call, and 589 operations for the request overall. The
+    # answer is already denormalised: part.file_groups is written at import by
+    # sync_part_materialized_fields. So this is one aggregation over the parts
+    # we already resolved, and no PartFile access at all.
+    #
+    # A part whose materialised field was never built contributes nothing here,
+    # so the per-part scan is kept as a fallback for exactly those.
+    names = sorted({str(pnr or "").strip() for pnr, _r, _q in flat if str(pnr or "").strip()})
     groups = set()
-    for pnr, r, _ in flat:
-        q = PartFile.objects(part_number__iexact=pnr)
-        if r is not None:
-            q = q.filter(revision__iexact=(r or ""))
-        for f in q.only("ext_group"):
+    stale: list[str] = []
+    if names:
+        for doc in Part.objects(part_number__in=names).only("part_number", "file_groups"):
+            values = list(getattr(doc, "file_groups", None) or [])
+            if values:
+                groups.update(str(v).strip() for v in values if str(v or "").strip())
+            else:
+                stale.append(doc.part_number)
+    for pnr in stale:
+        for f in PartFile.objects(part_number__iexact=pnr).only("ext_group"):
             if f.ext_group:
                 groups.add(f.ext_group)
 

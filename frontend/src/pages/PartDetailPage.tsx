@@ -1,5 +1,5 @@
 // frontend/src/pages/PartDetailPage.tsx
-import React, { useEffect, useMemo, useState, Suspense, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useState, Suspense, useRef } from "react";
 import { useLocation, useParams, Link } from "react-router-dom";
 import { effectiveRevisionFor, revisionFromLocation } from "../lib/partIdentity";
 import { DataTable } from "primereact/datatable";
@@ -348,6 +348,25 @@ function identityAvatar(profile?: IdentityProfile | null, fallback = "", size: "
 
 
 // ---------- Component ----------
+/**
+ * Declares that the panel containing it needs its data loaded.
+ *
+ * PrimeReact renders only the ACTIVE tab, so mounting is a reliable signal
+ * that the user opened this panel. Deriving the same thing from a tab index
+ * was not: some panels are conditional - the drawing tab only exists when
+ * there is a drawing - so a hardcoded position pointed at the wrong panel on
+ * some parts and the doc-pack filters silently came up empty.
+ *
+ * The panel asking for what it needs cannot drift out of step with the panel
+ * order, because there is no order involved.
+ */
+function NeedsData({ onNeeded }: { onNeeded: () => void }) {
+  useEffect(() => {
+    onNeeded();
+  }, [onNeeded]);
+  return null;
+}
+
 export default function PartDetailPage() {
   const route = useParams();
   const location = useLocation();
@@ -458,6 +477,7 @@ export default function PartDetailPage() {
   // 4.2 seconds, walking an entire assembly subtree to populate a dropdown
   // that most visits never open. Nothing is fetched until the tab is.
   const [docOptsWanted, setDocOptsWanted] = useState(false);
+  const requestDocOpts = useCallback(() => setDocOptsWanted(true), []);
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
   const [docProgress, setDocProgress] = useState(0);
@@ -1995,12 +2015,6 @@ function isExternalDatasheetUrl(url: string): boolean {
 
   // ---------- Render ----------
   const [tabIndex, setTabIndex] = useState(0)
-  // Doc Packs is the fourth panel; the three before it are unconditional.
-  // Opening it is what makes the options worth fetching.
-  const DOC_PACKS_TAB_INDEX = 3
-  useEffect(() => {
-    if (tabIndex === DOC_PACKS_TAB_INDEX) setDocOptsWanted(true)
-  }, [tabIndex])
   useEffect(() => {
     setTabIndex(0)
     setShareCreateUrl("")
@@ -2926,6 +2940,7 @@ function isExternalDatasheetUrl(url: string): boolean {
             </TabPanel>
 
             {(!isSharedView || sharedAllowsDocpacks) && <TabPanel header={tabHeader("Doc Packs", "pi-folder")}>
+              <NeedsData onNeeded={requestDocOpts} />
               {docError ? <div className="alert alert-danger mt-3" role="alert">{docError}</div> : null}
               {(() => {
                 const docpackMissing: string[] = [];
