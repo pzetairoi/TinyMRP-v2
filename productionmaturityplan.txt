@@ -1,0 +1,565 @@
+========================================================================
+POST-1.0 PRODUCTION MATURITY PLAN - close the edges, then add capability
+========================================================================
+Opened 2026-08-08. Branch: main.
+Release baseline: v1.0.0 = f5b5913.
+Handover baseline reviewed: postoptimizationplan.txt at cc4f13c.
+
+This plan starts AFTER hardeningplan.txt, posthardeningplan.txt,
+optimizationplan.txt and the 1.0 closure recorded in postoptimizationplan.txt.
+Those plans are history and evidence, not a backlog.
+
+RULE: do not reopen a CLOSED item unless a regression is demonstrated.
+The purpose here is to finish the small known debts, add the missing quality
+coverage, and build the next useful features without destabilising 1.0.
+
+NOTE ON THIS DOCUMENT. Drafted by ChatGPT after the 1.0 work and reviewed
+against the repository before being committed. The review confirmed the
+baseline claims in section 0 (release workflow, Trivy gate, SBOM, GHCR
+publication all exist as described) and added one item the draft could not
+have known about: A4, backup retention. That finding landed in
+postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
+
+
+========================================================================
+0. CURRENT BASELINE - DO NOT REDISCOVER THIS
+========================================================================
+
+  RELEASE / FLEET
+    - v1.0.0 is tagged and immutable.
+    - Fleet Mongo authentication is CLOSED and live everywhere. Verified
+      positively: unauthenticated access to mecs is refused.
+    - Fleet strict authentication is CLOSED and live everywhere.
+    - Scheduled backups on SERVER-B are installed and were verified to
+      contain real data, including after Mongo auth was enabled.
+    - Nextcloud resource tuning is CLOSED. Do not restart N6-N8 work.
+    - Existing release-image workflow already builds the hardened app image,
+      runs a HIGH/CRITICAL Trivy gate, creates an SBOM and publishes to GHCR.
+      VERIFIED in .github/workflows/release-image.yml, 2026-08-08.
+
+  STILL OPEN FROM postoptimizationplan.txt
+    O1    CSP browser check.
+    2.14  Backup retention and cadence. NEWEST AND MOST TIME-SENSITIVE.
+    2.13  Remove/retire legacy-login compat paths, after add-in compatibility
+          is confirmed.
+    2.12  Migrate and remove legacy roles safely.
+    2.11  Finish TypeScript errors and make tsc a real CI gate.
+    2.7   Frontend page coverage + Playwright/axe coverage.
+    2.8   Risk-ranked silent exception cleanup.
+    2.5   Re-measure _flatten_bom before any further optimisation.
+    2.6   Optimise remaining tree walks only when profiling proves value.
+    N11   Nextcloud-as-file-manager architecture, read-side first.
+    2.10  Help screenshots + drawing markup help.
+    2.9   Commercial/legal review by counsel; track here, do not pretend an
+          AI code change closes it.
+
+  NEW WORKSTREAM ADDED BY OWNER
+    C1-C8 TinyMRP Community / Standalone Docker distribution:
+          one hardened Linux image, one Compose architecture, simple Linux
+          and Windows installers, Docker Hub publication, safe update,
+          backup and restore.
+
+
+========================================================================
+1. HOW TO WORK FROM HERE
+========================================================================
+
+  KEEP 1.0 BORING.
+    Small commits, one purpose each. Do not mix auth cleanup, RBAC migration,
+    frontend typing and Docker distribution in the same change.
+
+  VERIFY BEFORE DELETE.
+    Legacy auth and roles are removable only after proving what still uses
+    them. Existing database role names and SolidWorks add-ins matter more
+    than grep results.
+
+  MEASURE BEFORE OPTIMISE.
+    Items 2.5 and 2.6 do not become coding tasks until profiling proves the
+    current implementation is still materially hot.
+
+  DATA MIGRATIONS MUST BE ADDITIVE AND REVERSIBLE.
+    No destructive role/database/file migration. A failed migration may stop;
+    it may not silently remove access or data.
+
+  DO NOT WEAKEN THE HARDENED IMAGE FOR COMMUNITY USE.
+    Community deployment must preserve non-root app execution, read-only
+    filesystem where practical, tmpfs /tmp, no-new-privileges, dropped
+    capabilities, authenticated Mongo, internal-only Mongo/Redis and the
+    existing health/readiness behaviour.
+
+  NEXTCLOUD TUNING IS CLOSED.
+    N11 is architecture, not another resource-tuning pass. N9/N10 are only
+    reconsidered if N11 design evidence makes them relevant.
+
+  solidworks-addin/ STILL REQUIRES REAL SOLIDWORKS ACCEPTANCE.
+    Do not claim compat code can be deleted based only on server tests.
+
+  A BACKUP IS NOT A BACKUP UNTIL IT HAS BEEN RESTORED.
+    Carried forward because it has already cost this project twice: four
+    consecutive backups were silently empty past a guard that only checked
+    the file was non-empty, and eight deploy scripts - including
+    backup-instance.sh and restore-instance.sh - were not executable, so
+    the documented invocation failed outright. Check content, not exit codes.
+
+
+========================================================================
+2. ORDER OF WORK - CONCURRENT LANES
+========================================================================
+
+  LANE A - SECURITY / LEGACY CLEANUP / OPERATIONS
+    A1 O1 CSP browser check.
+    A2 2.13 legacy-login retirement.
+    A3 2.12 legacy-role migration and removal.
+    A4 2.14 backup retention and cadence. Independent of A1-A3.
+
+  LANE B - FRONTEND / QUALITY
+    B1 2.11 finish TypeScript and enforce tsc in CI.
+    B2 2.7 page tests, then minimum Playwright + axe critical-path suite.
+    B3 2.8 silent exceptions, risk-ranked and incremental.
+
+  LANE C - COMMUNITY DOCKER DISTRIBUTION
+    C1 architecture + public contract.
+    C2 release pipeline / Docker Hub.
+    C3 shared Compose.
+    C4 Linux installer and commands.
+    C5 Windows installer and commands.
+    C6 update / backup / restore / uninstall-preserve-data.
+    C7 optional LAN/domain/Caddy modes.
+    C8 cross-platform acceptance matrix and public docs.
+
+  LANE D - PERFORMANCE, MEASURE-ONLY FIRST
+    D1 2.5 re-measure _flatten_bom.
+    D2 2.6 profile remaining tree walks.
+
+  LANE E - NEXTCLOUD ARCHITECTURE
+    E1 N11 ADR/spike only at first. Read-side integration before any ownership
+       inversion. Do not change import/write truth in the first iteration.
+
+  LANE F - DOCUMENTATION / COMMERCIAL
+    F1 2.10 help screenshots + markup help.
+    F2 2.9 counsel review and commercial-document updates after advice.
+
+  Lanes A, B, C, D-measurement and F may progress concurrently.
+  Do NOT run A2 and A3 as overlapping edits if both touch shared auth/RBAC
+  primitives. Do NOT implement N11 writes/import changes concurrently with
+  importer or file-security refactors.
+  A4 and C6 both touch backup behaviour - settle A4's retention model before
+  C6 defines the Community backup contract, or the two will disagree.
+
+
+========================================================================
+3. TASKS
+========================================================================
+
+  A1  CSP BROWSER CHECK                                      SMALL / MANUAL
+      Status: OPEN - deliberately parked by owner.
+      Use report-only strict CSP first, exercise representative UI paths,
+      classify script-src violations, then enforce TINYMRP_CSP_ALLOW_INLINE=false
+      only if clean. style-src inline allowances are a separate intentional
+      decision and must not be confused with script-src closure.
+      DONE WHEN: critical UI paths work with strict script CSP enforced and
+      evidence is recorded in this plan.
+
+  A2  RETIRE LEGACY LOGIN / COMPAT PATHS                    SECURITY CLEANUP
+      First inventory every compat branch and every client that can still hit
+      it. Confirm the deployed SolidWorks add-in works against strict mode.
+      Then remove dead compat paths rather than preserving a second auth model.
+      Keep the change small and security-test heavy.
+      CONTEXT AS OF 1.0: the whole fleet already runs strict, so the compat
+      branches are unreachable in production. A rollback copy of the last
+      compat configuration is kept at
+      instances/mecs/.env.before-strict-20260808. If nobody has complained
+      after a few weeks of real add-in use, that file can go and this task
+      becomes safe.
+      DONE WHEN: strict is the only supported production auth path, tests cover
+      its fail-closed behaviour, and no known field client depends on compat.
+
+  A3  MIGRATE AND REMOVE LEGACY ROLES                              RBAC
+      Identify the exact legacy role set from the role registry/RBAC history.
+      Inspect live role assignments before deletion. Provide an additive,
+      reversible mapping to canonical roles; migrate data first, remove code
+      second. Prove representative allow/deny cases so a 403 cannot become 200.
+      WARNING FROM EXPERIENCE: an authorisation check was removed twice in this
+      project on the reasoning that it looked redundant, and was caught both
+      times by tests - once turning a 403 into a 200 on a path-traversal
+      record. Role names also live in databases, not only in code: deleting a
+      name while a live user holds it silently drops their access.
+      DONE WHEN: no live user depends on a legacy role name and legacy role
+      handling is absent from normal code paths.
+
+  A4  BACKUP RETENTION AND CADENCE                            OPERATIONS
+      Measured on mecs at 1.0 closure:
+        deliverables.tar.gz   2.0 GB     99.9% of the backup
+        mongo.archive.gz      2.3 MB     (27.1 MB uncompressed)
+        live: 2.8 GB across 22151 files vs a 515 MB Mongo data dir
+      The database is tiny; the engineering files are the entire cost.
+
+      TWO PROBLEMS, both structural rather than incidental:
+        - the daily job re-compresses all 2.8 GB every night even when not one
+          file changed
+        - there is NO retention policy at all. Nothing deletes anything, ever.
+      At roughly 2 GB a night against ~14 GB free, the disk has about a week
+      of runway, and a backup that runs out of space fails quietly.
+
+      THE FIX FALLS OUT OF THE MEASUREMENT: split the cadences.
+        - database: 2.3 MB compressed. Daily is free; hourly would be too.
+        - deliverables: 2 GB that rarely all change. Weekly, or better an
+          incremental rsync mirror that copies only what is new.
+        - retention: keep N and drop the rest. Anything beats nothing.
+      Deliberately not done on release day. It changes backup-instance.sh,
+      which has already produced silent failures twice here.
+      DONE WHEN: disk usage is bounded by policy, the database is captured at
+      least daily, and a restore from the new layout has been proven on a
+      disposable instance.
+
+  B1  MAKE TYPESCRIPT A REAL GATE                                 QUALITY
+      Current state: ambient declarations were repaired and errors reduced from
+      25 to 18 at the 1.0 closure handover.
+      Root cause of most of them was src/vite-env.d.ts holding a stale copy of
+      vite.config.ts where the ambient declarations belong, so no CSS import
+      had a type. Nothing caught it because Vite's build strips types without
+      checking them and CI never ran a typecheck.
+      Fix genuine errors without broad casts/ts-ignore, add missing dev types,
+      then run `tsc --noEmit` in CI before declaring this closed.
+      DONE WHEN: standalone typecheck is green locally and blocking in CI.
+
+  B2  FRONTEND ACCEPTANCE COVERAGE                               QUALITY
+      Finish page-level tests for the uncovered pages first. Then add a small
+      Playwright suite for the workflows that unit tests cannot prove:
+        login -> search/list -> part detail -> BOM -> file/viewer/markup path
+        plus one admin permission denial.
+      Add axe to the same small suite; do not attempt a giant E2E framework.
+      DONE WHEN: critical user path and at least one RBAC negative path execute
+      in a real browser in CI, with basic accessibility checks.
+
+  B3  SILENT EXCEPTION TRIAGE                                    QUALITY
+      Do not chase the count for its own sake. Work in small batches by risk:
+        auth/security/data writes -> import/docpacks -> admin -> best-effort UI.
+      Replace silent swallowing with explicit expected exceptions or logging;
+      add a regression test whenever a real defect is found.
+      DONE WHEN: high-risk silent handlers are gone; low-risk best-effort
+      handlers are either justified or tracked, not merely counted.
+
+
+  C1  COMMUNITY DISTRIBUTION CONTRACT                         NEW FEATURE
+      Create deploy/community/ without altering the hardened multi-instance
+      VPS deployment. Reuse the SAME app Dockerfile/image.
+
+      Public product shape:
+        TinyMRP app + authenticated Mongo + Redis
+        optional Caddy profile for domain/TLS
+        user-visible deliverables bind mount
+        Docker-managed Mongo persistence
+
+      One compose.yaml must serve Linux and Windows Docker Desktop. Windows
+      runs the same Linux containers; do NOT create a separate Windows image.
+      Nextcloud is NOT part of the first Community package.
+
+      User input should be limited to:
+        deliverables path
+        access mode: localhost / LAN / domain
+        port
+        administrator email/password
+      Everything else is generated or managed.
+
+      NOTE: the entrypoint sizes gunicorn workers from the host core count.
+      That formula once took a shared VPS down because it assumed one
+      application per host. A Community install is single-tenant, so the
+      default is appropriate there - but keep WEB_CONCURRENCY documented as
+      the per-host override.
+
+  C2  DOCKER HUB + RELEASE PIPELINE                           SUPPLY CHAIN
+      Extend the existing release-image workflow; do not build a second,
+      differently-scanned artifact for Docker Hub.
+
+      Requirements:
+        - preserve GHCR publication
+        - add Docker Hub publication from version tags
+        - same source/tag and preferably same build digest to both registries
+        - preserve Trivy HIGH/CRITICAL gate and SBOM evidence
+        - publish immutable semantic tags; move `latest` only on stable release
+        - linux/amd64 required; linux/arm64 after dependency/build smoke proves it
+        - never publish secrets in image layers or workflow logs
+
+      Namespace target may be `tinymrp/tinymrp`, but make it configurable until
+      ownership of the Docker Hub namespace is confirmed.
+      v1.0.0 must not be retagged or mutated. If backfilled to Docker Hub, build
+      exactly from the immutable v1.0.0 tag; otherwise first public release may
+      be the next patch version.
+
+  C3  SHARED COMMUNITY COMPOSE                              DISTRIBUTION
+      Add deploy/community/compose.yaml and .env.example/template.
+      Required defaults:
+        localhost bind by default, not 0.0.0.0
+        app image selected by explicit version variable
+        Mongo and Redis have no published host ports
+        Mongo auth uses separate root and least-privilege app credentials
+        Mongo data persists in a named volume
+        deliverables use a user-selected host bind mount
+        app keeps hardened read_only/tmpfs/cap-drop/no-new-privileges posture
+        healthchecks and dependency readiness are explicit
+      Caddy/domain mode should be an optional profile, not mandatory complexity.
+
+      Mongo authentication cannot be added to an existing data directory by
+      environment variables alone - the official image only creates users while
+      initialising an EMPTY data dir, silently doing nothing otherwise. A
+      Community install must therefore start authenticated from first boot.
+      enable-mongo-auth.sh exists for the migration case; do not rely on it as
+      the happy path.
+
+  C4  LINUX INSTALLER + OPERATOR COMMANDS                    USABILITY
+      Add install.sh plus simple wrappers/commands for:
+        start | stop | status | logs | update | backup | restore
+      Installer must generate secrets securely, validate Docker/Compose,
+      create storage paths, detect port conflicts, start the stack, wait for
+      readiness and print the final URL.
+      Default experience: localhost. LAN is explicit opt-in.
+      Ship every script executable. Eight of this repository's deploy scripts
+      were committed mode 644, so the documented invocation failed with
+      "command not found" - including the backup and restore scripts.
+
+  C5  WINDOWS INSTALLER + OPERATOR COMMANDS                  USABILITY
+      Add install.ps1 and a small install.cmd launcher using the SAME compose.
+      Target first: Windows workstation with Docker Desktop Linux containers.
+      Default deliverables path may be C:\TinyMRP\Deliverables, but allow any
+      local drive path supported by Docker Desktop.
+      Validate Docker/Compose before changing anything; detect port conflicts;
+      for LAN mode, make any Windows Firewall change explicit and Private-network
+      only. Do not make remote `irm | iex` the recommended novice path.
+      A signed Setup.exe can be a later packaging layer over the same scripts.
+
+  C6  UPDATE / BACKUP / RESTORE / DATA SURVIVAL               OPERATIONS
+      Community update must be safer than `pull && up`:
+        backup database/config first
+        remember previous app version
+        pull explicit target tag
+        recreate app
+        wait for health/readiness
+        rollback app tag automatically on failed startup
+
+      Backup must include a real Mongo dump + configuration and optionally
+      deliverables, with integrity verification. Restore must be acceptance
+      tested on a disposable installation. Uninstall must clearly distinguish
+      "remove application" from "delete data"; data deletion is never default.
+
+      VERIFY CONTENT, NOT EXIT CODES. mongodump writes a valid, tiny archive
+      and exits 0 when it cannot authenticate. Check the UNCOMPRESSED size -
+      the gzip trailer gives it in constant time; the compressed size is
+      worthless because repetitive data compresses to a few hundred bytes.
+      See app/services/backups.py for the working version of this check.
+      Settle A4's retention model first so the two do not disagree.
+
+  C7  ACCESS MODES                                            NETWORKING
+      localhost: bind 127.0.0.1, default.
+      LAN: bind 0.0.0.0 only after explicit choice and show detected LAN URL.
+      domain: optional Caddy service/profile with HTTPS; TinyMRP app itself
+      stays private behind Caddy.
+      Do not make domain/TLS complexity block the localhost/LAN milestone.
+
+  C8  COMMUNITY ACCEPTANCE MATRIX                                QA
+      Before calling Community distribution supported, prove from clean hosts:
+        Ubuntu/Debian-class Docker Engine: install, login, import/basic use,
+        backup, update, restore, stop/start, uninstall preserving data.
+        Windows + Docker Desktop: same sequence using PowerShell/cmd.
+        localhost and LAN modes on both.
+        domain/Caddy on Linux at minimum before documenting it as supported.
+      Add one CI compose smoke test, but keep real Windows acceptance as a
+      release checklist unless a suitable runner is available.
+      Public README/Docker Hub instructions must match the tested path exactly.
+
+
+  D1  RE-MEASURE _flatten_bom                                PERFORMANCE
+      Re-run the doc-pack measurement after the existing memoisation work.
+      If the cost is no longer material, CLOSE WITHOUT CODE.
+      If still hot, optimise with exact multiplicity tests kept green.
+      $graphLookup reports reachability, not multiplicity, so it cannot be
+      used here: quantities accumulate per path. A wrong quantity on a
+      document pack is a manufacturing error, not a slow page.
+
+  D2  REMAINING TREE WALKS                                   PERFORMANCE
+      Profile first. Only optimise walks that are both frequent and material.
+      Do not spend engineering effort on once-a-day paths to improve a number
+      nobody experiences.
+      TINYMRP_PROFILE=1 counts Mongo operations per request. Count, not time:
+      every query here already runs in about a millisecond and the damage is
+      doing it four hundred times. It costs about 31% CPU, so turn it off after.
+
+
+  E1  N11 NEXTCLOUD AS FILE MANAGER                     ARCHITECTURE / LATER
+      First deliverable is an ADR/spike, not a migration.
+      Preserve these invariants:
+        imports do not fail because Nextcloud is down
+        current path/file permission checks remain effective
+        no deliverable becomes unreachable during migration
+        TinyMRP can still run without Nextcloud
+        import atomicity is not weakened
+
+      Preferred first step: read-side/presentation integration only. TinyMRP
+      keeps write ownership and truth while Nextcloud becomes the user-facing
+      manager for browsing/sharing. Reconsider source-of-truth inversion only
+      after that model has real operating evidence.
+
+      TWO CONSTRAINTS THE DESIGN MUST START FROM:
+        - the application container has NO docker socket and cannot run occ.
+          Mounting the socket would hand the application root on the host.
+        - upload_pack.py stages inside file_root so os.replace stays atomic.
+          An API-backed store has no equivalent guarantee, and partial writes
+          would become visible states.
+
+      N9/N10/N6-N8: do not schedule separately unless this architecture creates
+      a measured reason. Current Nextcloud tuning remains CLOSED.
+
+
+  F1  HELP / MARKUP DOCUMENTATION                             DOCUMENTATION
+      Replace the remaining placeholder screenshots and add a concise help
+      section for drawing markup. Keep screenshots tied to current UI so the
+      task is finite and reviewable.
+
+  F2  COMMERCIAL / LEGAL                                    OWNER / COUNSEL
+      Track the drafts and questions for counsel. Update repository documents
+      only after the legal/commercial position is decided. This is not a code
+      completion gate for engineering work.
+      The licence decision - The Unlicense, public domain - means any agreement
+      must be a service and support contract, not a EULA. Restrictions cannot
+      be imposed on software dedicated to the public domain.
+
+
+========================================================================
+4. CONCURRENCY RULES FOR CLAUDE / CODEX
+========================================================================
+
+  SAFE TO RUN IN PARALLEL
+    - B1 TypeScript work vs C1-C5 Community packaging.
+    - F1 documentation vs backend/security work.
+    - D1/D2 measurement vs most code work, provided profiling is read-only.
+    - A4 backup retention vs anything that is not C6.
+    - C4 Linux installer and C5 Windows installer AFTER C3 compose contract is
+      stable; both must consume the same variables rather than inventing two
+      configurations.
+
+  SERIALISE THESE
+    - A2 legacy login and A3 legacy roles when touching shared auth/RBAC files.
+    - A4 retention model before C6 backup contract.
+    - C2 release workflow and any other change to release-image.yml.
+    - C3 compose contract before C4/C5 diverge around it.
+    - N11 implementation vs importer/file-security architecture changes.
+
+  EVERY TASK MUST LEAVE A HANDOVER ENTRY
+    STATUS: OPEN | ACTIVE | BLOCKED | DONE | DEFERRED
+    baseline/result measurements where relevant
+    files changed
+    tests/gates run
+    commit SHA
+    rollback or migration note if applicable
+    one-line "what remains"
+
+  If a task discovers another issue, record it here once. Do not silently fold
+  unrelated cleanup into the current change.
+
+
+========================================================================
+5. GATES / DEFINITION OF DONE
+========================================================================
+
+  EXISTING GATES MUST NOT REGRESS
+    backend tests            794 passing, 1 skipped at 1.0
+    ruff                     clean
+    bandit                   clean
+    scoped mypy security checks
+    frontend unit tests      336 passing at 1.0
+    frontend build           clean
+    dependency/security workflow
+    image vulnerability gate + SBOM
+
+  ADD AS THEY BECOME REAL
+    standalone TypeScript typecheck after B1
+    critical Playwright/axe suite after B2
+    community compose smoke after C3/C8
+
+  DATA-SENSITIVE CHANGES
+    role migration, backup/restore, community update/restore and future N11
+    work require a disposable acceptance test before production use.
+
+  RELEASE RULE
+    v1.0.0 remains immutable. New work earns patch/minor releases; do not move
+    the old tag to make packaging easier.
+
+
+========================================================================
+6. MILESTONES
+========================================================================
+
+  M1 - SMALL SECURITY/QUALITY CLOSURE
+    A1 + B1 complete.
+    Result: last manual CSP debt closed and frontend has a real type gate.
+
+  M1b - OPERATIONS SAFETY
+    A4 complete.
+    Result: backup storage is bounded by policy instead of growing until the
+    disk fills. Sequenced early because it is the only open item with a
+    deadline set by physics rather than preference.
+
+  M2 - LEGACY REDUCTION
+    A2 + A3 complete with field-client/RBAC evidence.
+    Result: one auth model, one canonical role model.
+
+  M3 - COMMUNITY STANDALONE MVP
+    C1-C6 complete for Linux + Windows localhost.
+    Result: clean machine -> install -> login -> persist -> backup/restore ->
+    update, without cloning source or manually editing secrets.
+
+  M4 - COMMUNITY NETWORK/RELEASE
+    C2 + C7 + C8 complete.
+    Result: verified Docker Hub distribution, LAN support and documented domain
+    mode; same hardened image remains the source everywhere.
+
+  M5 - QUALITY DEPTH
+    B2 plus high-risk portion of B3.
+    Result: browser-level critical path + accessibility smoke and less silent
+    failure in sensitive code.
+
+  M6 - MEASURED PERFORMANCE ONLY
+    D1/D2 closed either with evidence that no work is needed, or narrowly
+    optimised with before/after measurements.
+
+  M7 - NEXTCLOUD ARCHITECTURE DECISION
+    E1 ADR/spike accepted or explicitly deferred. No forced migration.
+
+  F1/F2 run when convenient and should not block engineering milestones unless
+  a release explicitly requires their output.
+
+
+========================================================================
+7. PROGRESS LOG
+========================================================================
+
+  Add newest entries at the top. Keep entries short.
+
+  2026-08-08  PLAN  OPENED
+    Baseline: v1.0.0 = f5b5913; fleet on f5b5913c265c, all three instances
+      strict, Mongo authenticated, doctor 0 failures.
+    Change/result: this plan created. Section 0 baseline claims verified
+      against the repository; A4 added from cc4f13c, which postdated the
+      draft's stated baseline of 310d3f0.
+    Evidence/tests: 794 backend, 336 frontend, ruff, bandit, build all green.
+    Commit: see git log for this file.
+    Remaining: everything. Nothing in section 3 has been started.
+
+
+========================================================================
+8. END STATE
+========================================================================
+
+  This plan is complete when:
+    - known 1.0 security/legacy debts are closed or explicitly accepted;
+    - backup storage is bounded and restore from the new layout is proven;
+    - typecheck and critical browser coverage are real gates;
+    - high-risk silent failures are triaged;
+    - performance work is measurement-driven rather than speculative;
+    - TinyMRP can be installed as a standalone Community product on Linux and
+      Windows using the same hardened image and Compose architecture;
+    - Docker Hub publishing reuses the existing verified release pipeline;
+    - update, backup and restore preserve data by construction;
+    - N11 has a deliberate architectural decision rather than accidental drift;
+    - old CLOSED hardening/optimisation work has not been re-created under new
+      names.
