@@ -146,3 +146,33 @@ def test_preresolved_parts_do_not_weaken_the_file_check(app):
             exact_file_part(_User(), "ASM", "1", parts_in_scope={("other", ""): object()})
             is None
         )
+
+
+def test_flatten_bom_still_accumulates_quantities_across_shared_paths(app):
+    """The children memo must not change the arithmetic.
+
+    _flatten_bom deliberately has NO visited set: a shared subassembly appears
+    on several paths and its quantities must add up. Memoising the link fetch
+    shares the query, not the traversal - so a part reached twice must still be
+    counted twice.
+
+    This is the assertion that matters. A wrong quantity on a document pack is
+    a manufacturing error, not a slow page.
+    """
+    from app.services.docpacks import _flatten_bom
+
+    with app.app_context():
+        BOMLink.objects.delete()
+        # TOP uses SHARED twice, via two different intermediates, 2 x 3 and 5 x 3.
+        BOMLink(parent_pn="TOP", parent_rev="", child_pn="MID-A", child_rev="", qty=2).save()
+        BOMLink(parent_pn="TOP", parent_rev="", child_pn="MID-B", child_rev="", qty=5).save()
+        BOMLink(parent_pn="MID-A", parent_rev="", child_pn="SHARED", child_rev="", qty=3).save()
+        BOMLink(parent_pn="MID-B", parent_rev="", child_pn="SHARED", child_rev="", qty=3).save()
+
+        rows = {(pn, rev): qty for pn, rev, qty in _flatten_bom("TOP", "", full=True)}
+
+    assert rows[("MID-A", "")] == 2
+    assert rows[("MID-B", "")] == 5
+    # 2x3 via MID-A plus 5x3 via MID-B. The memo shares the LINK LOOKUP for
+    # SHARED; it must not collapse the two paths into one.
+    assert rows[("SHARED", "")] == 21, f"quantities collapsed: got {rows.get(('SHARED', ''))}"

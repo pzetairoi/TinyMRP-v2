@@ -206,12 +206,29 @@ def _flatten_bom(
 
     terminals: Set[str] = set([str(x).strip().lower() for x in (terminal_processes or [])])
 
+    # Memoised for the life of this walk. A BOM is a graph, not a tree: shared
+    # subassemblies mean the same parent is reached along several paths and was
+    # being re-queried each time. Measured on a doc-pack build: 6625 BOM
+    # queries for 1344 distinct parts, about five per part.
+    #
+    # The walk deliberately has no visited set, because the same part legitimately
+    # appears more than once with DIFFERENT accumulated quantities. That stays
+    # true - only the link fetch is shared, and the traversal and its arithmetic
+    # are untouched.
+    _children_cache: Dict[Tuple[str, str], list] = {}
+
     def children(pn: str, rev: Optional[str]):
         rev_val = _clean_rev(rev)
-        if "parent_rev" in BOMLink._fields:
-            if rev is not None:
-                return BOMLink.objects(parent_pn=pn, parent_rev=rev_val)
-        return BOMLink.objects(parent_pn=pn)
+        key = (str(pn or "").strip().casefold(), rev_val.casefold() if rev is not None else "<any-revision>")
+        cached = _children_cache.get(key)
+        if cached is not None:
+            return cached
+        if "parent_rev" in BOMLink._fields and rev is not None:
+            rows = list(BOMLink.objects(parent_pn=pn, parent_rev=rev_val))
+        else:
+            rows = list(BOMLink.objects(parent_pn=pn))
+        _children_cache[key] = rows
+        return rows
 
     stack: List[Tuple[str,str,float]] = []
     # Seed stack with immediate children
@@ -685,12 +702,29 @@ def _bom_occurrences(
     occ: Dict[Tuple[str,str], List[Tuple[str,float]]] = {}
     terminals: Set[str] = set([str(x).strip().lower() for x in (terminal_processes or [])])
 
+    # Memoised for the life of this walk. A BOM is a graph, not a tree: shared
+    # subassemblies mean the same parent is reached along several paths and was
+    # being re-queried each time. Measured on a doc-pack build: 6625 BOM
+    # queries for 1344 distinct parts, about five per part.
+    #
+    # The walk deliberately has no visited set, because the same part legitimately
+    # appears more than once with DIFFERENT accumulated quantities. That stays
+    # true - only the link fetch is shared, and the traversal and its arithmetic
+    # are untouched.
+    _children_cache: Dict[Tuple[str, str], list] = {}
+
     def children(pn: str, rev: Optional[str]):
         rev_val = _clean_rev(rev)
-        if "parent_rev" in BOMLink._fields:
-            if rev is not None:
-                return BOMLink.objects(parent_pn=pn, parent_rev=rev_val)
-        return BOMLink.objects(parent_pn=pn)
+        key = (str(pn or "").strip().casefold(), rev_val.casefold() if rev is not None else "<any-revision>")
+        cached = _children_cache.get(key)
+        if cached is not None:
+            return cached
+        if "parent_rev" in BOMLink._fields and rev is not None:
+            rows = list(BOMLink.objects(parent_pn=pn, parent_rev=rev_val))
+        else:
+            rows = list(BOMLink.objects(parent_pn=pn))
+        _children_cache[key] = rows
+        return rows
 
     def _fmt_seq(seq: object, fallback: int | None) -> str:
         val = seq if seq not in (None, "") else fallback
