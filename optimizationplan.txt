@@ -374,6 +374,39 @@ measure, including the attempts that fail.
        instance, count how many instances share the machine. Nothing inside a
        container can see its neighbours; only the operator can.
 
+  P-20. $graphLookup in the options endpoint            DONE
+       subtree_part_numbers() resolves the descendants inside Mongo.
+       46 ms for J200684's 1344 descendants, against 4.2 s and 589 operations.
+       SCOPE, and it matters: this does NOT replace _flatten_bom. That
+       accumulates quantities along each path; $graphLookup reports
+       reachability, not multiplicity. It is used only where the SET of parts
+       is the answer - which file groups and processes exist below an assembly.
+       Falls back to the walk on empty or on failure, and maxDepth 25 guards
+       against a cycle in the data.
+
+  P-21. Loading state for the doc-pack filters          DONE
+       Those lists are gathered across a whole assembly. An empty list during
+       the wait reads as "this part has no processes" - a manufacturing answer
+       rather than a loading state, the same misleading emptiness the BOM tree
+       had. Both lists now show a progress bar naming what is being fetched,
+       and only while genuinely empty.
+
+  P-22. Everything deployed to PRODUCTION               DONE 2026-08-08
+       main on SERVER-A now runs the full optimisation set. Backed up first
+       (21 MB, checksums verified). After: 52 parts / 56 bom / 178 files
+       intact, strict mode, healthy, www and vikunja both serving, 6265 MB
+       still available.
+       Workers: 4 cores -> 5, which is safe here because SERVER-A runs ONE
+       TinyMRP instance with 7.7 GB. That is the opposite of the host that
+       fell over, and the difference is exactly the co-tenancy the formula
+       cannot see (see P-19).
+
+  OUTSTANDING, NOT PERFORMANCE BUT NOT DONE EITHER:
+    Nextcloud on SERVER-A was torn down during the from-scratch rebuild and
+    never reinstalled. Its data is safe in the safety copy taken beforehand
+    (161 MB, /srv/rebuild-safety-*). cloud.tinymrp.com is currently not
+    served. This needs doing or explicitly abandoning.
+
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.
     2. Count queries per request; an N+1 hides as a fast query repeated.
