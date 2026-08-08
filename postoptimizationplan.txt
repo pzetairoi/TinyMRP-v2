@@ -91,16 +91,30 @@ already known, so nobody re-derives anything.
   FLEET, by alias. Real addresses in deploy/fleet.local.md, gitignored - this
   repository is public.
 
-    SERVER-A (4 cores, 7.7 GB, comfortable)
-      main    PRODUCTION   latest | Mongo authenticated | strict | redis
-      vikunja              untouched throughout, verified up
-      *** Nextcloud is NOT running. Torn down during the rebuild and never
-          reinstalled; cloud.tinymrp.com is unserved. See item 2.1. ***
+    SERVER-A (4 cores, 7.7 GB)   REBUILT FROM SCRATCH 2026-08-08
+      Wiped completely at the owner's instruction to test a clean install:
+      all TinyMRP and Nextcloud containers, data, deliverables, backups and
+      the repo clone, plus an older BARE-METAL install nobody remembered
+      (host mongod, mariadb, redis, apache2, nginx, a tinymrp system user,
+      /var/www) - 21 GB recovered, 25G used -> 3.7G.
+      The owner is reinstalling it manually. STATE UNKNOWN TO THIS FILE:
+      the rebuild rotated the host key and dropped the deploy public key,
+      so automated access was lost. Re-verify before trusting anything
+      here about SERVER-A.
+      vikunja              SURVIVED, deliberately. sqlite at /srv/vikunja,
+                           its own caddy at /srv/vikunja/proxy, HTTP 200.
+                           See /srv/vikunja/LEEME-ANTES-DE-INSTALAR.txt -
+                           that caddy holds ports 80/443 and a TinyMRP
+                           install will collide with it.
 
-    SERVER-B (2 cores, 3.8 GB, busy - see 2.4)
-      mecs    PRODUCTION   latest | compat mode | no redis
-      test                 latest | strict | redis | profiler OFF
-      two Nextclouds       the actual resource consumers on this host
+    SERVER-B (2 cores, 3.8 GB)   FULLY UP TO DATE 2026-08-08
+      mecs    PRODUCTION   image 7c7301fc6621 | compat mode | no redis
+      test                 image 7c7301fc6621 | strict | redis | profiler OFF
+      two Nextclouds       both now on cron at low priority (section 3)
+      repo at 3119bf3. The image is CURRENT: nothing under app/, frontend/,
+      requirements or docker/ has changed since it was built, so the
+      commits after it are host-side scripts and docs only. Do not rebuild
+      looking for a difference that is not there.
 
   GATES, re-verified 2026-08-08:
     787 backend tests pass (1 skipped) | 336 frontend tests pass
@@ -136,17 +150,26 @@ already known, so nobody re-derives anything.
 2. WHAT IS LEFT
 ========================================================================
 
-  2.1 Reinstall the SERVER-A stack, including Nextcloud     VISIBLE GAP
-      cloud.tinymrp.com has been unserved since the from-scratch rebuild. It
-      is the only thing a user can see is missing. Its data is safe in the
-      safety copy taken beforehand: 161 MB under /srv/rebuild-safety-*, with
-      the Caddy routes and a Vikunja archive.
-      PROCEDURE, learned the hard way:
+  2.1 SERVER-A rebuild             OWNER IS DOING THIS MANUALLY 2026-08-08
+      SERVER-A was wiped completely at the owner's instruction, on the
+      owner's statement that it was a test machine nobody uses and its data
+      might be dirty. NO BACKUP WAS KEPT - that was the explicit decision,
+      not an oversight. The old safety copies referenced by earlier versions
+      of this item are gone too.
+      The owner is reinstalling it by hand with another AI's help.
+      *** AUTOMATED ACCESS TO SERVER-A IS LOST. *** The rebuild rotated the
+      host key and dropped the deploy public key from authorized_keys.
+      Restoring it needs the owner to append the key once.
+      WHAT SURVIVES AND MUST KEEP SURVIVING: vikunja. sqlite at
+      /srv/vikunja, its own caddy at /srv/vikunja/proxy, verified HTTP 200.
+      THE TRAP WAITING FOR THE INSTALL: that caddy holds ports 80/443, so a
+      TinyMRP install will fail with "port is already allocated". Written up
+      on the machine itself at /srv/vikunja/LEEME-ANTES-DE-INSTALAR.txt,
+      with the original route preserved at /srv/vikunja/vikunja.caddy.keep.
+      PROCEDURE, learned the hard way and still true:
         - back up, then PROVE the backup restores into a throwaway container
           before destroying anything. Four consecutive backups were once
           silently empty and only verifying caught it
-        - Vikunja shares that Caddy and must never go down; check it before,
-          during and after
         - the admin password must be at least 12 characters or the container
           refuses to start, having already destroyed the old instance
 
@@ -204,17 +227,17 @@ already known, so nobody re-derives anything.
       support contract, not a EULA. Restrictions cannot be imposed on software
       dedicated to the public domain.
 
-  2.11 Make the typecheck real, or stop claiming it          QUALITY
-       Add @types/node, fix the four genuine errors, then put
-       `tsc --noEmit` in security.yml so it cannot rot again. Half a day.
-       Until then the frontend has tests and a build but no type gate,
-       and BomPage.tsx and ThreeMFViewer.tsx carry type errors that
-       happen not to bite at runtime.
-
   2.10 Help screenshots                                     COSMETIC
       Five placeholder images in the running help state what to capture and
       which file to overwrite. Replace them one at a time. Drawing markups
       have no help section at all - a whole feature undocumented.
+
+  2.11 Make the typecheck real, or stop claiming it          QUALITY
+      Add @types/node, fix the four genuine errors, then put
+      `tsc --noEmit` in security.yml so it cannot rot again. Half a day.
+      Until then the frontend has tests and a build but no type gate,
+      and BomPage.tsx and ThreeMFViewer.tsx carry type errors that
+      happen not to bite at runtime.
 
 
 ========================================================================
@@ -329,6 +352,21 @@ already known, so nobody re-derives anything.
 
   3.5 THE PLAN, CHEAPEST AND SAFEST FIRST
 
+    INDEX. Items appear in the order they were worked, NOT in numeric
+    order, because N9-N11 were discovered after the list was written.
+      N0  stagger the timers .................. DONE
+      N1  raise the interval .................. REJECTED by owner
+      N2  change-detection guard .............. DONE, both instances
+      N3  drop the redundant second pass ...... DONE, both instances
+      N4  Nextcloud cron instead of AJAX ...... DONE, both instances
+      N5  stop the test Nextcloud ............. DECLINED by owner
+      N11 Nextcloud as the file manager ....... OPEN, the big one
+      N9  Nextcloud scans the same tree we do . OPEN, needs a decision
+      N10 priority, not limits ................ PARTLY DONE
+      N6  Redis for Nextcloud ................. deprioritised, with reasons
+      N7  Apache / previews / InnoDB .......... only with evidence
+      N8  PHP-FPM ondemand .................... last, if ever
+
     N0  STAGGER THE TIMERS                     DONE 2026-08-08 (5c0f2c4)
         RandomizedDelaySec (half the interval, bounded 15-300s) plus
         AccuracySec=15s in install-nextcloud-scan-job.sh, matching what
@@ -342,7 +380,7 @@ already known, so nobody re-derives anything.
         matters to users for the thing the guard fixes anyway.
         Do not revive this item. Go straight to N2.
 
-    N2  CHANGE-DETECTION GUARD    IMPLEMENTED 2026-08-08 (5c0f2c4), ON TEST
+    N2  CHANGE-DETECTION GUARD   DONE 2026-08-08 (5c0f2c4), TEST AND MECS
         Revised 2026-08-08. An earlier draft had TinyMRP touch a marker
         file. That is unnecessary: the scan job runs on the HOST, and the
         deliverables tree is on the host. It can detect change itself.
@@ -430,7 +468,7 @@ already known, so nobody re-derives anything.
         every fallback path still does the user pass.
         TINYMRP_NEXTCLOUD_SCAN_USER_PATHS=1 forces it back on.
 
-    N4  NEXTCLOUD'S OWN BACKGROUND JOBS   DONE ON TEST 2026-08-08 (d7ef9d0)
+    N4  NEXTCLOUD'S OWN BACKGROUND JOBS  DONE 2026-08-08 (d7ef9d0), BOTH
         Confirmed beforehand: backgroundjobs_mode was unset on both
         instances, so both ran on the AJAX default where a user's page
         load drags Nextcloud's housekeeping.
