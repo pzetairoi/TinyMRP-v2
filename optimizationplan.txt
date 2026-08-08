@@ -469,6 +469,42 @@ measure, including the attempts that fail.
   OUTSTANDING, NOT PERFORMANCE BUT NOT DONE EITHER:
     Nextcloud on SERVER-A - folded into T-1 above.
 
+  P-23b. Healthcheck change MEASURED                    CONFIRMED 2026-08-08
+       Before/after on an idle test instance, same 45-second window:
+         Mongo CPU        39.37%  ->  0.51%
+         connections/45s      25  ->  13
+       Seventy times less CPU. This was the answer to "why is the VPS at 40%
+       while nobody is using it".
+
+  P-24. Doc-pack options: the remaining per-child queries  IN PROGRESS
+       Owner's framing, and it is the right one: this should be a query that
+       returns the distinct processes and file groups across the children, not
+       a question asked once per child. We do not need the children's data,
+       only their distinct values - with the permission filter applied.
+
+       CURRENT COST, measured after the $graphLookup work:
+         37541 ms, 9665 mongo ops for J200684
+         parts=5592  part_files=1372  bom=1348  part_drawing_markups=1348
+
+       Each of those four is its own per-child loop:
+         part_drawing_markups=1348  markup_document_count_for_pairs called
+                                    _current_layer per part - a markup query, a
+                                    PartFile query, a FILESYSTEM stat and a
+                                    fingerprint read, EACH.  ** FIXED: now one
+                                    query. **
+         bom=1348                   exact_bom_pairs walks the tree in Python to
+                                    build the authorisation pair list. Should
+                                    use subtree_part_numbers().
+         parts=5592                 roughly four per part. preflight_export_plan
+                                    and the pair resolution both re-read parts.
+         part_files=1372            still one per part somewhere in the
+                                    export-security path.
+
+       The shape of the fix is settled and proven twice already: resolve the
+       subtree once with $graphLookup, then answer each question with a single
+       aggregation over that set. Permission filtering is applied to the
+       resulting values in memory, which is free.
+
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.
     2. Count queries per request; an N+1 hides as a fast query repeated.

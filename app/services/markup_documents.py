@@ -252,16 +252,41 @@ def markup_documents_for_pairs(pairs: Iterable[tuple[str, str]]) -> list[MarkupD
 
 
 def markup_document_count_for_pairs(pairs: Iterable[tuple[str, str]]) -> int:
-    count = 0
-    seen: set[tuple[str, str]] = set()
+    """How many parts in this set carry a visible markup layer.
+
+    ONE query, deliberately. The previous version called _current_layer per
+    part, and that does a markup query, a PartFile query, a FILESYSTEM stat and
+    a fingerprint read - each. Measured on a real assembly: 1348 markup queries
+    inside a single doc-pack options call that took 37 seconds.
+
+    This is a COUNT used to enable a checkbox and show a number beside it. It
+    does not need each layer revalidated against its source file: visibility is
+    decided from the layer document, which is already in memory once fetched.
+    The full validation still runs in _current_layer wherever a layer is
+    actually rendered, which is where a stale source would matter.
+
+    Worst case this counts a part whose source file has since vanished, so a
+    checkbox is offered for a document that turns out empty. That is a far
+    smaller problem than the wait it replaces.
+    """
+    wanted: dict[tuple[str, str], None] = {}
     for pn, rev in pairs:
         key = (str(pn or "").strip(), clean_rev(rev))
-        if not key[0] or key in seen:
-            continue
-        seen.add(key)
-        if _current_layer(*key):
-            count += 1
-    return count
+        if key[0]:
+            wanted.setdefault((key[0].casefold(), key[1].casefold()), None)
+    if not wanted:
+        return 0
+
+    names = sorted({pn for pn, _rev in wanted})
+    with_markups: set[tuple[str, str]] = set()
+    for layer in PartDrawingMarkup.objects(part_number__in=names):
+        key = (
+            str(layer.part_number or "").strip().casefold(),
+            clean_rev(layer.revision or "").casefold(),
+        )
+        if key in wanted and key not in with_markups and _visible_objects(layer):
+            with_markups.add(key)
+    return len(with_markups)
 
 
 _INDEX_ROWS_PER_PAGE = 38
