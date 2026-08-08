@@ -557,10 +557,14 @@ measure, including the attempts that fail.
        argument was WRONG and the same path-traversal test caught it. Reverted,
        with the reasoning left in the code so nobody re-derives it.
 
-       STILL OPEN: that check costs about 5592 part queries on a 1344-part
-       assembly, because exact_file_part runs a Part query per file record.
-       The answer is to make the check cheap - resolve the parts once and hand
-       them in - NOT to reason it away. That is the remaining work here.
+       NOW DONE, the right way. preflight_export_plan resolves every part in
+       the authorised set ONCE through scope_queryset and hands the map to
+       exact_file_part, which turns its per-record query into a dict lookup.
+       The check is unchanged in what it proves: a file whose part is absent
+       from that scoped map is still refused, and a test asserts exactly that
+       - including that a DIFFERENT part being in scope does not authorise
+       this one. Cheap, not weakened, which is what the failed attempt should
+       have been.
 
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.

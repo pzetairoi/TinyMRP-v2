@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from app.models.artifact import PartFile
+from app.models.part import Part
 from app.models.bom import BOMLink
 from app.services.authorization import (
     authorised_part_pairs,
@@ -269,6 +270,39 @@ def preflight_export_plan(
         raise ExportSecurityError("export unavailable")
 
     files = _files_for_pairs(exact_pairs, file_groups) if include_files else ()
+
+    # Resolve every part in the authorised set ONCE, through scope_queryset, so
+    # the per-file check below is a dict lookup rather than a query. It ran a
+    # Part query per file record: about 5592 of them against 1372 files on a
+    # large assembly.
+    #
+    # The check is NOT weakened - a file whose part is absent from this scoped
+    # map is still refused, which is exactly what the per-file query proved. An
+    # earlier attempt removed the check outright on the argument that it could
+    # not fail; that was wrong and a path-traversal test caught it. This makes
+    # it cheap instead.
+    parts_in_scope: dict[tuple[str, str], Part] = {}
+    if files:
+        from app.services.authorization import scope_queryset as _scope
+
+        names = sorted({pn for pn, _rev in exact_pairs if pn})
+        if names:
+            scoped_parts = _scope(Part.objects, user, "parts").filter(
+                __raw__={
+                    "part_number": {
+                        "$in": [
+                            re.compile(f"^{re.escape(name)}$", re.IGNORECASE) for name in names
+                        ]
+                    }
+                }
+            )
+            for doc in scoped_parts.only("part_number", "revision", "canonical"):
+                key = (
+                    str(doc.part_number or "").strip().casefold(),
+                    clean_rev(doc.revision or "").casefold(),
+                )
+                parts_in_scope[key] = doc
+
     for file_record in files:
         # REVERTED 2026-08-08. I removed this per-file check arguing it could
         # not fail - authorised_part_pairs proves the whole pair set above, and
@@ -280,7 +314,9 @@ def preflight_export_plan(
         # Keep the full check. The 5592 part queries it costs on a large
         # assembly are recorded in optimizationplan.txt as still open; the
         # answer is to make the check cheap, not to reason it away.
-        if not managed_file_read_allowed(user, file_record):
+        if not managed_file_read_allowed(
+            user, file_record, parts_in_scope=parts_in_scope
+        ):
             raise ExportSecurityError("export unavailable")
         try:
             # Existing docpack/binder behaviour treats a safely located but

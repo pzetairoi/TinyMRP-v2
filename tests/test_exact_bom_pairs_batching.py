@@ -119,3 +119,30 @@ def test_file_lookup_matches_part_numbers_case_insensitively(app):
         found = _files_for_pairs([("AWS-Z-009025", "")], None)
 
     assert len(found) == 1, "a differently-cased part number was dropped by the batch"
+
+
+def test_preresolved_parts_do_not_weaken_the_file_check(app):
+    """The map makes the check cheap. It must not make it permissive.
+
+    exact_file_part ran a Part query per file record - about 5592 against 1372
+    files on a large assembly. Callers can now hand in parts they already
+    resolved through scope_queryset, turning it into a dict lookup.
+
+    The property that matters: a file whose part is ABSENT from that scoped map
+    is still refused, exactly as the query refused a part outside scope. An
+    earlier attempt deleted this check on the argument that it could not fail;
+    it could, and a path-traversal test caught it.
+    """
+    from app.services.file_security import exact_file_part
+
+    class _User:
+        is_authenticated = True
+
+    with app.app_context():
+        # Empty map: nothing is in scope, so nothing may be read.
+        assert exact_file_part(_User(), "ASM", "1", parts_in_scope={}) is None
+        # A different part in scope does not authorise this one.
+        assert (
+            exact_file_part(_User(), "ASM", "1", parts_in_scope={("other", ""): object()})
+            is None
+        )
