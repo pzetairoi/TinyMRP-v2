@@ -401,11 +401,47 @@ measure, including the attempts that fail.
        fell over, and the difference is exactly the co-tenancy the formula
        cannot see (see P-19).
 
+  T-1. Fully reinstall the SERVER-A instance             OWNER-REQUESTED
+       Reinstall the whole stack behind www.tinymrp.com from scratch,
+       INCLUDING Nextcloud, which was torn down during the earlier rebuild and
+       never put back - cloud.tinymrp.com is currently not served.
+       Nextcloud's data is in the safety copy taken beforehand: 161 MB in
+       /srv/rebuild-safety-*, alongside the Caddy routes and a Vikunja archive.
+       PROCEDURE, learned the hard way and not to be shortcut:
+         1. Back up, then PROVE the backup restores into a throwaway container
+            before destroying anything. A backup that has not been restored is
+            a file, not a backup - four consecutive backups were silently
+            empty and only verifying caught it.
+         2. Vikunja shares that Caddy and must never go down. Verify it before,
+            during and after.
+         3. The admin password must be at least 12 characters or the container
+            refuses to start, having already destroyed the old instance.
+         4. Restore, then verify counts against what was there before.
+
+  T-2. Resource analysis of the test VPS                 OWNER-REQUESTED
+       Find what is actually consuming the RAM on SERVER-B and why it sits at
+       the limit. Report, do not change.
+       KNOWN SO FAR, so this starts from evidence:
+         - one idle TinyMRP stack costs roughly 350 MB, measured by removing
+           demo: 2306 MB -> 1955 MB used
+         - per container when last sampled: app ~150-170 MB, Mongo ~90-115 MB,
+           redis ~5 MB, Nextcloud app ~218 MB
+         - the box has 3.8 GB and carries mecs, test, two Nextclouds with their
+           MariaDBs, Caddy and Redis
+       WHAT TO CHECK, in this order:
+         - Mongo's WiredTiger cache defaults to HALF of available RAM. With
+           two Mongos on one host that alone can look like "RAM at 100%" and
+           it is one compose setting to bound. Check it first; it is the most
+           likely single answer.
+         - MariaDB has its own buffer pool with the same story.
+         - Compare docker stats against free -m. Linux counts page cache as
+           used, so a host reporting 100% may simply be caching files and
+           giving the memory back on demand. `available` is the number that
+           matters, not `used`.
+         - Only then look at TinyMRP itself.
+
   OUTSTANDING, NOT PERFORMANCE BUT NOT DONE EITHER:
-    Nextcloud on SERVER-A was torn down during the from-scratch rebuild and
-    never reinstalled. Its data is safe in the safety copy taken beforehand
-    (161 MB, /srv/rebuild-safety-*). cloud.tinymrp.com is currently not
-    served. This needs doing or explicitly abandoning.
+    Nextcloud on SERVER-A - folded into T-1 above.
 
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.
