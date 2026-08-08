@@ -280,9 +280,11 @@ FALLBACK_FILES_SCAN_ALL=0
 EXTERNAL_SCAN_FAILED=0
 USER_SCAN_FAILED=0
 USER_SCAN_COUNT=0
+MOUNT_SCAN_CLEAN=0
 if [ -n "$MOUNT_ID" ]; then
   if nextcloud_occ "$NEXTCLOUD_CONTAINER_NAME" files_external:scan "$MOUNT_ID" >/dev/null 2>&1; then
     pass "External mount ID scan completed for mount ${MOUNT_ID}"
+    MOUNT_SCAN_CLEAN=1
   else
     note "External mount ID scan failed for mount ${MOUNT_ID}. Falling back to files_external:scan --all."
     FALLBACK_EXTERNAL_SCAN_ALL=1
@@ -320,7 +322,26 @@ else
   fi
 fi
 
-if [ ! -s "$USER_LIST_FILE" ]; then
+# The user-visible pass re-walks the tree the external scan has just walked.
+# Measured on test: a file created under the mount is already indexed, with a
+# fileid issued, after files_external:scan alone - the second pass added
+# nothing but roughly doubled the cost of every real scan. Nextcloud's file
+# cache is per-STORAGE, not per-user, so one storage scan serves every user the
+# mount is shared with.
+#
+# Only skipped when the mount-specific scan succeeded outright. Any fallback
+# path, or an unresolved mount id, still does the user pass: those are the
+# cases where the storage scan did not definitively cover this mount.
+# TINYMRP_NEXTCLOUD_SCAN_USER_PATHS=1 forces it back on.
+SKIP_USER_PATHS=0
+if [ "$MOUNT_SCAN_CLEAN" -eq 1 ] && [ "${TINYMRP_NEXTCLOUD_SCAN_USER_PATHS:-0}" != "1" ]; then
+  SKIP_USER_PATHS=1
+fi
+
+if [ "$SKIP_USER_PATHS" -eq 1 ]; then
+  SCAN_MODE="mount-id"
+  pass "User-visible path pass skipped: the mount-specific external scan already covered this storage"
+elif [ ! -s "$USER_LIST_FILE" ]; then
   fail "No Nextcloud users were resolved for user-visible path scanning under ${RESOLVED_MOUNT_POINT}"
   USER_SCAN_FAILED=1
 else
