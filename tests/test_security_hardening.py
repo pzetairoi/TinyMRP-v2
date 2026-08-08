@@ -33,7 +33,13 @@ def _login_session(client, user):
         sess["_fresh"] = True
 
 
-def test_cors_compat_same_origin(monkeypatch):
+def test_compat_mode_no_longer_relaxes_cors(monkeypatch):
+    """compat used to reflect any same-origin/localhost Origin with credentials.
+
+    That branch was removed (productionmaturityplan A2). This test used to
+    assert the relaxed behaviour; it now pins the opposite, so nobody can
+    reintroduce the second CORS model without a test turning red.
+    """
     app = _make_app(
         monkeypatch,
         TINYMRP_SECURITY_MODE="compat",
@@ -42,8 +48,26 @@ def test_cors_compat_same_origin(monkeypatch):
     )
     client = app.test_client()
     resp = client.get("/", headers={"Origin": "http://localhost"})
-    assert resp.headers.get("Access-Control-Allow-Origin") == "http://localhost"
-    assert resp.headers.get("Access-Control-Allow-Credentials") == "true"
+    assert resp.headers.get("Access-Control-Allow-Origin") is None
+    assert resp.headers.get("Access-Control-Allow-Credentials") is None
+
+
+def test_session_csrf_rejects_a_request_with_no_origin_or_referer(monkeypatch):
+    """The loosest rule compat had: neither header present used to pass.
+
+    A browser always sends one of them for an unsafe request, so anything that
+    sends neither is not a browser session and must be refused.
+    """
+    from app.services.security_mode import session_csrf_allowed
+
+    app = _make_app(
+        monkeypatch,
+        TINYMRP_SECURITY_MODE="compat",
+        SECRET_KEY="test-secret-123456",
+        SECURITY_PASSWORD_SALT="test-salt-123456",
+    )
+    with app.test_request_context("/api/parts", method="POST"):
+        assert session_csrf_allowed() is False
 
 
 def test_cors_strict_requires_allowlist(monkeypatch):

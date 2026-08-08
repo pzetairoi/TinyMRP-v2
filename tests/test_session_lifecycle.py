@@ -86,7 +86,9 @@ def test_inactive_and_reactivated_user_cannot_reuse_old_session(app):
     actor = _security_actor(app)
     target = _make_user(app, "status-session@example.com")
     actor_client = app.test_client()
+    actor_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
     target_client = app.test_client()
+    target_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
     _login(actor_client, actor)
     _login(target_client, target)
     original_identity = target.fs_uniquifier
@@ -157,7 +159,9 @@ def test_expired_signed_session_cookie_is_rejected(client, app):
 def test_self_password_change_signs_out_every_browser_and_audits(app):
     user = _make_user(app, "self-password-session@example.com")
     first_client = app.test_client()
+    first_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
     second_client = app.test_client()
+    second_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
     _login(first_client, user)
     _login(second_client, user)
     old_identity = user.fs_uniquifier
@@ -196,7 +200,9 @@ def test_administrator_password_reset_revokes_target_sessions(app):
     actor = _security_actor(app)
     target = _make_user(app, "admin-reset-session@example.com")
     actor_client = app.test_client()
+    actor_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
     target_client = app.test_client()
+    target_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
     _login(actor_client, actor)
     _login(target_client, target)
     old_identity = target.fs_uniquifier
@@ -292,7 +298,9 @@ def test_role_permission_edit_revokes_assigned_user_sessions(app):
         roles=[managed_role],
     )
     actor_client = app.test_client()
+    actor_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
     target_client = app.test_client()
+    target_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
     _login(actor_client, actor)
     _login(target_client, target)
     old_identity = target.fs_uniquifier

@@ -34,7 +34,22 @@ def app():
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    """A test client that behaves like a browser.
+
+    Real browsers always send Origin on unsafe cross-origin requests and
+    Referer on same-origin form posts; Flask's bare test client sends neither.
+    The suite used to paper over that by running in compat mode, where a
+    request with no Origin and no Referer passed the session CSRF check. That
+    branch was removed (productionmaturityplan A2), so the client now supplies
+    the header a browser would - which means these tests exercise the real
+    strict-mode path instead of a relaxed one that no longer exists.
+
+    Tests that need the no-header case should build their own client and assert
+    the request is REJECTED.
+    """
+    test_client = app.test_client()
+    test_client.environ_base["HTTP_ORIGIN"] = "http://localhost"
+    return test_client
 
 
 @pytest.fixture

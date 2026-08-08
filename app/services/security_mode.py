@@ -43,9 +43,40 @@ def security_mode() -> str:
     if not val:
         val = os.getenv("TINYMRP_SECURITY_MODE", "")
     val = str(val or "").strip().lower()
-    # Production-safe by default. Compatibility mode remains available only
-    # when an operator or the development/test environment selects it.
-    return "compat" if val == "compat" else "strict"
+    # RETIRED 2026-08-09 (productionmaturityplan A2). "compat" used to loosen
+    # CORS and the session CSRF origin check; those branches are gone and this
+    # is now the only remaining difference the value makes - it is reported by
+    # /api/health and nothing else reads it to weaken a check.
+    #
+    # Still resolved rather than deleted outright so an instance whose .env
+    # says compat keeps booting and keeps reporting honestly what it is
+    # configured as, instead of silently claiming strict. Removing the
+    # variable entirely is a separate, later step once no .env carries it.
+    if val == "compat":
+        _warn_compat_is_inert()
+        return "compat"
+    return "strict"
+
+
+_COMPAT_WARNED = False
+
+
+def _warn_compat_is_inert() -> None:
+    """Say it once per process, loudly enough to be acted on."""
+    global _COMPAT_WARNED
+    if _COMPAT_WARNED:
+        return
+    _COMPAT_WARNED = True
+    try:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "TINYMRP_SECURITY_MODE=compat no longer relaxes any security check. "
+            "The CORS and session-CSRF compatibility branches were removed. "
+            "Set it to strict, or remove it, to stop this warning."
+        )
+    except Exception:
+        pass
 
 
 def is_strict_mode() -> bool:
@@ -155,11 +186,6 @@ def resolve_cors_origin() -> Tuple[str | None, bool]:
         allow_credentials = _cors_credentials_allowed(explicit=True)
         return origin, allow_credentials
 
-    if security_mode() == "compat":
-        if _origin_matches_request(origin) or _origin_is_localhost(origin):
-            allow_credentials = True
-            return origin, allow_credentials
-
     return None, False
 
 
@@ -218,29 +244,21 @@ def api_auth_policy() -> str:
 
 
 def session_csrf_allowed() -> bool:
+    """Origin/referer check for unsafe methods on SESSION-authenticated requests.
+
+    API-token clients never reach this: app/__init__.py returns early for them,
+    which is why retiring the old compat behaviour here could not affect the
+    SolidWorks add-in. It authenticates with a token, not a session cookie.
+
+    A request carrying neither Origin nor Referer fails. That used to be
+    allowed in compat mode, and it was the loosest rule in the system.
+    """
     if is_safe_method(request.method):
         return True
     origin = request.headers.get("Origin")
     if origin:
-        if _origin_matches_request(origin):
-            return True
-        if security_mode() == "compat":
-            origins, _ = allowed_origins()
-            if _origin_matches_allowed(origin, origins):
-                return True
-            if _origin_is_localhost(origin):
-                return True
-        return False
+        return _origin_matches_request(origin)
     referer = request.headers.get("Referer")
     if referer:
-        if _origin_matches_request(referer):
-            return True
-        if security_mode() == "compat":
-            origins, _ = allowed_origins()
-            if _origin_matches_allowed(referer, origins):
-                return True
-            if _origin_is_localhost(referer):
-                return True
-        return False
-    # No origin or referer -> be lenient in compat mode.
-    return security_mode() == "compat"
+        return _origin_matches_request(referer)
+    return False

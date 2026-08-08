@@ -48,6 +48,7 @@ def test_login_logout_login_with_runtime_secrets(tmp_path, monkeypatch):
         ).save()
 
     client = app.test_client()
+    client.environ_base["HTTP_ORIGIN"] = "http://localhost"
 
     csrf = _csrf_token(client, "/login")
     resp1 = client.post(
