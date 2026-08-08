@@ -15,6 +15,76 @@ already known, so nobody re-derives anything.
 
 
 ========================================================================
+0. SUMMARY - WHAT WAS DONE, WHAT IS LEFT
+========================================================================
+  Added 2026-08-08 at the owner's request. Read this if you read nothing
+  else; everything below is the detail behind it.
+
+  WHAT HAS BEEN DONE, across four plans
+
+    hardeningplan.txt        CLOSED. Security baseline: authentication,
+                             RBAC, secret scanning, pinned and
+                             hash-locked dependencies, reproducible
+                             images, CI security workflow.
+    posthardeningplan.txt    CLOSED. The remainder of the above plus
+                             deployment tooling: doctor, backup and
+                             restore with verified content, Mongo
+                             authentication, strict mode.
+    optimizationplan.txt     CLOSED 2026-08-08. The navigation problem:
+                               docpacks/options  9665 ops/37s -> 52/4.6s
+                               bom_tree            64 ops/1001ms -> 21/75ms
+                               part_detail         52 ops/2106ms -> 29/234ms
+                               Mongo idle CPU          39.4% -> 0.5%
+                             Four ideas did the work, and only two are
+                             conventional optimisation: stop fetching
+                             what nobody asked for, read what import
+                             already computed, batch, and delete work
+                             that cannot change the answer.
+    THIS FILE, section 3     Nextcloud resource phase, done 2026-08-08:
+                               scan job    ~52s/5min -> ~0.2s/1min
+                               real scan        29s -> 14s
+                               background jobs  AJAX -> cron, low priority
+                             All host-side shell. No application change,
+                             no rebuild, no new privilege.
+
+  WHAT IS LEFT, honestly ranked
+
+    SECURITY, and the only items that would give me pause
+      2.2  Mongo runs unauthenticated on test and mecs. The script
+           exists and is proven on main.
+      2.3  mecs still runs compat authentication, not strict. One
+           environment variable; the risk that blocked it is retired.
+      O1   The CSP browser check has never been done. Thirty minutes.
+
+    QUALITY, real but not urgent
+      2.11 There is no enforced typecheck, and this file used to claim
+           there was.
+      2.7  Half the frontend pages have no page-level test; no Playwright
+           or axe, so no accessibility testing and no coverage of the 3D
+           viewer or canvas markup.
+      2.8  158 silent exception handlers remain.
+
+    ARCHITECTURE, the big future work
+      N11  Make Nextcloud the file manager rather than a mirror. The
+           owner's stated direction. Large, touches import, file
+           security and atomic writes. Everything else Nextcloud-related
+           becomes moot if this happens.
+
+    OWNER'S TO DECIDE
+      2.9  Commercial and legal drafts need counsel.
+      2.10 Help screenshots, and drawing markups have no help at all.
+
+  ON CALLING THIS 1.0
+    The code is ready: four plans closed, every gate that actually runs
+    is green, and it has been serving two real companies throughout.
+    What is NOT ready is two production DEPLOYMENTS - mecs on compat
+    mode, and unauthenticated databases on test and mecs. Both are
+    configuration with existing tooling, not product defects.
+    So: tag 1.0, and treat those two as the first post-1.0 job. Just do
+    not describe the fleet as fully hardened until they are done.
+
+
+========================================================================
 1. WHERE THINGS STAND
 ========================================================================
 
@@ -32,7 +102,26 @@ already known, so nobody re-derives anything.
       test                 latest | strict | redis | profiler OFF
       two Nextclouds       the actual resource consumers on this host
 
-  GATES: 787 backend tests, 336 frontend, ruff / mypy / bandit clean, build OK.
+  GATES, re-verified 2026-08-08:
+    787 backend tests pass (1 skipped) | 336 frontend tests pass
+    ruff clean | bandit clean | frontend build clean
+
+  CORRECTION TO AN EARLIER CLAIM IN THIS FILE. It listed
+  "npx tsc --noEmit -p tsconfig.app.json" among the gates that must stay
+  green. IT IS NOT GREEN, AND CI HAS NEVER RUN IT. .github/workflows/
+  security.yml runs the tests and the build, not a standalone typecheck,
+  and Vite's build does not typecheck - esbuild strips types without
+  checking them. Running it by hand reports errors in two categories:
+    ENVIRONMENTAL, from @types/node being absent from package.json:
+      node:child_process and process in noUndefinedIdentifiers.test.ts,
+      the JSX namespace, and every CSS module import
+    REAL, and nothing currently catches them:
+      unused declarations in AdminAddinPage.tsx and PartsPage.tsx,
+      a Vector2 argument in ThreeMFViewer.tsx:737,
+      a TreeTable matchMode union in BomPage.tsx:383
+  None of it breaks the build or any test. But the honest statement is
+  that this project has no enforced typecheck, and saying otherwise in a
+  handover document is worse than not having one. See item 2.11.
 
   SECURITY POSTURE
     Phase 2 strict authentication is live on main and test. mecs remains on
@@ -114,6 +203,13 @@ already known, so nobody re-derives anything.
       The Unlicense, public domain - means the agreement must be a service and
       support contract, not a EULA. Restrictions cannot be imposed on software
       dedicated to the public domain.
+
+  2.11 Make the typecheck real, or stop claiming it          QUALITY
+       Add @types/node, fix the four genuine errors, then put
+       `tsc --noEmit` in security.yml so it cannot rot again. Half a day.
+       Until then the frontend has tests and a build but no type gate,
+       and BomPage.tsx and ThreeMFViewer.tsx carry type errors that
+       happen not to bite at runtime.
 
   2.10 Help screenshots                                     COSMETIC
       Five placeholder images in the running help state what to capture and
@@ -356,7 +452,15 @@ already known, so nobody re-derives anything.
             start a unit that is already active
           - steady-state cost afterwards is small; this is a one-off debt
             being paid down, not the new normal
-        Not yet applied to mecs: test has to finish cleanly first.
+
+        BOTH INSTANCES DONE. Backlog curves, from the journal:
+          test   842 -> 569 -> 0 -> 1 -> 1 -> 2 -> 1 -> 2 s
+          mecs   841 -> 841 -> 176 -> settling the same way
+        mecs is larger (1479 parts vs 52) so its debt was bigger.
+        Production was never affected: mecs answered in 0.218 / 0.078 /
+        0.066 / 0.131 s throughout, with cron peaking at 94% CPU.
+        Memory rose to 481 MB during the backlog and fell back to 292 MB
+        afterwards - it was work in flight, not a leak.
 
     N5  STOP THE TEST NEXTCLOUD WHEN NOT TESTING    DECLINED BY OWNER
         453 MB and two containers, idle almost always. Declined
@@ -364,6 +468,53 @@ already known, so nobody re-derives anything.
         there is no memory pressure (1674 MB available, zero swap), so
         this was convenience, not need. Left here only so nobody
         proposes it again as if it were new.
+
+    N11 NEXTCLOUD AS THE FILE MANAGER          THE BIG ONE - OWNER'S CALL
+        Owner's direction, 2026-08-08: leave Nextcloud alone for now,
+        because the intended future is that NEXTCLOUD BECOMES THE FILE
+        MANAGER for TinyMRP rather than a mirror hanging off the side of
+        it. This is a large architectural change, not a tuning item, and
+        it lands on top of everything the resource phase just tuned.
+
+        WHY IT IS BIG. Today the relationship is one-directional and
+        loose: TinyMRP owns the deliverables tree on disk, reads it
+        directly, and a host-side job tells Nextcloud to re-index. The
+        application itself has no idea Nextcloud exists - grepping app/
+        for "nextcloud" returns two hits, both in help HTML. Making
+        Nextcloud the manager inverts that: TinyMRP would have to treat
+        an external system as the source of truth for files.
+
+        WHAT IT WOULD TOUCH, so nobody underestimates it:
+          - file discovery (app/services/filescan.py) reads the
+            filesystem with iterdir() and a per-scan cache. Every import
+            depends on this being fast and truthful
+          - upload_pack.py stages inside file_root so os.replace stays
+            atomic. An API-backed store has no equivalent guarantee -
+            partial writes become visible states
+          - file_security.py and export_security.py resolve permissions
+            against real paths, including a path-traversal check that
+            has already caught two mistakes in this project
+          - deliverables are a bind mount today; permissions are UID 1000
+            by convention across every instance
+          - offline behaviour: an import currently cannot fail because
+            Nextcloud is down. That property would be given up
+
+        WHAT TO PRESERVE, whatever the design:
+          - an import must never block on, or fail because of, Nextcloud
+          - the path-traversal and per-part permission checks must keep
+            working on whatever the new identity of a file is
+          - no deliverable may become unreachable during migration
+          - it must remain possible to run TinyMRP with no Nextcloud at
+            all, as main and demo do today
+
+        SUGGESTED SHAPE, if it is ever picked up: do it read-side first.
+        Let Nextcloud own presentation and sharing while TinyMRP keeps
+        owning writes and truth. That gets most of the user-visible
+        benefit without betting imports on an external service. Only
+        consider inverting ownership after that has run for a while.
+
+        Everything in N9 and N7 becomes moot if this happens - do not
+        spend effort there first.
 
     N9  NEXTCLOUD SCANS THE SAME TREE WE DO       FOUND 2026-08-08, OPEN
         Found while watching the cron backlog: Nextcloud runs its own
@@ -390,6 +541,10 @@ already known, so nobody re-derives anything.
         Worth extending the same treatment to the scan job if it ever
         shows up in a load average again. Priority is the right tool
         here; hard limits are how you turn a slow sync into a failed one.
+
+    NEXTCLOUD IS NOW CLOSED FOR TUNING. Owner's instruction 2026-08-08:
+    leave it alone. Everything from here to the end of section 3 is
+    recorded for whoever picks up N11, not work to be scheduled.
 
     N6  REDIS FOR NEXTCLOUD                    DEPRIORITISED - see why
         The review recommends it for locking and distributed cache,
