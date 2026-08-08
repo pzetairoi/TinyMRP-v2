@@ -360,6 +360,28 @@ function identityAvatar(profile?: IdentityProfile | null, fallback = "", size: "
  * The panel asking for what it needs cannot drift out of step with the panel
  * order, because there is no order involved.
  */
+
+/**
+ * Shown while the doc-pack options are still arriving.
+ *
+ * Those lists are gathered across a whole assembly, so on a large one there is
+ * a real wait. An empty list during that wait reads as "this part has no
+ * processes", which is a manufacturing answer rather than a loading state.
+ */
+function LoadingList({ label }: { label: string }) {
+  return (
+    <div className="d-flex align-items-center gap-2 text-muted small py-2" role="status">
+      <div className="progress flex-grow-1" style={{ height: "4px", maxWidth: "180px" }}>
+        <div
+          className="progress-bar progress-bar-striped progress-bar-animated w-100"
+          aria-hidden="true"
+        />
+      </div>
+      <span>{label}</span>
+    </div>
+  );
+}
+
 function NeedsData({ onNeeded }: { onNeeded: () => void }) {
   useEffect(() => {
     onNeeded();
@@ -477,6 +499,7 @@ export default function PartDetailPage() {
   // 4.2 seconds, walking an entire assembly subtree to populate a dropdown
   // that most visits never open. Nothing is fetched until the tab is.
   const [docOptsWanted, setDocOptsWanted] = useState(false);
+  const [docOptsLoading, setDocOptsLoading] = useState(false);
   const requestDocOpts = useCallback(() => setDocOptsWanted(true), []);
   const [docLoading, setDocLoading] = useState(false);
   const [docError, setDocError] = useState<string | null>(null);
@@ -1150,6 +1173,7 @@ function isExternalDatasheetUrl(url: string): boolean {
     (async () => {
       setDocError(null);
       if (!docOptsWanted) return;
+      setDocOptsLoading(true);
       try {
         if (isSharedView && !sharedAllowsDocpacks) {
           if (!cancelled) setDocOpts({ file_types: [], processes: [], markup_document_count: 0 });
@@ -1167,6 +1191,8 @@ function isExternalDatasheetUrl(url: string): boolean {
         if (selProcesses.size === 0 && processes.length) setSelProcesses(new Set(processes));
       } catch (error) {
         if (!cancelled) setDocError(apiErrorMessage(error, "Failed to load document-pack options."));
+      } finally {
+        if (!cancelled) setDocOptsLoading(false);
       }
     })();
     return () => { cancelled = true };
@@ -3016,6 +3042,9 @@ function isExternalDatasheetUrl(url: string): boolean {
                     </div>
                     {processMode === 'selected' && (
                       <div className="border rounded p-2">
+                        {docOptsLoading && !docOpts.processes.length ? (
+                          <LoadingList label="Loading processes for this part and its children…" />
+                        ) : null}
                         <div className="row g-2">
                           {docOpts.processes.map((p) => (
                             <div key={p} className="col-6 col-md-4">
@@ -3039,6 +3068,9 @@ function isExternalDatasheetUrl(url: string): boolean {
                   <div className="col-md-6">
                     <div className="fw-semibold small mb-1">File type filter</div>
                     <div className="border rounded p-2">
+                      {docOptsLoading && !docOpts.file_types.length ? (
+                        <LoadingList label="Loading file types for this part and its children…" />
+                      ) : null}
                       <div className="row g-2">
                         {docOpts.file_types.map((t) => (
                           <div key={t} className="col-6 col-md-4">
