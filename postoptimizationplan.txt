@@ -322,19 +322,41 @@ already known, so nobody re-derives anything.
         need to signal anything, because the guard already sees what
         the import wrote.
 
-    N3  DROP THE REDUNDANT SECOND PASS         measure, then decide
-        Test whether files:scan --path adds anything after
-        files_external:scan on the same tree. If not, halve the cost of
-        every scan. VERIFY IN THE NEXTCLOUD UI, not in the exit code -
-        the scan reports success either way.
+    N3  DROP THE REDUNDANT SECOND PASS    DONE 2026-08-08 (8282b24), TEST+MECS
+        Measured before changing anything: a file created under the mount
+        is already indexed, with a fileid issued, after
+        files_external:scan ALONE. The user-path pass added nothing and
+        roughly doubled the cost. Nextcloud's file cache is per-storage,
+        not per-user, so one storage scan serves every user the mount is
+        shared with.
+        Result on test: a real scan went 29s -> 14s, file still indexed.
+        Only skipped when the mount-specific scan succeeded outright;
+        every fallback path still does the user pass.
+        TINYMRP_NEXTCLOUD_SCAN_USER_PATHS=1 forces it back on.
 
-    N4  NEXTCLOUD'S OWN BACKGROUND JOBS        correct, and missing
-        Confirmed: backgroundjobs_mode is unset on both instances, so
-        both are on the AJAX default and a user's page load can drag
-        Nextcloud's housekeeping. Set background:cron with a real cron
-        entry, plus maintenance_window_start so the heavy daily jobs run
-        at night. Note this ADDS a small steady cost and removes a
-        larger unpredictable one.
+    N4  NEXTCLOUD'S OWN BACKGROUND JOBS   DONE ON TEST 2026-08-08 (d7ef9d0)
+        Confirmed beforehand: backgroundjobs_mode was unset on both
+        instances, so both ran on the AJAX default where a user's page
+        load drags Nextcloud's housekeeping.
+        deploy/scripts/install-nextcloud-cron-job.sh sets background:cron,
+        sets maintenance_window_start (default 02:00 UTC) and installs a
+        jittered systemd timer running cron.php every 5 minutes.
+
+        *** THE FIRST RUN IS EXPENSIVE AND NOBODY WARNS YOU ***
+        Switching off AJAX means every job AJAX had been starving comes
+        due at once. On test the first cron.php run took well over ten
+        minutes at ~57% CPU on the app and ~26% on the database, with the
+        container growing from 228 MB to 411 MB.
+        Consequences for whoever does this next:
+          - do it OUT OF HOURS, and on one instance at a time
+          - `systemctl start` on a Type=oneshot unit BLOCKS until the job
+            finishes. Use --no-block or you will sit there for a quarter
+            of an hour thinking it hung
+          - the 5-minute timer cannot pile up behind it: systemd will not
+            start a unit that is already active
+          - steady-state cost afterwards is small; this is a one-off debt
+            being paid down, not the new normal
+        Not yet applied to mecs: test has to finish cleanly first.
 
     N5  STOP THE TEST NEXTCLOUD WHEN NOT TESTING    DECLINED BY OWNER
         453 MB and two containers, idle almost always. Declined
