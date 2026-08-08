@@ -320,6 +320,60 @@ measure, including the attempts that fail.
        healthcheck interval and retries are the cost, not the app. Also
        whether more gunicorn workers simply take longer to fork and import.
 
+  P-15. $graphLookup measured, and it is the answer      MEASURED, NOT BUILT
+       Run against the live data before designing anything on top of it:
+         J200684        46 ms   1344 distinct descendants
+         AWS-Z-009025   20 ms    661
+         AWS-Z-000493   11 ms    142
+         distinct file groups for a subtree, from the materialised field: 34 ms
+       Roughly 80 ms for what the recursive walk cost 4.2 seconds and 589
+       operations. No memory pressure - the 100 MB $graphLookup limit is not
+       close at this size.
+       WHAT THIS UNLOCKS: exact_bom_pairs and _flatten_bom still walk the tree
+       in Python, once each, per options call. Replacing them with one
+       $graphLookup makes P-7 unnecessary rather than hard - the level-by-level
+       restructuring was only needed because the descent was in Python.
+       Do this next. It is the last large win.
+
+  P-16. Doc-pack filters came up empty                  FIXED - my regression
+       Deferring the options load keyed on a HARDCODED tab index. Panels are
+       conditional - the drawing tab only exists when there is a drawing - so
+       on those parts index 3 was not Doc Packs and the options were never
+       requested.
+       The panel now asks for its own data on mount. PrimeReact renders only
+       the active tab, so mounting is the signal, and nothing can drift out of
+       step with the panel order because no order is involved.
+       LESSON worth keeping: deriving behaviour from a position in a list that
+       is conditionally rendered is a bug waiting for the right part to open.
+
+  P-17. Options file scan                               FIXED
+       One PartFile query per part, 130 in a single options call. Now a batched
+       read of part.file_groups, which import already wrote. Parts without the
+       materialised field fall back to the scan, so coverage cannot shrink.
+
+  P-18. demo instance removed                           DONE 2026-08-08
+       Owner asked for it: unused, and removing it measures the per-instance
+       cost of a TinyMRP stack.
+         memory used     2306 MB -> 1955 MB   (351 MB freed)
+         memory available 1513 MB -> 1864 MB
+         three containers gone: app, mongo, redis
+       mecs verified untouched and serving throughout, before and after.
+       So one idle instance costs roughly 350 MB. On a 3.8 GB box shared with
+       two Nextclouds that is the real capacity story, and it is not TinyMRP
+       being wasteful so much as five stacks on a small machine.
+
+  P-19. Worker sizing took the host down                POST-MORTEM
+       (2 x cores) + 1 floored at 4 is the standard formula, and it assumes ONE
+       application per host. This VPS runs several TinyMRP instances side by
+       side. One instance going 2 -> 5 workers, each a Python process with its
+       own Mongo pool, exhausted a 2-core 3.8 GB box shared with two Nextclouds
+       and made it unreachable - taking a production instance down.
+       Now cores + 1, floored 2 capped 6, with WEB_CONCURRENCY documented as
+       the per-host override. test is pinned at 2 until memory is proven stable.
+       THE LESSON, and it generalises: before multiplying anything per
+       instance, count how many instances share the machine. Nothing inside a
+       container can see its neighbours; only the operator can.
+
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.
     2. Count queries per request; an N+1 hides as a fast query repeated.
