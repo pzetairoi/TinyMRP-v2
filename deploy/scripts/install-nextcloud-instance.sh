@@ -274,6 +274,21 @@ else
   warn "The route was created, but the Nextcloud endpoint is not responding yet. Run sudo ./deploy/scripts/doctor.sh --nextcloud-instance ${INSTANCE_NAME} for diagnostics."
 fi
 
+# Nextcloud defaults to running its background jobs via AJAX, which performs
+# housekeeping during a user's page load. Every instance built before this was
+# wired up came up that way and had to be switched by hand afterwards - and the
+# longer it ran on AJAX, the bigger the backlog when it was finally switched
+# (842s on one instance, 224s on a fresh one). Doing it at install time keeps
+# that debt from ever accumulating.
+# Not fatal if it fails: the Nextcloud itself is already up and usable.
+if [ -x "${SCRIPT_DIR}/install-nextcloud-cron-job.sh" ]; then
+  if "${SCRIPT_DIR}/install-nextcloud-cron-job.sh" --nextcloud-instance "$INSTANCE_NAME"; then
+    printf '\nNextcloud background jobs: cron (installed automatically)\n'
+  else
+    warn "Could not install the Nextcloud cron job. Nextcloud is running but its background jobs are on the AJAX default. Run sudo ./deploy/scripts/install-nextcloud-cron-job.sh --nextcloud-instance ${INSTANCE_NAME} to fix it."
+  fi
+fi
+
 printf '\nPer-instance Nextcloud deployment complete.\n'
 printf 'TinyMRP instance: %s\n' "$INSTANCE_NAME"
 printf 'Nextcloud domain: %s\n' "$DOMAIN"
