@@ -47,6 +47,18 @@ export function isCancelledRequest(error: unknown): boolean {
 }
 
 export function apiErrorMessage(error: unknown, fallback: string): string {
+  // A request the browser cancelled is not a failure to report. Navigating
+  // away tears down in-flight fetches, and on a FULL page load React never
+  // unmounts, so the rejection lands while the old page is still on screen.
+  // Firefox words it "NetworkError when attempting to fetch resource" - a real
+  // message about a non-event.
+  //
+  // Answered here rather than at each call site on purpose: this page alone has
+  // nineteen places that surface an error, and guarding them one at a time left
+  // eighteen still showing it. Every render site treats a falsy message as
+  // "nothing to show", so an empty string is the correct way to say so once.
+  if (isCancelledRequest(error)) return ''
+
   if (error && typeof error === 'object' && 'message' in error) {
     const message = String((error as { message?: unknown }).message || '').trim()
     if (message) return message

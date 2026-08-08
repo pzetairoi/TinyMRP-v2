@@ -41,3 +41,22 @@ describe('isCancelledRequest', () => {
     expect(isCancelledRequest(undefined)).toBe(false)
   })
 })
+
+describe('apiErrorMessage and cancelled requests', () => {
+  it('produces NO message for a request killed by navigation', async () => {
+    const { apiErrorMessage } = await import('./api')
+    // Every render site treats a falsy message as nothing to show, so this is
+    // how a non-event is reported: it is not.
+    expect(apiErrorMessage(new TypeError('NetworkError when attempting to fetch resource.'), 'Failed')).toBe('')
+  })
+
+  it('still reports a real failure with its own message', async () => {
+    const { apiErrorMessage } = await import('./api')
+    expect(apiErrorMessage({ message: 'Request failed (500)' }, 'Failed')).toBe('Request failed (500)')
+  })
+
+  it('falls back when a real failure carries no message', async () => {
+    const { apiErrorMessage } = await import('./api')
+    expect(apiErrorMessage({}, 'Failed to load part details.')).toBe('Failed to load part details.')
+  })
+})
