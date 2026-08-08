@@ -260,10 +260,23 @@ already known, so nobody re-derives anything.
           interval                5 min -> 1 min, with 30s jitter
           doctor --instance test  0 failures
 
-        THEN UNDER THE REAL TIMER, from the journal:
-          0.24s and 0.15s per run, against 30.5-38.7s before.
-          Duty cycle for test: ~10.3% of the machine -> ~0.3%.
+        THEN UNDER THE REAL TIMER, five minutes from the journal:
+          03:07:28  skipped   0.15s
+          03:08:59  SCANNED  27.2s   <- caused by doctor, see below
+          03:10:30  skipped   0.38s
+          03:11:51  skipped   0.17s
+        Against 30.5-38.7s every single run before.
+        Duty cycle for test: ~10.3% of the machine -> ~0.3%.
         Roughly 150x less work, while checking five times more often.
+
+        WHY THAT ONE RUN SCANNED, because it will confuse someone later:
+        doctor.sh:324 touches and deletes .doctor-write-test inside the
+        deliverables folder to prove it is writable. That changes the
+        directory mtime, so the guard correctly concludes something
+        changed. Running doctor triggers exactly one scan. Harmless, and
+        arguably right - but if scans look more frequent than expected,
+        check what else is writing into the tree before suspecting the
+        guard.
 
         Verified in Nextcloud itself, not in the exit code - the scan
         reports success either way, which is exactly how a guard like
