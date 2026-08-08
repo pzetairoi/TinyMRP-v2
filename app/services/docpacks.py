@@ -118,6 +118,70 @@ def _part_processes(part: Optional[Part]) -> List[str]:
     return canonical_processes_for_part(part, process_meta=meta)
 
 
+def subtree_part_numbers(root_pn: str, *, max_depth: int = 25) -> List[str]:
+    """Every distinct part reachable below root_pn, resolved BY MONGO.
+
+    Deliberately returns part NUMBERS and nothing else. It cannot replace
+    _flatten_bom in general, because that accumulates quantities along each
+    path and $graphLookup reports reachability, not multiplicity. Where
+    quantities matter, keep the Python walk.
+
+    Where only the SET of parts matters - working out which file groups or
+    processes exist under an assembly - this is the right tool and the
+    difference is not subtle. Measured on the live data:
+
+        J200684        46 ms   1344 distinct descendants
+        AWS-Z-009025   20 ms    661
+        AWS-Z-000493   11 ms    142
+
+    against 4.2 seconds and 589 queries for the recursive version.
+
+    maxDepth guards against a cycle in the data turning this into an unbounded
+    traversal; 25 is far beyond any real assembly here (the deepest measured
+    was 10).
+    """
+    root = str(root_pn or "").strip()
+    if not root:
+        return []
+    try:
+        rows = BOMLink.objects.aggregate(
+            {"$match": {"parent_pn": root}},
+            {
+                "$graphLookup": {
+                    "from": BOMLink._get_collection_name(),
+                    "startWith": "$child_pn",
+                    "connectFromField": "child_pn",
+                    "connectToField": "parent_pn",
+                    "as": "_descendants",
+                    "maxDepth": max_depth,
+                }
+            },
+            {"$project": {"child_pn": 1, "deeper": "$_descendants.child_pn"}},
+            {
+                "$group": {
+                    "_id": None,
+                    "direct": {"$addToSet": "$child_pn"},
+                    "deeper": {"$addToSet": "$deeper"},
+                }
+            },
+            allowDiskUse=True,
+        )
+        found: Set[str] = set()
+        for row in rows:
+            for name in row.get("direct") or []:
+                if name:
+                    found.add(str(name))
+            for bundle in row.get("deeper") or []:
+                for name in bundle or []:
+                    if name:
+                        found.add(str(name))
+        return sorted(found)
+    except Exception:
+        # A failure here must not break the caller: it falls back to the walk.
+        logger.exception("subtree lookup failed for %s; caller should fall back", root)
+        return []
+
+
 def _flatten_bom(
     root_pn: str,
     root_rev: Optional[str],
