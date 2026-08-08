@@ -505,6 +505,39 @@ measure, including the attempts that fail.
        aggregation over that set. Permission filtering is applied to the
        resulting values in memory, which is free.
 
+  P-25. Survey every BOM tree walk for $graphLookup      NOT STARTED
+       $graphLookup has now proved itself twice: 46 ms for J200684's 1344
+       descendants against 4.2 seconds in Python. Every remaining place that
+       walks the assembly tree should be examined against it rather than
+       optimised one loop at a time.
+
+       INVENTORY of tree walks found 2026-08-08, so nobody has to hunt again:
+         app/services/docpacks.py:226      _flatten_bom
+         app/services/docpacks.py:734      second walk in the build path
+         app/services/export_security.py   exact_bom_pairs  ** now batched
+                                           per level, still Python **
+         app/services/authorization.py:641 _bom_is_fully_authorised frontier
+         app/services/part_shares.py:210   public share subtree
+         app/services/parts_delete.py:247  delete cascade (4 BOMLink queries)
+         app/views/admin_jobs.py:193,241   two walks
+         app/services/arena_export.py:62   _child_links
+         app/views/bom_tree.py:177         _child_links (tree render)
+
+       THE TEST FOR EACH ONE, and it is not "can $graphLookup do this":
+         - Does the caller need only the SET of reachable parts? Then
+           $graphLookup replaces the walk outright. subtree_part_numbers() in
+           docpacks.py is the working example.
+         - Does it accumulate something along each path - quantities, depth,
+           lineage? Then $graphLookup CANNOT replace it: it reports
+           reachability, not multiplicity. _flatten_bom is this case, and
+           forcing it would silently produce wrong quantities. Batch by level
+           instead, as exact_bom_pairs now does.
+         - Is it a delete or a write cascade? Correctness outranks speed there;
+           leave it unless it is measurably slow, and measure first.
+
+       Do the read paths first, and only ones the profiler shows are hot. Half
+       of these run once a day and are not worth touching.
+
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.
     2. Count queries per request; an N+1 hides as a fast query repeated.
