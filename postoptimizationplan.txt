@@ -233,11 +233,10 @@ already known, so nobody re-derives anything.
 
   3.5 THE PLAN, CHEAPEST AND SAFEST FIRST
 
-    N0  STAGGER THE TIMERS                     minutes, zero risk
-        Add RandomizedDelaySec and a per-instance offset to
-        install-nextcloud-scan-job.sh, exactly as install-backup-job.sh
-        already does. Removes the collision without changing behaviour.
-        Takes the 2-core peak from two concurrent PHP scans to one.
+    N0  STAGGER THE TIMERS                     DONE 2026-08-08 (5c0f2c4)
+        RandomizedDelaySec (half the interval, bounded 15-300s) plus
+        AccuracySec=15s in install-nextcloud-scan-job.sh, matching what
+        install-backup-job.sh already did. Live on test.
 
     N1  RAISE THE DEFAULT INTERVAL             REJECTED BY OWNER 2026-08-08
         Was: 5 -> 15 minutes as a holding measure. The owner does not
@@ -247,10 +246,37 @@ already known, so nobody re-derives anything.
         matters to users for the thing the guard fixes anyway.
         Do not revive this item. Go straight to N2.
 
-    N2  CHANGE-DETECTION GUARD                 the real fix - DO THIS ONE
+    N2  CHANGE-DETECTION GUARD    IMPLEMENTED 2026-08-08 (5c0f2c4), ON TEST
         Revised 2026-08-08. An earlier draft had TinyMRP touch a marker
         file. That is unnecessary: the scan job runs on the HOST, and the
         deliverables tree is on the host. It can detect change itself.
+
+        MEASURED ON TEST AFTER DEPLOYING:
+          unchanged tree          29s -> 0s by hand
+          file created            scans, and occ info:file confirms the
+                                  file is indexed (fileid issued)
+          file deleted            scans, and occ info:file confirms it is
+                                  gone from Nextcloud
+          interval                5 min -> 1 min, with 30s jitter
+          doctor --instance test  0 failures
+
+        THEN UNDER THE REAL TIMER, from the journal:
+          0.24s and 0.15s per run, against 30.5-38.7s before.
+          Duty cycle for test: ~10.3% of the machine -> ~0.3%.
+        Roughly 150x less work, while checking five times more often.
+
+        Verified in Nextcloud itself, not in the exit code - the scan
+        reports success either way, which is exactly how a guard like
+        this would hide a regression.
+
+        mecs is deliberately NOT on it yet. A systemd drop-in pins it to
+        the old unconditional behaviour:
+          /etc/systemd/system/tinymrp-nextcloud-scan-global-mecs.service.d/
+            keep-unconditional.conf
+          Environment=TINYMRP_NEXTCLOUD_SCAN_MAX_SKIP_SECONDS=0
+        Zero makes the hourly-safety-net branch fire every time, which is
+        precisely the pre-guard behaviour. Delete that file, reload and
+        relink mecs at 1 minute to adopt it.
 
           - keep a stamp file per link, e.g.
             /var/lib/tinymrp/nextcloud-scan/<instance>.stamp
