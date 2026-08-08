@@ -655,6 +655,54 @@ measure, including the attempts that fail.
     6. Record BOTH numbers in the commit message.
 
 ========================================================================
+3b. WHERE TO PICK THIS UP — ordered, with the reasoning
+========================================================================
+  Written 2026-08-08, after the resource question was answered. The
+  performance work that mattered is done: the owner reports the build stable
+  and navigation clean. What follows is ordered by value, not by difficulty.
+
+  1. TURN THE PROFILER OFF ON test.
+     TINYMRP_PROFILE=1 is still set and costs ~31% CPU on that container under
+     load. It did its job. Leaving it on distorts every future measurement and
+     wastes the machine. One env change and a restart.
+
+  2. DEPLOY EVERYTHING TO PRODUCTION (SERVER-A main, then mecs).
+     main already has most of it; mecs is still on the pre-optimisation image.
+     Update mecs for the BUG FIXES and the security work - the fail-open user
+     deletion, the empty backups, the cross-device import failure - not for
+     performance. It uses 0.55% CPU; there is nothing to reclaim.
+     Back up and PROVE the restore first, both times.
+
+  3. T-1: reinstall the SERVER-A stack including Nextcloud.
+     cloud.tinymrp.com has been unserved since the rebuild. This is the only
+     thing a user can see is missing.
+
+  4. Nextcloud's resource use on SERVER-B - the owner's infrastructure call.
+     162% of a 2-core box and a gigabyte of RAM across two instances. Nothing
+     in TinyMRP will move that number. Options are in T-2.
+
+  5. P-28: level-batch _flatten_bom.
+     22 s and 6625 BOM queries for a doc-pack build, now improved by the
+     children memo but not measured again. Re-measure BEFORE writing anything -
+     the memo may already have taken most of it.
+     Carries a real risk: quantities accumulate per path, so this needs the
+     assertion test that already exists to stay green.
+
+  6. P-25: the remaining tree walks.
+     Only the ones the profiler shows are hot. Half of the nine run once a day
+     and are not worth touching.
+
+  WHAT NOT TO DO NEXT, and why:
+    - Do not optimise TinyMRP further for the host's sake. Its whole footprint
+      is 575 MB across two instances, two Mongos and a Redis. The machine is
+      busy with something else.
+    - Do not raise WEB_CONCURRENCY on a shared host without counting the
+      instances first. That is what took it down once already.
+    - Do not remove an authorisation check because it looks redundant. That was
+      tried twice here and caught twice by tests, once turning a 403 into a
+      200. Make checks cheap instead; that worked every time.
+
+========================================================================
 4. EXIT CRITERIA
 ========================================================================
   - Browsing a large assembly on the test instance stays responsive: no hang,
