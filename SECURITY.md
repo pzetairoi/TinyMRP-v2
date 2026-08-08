@@ -76,4 +76,9 @@ If you suspect compromise:
 4. Review audit logs for suspicious actions.
 5. Verify proxy upstream and file roots are correct.
 
-See `MIGRATION.md` for a strict-mode rollout checklist.
+Strict mode is the default and is live on every production instance as of
+1.0.0. To move an instance that is still on compat: set
+`TINYMRP_SECURITY_MODE="strict"` in its `.env`, recreate the app container,
+and confirm `/api/health` reports `security_mode: strict`. Keep a copy of the
+previous `.env` until any SolidWorks add-ins in the field have been exercised
+against it.

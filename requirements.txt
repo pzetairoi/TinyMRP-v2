@@ -1,7 +1,7 @@
 # TinyMRP v2 — runtime dependencies (production).
 # Development/test/lint tooling lives in requirements-dev.txt.
 # Pins match the previously deployed versions; do not upgrade casually —
-# see docs/PROFESSIONALIZATION_PLAN.md Phase 0 and the CHANGELOG.
+# see docs/security/supply_chain_policy.md and the CHANGELOG.
 
 # --- Web framework ---
 Flask==3.1.3

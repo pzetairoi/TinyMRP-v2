@@ -40,7 +40,7 @@ exclude = [
 python_version = "3.11"
 ignore_missing_imports = true
 # Scope errors to the files explicitly passed on the CLI (CI checks 2 modules);
-# widen coverage gradually per docs/PROFESSIONALIZATION_PLAN.md.
+# widen coverage gradually per productionmaturityplan.txt (lane B).
 follow_imports = "silent"
 check_untyped_defs = false
 warn_unused_ignores = true

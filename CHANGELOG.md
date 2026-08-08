@@ -5,6 +5,39 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
+Nothing yet. Work planned for after 1.0.0 is tracked in
+`productionmaturityplan.txt`.
+
+## [1.0.0] — 2026-08-08
+
+First tagged release, at commit `f5b5913`. The sections below cover the
+hardening, post-hardening and optimisation work that led to it.
+
+### Release summary
+
+- **Security.** Strict authentication across the whole fleet, RBAC with
+  per-part permission checks, secret scanning, hash-locked dependencies,
+  reproducible images, authenticated MongoDB on every instance, and backup
+  and restore that are verified by content rather than by exit code.
+- **Performance.** Document-pack options went from 9665 database operations
+  and 37s to 52 operations and 4.6s; the BOM tree from 64 operations and
+  1001ms to 21 and 75ms; part detail from 52 operations and 2106ms to 29 and
+  234ms. Idle MongoDB CPU fell from 39.4% to 0.5%.
+- **Operations.** The Nextcloud deliverables scan went from ~52s every five
+  minutes to ~0.2s every minute, by checking whether anything changed before
+  doing the work. Nextcloud's own background jobs moved from AJAX to cron at
+  low priority.
+- **Admin.** The permission-test environment can be switched on and off from
+  the dashboard instead of editing a config file, and backups are visible
+  there: what exists, what it occupies, and how much room is left.
+
+### Gates at release
+
+794 backend tests, 336 frontend tests, ruff, bandit and the frontend build,
+all green. Known and documented at release: there is no enforced TypeScript
+typecheck yet (18 known errors, none reaching runtime), and four of eight
+frontend pages have no page-level test.
+
 ### Security (Phase 3C — reproducible supply-chain controls)
 - Pinned every third-party GitHub Action to a verified commit and fixed the
   release workflow's invalid Trivy tag. CI runners and Python/pip/Node/

@@ -1,5 +1,13 @@
 ========================================================================
-STATUS LOG — keep this current so work is not repeated
+HARDENING PLAN — CLOSED 2026-08-07. HISTORY AND EVIDENCE, NOT A BACKLOG.
+========================================================================
+Superseded by posthardeningplan.txt, optimizationplan.txt,
+postoptimizationplan.txt and finally productionmaturityplan.txt, which is
+the only open plan. Do not reopen an item here unless a regression is
+demonstrated.
+
+========================================================================
+STATUS LOG — kept for the record
 ========================================================================
 Branch: main (hardening/production-readiness was merged and deleted 2026-08-07)
 Driver: Claude (sole owner as of 2026-08-03). Codex handed off after Phase 4A.

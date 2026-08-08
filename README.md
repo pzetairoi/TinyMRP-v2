@@ -25,7 +25,7 @@ Original project: pzetairoi/TinyMRP. This v2 rebuilds the stack (Flask + MongoDB
 
 ## Tech Stack
 
-- Backend: Python 3.12, Flask 3.x, MongoEngine 0.29.x, PyMongo 4.x.
+- Backend: Python 3.11, Flask 3.x, MongoEngine 0.29.x, PyMongo 4.x.
 - DB: MongoDB 6/7 (local or Atlas).
 - Frontend: React 19, Vite 7, PrimeReact, ThreeJS (3MF viewer).
 - Dev: `python-dotenv`, Docker Compose, optional Nginx for secure file offload.
@@ -79,9 +79,13 @@ Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 - **strict (default)**: the same-origin browser uses its authenticated session and an origin/referer CSRF check; integrations and the SolidWorks add-in use bearer tokens. `/api/auth/check` is bearer-only, public-share APIs require their scoped share capability, and `/api/health` is anonymous. Browser-only APIs reject bearer substitution. CORS is disabled unless an origin is explicitly allowed, cookies are Secure + SameSite=Strict, and startup fails if secrets are missing or weak.
 - **compat (development/migration only)**: preserves legacy behavior for local HTTP and staged upgrades. It retains the session-origin CSRF guard and safer CORS defaults, but may persist generated runtime secrets when explicit secrets are missing. Do not expose compat mode to the public internet.
 
-See `SECURITY.md` for the full threat model, `MIGRATION.md` for a safe rollout
-checklist, and `docs/security/supply_chain_policy.md` for immutable pin updates
-and release-gate evidence.
+Since 1.0.0 every production instance runs strict mode, so compat exists only
+for local development and for staging an upgrade. Retiring it altogether is
+task A2 in `productionmaturityplan.txt`.
+
+See `SECURITY.md` for the full threat model and
+`docs/security/supply_chain_policy.md` for immutable pin updates and
+release-gate evidence.
 
 ### Runtime secrets (compat mode)
 
