@@ -566,6 +566,36 @@ measure, including the attempts that fail.
        this one. Cheap, not weakened, which is what the failed attempt should
        have been.
 
+  P-27. RESULTS — measured on the live test instance      2026-08-08
+       The owner's verdict: "now it is reasonable, down to three or four
+       seconds". Numbers for the same requests, before and after the whole
+       optimisation pass:
+
+         /api/docpacks/options   9665 ops / 37 s   ->   52 ops / 4.6 s
+         /api/bom_tree (1 level)   64 ops / 1001 ms ->   21 ops / 75 ms
+         /api/part_detail          52 ops / 2106 ms ->   29 ops / 234 ms
+         Mongo CPU at idle             39.4%        ->   0.5%
+
+       Navigation - the thing the owner said had been ruined - is now fast.
+
+  P-28. docpacks/build is the last hot path              NOT STARTED
+       Measured: 22429 ms, 10744 mongo ops, of which bom=6625 and parts=4076.
+       That is _flatten_bom (docpacks.py:226 and :734) walking one node at a
+       time.
+
+       IMPORTANT, and the reason this is not a repeat of the earlier fixes:
+       _flatten_bom ACCUMULATES QUANTITIES along each path. $graphLookup
+       reports reachability, not multiplicity, so it cannot replace this - it
+       would silently produce wrong quantities on a document pack, which is a
+       manufacturing error rather than a slow page.
+       The safe shape is level batching, as exact_bom_pairs now does: expand a
+       whole frontier in one query while still multiplying quantities per path.
+
+       PRIORITY JUDGEMENT: this is a user-initiated export, not a page load.
+       22 seconds for building a document pack of a 1344-part assembly is
+       tolerable in a way that 37 seconds for opening a tab never was. Do it,
+       but do it carefully and with quantity assertions - not quickly.
+
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.
     2. Count queries per request; an N+1 hides as a fast query repeated.
