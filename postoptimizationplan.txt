@@ -50,8 +50,10 @@ already known, so nobody re-derives anything.
   WHAT IS LEFT, honestly ranked
 
     SECURITY, and the only items that would give me pause
-      2.2  Mongo runs unauthenticated on test and mecs. The script
-           exists and is proven on main.
+      2.2  Mongo runs unauthenticated on test and mecs. The script exists
+           and is proven - both main and the rebuilt SERVER-A instance
+           run authenticated, so this is two maintenance windows, not
+           an unknown.
       2.3  mecs still runs compat authentication, not strict. One
            environment variable; the risk that blocked it is retired.
       O1   The CSP browser check has never been done. Thirty minutes.
@@ -91,21 +93,22 @@ already known, so nobody re-derives anything.
   FLEET, by alias. Real addresses in deploy/fleet.local.md, gitignored - this
   repository is public.
 
-    SERVER-A (4 cores, 7.7 GB)   REBUILT FROM SCRATCH 2026-08-08
-      Wiped completely at the owner's instruction to test a clean install:
-      all TinyMRP and Nextcloud containers, data, deliverables, backups and
-      the repo clone, plus an older BARE-METAL install nobody remembered
-      (host mongod, mariadb, redis, apache2, nginx, a tinymrp system user,
-      /var/www) - 21 GB recovered, 25G used -> 3.7G.
-      The owner is reinstalling it manually. STATE UNKNOWN TO THIS FILE:
-      the rebuild rotated the host key and dropped the deploy public key,
-      so automated access was lost. Re-verify before trusting anything
-      here about SERVER-A.
-      vikunja              SURVIVED, deliberately. sqlite at /srv/vikunja,
-                           its own caddy at /srv/vikunja/proxy, HTTP 200.
-                           See /srv/vikunja/LEEME-ANTES-DE-INSTALAR.txt -
-                           that caddy holds ports 80/443 and a TinyMRP
-                           install will collide with it.
+    SERVER-A (4 cores, 7.7 GB)   REBUILT FROM SCRATCH, VERIFIED 2026-08-08
+      Wiped completely at the owner's instruction to test a clean install -
+      including an older BARE-METAL install nobody remembered (host mongod,
+      mariadb, redis, apache2, nginx, a tinymrp system user, /var/www).
+      21 GB recovered. VIKUNJA IS ALSO GONE: preserved during the wipe, then
+      deleted by the owner afterwards. Nothing survives from before.
+      Reinstalled BY THE OWNER, by hand. Verified working:
+      tinymrp-canada  PRODUCTION  tinymrp-app:latest | Mongo AUTHENTICATED
+                                  | redis | doctor 0 failures, 4 warnings
+      Nextcloud                   installed, cloud.tinymrp.com serving
+      Endpoints: tinymrp.com 200, www 302, cloud 302.
+      Host: load 0.59, 6.1 GB RAM available, 63 GB disk free.
+      The clean install picked up the scan guard automatically and came up
+      at a 1-minute interval - the new defaults propagate without anyone
+      remembering to apply them. Nextcloud cron was added afterwards for
+      parity (it is not yet part of the installer - see N4).
 
     SERVER-B (2 cores, 3.8 GB)   FULLY UP TO DATE 2026-08-08
       mecs    PRODUCTION   image 7c7301fc6621 | compat mode | no redis
@@ -150,28 +153,28 @@ already known, so nobody re-derives anything.
 2. WHAT IS LEFT
 ========================================================================
 
-  2.1 SERVER-A rebuild             OWNER IS DOING THIS MANUALLY 2026-08-08
-      SERVER-A was wiped completely at the owner's instruction, on the
-      owner's statement that it was a test machine nobody uses and its data
-      might be dirty. NO BACKUP WAS KEPT - that was the explicit decision,
-      not an oversight. The old safety copies referenced by earlier versions
-      of this item are gone too.
-      The owner is reinstalling it by hand with another AI's help.
-      *** AUTOMATED ACCESS TO SERVER-A IS LOST. *** The rebuild rotated the
-      host key and dropped the deploy public key from authorized_keys.
-      Restoring it needs the owner to append the key once.
-      WHAT SURVIVES AND MUST KEEP SURVIVING: vikunja. sqlite at
-      /srv/vikunja, its own caddy at /srv/vikunja/proxy, verified HTTP 200.
-      THE TRAP WAITING FOR THE INSTALL: that caddy holds ports 80/443, so a
-      TinyMRP install will fail with "port is already allocated". Written up
-      on the machine itself at /srv/vikunja/LEEME-ANTES-DE-INSTALAR.txt,
-      with the original route preserved at /srv/vikunja/vikunja.caddy.keep.
-      PROCEDURE, learned the hard way and still true:
-        - back up, then PROVE the backup restores into a throwaway container
-          before destroying anything. Four consecutive backups were once
-          silently empty and only verifying caught it
-        - the admin password must be at least 12 characters or the container
-          refuses to start, having already destroyed the old instance
+  2.1 SERVER-A rebuild                              CLOSED 2026-08-08
+      Wiped and reinstalled from scratch. The wipe was deliberate and NO
+      BACKUP WAS KEPT - the owner's explicit decision, on his statement
+      that it was a test machine nobody uses whose data might be dirty.
+      Vikunja was preserved during the wipe and then deleted by the owner
+      afterwards. Nothing survives from before.
+      The owner reinstalled by hand; it holds a new instance called
+      tinymrp-canada with a couple of test imports. Verified: doctor 0
+      failures, all three endpoints responding, Mongo authenticated.
+      WORTH KEEPING FROM THIS EXERCISE:
+        - the clean install inherited the scan guard and a 1-minute
+          interval with nobody applying anything. Defaults in the deploy
+          scripts DO reach new installs - that is the payoff for fixing
+          them there rather than on the running machines
+        - a rebuild rotates the SSH host key and drops deploy keys from
+          authorized_keys. Automated access has to be re-granted by hand
+        - the admin password must be at least 12 characters or the
+          container refuses to start, having already destroyed the old
+          instance
+        - back up and PROVE the backup restores before destroying
+          anything, whenever the data is NOT disposable. Four consecutive
+          backups were once silently empty and only verifying caught it
 
   2.2 Mongo authentication on demo, test and mecs           SECURITY
       deploy/scripts/enable-mongo-auth.sh exists and is proven on main. One
@@ -491,9 +494,17 @@ already known, so nobody re-derives anything.
           - steady-state cost afterwards is small; this is a one-off debt
             being paid down, not the new normal
 
-        BOTH INSTANCES DONE. Backlog curves, from the journal:
-          test   842 -> 569 -> 0 -> 1 -> 1 -> 2 -> 1 -> 2 s
-          mecs   841 -> 841 -> 176 -> settling the same way
+        NOT WIRED INTO THE INSTALLER. A fresh install comes up on AJAX;
+        this script has to be run once per Nextcloud instance. Worth
+        folding into install-nextcloud-instance.sh so it stops being a
+        step someone has to remember.
+
+        ALL THREE INSTANCES DONE. Backlog curves, from the journal:
+          test            842 -> 569 -> 0 -> 1 -> 1 -> 2 -> 1 -> 2 s
+          mecs            841 -> 841 -> 176 -> 1 -> 1 -> 0 s
+          tinymrp-canada  224 -> 1 s   (fresh install, little to catch up)
+        The size of the first run tracks how much history the instance
+        has, which is the tell that it really is a one-off debt.
         mecs is larger (1479 parts vs 52) so its debt was bigger.
         Production was never affected: mecs answered in 0.218 / 0.078 /
         0.066 / 0.131 s throughout, with cron peaking at 94% CPU.
