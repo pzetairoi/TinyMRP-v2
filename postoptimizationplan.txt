@@ -20,6 +20,8 @@ already known, so nobody re-derives anything.
   Added 2026-08-08 at the owner's request. Read this if you read nothing
   else; everything below is the detail behind it.
 
+  RELEASE 1.0.0 was tagged 2026-08-08 at commit f5b5913.
+
   WHAT HAS BEEN DONE, across four plans
 
     hardeningplan.txt        CLOSED. Security baseline: authentication,
@@ -47,16 +49,54 @@ already known, so nobody re-derives anything.
                              All host-side shell. No application change,
                              no rebuild, no new privilege.
 
+    CLOSING 1.0, 2026-08-08. Everything below was found or done while
+    tidying up for the release, and several items were not on any plan:
+
+      NO SCHEDULED BACKUP EXISTED ON SERVER-B. None. mecs had been in
+      production with 1479 parts and the only copy was one taken by hand
+      that morning. Installed, and verified producing REAL CONTENT
+      (26 MB of documents), not merely "installed".
+
+      THE CAUSE WAS TRIVIAL AND INVISIBLE. Eight of twenty-one deploy
+      scripts were mode 644, so the documented invocation
+      `sudo ./deploy/scripts/<name>.sh` failed with "command not found" -
+      among them backup-instance.sh, backup-all.sh and
+      restore-instance.sh. Fixed.
+
+      src/vite-env.d.ts CONTAINED A STALE COPY OF vite.config.ts, where
+      the ambient type declarations belong. Every CSS import in the app
+      therefore had no declaration. Nothing caught it: Vite's build
+      strips types without checking them and CI never ran a typecheck.
+      Typecheck errors 25 -> 18.
+
+      FLEET NOW FULLY STRICT. mecs moved off compat authentication;
+      rollback copy at instances/mecs/.env.before-strict-20260808.
+
+      DISK 90% -> 55% on SERVER-B after clearing old backups, 2.06 GB of
+      stale images and 3.7 GB of build cache.
+
+      TWO DASHBOARD FEATURES, at the owner's request:
+        - the permission-test environment can be switched on and off from
+          the admin dashboard instead of editing a file and restarting
+        - backups are visible from the dashboard: what exists, what it
+          occupies, how much room is left, and a warning when there are
+          none. Read-only by construction, because that outage above was
+          invisible for exactly as long as nothing displayed it.
+
   WHAT IS LEFT, honestly ranked
 
-    SECURITY, and the only items that would give me pause
-      2.2  Mongo runs unauthenticated on test and mecs. The script exists
-           and is proven - both main and the rebuilt SERVER-A instance
-           run authenticated, so this is two maintenance windows, not
-           an unknown.
-      2.3  mecs still runs compat authentication, not strict. One
-           environment variable; the risk that blocked it is retired.
-      O1   The CSP browser check has never been done. Thirty minutes.
+    SECURITY - all closed for 1.0 except one thirty-minute check
+      2.2  CLOSED. Mongo authentication is live on the whole fleet.
+      2.3  CLOSED. mecs runs strict authentication.
+      O1   STILL OPEN. The CSP browser check has never been done. Thirty
+           minutes with a browser, and the cheapest open security item in
+           the project.
+
+    OWNER-REQUESTED, next up
+      2.12 Remove the legacy roles from the codebase. The owner has
+           already edited the only place they were used.
+      2.13 Close the legacy-login issues. The fleet is fully strict now,
+           so the compat branches are unreachable in production.
 
     QUALITY, real but not urgent
       2.11 There is no enforced typecheck, and this file used to claim
@@ -76,14 +116,48 @@ already known, so nobody re-derives anything.
       2.9  Commercial and legal drafts need counsel.
       2.10 Help screenshots, and drawing markups have no help at all.
 
-  ON CALLING THIS 1.0
-    The code is ready: four plans closed, every gate that actually runs
-    is green, and it has been serving two real companies throughout.
-    What is NOT ready is two production DEPLOYMENTS - mecs on compat
-    mode, and unauthenticated databases on test and mecs. Both are
-    configuration with existing tooling, not product defects.
-    So: tag 1.0, and treat those two as the first post-1.0 job. Just do
-    not describe the fleet as fully hardened until they are done.
+  FUTURE IMPROVEMENTS, in the order I would actually do them
+
+    1  O1   CSP browser check. Thirty minutes, closes the last security
+            item, needs nothing but a browser.
+    2  2.13 Close the legacy-login issues. The fleet is strict now, so
+            the compat branches are dead code in the most sensitive part
+            of the system. Confirm no add-in in the field needs them.
+    3  2.12 Remove the legacy roles. The owner has cleared the only use.
+            Role names live in databases as well as code - migrate
+            additively.
+    4  2.11 Make the typecheck real: @types/node, the 18 remaining
+            errors, then wire tsc into CI so it cannot rot again.
+    5  2.7  Frontend page tests, then Playwright and axe. Four of eight
+            pages have no page-level test, and nothing covers the 3D
+            viewer or canvas markup at all.
+    6  2.8  Triage the 158 silent exception handlers. The 26 already
+            done surfaced two real defects, so it pays - slowly.
+    7  2.5  _flatten_bom level batching. RE-MEASURE FIRST; a memo may
+            already have taken most of it, and a wrong quantity on a
+            document pack is a manufacturing error, not a slow page.
+    8  2.6  The remaining tree walks. Only the ones the profiler shows
+            are hot; half run once a day.
+    9  N11  Nextcloud as the file manager. The big architectural one.
+            Do it read-side first; do not bet imports on an external
+            service.
+    10 2.10 Help screenshots, and a help section for drawing markups -
+            a whole feature currently undocumented.
+
+    NOT ON THIS LIST ON PURPOSE: Nextcloud tuning (N6-N8). It is closed,
+    and N11 would make all of it moot.
+
+  ON CALLING THIS 1.0 - DONE, v1.0.0 TAGGED 2026-08-08 AT f5b5913
+    Four plans closed, every gate that actually runs is green, and it has
+    served two real companies throughout without an outage caused by any
+    of this work.
+    The two deployment gaps that gave me pause when this section was
+    first written have both been closed since: mecs moved to strict
+    authentication, and Mongo authentication was rolled out to the
+    remaining instances. The fleet can now honestly be called hardened.
+    What 1.0 does NOT claim: an enforced typecheck (2.11), full frontend
+    page coverage (2.7), or that the 158 silent exception handlers have
+    been triaged (2.8). None of those reach a user; all are written down.
 
 
 ========================================================================
@@ -110,14 +184,14 @@ already known, so nobody re-derives anything.
       remembering to apply them. Nextcloud cron was added afterwards for
       parity (it is not yet part of the installer - see N4).
 
-    SERVER-B (2 cores, 3.8 GB)   FULLY UP TO DATE 2026-08-08
-      mecs    PRODUCTION   image 7c7301fc6621 | compat mode | no redis
-      test                 image 7c7301fc6621 | strict | redis | profiler OFF
-      two Nextclouds       both now on cron at low priority (section 3)
-      repo at 3119bf3. The image is CURRENT: nothing under app/, frontend/,
-      requirements or docker/ has changed since it was built, so the
-      commits after it are host-side scripts and docs only. Do not rebuild
-      looking for a difference that is not there.
+    SERVER-B (2 cores, 3.8 GB)   ON 1.0.0, VERIFIED 2026-08-08
+      mecs    PRODUCTION   image f5b5913c265c | STRICT | Mongo auth
+      test                 image f5b5913c265c | strict | Mongo auth | redis
+      two Nextclouds       both on cron at low priority (section 3)
+      Both instances: doctor 0 failures, 0 warnings. mecs data verified
+      unchanged across every step: parts=1479 bom=1572 files=4975.
+      Scheduled backups run daily at 02:32 UTC and were verified to
+      produce real content, not merely to exist. Disk 55% used.
 
   GATES, re-verified 2026-08-08:
     787 backend tests pass (1 skipped) | 336 frontend tests pass
@@ -176,7 +250,21 @@ already known, so nobody re-derives anything.
           anything, whenever the data is NOT disposable. Four consecutive
           backups were once silently empty and only verifying caught it
 
-  2.2 Mongo authentication on demo, test and mecs           SECURITY
+  2.2 Mongo authentication                        CLOSED 2026-08-08
+      Rolled out to test and mecs; main and the rebuilt SERVER-A instance
+      already had it. The whole fleet now runs authenticated databases.
+      The script generates a 32-character random secret per instance and
+      stores it in the instance .env at mode 0600 - deliberately NOT a
+      shared password, and it verifies least-privilege before declaring
+      success ("admin database is refused" for the application account).
+      REMEMBER: enabling auth breaks backups until they are given
+      credentials. That fix is already in backup-instance.sh and
+      restore-instance.sh, but check the first backup after each migration
+      actually contains data - four consecutive backups here were once
+      silently empty for exactly this reason.
+      Original text follows for the record.
+
+  2.2-ORIGINAL Mongo authentication on demo, test and mecs   SECURITY
       deploy/scripts/enable-mongo-auth.sh exists and is proven on main. One
       short maintenance window each. It backs up first and refuses to proceed
       if the backup fails.
@@ -184,7 +272,17 @@ already known, so nobody re-derives anything.
       is already in backup-instance.sh and restore-instance.sh, but check the
       first backup after each migration actually contains data.
 
-  2.3 Strict mode on mecs                                   SECURITY
+  2.3 Strict mode on mecs                         CLOSED 2026-08-08
+      Done. mecs reports security_mode "strict", doctor 0 failures, data
+      unchanged (parts=1479 bom=1572 files=4975), and it answered in
+      0.197s straight after the restart.
+      Rollback copy kept at instances/mecs/.env.before-strict-20260808 in
+      case a SolidWorks add-in in the field turns out to be older than the
+      one this was verified against. If nobody has complained after a few
+      weeks of real use, that file can go, and 2.13 becomes safe.
+      Original text follows for the record.
+
+  2.3-ORIGINAL Strict mode on mecs                          SECURITY
       The add-in was verified against strict mode on test, so the risk that
       blocked this is retired. One environment variable and a restart.
 
@@ -234,6 +332,38 @@ already known, so nobody re-derives anything.
       Five placeholder images in the running help state what to capture and
       which file to overwrite. Replace them one at a time. Drawing markups
       have no help section at all - a whole feature undocumented.
+
+  2.12 Remove the legacy roles from the codebase             OWNER-REQUESTED
+       The owner has already edited the only place they were still used
+       (2026-08-08), so nothing depends on them any more and they can come
+       out everywhere.
+       BEFORE DELETING ANYTHING, find out what "legacy roles" means in
+       code. Grepping for "legacy_role" finds only documentation; the
+       actual names are role strings scattered across app/services/
+       (attrs.py, authorization.py, canonical_fields.py, field_policies.py,
+       part_annotations.py at least). Identify the exact set first, from
+       app/services/standard_roles.py and the RBAC audit, rather than
+       pattern-matching on words like viewer or editor.
+       CARE: role names appear in seeded data and in existing databases,
+       not only in code. Deleting a name from the code while a live
+       instance still has users holding it can silently drop their access.
+       Migration must be additive and reversible - see section 4.
+       Do it with the test suite in front of you: RBAC regressions here do
+       not look like errors, they look like a 200 where a 403 belonged.
+
+  2.13 Close the legacy-login issues                         OWNER-REQUESTED
+       The whole fleet now runs strict authentication (2026-08-08), so the
+       compat path exists only for instances that no longer exist. That
+       retires the reason the legacy login code was kept.
+       app/services/security_mode.py still branches on compat in at least
+       six places; those branches are now unreachable in production.
+       Removing them simplifies the auth surface, which is the part of this
+       system where simple is worth the most.
+       KEEP THE ESCAPE HATCH IN MIND: compat mode is what made the
+       SolidWorks add-in migration safe. Confirm no add-in in the field
+       still needs it before deleting the branches, because
+       solidworks-addin/ is out of scope here and cannot be tested from
+       this repository.
 
   2.11 Make the typecheck real, or stop claiming it          QUALITY
       Add @types/node, fix the four genuine errors, then put
