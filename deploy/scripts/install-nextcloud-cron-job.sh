@@ -131,7 +131,15 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/docker exec -u www-data ${CONTAINER_NAME} php -f /var/www/html/cron.php
+# nice and ionice, INSIDE the container. Housekeeping must never compete with
+# a user waiting on a page. Measured on a 2-core host during the first run:
+# cron.php sat at ~90% CPU, and after renicing, the neighbouring production
+# instance still answered in 0.11s. It uses spare capacity, not contended
+# capacity.
+# Note systemd's CPUWeight would NOT work here: docker exec runs the work in
+# the container's cgroup, not this unit's, so the limit has to travel with the
+# command.
+ExecStart=/usr/bin/docker exec -u www-data ${CONTAINER_NAME} nice -n 15 ionice -c 3 php -f /var/www/html/cron.php
 WorkingDirectory=/
 EOF
 

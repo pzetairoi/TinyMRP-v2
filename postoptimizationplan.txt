@@ -365,6 +365,32 @@ already known, so nobody re-derives anything.
         this was convenience, not need. Left here only so nobody
         proposes it again as if it were new.
 
+    N9  NEXTCLOUD SCANS THE SAME TREE WE DO       FOUND 2026-08-08, OPEN
+        Found while watching the cron backlog: Nextcloud runs its own
+        OCA\Files\BackgroundJob\ScanFiles, and files_no_background_scan
+        is unset. So Nextcloud walks the external storage looking for
+        changes on its own schedule - the very tree our guarded job just
+        stopped walking unnecessarily.
+        Setting files_no_background_scan=true would remove the
+        duplication, and our scan job already covers the deliverables
+        mount, targeted and guarded.
+        NOT DONE, deliberately: that setting disables background scanning
+        for ALL storages, not just ours. If any instance ever gains a
+        second external storage that nothing else scans, files added to
+        it would silently never appear. Check what storages exist per
+        instance before setting it, and prefer being explicit over being
+        clever with a global switch.
+
+    N10 PRIORITY, NOT LIMITS                      PARTLY DONE 2026-08-08
+        The first cron run pinned a core at ~90%. Rather than capping
+        Nextcloud's memory or CPU - which risks failing a real sync -
+        the cron job now runs under nice -n 15 and ionice -c 3, so it
+        yields to anything that matters. Measured during contention: the
+        neighbouring production instance answered in 0.11s.
+        Worth extending the same treatment to the scan job if it ever
+        shows up in a load average again. Priority is the right tool
+        here; hard limits are how you turn a slow sync into a failed one.
+
     N6  REDIS FOR NEXTCLOUD                    DEPRIORITISED - see why
         The review recommends it for locking and distributed cache,
         citing the MariaDB CPU. That CPU was scan-window sampling; at
