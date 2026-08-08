@@ -1,4 +1,12 @@
-from mongoengine import Document, StringField, DateTimeField, ListField, IntField, DictField
+from mongoengine import (
+    BooleanField,
+    DateTimeField,
+    DictField,
+    Document,
+    IntField,
+    ListField,
+    StringField,
+)
 from app.services.timezone_utils import utc_now
 
 DB_ALIAS = "tinymrp-v2"
@@ -6,6 +14,17 @@ DB_ALIAS = "tinymrp-v2"
 
 class AppSettings(Document):
     brand_logo_rel_path = StringField(default="")
+    # Tri-state ON PURPOSE: None means "never set from the dashboard, use the
+    # ALLOW_PERMISSION_TEST_DATA environment variable". True/False are an
+    # explicit administrator decision and win over the environment.
+    # A plain False default would silently switch off every instance that
+    # currently enables the flag through its .env the moment this field is
+    # added.
+    allow_permission_test_data = BooleanField(default=None, null=True)
+    # Backups. Empty/zero means "use the schedule the host already has";
+    # these only describe what the dashboard asks for.
+    backup_schedule_hour_utc = IntField(default=None, null=True)
+    backup_retention_days = IntField(default=None, null=True)
     timezone = StringField(default="")
     arena_file_link_base_url = StringField(default="")
     hardware_folders = ListField(StringField(), default=list)

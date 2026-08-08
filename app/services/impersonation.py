@@ -42,8 +42,14 @@ def _domain() -> str:
 
 
 def enabled() -> bool:
-    """Whether this instance exposes impersonation at all."""
-    return bool(current_app.config.get("ALLOW_PERMISSION_TEST_DATA", False))
+    """Whether this instance exposes impersonation at all.
+
+    Delegates so the administrator's dashboard toggle and the environment
+    variable cannot disagree: one function decides, every guard asks it.
+    """
+    from app.services.app_settings import permission_test_data_enabled
+
+    return permission_test_data_enabled()
 
 
 def _is_admin(user: Any) -> bool:

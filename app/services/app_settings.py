@@ -148,6 +148,45 @@ def format_display_ts(
         return ""
 
 
+def permission_test_data_enabled() -> bool:
+    """Whether the permission-test environment is available on this instance.
+
+    Reads the dashboard setting first and falls back to the
+    ALLOW_PERMISSION_TEST_DATA environment variable when no administrator has
+    ever touched the toggle. That ordering is what lets the flag be changed
+    without editing a config file and restarting, while leaving instances that
+    already set it in their .env behaving exactly as before.
+
+    Never raises: a database that is unreachable must not turn a permission
+    check into a 500. It falls back to the environment, which is the value the
+    instance booted with.
+    """
+    try:
+        settings = get_app_settings(create=False)
+        if settings is not None:
+            stored = settings.allow_permission_test_data
+            if stored is not None:
+                return bool(stored)
+    except Exception:
+        pass
+
+    if has_app_context():
+        return bool(current_app.config.get("ALLOW_PERMISSION_TEST_DATA", False))
+    return False
+
+
+def set_permission_test_data_enabled(enabled: Optional[bool]) -> None:
+    """Set the toggle. None clears it back to following the environment."""
+    settings = get_app_settings(create=True)
+    if settings is None:
+        return
+    settings.allow_permission_test_data = None if enabled is None else bool(enabled)
+    settings.updated_at = utc_now()
+    settings.save()
+    if has_request_context():
+        g._tinymrp_app_settings = settings
+
+
 def resolve_brand_logo_path() -> Optional[str]:
     settings = get_app_settings(create=False)
     rel_path = (settings.brand_logo_rel_path if settings else "") or ""

@@ -57,5 +57,71 @@
     </div>
   </section>
   {% endif %}
+
+  {% if backup_summary %}
+  {% macro human_bytes(n) %}{% if n is none %}—{% elif n >= 1073741824 %}{{ '%.1f'|format(n / 1073741824) }} GB{% elif n >= 1048576 %}{{ '%.0f'|format(n / 1048576) }} MB{% elif n >= 1024 %}{{ '%.0f'|format(n / 1024) }} KB{% else %}{{ n }} B{% endif %}{% endmacro %}
+  <section class="tm-admin-hub__section">
+    {% call section_header("Backups", "What exists on this server, and how much room is left.") %}{% endcall %}
+
+    {% if not backup_summary.available %}
+    <p class="small text-muted">
+      Backups are not visible from this instance. They are taken on the host by
+      <code>backup-instance.sh</code>; the dashboard can only list them once the
+      backups directory is mounted, which newer deployments do automatically.
+    </p>
+    {% else %}
+
+    {% if backup_summary.disk %}
+    {% set disk = backup_summary.disk %}
+    {% set pct = (disk.used_bytes * 100 // disk.total_bytes) if disk.total_bytes else 0 %}
+    <p class="mb-2">
+      Disk: <strong>{{ human_bytes(disk.free_bytes) }}</strong> free of {{ human_bytes(disk.total_bytes) }}
+      ({{ pct }}% used) · Backups occupy <strong>{{ human_bytes(backup_summary.total_bytes) }}</strong>
+    </p>
+    <div class="progress mb-3" style="height: 6px;" role="progressbar"
+         aria-label="Disk usage" aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100">
+      <div class="progress-bar {% if pct >= 90 %}bg-danger{% elif pct >= 75 %}bg-warning{% endif %}"
+           style="width: {{ pct }}%"></div>
+    </div>
+    {% if pct >= 90 %}
+    <div class="alert alert-danger py-2 small">
+      The disk is nearly full. A backup that runs out of space can fail silently —
+      remove old backups on the host before the next scheduled run.
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {% if backup_summary.count == 0 %}
+    <div class="alert alert-warning py-2 small mb-0">
+      <strong>No backups found.</strong> If this instance holds real data, install the
+      scheduled job on the host with
+      <code>sudo ./deploy/scripts/install-backup-job.sh</code>.
+    </div>
+    {% else %}
+    <p class="small text-muted">
+      {{ backup_summary.count }} backup{{ '' if backup_summary.count == 1 else 's' }},
+      most recent first. Restoring one is a host action —
+      <code>restore-instance.sh</code> — so this page only reports.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead><tr><th scope="col">Backup</th><th scope="col">Taken</th><th scope="col" class="text-end">Size</th></tr></thead>
+        <tbody>
+          {% for row in backup_summary.backups %}
+          <tr>
+            <td><code>{{ row.name }}</code>
+              {% if row.looks_empty %}<span class="badge bg-danger ms-1">looks empty</span>{% endif %}
+            </td>
+            <td class="small text-muted">{{ row.created_at.strftime('%Y-%m-%d %H:%M UTC') if row.created_at else '—' }}</td>
+            <td class="text-end">{{ human_bytes(row.size_bytes) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% endif %}
+  </section>
+  {% endif %}
 </div>
 {% endblock %}

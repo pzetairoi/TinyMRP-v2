@@ -17,6 +17,10 @@ from flask_security import current_user
 from mongoengine.errors import DoesNotExist, ValidationError
 
 from app.models.auth import Role, User
+from app.services.app_settings import (
+    permission_test_data_enabled,
+    set_permission_test_data_enabled,
+)
 from app.services.audit import log_action
 from app.services.authorization import require_permission
 from app.services.permissions import (
@@ -349,9 +353,7 @@ def _render_roles_page(
             standard_report=report,
             query=query,
             role_filter=role_filter,
-            permission_test_enabled=bool(
-                current_app.config.get("ALLOW_PERMISSION_TEST_DATA", False)
-            ),
+            permission_test_enabled=permission_test_data_enabled(),
             permission_test_result=permission_test_result,
         ),
         status_code,
@@ -442,13 +444,47 @@ def standard_roles_restore():
     return redirect(url_for("admin_roles.roles_list"))
 
 
+@bp.post("/permission-test/toggle")
+@require_permission("security.roles.manage")
+@require_permission("security.users.manage")
+@require_permission("security.assignments.manage")
+@require_permission("system.maintenance")
+def permission_test_toggle():
+    """Turn the permission-test environment on or off without editing a file.
+
+    Guarded by exactly the permissions that seeding already required, so this
+    cannot become a cheaper route to the same capability: anyone able to flip
+    the switch was already able to seed and reset the environment.
+    """
+    desired = str(request.form.get("enabled") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    set_permission_test_data_enabled(desired)
+    log_action(
+        "admin.permission_test.toggle",
+        resource_type="system",
+        resource="permission_test_environment",
+        meta={"enabled": desired},
+    )
+    flash(
+        "Permission test environment enabled."
+        if desired
+        else "Permission test environment disabled.",
+        "success" if desired else "info",
+    )
+    return redirect(url_for("admin_roles.roles_list"))
+
+
 @bp.post("/permission-test/seed")
 @require_permission("security.roles.manage")
 @require_permission("security.users.manage")
 @require_permission("security.assignments.manage")
 @require_permission("system.maintenance")
 def permission_test_seed():
-    if not current_app.config.get("ALLOW_PERMISSION_TEST_DATA", False):
+    if not permission_test_data_enabled():
         abort(403)
     domain = str(
         current_app.config.get("PERMISSION_TEST_DATA_DOMAIN") or "demo.com"
@@ -473,7 +509,7 @@ def permission_test_seed():
 @require_permission("security.assignments.manage")
 @require_permission("system.maintenance")
 def permission_test_reset():
-    if not current_app.config.get("ALLOW_PERMISSION_TEST_DATA", False):
+    if not permission_test_data_enabled():
         abort(403)
     domain = str(
         current_app.config.get("PERMISSION_TEST_DATA_DOMAIN") or "demo.com"

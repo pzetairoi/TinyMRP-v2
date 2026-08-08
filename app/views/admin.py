@@ -173,7 +173,18 @@ def admin_index():
         ),
     ):
         abort(403)
-    return render_template("admin/index.html")
+    # Only for operators who could act on it. Everyone else gets the page
+    # without the section rather than an empty box they cannot use.
+    backup_summary = None
+    if has_any_permission(current_user, ("system.maintenance", "system.config.read")):
+        try:
+            from app.services.backups import summary as _backup_summary
+
+            backup_summary = _backup_summary(limit=20)
+        except Exception:
+            # An admin dashboard must not 500 because a directory moved.
+            backup_summary = None
+    return render_template("admin/index.html", backup_summary=backup_summary)
 
 @bp.get("/metrics")
 @require_permission("system.maintenance")

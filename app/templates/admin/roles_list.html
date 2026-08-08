@@ -157,10 +157,27 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn btn-outline-danger" type="submit">Reset permission test environment</button>
       </form>
+      {% if has_perm('system.maintenance') %}
+      <form method="post" action="{{ url_for('admin_roles.permission_test_toggle') }}"
+            data-confirm="Turn the permission test environment off? The seed and reset actions will be hidden until it is turned back on.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="enabled" value="0">
+        <button class="btn btn-outline-secondary" type="submit">Turn off</button>
+      </form>
+      {% endif %}
     </div>
+    {% elif has_perm('security.roles.manage') and has_perm('security.users.manage') and has_perm('security.assignments.manage') and has_perm('system.maintenance') %}
+    <p class="small text-muted">Test-data actions are currently disabled on this instance.</p>
+    <form method="post" action="{{ url_for('admin_roles.permission_test_toggle') }}"
+          data-confirm="Enable the permission test environment on this instance? Only do this on development, staging or disposable instances.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="enabled" value="1">
+      <button class="btn btn-outline-primary" type="submit">Turn on</button>
+    </form>
     {% else %}
     <p class="small text-muted mb-0">
-      Test-data actions are disabled. Set <code>ALLOW_PERMISSION_TEST_DATA=true</code> only on an appropriate instance.
+      Test-data actions are disabled, and enabling them needs the same permissions
+      that seeding requires.
     </p>
     {% endif %}
 

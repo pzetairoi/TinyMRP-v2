@@ -690,6 +690,13 @@ render_instance_compose() {
   local private_network_name="$9"
   local app_image="${10:-tinymrp-app:latest}"
 
+  # Derived rather than passed in, so every existing caller keeps working.
+  # backup-instance.sh writes to $(tinymrp_root)/backups/<instance>; this is
+  # the same path, and it is created here so the bind mount cannot fail on an
+  # instance that has never been backed up.
+  local backups_dir="$(tinymrp_root)/backups/${project_name#tinymrp-}"
+  mkdir -p "$backups_dir" 2>/dev/null || true
+
   local mongo_command='["mongod", "--bind_ip_all"]'
   if [ -n "${MONGO_AUTH_ENABLED:-}" ]; then
     mongo_command='["mongod", "--bind_ip_all", "--auth"]'
@@ -809,6 +816,17 @@ services:
       - type: bind
         source: ${deliverables_dir}
         target: /data/deliverables
+      # Backups, READ ONLY, so the admin dashboard can list what exists and how
+      # much space it uses. Read-only on purpose: the dashboard reports, it
+      # never writes or deletes here. Deleting backups stays a deliberate act
+      # on the host, where restore-instance.sh also lives.
+      # If this path does not exist the dashboard simply reports backups as
+      # unavailable - the mount is created by the deploy script, so a hand-made
+      # instance without it still runs.
+      - type: bind
+        source: ${backups_dir}
+        target: /data/backups
+        read_only: true
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ready', timeout=4).read()"]
       interval: 15s
