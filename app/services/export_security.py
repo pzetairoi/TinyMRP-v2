@@ -51,26 +51,45 @@ def exact_bom_pairs(
     if not root[0]:
         raise ExportSecurityError("export unavailable")
     found: set[tuple[str, str]] = {root}
-    queue: list[tuple[str, str]] = [root]
+    frontier: list[tuple[str, str]] = [root]
     try:
-        while queue:
-            parent_pn, parent_rev = queue.pop(0)
-            links = BOMLink.objects(
-                parent_pn=parent_pn,
-                parent_rev=parent_rev,
-            )
-            for link in links:
-                child_pn = str(getattr(link, "child_pn", "") or "").strip()
-                if not child_pn:
-                    continue
-                child = (child_pn, clean_rev(getattr(link, "child_rev", "")))
-                if child in found:
-                    continue
-                found.add(child)
-                if full:
-                    queue.append(child)
+        # One query per LEVEL, not per node. This walk previously issued a
+        # BOMLink query for every part it visited - 1348 of them inside a
+        # single doc-pack options call. The parts of a level are all known
+        # before any of them is expanded, so they can be asked for together.
+        #
+        # The result is identical by construction: the same pairs are
+        # discovered in the same breadth-first order, and the (pn, rev) match
+        # is still exact. Only the number of round trips changes. That matters
+        # because this set is the authorisation boundary for an export.
+        while frontier:
+            parent_names = sorted({pn for pn, _rev in frontier if pn})
+            wanted = set(frontier)
+            next_frontier: list[tuple[str, str]] = []
+            if parent_names:
+                for link in BOMLink.objects(parent_pn__in=parent_names).only(
+                    "parent_pn", "parent_rev", "child_pn", "child_rev"
+                ):
+                    parent = (
+                        str(getattr(link, "parent_pn", "") or "").strip(),
+                        clean_rev(getattr(link, "parent_rev", "")),
+                    )
+                    # A batched query returns links for every revision of those
+                    # part numbers, so the exact pair must still be honoured.
+                    if parent not in wanted:
+                        continue
+                    child_pn = str(getattr(link, "child_pn", "") or "").strip()
+                    if not child_pn:
+                        continue
+                    child = (child_pn, clean_rev(getattr(link, "child_rev", "")))
+                    if child in found:
+                        continue
+                    found.add(child)
+                    if full:
+                        next_frontier.append(child)
             if not full:
                 break
+            frontier = next_frontier
     except Exception as exc:
         raise ExportSecurityError("export unavailable") from exc
     return frozenset(found)
