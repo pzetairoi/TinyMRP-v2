@@ -418,7 +418,57 @@ measure, including the attempts that fail.
             refuses to start, having already destroyed the old instance.
          4. Restore, then verify counts against what was there before.
 
-  T-2. Resource analysis of the test VPS                 OWNER-REQUESTED
+  T-2. Resource analysis of SERVER-B          ANSWERED 2026-08-08
+
+  *** THE ANSWER: IT IS NOT TinyMRP, AND IT IS NOT mecs. ***
+
+       Measured with docker stats on the live host, 2 cores, 3.8 GB:
+
+         tinymrp-test-nextcloud-app   67.02%   296 MB
+         tinymrp-nextcloud-app        37.86%   302 MB
+         tinymrp-nextcloud-db         31.53%   250 MB
+         tinymrp-test-nextcloud-db    25.79%   223 MB
+         ------------------------------------------------
+         two Nextclouds + MariaDBs   ~162%   ~1073 MB
+
+         tinymrp-test-app             31.67%   150 MB  (profiler ON)
+         tinymrp-test-mongo            0.42%   165 MB
+         tinymrp-mecs-app              0.17%   165 MB
+         tinymrp-mecs-mongo            0.38%    96 MB
+         tinymrp-test-redis            0.47%     5 MB
+         tinymrp-caddy                 0.07%    56 MB
+
+       DIRECTLY ANSWERING THE OWNER'S QUESTION: updating mecs would NOT recover
+       resources. It uses 0.55% of CPU and 261 MB in total, running the
+       pre-optimisation image. There is nothing there to reclaim. Update it for
+       the bug fixes and the security work, not for performance.
+
+       THE REAL CONSUMER is two Nextcloud instances with their own MariaDBs,
+       taking about 162% of a 2-core machine and a gigabyte of RAM - more than
+       everything TinyMRP runs put together (~575 MB across two instances,
+       two Mongos and a Redis).
+
+       ON MEMORY, and this matters before anyone panics: total 3819 MB, used
+       2265 MB, buff/cache 1721 MB, AVAILABLE 1554 MB. The host is not out of
+       memory. Linux counts page cache as used, so a control panel showing
+       "100%" is usually showing cache that is handed back on demand.
+       `available` is the number that matters and there is 1.5 GB of it.
+
+       WHAT TO DO ABOUT IT - options, not recommendations, because this is the
+       owner's infrastructure decision:
+         a) Two Nextclouds on one 2-core box is the cost. Ask whether both are
+            needed; the test one in particular.
+         b) Nextcloud runs cron and background jobs on a schedule. Check
+            whether both are indexing or previewing at once - that is what a
+            60% CPU reading usually is, and it is periodic rather than
+            constant.
+         c) Bound MariaDB's innodb_buffer_pool_size on both. It sizes itself
+            optimistically and two of them compound.
+         d) TinyMRP's own footprint is already small and further optimisation
+            there will not move this number.
+
+       NOTE: test-app at 31.67% has TINYMRP_PROFILE=1 enabled. Turn profiling
+       off when the measurement work is finished; it is not free under load.
        Find what is actually consuming the RAM on SERVER-B and why it sits at
        the limit. Report, do not change.
        KNOWN SO FAR, so this starts from evidence:
