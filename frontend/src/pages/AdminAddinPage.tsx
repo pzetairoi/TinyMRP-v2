@@ -5,9 +5,7 @@ import {
   createEmptySegment,
   getSegmentKind,
   normalizeSequenceSegments,
-  padCounter,
   revisionSample,
-  segmentSample,
 } from '../lib/numbering'
 import { apiFetch } from '../lib/api'
 import type { ApiError } from '../lib/api'

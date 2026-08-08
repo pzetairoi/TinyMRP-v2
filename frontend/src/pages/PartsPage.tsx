@@ -5,7 +5,7 @@ import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
 import FieldSelector from '../components/FieldSelector'
 import { apiErrorMessage, apiFetch, isCancelledRequest } from '../lib/api'
-import { defaultColumnFilterMeta, defaultColumnMatchMode, ensureColumnFilters } from '../lib/columnFilters'
+import { defaultColumnMatchMode, ensureColumnFilters } from '../lib/columnFilters'
 import {
   contextFields,
   defaultFieldIds,

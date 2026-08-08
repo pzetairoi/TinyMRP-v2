@@ -1,14 +1,11 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+/// <reference types="vite/client" />
 
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    proxy: { '/api': { target: 'http://127.0.0.1:5000', changeOrigin: true } }
-  },
-  build: {
-    outDir: '../app/static/parts-ui',
-    emptyOutDir: true
-  },
-  base: '/static/parts-ui/'
-})
+// This file used to contain a stale copy of vite.config.ts - an older,
+// slightly different one, sitting where the ambient type declarations belong.
+// Because of that, TypeScript had no declaration for `import './App.css'` or
+// any other asset import, and every CSS import in the app reported
+// "Cannot find module". Nothing caught it: Vite's build strips types without
+// checking them, and the typecheck was never wired into CI.
+//
+// The reference above is what the file is for. It brings in Vite's ambient
+// declarations for CSS, images and the rest of the asset imports.

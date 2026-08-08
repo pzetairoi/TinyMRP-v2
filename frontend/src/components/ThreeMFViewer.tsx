@@ -734,7 +734,7 @@ const ThreeMFViewer: React.FC<Props> = ({ url, height = 480, format = "ply" }) =
       const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera({ x, y }, cameraRef.current);
+      raycaster.setFromCamera(new THREE.Vector2(x, y), cameraRef.current);
       const hits = raycaster.intersectObject(modelRef.current, true);
       if (!hits.length) return;
       const point = hits[0].point.clone();

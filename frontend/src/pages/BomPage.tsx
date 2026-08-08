@@ -2,8 +2,17 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { TreeTable } from 'primereact/treetable'
+// PrimeReact's own filter types. A hand-written
+// Record<string, { value: any; matchMode: string }> looks equivalent but is
+// not: matchMode is a closed union there, so the loose version silently fails
+// to typecheck at the call site.
+// The two tables on this page need DIFFERENT types - the BOM tree is a
+// TreeTable, the where-used list is a DataTable - and they are not
+// interchangeable.
+import type { TreeTableFilterMeta } from 'primereact/treetable'
 import type { TreeNode } from 'primereact/treenode'
 import { DataTable } from 'primereact/datatable'
+import type { DataTableFilterMeta } from 'primereact/datatable'
 import { Column } from 'primereact/column'
 import { FilterMatchMode } from 'primereact/api'
 import ThumbImg from '../components/ThumbImg'
@@ -54,7 +63,7 @@ type LazyWUState = {
   rows: number
   sortField: string
   sortOrder: 1 | -1
-  filters: Record<string, { value: any; matchMode: string }>
+  filters: DataTableFilterMeta
 }
 
 const FALLBACK_BOM_FIELDS: FieldDefinition[] = [
@@ -98,7 +107,7 @@ export default function BomPage() {
   const [fieldConfig, setFieldConfig] = useState<FieldConfigPayload | null>(null)
   const [fieldPreferences, setFieldPreferences] = useState<FieldPreferences | null>(null)
 
-  const [treeFilters, setTreeFilters] = useState<Record<string, { value: any; matchMode: string }>>({})
+  const [treeFilters, setTreeFilters] = useState<TreeTableFilterMeta>({})
 
   useEffect(() => {
     ;(async () => {
@@ -186,8 +195,8 @@ export default function BomPage() {
     } catch {}
   }
 
-  function normalizeFilters(next: Record<string, { value: any; matchMode: string }>) {
-    const out: Record<string, { value: any; matchMode: string }> = {}
+  function normalizeFilters(next: TreeTableFilterMeta) {
+    const out: TreeTableFilterMeta = {}
     for (const [key, value] of Object.entries(next || {})) {
       if (value?.value === '' || value?.value === null || value?.value === undefined) continue
       out[key] = value
