@@ -120,6 +120,10 @@ already known, so nobody re-derives anything.
 
     1  O1   CSP browser check. Thirty minutes, closes the last security
             item, needs nothing but a browser.
+    1b 2.14 Backup retention and cadence. Not glamorous, but the disk has
+            about a week of runway and nothing deletes anything. Split
+            the database (2.3 MB) from the deliverables (2 GB) and add a
+            retention policy.
     2  2.13 Close the legacy-login issues. The fleet is strict now, so
             the compat branches are dead code in the most sensitive part
             of the system. Confirm no add-in in the field needs them.
@@ -332,6 +336,31 @@ already known, so nobody re-derives anything.
       Five placeholder images in the running help state what to capture and
       which file to overwrite. Replace them one at a time. Drawing markups
       have no help section at all - a whole feature undocumented.
+
+  2.14 Backup retention and cadence                          MEASURED, OPEN
+       A mecs backup is 2.0 GB, and the split is not what anyone assumes:
+         deliverables.tar.gz   2.0 GB     99.9% of it
+         mongo.archive.gz      2.3 MB     (27.1 MB uncompressed)
+       Live: 2.8 GB across 22151 files, against a 515 MB Mongo data dir.
+       The database is tiny. The engineering files are everything, which
+       is exactly what an MRP should look like.
+
+       CONSEQUENCE. The daily job re-compresses all 2.8 GB every night
+       even when not one file changed. At roughly 2 GB a night against
+       14 GB free, the disk has about a week of runway, and a backup that
+       runs out of space is precisely the kind that fails quietly. There
+       is no retention policy at all - nothing deletes anything, ever.
+
+       THE FIX FALLS OUT OF THE MEASUREMENT: split the cadences.
+         - database: 2.3 MB compressed. Daily is free; hourly would be
+           too. This is the part that changes constantly.
+         - deliverables: 2 GB that rarely all change. Weekly, or better,
+           an incremental rsync mirror that only copies what is new.
+         - retention: keep N and drop the rest. Anything is better than
+           the current nothing.
+       Deliberately NOT done on release day, with a freshly verified
+       backup in hand. It changes backup-instance.sh, and that script has
+       already produced silent failures twice in this project's history.
 
   2.12 Remove the legacy roles from the codebase             OWNER-REQUESTED
        The owner has already edited the only place they were still used
