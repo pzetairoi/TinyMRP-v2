@@ -9,11 +9,22 @@
 #   mongo-raw.tar.gz      OPTIONAL (--raw): raw /data/db tarball, compatible with
 #                         rollback-instance.sh --restore-mongo-from (stops the instance briefly!)
 #
-# Retention: --keep-days N (default 14) prunes older backup folders for this instance.
+# Retention, three limits, any of which can prune. The newest backup is never
+# pruned, whatever they say:
+#   --keep-days N      default 14, age
+#   --keep-count N     default 8, a hard ceiling on how many exist
+#   --max-total-gb N   default 10, the only limit expressed in the unit that
+#                      actually runs out. Age alone aimed 14 days of 2 GB
+#                      backups at a 14 GB disk here.
 #
 # Usage:
-#   sudo ./deploy/scripts/backup-instance.sh <instance_name> [--dest <dir>] [--keep-days 14]
+#   sudo ./deploy/scripts/backup-instance.sh <instance_name> [--dest <dir>]
+#        [--keep-days 14] [--keep-count 8] [--max-total-gb 10]
 #        [--no-deliverables] [--raw] [--dry-run]
+#
+# --no-deliverables is the cheap one: the database is ~2 MB compressed while
+# the deliverables are gigabytes, so a database-only backup can run far more
+# often than a full one. See install-backup-job.sh, which installs both.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +41,11 @@ shift
 
 DEST_ROOT=""
 KEEP_DAYS=14
+# A hard ceiling on how many backups exist, and on how much room they may
+# occupy. Age alone let 14 days of 2 GB backups aim at a 14 GB disk.
+# 0 disables either limit.
+KEEP_COUNT=8
+MAX_TOTAL_GB=10
 WITH_DELIVERABLES=1
 WITH_RAW=0
 DRY_RUN=0
@@ -38,6 +54,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --dest) DEST_ROOT="${2:?}"; shift 2 ;;
     --keep-days) KEEP_DAYS="${2:?}"; shift 2 ;;
+    --keep-count) KEEP_COUNT="${2:?}"; shift 2 ;;
+    --max-total-gb) MAX_TOTAL_GB="${2:?}"; shift 2 ;;
     --no-deliverables) WITH_DELIVERABLES=0; shift ;;
     --raw) WITH_RAW=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -162,14 +180,75 @@ else
   die "Checksum verification failed immediately after writing the backup."
 fi
 
-# 6) Retention
-if [ "$KEEP_DAYS" -gt 0 ] 2>/dev/null; then
-  PRUNED=0
-  while IFS= read -r old_dir; do
-    rm -rf -- "$old_dir"
-    PRUNED=$((PRUNED + 1))
-  done < <(find "${DEST_ROOT}/${INSTANCE_NAME}" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" 2>/dev/null)
-  [ "$PRUNED" -gt 0 ] && info "  pruned ${PRUNED} backup(s) older than ${KEEP_DAYS} days"
+# 6) Retention.
+#
+# Age alone is not enough, and that gap is what nearly filled a disk here.
+# A mecs backup is 2.0 GB, of which 99.9% is deliverables and 2.3 MB is the
+# database. Keeping 14 days of those needs 28 GB on a host that had 14 GB
+# free: the policy was satisfied right up until the disk was not.
+#
+# So three limits, applied in order, each one able to prune on its own:
+#   age    - the original --keep-days
+#   count  - --keep-count, a hard ceiling on how many exist
+#   size   - --max-total-gb, the only one that actually bounds disk use,
+#            because it is the only one expressed in the unit that runs out
+# The newest backup is never pruned, whatever the limits say. A retention
+# policy that can delete the only copy is worse than no policy.
+prune_backup_dirs() {
+  local reason="$1"
+  shift
+  local pruned=0
+  for old_dir in "$@"; do
+    [ -n "$old_dir" ] || continue
+    rm -rf -- "$old_dir" && pruned=$((pruned + 1))
+  done
+  [ "$pruned" -gt 0 ] && info "  pruned ${pruned} backup(s): ${reason}"
+  return 0
+}
+
+list_backups_newest_first() {
+  find "${DEST_ROOT}/${INSTANCE_NAME}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn | cut -d' ' -f2-
+}
+
+if [ "${KEEP_DAYS:-0}" -gt 0 ] 2>/dev/null; then
+  # -mtime +N never matches the backup just written, so the newest is safe.
+  mapfile -t OLD_BY_AGE < <(find "${DEST_ROOT}/${INSTANCE_NAME}" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" 2>/dev/null)
+  [ "${#OLD_BY_AGE[@]}" -gt 0 ] && prune_backup_dirs "older than ${KEEP_DAYS} days" "${OLD_BY_AGE[@]}"
+fi
+
+if [ "${KEEP_COUNT:-0}" -gt 0 ] 2>/dev/null; then
+  mapfile -t ALL_BACKUPS < <(list_backups_newest_first)
+  if [ "${#ALL_BACKUPS[@]}" -gt "$KEEP_COUNT" ]; then
+    prune_backup_dirs "keeping the newest ${KEEP_COUNT}" "${ALL_BACKUPS[@]:$KEEP_COUNT}"
+  fi
+fi
+
+if [ "${MAX_TOTAL_GB:-0}" -gt 0 ] 2>/dev/null; then
+  BUDGET_KB=$((MAX_TOTAL_GB * 1024 * 1024))
+  mapfile -t ALL_BACKUPS < <(list_backups_newest_first)
+  RUNNING_KB=0
+  OVER_BUDGET=()
+  for idx in "${!ALL_BACKUPS[@]}"; do
+    dir="${ALL_BACKUPS[$idx]}"
+    dir_kb="$(du -sk "$dir" 2>/dev/null | cut -f1)"
+    RUNNING_KB=$((RUNNING_KB + ${dir_kb:-0}))
+    # Index 0 is the newest and is kept unconditionally, even if it alone
+    # exceeds the budget - in that case the budget is wrong, not the backup.
+    if [ "$idx" -gt 0 ] && [ "$RUNNING_KB" -gt "$BUDGET_KB" ]; then
+      OVER_BUDGET+=("$dir")
+    fi
+  done
+  if [ "${#OVER_BUDGET[@]}" -gt 0 ]; then
+    prune_backup_dirs "over the ${MAX_TOTAL_GB} GB budget" "${OVER_BUDGET[@]}"
+  fi
+fi
+
+# Say plainly how much room is left. The failure this guards against is a
+# backup that runs out of space, which is silent from the inside.
+DISK_AVAIL="$(df -Pk "$DEST_ROOT" 2>/dev/null | awk 'NR==2 {printf "%.1f", $4/1048576}')"
+if [ -n "$DISK_AVAIL" ]; then
+  info "  backups now use $(du -sh "${DEST_ROOT}/${INSTANCE_NAME}" 2>/dev/null | cut -f1), ${DISK_AVAIL} GB free on the filesystem"
 fi
 
 info "Backup complete: ${BACKUP_DIR}"
