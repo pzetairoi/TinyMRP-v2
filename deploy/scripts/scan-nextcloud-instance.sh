@@ -10,12 +10,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance_name> [--nextcloud-instance <name|global>]
+  sudo ./deploy/scripts/scan-nextcloud-instance.sh <instance_name> [--nextcloud-instance <name|global>] [--force]
+
+Options:
+  --force   Scan even if nothing under the deliverables folder has changed.
+            Without it, a run whose tree is unchanged exits in milliseconds.
 
 Examples:
   sudo ./deploy/scripts/scan-nextcloud-instance.sh mecs
   sudo ./deploy/scripts/scan-nextcloud-instance.sh mecs --nextcloud-instance mecs
   sudo ./deploy/scripts/scan-nextcloud-instance.sh mecs --nextcloud-instance global
+  sudo ./deploy/scripts/scan-nextcloud-instance.sh mecs --force
 EOF
 }
 
@@ -39,6 +44,52 @@ append_line_if_present() {
   printf '%s\n' "$value" >>"$target_file"
 }
 
+# --- Change-detection guard -------------------------------------------------
+# The expensive part of this script is two occ passes that each cost tens of
+# seconds of PHP. Measured on SERVER-B: 26s for files_external:scan plus 22s
+# for files:scan --path, every five minutes, and almost every run found that
+# nothing had changed. Asking the filesystem first turns the common case into
+# a metadata walk of a few milliseconds.
+#
+# FAILS OPEN BY DESIGN. No stamp, an unreadable tree, a find that errors - all
+# lead to a scan. The dangerous failure here is not scanning too often, it is
+# silently never scanning again and letting deliverables quietly stop appearing
+# in Nextcloud. Every uncertain path therefore scans, and an unconditional scan
+# still runs at least once per SCAN_MAX_SKIP_SECONDS whatever the check says.
+SCAN_STAMP_DIR="${TINYMRP_NEXTCLOUD_SCAN_STAMP_DIR:-/var/lib/tinymrp/nextcloud-scan}"
+SCAN_MAX_SKIP_SECONDS="${TINYMRP_NEXTCLOUD_SCAN_MAX_SKIP_SECONDS:-3600}"
+
+scan_stamp_file_path() {
+  printf '%s/%s__%s.stamp\n' "$SCAN_STAMP_DIR" "$1" "$2"
+}
+
+deliverables_changed_since_stamp() {
+  local deliverables_dir="$1"
+  local stamp_file="$2"
+  local newest=""
+
+  # No stamp means this link has never been scanned by a guarded run.
+  [ -f "$stamp_file" ] || return 0
+
+  # -quit stops at the first newer entry, so a busy tree costs even less than
+  # an idle one. Directory mtimes change on create and delete, so removals are
+  # caught as well as additions.
+  newest="$(find "$deliverables_dir" -newer "$stamp_file" -print -quit 2>/dev/null)" || return 0
+  [ -n "$newest" ]
+}
+
+stamp_older_than_max_skip() {
+  local stamp_file="$1"
+  local now=""
+  local stamp_mtime=""
+
+  [ -f "$stamp_file" ] || return 0
+  now="$(date +%s 2>/dev/null)" || return 0
+  stamp_mtime="$(stat -c %Y "$stamp_file" 2>/dev/null)" || return 0
+  [ -n "$now" ] && [ -n "$stamp_mtime" ] || return 0
+  [ "$((now - stamp_mtime))" -ge "$SCAN_MAX_SKIP_SECONDS" ]
+}
+
 scan_nextcloud_user_path() {
   local container_name="$1"
   local user_name="$2"
@@ -56,9 +107,14 @@ scan_nextcloud_user_path() {
 
 INSTANCE_NAME=""
 NEXTCLOUD_SELECTOR=""
+FORCE_SCAN=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --force)
+      FORCE_SCAN=1
+      shift
+      ;;
     --nextcloud-instance)
       [ -n "${2-}" ] || die "--nextcloud-instance requires a value."
       NEXTCLOUD_SELECTOR="$(normalize_nextcloud_selector "${2-}")"
@@ -102,6 +158,26 @@ INSTANCE_ROOT="$(instance_dir "$INSTANCE_NAME")"
 INSTANCE_DELIVERABLES="${INSTANCE_ROOT}/deliverables"
 [ -d "$INSTANCE_ROOT" ] || die "TinyMRP instance not found: ${INSTANCE_ROOT}"
 [ -d "$INSTANCE_DELIVERABLES" ] || die "TinyMRP deliverables folder not found: ${INSTANCE_DELIVERABLES}"
+
+# Guard before anything expensive - deliberately ahead of the first docker exec
+# as well as ahead of the occ passes, so a no-op run does not even enter a
+# container.
+SCAN_STAMP_FILE="$(scan_stamp_file_path "$INSTANCE_NAME" "$NEXTCLOUD_SELECTOR")"
+if [ "$FORCE_SCAN" -eq 1 ]; then
+  note "Forced scan requested with --force; skipping the change-detection guard."
+elif stamp_older_than_max_skip "$SCAN_STAMP_FILE"; then
+  note "No scan in the last ${SCAN_MAX_SKIP_SECONDS}s; scanning unconditionally as a safety net."
+elif ! deliverables_changed_since_stamp "$INSTANCE_DELIVERABLES" "$SCAN_STAMP_FILE"; then
+  pass "No deliverable changes since the last scan under ${INSTANCE_DELIVERABLES}"
+  printf 'Scan skipped: nothing changed since %s\n' "$(date -u -r "$SCAN_STAMP_FILE" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || printf unknown)"
+  exit 0
+fi
+
+# Stamp BEFORE scanning, never after. A file written while the scan is running
+# has to look newer than the stamp so the next run still picks it up; stamping
+# afterwards would swallow exactly those writes.
+mkdir -p "$SCAN_STAMP_DIR" 2>/dev/null || true
+touch "$SCAN_STAMP_FILE" 2>/dev/null || true
 
 export TINYMRP_NEXTCLOUD_DIR
 TINYMRP_NEXTCLOUD_DIR="$(nextcloud_root_for_selector "$NEXTCLOUD_SELECTOR")"

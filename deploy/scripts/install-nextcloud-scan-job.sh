@@ -55,6 +55,18 @@ EOF
 render_systemd_timer() {
   local service_name="$1"
   local interval_minutes="$2"
+  local jitter_seconds
+
+  # Two instances installed by the same operator previously fired within six
+  # MILLISECONDS of each other and then fought over the same two cores for the
+  # length of both scans. install-backup-job.sh already sets RandomizedDelaySec
+  # for exactly this reason; the scan job set nothing at all.
+  # Half the interval, bounded so a one-minute timer stays roughly on time and
+  # a long one does not drift for hours.
+  jitter_seconds=$((interval_minutes * 30))
+  [ "$jitter_seconds" -lt 15 ] && jitter_seconds=15
+  [ "$jitter_seconds" -gt 300 ] && jitter_seconds=300
+
   cat <<EOF
 [Unit]
 Description=Run ${service_name} every ${interval_minutes} minute(s)
@@ -62,6 +74,8 @@ Description=Run ${service_name} every ${interval_minutes} minute(s)
 [Timer]
 OnBootSec=2min
 OnUnitActiveSec=${interval_minutes}min
+RandomizedDelaySec=${jitter_seconds}
+AccuracySec=15s
 Persistent=true
 Unit=${service_name}
 

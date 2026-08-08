@@ -73,16 +73,17 @@ already known, so nobody re-derives anything.
       The add-in was verified against strict mode on test, so the risk that
       blocked this is retired. One environment variable and a restart.
 
-  2.4 Nextcloud's resource use on SERVER-B                  OWNER DECISION
-      Two Nextclouds with their MariaDBs take about 162% of a 2-core box and a
-      gigabyte of RAM - more than everything TinyMRP runs there combined.
-      TinyMRP's whole footprint on that host is roughly 575 MB.
-      Nothing in TinyMRP will move this number. Options: drop the test
-      Nextcloud, stagger their cron and preview jobs, bound
-      innodb_buffer_pool_size on both.
-      AND BEFORE ANYONE PANICS AT A CONTROL PANEL: the host is not out of
-      memory. Linux counts page cache as used; `available` is the number that
-      matters and there was 1.5 GB of it.
+  2.4 Nextcloud's resource use on SERVER-B      SUPERSEDED - see section 3
+      This item used to say the two Nextclouds took 162% of a 2-core box.
+      Re-measured 2026-08-08: that was sampled during a scan window. At rest
+      they sit at 0.00-0.01% CPU. The periodic cost is real but it is OUR
+      scan job, not Nextcloud, and section 3 has the measurements and plan.
+      The RAM claim was also overstated - 934 MB of 1608 MB of containers,
+      with 1674 MB available and zero swap.
+      "Nothing in TinyMRP will move this number" was wrong twice over: the
+      number was mostly ours to begin with, and N2 removes most of it.
+      What survives from this item: the host is not out of memory. Linux
+      counts page cache as used; `available` is the number that matters.
 
   2.5 _flatten_bom level batching                           PERFORMANCE
       A doc-pack build measured 22 s and 6625 BOM queries before a
@@ -121,7 +122,243 @@ already known, so nobody re-derives anything.
 
 
 ========================================================================
-3. HOW TO WORK ON THIS SYSTEM
+3. NEXTCLOUD RESOURCE PHASE
+========================================================================
+  Opened 2026-08-08 after an external review (ChatGPT) of Nextcloud's
+  resource use. The review's direction was right; its magnitudes were not.
+  Everything below was MEASURED read-only on SERVER-B before being written
+  down. No change has been made yet.
+
+  3.1 WHAT THE MACHINE ACTUALLY SHOWS
+
+    Memory, SERVER-B, 3819 MB total:
+      used 2145 | buff/cache 1553 | AVAILABLE 1674
+      swap 0 used, 0 pages ever swapped, 0 OOM kills in dmesg
+
+    Containers by RSS:
+      tinymrp-nextcloud-db          273.5 MB    0.01% CPU
+      tinymrp-test-nextcloud-app    228.4 MB    0.00% CPU
+      tinymrp-test-nextcloud-db     225.0 MB    0.01% CPU
+      tinymrp-test-app              214.4 MB    0.11% CPU
+      tinymrp-nextcloud-app         207.6 MB    0.00% CPU
+      tinymrp-mecs-app              166.7 MB    0.12% CPU
+      tinymrp-mecs-mongo            136.4 MB    0.39% CPU
+      tinymrp-test-mongo            120.1 MB    0.41% CPU
+      tinymrp-caddy                  31.1 MB    0.00% CPU
+      tinymrp-test-redis              4.2 MB    0.47% CPU
+
+    THREE CORRECTIONS TO THE PREMISE. Worth stating plainly because the
+    whole plan changes shape once they are true:
+
+    a) Nextcloud is NOT using 80% of RAM. It is 934 MB of 1608 MB of
+       containers - 58% - and the host has 1674 MB available with zero
+       swap and zero OOM kills. There is no memory pressure to fix.
+
+    b) Nextcloud is NOT using 80% of CPU. At rest it is 0.00-0.01%. The
+       162% figure recorded earlier in optimizationplan.txt was sampled
+       DURING a scan window. Both the earlier measurement and the external
+       review generalised a spike into a steady state.
+
+    c) The CPU is real, but it is periodic and it is entirely ours. It is
+       the scan job we install, not Nextcloud running hot.
+
+  3.2 THE ACTUAL COST, MEASURED
+
+    Three consecutive runs of each scan, from the journal:
+      mecs   56.1s  51.5s  52.1s
+      test   38.7s  30.8s  30.5s
+
+    Both timers fired at 1786157409.640 and 1786157409.645 - SIX
+    MILLISECONDS apart. They are not staggered and they never will be:
+    install-backup-job.sh sets RandomizedDelaySec=600, and
+    install-nextcloud-scan-job.sh sets nothing at all.
+
+    Duty cycle: 52s + 31s of concurrent work every 300s on two cores.
+    Roughly 28% of the machine's wall-clock time, almost always computing
+    that nothing has changed.
+
+    One mecs run broken down:
+      02:50:10  mount visibility check
+      02:50:13  group user discovery
+      02:50:39  files_external:scan 1          26s
+      02:51:01  files:scan --path=admin/...    22s
+      total 51s
+
+    THE SECOND PASS RE-WALKS THE TREE THE FIRST PASS JUST WALKED. Same
+    files, once as the external mount and once through the user's view.
+    About half the cost, and nobody has ever tested whether dropping it
+    changes what appears in the Nextcloud UI. That test is item 3.5.
+
+    Good news the review guessed at and could not confirm: the targeted
+    path is working. "files_external:scan --all fallback used: no" and
+    "files:scan --all fallback used: no" on every run. The catastrophic
+    fallback exists but is not firing.
+
+  3.3 THE IDEA THAT DOES NOT SURVIVE CONTACT WITH THE CODE
+
+    The review proposes that TinyMRP mark the mount dirty on write and
+    trigger a targeted scan. The instinct is right. The mechanism cannot
+    be built as described:
+
+      TinyMRP HAS NO NEXTCLOUD AWARENESS AT ALL. Grepping the whole of
+      app/ for "nextcloud" returns two hits, both in static help HTML.
+      The integration lives entirely in deploy/scripts.
+
+      THE APP CANNOT RUN occ. It is a non-root container with no docker
+      socket. Mounting the socket to let it exec into the Nextcloud
+      container would hand the application root on the host and undo the
+      hardening plan in a single line. Not a trade worth making to avoid
+      a filesystem scan.
+
+    The safe equivalent, and what 3.6 specifies, is a marker file in the
+    deliverables directory - which is ALREADY a shared bind mount, so it
+    needs no new privilege, no new network path and no new socket.
+
+  3.4 AND THE CONCERN THAT IS ALREADY SOLVED
+
+    The worry was that a user dropping files into their Nextcloud would
+    not be seen by a subsequent import. Verified in app/services/
+    filescan.py: discovery reads the filesystem directly through
+    iterdir(), and the directory index cache is documented as living for
+    exactly one scan "because storage changes between scans".
+
+    So an import already sees those files IMMEDIATELY. It does not
+    consult Nextcloud's file cache and never has.
+
+    The occ scan only serves the OPPOSITE direction: making deliverables
+    that TinyMRP wrote appear in the Nextcloud web UI. Nothing about
+    import speed or correctness depends on it. That reframes the whole
+    job - it is a convenience refresh, not a correctness mechanism, and
+    it can be made lazy without risking an import.
+
+  3.5 THE PLAN, CHEAPEST AND SAFEST FIRST
+
+    N0  STAGGER THE TIMERS                     minutes, zero risk
+        Add RandomizedDelaySec and a per-instance offset to
+        install-nextcloud-scan-job.sh, exactly as install-backup-job.sh
+        already does. Removes the collision without changing behaviour.
+        Takes the 2-core peak from two concurrent PHP scans to one.
+
+    N1  RAISE THE DEFAULT INTERVAL             REJECTED BY OWNER 2026-08-08
+        Was: 5 -> 15 minutes as a holding measure. The owner does not
+        want freshness to get worse, and he is right to refuse it: N2
+        makes the idle scan nearly free, so the interval should go DOWN
+        to 1 minute, not up. Raising it would have traded the thing that
+        matters to users for the thing the guard fixes anyway.
+        Do not revive this item. Go straight to N2.
+
+    N2  CHANGE-DETECTION GUARD                 the real fix - DO THIS ONE
+        Revised 2026-08-08. An earlier draft had TinyMRP touch a marker
+        file. That is unnecessary: the scan job runs on the HOST, and the
+        deliverables tree is on the host. It can detect change itself.
+
+          - keep a stamp file per link, e.g.
+            /var/lib/tinymrp/nextcloud-scan/<instance>.stamp
+          - the job starts by asking the filesystem whether anything is
+            newer than the stamp; if not, exit
+          - only if something changed: touch the stamp FIRST, then scan,
+            so a write during the scan is not swallowed
+
+        Why this is the right shape:
+          - NO application change. No new code path in TinyMRP, no
+            rebuild, no redeploy, no docker socket, no new privilege.
+            It is a guard clause in a shell script that already exists.
+          - a no-op costs a metadata walk in milliseconds instead of
+            ~50 seconds of PHP - roughly a 250x reduction on the case
+            that is true almost every time
+          - because the idle case is nearly free, the interval can go
+            DOWN to 1 minute rather than up. The owner gets faster
+            freshness than today AND the machine gets its CPU back.
+          - it catches changes made by anyone - TinyMRP, a user in the
+            Nextcloud UI, an admin over SSH - not only writes TinyMRP
+            knows it made
+
+        Care: use the cheapest check that is still correct. A full
+        -newer stat of every file is fine at current sizes but grows
+        with the tree; directory mtimes alone miss in-place edits.
+        Measure the guard itself before trusting it, and keep a slow
+        unconditional scan (hourly, staggered) as a safety net.
+
+        Item 3.6 then reduces to almost nothing: the import does not
+        need to signal anything, because the guard already sees what
+        the import wrote.
+
+    N3  DROP THE REDUNDANT SECOND PASS         measure, then decide
+        Test whether files:scan --path adds anything after
+        files_external:scan on the same tree. If not, halve the cost of
+        every scan. VERIFY IN THE NEXTCLOUD UI, not in the exit code -
+        the scan reports success either way.
+
+    N4  NEXTCLOUD'S OWN BACKGROUND JOBS        correct, and missing
+        Confirmed: backgroundjobs_mode is unset on both instances, so
+        both are on the AJAX default and a user's page load can drag
+        Nextcloud's housekeeping. Set background:cron with a real cron
+        entry, plus maintenance_window_start so the heavy daily jobs run
+        at night. Note this ADDS a small steady cost and removes a
+        larger unpredictable one.
+
+    N5  STOP THE TEST NEXTCLOUD WHEN NOT TESTING    DECLINED BY OWNER
+        453 MB and two containers, idle almost always. Declined
+        2026-08-08: the owner wants test Nextcloud available. Fine -
+        there is no memory pressure (1674 MB available, zero swap), so
+        this was convenience, not need. Left here only so nobody
+        proposes it again as if it were new.
+
+    N6  REDIS FOR NEXTCLOUD                    DEPRIORITISED - see why
+        The review recommends it for locking and distributed cache,
+        citing the MariaDB CPU. That CPU was scan-window sampling; at
+        rest both databases sit at 0.01%. Redis would mostly relieve
+        load that N2 deletes outright. Two more containers and two more
+        failure modes to fix a symptom of the thing being removed.
+        Revisit only if N2 lands and the databases are still busy.
+
+    N7  APACHE / PREVIEWS / INNODB TUNING      only with evidence
+        The review is right that mod_php + prefork is not the leanest
+        model, and right that preview generation can spike to 256 MB.
+        But nothing here is currently under pressure. MariaDB's 128 MB
+        default buffer pool already explains the ~225-275 MB RSS, so
+        setting innodb_buffer_pool_size=128M would very likely save
+        nothing. Measure with SHOW VARIABLES before touching it.
+
+    N8  PHP-FPM WITH pm=ondemand               architecturally nicer, later
+        A genuinely better fit for many tenants with few concurrent
+        users. It is also a migration of the web server under a running
+        production service, for a host that is not short of memory.
+        Last, if ever.
+
+  3.6 SEPARATE TASK: SCAN ON IMPORT            RISKY - own change, own test
+
+    The owner's other idea: when an import runs, discover filesystem
+    changes so new file references are usable straight away, WITHOUT the
+    sync blocking or delaying the import, and ideally with images first
+    so thumbnails can be built.
+
+    Flagged by the owner himself as potentially problematic, and he is
+    right. Recorded here rather than folded into N2 because it touches
+    the import path, which is the one thing in this system that must not
+    become slower or less correct.
+
+    What is already true (3.4): the import ALREADY sees new files on
+    disk. So this task is not about correctness. It is about making the
+    Nextcloud side refresh at the moment there is a reason to.
+
+    The cheap, safe 90%: have the import touch the N2 marker when it
+    finishes writing. The scan then happens within a minute, entirely
+    outside the request, and the import never waits.
+
+    What to be careful about, if it ever goes further than that:
+      - the import must not block on any scan, ever
+      - a failed or slow scan must not fail an import
+      - thumbnail generation on the TinyMRP side is already an
+        import-time concern (see optimizationplan.txt); do not entangle
+        the two mechanisms just because both involve images
+      - re-imports storage-scan every planned part, so an import can
+        write a great many files in a burst: one marker, one scan, not
+        one per file
+
+
+========================================================================
+4. HOW TO WORK ON THIS SYSTEM
 ========================================================================
   Distilled from three plans and several expensive mistakes. This is the part
   worth reading before touching anything.

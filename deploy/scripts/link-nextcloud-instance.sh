@@ -284,7 +284,13 @@ REMOVE_LINK=0
 NON_INTERACTIVE=0
 REQUESTED_MODE=""
 MODE_FLAG_SOURCE=""
-SCAN_INTERVAL_MINUTES=5
+# One minute, not five. Counter-intuitive only until you know the scan now
+# begins with a change-detection guard (scan-nextcloud-instance.sh): a run with
+# an unchanged deliverables tree costs a metadata walk and exits, so checking
+# more often is cheaper than the old five-minute unconditional scan AND makes
+# deliverables appear in Nextcloud sooner. Raising this number no longer buys
+# anything - if the machine is busy, look at whether the guard is working.
+SCAN_INTERVAL_MINUTES=1
 INSTALL_SCAN_JOB=1
 
 while [ $# -gt 0 ]; do
