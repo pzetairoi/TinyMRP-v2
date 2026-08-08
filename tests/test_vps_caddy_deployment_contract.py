@@ -313,3 +313,25 @@ def test_backup_proves_it_captured_data_and_uses_credentials():
 
     # A skipped deliverables snapshot must abort, not warn.
     assert "deliverables were requested but the directory is missing" in backup
+
+
+def test_mongo_healthcheck_is_not_run_every_ten_seconds():
+    """mongosh is a full Node REPL, not a light client.
+
+    Measured on the live instance: one invocation costs 1873 ms of CPU and
+    opens five connections. At a 10-second interval that is roughly 23 seconds
+    of CPU per minute per Mongo container, on an idle host - which was a large
+    part of the "40% CPU while idle" the owner reported, spent entirely on
+    asking whether the database was alive.
+    """
+    common = _read("deploy/scripts/lib/common.sh")
+    renderer = _shell_function(common, "render_instance_compose")
+    mongo = renderer.split("  mongo:", 1)[1].split("\n  redis:", 1)[0]
+
+    assert "mongosh" in mongo, "the check must still prove Mongo answers"
+    assert "interval: 10s" not in mongo, (
+        "the 10s interval is back; it costs ~23s of CPU per minute per Mongo"
+    )
+    assert "interval: 30s" in mongo
+    # mongosh takes about two seconds, so the timeout has to allow for it.
+    assert "timeout: 10s" in mongo

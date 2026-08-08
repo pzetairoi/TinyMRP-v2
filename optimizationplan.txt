@@ -440,6 +440,32 @@ measure, including the attempts that fail.
            matters, not `used`.
          - Only then look at TinyMRP itself.
 
+       DELIVER A REPEATABLE METHOD, not a one-off reading. The owner should be
+       able to answer "who is eating the RAM" without waiting for anyone. A
+       small script under deploy/scripts/ that prints, in one pass:
+         - free -m with available highlighted, since Linux counts page cache
+           as used and `used` alone misleads
+         - docker stats --no-stream sorted by memory
+         - each Mongo's WiredTiger cache setting and current usage
+         - each MariaDB's buffer pool
+         - the total of container limits versus physical RAM, which is how a
+           host ends up overcommitted without anything looking wrong
+       It should be safe to run on production and change nothing.
+
+  P-23. Mongo healthcheck was burning CPU at idle          DONE 2026-08-08
+       Measured while chasing the idle-resource question, and it is a large
+       part of the answer:
+         one mongosh invocation   1873 ms of CPU, 5 new connections
+         interval                 every 10 s, per Mongo container
+       On a host with two Mongos that is about 23 seconds of CPU per minute
+       spent asking whether the database is alive, plus 60 connections a
+       minute - which also explains the connection churn logged as P-9
+       (24,903 created against 17 concurrent).
+       mongosh is a full Node REPL, not a light client; the cost is its
+       startup, not the ping. Interval eased to 30 s with a 10 s timeout, which
+       still detects a dead Mongo well within the time its retries take to act.
+       Expect roughly a third of the previous idle CPU and churn.
+
   OUTSTANDING, NOT PERFORMANCE BUT NOT DONE EITHER:
     Nextcloud on SERVER-A - folded into T-1 above.
 

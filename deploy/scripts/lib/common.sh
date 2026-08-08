@@ -735,9 +735,16 @@ services:
         target: /docker-entrypoint-initdb.d
         read_only: true
     healthcheck:
+      # mongosh is a full Node REPL, not a light client: one invocation
+      # measured at 1873 ms of CPU and five new connections. At the old 10s
+      # interval that is roughly 23 seconds of CPU per minute per Mongo, on an
+      # idle host - a large share of the "40% CPU while idle" the owner saw,
+      # spent entirely on asking whether the database was alive.
+      # 30s still notices a dead Mongo quickly enough for a healthcheck whose
+      # retries then take another 90s to act.
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 10s
-      timeout: 5s
+      interval: 30s
+      timeout: 10s
       retries: 10
     networks:
       - private
