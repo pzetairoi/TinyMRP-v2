@@ -77,3 +77,45 @@ def test_a_blank_part_number_is_refused(app):
     with app.app_context():
         with pytest.raises(ExportSecurityError):
             exact_bom_pairs("", "", full=True)
+
+
+def test_preflight_still_refuses_an_unauthorised_pair_set(app, monkeypatch):
+    """The pair-level gate is what the per-file check was leaning on."""
+    from app.services import export_security
+
+    monkeypatch.setattr(export_security, "require_export_permissions", lambda *a, **k: None)
+    monkeypatch.setattr(export_security, "authorised_part_pairs", lambda user, pairs: frozenset())
+
+    with app.app_context():
+        with pytest.raises(export_security.ExportSecurityError):
+            export_security.preflight_export_plan(
+                object(), [("ASM", "1")], require_bom=False, include_files=True
+            )
+
+
+def test_file_lookup_matches_part_numbers_case_insensitively(app):
+    """_files_for_pairs batches with $in, which is case-SENSITIVE by default.
+
+    Swapping the per-pair __iexact query for a plain $in silently dropped files
+    whose stored part_number differed only in case. In the test suite that hid
+    a path-traversal record from the safety check and turned a 403 into a 200 -
+    a performance change quietly disabling a security check, which is the worst
+    way for one to fail.
+    """
+    from app.models.artifact import PartFile
+    from app.services.export_security import _files_for_pairs
+
+    with app.app_context():
+        PartFile.objects.delete()
+        PartFile(
+            part_number="aws-z-009025",
+            revision="",
+            ext="pdf",
+            ext_group="pdf",
+            rel_path="pdf/x.pdf",
+            path="/data/deliverables/pdf/x.pdf",
+        ).save()
+
+        found = _files_for_pairs([("AWS-Z-009025", "")], None)
+
+    assert len(found) == 1, "a differently-cased part number was dropped by the batch"

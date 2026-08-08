@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -194,15 +196,51 @@ def _files_for_pairs(
     pairs: Iterable[tuple[str, str]],
     groups: set[str] | None,
 ) -> tuple[PartFile, ...]:
-    files: list[PartFile] = []
+    # One query for every pair, not one per pair. This ran a PartFile query per
+    # part - 1372 of them inside a single doc-pack options call on a 1344-part
+    # assembly.
+    #
+    # The batched query matches on part_number only, so it returns rows for
+    # every revision of those numbers. The exact (pn, rev) pair is still
+    # enforced in memory below, case-folded exactly as __iexact would - this
+    # feeds an export authorisation check, so a row for a revision that was
+    # never requested must not slip through.
+    wanted: set[tuple[str, str]] = set()
+    names: set[str] = set()
     for pn, rev in pairs:
-        query = PartFile.objects(
-            part_number__iexact=pn,
-            revision__iexact=clean_rev(rev),
+        name = str(pn or "").strip()
+        if not name:
+            continue
+        names.add(name)
+        wanted.add((name.casefold(), clean_rev(rev).casefold()))
+    if not wanted:
+        return ()
+
+    # Case-INSENSITIVE $in, matching the __iexact the per-pair query used.
+    # A plain $in is case-sensitive, and swapping it in silently dropped files
+    # whose stored part_number differed only in case - including, in the test
+    # suite, a path-traversal record that then never reached the safety check
+    # and turned a 403 into a 200. Part numbers are matched case-insensitively
+    # everywhere in this codebase; an authorisation path is the last place to
+    # make an exception.
+    query = PartFile.objects(
+        __raw__={
+            "part_number": {
+                "$in": [re.compile(f"^{re.escape(name)}$", re.IGNORECASE) for name in sorted(names)]
+            }
+        }
+    )
+    if groups is not None:
+        query = query.filter(ext_group__in=sorted(groups))
+
+    files: list[PartFile] = []
+    for record in query:
+        key = (
+            str(getattr(record, "part_number", "") or "").strip().casefold(),
+            clean_rev(getattr(record, "revision", "")).casefold(),
         )
-        if groups is not None:
-            query = query.filter(ext_group__in=sorted(groups))
-        files.extend(query)
+        if key in wanted:
+            files.append(record)
     return tuple(files)
 
 
@@ -232,6 +270,16 @@ def preflight_export_plan(
 
     files = _files_for_pairs(exact_pairs, file_groups) if include_files else ()
     for file_record in files:
+        # REVERTED 2026-08-08. I removed this per-file check arguing it could
+        # not fail - authorised_part_pairs proves the whole pair set above, and
+        # _files_for_pairs only returns files for those pairs. The argument was
+        # wrong, and test_docpack_preflight_rejects_unsafe_required_file caught
+        # it: a PartFile carrying rel_path "../outside.pdf" was accepted where
+        # it had been refused with a 403.
+        #
+        # Keep the full check. The 5592 part queries it costs on a large
+        # assembly are recorded in optimizationplan.txt as still open; the
+        # answer is to make the check cheap, not to reason it away.
         if not managed_file_read_allowed(user, file_record):
             raise ExportSecurityError("export unavailable")
         try:

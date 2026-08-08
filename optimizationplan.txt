@@ -538,6 +538,30 @@ measure, including the attempts that fail.
        Do the read paths first, and only ones the profiler shows are hot. Half
        of these run once a day and are not worth touching.
 
+  P-26. Export preflight: one file query, not one per pair   PARTIAL
+       _files_for_pairs queried PartFile once per pair - 1372 in a single
+       options call. Now one query.
+       *** TWO MISTAKES HERE, both caught by tests, both worth keeping. ***
+
+       FIRST: I swapped __iexact for a plain $in, which is case-SENSITIVE.
+       Files whose stored part_number differed only in case were silently
+       dropped - including, in the suite, a path-traversal record that then
+       never reached the safety check and turned a 403 into a 200. A
+       performance change quietly disabling a security check is the worst way
+       for one to fail. Fixed with case-insensitive regexes in the $in, and
+       pinned by a test.
+
+       SECOND: I also removed the per-file managed_file_read_allowed call,
+       arguing it could not fail because authorised_part_pairs proves the whole
+       pair set and _files_for_pairs only returns files for those pairs. That
+       argument was WRONG and the same path-traversal test caught it. Reverted,
+       with the reasoning left in the code so nobody re-derives it.
+
+       STILL OPEN: that check costs about 5592 part queries on a 1344-part
+       assembly, because exact_file_part runs a Part query per file record.
+       The answer is to make the check cheap - resolve the parts once and hand
+       them in - NOT to reason it away. That is the remaining work here.
+
   METHOD - unchanged, and it has earned its place:
     1. Measure before changing.
     2. Count queries per request; an N+1 hides as a fast query repeated.
