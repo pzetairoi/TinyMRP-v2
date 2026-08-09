@@ -35,7 +35,10 @@ def test_security_workflow_uses_versioned_runner_and_full_history_secret_scan():
     assert "persist-credentials: false" in source
     assert "gitleaks/gitleaks-action@" in source
     assert source.count('python-version: "3.11.15"') == 2
-    assert source.count('node-version: "24.18.1"') == 1
+    # Two jobs pin Node now: the frontend job, and fresh-compose since B2-a
+    # added the browser suite there. Same pin reused deliberately, not drift -
+    # if this count changes, check WHY rather than just updating the number.
+    assert source.count('node-version: "24.18.1"') == 2
     assert source.count("python -m pip install --upgrade pip==26.2") == 2
     assert "koalaman/shellcheck:v0.11.0@sha256:" in source
     assert "apt-get install" not in source

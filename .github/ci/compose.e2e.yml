@@ -1,0 +1,22 @@
+# Compose overlay for the ephemeral browser-test instance (plan B2-a).
+#
+# WHY THIS FILE EXISTS RATHER THAN AN EDIT TO docker-compose.yml:
+# the plan's ownership map assigns root docker-compose*.yml to Lane C while
+# Codex is packaging the Community distribution. An overlay keeps the CI
+# requirement out of a file another agent is actively changing.
+#
+# WHAT IT CHANGES, and why it matters:
+# TINYMRP_CSP_ALLOW_INLINE defaults to "true" in the application, but the
+# fleet runs with it FALSE - A1 dropped 'unsafe-inline' from script-src on
+# 2026-08-09 after browser evidence showed every violation was style-src and
+# not one was script-src.
+#
+# Without this overlay the ephemeral instance would serve the PERMISSIVE
+# policy, so the Playwright CSP assertion would pass no matter what: it can
+# only catch a script the policy blocks, and a policy allowing inline scripts
+# blocks nothing. The test would still report green while proving nothing,
+# which is the same defect that reopened B2 in the first place.
+services:
+  app:
+    environment:
+      TINYMRP_CSP_ALLOW_INLINE: "false"

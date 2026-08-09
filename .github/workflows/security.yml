@@ -48,11 +48,26 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Node and the browser are installed BEFORE the stack comes up so that a
+      # tooling failure cannot be mistaken for an application failure, and so
+      # the download does not run while the compose stack idles.
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24.18.1"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend deps for the browser suite
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
       - name: Fresh database, bootstrap, restart, login and API smoke
         env:
           COMPOSE_PROJECT_NAME: tinymrp-phase3a-smoke
           SMOKE_EMAIL: phase3a-smoke@example.com
           HTTP_PORT: "5080"
+          DENIED_EMAIL: phase3a-workshop@example.com
         run: |
           set -euo pipefail
           SMOKE_ROOT="$RUNNER_TEMP/tinymrp-phase3a-smoke"
@@ -75,7 +90,10 @@ jobs:
           FILES_PROXY_MAX_BYTES=
           EOF
 
-          COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --env-file "$SMOKE_ENV" -f docker-compose.yml)
+          # The overlay makes this instance enforce the SAME script CSP as the
+          # fleet. Without it the policy allows inline scripts, and a CSP test
+          # against a permissive policy passes unconditionally.
+          COMPOSE=(docker compose --project-name "$COMPOSE_PROJECT_NAME" --env-file "$SMOKE_ENV" -f docker-compose.yml -f .github/ci/compose.e2e.yml)
           cleanup() {
             status=$?
             trap - EXIT
@@ -173,6 +191,90 @@ jobs:
             echo "Bootstrap password was exposed in container logs."
             exit 1
           fi
+
+          ###################################################################
+          # B2-a: the browser suite, against this ephemeral instance.
+          #
+          # Until now every Playwright step was gated on PLAYWRIGHT_BASE_URL,
+          # which nothing in this repository set - so on a pull request they
+          # were SKIPPED and the job still reported green. A suite that cannot
+          # fail is not a gate. This is where it runs for real.
+          #
+          # It runs LAST on purpose: the API, persistence and bootstrap checks
+          # above are the older, cheaper signal, and a browser failure must not
+          # prevent them from being reported.
+          #
+          # THE SEED USES THE APPLICATION'S OWN CLI COMMANDS, deliberately.
+          # A hand-written fixture drifts from the roles and permissions the
+          # app actually defines, and a drifting seed makes the suite flaky -
+          # a flaky browser suite gets disabled within a month. `seed-roles`
+          # reconciles against STANDARD_ROLES, so the seed cannot disagree
+          # with the catalogue it is testing.
+          ###################################################################
+          DENIED_PASSWORD="$(openssl rand -hex 24)"
+          FLASK=("${COMPOSE[@]}" exec -T -e FLASK_APP=run.py app flask)
+
+          "${FLASK[@]}" user seed-roles
+          "${FLASK[@]}" user seed-parts
+          "${FLASK[@]}" user seed-bom
+          "${FLASK[@]}" user create --email "$DENIED_EMAIL" --password "$DENIED_PASSWORD"
+          # workshop is an internal shop-floor role with no admin authority:
+          # exactly the account the RBAC negative path needs.
+          "${FLASK[@]}" user grant-role --email "$DENIED_EMAIL" --role workshop
+
+          # Prove the seed produced what the suite assumes, BEFORE running it.
+          # Without this a mis-seeded fixture surfaces as "the browser test
+          # failed", which sends the next person debugging the UI instead of
+          # the seed.
+          "${COMPOSE[@]}" exec -T app python - <<'PY'
+          from app import create_app
+          from app.models.auth import User
+          from app.models.part import Part
+          from app.models.bom import BOMLink
+
+          app = create_app()
+          with app.app_context():
+              denied = User.objects.get(email="phase3a-workshop@example.com")
+              roles = [r.name for r in denied.roles]
+              assert roles == ["workshop"], f"denied user has roles {roles}"
+              assert denied.active is True
+              assert Part.objects.count() >= 4, "sample parts missing"
+              assert BOMLink.objects(parent_pn="ASM-1001").count() >= 2, "demo BOM missing"
+              print("e2e seed verified")
+          PY
+
+          # Prove the CSP the overlay asked for actually arrived. If the app
+          # served the permissive default instead, every CSP assertion below
+          # would pass while testing nothing.
+          CSP="$(curl -sS -D - -o /dev/null "http://localhost:$HTTP_PORT/login" \
+            | tr -d '\r' | grep -i '^content-security-policy:')"
+          echo "$CSP"
+          if grep -q "script-src[^;]*unsafe-inline" <<<"$CSP"; then
+            echo "The ephemeral instance is serving the PERMISSIVE script CSP;"
+            echo "the browser CSP assertions would prove nothing. Check the overlay."
+            exit 1
+          fi
+
+          cd frontend
+          PLAYWRIGHT_BASE_URL="http://localhost:$HTTP_PORT" \
+          E2E_EMAIL="$SMOKE_EMAIL" \
+          E2E_PASSWORD="$SMOKE_PASSWORD" \
+          E2E_DENIED_EMAIL="$DENIED_EMAIL" \
+          E2E_DENIED_PASSWORD="$DENIED_PASSWORD" \
+            npx playwright test
+          cd ..
+      # Traces and screenshots for the failures that are hard to reproduce
+      # from a description alone.
+      - name: Upload browser evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-evidence
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
 
   supply-chain:
     runs-on: ubuntu-24.04
@@ -309,18 +411,16 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.app.json
       - name: Build
         run: npm run build
-      # Browser-level critical path (B2). Deliberately small: it proves only
-      # what jsdom cannot see - that the built bundle runs, the enforced CSP
-      # does not block our own scripts, and an unauthenticated caller is
-      # refused. The signed-in test skips unless E2E_EMAIL/E2E_PASSWORD are
-      # provided, so this never carries working credentials.
-      # Needs a running instance; skipped unless PLAYWRIGHT_BASE_URL is set.
-      - name: Install Playwright browser
-        if: env.PLAYWRIGHT_BASE_URL != ''
-        run: npx playwright install --with-deps chromium
-      - name: Critical path + accessibility (Playwright + axe)
-        if: env.PLAYWRIGHT_BASE_URL != ''
-        run: npm run test:e2e
+      # The browser suite USED TO LIVE HERE, gated on `env.PLAYWRIGHT_BASE_URL
+      # != ''`. Nothing in this repository ever set that variable, so the steps
+      # were skipped on every run and the job reported green regardless - the
+      # suite could not fail, which means it was not a gate. Removed 2026-08-09
+      # rather than left in place, because a permanently-skipped step is worse
+      # than no step: it reads as coverage.
+      #
+      # It now runs in two places that can actually go red:
+      #   fresh-compose job     - ephemeral seeded instance, every PR
+      #   browser-live workflow - against a deployed instance, after a deploy
       - name: Upload frontend supply-chain evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

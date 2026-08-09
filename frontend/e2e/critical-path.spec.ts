@@ -82,7 +82,15 @@ test.describe('signed in', () => {
     await page.fill('input[type="email"], input[name="email"]', EMAIL)
     await page.fill('input[type="password"]', PASSWORD)
     await page.click('button[type="submit"], input[type="submit"]')
-    await page.waitForLoadState('networkidle')
+
+    // NOT waitForLoadState('networkidle') - proven flaky against a real
+    // deployment 2026-08-09: the parts list rendered correctly (confirmed in
+    // the failure screenshot, full table with rows) while the test still
+    // timed out, because SOME connection - a keep-alive, an open dev-tools
+    // socket - kept the network from ever going quiet. Playwright's own docs
+    // discourage this wait for exactly that reason. Waiting for navigation
+    // away from /login is the actual signal this step needs.
+    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 15_000 }).catch(() => {})
 
     // Assert the login WORKED before anything else runs. Without this, bad
     // credentials surface as "the parts table is missing", which sends the
@@ -96,14 +104,34 @@ test.describe('signed in', () => {
   test('the parts list loads and renders rows without console errors', async ({ page }) => {
     const errors = watchConsole(page)
     await page.goto('/ui/parts')
-    await page.waitForLoadState('networkidle')
 
     // The table shell must exist. Row count is deliberately not asserted: an
     // empty instance is a valid state and this test must not depend on data.
+    // This wait is the real signal - see the beforeEach comment on why
+    // networkidle was dropped in favour of it.
     await expect(page.locator('table, [role="table"], .p-datatable').first()).toBeVisible()
 
     const blocked = errors.filter((e) => /Content Security Policy|Refused to/i.test(e))
     expect(blocked, `CSP blocked something on the parts list:\n${blocked.join('\n')}`).toHaveLength(0)
+  })
+
+  // B2-c: the journey the plan named - parts -> detail -> BOM - not just the
+  // list shell. A jsdom test cannot prove the router actually resolves
+  // /ui/part/:pn or that the BOM section renders against a real fetch; this
+  // is the one place that can. File/viewer/markup is deliberately NOT
+  // extended to here: it needs real file fixtures the seed does not create,
+  // and reaching for that risks becoming the "giant E2E framework" this
+  // suite was explicitly asked not to be.
+  test('a part opened from the list shows its BOM children', async ({ page }) => {
+    await page.goto('/ui/parts')
+    await page.getByRole('link', { name: 'Open ASM-1001 details' }).first().click()
+    await expect(page).toHaveURL(/\/ui\/part\/ASM-1001/)
+
+    // ASM-1001 -> CMP-2002 is seeded by `flask user seed-bom`; if this link
+    // is missing the BOM either failed to load or failed to resolve, and
+    // either way the page must not claim otherwise.
+    await expect(page.getByRole('heading', { name: 'BOM' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Open CMP-2002 details' }).first()).toBeVisible()
   })
 })
 
@@ -128,7 +156,8 @@ test.describe('permission denial', () => {
     await page.fill('input[type="email"], input[name="email"]', DENIED_EMAIL)
     await page.fill('input[type="password"]', DENIED_PASSWORD)
     await page.click('button[type="submit"], input[type="submit"]')
-    await page.waitForLoadState('networkidle')
+    // See the "signed in" beforeEach above: networkidle is unreliable here.
+    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 15_000 }).catch(() => {})
     expect(page.url(), 'the low-privilege login itself failed').not.toContain('/login')
 
     const response = await page.goto('/admin/')

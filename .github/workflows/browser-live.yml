@@ -1,0 +1,79 @@
+# The post-deploy half of the browser-test model (plan B2, decision 2026-08-09).
+#
+# WHY A SEPARATE WORKFLOW. The pull-request half runs against an ephemeral
+# seeded instance in the fresh-compose job and answers "does this change break
+# the application?". That instance cannot answer the other question - "does
+# what I just deployed actually work?" - because TLS, the reverse proxy and the
+# real environment come from the deployment, not from the code.
+#
+# It is deliberately NOT a step inside the PR workflow. The previous attempt
+# was exactly that, gated on a variable nothing set, so it skipped on every run
+# and reported green. A workflow that must be invoked either runs or is visibly
+# absent; it cannot quietly pretend.
+#
+# CREDENTIALS ARE NEVER DEFAULTED. Without E2E_* secrets the signed-in and
+# RBAC-denial tests skip and only the anonymous checks run - which is honest
+# for a public deployment, and reported as skipped rather than passed.
+name: Browser suite (live instance)
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Deployed instance to test, e.g. https://test.tinymrp.com"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  browser-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24.18.1"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install deps
+        working-directory: frontend
+        run: npm ci
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      # Fail early and clearly if the target is not up. Note this checks the
+      # STATUS CODE, not curl's exit code: `curl -s -o /dev/null` exits 0 on a
+      # 502, which has already cost this project a wait loop that reported a
+      # dead instance as healthy.
+      - name: The target is actually serving
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/health")"
+          echo "GET $BASE_URL/api/health -> $code"
+          test "$code" = "200"
+      - name: Critical path + accessibility (Playwright + axe)
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ inputs.base_url }}
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          E2E_DENIED_EMAIL: ${{ secrets.E2E_DENIED_EMAIL }}
+          E2E_DENIED_PASSWORD: ${{ secrets.E2E_DENIED_PASSWORD }}
+        run: npx playwright test
+      - name: Upload browser evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-evidence-live
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
