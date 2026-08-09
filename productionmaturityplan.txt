@@ -119,6 +119,40 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 2. ORDER OF WORK - CONCURRENT LANES
 ========================================================================
 
+  *** WHO HAS WHAT, 2026-08-09. Codex is working lane C in parallel. ***
+
+    CLAUDE has touched, and lane C must not edit concurrently:
+      app/services/{authorization,file_security,filescan,extra_files,
+                    upload_pack,docpacks,security_mode,runtime_secrets}.py
+      app/views/{fileserve,part_shares,upload_pack,admin,admin_roles}.py
+      app/__init__.py
+      frontend/ (typecheck, bundle split, e2e suite)
+      .github/workflows/security.yml   <- NOT release-image.yml, which is C2
+      deploy/scripts/{backup-instance,backup-all,install-backup-job}.sh
+
+    LANE C OWNS, and Claude will not touch:
+      deploy/community/**            everything C1-C8 creates
+      .github/workflows/release-image.yml
+      docker-compose*.yml at the repo root, for community packaging changes
+
+    SETTLED FOR C6 - do not redesign it: A4 closed the retention model.
+      backup-instance.sh takes --keep-days, --keep-count and --max-total-gb,
+      the newest backup is never pruned whatever the limits say, and the
+      schedule is split into a daily database-only job and a weekly full one
+      because the database is ~2 MB and the deliverables are ~2 GB. The
+      Community backup contract should adopt this rather than invent a
+      second one; the plan's own concurrency rule already required settling
+      A4 first, and it is settled.
+
+    ALSO SETTLED, and load-bearing for C1/C3: there is ONE authentication
+      model and ONE role model. compat mode and the legacy admin bypass were
+      DELETED, not disabled. A Community install must start with
+      authenticated Mongo from first boot - the official image only creates
+      users while initialising an EMPTY data dir - and must supply strong
+      SECRET_KEY and SECURITY_PASSWORD_SALT, because the application no
+      longer generates its own and refuses to start without them.
+
+
   LANE A - SECURITY / LEGACY CLEANUP / OPERATIONS
     A1 O1 CSP browser check.
     A2 2.13 legacy-login retirement.      CLOSED 2026-08-09 (c54abf3, eec2039)
@@ -127,18 +161,18 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 
   LANE B - FRONTEND / QUALITY
     B1 2.11 TypeScript + tsc in CI.       CLOSED 2026-08-09 (2c43444, f28233a)
-    B2 2.7 Playwright + axe.        STARTED 2026-08-09 - suite live, see log
+    B2 2.7 Playwright + axe.   LANE B COMPLETE 2026-08-09 - see log
     B3 2.8 silent exceptions.            CLOSED 2026-08-09 (7 batches)
 
   LANE C - COMMUNITY DOCKER DISTRIBUTION
-    C1 architecture + public contract.
-    C2 release pipeline / Docker Hub.
-    C3 shared Compose.
-    C4 Linux installer and commands.
-    C5 Windows installer and commands.
-    C6 update / backup / restore / uninstall-preserve-data.
-    C7 optional LAN/domain/Caddy modes.
-    C8 cross-platform acceptance matrix and public docs.
+    C1 architecture + public contract.       ACTIVE 2026-08-09 (Codex)
+    C2 release pipeline / Docker Hub.        QUEUED behind C1/C3 (Codex)
+    C3 shared Compose.                       ACTIVE 2026-08-09 (Codex)
+    C4 Linux installer and commands.         QUEUED behind C3 (Codex)
+    C5 Windows installer and commands.       QUEUED behind C3 (Codex)
+    C6 update / backup / restore / uninstall-preserve-data. QUEUED (Codex)
+    C7 optional LAN/domain/Caddy modes.      QUEUED behind C3 (Codex)
+    C8 cross-platform acceptance matrix and public docs. QUEUED (Codex)
 
   LANE D - PERFORMANCE, MEASURE-ONLY FIRST
     D1 2.5 re-measure _flatten_bom.
@@ -274,7 +308,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       User input should be limited to:
         deliverables path
         access mode: localhost / LAN / domain
-        port
+        url or ip and port(optional)
         administrator email/password
       Everything else is generated or managed.
 
@@ -554,6 +588,19 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 
   Add newest entries at the top. Keep entries short.
 
+  2026-08-09  C1-C8 ACTIVE - Codex owns Community distribution lane
+    Scope boundary: deploy/community/, the Community public documentation,
+      Community-specific tests, and release-image.yml. Claude owns Lane B;
+      frontend files and B-task tests are deliberately untouched.
+    Baseline: no deploy/community/ directory exists; the current Compose is a
+      source-tree/development deployment and the release workflow publishes
+      GHCR only. C1/C3 contract and shared Compose are first because both
+      platform installers must consume exactly the same variables.
+    Files changed: this coordination entry only.
+    Tests/gates run: repository/status inspection only.
+    Commit: pending.
+    What remains: implement and verify C1-C8 in dependency order.
+
   2026-08-09  B2 STARTED - a small browser suite that runs against a real instance
     Playwright + @axe-core/playwright installed; config, 5 tests, npm script
     test:e2e, and a CI step gated on PLAYWRIGHT_BASE_URL being set.
@@ -576,7 +623,28 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
     LIVE INSTANCE rather than a dev server, because a broken chunk or a
     blocking CSP only exist in a real deployment.
 
-    REMAINING FOR B2: the page-level unit tests for the four uncovered
+    B2 CLOSED 2026-08-09, and with it LANE B.
+      6 browser tests green against test, 342 frontend unit tests (was 336):
+      NotFoundPage and PartsPage now have page tests.
+      PartsPage pins the same defect the dashboard had - a FAILED load
+      rendering as an empty table says "this company has no parts" rather
+      than "we could not ask", which on an inventory screen is a business
+      answer, not a UI glitch.
+
+    DEAD CODE, since the owner asked: none left in the frontend. The unused
+      state and imports came out in B1; a sweep for never-imported modules
+      found only ThreeMFViewer, which is a false positive - it is loaded
+      through React.lazy, which a static import search does not see.
+
+    STILL OPEN, and deliberately not rushed:
+      page tests for AdminAddinPage (970 lines), AdminFieldsPage (845) and
+      PartDetailPage (4069). PartDetailPage needs its own session.
+      A CI DECISION: seeded data or credentials. Until it is made the
+      browser tests stay skipped in CI and give a false impression of
+      coverage - which is the exact problem B2 existed to fix. Locally they
+      run against a live instance with permission-test credentials.
+
+    SUPERSEDED NOTE, kept for the lesson: the page-level unit tests for the four uncovered
     pages, and extending the signed-in path to detail -> BOM -> file/viewer.
     Both need either seeded data or credentials in CI; decide which before
     writing more browser tests, or they will be skipped forever.
