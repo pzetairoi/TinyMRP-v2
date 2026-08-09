@@ -1,11 +1,11 @@
 name: release-image
 
-# Builds, scans, and publishes the TinyMRP app image to GHCR when a version
-# tag (v*) is pushed. The trivy scan is a gate: HIGH/CRITICAL vulnerabilities
-# block the push. An SBOM is generated and attached to the workflow run.
-#
-# Hosts can then deploy the published image instead of building from source:
-#   sudo ./deploy/scripts/update-instance.sh <name> --image ghcr.io/<owner>/tinymrp-app:v2.1.0
+# One build is tagged for every enabled registry. The local scan and SBOM are
+# gates before publication; Docker Hub never gets a second, differently-built
+# artifact. Docker Hub is opt-in until namespace ownership is confirmed:
+#   repository variable PUBLISH_DOCKERHUB=true
+#   optional repository variable DOCKERHUB_IMAGE (default tinymrp/tinymrp)
+#   secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN
 
 on:
   push:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -24,6 +24,45 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          stable=false
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Release tags must be semantic versions such as v1.2.3 or v1.2.3-rc.1."
+              exit 1
+            fi
+            if [[ "$GITHUB_REF_NAME" != *-* ]]; then stable=true; fi
+          fi
+          echo "stable=$stable" >>"$GITHUB_OUTPUT"
+
+      - name: Select publication registries
+        id: registries
+        shell: bash
+        env:
+          DOCKERHUB_IMAGE_CONFIG: ${{ vars.DOCKERHUB_IMAGE }}
+          PUBLISH_DOCKERHUB_CONFIG: ${{ vars.PUBLISH_DOCKERHUB }}
+        run: |
+          set -euo pipefail
+          primary="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/tinymrp-app"
+          dockerhub="${DOCKERHUB_IMAGE_CONFIG:-tinymrp/tinymrp}"
+          publish_dockerhub=false
+          {
+            echo "images<<EOF"
+            echo "$primary"
+            if [[ "${PUBLISH_DOCKERHUB_CONFIG,,}" == "true" ]]; then
+              echo "$dockerhub"
+              publish_dockerhub=true
+            fi
+            echo "EOF"
+            echo "primary=$primary"
+            echo "dockerhub=$dockerhub"
+            echo "publish_dockerhub=$publish_dockerhub"
+          } >>"$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
@@ -31,19 +70,21 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: ghcr.io/${{ github.repository_owner }}/tinymrp-app
+          images: ${{ steps.registries.outputs.images }}
           tags: |
             type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ steps.version.outputs.stable }}
             type=sha,format=short
 
-      - name: Build image (local, for scanning)
+      - name: Build image locally for the security gates
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: docker/app/Dockerfile
           load: true
+          platforms: linux/amd64
           tags: tinymrp-app:scan
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -92,12 +133,118 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - name: Log in to Docker Hub
+        if: steps.registries.outputs.publish_dockerhub == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
-          context: .
-          file: docker/app/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Refuse to mutate an existing semantic version tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          PRIMARY_IMAGE: ${{ steps.registries.outputs.primary }}
+          DOCKERHUB_IMAGE: ${{ steps.registries.outputs.dockerhub }}
+          PUBLISH_DOCKERHUB: ${{ steps.registries.outputs.publish_dockerhub }}
+        run: |
+          set -euo pipefail
+          images=("$PRIMARY_IMAGE")
+          if [[ "$PUBLISH_DOCKERHUB" == "true" ]]; then images+=("$DOCKERHUB_IMAGE"); fi
+          for image in "${images[@]}"; do
+            ref="$image:$VERSION"
+            if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+              revision="$(docker buildx imagetools inspect "$ref" --format '{{json .Image.Config.Labels}}' | jq -r '."org.opencontainers.image.revision" // ""')"
+              if [[ "$revision" != "$GITHUB_SHA" ]]; then
+                echo "::error::$ref already exists for revision ${revision:-unknown}; semantic tags are immutable."
+                exit 1
+              fi
+            fi
+          done
+
+      - name: Push the exact gated image to every enabled registry
+        shell: bash
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            docker tag tinymrp-app:scan "$tag"
+            docker push "$tag"
+          done <<<"$TAGS"
+
+      - name: Verify the published digest in every registry
+        shell: bash
+        env:
+          PRIMARY_IMAGE: ${{ steps.registries.outputs.primary }}
+          DOCKERHUB_IMAGE: ${{ steps.registries.outputs.dockerhub }}
+          PUBLISH_DOCKERHUB: ${{ steps.registries.outputs.publish_dockerhub }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          primary_digest="$(docker buildx imagetools inspect "$PRIMARY_IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          test -n "$primary_digest"
+          if [[ "$PUBLISH_DOCKERHUB" == "true" ]]; then
+            dockerhub_digest="$(docker buildx imagetools inspect "$DOCKERHUB_IMAGE:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            if [[ "$dockerhub_digest" != "$primary_digest" ]]; then
+              echo "::error::Registry digests differ: GHCR=$primary_digest DockerHub=$dockerhub_digest"
+              exit 1
+            fi
+          fi
+
+      - name: Build versioned Community installer bundles
+        if: github.ref_type == 'tag'
+        id: bundle
+        shell: bash
+        env:
+          PRIMARY_IMAGE: ${{ steps.registries.outputs.primary }}
+          DOCKERHUB_IMAGE: ${{ steps.registries.outputs.dockerhub }}
+          PUBLISH_DOCKERHUB: ${{ steps.registries.outputs.publish_dockerhub }}
+        run: |
+          set -euo pipefail
+          name="tinymrp-community-$GITHUB_REF_NAME"
+          mkdir -p "bundle/$name"
+          cp -a deploy/community/. "bundle/$name/"
+          rm -f "bundle/$name/release.env.example"
+          repository="$PRIMARY_IMAGE"
+          if [[ "$PUBLISH_DOCKERHUB" == "true" ]]; then repository="$DOCKERHUB_IMAGE"; fi
+          {
+            echo "TINYMRP_IMAGE_REPOSITORY=$repository"
+            echo "TINYMRP_VERSION=$GITHUB_REF_NAME"
+          } >"bundle/$name/release.env"
+          chmod +x "bundle/$name/install.sh" "bundle/$name/tinymrp.sh"
+          tar -C bundle -czf "$name.tar.gz" "$name"
+          (cd bundle && zip -qr "../$name.zip" "$name")
+          echo "name=$name" >>"$GITHUB_OUTPUT"
+
+      - name: Upload Community installer artifact
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.bundle.outputs.name }}
+          path: |
+            ${{ steps.bundle.outputs.name }}.tar.gz
+            ${{ steps.bundle.outputs.name }}.zip
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Create or update the GitHub release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STABLE: ${{ steps.version.outputs.stable }}
+          BUNDLE_NAME: ${{ steps.bundle.outputs.name }}
+        run: |
+          set -euo pipefail
+          assets=("$BUNDLE_NAME.tar.gz" "$BUNDLE_NAME.zip" trivy-image.json sbom-image.cdx.json)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            flags=(--title "TinyMRP $GITHUB_REF_NAME" --generate-notes)
+            if [[ "$STABLE" != "true" ]]; then flags+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" "${flags[@]}"
+          fi

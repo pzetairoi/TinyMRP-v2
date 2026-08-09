@@ -40,43 +40,67 @@ docker info >/dev/null 2>&1 || die "Docker is installed but its daemon is not ru
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required."
 command -v openssl >/dev/null 2>&1 || die "openssl is required to generate secrets."
 
-deliverables="$(prompt 'Deliverables folder' "$HOME/TinyMRP/Deliverables")"
-mode="$(prompt 'Access mode (localhost/lan/domain)' 'localhost')"
+if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
+  deliverables="${TINYMRP_DELIVERABLES_PATH:?TINYMRP_DELIVERABLES_PATH is required in non-interactive mode}"
+  mode="${TINYMRP_ACCESS_MODE:-localhost}"
+  port="${TINYMRP_APP_PORT:-5000}"
+  admin_email="${TINYMRP_ADMIN_EMAIL:?TINYMRP_ADMIN_EMAIL is required in non-interactive mode}"
+  admin_password="${TINYMRP_ADMIN_PASSWORD:?TINYMRP_ADMIN_PASSWORD is required in non-interactive mode}"
+else
+  deliverables="$(prompt 'Deliverables folder' "$HOME/TinyMRP/Deliverables")"
+  mode="$(prompt 'Access mode (localhost/lan/domain)' 'localhost')"
+fi
 case "$mode" in localhost|lan|domain) ;; *) die "Access mode must be localhost, lan, or domain." ;; esac
-port="$(prompt 'TinyMRP localhost port' '5000')"
+if [[ "${TINYMRP_NON_INTERACTIVE:-0}" != "1" ]]; then port="$(prompt 'TinyMRP localhost port' '5000')"; fi
 [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || die "Port must be between 1 and 65535."
 port_in_use "$port" && die "TCP port $port is already in use."
-admin_email="$(prompt 'Administrator email' 'admin@example.com')"
+if [[ "${TINYMRP_NON_INTERACTIVE:-0}" != "1" ]]; then admin_email="$(prompt 'Administrator email' 'admin@example.com')"; fi
 [[ "$admin_email" == *@*.* ]] || die "Enter a plausible administrator email address."
-read -r -s -p 'Administrator password (14+ characters): ' admin_password
-printf '\n'
+if [[ "${TINYMRP_NON_INTERACTIVE:-0}" != "1" ]]; then
+  read -r -s -p 'Administrator password (14+ characters): ' admin_password
+  printf '\n'
+fi
 (( ${#admin_password} >= 14 )) || die "Administrator password must be at least 14 characters."
 safe_value "$admin_password"
 
-image_repository="${TINYMRP_IMAGE_REPOSITORY:-tinymrp/tinymrp}"
-version="${TINYMRP_VERSION:-v1.0.1}"
-[[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || die "TINYMRP_VERSION must be a semantic version."
+release_value() {
+  local key="$1"
+  [[ -f "$SCRIPT_DIR/release.env" ]] || return 0
+  sed -n "s/^${key}=//p" "$SCRIPT_DIR/release.env" | head -n1
+}
+image_repository="${TINYMRP_IMAGE_REPOSITORY:-$(release_value TINYMRP_IMAGE_REPOSITORY)}"
+version="${TINYMRP_VERSION:-$(release_value TINYMRP_VERSION)}"
+[[ -n "$image_repository" && -n "$version" ]] || \
+  die "This is not a versioned Community bundle. Set TINYMRP_IMAGE_REPOSITORY and TINYMRP_VERSION explicitly."
+[[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "TINYMRP_VERSION must be a Docker-safe semantic version."
 
 bind_ip=127.0.0.1
 origin="http://localhost:$port"
-force_https=false
 domain=""
 acme_email=""
 url="$origin"
 if [[ "$mode" == "lan" ]]; then
   bind_ip=0.0.0.0
-  lan_host="$(prompt 'LAN hostname or IP shown to users' "$(hostname -I 2>/dev/null | awk '{print $1}')")"
+  if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
+    lan_host="${TINYMRP_LAN_HOST:?TINYMRP_LAN_HOST is required for non-interactive LAN mode}"
+  else
+    lan_host="$(prompt 'LAN hostname or IP shown to users' "$(hostname -I 2>/dev/null | awk '{print $1}')")"
+  fi
   [[ -n "$lan_host" ]] || die "A LAN hostname or IP is required."
   origin="http://$lan_host:$port"
   url="$origin"
 elif [[ "$mode" == "domain" ]]; then
   port_in_use 80 && die "TCP port 80 is already in use."
   port_in_use 443 && die "TCP port 443 is already in use."
-  domain="$(prompt 'Public domain (DNS must point here)' 'tinymrp.example.com')"
-  acme_email="$(prompt 'ACME certificate email' "$admin_email")"
+  if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
+    domain="${TINYMRP_DOMAIN:?TINYMRP_DOMAIN is required for non-interactive domain mode}"
+    acme_email="${ACME_EMAIL:?ACME_EMAIL is required for non-interactive domain mode}"
+  else
+    domain="$(prompt 'Public domain (DNS must point here)' 'tinymrp.example.com')"
+    acme_email="$(prompt 'ACME certificate email' "$admin_email")"
+  fi
   origin="https://$domain"
   url="$origin"
-  force_https=true
 fi
 
 mkdir -p "$deliverables" "$SCRIPT_DIR/backups"
@@ -99,7 +123,6 @@ write_env_value APP_BIND_IP "$bind_ip"
 write_env_value APP_PORT "$port"
 write_env_value TINYMRP_URL "$url"
 write_env_value TINYMRP_ALLOWED_ORIGINS "$origin"
-write_env_value FORCE_HTTPS "$force_https"
 write_env_value DELIVERABLES_PATH "$deliverables"
 write_env_value MONGO_DB tinymrp
 write_env_value MONGO_ROOT_USER tinymrp_root
@@ -133,10 +156,12 @@ cleanup_on_error() {
 trap cleanup_on_error EXIT
 
 docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/compose.yaml" config --quiet
+pull_mode="${TINYMRP_INSTALL_PULL:-always}"
+case "$pull_mode" in always|missing|never) ;; *) die "TINYMRP_INSTALL_PULL must be always, missing, or never." ;; esac
 if [[ "$mode" == "domain" ]]; then
-  docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/compose.yaml" --profile domain up -d --pull always --wait
+  docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/compose.yaml" --profile domain up -d --pull "$pull_mode" --wait
 else
-  docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/compose.yaml" up -d --pull always --wait
+  docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/compose.yaml" up -d --pull "$pull_mode" --wait
 fi
 
 # Remove the one-time administrator password from both persistent config and

@@ -5,5 +5,10 @@
 
 {$TINYMRP_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy app:8000
+	reverse_proxy app:8000 {
+		# Flask sees X-Forwarded-Proto=https and emits HSTS. Its current runtime
+		# config does not consume SESSION_COOKIE_SECURE from the environment, so
+		# enforce Secure on every upstream cookie at the TLS boundary as well.
+		header_down Set-Cookie "(.*)" "$1; Secure"
+	}
 }

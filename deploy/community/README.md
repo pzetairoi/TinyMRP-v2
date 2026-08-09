@@ -5,6 +5,12 @@ Redis. Linux and Windows Docker Desktop use the same `compose.yaml` and the
 same hardened Linux application image. It does not include Nextcloud and does
 not change the multi-instance VPS deployment under `deploy/scripts/`.
 
+Download `tinymrp-community-VERSION.zip` (Windows) or `.tar.gz` (Linux) from
+the matching GitHub release. Each bundle carries a generated `release.env`
+that pins the image repository and exact semantic version. A source checkout
+does not: developers must set `TINYMRP_IMAGE_REPOSITORY` and `TINYMRP_VERSION`
+explicitly before running an installer.
+
 The installers ask only for the deliverables folder, access mode and address,
 administrator credentials, and an explicit released version. They generate
 the database and Flask secrets locally. The image repository is configured by

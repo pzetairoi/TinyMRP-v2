@@ -390,7 +390,31 @@ iscc solidworks-addin\installer.iss
 
 ---
 
-## Docker Compose
+## TinyMRP Community (standalone Docker)
+
+For a single workstation or small server, download the versioned Community
+bundle from the matching GitHub release:
+
+- Linux: `tinymrp-community-vX.Y.Z.tar.gz`, then run `./install.sh`.
+- Windows Docker Desktop: `tinymrp-community-vX.Y.Z.zip`, then run
+  `install.cmd`.
+
+Both platforms use the same `deploy/community/compose.yaml`, the same hardened
+Linux application image, authenticated MongoDB, and internal-only Redis. The
+default URL is `http://localhost:5000`; LAN exposure is an explicit choice and
+domain/TLS mode is an optional Caddy profile. Nextcloud is not included.
+
+Use the bundled `tinymrp.sh` or `tinymrp.ps1` for start, stop, status, logs,
+version-pinned update with rollback, verified backup/restore, and uninstall
+that preserves data by default. Do not install with a remote `curl | sh` or
+`irm | iex` pipeline, and do not configure an installed system with the
+mutable `latest` tag.
+
+The exact public path, lifecycle guarantees, and current host acceptance
+status are documented in [`deploy/community/README.md`](deploy/community/README.md)
+and [`deploy/community/ACCEPTANCE.md`](deploy/community/ACCEPTANCE.md).
+
+## Developer Docker Compose
 
 ```bash
 docker compose up --build

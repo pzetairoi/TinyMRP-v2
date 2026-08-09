@@ -1,0 +1,124 @@
+name: community-compose-smoke
+
+on:
+  pull_request:
+    paths:
+      - "deploy/community/**"
+      - "docker/**"
+      - "app/**"
+      - "requirements*.txt"
+      - ".github/workflows/community-smoke.yml"
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "deploy/community/**"
+      - "docker/**"
+      - "app/**"
+      - "requirements*.txt"
+      - ".github/workflows/community-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-install-backup-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the same app Dockerfile used by releases
+        run: docker build -f docker/app/Dockerfile -t tinymrp-community-ci:v0.0.0-ci .
+
+      - name: Install from a clean Community package
+        env:
+          TINYMRP_NON_INTERACTIVE: "1"
+          TINYMRP_DELIVERABLES_PATH: ${{ runner.temp }}/tinymrp-community/deliverables
+          TINYMRP_ACCESS_MODE: localhost
+          TINYMRP_APP_PORT: "5088"
+          TINYMRP_ADMIN_EMAIL: community-ci@example.com
+          TINYMRP_IMAGE_REPOSITORY: tinymrp-community-ci
+          TINYMRP_VERSION: v0.0.0-ci
+          TINYMRP_INSTALL_PULL: never
+        run: |
+          set -euo pipefail
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [[ -f deploy/community/.env && "$status" -ne 0 ]]; then
+              docker compose --env-file deploy/community/.env -f deploy/community/compose.yaml --profile domain ps || true
+              docker compose --env-file deploy/community/.env -f deploy/community/compose.yaml --profile domain logs --no-color app mongo redis || true
+            fi
+            if [[ -f deploy/community/.env ]]; then
+              docker compose --env-file deploy/community/.env -f deploy/community/compose.yaml --profile domain down -v --remove-orphans || true
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          export TINYMRP_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          mkdir -p "$TINYMRP_DELIVERABLES_PATH"
+          ./deploy/community/install.sh
+          grep -Fx 'TINYMRP_SEED_ADMIN="false"' deploy/community/.env
+          grep -Fx 'TINYMRP_ADMIN_PASSWORD=""' deploy/community/.env
+          if grep -Fq "$TINYMRP_ADMIN_PASSWORD" deploy/community/.env; then
+            echo "::error::Bootstrap password remains in persistent configuration."
+            exit 1
+          fi
+
+          COMPOSE=(docker compose --env-file deploy/community/.env -f deploy/community/compose.yaml)
+          curl --fail --silent --show-error http://127.0.0.1:5088/api/ready | python -m json.tool
+
+          if "${COMPOSE[@]}" exec -T mongo mongosh --quiet --eval \
+            "db.getSiblingDB('tinymrp').getCollectionNames()"; then
+            echo "::error::Unauthenticated Mongo access unexpectedly succeeded."
+            exit 1
+          fi
+          roles="$("${COMPOSE[@]}" exec -T mongo mongosh --quiet \
+            --username tinymrp_root --password "$(sed -n 's/^MONGO_ROOT_PASSWORD="\(.*\)"/\1/p' deploy/community/.env)" \
+            --authenticationDatabase admin \
+            --eval "JSON.stringify(db.getSiblingDB('tinymrp').getUser('tinymrp_app').roles)")"
+          grep -Fq '"role":"readWrite","db":"tinymrp"' <<<"$roles"
+
+          app_container="$("${COMPOSE[@]}" ps -q app)"
+          test "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$app_container")" = true
+          docker inspect --format '{{json .HostConfig.CapDrop}}' "$app_container" | grep -Fq 'ALL'
+          docker inspect --format '{{json .HostConfig.SecurityOpt}}' "$app_container" | grep -Fq 'no-new-privileges:true'
+          test -z "$(docker port "$("${COMPOSE[@]}" ps -q mongo)")"
+          test -z "$(docker port "$("${COMPOSE[@]}" ps -q redis)")"
+
+          ./deploy/community/tinymrp.sh backup
+          backup_dir="$(find deploy/community/backups -mindepth 1 -maxdepth 1 -type d -name '20*Z' | sort -r | head -n1)"
+          test -s "$backup_dir/mongo.archive.gz"
+          "${COMPOSE[@]}" exec -T app python - <<'PY'
+          from app import create_app
+          from app.models.part import Part
+          app = create_app()
+          with app.app_context():
+              Part(part_number="COMMUNITY-CI-RESTORE-MARKER", revision="A").save()
+              assert Part.objects(part_number="COMMUNITY-CI-RESTORE-MARKER").count() == 1
+          PY
+          ./deploy/community/tinymrp.sh restore "$backup_dir" --yes
+          "${COMPOSE[@]}" exec -T app python - <<'PY'
+          from app import create_app
+          from app.models.auth import User
+          from app.models.part import Part
+          app = create_app()
+          with app.app_context():
+              assert User.objects(email="community-ci@example.com").count() == 1
+              assert Part.objects(part_number="COMMUNITY-CI-RESTORE-MARKER").count() == 0
+          PY
+
+          ./deploy/community/tinymrp.sh uninstall
+          docker volume inspect tinymrp-community_mongo_data >/dev/null
+          ./deploy/community/tinymrp.sh start
+          "${COMPOSE[@]}" exec -T app python - <<'PY'
+          from app import create_app
+          from app.models.auth import User
+          app = create_app()
+          with app.app_context():
+              assert User.objects(email="community-ci@example.com").count() == 1
+          PY

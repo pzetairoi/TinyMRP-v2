@@ -70,3 +70,4 @@ instance/
 
 # Infrastructure reference: real addresses and domains, never published.
 deploy/fleet.local.md
+deploy/community/backups/

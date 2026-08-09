@@ -176,7 +176,7 @@ restore() {
     read -r -p "Replace the TinyMRP database from $source? Type RESTORE: " confirmation
     [[ "$confirmation" == "RESTORE" ]] || die "Restore cancelled."
   fi
-  compose up -d mongo
+  compose up -d --wait mongo
   compose stop app >/dev/null 2>&1 || true
   db="$(env_get MONGO_DB)"; db="${db:-tinymrp}"
   if ! compose exec -T mongo sh -c \
@@ -198,7 +198,7 @@ restore() {
 
 update_app() {
   local target="${1:-}" old_version backup_line
-  [[ "$target" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || die "Usage: ./tinymrp.sh update vMAJOR.MINOR.PATCH"
+  [[ "$target" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "Usage: ./tinymrp.sh update vMAJOR.MINOR.PATCH"
   [[ "$target" != "latest" ]] || die "latest is not an installable version."
   require_install
   require_runtime
