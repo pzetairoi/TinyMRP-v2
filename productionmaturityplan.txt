@@ -179,11 +179,11 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 
   LANE D - PERFORMANCE, MEASURE-ONLY FIRST
     D1 2.5 re-measure _flatten_bom.       CLOSED WITHOUT CODE 2026-08-09
-    D2 2.6 profile remaining tree walks.
+    D2 2.6 profile remaining tree walks.  CLOSED 2026-08-09 - see log
 
   LANE F - DOCUMENTATION / COMMERCIAL
-    F1 2.10 help screenshots + markup help.
-    F2 2.9 counsel review and commercial-document updates after advice.
+    F1 2.10 help screenshots + markup help. ACTIVE 2026-08-09 (Codex)
+    F2 2.9 counsel review and commercial-document updates after advice. OWNER/COUNSEL
 
   Lanes A, B, C, D-measurement and F may progress concurrently.
   Do NOT run A2 and A3 as overlapping edits if both touch shared auth/RBAC
@@ -498,13 +498,58 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       into O(depth) - noted for whoever picks it up, not opened as new work
       here, since nothing measured says it is needed now.
 
-  D2  REMAINING TREE WALKS                                   PERFORMANCE
+  D2  REMAINING TREE WALKS                              CLOSED 2026-08-09
       Profile first. Only optimise walks that are both frequent and material.
       Do not spend engineering effort on once-a-day paths to improve a number
       nobody experiences.
       TINYMRP_PROFILE=1 counts Mongo operations per request. Count, not time:
       every query here already runs in about a millisecond and the damage is
       doing it four hundred times. It costs about 31% CPU, so turn it off after.
+
+      INVENTORY, not guesswork: grepped for every stack/recursive tree walk
+      alongside _flatten_bom (docpacks.py's second walk, export_security.py,
+      parts_delete.py, arena_export.py). Two already had a bug like the one
+      D1 re-verified was fixed - docpacks.py's `_bom_occurrences` already has
+      its own `_children_cache`, and `where_used_pairs`/`_collect_bom_descendants`
+      are single-level or already visited-set-deduplicated. ONE was genuinely
+      unfixed: arena_export.py's two walk() functions called `_child_links`
+      fresh on every visit, with no cache at all - the exact defect
+      `_flatten_bom` was fixed for, just not yet applied here.
+
+      FOUND, MEASURED, FIXED: a real A/B against the pre-fix committed source
+      (loaded from git HEAD as a second module in the same process, run
+      against identical synthetic BOMs) shows the overhead COMPOUNDS with
+      depth rather than staying flat:
+        3 layers:  1.48x queries/part vs. the fixed version's flat 1.00x
+        4 layers:  2.37x
+        5 layers:  3.07x
+      A 6-layer graph at the same scale used for D1 never finished in several
+      minutes on the unfixed code - consistent with that growth curve, not
+      contradicting it. Fixed by applying the SAME pattern D1 re-verified:
+      memoise the constant-per-part lookups (BOMLink children query, Part
+      fetch, harvested attrs, description), while explicitly NOT memoising
+      the walk/output itself in build_arena_bom_csv, because Arena's BOM
+      format legitimately needs one CSV row per occurrence-path - quantity,
+      level and total_qty all vary by path, so collapsing revisits there
+      would silently drop real BOM lines, not just be slow. That distinction
+      is load-bearing and is spelled out in the code comment.
+      _collect_unique_parts is a different case: it only ever wanted a SET,
+      so its per-path `ancestry` guard was replaced with the stronger global
+      `seen` check - correct there specifically because there is no per-path
+      output to lose, unlike the CSV walk.
+      Two regression tests added (test_arena_exports.py), mirroring
+      _flatten_bom's own accumulation test: a diamond-shared subassembly
+      still produces two distinct CSV rows with correct level/quantity, and
+      a diamond-shared part's files are listed exactly once on the
+      file-links export. Full existing suite (18 tests touching this area,
+      then the whole backend) stays green.
+
+      NOT FIXED, OUT OF SCOPE: found a pre-existing duplicate `_desc_from`
+      definition in arena_export.py (mypy no-redef, lines 96 and ~453) while
+      running mypy against the file - predates this change, confirmed
+      against git HEAD, not currently CI-gated (mypy only runs against the
+      security-critical file list in security.yml). Recorded, not touched,
+      per the plan's own rule against folding unrelated cleanup in.
 
 
   E1  N11 NEXTCLOUD AS FILE MANAGER          BACKLOG - moved out 2026-08-09
@@ -586,7 +631,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   EXISTING GATES MUST NOT REGRESS
-    backend tests            790 passing, 1 skipped 2026-08-09 (B2 closure)
+    backend tests            792 passing, 1 skipped 2026-08-09 (D2 closure)
     ruff                     clean
     bandit                   clean
     scoped mypy security checks
@@ -662,6 +707,55 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  D2 CLOSED - one real N+1 found and fixed, rest already clean
+    Inventoried every recursive/stack-based BOM walk alongside _flatten_bom,
+      not just the one D1 already knew about: docpacks.py's second walk
+      (`_bom_occurrences`) already had its own memo; export_security.py and
+      parts_delete.py's walks are single-level or already visited-set-deduped.
+      arena_export.py's two walk() functions were the one genuine gap - no
+      cache at all on `_child_links`, the exact defect D1 re-verified fixed
+      elsewhere.
+    Real A/B, not a theoretical fix: loaded the pre-fix committed source as a
+      second module in the same process and ran both against identical
+      synthetic BOMs. Overhead COMPOUNDS with depth on the unfixed code -
+      1.48x queries/part at 3 layers, 2.37x at 4, 3.07x at 5 - while the
+      fixed version stays flat at 1.00x regardless of depth. A 6-layer graph
+      at D1's scale never finished in several minutes pre-fix; that failure
+      is consistent with the measured growth curve, not a separate anomaly.
+    Fix respects a real correctness constraint the code already documented:
+      build_arena_bom_csv's walk() legitimately needs one CSV row per
+      occurrence-path (quantity/level/total_qty all vary by path), so only
+      the constant-per-part lookups were memoised - the walk and its row
+      output are untouched. _collect_unique_parts only ever wanted a set, so
+      its guard correctly switched from path-local to a global `seen` check.
+    Two new regression tests (test_arena_exports.py) prove a diamond-shared
+      subassembly still gets two distinct BOM rows with correct quantities,
+      and a diamond-shared part's files list exactly once on the file-links
+      export. 7/7 in that file, 38/38 in the surrounding area, full backend
+      suite run clean alongside this.
+    Found, not fixed: a pre-existing duplicate `_desc_from` def in
+      arena_export.py (mypy no-redef) predating this change - not CI-gated,
+      out of scope, recorded rather than silently folded in or ignored.
+    Files changed: app/services/arena_export.py, tests/test_arena_exports.py.
+    Scripts used, not committed: scratchpad/measure_arena_export_before_after.py.
+
+  2026-08-09  F1 ACTIVE - live help captures complete; integration validating
+    Ownership: Codex is changing docs/help/**, app/static/help/** and the help
+      capture tool only. Claude's arena-export/D2 work remains untouched.
+    Runtime evidence: used an isolated dev server against the existing
+      localhost Mongo and configured local deliverables root. Refreshed only
+      reserved permtest.* / DEMO-* screenshot data. The normal dev server on
+      port 5000 was not stopped or reconfigured.
+    Captures: refreshed Inventory, Import, Roles and customer view; replaced
+      all five placeholders with live Admin Fields, Part Detail, expanded
+      two-level BOM, Tools downloads and preview-only import redline images;
+      added a live expanded drawing-markup workspace image.
+    Safety: upload-pack example was generated in memory and previewed only;
+      no import was applied and no drawing markup was saved. Temporary port
+      5001 server was terminated after capture.
+    What remains: rebuild generated help, run help/image tests and visual/link
+      checks, then audit F2 drafts into specific owner/counsel decisions.
 
   2026-08-09  D1 CLOSED WITHOUT CODE - the memoisation already fixed it
     Measured, not assumed. The live assembly behind the original 6625-query
