@@ -108,9 +108,9 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 
   LANE A - SECURITY / LEGACY CLEANUP / OPERATIONS
     A1 O1 CSP browser check.
-    A2 2.13 legacy-login retirement.
-    A3 2.12 legacy-role migration and removal.
-    A4 2.14 backup retention and cadence. Independent of A1-A3.
+    A2 2.13 legacy-login retirement.            DONE 2026-08-09 (c54abf3)
+    A3 2.12 legacy-role migration and removal.  DONE 2026-08-09 (f7c1133)
+    A4 2.14 backup retention and cadence.       DONE 2026-08-09 (4fe788e)
 
   LANE B - FRONTEND / QUALITY
     B1 2.11 finish TypeScript and enforce tsc in CI.
@@ -534,6 +534,61 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  A2 + A3 + A4  DONE
+    Baseline: v1.0.0 = f5b5913, fleet all strict and Mongo-authenticated.
+
+    A4 backup retention. CORRECTS A CLAIM I MADE IN
+      postoptimizationplan.txt: retention DID exist and WAS wired through -
+      install-backup-job.sh passed --keep-days 14 all the way to the prune.
+      The real problem was narrower: 14 days of 2 GB backups needs 28 GB on
+      a host with 14 GB free, so the policy held right up until the disk
+      would not. Age is the wrong unit.
+      Added --keep-count (8) and --max-total-gb (10); the newest backup is
+      never pruned whatever the limits say. Split the cadence: a daily
+      database-only job and a weekly full one, an hour apart.
+      MEASURED ON SERVER-B: the daily job takes 4s for both instances and
+      produces 2.4 MB and 3.3 MB holding 28.6 MB and 37.1 MB of documents.
+      The previous nightly full backup took ~10 minutes. Both existing full
+      backups verified still present afterwards - nothing was wrongly pruned.
+      Commit 4fe788e.
+
+    A2 legacy login. Removed the compat CORS and session-CSRF branches.
+      SAFE FOR A BETTER REASON THAN A FIELD TEST: app/__init__.py returns
+      early from the CSRF guard for any request carrying an API token, so
+      the SolidWorks add-in never reaches that code. It authenticates with a
+      token, not a session cookie. The branches only ever affected browser
+      sessions.
+      THE TEST SUITE WAS HIDING THIS. conftest set compat globally and 154
+      tests depended on the no-Origin-no-Referer leniency, so the default
+      suite never exercised strict CSRF at all. The client now sends the
+      Origin header a browser would. The test asserting relaxed CORS now
+      asserts the opposite, plus a new test pinning that a request with
+      neither header is refused.
+      TINYMRP_SECURITY_MODE still resolves, and warns once that compat no
+      longer relaxes anything, so an instance configured for it keeps
+      reporting honestly instead of silently claiming strict.
+      Commit c54abf3.
+
+    A3 legacy roles. The legacy role turned out to be ONE role named
+      literally "admin", whose holder bypassed the entire permission
+      registry without consulting it. It defaulted to ENABLED.
+      Checked the live fleet first, because a role name lives in databases
+      and not only in code: mecs (production) had 0 users holding it, test
+      had 1. Migrated that one additively - added administrator, removed
+      nothing - then flipped the default to off.
+      Left overridable via LEGACY_ADMIN_BYPASS_ENABLED=1 rather than
+      deleted, so an instance that finds a dependency can restore access
+      while it reassigns roles.
+      Commit f7c1133.
+
+    Evidence/tests: 795 backend tests pass (up from 794 - one new CSRF
+      test), ruff and bandit clean.
+    Remaining: A1 (CSP browser check) is the last Lane A item. A3 is not
+      fully closed - the code still contains the bypass behind a default-off
+      flag, and the "admin" role still exists in both databases. Deleting
+      either is a later step once the flag has been off in production for a
+      while.
 
   2026-08-08  PLAN  OPENED
     Baseline: v1.0.0 = f5b5913; fleet on f5b5913c265c, all three instances
