@@ -178,7 +178,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
     C8 acceptance matrix/public docs.        REPO DONE a5735df; release rows external
 
   LANE D - PERFORMANCE, MEASURE-ONLY FIRST
-    D1 2.5 re-measure _flatten_bom.
+    D1 2.5 re-measure _flatten_bom.       CLOSED WITHOUT CODE 2026-08-09
     D2 2.6 profile remaining tree walks.
 
   LANE F - DOCUMENTATION / COMMERCIAL
@@ -463,13 +463,40 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       Public README/Docker Hub instructions must match the tested path exactly.
 
 
-  D1  RE-MEASURE _flatten_bom                                PERFORMANCE
+  D1  RE-MEASURE _flatten_bom               CLOSED WITHOUT CODE 2026-08-09
       Re-run the doc-pack measurement after the existing memoisation work.
       If the cost is no longer material, CLOSE WITHOUT CODE.
       If still hot, optimise with exact multiplicity tests kept green.
       $graphLookup reports reachability, not multiplicity, so it cannot be
       used here: quantities accumulate per path. A wrong quantity on a
       document pack is a manufacturing error, not a slow page.
+
+      RE-MEASURED, not assumed. The live assembly the original 6625-query
+      figure came from (J200684) is not reachable from this environment, so
+      a synthetic assembly of comparable scale was built instead: 6 layers,
+      1268 distinct part numbers, 4845 BOM links, deliberately with the SAME
+      shape that caused the original cost - shared subassemblies reached by
+      several parent paths, not a tree. Method and script in the log entry.
+
+      RESULT: 1132 BOMLink queries for 1131 distinct parts reached - 1.00
+      queries per part, against the documented pre-memoisation baseline of
+      ~4.93 queries per part (6625/1344). Cross-checked two independent ways
+      (mongomock call counting, and pymongo command monitoring against a
+      real disposable MongoDB container) and both agreed on 1132 exactly.
+      The per-call children() cache already turns the cost from O(total path
+      revisits) into O(distinct parents reached) - the multiplicative blowup
+      D1 was opened to check on is gone. CLOSED WITHOUT CODE per this task's
+      own rule.
+
+      NOT closed as "fast" - closed as "no longer multiplicative". For the
+      largest real assemblies this is still on the order of a thousand
+      sequential single-document queries for one request, each on an indexed
+      field, triggered only by an explicit user action (doc-pack build,
+      Excel BOM export, order scoping, part sharing) rather than a page
+      load. If this becomes hot again, the next lever is batching children()
+      per LAYER with $in instead of per PARENT, turning O(distinct parents)
+      into O(depth) - noted for whoever picks it up, not opened as new work
+      here, since nothing measured says it is needed now.
 
   D2  REMAINING TREE WALKS                                   PERFORMANCE
       Profile first. Only optimise walks that are both frequent and material.
@@ -635,6 +662,38 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  D1 CLOSED WITHOUT CODE - the memoisation already fixed it
+    Measured, not assumed. The live assembly behind the original 6625-query
+      figure (J200684, 1344 distinct descendants) is not reachable from this
+      environment, so the re-measurement used a synthetic BOM at comparable
+      scale with the SAME shape that caused the original cost: 6 layers,
+      1268 distinct part numbers, 4845 links, shared subassemblies reached
+      via multiple parent paths (a graph, not a tree - matching the comment
+      in _flatten_bom that says it deliberately has no visited set).
+    Instrumentation: mongomock's own Collection.find counted directly (pymongo
+      monitoring listeners never fire for mongomock - it does not use the
+      wire protocol), sanity-checked first against the existing 4-part/4-query
+      accumulation test in test_exact_bom_pairs_batching.py. Cross-checked
+      independently against a real disposable MongoDB container (`docker run
+      --rm mongo:7`, torn down after) using pymongo's own command monitoring.
+      Both methods agreed exactly: 1132 queries.
+    Result: 1132 BOMLink queries for 1131 distinct parts reached = 1.00
+      queries/part, against the documented pre-memoisation baseline of 4.93
+      queries/part (6625/1344) - essentially the predicted ~5x reduction,
+      confirmed rather than assumed. Real-Mongo wall clock was 12.7s for the
+      1132 sequential queries, but that number is dominated by Docker
+      Desktop's networking hop on this machine (~11ms/round-trip against an
+      indexed field that should cost roughly 1ms on a real host, per the
+      profiler's own documented baseline) - reported for completeness, not
+      claimed as a production figure.
+    Verdict: the multiplicative cost D1 was opened to check on is gone.
+      Closed without code, per D1's own rule. Left a note in the task entry
+      (not new work, not opened) that per-layer $in batching would be the
+      next lever if this becomes hot again - O(depth) instead of O(distinct
+      parents) - so it is not rediscovered from scratch next time.
+    Scripts used (not committed - throwaway measurement tooling):
+      scratchpad/measure_flatten_bom.py, measure_flatten_bom_real_mongo.py.
 
   2026-08-09  B2 CLOSED FOR REAL - verified twice in Docker, not hand-checked
     Commits: 277ecaf (CI infrastructure + the networkidle bugfix it found),
