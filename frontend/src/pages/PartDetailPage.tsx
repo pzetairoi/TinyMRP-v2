@@ -12,7 +12,6 @@ import ImageStrip from "../components/ImageStrip";
 import ThumbImg from "../components/ThumbImg";
 import "./partdetail.css";
 import FieldSelector from "../components/FieldSelector";
-import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
 import { withBomOccurrenceKeys } from "../lib/bomTree";
 import { apiErrorMessage, apiFetch, readApiResponse } from '../lib/api';
 import {
@@ -313,6 +312,14 @@ const FALLBACK_WHERE_USED_FIELDS: FieldDefinition[] = [
 
 // threeMF viewer (lazy load)
 const ThreeMFViewer = React.lazy(() => import("../components/ThreeMFViewer"));
+
+// Drawing markups, lazy for the same reason the 3D viewer is: fabric.js is a
+// large canvas library, and the markup editor lives behind a tab that most
+// visits to a part never open. Loading it eagerly charged every visitor for a
+// feature they were not using.
+const DrawingMarkupWorkspace = React.lazy(
+  () => import("../components/markups/DrawingMarkupWorkspace"),
+);
 
 // ---------- Helpers ----------
 const asArr = <T,>(x: any): T[] => (Array.isArray(x) ? (x as T[]) : []);
@@ -3442,6 +3449,7 @@ function isExternalDatasheetUrl(url: string): boolean {
               </div>
               {/* Canvas editor plus the unified review panel: general comments
                   and markup review threads share one list and one feature set. */}
+              <Suspense fallback={<div className="p-3">Loading the markup editor...</div>}>
               <DrawingMarkupWorkspace
                 key={`${pn}::${revToken}::${drawingSource?.source_file_id || "none"}`}
                 pn={pn}
@@ -3464,6 +3472,7 @@ function isExternalDatasheetUrl(url: string): boolean {
                 onSetCommentPriority={setCommentPriority}
                 onDeleteComment={deleteComment}
               />
+              </Suspense>
             </div>
           </TabPanel>}
 
