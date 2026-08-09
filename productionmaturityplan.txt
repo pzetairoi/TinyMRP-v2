@@ -588,6 +588,20 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 
   Add newest entries at the top. Keep entries short.
 
+  2026-08-09  C1/C3 IMPLEMENTED - shared Community contract is concrete
+    Result: self-contained deploy/community package uses one published app
+      image on Linux and Windows, authenticated least-privilege Mongo from an
+      empty named volume, internal-only Mongo/Redis, a user bind mount, and the
+      existing read-only/cap-drop/no-new-privileges app posture. Localhost is
+      the default; Caddy is isolated behind an optional domain profile.
+    Files changed: deploy/community/{compose.yaml,.env.example,Caddyfile,
+      mongo-init.js,README.md}.
+    Tests/gates run: base and domain-profile `docker compose config --quiet`
+      pass; `git diff --check` passes.
+    Commit: pending.
+    What remains: lifecycle scripts and a live disposable Compose smoke before
+      C1/C3 can be marked DONE.
+
   2026-08-09  C1-C8 ACTIVE - Codex owns Community distribution lane
     Scope boundary: deploy/community/, the Community public documentation,
       Community-specific tests, and release-image.yml. Claude owns Lane B;
@@ -639,10 +653,34 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
     STILL OPEN, and deliberately not rushed:
       page tests for AdminAddinPage (970 lines), AdminFieldsPage (845) and
       PartDetailPage (4069). PartDetailPage needs its own session.
-      A CI DECISION: seeded data or credentials. Until it is made the
-      browser tests stay skipped in CI and give a false impression of
-      coverage - which is the exact problem B2 existed to fix. Locally they
-      run against a live instance with permission-test credentials.
+      THE CI DECISION IS MADE, 2026-08-09. Owner chose the split model:
+
+        ON PULL REQUEST - an ephemeral seeded instance.
+          CI brings up Mongo + the app, seeds an admin and a few parts, runs
+          the suite against localhost, tears it down. No secrets, so it works
+          on forks. Reproducible: the same commit always gives the same
+          answer, and nobody can break CI by editing data on test.
+          It answers "does this change break the application?"
+
+        AFTER DEPLOY - the same suite against the live instance.
+          Runs post-deploy, not pre-merge, using PLAYWRIGHT_BASE_URL and
+          repository secrets. This is the only place the CSP, TLS and Caddy
+          tests mean anything, because those come from the deployment and not
+          from the code.
+          It answers "does what I just deployed actually work?"
+
+        WHY NOT ONE OR THE OTHER. Ephemeral alone cannot see the failure the
+        CSP test exists for - a blocked script renders a blank page that
+        returns HTTP 200, and an ephemeral instance does not carry the
+        enforced policy. Live alone makes a red CI ambiguous between "code
+        broken" and "server down", which is how a gate stops being believed,
+        and it cannot run on forks at all.
+
+        ORDER OF WORK: the post-deploy half already exists - the CI step is
+        written and gated on PLAYWRIGHT_BASE_URL. The ephemeral half is the
+        remaining work and needs a reproducible seed, which is the part worth
+        getting right: a seed that drifts makes the suite flaky, and a flaky
+        browser suite gets disabled within a month.
 
     SUPERSEDED NOTE, kept for the lesson: the page-level unit tests for the four uncovered
     pages, and extending the signed-in path to detail -> BOM -> file/viewer.

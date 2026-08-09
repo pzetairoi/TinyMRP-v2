@@ -1,0 +1,145 @@
+name: ${COMPOSE_PROJECT_NAME:-tinymrp-community}
+
+# This is the public, single-instance TinyMRP Community stack. It deliberately
+# uses a published app image: Linux and Windows Docker Desktop run this exact
+# same Compose file and the same Linux containers.
+services:
+  mongo:
+    image: ${TINYMRP_MONGO_IMAGE:-mongo:6.0@sha256:8b6d8f5bbedb25cb73517b65cf99f13aeb75ad5b157a56c479287a840bbad3ac}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-tinymrp}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-tinymrp_root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Run install.sh or install.ps1 to generate secrets}
+      MONGO_APP_USER: ${MONGO_APP_USER:-tinymrp_app}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?Run install.sh or install.ps1 to generate secrets}
+    volumes:
+      - mongo_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/10-tinymrp-app-user.js:ro
+    networks:
+      - backend
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --username "$$MONGO_INITDB_ROOT_USERNAME"
+          --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
+          --eval "quit(db.adminCommand('ping').ok === 1 ? 0 : 2)"
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: ${TINYMRP_REDIS_IMAGE:-redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2}
+    restart: unless-stopped
+    read_only: true
+    user: redis
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /data
+      - /tmp
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: ${TINYMRP_IMAGE_REPOSITORY:?Set TINYMRP_IMAGE_REPOSITORY}:${TINYMRP_VERSION:?Set an explicit semantic TINYMRP_VERSION}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      FLASK_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?Run install.sh or install.ps1 to generate secrets}
+      SECURITY_PASSWORD_SALT: ${SECURITY_PASSWORD_SALT:?Run install.sh or install.ps1 to generate secrets}
+      MONGO_URI: mongodb://${MONGO_APP_USER:-tinymrp_app}:${MONGO_APP_PASSWORD}@mongo:27017/${MONGO_DB:-tinymrp}?authSource=${MONGO_DB:-tinymrp}
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_STORAGE_URI: redis://redis:6379/0
+      RATE_LIMIT_FAIL_CLOSED: "false"
+      FILES_LOCAL_ROOT: /data/deliverables
+      FILES_URL_PREFIX: /deliverables
+      FILES_PUBLIC_URLS: "false"
+      FILES_ALLOW_LEGACY_TOKENS: "false"
+      FILES_ACCEL_REDIRECT_PREFIX: ""
+      TINYMRP_ALLOWED_ORIGINS: ${TINYMRP_ALLOWED_ORIGINS:-http://localhost:5000}
+      TINYMRP_CORS_CREDENTIALS: "true"
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
+      TINYMRP_SEED_ADMIN: ${TINYMRP_SEED_ADMIN:-false}
+      TINYMRP_ADMIN_EMAIL: ${TINYMRP_ADMIN_EMAIL:-}
+      TINYMRP_ADMIN_PASSWORD: ${TINYMRP_ADMIN_PASSWORD:-}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - ${APP_BIND_IP:-127.0.0.1}:${APP_PORT:-5000}:8000
+    volumes:
+      - type: bind
+        source: ${DELIVERABLES_PATH:?Set DELIVERABLES_PATH to a host directory}
+        target: /data/deliverables
+    networks:
+      - backend
+      - frontend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ready', timeout=4).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  caddy:
+    image: ${TINYMRP_CADDY_IMAGE:-caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648}
+    profiles: ["domain"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      TINYMRP_DOMAIN: ${TINYMRP_DOMAIN:-localhost.invalid}
+      ACME_EMAIL: ${ACME_EMAIL:-invalid@localhost.invalid}
+    ports:
+      - ${CADDY_BIND_IP:-0.0.0.0}:80:80
+      - ${CADDY_BIND_IP:-0.0.0.0}:443:443
+      - ${CADDY_BIND_IP:-0.0.0.0}:443:443/udp
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    tmpfs:
+      - /tmp
+    networks:
+      - frontend
+    depends_on:
+      app:
+        condition: service_healthy
+
+networks:
+  backend:
+    internal: true
+  frontend:
+
+volumes:
+  mongo_data:
+  caddy_data:
+  caddy_config:
