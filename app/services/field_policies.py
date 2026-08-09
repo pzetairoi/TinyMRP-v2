@@ -223,8 +223,11 @@ def _external_fields(normalized: str, boundary: str) -> frozenset[str]:
         "customers": _CUSTOMER_EXTERNAL if boundary == "customer_portal" else frozenset(),
         "suppliers": _SUPPLIER_EXTERNAL if boundary == "supplier_portal" else frozenset(),
         "address": _ADDRESS_SAFE, "contact": frozenset(),
-        "comment": _COMMENT_SAFE if boundary == "production_operator" else frozenset(),
-        "profile": _PROFILE_SAFE if boundary == "production_operator" else frozenset(),
+        # Comment endpoints separately require comments.read/write and an
+        # authorised part.  These sets expose only the already-sanitised
+        # conversation/profile projection, never directory or role data.
+        "comment": _COMMENT_SAFE,
+        "profile": _PROFILE_SAFE,
         "job_stats": _fields("ok status_counts overdue active"),
         "order_stats": _fields("ok status_counts"),
         "order_mutation": _fields("ok removed"),

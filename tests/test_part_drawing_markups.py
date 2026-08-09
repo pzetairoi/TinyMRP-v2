@@ -2,6 +2,7 @@ import uuid
 
 from app.models.artifact import PartFile
 from app.models.auth import Role, User
+from app.models.customer import Customer
 from app.models.job import Job, JobBOMLine
 from app.models.part import Part
 from app.models.part_annotation import PartAnnotation
@@ -514,6 +515,47 @@ def test_identity_and_display_time_fields_returned(client):
     assert msg["author"] == "markup-viewer@example.com"
     assert msg["author_display"]
     assert msg["author_profile"]["initials"]
+
+
+def test_customer_markup_conversation_is_scoped_and_hides_directory_identities(client):
+    part, pf, internal = _setup(client)
+    _put(client, pf, _canvas("obj-1"), expected_version=0)
+    assert _create_thread(client, pf, ["obj-1"]).status_code == 201
+
+    definition = STANDARD_ROLES["customer"]
+    portal_role = Role(
+        name="customer",
+        display_name=definition.display_name,
+        permissions=list(definition.permissions),
+    ).save()
+    portal = _make_user("customer-reviewer@example.com", [portal_role])
+    customer = Customer(
+        code="MARKUP-CUSTOMER",
+        name="Markup Customer",
+        users=[portal],
+    ).save()
+    Job(
+        job_number="MARKUP-CUSTOMER-JOB",
+        customer=customer,
+        bom=[JobBOMLine(pn=part.part_number, rev=part.revision, qty=1)],
+    ).save()
+    _login(client, portal)
+
+    loaded = _get(client, pf)
+    assert loaded.status_code == 200
+    payload = loaded.get_json()
+    assert payload["can_edit"] is True
+    assert "rel_path" not in payload["source"]
+    assert internal.email not in str(payload["threads"])
+    assert "@" not in str(payload["threads"])
+    created = _create_thread(
+        client,
+        pf,
+        ["obj-1"],
+        message="Please approve the held child",
+    )
+    assert created.status_code == 201
+    assert portal.email not in str(created.get_json()["threads"])
 
 
 # ---------------------------------------------------------------------------

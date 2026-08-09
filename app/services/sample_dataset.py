@@ -25,6 +25,12 @@ DATASET_ID = "cv03-tr-a01-rev-a"
 PART_NUMBER = "CV03-TR-A01"
 REVISION = "A"
 APPROVER = "TinyManager"
+# Deliberate release holds used by the RLS demo.  Everything else in this
+# owner-approved fixture is released by TinyManager.
+UNRELEASED_SAMPLE_PARTS = frozenset({
+    ("CV03-F02", "B"),
+    ("ADR-LED-IND", ""),
+})
 DATASET_ROOT = Path(__file__).resolve().parents[2] / "sample_data" / "cv03_tr_a01_rev_a"
 MANAGED_ROOT = DATASET_ROOT / "managed"
 MANIFEST_PATH = DATASET_ROOT / "manifest.json"
@@ -163,7 +169,7 @@ def _fixture_part_files(
 
 
 def ensure_sample_engineering_records() -> dict[str, int]:
-    """Create missing sample records and release the exact BOM family."""
+    """Create the exact BOM family with deterministic release/hold states."""
 
     parsed = _parse_sample_bom()
     created_parts = 0
@@ -197,21 +203,22 @@ def ensure_sample_engineering_records() -> dict[str, int]:
             for key, value in dict(part.attrs or {}).items()
             if canonical_attr_key(key) not in approval_aliases
         }
-        attrs.update(
-            {
-                "approved": True,
-                "approved_by": APPROVER,
-                "approved_date": utc_now().date().isoformat(),
-            }
-        )
+        released = (part_number, revision) not in UNRELEASED_SAMPLE_PARTS
+        attrs["approved"] = released
+        if released:
+            attrs.update(
+                {
+                    "approved_by": APPROVER,
+                    "approved_date": utc_now().date().isoformat(),
+                }
+            )
         before = dict(part.canonical or {})
         part.attrs = attrs
         part.save()
         after = dict(part.canonical or {})
-        if (
-            not before.get("approved")
-            or before.get("approved_by") != APPROVER
-            or before.get("approved_date") != after.get("approved_date")
+        if any(
+            before.get(key) != after.get(key)
+            for key in ("approved", "approved_by", "approved_date")
         ):
             approvals_updated += 1
 

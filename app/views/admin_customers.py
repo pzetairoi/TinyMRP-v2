@@ -4,6 +4,7 @@ from app.services.acl import permissions_required
 from app.services.authorization import (
     authorised_get,
     enforce_permission as _require,
+    has_portal_role,
     has_permission,
     scope_queryset,
     uses_portal_presentation,
@@ -85,6 +86,16 @@ def _require_customer_form_permissions():
         _require("customers.financial.update")
     if "users" in request.form:
         _require("customers.portal_users.manage")
+
+
+def _selected_portal_users() -> list[User]:
+    user_ids = request.form.getlist("users")
+    users = list(User.objects(id__in=user_ids)) if user_ids else []
+    if len(users) != len(set(user_ids)) or any(
+        not has_portal_role(user, "customer") for user in users
+    ):
+        abort(400)
+    return users
 
 
 @bp.get("/")
@@ -299,7 +310,7 @@ def customers_new():
                     c.phone = primary.phone or c.phone
         user_ids = request.form.getlist("users")
         if user_ids:
-            c.users = list(User.objects(id__in=user_ids))
+            c.users = _selected_portal_users()
         if "tags" in request.form:
             c.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
         c.save()
@@ -384,8 +395,7 @@ def customers_edit(cust_id):
         if "tags" in request.form:
             c.tags = [t.strip() for t in (request.form.get("tags") or "").split(",") if t.strip()]
         if "users" in request.form:
-            user_ids = request.form.getlist("users")
-            c.users = list(User.objects(id__in=user_ids)) if user_ids else []
+            c.users = _selected_portal_users()
         c.save()
         flash("Customer updated.", "success")
         return redirect(url_for("admin_customers.customers_list"))

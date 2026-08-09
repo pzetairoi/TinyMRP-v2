@@ -10,6 +10,7 @@ from app.services.authorization import (
     authorise_part_access,
     has_permission,
     require_permission,
+    uses_portal_presentation,
 )
 from app.services.audit import log_action
 from app.services.part_drawing_markups import (
@@ -126,6 +127,63 @@ def _audit(action: str, part: Part, meta: dict | None = None) -> None:
         logger.exception("audit log failed for markup action %s", action)
 
 
+def _external_safe_label(value) -> str:
+    label = str(value or "").strip()
+    return label if label and "@" not in label else "External reviewer"
+
+
+def _sanitize_external_markup(payload: dict) -> dict:
+    """Remove directory identities and storage hints from portal responses."""
+
+    if not uses_portal_presentation(
+        current_user,
+        "markups.read",
+        resource_type="parts",
+    ):
+        return payload
+    source = payload.get("source")
+    if isinstance(source, dict):
+        source.pop("rel_path", None)
+    for thread in payload.get("threads") or []:
+        if not isinstance(thread, dict):
+            continue
+        created_label = _external_safe_label(thread.get("created_by_display"))
+        thread["created_by"] = created_label
+        thread["created_by_display"] = created_label
+        for key in ("updated_by", "resolved_by"):
+            if thread.get(key):
+                thread[key] = _external_safe_label(thread.get(key))
+        for profile_key in ("created_by_profile",):
+            profile = thread.get(profile_key)
+            if isinstance(profile, dict):
+                safe_label = _external_safe_label(
+                    profile.get("display_name") or profile.get("label")
+                )
+                thread[profile_key] = {
+                    "display_name": safe_label,
+                    "label": safe_label,
+                    "initials": profile.get("initials") or "ER",
+                    "avatar_color": profile.get("avatar_color") or "#1d4ed8",
+                    "avatar_shape": profile.get("avatar_shape") or "circle",
+                }
+        for message in thread.get("messages") or []:
+            if not isinstance(message, dict):
+                continue
+            label = _external_safe_label(message.get("author_display"))
+            message["author"] = label
+            message["author_display"] = label
+            profile = message.get("author_profile")
+            if isinstance(profile, dict):
+                message["author_profile"] = {
+                    "display_name": label,
+                    "label": label,
+                    "initials": profile.get("initials") or "ER",
+                    "avatar_color": profile.get("avatar_color") or "#1d4ed8",
+                    "avatar_shape": profile.get("avatar_shape") or "circle",
+                }
+    return payload
+
+
 def _markup_response(doc, *, part: Part, pf, fingerprint: str, page_number: int, status: int = 200):
     payload = serialize_markup(
         doc,
@@ -136,7 +194,7 @@ def _markup_response(doc, *, part: Part, pf, fingerprint: str, page_number: int,
         page_number=page_number,
         can_edit=_can_edit_markups(),
     )
-    return jsonify(payload), status
+    return jsonify(_sanitize_external_markup(payload)), status
 
 
 def _conflict_response(exc: MarkupConflictError, *, part: Part, pf, fingerprint: str, page_number: int):
@@ -153,7 +211,7 @@ def _conflict_response(exc: MarkupConflictError, *, part: Part, pf, fingerprint:
     payload["ok"] = False
     payload["error"] = "conflict"
     payload["message"] = "the markup layer was modified by someone else; reload before saving"
-    return jsonify(payload), 409
+    return jsonify(_sanitize_external_markup(payload)), 409
 
 
 @bp.get("/parts/<path:pn>/drawing-markups")

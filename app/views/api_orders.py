@@ -259,13 +259,19 @@ def _order_to_dict(o: Order, *, user=None):
                 },
             )
         )
+    order_customer = (
+        safe_ref(o, "customer") if has_permission(user, "customers.read") else None
+    )
+    order_supplier = (
+        safe_ref(o, "supplier") if has_permission(user, "suppliers.read") else None
+    )
     payload = {
         "order_number": o.order_number,
         "kind": o.kind,
         "description": o.description,
         "status": o.status,
-        "customer": getattr(safe_ref(o, "customer"), "name", None),
-        "supplier": getattr(safe_ref(o, "supplier"), "name", None),
+        "customer": getattr(order_customer, "name", None),
+        "supplier": getattr(order_supplier, "name", None),
         "job": getattr(safe_ref(o, "job"), "job_number", None),
         "subtotal": o.subtotal,
         "tax_amount": o.tax_amount,

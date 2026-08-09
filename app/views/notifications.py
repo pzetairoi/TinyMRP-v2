@@ -6,7 +6,11 @@ from app.models.auth import User
 from app.models.notification import UserNotification
 from app.models.part import Part
 from app.services.api_auth import api_auth_required, get_request_user
-from app.services.authorization import authorise_part_access, has_permission
+from app.services.authorization import (
+    authorise_part_access,
+    has_permission,
+    uses_portal_presentation,
+)
 from app.services.timezone_utils import utc_iso, utc_now
 from app.services.user_profile import profile_for_user
 
@@ -79,7 +83,11 @@ def mentionable_users():
         return jsonify({"ok": False, "error": "part_required"}), 400
     # Mentioning is a commenting action, so it needs comment authority. This
     # also keeps the internal directory away from customer and supplier portals.
-    if not has_permission(current, "comments.write"):
+    if not has_permission(current, "comments.write") or uses_portal_presentation(
+        current,
+        "comments.write",
+        resource_type="parts",
+    ):
         return jsonify({"ok": False, "error": "forbidden"}), 403
     part = Part.objects(part_number__iexact=pn, revision__iexact=rev).first()
     if not part:

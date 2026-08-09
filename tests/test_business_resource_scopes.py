@@ -238,8 +238,15 @@ def test_supplier_portal_scope_applies_to_issued_orders_related_jobs_and_counts(
         _standard_role("supplier"),
     )
     linked = Supplier(code="S-LINKED", name="Linked", users=[portal]).save()
-    other = Supplier(code="S-OTHER", name="Other").save()
-    related = Job(job_number="JOB-S-LINKED").save()
+    other = Supplier(code="S-OTHER", name="OTHER-SUPPLIER-SECRET").save()
+    confidential_customer = Customer(
+        code="C-SUPPLIER-HIDDEN",
+        name="Confidential Customer",
+    ).save()
+    related = Job(
+        job_number="JOB-S-LINKED",
+        customer=confidential_customer,
+    ).save()
     hidden = Job(job_number="JOB-S-OTHER").save()
     Order(
         order_number="PO-S-LINKED",
@@ -257,6 +264,7 @@ def test_supplier_portal_scope_applies_to_issued_orders_related_jobs_and_counts(
         order_number="SO-S-LINKED",
         kind="sales",
         supplier=linked,
+        job=hidden,
     ).save()
     headers = _headers(portal)
 
@@ -272,6 +280,13 @@ def test_supplier_portal_scope_applies_to_issued_orders_related_jobs_and_counts(
         client.get("/api/jobs", headers=headers),
         "job_number",
     ) == {related.job_number}
+    job_payload = client.get("/api/jobs", headers=headers).get_json()["items"][0]
+    assert "customer" not in job_payload
+    assert "customer_id" not in job_payload
+    _login(client, portal)
+    job_html = client.get(f"/admin/jobs/{related.id}").get_data(as_text=True)
+    assert confidential_customer.name not in job_html
+    assert other.name not in job_html
     assert client.get(
         f"/api/suppliers/{other.code}",
         headers=headers,
@@ -314,7 +329,7 @@ def test_multiple_roles_union_only_permissions_that_grant_the_operation(client):
     assert _numbers(
         client.get("/api/jobs", headers=_headers(linked_user)),
         "job_number",
-    ) == {"JOB-MULTI-LINKED", "JOB-MULTI-GLOBAL"}
+    ) == {"JOB-MULTI-LINKED"}
 
     production_planner = _user(
         "multi.production@stage3a.test",
@@ -373,7 +388,7 @@ def test_engineering_roles_stop_short_of_destructive_and_commercial_authority():
     }.isdisjoint(permissions)
 
 
-def test_portal_role_combined_with_commercial_widens_to_every_order(client):
+def test_portal_role_combined_with_commercial_keeps_external_boundary(client):
     portal = _user(
         "multi.supplier@stage3a.test",
         _standard_role("supplier"),
@@ -388,11 +403,12 @@ def test_portal_role_combined_with_commercial_widens_to_every_order(client):
     Order(order_number="PO-MULTI-OTHER", kind="purchase").save()
     Order(order_number="SO-MULTI", kind="sales").save()
 
-    # Commercial contributes company-wide order scope, so the union is global.
+    # A portal role is a sticky security boundary.  The additional commercial
+    # role neither widens the order rows nor restores commercial mutations.
     assert _numbers(
         client.get("/api/orders", headers=_headers(portal)),
         "order_number",
-    ) == {"PO-MULTI-LINKED", "PO-MULTI-OTHER", "SO-MULTI"}
+    ) == {"PO-MULTI-LINKED"}
 
 
 def test_financial_permissions_deny_reads_and_mixed_writes_without_partial_save(
@@ -645,3 +661,51 @@ def test_ordinary_company_updates_cannot_change_portal_user_relationships(client
     assert response.status_code == 403
     supplier.reload()
     assert [str(user.id) for user in supplier.users] == [str(linked.id)]
+
+
+def test_company_portal_assignment_requires_matching_canonical_role(client):
+    admin = _user(
+        "portal.assignment.admin@stage3a.test",
+        _standard_role("administrator"),
+    )
+    internal = _user(
+        "portal.assignment.internal@stage3a.test",
+        _standard_role("internal"),
+    )
+    customer_user = _user(
+        "portal.assignment.customer@stage3a.test",
+        _standard_role("customer"),
+    )
+    supplier_user = _user(
+        "portal.assignment.supplier@stage3a.test",
+        _standard_role("supplier"),
+    )
+    customer = Customer(code="C-ROLE-GUARD", name="Role Guard Customer").save()
+    supplier = Supplier(code="S-ROLE-GUARD", name="Role Guard Supplier").save()
+    _login(client, admin)
+
+    assert client.post(
+        f"/admin/customers/{customer.id}/edit",
+        data={"users": str(internal.id)},
+    ).status_code == 400
+    assert client.post(
+        f"/admin/suppliers/{supplier.id}/edit",
+        data={"users": str(customer_user.id)},
+    ).status_code == 400
+    customer.reload()
+    supplier.reload()
+    assert customer.users == []
+    assert supplier.users == []
+
+    assert client.post(
+        f"/admin/customers/{customer.id}/edit",
+        data={"users": str(customer_user.id)},
+    ).status_code == 302
+    assert client.post(
+        f"/admin/suppliers/{supplier.id}/edit",
+        data={"users": str(supplier_user.id)},
+    ).status_code == 302
+    customer.reload()
+    supplier.reload()
+    assert [str(user.id) for user in customer.users] == [str(customer_user.id)]
+    assert [str(user.id) for user in supplier.users] == [str(supplier_user.id)]

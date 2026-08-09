@@ -183,15 +183,15 @@ def test_permission_test_users_sign_in_and_open_expected_primary_navigation(
     (
         (
             ("commercial", "customer"),
-            ROLE_NAVIGATION["commercial"],
+            ROLE_NAVIGATION["customer"],
         ),
         (
             ("commercial", "supplier"),
-            ROLE_NAVIGATION["commercial"],
+            ROLE_NAVIGATION["supplier"],
         ),
         (
             ("internal", "customer"),
-            ROLE_NAVIGATION["internal"],
+            ROLE_NAVIGATION["customer"],
         ),
         (
             ("engineering", "workshop"),
@@ -199,7 +199,7 @@ def test_permission_test_users_sign_in_and_open_expected_primary_navigation(
         ),
         (
             ("security_administrator", "customer"),
-            ROLE_NAVIGATION["customer"] | {"admin"},
+            ROLE_NAVIGATION["customer"],
         ),
     ),
 )

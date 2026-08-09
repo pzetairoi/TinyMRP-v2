@@ -207,6 +207,12 @@ try {
   await settle(customer, 1200)
   await customer.getByRole('link', { name: helpPart.partNumber, exact: true }).waitFor({ state: 'visible', timeout: 15_000 })
   await viewportShot(customer, 'customer-portal')
+  await customer.setViewportSize({ width: 1440, height: 1000 })
+  await customer.goto(`${baseUrl}/ui/part/${helpPart.partNumber}?rev=${helpPart.revision}`)
+  await customer.getByRole('tab', { name: /Comments & Markups/ }).click()
+  await customer.getByText(/Please approve CV03-F02 REV B/).waitFor({ state: 'visible', timeout: 20_000 })
+  await settle(customer, 2200)
+  await viewportShot(customer, 'customer-approval-request')
   await customerContext.close()
   await adminContext.close()
 } finally {

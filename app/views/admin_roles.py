@@ -22,7 +22,7 @@ from app.services.app_settings import (
     set_permission_test_data_enabled,
 )
 from app.services.audit import log_action
-from app.services.authorization import require_permission
+from app.services.authorization import permissions_are_delegable, require_permission
 from app.services.permissions import (
     CANONICAL_PERMISSION_GROUPS,
 )
@@ -537,6 +537,8 @@ def roles_create():
             "display_name": display_name,
             "description": description,
         }
+        if not permissions_are_delegable(current_user, permissions):
+            abort(403)
         if name == "administrator" and not current_user.has_role("administrator"):
             abort(403)
         if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", name):
@@ -629,6 +631,11 @@ def roles_edit(role_id):
             "display_name": display_name,
             "description": description,
         }
+        # A delegated role manager may preserve or remove existing grants,
+        # but cannot introduce authority they do not personally hold.
+        added_permissions = set(permissions) - previous_permissions
+        if not permissions_are_delegable(current_user, added_permissions):
+            abort(403)
         assigned_to_actor = any(
             str(assigned.id) == str(role.id)
             for assigned in (getattr(current_user, "roles", None) or [])

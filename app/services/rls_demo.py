@@ -14,6 +14,7 @@ from app.models.order import Order, OrderLine
 from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.api_token import ApiToken
+from app.models.user_settings import UserSettings
 from app.services.biz_utils import calculate_order_totals
 from app.services.standard_roles import STANDARD_ROLE_SLUGS
 from app.services.timezone_utils import utc_now
@@ -61,6 +62,21 @@ DEMO_BOM = [
     ("DEMO-ASM-2", "A", "DEMO-SUB-2", "A", 1.0),
     ("DEMO-SUB-2", "A", "DEMO-RAW-2", "A", 3.0),
 ]
+
+DEMO_USER_DISPLAY_NAMES = {
+    "customer": "Alex Fleet (Customer)",
+    "customer_spares": "Casey Service (Customer)",
+    "customer_unreleased": "Morgan External Release Reviewer",
+    "supplier": "Fran Fabrication (Supplier)",
+    "supplier_unreleased": "Taylor Fabrication Release Reviewer",
+    "supplier_running_gear": "Riley Gear (Supplier)",
+    "supplier_electrical": "Emery Compliance (Supplier)",
+    "supplier_finish": "Parker Finish (Supplier)",
+    "engineering": "Erin Design Engineer",
+    "engineering_manager": "Morgan Engineering Manager",
+    "workshop": "Wes Workshop Lead",
+    "commercial": "Sam Commercial Coordinator",
+}
 
 DEMO_CUSTOMER_PROFILES = {
     "DEMO-CUST-A": {
@@ -288,9 +304,13 @@ PERMISSION_TEST_ROLE_SCENARIOS: dict[str, tuple[str, ...]] = {
     "engineering_commercial": ("engineering", "commercial"),
     "commercial_supplier": ("commercial", "supplier"),
     "security_customer": ("security_administrator", "customer"),
+    # Explicit unreleased exceptions.  The portal boundary still strips every
+    # unrelated auditor/engineering capability and keeps relationship scope.
+    "customer_unreleased": ("auditor", "customer"),
     "customer_spares": ("customer",),
+    "supplier_unreleased": ("engineering", "supplier"),
     "supplier_running_gear": ("supplier",),
-    "supplier_electrical": ("supplier",),
+    "supplier_electrical": ("engineering", "supplier"),
     "supplier_finish": ("supplier",),
 }
 
@@ -319,6 +339,21 @@ def _standard_role_documents() -> dict[str, Role]:
             "Standard role reconciliation did not create: "
             + ", ".join(sorted(missing))
         )
+    # Demo portal conversations and the RLS assertions require the canonical
+    # external definitions.  Restore only these two roles; do not overwrite
+    # operator-modified internal roles while refreshing demo data.
+    for slug in ("customer", "supplier"):
+        role = roles[slug]
+        definition = STANDARD_ROLES[slug]
+        if (
+            role.display_name != definition.display_name
+            or role.description != definition.description
+            or tuple(role.permissions or ()) != definition.permissions
+        ):
+            role.display_name = definition.display_name
+            role.description = definition.description
+            role.permissions = list(definition.permissions)
+            role.save()
     return roles
 
 
@@ -366,8 +401,12 @@ def _seed_permission_test_records(
         users["security_customer"],
         users["customer_spares"],
     ]
+    customers["DEMO-CUST-A"].users.append(users["customer_unreleased"])
     customers["DEMO-CUST-OTHER"].users = []
-    suppliers["DEMO-SUP-X"].users = [users["supplier"]]
+    suppliers["DEMO-SUP-X"].users = [
+        users["supplier"],
+        users["supplier_unreleased"],
+    ]
     suppliers["DEMO-SUP-Y"].users = [
         users["commercial_supplier"],
         users["supplier_running_gear"],
@@ -510,7 +549,9 @@ def _seed_permission_test_records(
         (
             "DEMO-PO-E1",
             "purchase",
-            None,
+            # Deliberate cross-kind field: customers must not gain a purchase
+            # order merely because their reference is present for drop-ship.
+            customers["DEMO-CUST-A"],
             suppliers["DEMO-SUP-E"],
             jobs["DEMO-JOB-A1"],
             [
@@ -536,7 +577,9 @@ def _seed_permission_test_records(
             "DEMO-SO-B1",
             "sales",
             customers["DEMO-CUST-B"],
-            None,
+            # Deliberate malformed legacy reference.  Supplier scoping must
+            # ignore supplier fields on sales orders.
+            suppliers["DEMO-SUP-E"],
             jobs["DEMO-JOB-B1"],
             [
                 OrderLine(pn="ADR-HITCH", rev="A", qty=2.0, uom="EA", description="Replacement ball hitch", unit_price=185.0, tax_pct=10.0),
@@ -605,6 +648,11 @@ def _seed_permission_test_records(
             "customer": "DEMO-CUST-B",
             "job": "DEMO-JOB-B1",
         },
+        "customer_unreleased": {
+            "customer": "DEMO-CUST-A",
+            "job": "DEMO-JOB-A1",
+            "exception": "parts.read_unreleased",
+        },
         "supplier_portal": {
             "supplier": "DEMO-SUP-X",
             "job": "DEMO-JOB-A1",
@@ -624,6 +672,11 @@ def _seed_permission_test_records(
         "supplier_finish": {
             "supplier": "DEMO-SUP-OTHER",
             "job": "DEMO-JOB-A1",
+        },
+        "supplier_unreleased": {
+            "supplier": "DEMO-SUP-X",
+            "job": "DEMO-JOB-A1",
+            "exception": "parts.read_unreleased",
         },
         "production_operator": {"job": "DEMO-JOB-A1"},
         "planner_production": {"job": "DEMO-JOB-A1"},
@@ -684,6 +737,17 @@ def seed_permission_test_environment(
         user.active = True
         user.updated_at = utc_now()
         user.save()
+        settings = UserSettings.objects(user_id=user).first() or UserSettings(
+            user_id=user
+        )
+        profile = dict(settings.profile or {})
+        profile["display_name"] = DEMO_USER_DISPLAY_NAMES.get(
+            scenario,
+            f"Demo {scenario.replace('_', ' ').title()}",
+        )
+        settings.profile = profile
+        settings.updated_at = utc_now()
+        settings.save()
         revoke_user_tokens(user, reason="permission_test_credential_refresh")
         if not created:
             revoke_user_sessions(
@@ -725,6 +789,11 @@ def reset_permission_test_environment(
     removed_reviews = remove_sample_review_history()
     users = _permission_test_users(domain)
     user_ids = [user.id for user in users]
+    deleted_settings = (
+        UserSettings.objects(user_id__in=user_ids).delete()
+        if user_ids
+        else 0
+    )
     deleted_tokens = (
         ApiToken.objects(user_id__in=user_ids).delete()
         if user_ids
@@ -758,6 +827,7 @@ def reset_permission_test_environment(
     ).delete()
     return {
         "tokens": int(deleted_tokens or 0),
+        "user_settings": int(deleted_settings or 0),
         "users": int(deleted_users or 0),
         "customers": int(deleted_customers or 0),
         "suppliers": int(deleted_suppliers or 0),

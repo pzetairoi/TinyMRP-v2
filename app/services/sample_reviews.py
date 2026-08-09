@@ -62,10 +62,9 @@ def _review_comments(users: dict[str, object]) -> dict[tuple[str, str], list[dic
     manager = _email(users, "engineering_manager")
     workshop = _email(users, "workshop")
     commercial = _email(users, "commercial")
-    fabrication = _email(users, "supplier")
+    fabrication_release = _email(users, "supplier_unreleased")
     running = _email(users, "supplier_running_gear")
     electrical = _email(users, "supplier_electrical")
-    finish = _email(users, "supplier_finish")
     return {
         (PART_NUMBER, REVISION): [
             _comment(
@@ -76,14 +75,14 @@ def _review_comments(users: dict[str, object]) -> dict[tuple[str, str], list[dic
                 priority="high",
                 replies=[
                     _reply("demo-cv03-root-clearance-r1", "2026-07-13T10:02:00", engineer, "Checked against the A-revision envelope; markup added around the hitch zone."),
-                    _reply("demo-cv03-root-clearance-r2", "2026-07-13T13:45:00", fabrication, "Frame jig and hitch plate match the released drawing dimensions."),
+                    _reply("demo-cv03-root-clearance-r2", "2026-07-13T13:45:00", manager, "Frame jig and hitch plate evidence matches the released drawing dimensions."),
                     _reply("demo-cv03-root-clearance-r3", "2026-07-15T08:30:00", workshop, "Physical sweep test passed on the first build."),
                 ],
             ),
             _comment(
                 "demo-cv03-root-adr",
                 "2026-07-17T11:20:00",
-                electrical,
+                engineer,
                 "ADR lamp, reflector and registration-light positions checked against the drawing.",
                 priority="high",
                 status="resolved",
@@ -95,7 +94,7 @@ def _review_comments(users: dict[str, object]) -> dict[tuple[str, str], list[dic
             _comment(
                 "demo-cv03-root-finish",
                 "2026-07-22T07:55:00",
-                finish,
+                workshop,
                 "Mask VIN plate lands, earth points and hitch interface before powder coating.",
                 priority="normal",
                 status="resolved",
@@ -104,18 +103,29 @@ def _review_comments(users: dict[str, object]) -> dict[tuple[str, str], list[dic
                     _reply("demo-cv03-root-finish-r2", "2026-07-24T15:15:00", engineer, "First-off finish inspection passed."),
                 ],
             ),
+            _comment(
+                "demo-cv03-root-release-request",
+                "2026-07-25T09:20:00",
+                customer,
+                "Please approve CV03-F02 REV B. The parent drawing references it, but our restricted portal correctly prevents us from opening the unreleased frame assembly.",
+                priority="high",
+                replies=[
+                    _reply("demo-cv03-root-release-request-r1", "2026-07-25T10:05:00", engineer, "Approval remains on hold pending the weld-distortion review; the released parent can still be reviewed here."),
+                    _reply("demo-cv03-root-release-request-r2", "2026-07-25T11:40:00", manager, "A specifically authorised portal reviewer will validate the held subtree before release."),
+                ],
+            ),
         ],
         ("CV03-F02", "B"): [
             _comment(
                 "demo-cv03-frame-dfm",
                 "2026-07-10T08:40:00",
-                fabrication,
+                fabrication_release,
                 "Request weld sequence confirmation to control drawbar distortion.",
                 priority="high",
                 status="resolved",
                 replies=[
                     _reply("demo-cv03-frame-dfm-r1", "2026-07-10T10:15:00", engineer, "Use alternating 150 mm runs from the centre outward."),
-                    _reply("demo-cv03-frame-dfm-r2", "2026-07-12T16:05:00", fabrication, "Trial frame measured within tolerance; sequence accepted."),
+                    _reply("demo-cv03-frame-dfm-r2", "2026-07-12T16:05:00", fabrication_release, "Trial frame measured within tolerance; sequence accepted."),
                 ],
             )
         ],
@@ -183,6 +193,7 @@ def _markup_objects() -> list[dict]:
         {"type": "Ellipse", "tmObjectId": "demo-cv03-lamp-ring", "left": 210, "top": 805, "rx": 150, "ry": 95, "fill": "rgba(245,158,11,0.08)", "stroke": "#f59e0b", "strokeWidth": 6},
         {"type": "Rect", "tmObjectId": "demo-cv03-vin-mask", "left": 1210, "top": 875, "width": 235, "height": 85, "fill": "rgba(37,99,235,0.08)", "stroke": "#2563eb", "strokeWidth": 5},
         {"type": "Textbox", "tmObjectId": "demo-cv03-loom-note", "left": 920, "top": 405, "width": 360, "text": "Confirm ADR loom route", "fontSize": 36, "fill": "#dc2626", "strokeWidth": 1},
+        {"type": "Textbox", "tmObjectId": "demo-cv03-release-note", "left": 900, "top": 1040, "width": 520, "text": "CV03-F02 REV B approval requested", "fontSize": 32, "fill": "#7c3aed", "strokeWidth": 1},
     ]
 
 
@@ -194,9 +205,7 @@ def _markup_threads(users: dict[str, object]) -> list[PartDrawingMarkupThread]:
     customer = _email(users, "customer")
     engineer = _email(users, "engineering")
     workshop = _email(users, "workshop")
-    fabrication = _email(users, "supplier")
-    electrical = _email(users, "supplier_electrical")
-    finish = _email(users, "supplier_finish")
+    manager = _email(users, "engineering_manager")
     return [
         PartDrawingMarkupThread(
             id="demo-cv03-thread-hitch", object_ids=["demo-cv03-hitch-box"], title="Hitch clearance review", priority="high", status="open",
@@ -204,25 +213,33 @@ def _markup_threads(users: dict[str, object]) -> list[PartDrawingMarkupThread]:
             messages=[
                 _message("demo-cv03-thread-hitch-m1", customer, "2026-07-13T09:12:00", "Please confirm clearance at full lock."),
                 _message("demo-cv03-thread-hitch-m2", engineer, "2026-07-13T10:04:00", "Envelope checked; highlighted zone is the controlling interface."),
-                _message("demo-cv03-thread-hitch-m3", fabrication, "2026-07-13T13:48:00", "Jig measurement agrees with the drawing."),
+                _message("demo-cv03-thread-hitch-m3", manager, "2026-07-13T13:48:00", "Jig measurement agrees with the drawing."),
                 _message("demo-cv03-thread-hitch-m4", workshop, "2026-07-15T08:31:00", "Physical sweep passed; leaving open until fleet sign-off."),
             ],
         ),
         PartDrawingMarkupThread(
             id="demo-cv03-thread-lamps", object_ids=["demo-cv03-lamp-ring", "demo-cv03-loom-note"], title="ADR lamp and loom placement", priority="high", status="resolved",
-            created_by=electrical, created_at=_ts("2026-07-17T11:22:00"), updated_by=engineer, updated_at=_ts("2026-07-18T09:10:00"), resolved_by=engineer, resolved_at=_ts("2026-07-18T09:10:00"),
+            created_by=engineer, created_at=_ts("2026-07-17T11:22:00"), updated_by=engineer, updated_at=_ts("2026-07-18T09:10:00"), resolved_by=engineer, resolved_at=_ts("2026-07-18T09:10:00"),
             messages=[
-                _message("demo-cv03-thread-lamps-m1", electrical, "2026-07-17T11:22:00", "Confirm lamp position and keep the loom above spring travel."),
+                _message("demo-cv03-thread-lamps-m1", engineer, "2026-07-17T11:22:00", "Confirm lamp position and keep the loom above spring travel."),
                 _message("demo-cv03-thread-lamps-m2", engineer, "2026-07-17T14:12:00", "Route accepted with the added P-clip location."),
                 _message("demo-cv03-thread-lamps-m3", workshop, "2026-07-18T08:50:00", "Installed and function-tested on the first unit."),
             ],
         ),
         PartDrawingMarkupThread(
             id="demo-cv03-thread-vin", object_ids=["demo-cv03-vin-mask"], title="VIN plate masking", priority="normal", status="resolved",
-            created_by=finish, created_at=_ts("2026-07-22T07:57:00"), updated_by=workshop, updated_at=_ts("2026-07-24T15:16:00"), resolved_by=workshop, resolved_at=_ts("2026-07-24T15:16:00"),
+            created_by=workshop, created_at=_ts("2026-07-22T07:57:00"), updated_by=workshop, updated_at=_ts("2026-07-24T15:16:00"), resolved_by=workshop, resolved_at=_ts("2026-07-24T15:16:00"),
             messages=[
-                _message("demo-cv03-thread-vin-m1", finish, "2026-07-22T07:57:00", "Mask this land before powder coat."),
+                _message("demo-cv03-thread-vin-m1", workshop, "2026-07-22T07:57:00", "Mask this land before powder coat."),
                 _message("demo-cv03-thread-vin-m2", workshop, "2026-07-24T15:16:00", "Mask removed and earth continuity verified."),
+            ],
+        ),
+        PartDrawingMarkupThread(
+            id="demo-cv03-thread-release", object_ids=["demo-cv03-release-note"], title="Unreleased child approval request", priority="high", status="open",
+            created_by=customer, created_at=_ts("2026-07-25T09:22:00"), updated_by=engineer, updated_at=_ts("2026-07-25T10:06:00"),
+            messages=[
+                _message("demo-cv03-thread-release-m1", customer, "2026-07-25T09:22:00", "We can review this parent drawing but cannot open CV03-F02 REV B. Please approve it when the engineering hold is cleared."),
+                _message("demo-cv03-thread-release-m2", engineer, "2026-07-25T10:06:00", "That restriction is intentional. Weld review is still open; an authorised external reviewer can inspect the held subtree."),
             ],
         ),
     ]
@@ -280,7 +297,11 @@ def seed_sample_review_history(users: dict[str, object]) -> dict[str, int]:
     markup.updated_at = _ts("2026-07-24T15:16:00")
     markup.save()
     sync_part_review_status(Part.objects(part_number=PART_NUMBER, revision=REVISION).get())
-    return {"annotated_parts": annotated_parts, "comments": comments_total, "markup_threads": 3}
+    return {
+        "annotated_parts": annotated_parts,
+        "comments": comments_total,
+        "markup_threads": len(_markup_threads(users)),
+    }
 
 
 def remove_sample_review_history() -> dict[str, int]:

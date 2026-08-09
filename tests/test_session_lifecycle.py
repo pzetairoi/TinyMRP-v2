@@ -280,7 +280,7 @@ def test_cli_password_and_role_changes_rotate_session_identity(app):
 def test_role_permission_edit_revokes_assigned_user_sessions(app):
     role_admin = Role(
         name=f"role_admin_{uuid.uuid4().hex}",
-        permissions=["security.roles.manage"],
+        permissions=["security.roles.manage", "files.read"],
     ).save()
     actor = _make_user(
         app,

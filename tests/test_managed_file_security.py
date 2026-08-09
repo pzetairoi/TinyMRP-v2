@@ -250,6 +250,18 @@ def test_customer_portal_job_updates_refresh_parts_and_thumbnail_access(
         f"/api/part_detail?pn={child.part_number}&rev={child.revision}"
     )
     assert child_detail.status_code == 200
+    comment = client.post(
+        f"/api/parts/{child.part_number}/comments",
+        json={"rev": child.revision, "text": "Customer release review"},
+    )
+    assert comment.status_code == 200
+    refreshed_detail = client.get(
+        f"/api/part_detail?pn={child.part_number}&rev={child.revision}"
+    ).get_json()
+    assert [row["text"] for row in refreshed_detail["comments"]] == [
+        "Customer release review"
+    ]
+    assert portal.email not in str(refreshed_detail["comments"])
     related_jobs = child_detail.get_json()["jobs_orders"]
     assert {
         (row["job_id"], row["job_number"])
@@ -328,7 +340,7 @@ def test_supplier_and_production_file_access_follow_exact_relationships(
     assert client.get(f"/files/view/{_token(app, unreleased_file)}").status_code == 404
 
 
-def test_supplier_portal_can_read_parts_from_vendor_linked_job(client, app):
+def test_supplier_portal_reads_only_its_purchase_order_subtree(client, app):
     allowed = _part("SUPPLIER-JOB-PART", "A", released=True)
     child = _part("SUPPLIER-JOB-CHILD", "A", released=True)
     remaining = _part("SUPPLIER-JOB-REMAINING", "A", released=True)
@@ -383,10 +395,10 @@ def test_supplier_portal_can_read_parts_from_vendor_linked_job(client, app):
     assert purchase_order.order_number in job_body
     assert hidden_sales_order.order_number not in job_body
     assert "Parts in Orders" in job_body
-    assert "Parts Not Yet Ordered" in job_body
+    assert "Parts Not Yet Ordered" not in job_body
     assert allowed.part_number in job_body
     assert child.part_number in job_body
-    assert remaining.part_number in job_body
+    assert remaining.part_number not in job_body
     assert hidden_sales_part.part_number not in job_body
     order_page = client.get(f"/admin/orders/{purchase_order.id}")
     assert order_page.status_code == 200

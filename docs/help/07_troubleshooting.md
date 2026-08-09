@@ -5,11 +5,14 @@ first.
 
 ## I cannot see a part that I know exists
 
-1. **Is it a draft?** Without `parts.read_unreleased` you only see approved
-   parts. Ask whoever manages roles whether you should have it.
+1. **Is it a draft?** External accounts see approved parts by default. An
+   administrator may grant `parts.read_unreleased` to a named reviewer, but
+   that exception only removes the approval barrier: it does not expose another
+   company, job, order or supplier line.
 2. **Are you a customer or supplier user?** You only see parts reachable from
-   your own jobs and orders. A part not linked to your work is invisible by
-   design.
+   your own relationship. Customers follow their contractual job/BOM subtree;
+   suppliers follow their own purchase-order lines and descendants. Being
+   listed as a job vendor provides job context, not the whole engineering BOM.
 3. **Are filters still applied?** Clear the search box *and* every column
    filter. A filter left in one column silently narrows everything.
 4. **Are you on the right revision?** Search the part number alone — other

@@ -445,7 +445,12 @@ def test_multiple_roles_combine_only_contributing_part_scopes():
     portal = _standard_role("customer")
     internal = _standard_role("internal")
     user = _user("multi@stage3b1.test", portal, internal)
-    Customer(name="Multi Customer", users=[user]).save()
+    customer = Customer(name="Multi Customer", users=[user]).save()
+    Job(
+        job_number="MULTI-CUSTOMER-JOB",
+        customer=customer,
+        bom=[JobBOMLine(pn=released.part_number, rev=released.revision, qty=1)],
+    ).save()
 
     assert authorise_part_access(user, released.part_number, released.revision).allowed
 

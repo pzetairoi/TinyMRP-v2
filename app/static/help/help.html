@@ -617,10 +617,18 @@ parts connected to their own jobs and orders.</li>
 <p>Seeing a <strong>draft</strong> part needs <code>parts.read_unreleased</code>. Without it, Inventory,
 search and BOM views quietly skip unapproved revisions. This is why a colleague
 may see a part you cannot.</p>
-<p>The same Inventory screen, opened by a customer account, shows only the parts
-reachable from that customer own jobs and orders — and the Import, Tools and
+<p>The same Inventory screen, opened by a customer account, shows only the approved
+parts reachable from that customer's own jobs and sales orders — and the Import, Tools and
 Admin menus are gone entirely:</p>
-<figure class="help-figure"><img src="/static/help/img/customer-portal.png" alt="Inventory as a customer: four permitted parts, and no Import, Tools or Admin menu." /><figcaption class="help-figure-caption">Inventory as a customer: four permitted parts, and no Import, Tools or Admin menu.</figcaption></figure>
+<figure class="help-figure"><img src="/static/help/img/customer-portal.png" alt="Inventory as a customer: only the released contractual subtree, and no Import, Tools or Admin menu." /><figcaption class="help-figure-caption">Inventory as a customer: only the released contractual subtree, and no Import, Tools or Admin menu.</figcaption></figure>
+<p>Suppliers are narrower again: a vendor association may expose job context, but
+engineering data comes only from that supplier's purchase-order lines and their
+children. A sales-order supplier field never grants access.</p>
+<p>Unapproved nodes stop traversal by default. If a named external reviewer really
+must inspect held data, assign <code>parts.read_unreleased</code> in addition to the
+customer or supplier role. This removes only the approval barrier; it does not
+broaden the linked company, jobs, order kind or supplier PO-line subtree.</p>
+<figure class="help-figure"><img src="/static/help/img/customer-approval-request.png" alt="A customer reviews the released parent drawing and requests approval for CV03-F02 REV B because the held child is correctly unavailable." /><figcaption class="help-figure-caption">A customer reviews the released parent drawing and requests approval for CV03-F02 REV B because the held child is correctly unavailable.</figcaption></figure>
 <h3 id="creating-approved-data-is-allowed-changing-it-is-not">Creating approved data is allowed; changing it is not</h3>
 <p>Anyone with upload rights may import a part that arrives already approved —
 that is normal engineering output, not a privileged act.</p>
@@ -1109,11 +1117,18 @@ user layout; they receive the new default when they choose <strong>Reset</strong
 </div></details><details class="help-section" id="sec-access-scoping-model-operational-view"><summary><span class="help-section-title" id="access-scoping-model-operational-view">Access Scoping Model (Operational View)</span></summary><div class="help-section-body">
 <p>External users can be scoped by linked entities:</p>
 <ul>
-<li>Customer-linked users see customer-relevant data.</li>
-<li>Supplier-linked users see supplier-relevant data.</li>
+<li>A linked user must also have the matching canonical <strong>Customer</strong> or
+<strong>Supplier</strong> portal role; a company link alone does not create access.</li>
+<li>Customer users see only their customer, jobs, sales orders and contractual
+BOM subtree.</li>
+<li>Supplier users see only their supplier, purchase orders and each PO-line
+subtree. A job vendor link provides context but never the complete job BOM.</li>
 <li>Internal privileged roles remain unscoped.</li>
 </ul>
-<p>This scoping is enforced server-side on jobs, orders, customers, suppliers, parts, and related views.</p>
+<p>This scoping is enforced server-side on jobs, orders, customers, suppliers,
+parts, comments, markups and related views. Unapproved nodes stop traversal by
+default. For a named external reviewer, <code>parts.read_unreleased</code> removes that
+approval barrier without widening the relationship scope.</p>
 </div></details><details class="help-section" id="sec-customer-and-supplier-master-data"><summary><span class="help-section-title" id="customer-and-supplier-master-data">Customer And Supplier Master Data</span></summary><div class="help-section-body">
 <h3 id="customers-admincustomers">Customers (<code>/admin/customers</code>)</h3>
 <ul>
@@ -1463,11 +1478,14 @@ check, and a public share before considering the migration complete.</p>
 first.</p>
 </div><details class="help-section" id="sec-i-cannot-see-a-part-that-i-know-exists" open><summary><span class="help-section-title" id="i-cannot-see-a-part-that-i-know-exists">I cannot see a part that I know exists</span></summary><div class="help-section-body">
 <ol>
-<li><strong>Is it a draft?</strong> Without <code>parts.read_unreleased</code> you only see approved
-parts. Ask whoever manages roles whether you should have it.</li>
+<li><strong>Is it a draft?</strong> External accounts see approved parts by default. An
+administrator may grant <code>parts.read_unreleased</code> to a named reviewer, but
+that exception only removes the approval barrier: it does not expose another
+company, job, order or supplier line.</li>
 <li><strong>Are you a customer or supplier user?</strong> You only see parts reachable from
-your own jobs and orders. A part not linked to your work is invisible by
-design.</li>
+your own relationship. Customers follow their contractual job/BOM subtree;
+suppliers follow their own purchase-order lines and descendants. Being
+listed as a job vendor provides job context, not the whole engineering BOM.</li>
 <li><strong>Are filters still applied?</strong> Clear the search box <em>and</em> every column
 filter. A filter left in one column silently narrows everything.</li>
 <li><strong>Are you on the right revision?</strong> Search the part number alone — other

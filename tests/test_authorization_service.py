@@ -7,7 +7,7 @@ from app.models.audit import AuditLog
 from app.models.auth import Role, User
 from app.models.customer import Customer
 from app.models.job import Job, JobBOMLine
-from app.models.order import Order
+from app.models.order import Order, OrderLine
 from app.models.part import Part
 from app.models.supplier import Supplier
 from app.services import authorization
@@ -483,9 +483,80 @@ def test_security_administrator_can_use_existing_admin_routes_without_self_escal
         f"/admin/users/{target.id}/edit",
         data={"roles": [str(planner.id)]},
     )
-    assert assigned.status_code == 302
+    assert assigned.status_code == 403
     target.reload()
-    assert [role.name for role in target.roles] == ["planner"]
+    assert target.roles == []
+
+
+def test_external_unreleased_permission_removes_only_approval_barrier(app):
+    root = Part(
+        part_number="PORTAL-RELEASED-ROOT",
+        revision="A",
+        attrs={"approvedby": "QA"},
+    ).save()
+    held = Part(
+        part_number="PORTAL-HELD-CHILD",
+        revision="A",
+        attrs={"approved": False},
+    ).save()
+    grandchild = Part(
+        part_number="PORTAL-RELEASED-GRANDCHILD",
+        revision="A",
+        attrs={"approvedby": "QA"},
+    ).save()
+    from app.models.bom import BOMLink
+
+    BOMLink(
+        parent_pn=root.part_number,
+        parent_rev="A",
+        child_pn=held.part_number,
+        child_rev="A",
+        qty=1,
+    ).save()
+    BOMLink(
+        parent_pn=held.part_number,
+        parent_rev="A",
+        child_pn=grandchild.part_number,
+        child_rev="A",
+        qty=1,
+    ).save()
+
+    portal_role = _role("customer", ["parts.read", "jobs.read"])
+    exception_role = _role(
+        "portal_unreleased_exception",
+        ["parts.read_unreleased", "parts.update", "audit.read"],
+    )
+    default_user = _user("default-release-portal@example.com", [portal_role])
+    exception_user = _user(
+        "exception-release-portal@example.com",
+        [portal_role, exception_role],
+    )
+    customer = Customer(
+        code="PORTAL-RELEASE-CUSTOMER",
+        name="Portal Release Customer",
+        users=[default_user, exception_user],
+    ).save()
+    Job(
+        job_number="PORTAL-RELEASE-JOB",
+        customer=customer,
+        bom=[JobBOMLine(pn=root.part_number, rev="A", qty=1)],
+    ).save()
+
+    default_visible = {
+        part.part_number for part in scope_queryset(Part.objects, default_user, "parts")
+    }
+    exception_visible = {
+        part.part_number for part in scope_queryset(Part.objects, exception_user, "parts")
+    }
+    assert default_visible == {root.part_number}
+    assert exception_visible == {
+        root.part_number,
+        held.part_number,
+        grandchild.part_number,
+    }
+    assert "parts.read_unreleased" in effective_permissions(exception_user)
+    assert "parts.update" not in effective_permissions(exception_user)
+    assert "audit.read" not in effective_permissions(exception_user)
 
 
 def test_system_administrator_uses_existing_system_routes_only(client, app):

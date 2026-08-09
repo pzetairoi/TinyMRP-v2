@@ -10,6 +10,7 @@ from app.services.audit import log_action
 from app.services.authorization import (
     has_any_permission,
     has_permission,
+    permissions_are_delegable,
     require_permission,
 )
 from ..models.auth import User, Role
@@ -699,6 +700,15 @@ def users_create():
         role_ids = request.form.getlist("roles")
         if role_ids:
             selected_roles = list(Role.objects(id__in=role_ids))
+            if not permissions_are_delegable(
+                current_user,
+                (
+                    permission
+                    for role in selected_roles
+                    for permission in (role.permissions or [])
+                ),
+            ):
+                abort(403)
             if (
                 any(role.name == "administrator" for role in selected_roles)
                 and not current_user.has_role("administrator")
@@ -740,6 +750,15 @@ def users_edit(user_id):
         ):
             abort(403)
         requested_role_ids = {str(role.id) for role in selected_roles}
+        if not permissions_are_delegable(
+            current_user,
+            (
+                permission
+                for role in selected_roles
+                for permission in (role.permissions or [])
+            ),
+        ):
+            abort(403)
         if str(u.id) == str(current_user.id):
             if requested_role_ids - current_role_ids:
                 abort(403)

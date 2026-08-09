@@ -41,11 +41,22 @@ Seeing a **draft** part needs `parts.read_unreleased`. Without it, Inventory,
 search and BOM views quietly skip unapproved revisions. This is why a colleague
 may see a part you cannot.
 
-The same Inventory screen, opened by a customer account, shows only the parts
-reachable from that customer own jobs and orders — and the Import, Tools and
+The same Inventory screen, opened by a customer account, shows only the approved
+parts reachable from that customer's own jobs and sales orders — and the Import, Tools and
 Admin menus are gone entirely:
 
-![Inventory as a customer: four permitted parts, and no Import, Tools or Admin menu.](/static/help/img/customer-portal.png)
+![Inventory as a customer: only the released contractual subtree, and no Import, Tools or Admin menu.](/static/help/img/customer-portal.png)
+
+Suppliers are narrower again: a vendor association may expose job context, but
+engineering data comes only from that supplier's purchase-order lines and their
+children. A sales-order supplier field never grants access.
+
+Unapproved nodes stop traversal by default. If a named external reviewer really
+must inspect held data, assign `parts.read_unreleased` in addition to the
+customer or supplier role. This removes only the approval barrier; it does not
+broaden the linked company, jobs, order kind or supplier PO-line subtree.
+
+![A customer reviews the released parent drawing and requests approval for CV03-F02 REV B because the held child is correctly unavailable.](/static/help/img/customer-approval-request.png)
 
 ### Creating approved data is allowed; changing it is not
 

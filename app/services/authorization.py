@@ -54,6 +54,7 @@ class _ScopeContext:
     supplier_ids: tuple[Any, ...] = ()
     participant_job_ids: tuple[Any, ...] = ()
     role_permissions: tuple[tuple[str, frozenset[str]], ...] = ()
+    external: bool = False
 
 
 class AuthorizationScopeError(RuntimeError):
@@ -75,6 +76,33 @@ _RESOURCE_ALIASES = {
     "customer": "customers",
     "supplier": "suppliers",
 }
+
+_CUSTOMER_ROLE_NAMES = frozenset({
+    "customer", "customer_portal", "customer_viewer",
+})
+_SUPPLIER_ROLE_NAMES = frozenset({
+    "supplier", "supplier_portal", "supplier_viewer",
+})
+_EXTERNAL_ROLE_NAMES = _CUSTOMER_ROLE_NAMES | _SUPPLIER_ROLE_NAMES
+_SCOPED_ROLE_NAMES = _EXTERNAL_ROLE_NAMES | frozenset({
+    "production_operator", "operator", "viewer",
+})
+_EXTERNAL_PERMISSION_CEILING = frozenset({
+    "parts.read",
+    # Optional, explicit portal exception.  It removes only the approval
+    # barrier; relationship/job/order scoping still applies unchanged.
+    "parts.read_unreleased",
+    "bom.read",
+    "files.read",
+    "jobs.read",
+    "orders.read",
+    "customers.read",
+    "suppliers.read",
+    "comments.read",
+    "comments.write",
+    "markups.read",
+    "markups.write",
+})
 
 def _is_authenticated(user: Any) -> bool:
     return bool(user is not None and getattr(user, "is_authenticated", False))
@@ -140,11 +168,46 @@ def _permission_snapshot(user: Any) -> _PermissionSnapshot:
     return snapshot
 
 
+def _is_external_principal(
+    user: Any,
+    role_names: frozenset[str] | None = None,
+) -> bool:
+    """Treat a portal role as a sticky security boundary.
+
+    A role union must never turn a customer or supplier account into an
+    internal account. The check is deliberately role-local: adding relationship
+    queries to every permission check would regress the hot part/BOM paths.
+    Portal-company editors enforce the canonical role invariant separately.
+    """
+
+    names = role_names or frozenset()
+    return bool(names & _EXTERNAL_ROLE_NAMES)
+
+
+def has_portal_role(user: Any, relationship: str) -> bool:
+    """Return whether a user carries the canonical role for a company link."""
+
+    names = _permission_snapshot(user).role_names
+    if relationship == "customer":
+        return bool(names & _CUSTOMER_ROLE_NAMES)
+    if relationship == "supplier":
+        return bool(names & _SUPPLIER_ROLE_NAMES)
+    return False
+
+
 def effective_permissions(user: Any) -> frozenset[str]:
     """Return the immutable union of all valid permissions assigned to a user."""
 
     try:
-        return _permission_snapshot(user).permissions
+        snapshot = _permission_snapshot(user)
+        if _is_external_principal(user, snapshot.role_names):
+            ceiling = set(_EXTERNAL_PERMISSION_CEILING)
+            if not snapshot.role_names & _CUSTOMER_ROLE_NAMES:
+                ceiling.discard("customers.read")
+            if not snapshot.role_names & _SUPPLIER_ROLE_NAMES:
+                ceiling.discard("suppliers.read")
+            return snapshot.permissions & ceiling
+        return snapshot.permissions
     except Exception:
         # Fail closed, but never silently. A user who suddenly holds no
         # permissions looks exactly like a user who legitimately has none, so
@@ -275,14 +338,7 @@ def _build_scope_context(user: Any) -> _ScopeContext:
         return _ScopeContext(valid=False)
     try:
         snapshot = _permission_snapshot(user)
-        # Superseded slugs stay listed so users still holding one remain
-        # scoped instead of falling through to global visibility.
-        scoped_roles = {
-            "customer", "supplier",
-            "customer_portal", "customer_viewer", "supplier_portal",
-            "supplier_viewer", "production_operator", "operator", "viewer",
-        }
-        if not snapshot.role_names & scoped_roles:
+        if not snapshot.role_names & _SCOPED_ROLE_NAMES:
             return _ScopeContext(True, role_permissions=snapshot.role_permissions)
         from app.models.customer import Customer
         from app.models.job import Job
@@ -299,6 +355,11 @@ def _build_scope_context(user: Any) -> _ScopeContext:
             supplier_ids=supplier_ids,
             participant_job_ids=participant_ids,
             role_permissions=snapshot.role_permissions,
+            external=bool(
+                customer_ids
+                or supplier_ids
+                or snapshot.role_names & _EXTERNAL_ROLE_NAMES
+            ),
         )
     except Exception:
         return _ScopeContext(valid=False)
@@ -332,6 +393,13 @@ def _scope_modes(
     """Return the union of scope contributions from roles granting permission."""
 
     modes: set[str] = set()
+    role_names = {name for name, _permissions in scope.role_permissions}
+    if scope.external:
+        if scope.customer_ids or role_names & _CUSTOMER_ROLE_NAMES:
+            modes.add("customer")
+        if scope.supplier_ids or role_names & _SUPPLIER_ROLE_NAMES:
+            modes.add("supplier")
+        return frozenset(modes)
     # Any role absent from this map contributes "global" below, so every
     # deliberately scoped standard role must appear here. Superseded slugs stay
     # listed so users still holding one remain scoped.
@@ -383,7 +451,11 @@ def _scope_jobs(queryset: Any, scope: _ScopeContext, modes: frozenset[str]) -> A
 
         clauses.append(Q(vendors__in=scope.supplier_ids))
         order_job_ids = _distinct_ids(
-            Order.objects(supplier__in=scope.supplier_ids), "job"
+            Order.objects(
+                kind="purchase",
+                supplier__in=scope.supplier_ids,
+            ),
+            "job",
         )
         if order_job_ids:
             clauses.append(Q(id__in=tuple(order_job_ids)))
@@ -554,11 +626,8 @@ def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
         return None
 
     from mongoengine.queryset.visitor import Q
-    from app.models.bom import BOMLink
     from app.models.job import Job
     from app.models.order import Order
-    from app.models.part import Part
-    from app.services.attrs import approval_filter_raw
 
     job_ids = set(scope.participant_job_ids)
     customer_jobs: set[Any] = set()
@@ -568,16 +637,6 @@ def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
             "id",
         )
         job_ids |= customer_jobs
-    if scope.supplier_ids:
-        job_ids |= _distinct_ids(
-            Job.objects(vendors__in=scope.supplier_ids, is_deleted=False),
-            "id",
-        )
-        job_ids |= _distinct_ids(
-            Order.objects(kind="purchase", supplier__in=scope.supplier_ids),
-            "job",
-        )
-
     roots: set[tuple[str, str]] = set()
     if job_ids:
         for job in Job.objects(id__in=tuple(job_ids), is_deleted=False).only("bom"):
@@ -602,6 +661,24 @@ def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
             if str(line.pn or "").strip()
         )
 
+    return _expand_relationship_roots(user, roots)
+
+
+def _expand_relationship_roots(
+    user: Any,
+    roots: Iterable[tuple[Any, Any]],
+) -> set[tuple[str, str]]:
+    """Expand exact BOM roots, stopping at every unreleased node.
+
+    Approval is a traversal boundary, not just a presentation filter.  If an
+    external user cannot see an intermediate assembly they must not discover
+    its released descendants by walking around that assembly.
+    """
+
+    from app.models.bom import BOMLink
+    from app.models.part import Part
+    from app.services.attrs import approval_filter_raw
+
     revision_cache: dict[str, str] = {}
 
     def resolve_blank_revisions(part_numbers: set[str]) -> None:
@@ -620,7 +697,12 @@ def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
             revision_cache.setdefault(pn.casefold(), "")
 
     allowed: set[tuple[str, str]] = set()
-    frontier = roots
+    frontier = {
+        (str(pn or "").strip(), str(rev or "").strip())
+        for pn, rev in roots
+        if str(pn or "").strip()
+    }
+    released_only = not has_permission(user, "parts.read_unreleased")
     while frontier:
         resolve_blank_revisions({pn for pn, rev in frontier if not rev})
         current = {
@@ -630,6 +712,25 @@ def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
         } - allowed
         if not current:
             break
+        if released_only:
+            names = {pn for pn, _rev in current}
+            released_parts = Part.objects(part_number__in=tuple(names)).filter(
+                __raw__=approval_filter_raw(approved=True)
+            ).only("part_number", "revision")
+            released = {
+                (
+                    str(part.part_number or "").strip().casefold(),
+                    str(part.revision or "").strip().casefold(),
+                )
+                for part in released_parts
+            }
+            current = {
+                (pn, rev)
+                for pn, rev in current
+                if (pn.casefold(), rev.casefold()) in released
+            }
+            if not current:
+                break
         allowed |= current
         parent_numbers = {pn for pn, _rev in current}
         links = BOMLink.objects(parent_pn__in=tuple(parent_numbers)).only(
@@ -652,6 +753,92 @@ def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
             if child_pn:
                 frontier.add((child_pn, str(link.child_rev or "").strip()))
     return allowed
+
+
+def relationship_job_part_pairs(
+    user: Any,
+    job: Any,
+) -> set[tuple[str, str]] | None:
+    """Return the part subtree this user may see inside one specific job.
+
+    Customers and assigned internal users receive the job BOM. Suppliers
+    receive only their purchase-order lines for this job and descendants. A
+    vendor link by itself grants job context, never engineering data.
+    """
+
+    if not _is_authenticated(user) or job is None:
+        return set()
+    cache = _request_cache("job_part_scope_pairs")
+    job_id = getattr(job, "id", None)
+    key = f"{_cache_key(user)}:job:{job_id or id(job)}"
+    if cache is not None and key in cache:
+        return cache[key]
+
+    allowed = _build_relationship_job_part_pairs(user, job)
+    if cache is not None:
+        cache[key] = allowed
+    return allowed
+
+
+def _build_relationship_job_part_pairs(
+    user: Any,
+    job: Any,
+) -> set[tuple[str, str]] | None:
+    """Build one contextual job scope; the public helper request-caches it."""
+
+    try:
+        scope = _scope_context(user)
+        if not scope.valid or not has_permission(user, "jobs.read"):
+            return set()
+        modes = _scope_modes(scope, "jobs", "jobs.read")
+        if "global" in modes:
+            return None
+
+        roots: set[tuple[str, str]] = set()
+        job_id = getattr(job, "id", None)
+        customer = getattr(job, "customer", None)
+        customer_id = getattr(customer, "id", None)
+        if "customer" in modes and customer_id in set(scope.customer_ids):
+            roots.update(
+                (str(line.pn or "").strip(), str(line.rev or "").strip())
+                for line in (getattr(job, "bom", None) or ())
+                if str(line.pn or "").strip()
+            )
+        if "assigned" in modes and job_id in set(scope.participant_job_ids):
+            roots.update(
+                (str(line.pn or "").strip(), str(line.rev or "").strip())
+                for line in (getattr(job, "bom", None) or ())
+                if str(line.pn or "").strip()
+            )
+        if "supplier" in modes and scope.supplier_ids and job_id is not None:
+            from app.models.order import Order
+
+            for order in Order.objects(
+                kind="purchase",
+                job=job,
+                supplier__in=scope.supplier_ids,
+                status__ne="cancelled",
+            ).only("lines"):
+                roots.update(
+                    (str(line.pn or "").strip(), str(line.rev or "").strip())
+                    for line in (order.lines or ())
+                    if str(line.pn or "").strip()
+                )
+        return _expand_relationship_roots(user, roots)
+    except Exception:
+        logger.exception("job part-scope evaluation failed; denying all parts")
+        return set()
+
+
+def permissions_are_delegable(user: Any, permissions: Iterable[str]) -> bool:
+    """Prevent delegated role managers from granting authority they lack."""
+
+    requested = {
+        permission
+        for permission in permissions
+        if isinstance(permission, str) and permission in PERMISSION_REGISTRY
+    }
+    return requested <= set(effective_permissions(user))
 
 
 def scope_queryset(

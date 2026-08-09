@@ -38,6 +38,8 @@ from app.services.filescan import (
 from app.services.thumbs_gen import generate_thumbs_for_parts
 from app.services.extra_files import extra_file_url_for
 from app.services.acl import (
+    customer_scope_ids,
+    supplier_scope_ids,
     user_has_permission,
 )
 from app.services.authorization import (
@@ -45,6 +47,7 @@ from app.services.authorization import (
     authorise_part_access,
     has_permission,
     part_is_released,
+    relationship_job_part_pairs,
     require_permission,
     scope_queryset,
 )
@@ -491,7 +494,7 @@ def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
         Job.objects(is_deleted=False, bom__pn__in=tuple(related_pns)),
         user,
         "jobs",
-    ).only("job_number", "bom")
+    ).only("job_number", "customer", "bom")
     order_q = scope_queryset(
         Order.objects(
             status__ne="cancelled",
@@ -503,8 +506,23 @@ def _jobs_orders_summary(pn: str, rev: str | None, user) -> list[dict]:
 
     rows: list[dict] = []
     seen = set()
+    supplier_only = bool(supplier_scope_ids(user) and not customer_scope_ids(user))
 
     for job in job_q:
+        if supplier_only:
+            job_scope = relationship_job_part_pairs(user, job)
+            target_key = (
+                str(pn or "").strip().casefold(),
+                str(rev or "").strip().casefold(),
+            )
+            if job_scope is not None and target_key not in {
+                (
+                    str(part_number or "").strip().casefold(),
+                    str(revision or "").strip().casefold(),
+                )
+                for part_number, revision in job_scope
+            }:
+                continue
         used_set = _build_used_set([(l.pn, l.rev) for l in (job.bom or [])])
         if not used_set:
             continue
@@ -1157,14 +1175,11 @@ def part_detail():
     custom_field_ids, _custom_attr_keys = _configured_custom_fields(field_config)
     boundary = response_context("parts", current_user)
     attrs = harvest_part_attrs(p)
-    can_read_comments = (
-        boundary in {"internal", "production_operator"}
-        and has_permission(current_user, "comments.read")
-    )
-    can_read_markups = (
-        boundary in {"internal", "production_operator"}
-        and has_permission(current_user, "markups.read")
-    )
+    # The part query above already applied relationship and approval scope.
+    # Portal collaboration is therefore safe to enable on this exact part;
+    # field policies below still remove notes and directory identities.
+    can_read_comments = bool(boundary) and has_permission(current_user, "comments.read")
+    can_read_markups = bool(boundary) and has_permission(current_user, "markups.read")
     can_read_approval_identity = (
         boundary == "internal"
         and (

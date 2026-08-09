@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple
 from app.services.acl import (
     permissions_required,
     customer_scope_ids,
+    supplier_scope_ids,
     user_has_permission,
 )
 from app.services.authorization import (
@@ -12,6 +13,7 @@ from app.services.authorization import (
     authorised_part_pairs,
     enforce_permission as _require,
     authorise_part_access,
+    relationship_job_part_pairs,
     scope_queryset,
     uses_portal_presentation,
 )
@@ -393,13 +395,16 @@ def _build_job_bom_rollup(
     can_manage_orders: bool,
     bom_lines=None,
     user=None,
+    allowed_pairs=None,
 ):
     required_map, display_map, occurrences = _job_required_structure(job, bom_lines)
     if user is not None:
-        allowed_required = authorised_part_pairs(
-            user,
-            [display_map.get(key, key) for key in required_map],
-        )
+        allowed_required = allowed_pairs
+        if allowed_required is None:
+            allowed_required = authorised_part_pairs(
+                user,
+                [display_map.get(key, key) for key in required_map],
+            )
         required_map = {
             key: value
             for key, value in required_map.items()
@@ -536,6 +541,8 @@ def jobs_list():
         q = q.filter(job_number__icontains=job_q)
     if title_q:
         q = q.filter(Q(title__icontains=title_q) | Q(description__icontains=title_q))
+    if customer_q and not user_has_permission(current_user, "customers.read"):
+        abort(403)
     if customer_q:
         custs = Customer.objects(Q(name__icontains=customer_q) | Q(code__icontains=customer_q))
         if custs:
@@ -553,26 +560,36 @@ def jobs_list():
         resource_type="jobs",
     )
     cust_ids = customer_scope_ids(current_user)
-    mask_vendors = bool(is_external and cust_ids)
+    supp_ids = supplier_scope_ids(current_user)
+    mask_vendors = bool(is_external)
+    mask_customer = bool(is_external and supp_ids and not cust_ids)
     mask_participants = bool(is_external)
     jobs = q.order_by("job_number")
     safe_jobs = []
     for j in jobs:
-        try:
-            cust_name = j.customer.name if j.customer else "-"
-            cust_id = str(j.customer.id) if j.customer else ""
-        except Exception:
-            cust_name = "-"
-            cust_id = ""
-        try:
-            vendors = ", ".join([v.name for v in (j.vendors or [])])
-        except Exception:
-            vendors = "-"
-        try:
-            parts = ", ".join([u.email for u in (j.participants or [])])
-        except Exception:
-            parts = "-"
-        required_total, ordered_total, received_total = _job_order_totals(j)
+        cust_name = "Hidden" if mask_customer else "-"
+        cust_id = ""
+        if not mask_customer:
+            try:
+                cust_name = j.customer.name if j.customer else "-"
+                cust_id = str(j.customer.id) if j.customer else ""
+            except Exception:
+                pass
+        vendors = "Hidden" if mask_vendors else "-"
+        if not mask_vendors:
+            try:
+                vendors = ", ".join([v.name for v in (j.vendors or [])])
+            except Exception:
+                pass
+        parts = "Hidden" if mask_participants else "-"
+        if not mask_participants:
+            try:
+                parts = ", ".join([u.email for u in (j.participants or [])])
+            except Exception:
+                pass
+        required_total, ordered_total, received_total = (
+            (0.0, 0.0, 0.0) if is_external else _job_order_totals(j)
+        )
         ordered_pct = (ordered_total / required_total * 100.0) if required_total else 0.0
         received_pct = (received_total / ordered_total * 100.0) if ordered_total else 0.0
         safe_jobs.append(
@@ -588,14 +605,15 @@ def jobs_list():
                 "scheduled_end": j.scheduled_end,
                 "customer_name": cust_name or "-",
                 "customer_id": cust_id,
-                "participants": "Hidden" if mask_participants else (parts or "-"),
-                "vendors": "Hidden" if mask_vendors else (vendors or "-"),
+                "participants": parts or "-",
+                "vendors": vendors or "-",
                 # Deletion consequences surfaced in the confirm prompt: orders
                 # get unlinked, and portal users lose the part access this job
                 # grants them.
-                "order_count": Order.objects(job=j).count(),
-                "part_count": len(j.bom or []),
-                "vendor_count": len(j.vendors or []),
+                "order_count": 0 if is_external else Order.objects(job=j).count(),
+                "part_count": 0 if is_external else len(j.bom or []),
+                "vendor_count": 0 if is_external else len(j.vendors or []),
+                "external": bool(is_external),
                 "required_total": required_total,
                 "ordered_total": ordered_total,
                 "received_total": received_total,
@@ -639,30 +657,45 @@ def jobs_view(job_id):
     j = _scoped_job(job_id, "jobs.read")
     if not j:
         abort(404)
-    # Clean up broken references to avoid deref errors
-    try:
-        _ = j.customer.id if j.customer else None
-    except Exception:
-        j.customer = None
-    try:
-        log_action("job.view", resource_type="job", resource=str(j.id))
-    except Exception:
-        pass
     is_external = uses_portal_presentation(
         current_user,
         "jobs.read",
         resource_type="jobs",
     )
     cust_ids = customer_scope_ids(current_user)
+    supp_ids = supplier_scope_ids(current_user)
+    supplier_only = bool(is_external and supp_ids and not cust_ids)
+    # Supplier presentation never needs the customer DBRef.  Avoid both the
+    # disclosure and an unnecessary dereference on the external hot path.
+    if not supplier_only:
+        try:
+            _ = j.customer.id if j.customer else None
+        except Exception:
+            j.customer = None
+    try:
+        log_action("job.view", resource_type="job", resource=str(j.id))
+    except Exception:
+        pass
     users = _eligible_job_users() if user_has_permission(current_user, "jobs.assign") else []
-    suppliers, customers = _job_form_destinations()
-    allowed_bom = authorised_part_pairs(
-        current_user,
-        [
-            (line.pn, _resolve_visible_rev(line.pn, line.rev))
-            for line in (j.bom or [])
-        ],
-    )
+    suppliers, customers = ([], []) if is_external else _job_form_destinations()
+    allowed_bom = relationship_job_part_pairs(current_user, j)
+    if allowed_bom is None:
+        allowed_bom = authorised_part_pairs(
+            current_user,
+            [
+                (line.pn, _resolve_visible_rev(line.pn, line.rev))
+                for line in (j.bom or [])
+            ],
+        )
+    else:
+        allowed_bom = {
+            (
+                str(pn or "").strip().casefold(),
+                str(rev or "").strip().casefold(),
+            )
+            for pn, rev in allowed_bom
+        }
+    orders = _orders_for_job(j)
     visible_bom = [
         line
         for line in (j.bom or [])
@@ -672,16 +705,39 @@ def jobs_view(job_id):
         )
         in allowed_bom
     ]
+    if supplier_only:
+        supplier_lines = {}
+        for order in orders:
+            if str(order.kind or "").strip().lower() != "purchase":
+                continue
+            for line in order.lines or []:
+                revision = _resolve_visible_rev(line.pn, line.rev)
+                key = (
+                    str(line.pn or "").strip().casefold(),
+                    revision.casefold(),
+                )
+                if key not in allowed_bom:
+                    continue
+                existing = supplier_lines.get(key)
+                if existing is None:
+                    supplier_lines[key] = JobBOMLine(
+                        pn=str(line.pn or "").strip(),
+                        rev=revision,
+                        qty=float(line.qty or 0.0),
+                    )
+                else:
+                    existing.qty = float(existing.qty or 0.0) + float(line.qty or 0.0)
+        visible_bom = list(supplier_lines.values())
     bom_text = "\n".join(
         [f"{line.pn},{line.rev},{line.qty:g}" for line in visible_bom]
     )
-    orders = _orders_for_job(j)
     can_manage_orders = user_has_permission(current_user, "orders.update")
     rollup = _build_job_bom_rollup(
         j,
         can_manage_orders=can_manage_orders,
         bom_lines=visible_bom,
         user=current_user,
+        allowed_pairs=allowed_bom,
     )
     return render_template(
         "admin/jobs_form.html",
@@ -697,8 +753,8 @@ def jobs_view(job_id):
         oversupplied_parts=rollup["oversupplied_parts"],
         readonly=True,
         hide_participants=is_external,
-        hide_vendors=bool(is_external and cust_ids),
-        hide_customer=False,
+        hide_vendors=bool(is_external),
+        hide_customer=supplier_only,
         mask_supplier_names=bool(is_external and cust_ids),
     )
 

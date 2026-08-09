@@ -211,6 +211,10 @@ EXPECTED_ROLE_PERMISSIONS = {
         "jobs.read",
         "orders.read",
         "customers.read",
+        "comments.read",
+        "comments.write",
+        "markups.read",
+        "markups.write",
     },
     "supplier": {
         "parts.read",
@@ -219,6 +223,10 @@ EXPECTED_ROLE_PERMISSIONS = {
         "jobs.read",
         "orders.read",
         "suppliers.read",
+        "comments.read",
+        "comments.write",
+        "markups.read",
+        "markups.write",
     },
     "auditor": {
         "audit.read",
@@ -294,11 +302,10 @@ def test_scoped_standard_roles_are_registered_in_the_scope_map():
             f"standard role {slug!r} must map to scope mode {mode!r} in "
             "_scope_modes, otherwise it falls through to global scope"
         )
-    context_source = inspect.getsource(authorization._build_scope_context)
     for slug in EXPECTED_SCOPED_ROLES:
-        assert f'"{slug}"' in context_source, (
-            f"standard role {slug!r} must be listed in _build_scope_context's "
-            "scoped_roles, otherwise its company links are never loaded"
+        assert slug in authorization._SCOPED_ROLE_NAMES, (
+            f"standard role {slug!r} must be listed in _SCOPED_ROLE_NAMES, "
+            "otherwise its company links are never loaded"
         )
 
 

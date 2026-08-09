@@ -14,6 +14,7 @@ from app.services.authorization import (
     authorised_get,
     authorised_part_pairs,
     has_permission,
+    relationship_job_part_pairs,
     scope_queryset,
     uses_portal_presentation,
 )
@@ -227,9 +228,19 @@ def _job_to_dict(job: Job, user=None):
     ]
     if (job.part_number or "").strip():
         requested_pairs.append((job.part_number, job.part_revision or ""))
-    allowed_parts = (
-        authorised_part_pairs(user, requested_pairs) if user is not None else None
-    )
+    allowed_parts = None
+    if user is not None:
+        allowed_parts = relationship_job_part_pairs(user, job)
+        if allowed_parts is None:
+            allowed_parts = authorised_part_pairs(user, requested_pairs)
+        else:
+            allowed_parts = frozenset(
+                (
+                    str(part_number or "").strip().casefold(),
+                    str(revision or "").strip().casefold(),
+                )
+                for part_number, revision in allowed_parts
+            )
 
     def can_include(part_number, revision) -> bool:
         if allowed_parts is None:
@@ -274,7 +285,7 @@ def _job_to_dict(job: Job, user=None):
         for line in (job.bom or [])
         if can_include(line.pn, line.rev or "")
     ]
-    job_customer = safe_ref(job, "customer")
+    job_customer = safe_ref(job, "customer") if has_permission(user, "customers.read") else None
     payload = {
         "job_number": job.job_number,
         "title": job.title,

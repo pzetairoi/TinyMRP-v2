@@ -138,3 +138,25 @@ def test_deleting_a_job_nullifies_referencing_orders():
 
     order.reload()
     assert order.job is None
+
+
+def test_contextual_job_part_scope_is_built_once_per_request(app, monkeypatch):
+    """Repeated widgets on one job must share the relationship BOM walk."""
+
+    from app.services import authorization
+
+    portal = _user("cache-job-scope@t.test", _standard_role("customer"))
+    job = Job(job_number="CACHE-JOB-SCOPE").save()
+    calls = []
+
+    def build(user, scoped_job):
+        calls.append((str(user.id), str(scoped_job.id)))
+        return {("CACHE-PART", "A")}
+
+    monkeypatch.setattr(authorization, "_build_relationship_job_part_pairs", build)
+    with app.test_request_context("/"):
+        first = authorization.relationship_job_part_pairs(portal, job)
+        second = authorization.relationship_job_part_pairs(portal, job)
+
+    assert first == second == {("CACHE-PART", "A")}
+    assert calls == [(str(portal.id), str(job.id))]

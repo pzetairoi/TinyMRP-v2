@@ -83,11 +83,18 @@ user layout; they receive the new default when they choose **Reset**.
 
 External users can be scoped by linked entities:
 
-- Customer-linked users see customer-relevant data.
-- Supplier-linked users see supplier-relevant data.
+- A linked user must also have the matching canonical **Customer** or
+  **Supplier** portal role; a company link alone does not create access.
+- Customer users see only their customer, jobs, sales orders and contractual
+  BOM subtree.
+- Supplier users see only their supplier, purchase orders and each PO-line
+  subtree. A job vendor link provides context but never the complete job BOM.
 - Internal privileged roles remain unscoped.
 
-This scoping is enforced server-side on jobs, orders, customers, suppliers, parts, and related views.
+This scoping is enforced server-side on jobs, orders, customers, suppliers,
+parts, comments, markups and related views. Unapproved nodes stop traversal by
+default. For a named external reviewer, `parts.read_unreleased` removes that
+approval barrier without widening the relationship scope.
 
 ## Customer And Supplier Master Data
 

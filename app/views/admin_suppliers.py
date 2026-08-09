@@ -4,6 +4,7 @@ from app.services.acl import permissions_required
 from app.services.authorization import (
     authorised_get,
     enforce_permission as _require,
+    has_portal_role,
     has_permission,
     scope_queryset,
     uses_portal_presentation,
@@ -84,6 +85,16 @@ def _require_supplier_form_permissions():
         _require("suppliers.financial.update")
     if "users" in request.form:
         _require("suppliers.portal_users.manage")
+
+
+def _selected_portal_users() -> list[User]:
+    user_ids = request.form.getlist("users")
+    users = list(User.objects(id__in=user_ids)) if user_ids else []
+    if len(users) != len(set(user_ids)) or any(
+        not has_portal_role(user, "supplier") for user in users
+    ):
+        abort(400)
+    return users
 
 
 @bp.get("/")
@@ -259,7 +270,7 @@ def suppliers_new():
                     s.phone = primary.phone or s.phone
         user_ids = request.form.getlist("users")
         if user_ids:
-            s.users = list(User.objects(id__in=user_ids))
+            s.users = _selected_portal_users()
         if "processes" in request.form:
             s.processes = [p.strip() for p in (request.form.get("processes") or "").split(",") if p.strip()]
         if "categories" in request.form:
@@ -336,8 +347,7 @@ def suppliers_edit(sup_id):
                     s.email = primary.email or s.email
                     s.phone = primary.phone or s.phone
         if "users" in request.form:
-            user_ids = request.form.getlist("users")
-            s.users = list(User.objects(id__in=user_ids)) if user_ids else []
+            s.users = _selected_portal_users()
         if "processes" in request.form:
             s.processes = [p.strip() for p in (request.form.get("processes") or "").split(",") if p.strip()]
         if "categories" in request.form:

@@ -58,6 +58,11 @@ def test_sample_bom_metadata_seed_is_complete_idempotent_and_released(app):
             child_pn="CV03-F02",
             child_rev="B",
         ).count() == 1
+        held_frame = Part.objects(part_number="CV03-F02", revision="B").get()
+        assert held_frame.canonical["approved"] is False
+        assert not held_frame.canonical.get("approved_by")
+        held_lamp = Part.objects(part_number="ADR-LED-IND", revision="").get()
+        assert held_lamp.canonical["approved"] is False
         child = Part.objects(part_number="CV03-TR-11", revision="B").get()
         assert child.canonical["approved"] is True
         assert child.canonical["approved_by"] == "TinyManager"

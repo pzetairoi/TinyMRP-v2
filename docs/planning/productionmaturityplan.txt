@@ -808,6 +808,60 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       capture port is closed. F1 is complete; F2 awaits the owner/counsel
       commercial decisions listed in the draft documents.
 
+  2026-08-10  URGENT EXTERNAL RLS REVIEW CLOSED (Codex; supersedes the
+    all-60-approved demo state above)
+    Owner found unsafe-looking supplier/customer behaviour while exercising
+      the localhost demo, including a manually reassigned electrical supplier.
+      Audit reproduced a real over-broad scope: a supplier PO linked to a job
+      made the whole job BOM visible, and mixed portal+internal roles could
+      contribute global scope. A supplier field on a sales order also granted
+      job context. Role delegation allowed a security role manager to compose
+      authority it did not hold. These are being corrected fail-closed.
+    Policy now under regression test: the external portal boundary is sticky;
+      customers see only their customer/jobs/sales orders and contractual BOM;
+      suppliers see only their supplier/purchase orders and each PO-line
+      subtree. Vendor membership alone grants job context, never engineering
+      data. Unapproved nodes are traversal barriers by default. Customer names,
+      other vendors and whole-job procurement totals are masked from suppliers.
+    Owner decision 2026-08-10: selected external users MAY inspect unreleased
+      data. Implementation reuses the existing `parts.read_unreleased`
+      permission; it removes only the approval barrier and never widens company,
+      job, order or PO-line scope. No new per-part/company query is introduced.
+      Demo comparisons will include default-denied and explicitly-authorised
+      customer and supplier accounts.
+    Performance constraint: no per-piece authorisation query. Relationship BOM
+      traversal is breadth-first and batched per level, job scopes are cached
+      once per request, and unrestricted internal/global paths return before
+      customer/supplier relationship queries. Query-safety and endpoint tests
+      must pass before applying the enriched records to localhost Mongo.
+    Demo delivered: CV03-F02 REV B and ADR-LED-IND are deterministic
+      approval holds; the released parent drawing has a customer request and
+      markup asking for CV03-F02 approval. Cross-kind order references are kept
+      as deliberate negative RLS fixtures. Nineteen deterministic portal and
+      internal accounts cover default-denied and explicit unreleased-access
+      comparisons, two customers, four process suppliers, jobs, purchase/sales
+      orders, comments, replies and drawing markup conversations.
+    Localhost evidence: the seeded standard customer reaches 11 released parts
+      in DEMO-JOB-A1 and neither hold; customer_unreleased reaches the same
+      relationship's 43 parts including both holds. The standard fabrication
+      supplier is stopped at held CV03-F02; supplier_unreleased reaches its
+      31-part PO-line subtree, never the released parent. The electrical
+      exception reaches six PO-line parts including ADR-LED-IND but not CV03-F02
+      or the root. Deliberately malformed sales-order supplier and customer-on-
+      purchase-order references grant nothing cross-kind. Measured scope
+      resolution was 10-35 ms on local Mongo.
+    Verification: full backend suite 800 passed, 1 skipped; final focused help,
+      sample and RLS run 55 passed; ruff/node/compile and diff checks clean.
+      Twelve screenshots were recaptured from a disposable current-code server
+      against the real localhost Mongo and configured CV03 deliverables, then
+      the server was removed. Help now includes the customer's approval request.
+    Coordination decision still reserved for the owner: the seed deliberately
+      preserved manual internal-role drift rather than overwriting it.
+      engineering_manager still has customers.read, suppliers.read and
+      security.tokens.revoke; workshop still has exports.run and orders.read.
+      These internal grants are not an external escape because the sticky
+      portal ceiling is enforced, but canonical restoration needs owner intent.
+
   2026-08-09  D1 CLOSED WITHOUT CODE - the memoisation already fixed it
     Measured, not assumed. The live assembly behind the original 6625-query
       figure (J200684, 1344 distinct descendants) is not reachable from this

@@ -13,9 +13,11 @@ from app.models.part import Part
 from app.models.part_annotation import PartAnnotation
 from app.models.part_drawing_markup import PartDrawingMarkup
 from app.models.supplier import Supplier
+from app.models.user_settings import UserSettings
 from app.services.permissions import (
     CANONICAL_PERMISSION_IDENTIFIERS,
 )
+from app.services.authorization import effective_permissions, scope_queryset
 from app.services.rls_demo import (
     PERMISSION_TEST_ROLE_SCENARIOS,
     reset_permission_test_environment,
@@ -72,7 +74,12 @@ def test_admin_permission_editor_offers_only_enforced_permissions(
     app,
 ):
     with app.app_context():
-        actor = _access_actor("security.roles.manage")
+        actor = _access_actor(
+            "security.roles.manage",
+            "parts.read",
+            "bom.read",
+            "files.read",
+        )
     _login(client, actor)
 
     response = client.get("/admin/roles/new")
@@ -101,7 +108,12 @@ def test_admin_role_form_preserves_standard_slug_and_validates_custom_permission
     app,
 ):
     with app.app_context():
-        actor = _access_actor("security.roles.manage")
+        actor = _access_actor(
+            "security.roles.manage",
+            "parts.read",
+            "bom.read",
+            "files.read",
+        )
         reconcile_standard_roles()
         standard = Role.objects.get(name="commercial")
     _login(client, actor)
@@ -458,6 +470,9 @@ def test_permission_test_seed_uses_only_curated_canonical_matrix(client, app, tm
         sample = Part.objects(part_number="CV03-TR-A01", revision="A").get()
         assert sample.description == "CELLV03 Trailer"
         assert sample.canonical["approved"] is True
+        assert Part.objects(part_number="CV03-F02", revision="B").get().canonical[
+            "approved"
+        ] is False
         fleet_job = Job.objects(job_number="DEMO-JOB-A1").get()
         assert [(line.pn, line.rev, line.qty) for line in fleet_job.bom] == [
             ("CV03-TR-A01", "A", 3.0)
@@ -480,16 +495,66 @@ def test_permission_test_seed_uses_only_curated_canonical_matrix(client, app, tm
                 email="permtest.supplier_electrical@test.example.com"
             ),
         ).count() == 1
+        assert Customer.objects(
+            code="DEMO-CUST-A",
+            users=User.objects.get(
+                email="permtest.customer_unreleased@test.example.com"
+            ),
+        ).count() == 1
+        assert Supplier.objects(
+            code="DEMO-SUP-X",
+            users=User.objects.get(
+                email="permtest.supplier_unreleased@test.example.com"
+            ),
+        ).count() == 1
+        customer_exception = User.objects.get(
+            email="permtest.customer_unreleased@test.example.com"
+        )
+        supplier_exception = User.objects.get(
+            email="permtest.supplier_unreleased@test.example.com"
+        )
+        electrical_exception = User.objects.get(
+            email="permtest.supplier_electrical@test.example.com"
+        )
+        assert "parts.read_unreleased" in effective_permissions(customer_exception)
+        assert "audit.read" not in effective_permissions(customer_exception)
+        assert "parts.read_unreleased" in effective_permissions(supplier_exception)
+        assert "parts.update" not in effective_permissions(supplier_exception)
+        assert "parts.read_unreleased" in effective_permissions(electrical_exception)
+        assert "CV03-F02" not in {
+            part.part_number
+            for part in scope_queryset(Part.objects, customer_portal, "parts")
+        }
+        assert "CV03-F02" in {
+            part.part_number
+            for part in scope_queryset(Part.objects, customer_exception, "parts")
+        }
+        assert "CV03-F02" not in {
+            part.part_number
+            for part in scope_queryset(Part.objects, supplier_portal, "parts")
+        }
+        supplier_exception_parts = {
+            part.part_number
+            for part in scope_queryset(Part.objects, supplier_exception, "parts")
+        }
+        assert "CV03-F02" in supplier_exception_parts
+        assert "CV03-TR-A01" not in supplier_exception_parts
+        electrical_parts = {
+            part.part_number
+            for part in scope_queryset(Part.objects, electrical_exception, "parts")
+        }
+        assert "ADR-LED-IND" in electrical_parts
+        assert "CV03-F02" not in electrical_parts
         assert len(PartAnnotation.objects(
             part_number="CV03-TR-A01",
             revision="A",
-        ).get().comments) == 3
+        ).get().comments) == 4
         markup = PartDrawingMarkup.objects(
             part_number="CV03-TR-A01",
             revision="A",
         ).get()
-        assert len(markup.threads) == 3
-        assert len(markup.canvas_json["objects"]) == 4
+        assert len(markup.threads) == 4
+        assert len(markup.canvas_json["objects"]) == 5
     assert not list(tmp_path.iterdir())
     refreshed = client.get("/admin/roles/").get_data(as_text=True)
     assert "permtest.security_administrator@test.example.com" not in refreshed
@@ -536,6 +601,8 @@ def test_permission_test_seed_is_idempotent_and_reset_is_namespace_limited(
         removed = reset_permission_test_environment("seed.example.com")
         assert removed["users"] == len(PERMISSION_TEST_ROLE_SCENARIOS)
         assert removed["tokens"] == 1
+        assert removed["user_settings"] == len(PERMISSION_TEST_ROLE_SCENARIOS)
+        assert UserSettings.objects.count() == 0
         assert User.objects(email__regex=r"^permtest\.").count() == 0
         assert Customer.objects(code__startswith="DEMO-").count() == 0
         assert Supplier.objects(code__startswith="DEMO-").count() == 0

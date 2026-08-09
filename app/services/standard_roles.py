@@ -184,7 +184,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "customer",
             "Customer",
-            "Read-only linked-customer jobs, sales orders and exact released part revisions; excludes internal and supplier data.",
+            "Linked-customer jobs, sales orders and exact released part revisions, with scoped drawing-review collaboration; excludes internal and supplier data.",
             (
                 "parts.read",
                 "bom.read",
@@ -192,12 +192,16 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
                 "jobs.read",
                 "orders.read",
                 "customers.read",
+                "comments.read",
+                "comments.write",
+                "markups.read",
+                "markups.write",
             ),
         ),
         _role(
             "supplier",
             "Supplier",
-            "Read-only linked-supplier purchase orders, related jobs and exact released part revisions; excludes customer and internal data.",
+            "Linked-supplier purchase orders, related job context and only each PO line's released subtree, with scoped drawing-review collaboration; excludes customer and internal data.",
             (
                 "parts.read",
                 "bom.read",
@@ -205,6 +209,10 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
                 "jobs.read",
                 "orders.read",
                 "suppliers.read",
+                "comments.read",
+                "comments.write",
+                "markups.read",
+                "markups.write",
             ),
         ),
         _role(
