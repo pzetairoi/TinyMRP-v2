@@ -158,8 +158,9 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 3. TASKS
 ========================================================================
 
-  A1  CSP BROWSER CHECK                                      SMALL / MANUAL
-      Status: OPEN - deliberately parked by owner.
+  A1  CSP BROWSER CHECK                       CLOSED 2026-08-09 - see log
+      Status: script-src closed; style-src deliberately keeps 'unsafe-inline'
+      and that is a permanent decision, not unfinished work.
       Use report-only strict CSP first, exercise representative UI paths,
       classify script-src violations, then enforce TINYMRP_CSP_ALLOW_INLINE=false
       only if clean. style-src inline allowances are a separate intentional
@@ -499,7 +500,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   M1 - SMALL SECURITY/QUALITY CLOSURE
-    A1 + B1 complete.
+    A1 complete 2026-08-09; B1 outstanding.
     Result: last manual CSP debt closed and frontend has a real type gate.
 
   M1b - OPERATIONS SAFETY
@@ -546,6 +547,36 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  A1 CLOSED - strict script CSP enforced on test
+    Baseline: script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net.
+
+    BROWSER EVIDENCE, three pages (parts list, part detail OEM-Y-04D, admin
+      users): EVERY violation was style-src. NOT ONE was script-src.
+      The sources were a <style> block in the template, style="" attributes
+      (background, width) and PrimeReact injecting <style> elements at
+      runtime from index-*.js. A nonce covers none of those - the spec does
+      not allow a nonce on a style ATTRIBUTE at all.
+
+    RESULT ON test: TINYMRP_CSP_ALLOW_INLINE=false, enforced, not report-only:
+      script-src 'self' 'nonce-<per-request>' https://cdn.jsdelivr.net
+      style-src  'self' 'unsafe-inline' https://cdn.jsdelivr.net
+      login 200, app root 200, health ok, doctor 0 failures.
+      Rollback: instances/test/.env.before-csp-20260809.
+
+    style-src KEEPING 'unsafe-inline' IS THE DECISION, NOT LEFTOVER WORK.
+      Closing it would mean rewriting the UI to remove every style attribute
+      and to stop a third-party component library injecting stylesheets, for
+      no gain against XSS - which lands in script-src. Do not reopen this as
+      if it were an unfinished burn-down.
+
+    ONE FIX THIS EXPOSED (81344d1): the report-only probe tightened style-src
+      as well, producing hundreds of violations per page load that nobody
+      could act on and burying the only question it existed to answer. A
+      measurement that drowns its own signal is worse than no measurement.
+
+    Remaining: roll the same flag to the other instances once test has had
+      real browser use. mecs and tinymrp-canada still allow inline scripts.
 
   2026-08-09  A2 + A3 FULLY CLOSED - the second auth model is gone
     Baseline: A2/A3 had left the code behind default-off flags. The owner
