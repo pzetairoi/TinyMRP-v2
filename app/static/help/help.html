@@ -142,7 +142,6 @@ different menus on the same server. The usual entries are:</p>
 <p>A bell icon appears beside your name when you have notifications.</p>
 <hr />
 </div></details><details class="help-section" id="sec-inventory"><summary><span class="help-section-title" id="inventory">Inventory</span></summary><div class="help-section-body">
-<figure class="help-figure"><img src="/static/help/img/part-detail.png" alt="Part detail: attributes, files and BOM for one part revision." /><figcaption class="help-figure-caption">Part detail: attributes, files and BOM for one part revision.</figcaption></figure>
 <p><strong>What it is for:</strong> finding a part revision and getting to its details.</p>
 <p>Every row is one part <em>and revision</em>. The thumbnail, description and file
 badges tell you at a glance what exists.</p>
@@ -184,6 +183,7 @@ came from.</p>
 <p>The left panel shows the hero image, quick download buttons for whatever files
 exist, who uploaded it, the approval badge, and a <strong>Missing properties</strong>
 warning when important fields are empty.</p>
+<figure class="help-figure"><img src="/static/help/img/part-detail.png" alt="Part Details with the model preview, drawing, download shortcuts and working tabs visible together." /><figcaption class="help-figure-caption">Part Details with the model preview, drawing, download shortcuts and working tabs visible together.</figcaption></figure>
 <h3 id="the-approval-badge">The approval badge</h3>
 <p>A tick means the stored approval flag is set; the crossed mark means draft.
 This is the same value the Approved filter and the permission rules use, so the
@@ -245,12 +245,38 @@ draft.</p>
 </table>
 <p>A small badge on <strong>Attributes &amp; Notes</strong> and <strong>Comments &amp; Markups</strong> tells you
 there is something to look at.</p>
-<h3 id="comments-and-markups">Comments and markups</h3>
-<p>Comments are threaded discussion. Markups are annotations drawn directly on the
-drawing. Both can be flagged for review with a priority, which is what the
-review filter in Inventory picks up.</p>
-<p>You need <strong>comments.read</strong> / <strong>markups.read</strong> to see them, and the matching
-<code>.write</code> permission to add them.</p>
+<h3 id="comments-and-drawing-markups">Comments and drawing markups</h3>
+<p><strong>Where to find it:</strong> open a part revision, then choose <strong>Comments &amp; Markups</strong>.
+The same workspace keeps general discussion, drawing annotations and their
+review threads together.</p>
+<figure class="help-figure"><img src="/static/help/img/review-conversations.png" alt="A populated review history with customer, supplier, engineering and workshop participants, priorities and resolved/open states." /><figcaption class="help-figure-caption">A populated review history with customer, supplier, engineering and workshop participants, priorities and resolved/open states.</figcaption></figure>
+<p>General comments and drawing-linked review threads are chronological
+conversations. Each card keeps its original author, replies, priority and
+open/resolved state, so a supplier answer or workshop verification does not
+erase the customer's question. Reply on the existing card when the subject is
+the same; create a new comment or review when it needs its own status.</p>
+<figure class="help-figure"><img src="/static/help/img/drawing-markups.png" alt="The expanded drawing-markup workspace: review panel, drawing canvas, annotation tools and save/view controls." /><figcaption class="help-figure-caption">The expanded drawing-markup workspace: review panel, drawing canvas, annotation tools and save/view controls.</figcaption></figure>
+<p>To mark up a drawing:</p>
+<ol>
+<li>Pick <strong>Arrow</strong>, <strong>Rectangle</strong>, <strong>Ellipse</strong>, <strong>Revision cloud</strong>, <strong>Text / callout</strong>
+or <strong>Freehand</strong> from the left tool rail. Choose the colour and line width.</li>
+<li>Draw on the canvas. Use <strong>Select</strong> to move or resize an annotation, and
+<strong>Pan</strong>, <strong>Zoom in/out</strong> or <strong>Fit view</strong> to move around the sheet.</li>
+<li>Describe the issue when the review form opens. Set its priority and press
+<strong>Create review</strong>. This saves the new annotation and its linked review.</li>
+<li>If you skip the review, press <strong>Save</strong> in the right rail before leaving.</li>
+</ol>
+<p><strong>Add comment</strong> creates a general part comment. To attach a later comment to
+one or more annotations, select them first; the button changes to <strong>Add review
+comment</strong>. Use <strong>open / resolved / all</strong> to filter the discussion. Resolved
+annotations are hidden by default and can be revealed with <strong>Resolved</strong>.</p>
+<p><strong>PNG</strong> downloads the drawing with the visible annotations flattened on top;
+<strong>Open PDF</strong> opens the original drawing. The browser editor needs a drawing PNG
+or preview PNG as its canvas—the PDF alone is not drawn on directly.</p>
+<p>You need <strong>comments.read</strong> / <strong>markups.read</strong> to see the respective content,
+and <strong>comments.write</strong> / <strong>markups.write</strong> to add it. If the status says
+<strong>Conflict – reload required</strong>, another save won the race: reload the markup
+layer and repeat your unsaved change instead of overwriting their work.</p>
 <h3 id="the-actions-tab">The Actions tab</h3>
 <ul>
 <li><strong>Update files</strong> rescans storage for this part and revision and relinks what
@@ -304,9 +330,9 @@ permission.</p>
 </blockquote>
 <hr />
 </div></details><details class="help-section" id="sec-bom-view"><summary><span class="help-section-title" id="bom-view">BOM view</span></summary><div class="help-section-body">
-<figure class="help-figure"><img src="/static/help/img/bom-tree.png" alt="The BOM tree, expanded two levels." /><figcaption class="help-figure-caption">The BOM tree, expanded two levels.</figcaption></figure>
 <p>Opens the assembly tree for a part, expanding branches on demand so large
 assemblies stay responsive. Every node links to its own Part Details.</p>
+<figure class="help-figure"><img src="/static/help/img/bom-tree.png" alt="A multi-level BOM with one assembly expanded to show its child rows and quantities." /><figcaption class="help-figure-caption">A multi-level BOM with one assembly expanded to show its child rows and quantities.</figcaption></figure>
 <p>Below the tree, the <strong>where-used</strong> table answers the opposite question: which
 assemblies consume <em>this</em> part.</p>
 <hr />
@@ -318,7 +344,6 @@ common processes, and recently updated parts.</p>
 <p>Use it to spot systematic gaps before they reach a supplier.</p>
 <hr />
 </div></details><details class="help-section" id="sec-import"><summary><span class="help-section-title" id="import">Import</span></summary><div class="help-section-body">
-<figure class="help-figure"><img src="/static/help/img/upload-pack-redline.png" alt="The redline preview: exactly what an import would change, before it runs." /><figcaption class="help-figure-caption">The redline preview: exactly what an import would change, before it runs.</figcaption></figure>
 <p><strong>What it is for:</strong> bringing a SolidWorks upload pack into the database.</p>
 <h3 id="the-safe-sequence">The safe sequence</h3>
 <ol>
@@ -373,6 +398,7 @@ Inside, every property, BOM row and file is listed with what would happen —
 <em>add</em>, <em>replace</em>, <em>skipped</em>, <em>blocked</em>. Use the tabs to narrow to <strong>Changed</strong>,
 <strong>Blocked</strong> or <strong>Modified approved</strong>, and the <em>changed only</em> toggle to hide
 noise. A <strong>JSON report</strong> download captures the whole plan for a colleague.</p>
+<figure class="help-figure"><img src="/static/help/img/upload-pack-redline.png" alt="The import preview redline showing a new part beside a planned update to an approved part." /><figcaption class="help-figure-caption">The import preview redline showing a new part beside a planned update to an approved part.</figcaption></figure>
 <p><strong>Blocked</strong> means the policy or your permissions stop that one change. The
 import can still proceed; blocked items are left alone.</p>
 <h3 id="files-that-do-not-belong-to-a-part">Files that do not belong to a part</h3>
@@ -439,20 +465,26 @@ revoke it and create another. Revoke any token belonging to a machine you no
 longer use.</p>
 <hr />
 </div></details><details class="help-section" id="sec-tools"><summary><span class="help-section-title" id="tools">Tools</span></summary><div class="help-section-body">
-<figure class="help-figure"><img src="/static/help/img/tools-downloads.png" alt="The Tools page groups every download by what you would go looking for." /><figcaption class="help-figure-caption">The Tools page groups every download by what you would go looking for.</figcaption></figure>
 <p>Downloads for the SolidWorks toolchain, plus <strong>Excel Compile</strong>, which turns a
 spreadsheet of part data into a compiled ZIP.</p>
+<figure class="help-figure"><img src="/static/help/img/tools-downloads.png" alt="The Tools page with the add-in, SolidWorks setup, BOM templates and Excel helpers grouped by purpose." /><figcaption class="help-figure-caption">The Tools page with the add-in, SolidWorks setup, BOM templates and Excel helpers grouped by purpose.</figcaption></figure>
 <p>The download list is generated from what is actually installed on the server,
 so it never goes stale. Files are grouped by what you would go looking for:</p>
 <ul>
-<li><strong>Add-in installer</strong> — the Windows installer for the SolidWorks add-in, newest first, plus a direct “Download latest” link.</li>
-<li><strong>SolidWorks setup</strong> — install these once per workstation so SolidWorks writes the custom properties TinyMRP reads back. The <code>.prtprp</code> / <code>.asmprp</code> files are the custom property tabs for parts and assemblies; <code>TinyMRP.swp</code> is the macro.</li>
-<li><strong>BOM table templates</strong> — SolidWorks BOM table formats whose columns match what the importer expects, so you do not have to remap columns on every import.</li>
-<li><strong>Excel helpers</strong> — workbooks for editing properties in bulk and the template for the document compiler.</li>
+<li><strong>Add-in installer</strong> — the Windows installer for the SolidWorks add-in, newest
+first, plus a direct &quot;Download latest&quot; link.</li>
+<li><strong>SolidWorks setup</strong> — install these once per workstation so SolidWorks writes
+the custom properties TinyMRP reads back. The two <code>.prtprp</code> / <code>.asmprp</code> files
+are the custom property tabs for parts and assemblies; <code>TinyMRP.swp</code> is the
+macro.</li>
+<li><strong>BOM table templates</strong> — SolidWorks BOM table formats whose columns match
+what the importer expects. Using one of these avoids having to remap columns
+on every import.</li>
+<li><strong>Excel helpers</strong> — workbooks for editing properties in bulk and the template
+for the document compiler.</li>
 </ul>
 <hr />
 </div></details><details class="help-section" id="sec-admin"><summary><span class="help-section-title" id="admin">Admin</span></summary><div class="help-section-body">
-<figure class="help-figure"><img src="/static/help/img/admin-fields.png" alt="Admin > Fields: which columns each context shows." /><figcaption class="help-figure-caption">Admin > Fields: which columns each context shows.</figcaption></figure>
 <p>Available to administrators, and in part to security administrators.</p>
 <table>
 <thead>
@@ -625,6 +657,20 @@ exactly what that role sees, then return with one click. Actions taken while
 impersonating are recorded in the audit log against both identities.</p>
 <p>Impersonation is limited to purpose-made test accounts and never applies to
 real users or other administrators.</p>
+<p>The seeded environment uses the owner-approved <code>CV03-TR-A01</code> revision A sample
+and its BOM children. It includes complete-unit and spare-parts customers,
+four process suppliers, linked jobs and orders, released Part/File records,
+general-comment conversations, and open/resolved drawing-markup reviews. The
+extra customer/supplier accounts let an administrator follow a review from
+each participant's restricted view instead of simulating every reply as one
+user.</p>
+<p>The corresponding managed-file fixture lives in
+<code>sample_data/cv03_tr_a01_rev_a</code>. For an isolated development installation,
+copy it into the selected deliverables root with:</p>
+<pre><code class="language-text">python tools/install_sample_dataset.py --destination &lt;deliverables-root&gt;
+</code></pre>
+<p>Existing files are skipped. Add <code>--overwrite</code> only when you intentionally want
+the checksum-pinned sample copy to replace a same-named file.</p>
 </div></details></section><section class="help-chapter"><h1 id="installing-the-solidworks-add-in">Installing the SolidWorks Add-in</h1><div class="help-intro">
 <p>This page covers installer setup, activation in SolidWorks, and first connection to TinyMRP.</p>
 </div><details class="help-section" id="sec-before-you-start" open><summary><span class="help-section-title" id="before-you-start">Before You Start</span></summary><div class="help-section-body">
@@ -1046,6 +1092,20 @@ someone with <code>imports.override_approved</code>.</p>
 </li>
 </ul>
 <p>Do not change access behavior in code unless intentionally redesigning ACL. Production access should be managed through roles, permissions, and entity links.</p>
+</div></details><details class="help-section" id="sec-fields-and-exports-uiadminfields"><summary><span class="help-section-title" id="fields-and-exports-uiadminfields">Fields And Exports (<code>/ui/admin/fields</code>)</span></summary><div class="help-section-body">
+<p>Use <strong>Fields &amp; exports</strong> to keep field names, import aliases and visible columns
+consistent across the application.</p>
+<p>The <strong>Screen &amp; export presets</strong> section is destination-specific. For each
+parts table, BOM, summary, where-used or export context:</p>
+<ul>
+<li><strong>Allowed fields</strong> are the columns a user may choose.</li>
+<li><strong>Default preset</strong> is what appears after a user resets their personal layout.</li>
+<li>A field marked <strong>required</strong> cannot be removed from that context.</li>
+</ul>
+<figure class="help-figure"><img src="/static/help/img/admin-fields.png" alt="The Parts table preset showing allowed fields, the default column set and the required Part Number field." /><figcaption class="help-figure-caption">The Parts table preset showing allowed fields, the default column set and the required Part Number field.</figcaption></figure>
+<p>Open one destination at a time, make the smallest necessary change, then press
+<strong>Save</strong> at the top of the page. Changing a default does not erase an existing
+user layout; they receive the new default when they choose <strong>Reset</strong>.</p>
 </div></details><details class="help-section" id="sec-access-scoping-model-operational-view"><summary><span class="help-section-title" id="access-scoping-model-operational-view">Access Scoping Model (Operational View)</span></summary><div class="help-section-body">
 <p>External users can be scoped by linked entities:</p>
 <ul>
@@ -1308,7 +1368,7 @@ sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
 <p>Local domains such as <code>demo.test.local</code> and <code>demo.localhost</code> do not use public Let's Encrypt certificates.
 creating the instance. New HTTPS/internal-TLS guided instances default to strict.</p>
 </div></details><details class="help-section" id="sec-strict-authentication-on-guided-caddy-instances"><summary><span class="help-section-title" id="strict-authentication-on-guided-caddy-instances">Strict authentication on guided Caddy instances</span></summary><div class="help-section-body">
-exact origin, and strong secrets for every new instance. Caddy remains the TLS
+<p>exact origin, and strong secrets for every new instance. Caddy remains the TLS
 endpoint and forwards the host and scheme used by the browser. Normal browser
 pages and APIs use the signed session; unsafe browser API requests must have a
 same-origin Origin/Referer. The SolidWorks add-in and other integrations use API
@@ -1491,10 +1551,9 @@ expect.</li>
 <li><strong>The source files must exist.</strong> A binder cannot include a PDF that was
 never uploaded. Check the Files tab first.</li>
 <li><strong>Permissions</strong> — you need <code>exports.run</code>, <code>bom.read</code> and <code>files.read</code>.</li>
-<li><strong>If none of the above explains it, check the server log.</strong> A pack that
-loses its index or a page stamp now records why. Search the log for
-<code>docpack index could not be built</code> or <code>could not stamp page</code>. Before this,
-those failures were silent and the pack simply arrived incomplete.</li>
+<li><strong>If none of the above explains it, check the server log.</strong> A pack that loses
+its index or a page stamp now records why. Search for <code>docpack index could not be built</code> or <code>could not stamp page</code>. Before this, those failures were silent
+and the pack simply arrived incomplete.</li>
 </ol>
 </div></details><details class="help-section" id="sec-a-doc-pack-is-taking-a-long-time"><summary><span class="help-section-title" id="a-doc-pack-is-taking-a-long-time">A Doc Pack is taking a long time</span></summary><div class="help-section-body">
 <p>Full-BOM binders on large assemblies genuinely take minutes. The progress bar
@@ -1524,17 +1583,15 @@ if unsure, then replace the old secret in the add-in immediately.</li>
 deactivation or a password change/reset.</li>
 </ol>
 </div></details><details class="help-section" id="sec-the-browser-shows-an-authentication-or-csrf-error"><summary><span class="help-section-title" id="the-browser-shows-an-authentication-or-csrf-error">The browser shows an authentication or CSRF error</span></summary><div class="help-section-body">
-<ol>
-HTTPS URL. Strict cookies are not intended for a plain-HTTP public site.</li>
-<li>Confirm Caddy still forwards the original host and scheme. A browser write
-is rejected when its Origin/Referer does not match the routed instance.</li>
-<li>Do not paste an API bearer token into browser requests. Browser-only APIs
-require the signed login session; tokens are for the add-in/integrations.</li>
-<li>If a page reports <code>token_required</code>, check that the frontend is not calling
-the add-in-only <code>/api/auth/check</code> endpoint.</li>
-<li>If an older instance intentionally remains in compat during migration,
-confirm its instance <code>.env</code> explicitly says so; updates preserve that value.</li>
-</ol>
+<p>HTTPS URL. Strict cookies are not intended for a plain-HTTP public site.
+2. Confirm Caddy still forwards the original host and scheme. A browser write
+is rejected when its Origin/Referer does not match the routed instance.
+3. Do not paste an API bearer token into browser requests. Browser-only APIs
+require the signed login session; tokens are for the add-in/integrations.
+4. If a page reports <code>token_required</code>, check that the frontend is not calling
+the add-in-only <code>/api/auth/check</code> endpoint.
+5. If an older instance intentionally remains in compat during migration,
+confirm its instance <code>.env</code> explicitly says so; updates preserve that value.</p>
 </div></details><details class="help-section" id="sec-what-to-collect-before-asking-for-help"><summary><span class="help-section-title" id="what-to-collect-before-asking-for-help">What to collect before asking for help</span></summary><div class="help-section-body">
 <p>Include as much of this as you can:</p>
 <ul>
@@ -1723,16 +1780,17 @@ whole plan.</li>
 </tr>
 <tr>
 <td><code>SECRET_KEY</code></td>
-<td><code>dev-secret</code></td>
+<td><code>dev-only-secret-key-change-me</code></td>
 <td></td>
 </tr>
 <tr>
 <td><code>SECURITY_PASSWORD_SALT</code></td>
-<td><code>dev-salt</code></td>
+<td><code>dev-only-password-salt-change-me</code></td>
 <td></td>
 </tr>
 <tr>
-<td><code>compat</code></td>
+<td><code>TINYMRP_CSP_REPORT_ONLY_STRICT</code></td>
+<td><code>true</code></td>
 <td></td>
 </tr>
 <tr>

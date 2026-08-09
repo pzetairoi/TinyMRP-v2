@@ -28,3 +28,18 @@ app/static/parts-ui/**/*.wasm binary
 
 # These files execute in Linux containers and hosts.
 *.sh text eol=lf
+
+# Owner-approved engineering sample dataset. Keep CAD/drawing payloads byte-stable.
+sample_data/**/*.3mf binary
+sample_data/**/*.dxf binary
+sample_data/**/*.easm binary
+sample_data/**/*.edrw binary
+sample_data/**/*.eprt binary
+sample_data/**/*.pdf binary
+sample_data/**/*.ply binary
+sample_data/**/*.png binary
+sample_data/**/*.step binary
+sample_data/**/*.stl binary
+sample_data/**/*.zip binary
+sample_data/**/*.json text eol=lf
+sample_data/**/*.md text eol=lf

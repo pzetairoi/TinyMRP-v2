@@ -77,6 +77,8 @@ The left panel shows the hero image, quick download buttons for whatever files
 exist, who uploaded it, the approval badge, and a **Missing properties**
 warning when important fields are empty.
 
+![Part Details with the model preview, drawing, download shortcuts and working tabs visible together.](/static/help/img/part-detail.png)
+
 ### The approval badge
 
 A tick means the stored approval flag is set; the crossed mark means draft.
@@ -106,14 +108,45 @@ draft.
 A small badge on **Attributes & Notes** and **Comments & Markups** tells you
 there is something to look at.
 
-### Comments and markups
+### Comments and drawing markups
 
-Comments are threaded discussion. Markups are annotations drawn directly on the
-drawing. Both can be flagged for review with a priority, which is what the
-review filter in Inventory picks up.
+**Where to find it:** open a part revision, then choose **Comments & Markups**.
+The same workspace keeps general discussion, drawing annotations and their
+review threads together.
 
-You need **comments.read** / **markups.read** to see them, and the matching
-`.write` permission to add them.
+![A populated review history with customer, supplier, engineering and workshop participants, priorities and resolved/open states.](/static/help/img/review-conversations.png)
+
+General comments and drawing-linked review threads are chronological
+conversations. Each card keeps its original author, replies, priority and
+open/resolved state, so a supplier answer or workshop verification does not
+erase the customer's question. Reply on the existing card when the subject is
+the same; create a new comment or review when it needs its own status.
+
+![The expanded drawing-markup workspace: review panel, drawing canvas, annotation tools and save/view controls.](/static/help/img/drawing-markups.png)
+
+To mark up a drawing:
+
+1. Pick **Arrow**, **Rectangle**, **Ellipse**, **Revision cloud**, **Text / callout**
+   or **Freehand** from the left tool rail. Choose the colour and line width.
+2. Draw on the canvas. Use **Select** to move or resize an annotation, and
+   **Pan**, **Zoom in/out** or **Fit view** to move around the sheet.
+3. Describe the issue when the review form opens. Set its priority and press
+   **Create review**. This saves the new annotation and its linked review.
+4. If you skip the review, press **Save** in the right rail before leaving.
+
+**Add comment** creates a general part comment. To attach a later comment to
+one or more annotations, select them first; the button changes to **Add review
+comment**. Use **open / resolved / all** to filter the discussion. Resolved
+annotations are hidden by default and can be revealed with **Resolved**.
+
+**PNG** downloads the drawing with the visible annotations flattened on top;
+**Open PDF** opens the original drawing. The browser editor needs a drawing PNG
+or preview PNG as its canvas—the PDF alone is not drawn on directly.
+
+You need **comments.read** / **markups.read** to see the respective content,
+and **comments.write** / **markups.write** to add it. If the status says
+**Conflict – reload required**, another save won the race: reload the markup
+layer and repeat your unsaved change instead of overwriting their work.
 
 ### The Actions tab
 
@@ -182,6 +215,8 @@ press **Cancel** to stop waiting and get the page back.
 Opens the assembly tree for a part, expanding branches on demand so large
 assemblies stay responsive. Every node links to its own Part Details.
 
+![A multi-level BOM with one assembly expanded to show its child rows and quantities.](/static/help/img/bom-tree.png)
+
 Below the tree, the **where-used** table answers the opposite question: which
 assemblies consume *this* part.
 
@@ -241,6 +276,8 @@ Inside, every property, BOM row and file is listed with what would happen —
 *add*, *replace*, *skipped*, *blocked*. Use the tabs to narrow to **Changed**,
 **Blocked** or **Modified approved**, and the *changed only* toggle to hide
 noise. A **JSON report** download captures the whole plan for a colleague.
+
+![The import preview redline showing a new part beside a planned update to an approved part.](/static/help/img/upload-pack-redline.png)
 
 **Blocked** means the policy or your permissions stop that one change. The
 import can still proceed; blocked items are left alone.
@@ -314,6 +351,8 @@ longer use.
 
 Downloads for the SolidWorks toolchain, plus **Excel Compile**, which turns a
 spreadsheet of part data into a compiled ZIP.
+
+![The Tools page with the add-in, SolidWorks setup, BOM templates and Excel helpers grouped by purpose.](/static/help/img/tools-downloads.png)
 
 The download list is generated from what is actually installed on the server,
 so it never goes stale. Files are grouped by what you would go looking for:

@@ -20,24 +20,27 @@ from app.services.timezone_utils import utc_now
 
 
 DEMO_CUSTOMERS = [
-    ("DEMO-CUST-A", "Demo Customer A"),
-    ("DEMO-CUST-B", "Demo Customer B"),
-    ("DEMO-CUST-OTHER", "Demo Customer Other"),
+    ("DEMO-CUST-A", "Outback Hire Fleet (Demo)"),
+    ("DEMO-CUST-B", "Coastal Trailer Service (Demo)"),
+    ("DEMO-CUST-OTHER", "Isolation Customer (Demo)"),
 ]
 DEMO_SUPPLIERS = [
-    ("DEMO-SUP-X", "Demo Supplier X"),
-    ("DEMO-SUP-Y", "Demo Supplier Y"),
-    ("DEMO-SUP-OTHER", "Demo Supplier Other"),
+    ("DEMO-SUP-X", "Frame & Fabrication Works (Demo)"),
+    ("DEMO-SUP-Y", "Running Gear Supply (Demo)"),
+    ("DEMO-SUP-E", "ADR Electrical & Compliance (Demo)"),
+    ("DEMO-SUP-OTHER", "Powder Coat & Finish (Demo)"),
 ]
 DEMO_JOBS = [
-    ("DEMO-JOB-A1", "DEMO-CUST-A", ["DEMO-SUP-X"]),
-    ("DEMO-JOB-B1", "DEMO-CUST-B", ["DEMO-SUP-Y"]),
+    ("DEMO-JOB-A1", "DEMO-CUST-A", ["DEMO-SUP-X", "DEMO-SUP-Y", "DEMO-SUP-E", "DEMO-SUP-OTHER"]),
+    ("DEMO-JOB-B1", "DEMO-CUST-B", ["DEMO-SUP-Y", "DEMO-SUP-E"]),
     ("DEMO-JOB-O1", "DEMO-CUST-OTHER", ["DEMO-SUP-OTHER"]),
 ]
 DEMO_ORDERS = [
-    ("DEMO-PO-X1", "purchase", None, "DEMO-SUP-X", "DEMO-JOB-O1"),
+    ("DEMO-PO-X1", "purchase", None, "DEMO-SUP-X", "DEMO-JOB-A1"),
     ("DEMO-PO-Y1", "purchase", None, "DEMO-SUP-Y", "DEMO-JOB-A1"),
-    ("DEMO-SO-A1", "sales", "DEMO-CUST-A", None, None),
+    ("DEMO-PO-E1", "purchase", None, "DEMO-SUP-E", "DEMO-JOB-A1"),
+    ("DEMO-SO-A1", "sales", "DEMO-CUST-A", None, "DEMO-JOB-A1"),
+    ("DEMO-SO-B1", "sales", "DEMO-CUST-B", None, "DEMO-JOB-B1"),
     ("DEMO-PO-O1", "purchase", None, "DEMO-SUP-OTHER", "DEMO-JOB-O1"),
 ]
 DEMO_PARTS = [
@@ -59,6 +62,85 @@ DEMO_BOM = [
     ("DEMO-SUB-2", "A", "DEMO-RAW-2", "A", 3.0),
 ]
 
+DEMO_CUSTOMER_PROFILES = {
+    "DEMO-CUST-A": {
+        "description": "Fleet buyer ordering complete CELLV03 trailers.",
+        "customer_type": "wholesale",
+        "segment": "fleet",
+        "tags": ["demo", "complete-units"],
+        "contact": "Alex Fleet",
+        "email": "fleet@example.invalid",
+        "payment_terms": "NET30",
+        "currency": "AUD",
+        "industry": "equipment-hire",
+    },
+    "DEMO-CUST-B": {
+        "description": "Service customer ordering replacement trailer parts.",
+        "customer_type": "distributor",
+        "segment": "service-and-spares",
+        "tags": ["demo", "spare-parts"],
+        "contact": "Casey Service",
+        "email": "service@example.invalid",
+        "payment_terms": "NET14",
+        "currency": "AUD",
+        "industry": "trailer-service",
+    },
+    "DEMO-CUST-OTHER": {
+        "description": "Unlinked isolation record for RLS negative tests.",
+        "customer_type": "retail",
+        "segment": "isolation-test",
+        "tags": ["demo", "rls-isolation"],
+        "currency": "AUD",
+    },
+}
+
+DEMO_SUPPLIER_PROFILES = {
+    "DEMO-SUP-X": {
+        "description": "Welded trailer frames and fabricated steel components.",
+        "categories": ["fabrication", "frames"],
+        "processes": ["welding", "fabrication"],
+        "contact": "Fran Fabrication",
+        "email": "frames@example.invalid",
+        "payment_terms": "NET30",
+        "currency": "AUD",
+        "lead_time_days": 15,
+        "rating": 5,
+    },
+    "DEMO-SUP-Y": {
+        "description": "Suspension, hitch, jockey wheel and running-gear supplier.",
+        "categories": ["running-gear", "purchased-parts"],
+        "processes": ["purchase"],
+        "contact": "Riley Gear",
+        "email": "runninggear@example.invalid",
+        "payment_terms": "NET30",
+        "currency": "AUD",
+        "lead_time_days": 7,
+        "rating": 4,
+    },
+    "DEMO-SUP-E": {
+        "description": "ADR lighting, reflectors and compliance hardware.",
+        "categories": ["electrical", "adr-compliance"],
+        "processes": ["purchase", "electrical"],
+        "contact": "Emery Compliance",
+        "email": "adr@example.invalid",
+        "payment_terms": "NET14",
+        "currency": "AUD",
+        "lead_time_days": 5,
+        "rating": 5,
+    },
+    "DEMO-SUP-OTHER": {
+        "description": "Powder coating and final protective finish.",
+        "categories": ["coating", "finishing"],
+        "processes": ["powdercoat", "spray"],
+        "contact": "Parker Finish",
+        "email": "finish@example.invalid",
+        "payment_terms": "NET30",
+        "currency": "AUD",
+        "lead_time_days": 4,
+        "rating": 4,
+    },
+}
+
 EXPECTED_VISIBILITY = {
     "custA.viewer": {
         "jobs": ["DEMO-JOB-A1"],
@@ -66,10 +148,10 @@ EXPECTED_VISIBILITY = {
     },
     "custB.viewer": {
         "jobs": ["DEMO-JOB-B1"],
-        "orders": [],
+        "orders": ["DEMO-SO-B1"],
     },
     "supX.viewer": {
-        "jobs": ["DEMO-JOB-A1", "DEMO-JOB-O1"],
+        "jobs": ["DEMO-JOB-A1"],
         "orders": ["DEMO-PO-X1"],
     },
     "supY.viewer": {
@@ -82,15 +164,15 @@ EXPECTED_VISIBILITY = {
     },
     "admin": {
         "jobs": ["DEMO-JOB-A1", "DEMO-JOB-B1", "DEMO-JOB-O1"],
-        "orders": ["DEMO-PO-X1", "DEMO-PO-Y1", "DEMO-SO-A1", "DEMO-PO-O1"],
+        "orders": ["DEMO-PO-X1", "DEMO-PO-Y1", "DEMO-PO-E1", "DEMO-SO-A1", "DEMO-SO-B1", "DEMO-PO-O1"],
     },
     "planner": {
         "jobs": ["DEMO-JOB-A1", "DEMO-JOB-B1", "DEMO-JOB-O1"],
-        "orders": ["DEMO-PO-X1", "DEMO-PO-Y1", "DEMO-SO-A1", "DEMO-PO-O1"],
+        "orders": ["DEMO-PO-X1", "DEMO-PO-Y1", "DEMO-PO-E1", "DEMO-SO-A1", "DEMO-SO-B1", "DEMO-PO-O1"],
     },
     "operator": {
         "jobs": ["DEMO-JOB-A1", "DEMO-JOB-B1", "DEMO-JOB-O1"],
-        "orders": ["DEMO-PO-X1", "DEMO-PO-Y1", "DEMO-SO-A1", "DEMO-PO-O1"],
+        "orders": ["DEMO-PO-X1", "DEMO-PO-Y1", "DEMO-PO-E1", "DEMO-SO-A1", "DEMO-SO-B1", "DEMO-PO-O1"],
     },
 }
 
@@ -129,17 +211,21 @@ def _upsert_user(email: str, role: Role, password: str) -> User:
     return u
 
 
-def _upsert_customer(code: str, name: str) -> Customer:
+def _upsert_customer(code: str, name: str, **fields) -> Customer:
     c = Customer.objects(code=code).first() or Customer(code=code)
     c.name = name
+    for key, value in fields.items():
+        setattr(c, key, value)
     c.status = c.status or "active"
     c.save()
     return c
 
 
-def _upsert_supplier(code: str, name: str) -> Supplier:
+def _upsert_supplier(code: str, name: str, **fields) -> Supplier:
     s = Supplier.objects(code=code).first() or Supplier(code=code)
     s.name = name
+    for key, value in fields.items():
+        setattr(s, key, value)
     s.status = s.status or "active"
     s.save()
     return s
@@ -202,6 +288,10 @@ PERMISSION_TEST_ROLE_SCENARIOS: dict[str, tuple[str, ...]] = {
     "engineering_commercial": ("engineering", "commercial"),
     "commercial_supplier": ("commercial", "supplier"),
     "security_customer": ("security_administrator", "customer"),
+    "customer_spares": ("customer",),
+    "supplier_running_gear": ("supplier",),
+    "supplier_electrical": ("supplier",),
+    "supplier_finish": ("supplier",),
 }
 
 
@@ -235,6 +325,9 @@ def _standard_role_documents() -> dict[str, Role]:
 def _seed_permission_test_records(
     users: dict[str, User],
 ) -> tuple[dict[str, object], dict[str, int]]:
+    from app.services.sample_dataset import ensure_sample_engineering_records
+
+    sample_created = ensure_sample_engineering_records()
     created = {
         "customers": 0,
         "suppliers": 0,
@@ -242,27 +335,45 @@ def _seed_permission_test_records(
         "orders": 0,
         "parts": 0,
         "bom_links": 0,
+        "sample_parts": sample_created["parts"],
+        "sample_bom_links": sample_created["bom_links"],
+        "sample_approvals": sample_created["approvals_updated"],
+        "sample_part_files": sample_created["part_files"],
     }
 
     customers: dict[str, Customer] = {}
     for code, name in DEMO_CUSTOMERS:
         if Customer.objects(code=code).first() is None:
             created["customers"] += 1
-        customers[code] = _upsert_customer(code, name)
+        customers[code] = _upsert_customer(
+            code,
+            name,
+            **DEMO_CUSTOMER_PROFILES[code],
+        )
 
     suppliers: dict[str, Supplier] = {}
     for code, name in DEMO_SUPPLIERS:
         if Supplier.objects(code=code).first() is None:
             created["suppliers"] += 1
-        suppliers[code] = _upsert_supplier(code, name)
+        suppliers[code] = _upsert_supplier(
+            code,
+            name,
+            **DEMO_SUPPLIER_PROFILES[code],
+        )
 
-    customers["DEMO-CUST-A"].users = [
-        users["customer"],
+    customers["DEMO-CUST-A"].users = [users["customer"]]
+    customers["DEMO-CUST-B"].users = [
         users["security_customer"],
+        users["customer_spares"],
     ]
-    customers["DEMO-CUST-B"].users = []
+    customers["DEMO-CUST-OTHER"].users = []
     suppliers["DEMO-SUP-X"].users = [users["supplier"]]
-    suppliers["DEMO-SUP-Y"].users = [users["commercial_supplier"]]
+    suppliers["DEMO-SUP-Y"].users = [
+        users["commercial_supplier"],
+        users["supplier_running_gear"],
+    ]
+    suppliers["DEMO-SUP-E"].users = [users["supplier_electrical"]]
+    suppliers["DEMO-SUP-OTHER"].users = [users["supplier_finish"]]
     for customer in customers.values():
         customer.save()
     for supplier in suppliers.values():
@@ -304,32 +415,72 @@ def _seed_permission_test_records(
     job_specs = {
         "DEMO-JOB-A1": (
             customers["DEMO-CUST-A"],
-            [suppliers["DEMO-SUP-X"]],
-            [JobBOMLine(pn="DEMO-ASM-1", rev="A", qty=1.0)],
+            [
+                suppliers["DEMO-SUP-X"],
+                suppliers["DEMO-SUP-Y"],
+                suppliers["DEMO-SUP-E"],
+                suppliers["DEMO-SUP-OTHER"],
+            ],
+            [JobBOMLine(pn="CV03-TR-A01", rev="A", qty=3.0)],
             [
                 users["workshop"],
                 users["engineering_commercial"],
             ],
+            {
+                "title": "Fleet build: three CELLV03 trailers",
+                "description": "Complete-unit build for the demo fleet customer.",
+                "part_number": "CV03-TR-A01",
+                "part_revision": "A",
+                "qty_ordered": 3.0,
+                "priority": "high",
+                "status": "released",
+            },
         ),
         "DEMO-JOB-B1": (
             customers["DEMO-CUST-B"],
-            [suppliers["DEMO-SUP-Y"]],
-            [JobBOMLine(pn="DEMO-ASM-2", rev="A", qty=1.0)],
+            [suppliers["DEMO-SUP-Y"], suppliers["DEMO-SUP-E"]],
+            [
+                JobBOMLine(pn="ADR-HITCH", rev="A", qty=2.0),
+                JobBOMLine(pn="OEM-JOCKEYWHEEL", rev="A", qty=2.0),
+                JobBOMLine(pn="ADR-LED-IND", rev="", qty=4.0),
+                JobBOMLine(pn="rego plate light", rev="", qty=2.0),
+                JobBOMLine(pn="Mudguard", rev="A", qty=2.0),
+            ],
             [],
+            {
+                "title": "Service stock: CELLV03 spare parts",
+                "description": "Replacement running gear, lighting and body parts.",
+                "part_number": "CV03-TR-A01",
+                "part_revision": "A",
+                "qty_ordered": 1.0,
+                "priority": "normal",
+                "status": "in_progress",
+            },
         ),
         "DEMO-JOB-O1": (
             customers["DEMO-CUST-OTHER"],
             [suppliers["DEMO-SUP-OTHER"]],
-            [JobBOMLine(pn="DEMO-CMP-A", rev="A", qty=1.0)],
+            [JobBOMLine(pn="CV03-F02", rev="B", qty=1.0)],
             [],
+            {
+                "title": "Isolated frame refinishing",
+                "description": "Negative RLS fixture using an approved BOM child.",
+                "part_number": "CV03-F02",
+                "part_revision": "B",
+                "qty_ordered": 1.0,
+                "priority": "low",
+                "status": "on_hold",
+            },
         ),
     }
     jobs: dict[str, Job] = {}
-    for job_number, (customer, vendors, bom, participants) in job_specs.items():
+    for job_number, (customer, vendors, bom, participants, fields) in job_specs.items():
         if Job.objects(job_number=job_number).first() is None:
             created["jobs"] += 1
         job = _upsert_job(job_number, customer, vendors, bom)
         job.participants = participants
+        for key, value in fields.items():
+            setattr(job, key, value)
         job.save()
         jobs[job_number] = job
 
@@ -340,15 +491,37 @@ def _seed_permission_test_records(
             None,
             suppliers["DEMO-SUP-X"],
             jobs["DEMO-JOB-A1"],
-            [OrderLine(pn="DEMO-CMP-A", rev="A", qty=5.0, uom="EA")],
+            [OrderLine(pn="CV03-F02", rev="B", qty=3.0, uom="EA", description="Welded trailer frame", unit_price=2400.0, tax_pct=10.0)],
+            {"description": "Three welded CELLV03 frames", "currency": "AUD", "status": "confirmed"},
         ),
         (
             "DEMO-PO-Y1",
             "purchase",
             None,
             suppliers["DEMO-SUP-Y"],
-            jobs["DEMO-JOB-B1"],
-            [OrderLine(pn="DEMO-CMP-B", rev="A", qty=3.0, uom="EA")],
+            jobs["DEMO-JOB-A1"],
+            [
+                OrderLine(pn="SUSPENSIONKIT-93in", rev="A", qty=3.0, uom="EA", description="ADR suspension kit", unit_price=850.0, tax_pct=10.0),
+                OrderLine(pn="OEM-JOCKEYWHEEL", rev="A", qty=3.0, uom="EA", description="Jockey wheel kit", unit_price=160.0, tax_pct=10.0),
+                OrderLine(pn="ADR-HITCH", rev="A", qty=3.0, uom="EA", description="50 mm ball hitch", unit_price=120.0, tax_pct=10.0),
+            ],
+            {"description": "Running gear for fleet build", "currency": "AUD", "status": "submitted"},
+        ),
+        (
+            "DEMO-PO-E1",
+            "purchase",
+            None,
+            suppliers["DEMO-SUP-E"],
+            jobs["DEMO-JOB-A1"],
+            [
+                OrderLine(pn="ADR-LED-IND", rev="", qty=6.0, uom="EA", description="Rear combination lamp", unit_price=85.0, tax_pct=10.0),
+                OrderLine(pn="rego plate light", rev="", qty=3.0, uom="EA", description="Registration plate lamp", unit_price=32.0, tax_pct=10.0),
+                OrderLine(pn="ADR-REF-A", rev="A", qty=6.0, uom="EA", description="Amber reflector", unit_price=9.0, tax_pct=10.0),
+                OrderLine(pn="ADR-REF-W", rev="A", qty=12.0, uom="EA", description="White reflector", unit_price=9.0, tax_pct=10.0),
+                OrderLine(pn="ADR-VIN-PLATE", rev="A", qty=3.0, uom="EA", description="VIN compliance plate", unit_price=25.0, tax_pct=10.0),
+                OrderLine(pn="R104-CMARK", rev="A", qty=3.0, uom="EA", description="Conspicuity marking tape", unit_price=60.0, tax_pct=10.0),
+            ],
+            {"description": "ADR electrical and compliance kit", "currency": "AUD", "status": "confirmed"},
         ),
         (
             "DEMO-SO-A1",
@@ -356,7 +529,23 @@ def _seed_permission_test_records(
             customers["DEMO-CUST-A"],
             None,
             jobs["DEMO-JOB-A1"],
-            [OrderLine(pn="DEMO-ASM-1", rev="A", qty=1.0, uom="EA")],
+            [OrderLine(pn="CV03-TR-A01", rev="A", qty=3.0, uom="EA", description="CELLV03 complete trailer", unit_price=12900.0, tax_pct=10.0)],
+            {"description": "Fleet order for three complete trailers", "currency": "AUD", "status": "in_production", "customer_po": "OHF-2408"},
+        ),
+        (
+            "DEMO-SO-B1",
+            "sales",
+            customers["DEMO-CUST-B"],
+            None,
+            jobs["DEMO-JOB-B1"],
+            [
+                OrderLine(pn="ADR-HITCH", rev="A", qty=2.0, uom="EA", description="Replacement ball hitch", unit_price=185.0, tax_pct=10.0),
+                OrderLine(pn="OEM-JOCKEYWHEEL", rev="A", qty=2.0, uom="EA", description="Replacement jockey wheel", unit_price=245.0, tax_pct=10.0),
+                OrderLine(pn="ADR-LED-IND", rev="", qty=4.0, uom="EA", description="Replacement rear lamp", unit_price=135.0, tax_pct=10.0),
+                OrderLine(pn="rego plate light", rev="", qty=2.0, uom="EA", description="Replacement plate lamp", unit_price=55.0, tax_pct=10.0),
+                OrderLine(pn="Mudguard", rev="A", qty=2.0, uom="EA", description="Replacement mudguard", unit_price=190.0, tax_pct=10.0),
+            ],
+            {"description": "CELLV03 service and spare-parts order", "currency": "AUD", "status": "ready_to_ship", "customer_po": "CTS-SPARES-17"},
         ),
         (
             "DEMO-PO-O1",
@@ -364,13 +553,14 @@ def _seed_permission_test_records(
             None,
             suppliers["DEMO-SUP-OTHER"],
             jobs["DEMO-JOB-O1"],
-            [OrderLine(pn="DEMO-RAW-1", rev="A", qty=10.0, uom="EA")],
+            [OrderLine(pn="CV03-F02", rev="B", qty=1.0, uom="EA", description="Powder coat trailer frame", unit_price=650.0, tax_pct=10.0)],
+            {"description": "Isolated powder-coat service order", "currency": "AUD", "status": "submitted"},
         ),
     ]
-    for order_number, kind, customer, supplier, job, lines in order_specs:
+    for order_number, kind, customer, supplier, job, lines, fields in order_specs:
         if Order.objects(order_number=order_number).first() is None:
             created["orders"] += 1
-        _upsert_order(
+        order = _upsert_order(
             order_number,
             kind,
             customer,
@@ -378,6 +568,25 @@ def _seed_permission_test_records(
             job,
             lines,
         )
+        for key, value in fields.items():
+            setattr(order, key, value)
+        subtotal, tax_total, discount_total = calculate_order_totals(order.lines)
+        order.subtotal = subtotal
+        order.tax_amount = tax_total
+        order.discount_amount = discount_total
+        order.total = max(subtotal - discount_total + tax_total + float(order.shipping_cost or 0.0), 0.0)
+        order.save()
+
+    from app.services.sample_reviews import seed_sample_review_history
+
+    review_totals = seed_sample_review_history(users)
+    created.update(
+        {
+            "sample_annotated_parts_total": review_totals["annotated_parts"],
+            "sample_comments_total": review_totals["comments"],
+            "sample_markup_threads_total": review_totals["markup_threads"],
+        }
+    )
 
     linked = {
         "customer_portal": {
@@ -389,8 +598,12 @@ def _seed_permission_test_records(
             "job": "DEMO-JOB-B1",
         },
         "security_customer": {
-            "customer": "DEMO-CUST-A",
-            "job": "DEMO-JOB-A1",
+            "customer": "DEMO-CUST-B",
+            "job": "DEMO-JOB-B1",
+        },
+        "customer_spares": {
+            "customer": "DEMO-CUST-B",
+            "job": "DEMO-JOB-B1",
         },
         "supplier_portal": {
             "supplier": "DEMO-SUP-X",
@@ -398,7 +611,19 @@ def _seed_permission_test_records(
         },
         "procurement_supplier": {
             "supplier": "DEMO-SUP-Y",
-            "job": "DEMO-JOB-B1",
+            "job": "DEMO-JOB-A1",
+        },
+        "supplier_running_gear": {
+            "supplier": "DEMO-SUP-Y",
+            "job": "DEMO-JOB-A1",
+        },
+        "supplier_electrical": {
+            "supplier": "DEMO-SUP-E",
+            "job": "DEMO-JOB-A1",
+        },
+        "supplier_finish": {
+            "supplier": "DEMO-SUP-OTHER",
+            "job": "DEMO-JOB-A1",
         },
         "production_operator": {"job": "DEMO-JOB-A1"},
         "planner_production": {"job": "DEMO-JOB-A1"},
@@ -424,7 +649,12 @@ def _seed_permission_test_records(
 def seed_permission_test_environment(
     domain: str = "demo.com",
 ) -> dict[str, object]:
-    """Create the small canonical permission-test environment without tokens/files."""
+    """Create canonical roles/RLS records plus the CV03 sample metadata.
+
+    Managed fixture files are installed separately with
+    ``tools/install_sample_dataset.py`` so seeding never writes into an
+    operator's configured deliverables root implicitly.
+    """
 
     from app.services.api_tokens import revoke_user_tokens
     from app.services.session_lifecycle import revoke_user_sessions
@@ -490,6 +720,9 @@ def reset_permission_test_environment(
 ) -> dict[str, int]:
     """Remove only the reserved permission-test namespace and DEMO records."""
 
+    from app.services.sample_reviews import remove_sample_review_history
+
+    removed_reviews = remove_sample_review_history()
     users = _permission_test_users(domain)
     user_ids = [user.id for user in users]
     deleted_tokens = (
@@ -532,4 +765,6 @@ def reset_permission_test_environment(
         "orders": int(deleted_orders or 0),
         "parts": int(deleted_parts or 0),
         "bom_links": int(deleted_bom or 0),
+        "sample_comments": removed_reviews["comments"],
+        "sample_markup_threads": removed_reviews["markup_threads"],
     }

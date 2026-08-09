@@ -182,8 +182,8 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
     D2 2.6 profile remaining tree walks.  CLOSED 2026-08-09 - see log
 
   LANE F - DOCUMENTATION / COMMERCIAL
-    F1 2.10 help screenshots + markup help. ACTIVE 2026-08-09 (Codex)
-    F2 2.9 counsel review and commercial-document updates after advice. OWNER/COUNSEL
+    F1 2.10 help screenshots + markup help. DONE 2026-08-09 (Codex)
+    F2 2.9 counsel review and commercial-document updates after advice. AWAITING OWNER/COUNSEL
 
   Lanes A, B, C, D-measurement and F may progress concurrently.
   Do NOT run A2 and A3 as overlapping edits if both touch shared auth/RBAC
@@ -756,6 +756,57 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       5001 server was terminated after capture.
     What remains: rebuild generated help, run help/image tests and visual/link
       checks, then audit F2 drafts into specific owner/counsel decisions.
+
+  2026-08-09  F1 PRIVACY RECAPTURE COMPLETE; SAMPLE FIXTURE ACTIVE (Codex)
+    The earlier part-bearing captures are superseded. Inventory, customer
+      Inventory, Part Detail, drawing markups, expanded BOM and import-redline
+      images were recaptured using only CV03-TR-A01 REV A or its BOM children.
+      Non-part Admin Fields, Import, Roles and Tools captures remain valid.
+    Visual check passed for all six replacement images. The redline remains a
+      dry-run preview; no import or markup was saved. The temporary customer
+      permission and DEMO-JOB-A1 BOM override were removed, DEMO-JOB-A1 was
+      restored to DEMO-ASM-1 REV A, port 5001 is closed, and port 5000 is up.
+    Owner expanded F1 scope: make CV03-TR-A01 REV A and its complete managed
+      files the canonical reusable sample dataset for tests/help. Located the
+      existing BOM archive plus 3MF, EASM, EDRW, PDF, PLY, PNG/render,
+      thumbnail/drawing PNG, STEP and generated thumbnails. Awaiting the
+      owner's unfinished BOM-file detail if inspection cannot resolve it;
+      repository fixture design and size/licensing checks are in progress.
+
+  2026-08-09  F1 SAMPLE DATASET + REVIEW HISTORY IMPLEMENTED (Codex)
+    Canonical source is the owner-supplied CV03-TR-A01 REV A BOM archive.
+      The portable sample now contains all locally available assembly/child
+      deliverables: 494 checksum-pinned files, 135,500,125 bytes, across 60
+      exact part/revision identities (3MF, BOM, DXF, eDrawings, PDF, PLY, PNG,
+      STEP and thumbnails). Explicit installer is non-overwriting by default.
+    Mongo: all 60 exact BOM-family records are approved by TinyManager; no
+      prefix/global update was used. The demo seed creates missing sample
+      Parts/BOM/PartFiles idempotently and exposes actual doc-pack/3D/drawing
+      formats. Local verification: 60 present, 60 approved, 60 TinyManager.
+    Business demo: two customer scenarios (three complete trailers; service
+      spares), four process suppliers, three jobs, four purchase orders and
+      two sales orders. Added customer-spares and three specialist supplier
+      users while retaining canonical role definitions and RLS links.
+    Review demo: deterministic multi-role comments/replies on four parts plus
+      four drawing objects and three markup threads (open/resolved, priorities,
+      customer/supplier/engineering/workshop history). Reset removes only the
+      demo-prefixed conversations/markups and preserves unrelated reviews.
+    Help recaptured with populated reviews/markups and approved-data redline;
+      new review-conversations screenshot added. Capture used only the CV03
+      BOM family. Isolated port 5001 closed; port 5000 remains healthy.
+    IP cleanup: removed tracked testfiles/bom/13-2921_REV__2026_01_18_09_03_22.zip
+      and replaced both dependent tests with the approved CV03 BOM fixture.
+      Repository search now finds no runtime, fixture or test references to
+      13-2921; only this historical cleanup note names it.
+    F1 closure validation: generated help and TOC rebuilt; every Markdown image
+      reference resolves and no screenshot placeholders remain. Ruff, Python
+      compilation, JavaScript syntax, diff whitespace and focused sample/help/
+      role/BOM/markup checks passed. Full suite: 796 passed, 1 skipped. The
+      approved sample manifest verifies 494 files / 135,500,125 bytes and all
+      four sample-dataset tests, including real child/root PDF+STEP doc packs
+      and markup-review export, pass. Port 5000 remains healthy and the isolated
+      capture port is closed. F1 is complete; F2 awaits the owner/counsel
+      commercial decisions listed in the draft documents.
 
   2026-08-09  D1 CLOSED WITHOUT CODE - the memoisation already fixed it
     Measured, not assumed. The live assembly behind the original 6625-query

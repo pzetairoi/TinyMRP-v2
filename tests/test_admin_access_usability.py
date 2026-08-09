@@ -10,6 +10,8 @@ from app.models.customer import Customer
 from app.models.job import Job
 from app.models.order import Order
 from app.models.part import Part
+from app.models.part_annotation import PartAnnotation
+from app.models.part_drawing_markup import PartDrawingMarkup
 from app.models.supplier import Supplier
 from app.services.permissions import (
     CANONICAL_PERMISSION_IDENTIFIERS,
@@ -449,10 +451,45 @@ def test_permission_test_seed_uses_only_curated_canonical_matrix(client, app, tm
         assert Customer.objects(code="DEMO-CUST-A", users=customer_portal).count() == 1
         assert Supplier.objects(code="DEMO-SUP-X", users=supplier_portal).count() == 1
         assert Customer.objects(code__startswith="DEMO-CUST-").count() == 3
-        assert Supplier.objects(code__startswith="DEMO-SUP-").count() == 3
+        assert Supplier.objects(code__startswith="DEMO-SUP-").count() == 4
         assert Part.objects(part_number="DEMO-ASM-1", revision="A").count() == 1
         assert Part.objects(part_number="DEMO-ASM-1", revision="B").count() == 1
         assert BOMLink.objects(parent_pn="DEMO-ASM-1").count() > 0
+        sample = Part.objects(part_number="CV03-TR-A01", revision="A").get()
+        assert sample.description == "CELLV03 Trailer"
+        assert sample.canonical["approved"] is True
+        fleet_job = Job.objects(job_number="DEMO-JOB-A1").get()
+        assert [(line.pn, line.rev, line.qty) for line in fleet_job.bom] == [
+            ("CV03-TR-A01", "A", 3.0)
+        ]
+        assert len(fleet_job.vendors) == 4
+        spares_job = Job.objects(job_number="DEMO-JOB-B1").get()
+        assert {line.pn for line in spares_job.bom} == {
+            "ADR-HITCH",
+            "OEM-JOCKEYWHEEL",
+            "ADR-LED-IND",
+            "rego plate light",
+            "Mudguard",
+        }
+        assert Order.objects(order_number__startswith="DEMO-").count() == 6
+        assert Order.objects(order_number="DEMO-SO-A1", total__gt=0).count() == 1
+        assert Order.objects(order_number="DEMO-SO-B1", total__gt=0).count() == 1
+        assert Supplier.objects(
+            code="DEMO-SUP-E",
+            users=User.objects.get(
+                email="permtest.supplier_electrical@test.example.com"
+            ),
+        ).count() == 1
+        assert len(PartAnnotation.objects(
+            part_number="CV03-TR-A01",
+            revision="A",
+        ).get().comments) == 3
+        markup = PartDrawingMarkup.objects(
+            part_number="CV03-TR-A01",
+            revision="A",
+        ).get()
+        assert len(markup.threads) == 3
+        assert len(markup.canvas_json["objects"]) == 4
     assert not list(tmp_path.iterdir())
     refreshed = client.get("/admin/roles/").get_data(as_text=True)
     assert "permtest.security_administrator@test.example.com" not in refreshed
@@ -485,6 +522,10 @@ def test_permission_test_seed_is_idempotent_and_reset_is_namespace_limited(
         )
         for key in ("customers", "suppliers", "jobs", "orders", "parts", "bom_links"):
             assert second["counts"][key] == 0
+        assert second["counts"]["sample_parts"] == 0
+        assert second["counts"]["sample_bom_links"] == 0
+        assert second["counts"]["sample_approvals"] == 0
+        assert second["counts"]["sample_part_files"] == 0
 
         test_user = User.objects(email__in=list(first_emails)).first()
         ApiToken(
@@ -501,6 +542,15 @@ def test_permission_test_seed_is_idempotent_and_reset_is_namespace_limited(
         assert Job.objects(job_number__startswith="DEMO-").count() == 0
         assert Order.objects(order_number__startswith="DEMO-").count() == 0
         assert Part.objects(part_number__startswith="DEMO-").count() == 0
+        assert Part.objects(part_number="CV03-TR-A01", revision="A").count() == 1
+        assert PartAnnotation.objects(
+            part_number="CV03-TR-A01",
+            revision="A",
+        ).count() == 0
+        assert PartDrawingMarkup.objects(
+            part_number="CV03-TR-A01",
+            revision="A",
+        ).count() == 0
         assert BOMLink.objects(
             __raw__={
                 "$or": [

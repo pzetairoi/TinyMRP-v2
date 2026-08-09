@@ -61,6 +61,24 @@ Main admin modules:
 
 Do not change access behavior in code unless intentionally redesigning ACL. Production access should be managed through roles, permissions, and entity links.
 
+## Fields And Exports (`/ui/admin/fields`)
+
+Use **Fields & exports** to keep field names, import aliases and visible columns
+consistent across the application.
+
+The **Screen & export presets** section is destination-specific. For each
+parts table, BOM, summary, where-used or export context:
+
+- **Allowed fields** are the columns a user may choose.
+- **Default preset** is what appears after a user resets their personal layout.
+- A field marked **required** cannot be removed from that context.
+
+![The Parts table preset showing allowed fields, the default column set and the required Part Number field.](/static/help/img/admin-fields.png)
+
+Open one destination at a time, make the smallest necessary change, then press
+**Save** at the top of the page. Changing a default does not erase an existing
+user layout; they receive the new default when they choose **Reset**.
+
 ## Access Scoping Model (Operational View)
 
 External users can be scoped by linked entities:

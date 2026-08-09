@@ -102,3 +102,22 @@ impersonating are recorded in the audit log against both identities.
 
 Impersonation is limited to purpose-made test accounts and never applies to
 real users or other administrators.
+
+The seeded environment uses the owner-approved `CV03-TR-A01` revision A sample
+and its BOM children. It includes complete-unit and spare-parts customers,
+four process suppliers, linked jobs and orders, released Part/File records,
+general-comment conversations, and open/resolved drawing-markup reviews. The
+extra customer/supplier accounts let an administrator follow a review from
+each participant's restricted view instead of simulating every reply as one
+user.
+
+The corresponding managed-file fixture lives in
+`sample_data/cv03_tr_a01_rev_a`. For an isolated development installation,
+copy it into the selected deliverables root with:
+
+```text
+python tools/install_sample_dataset.py --destination <deliverables-root>
+```
+
+Existing files are skipped. Add `--overwrite` only when you intentionally want
+the checksum-pinned sample copy to replace a same-named file.

@@ -1,0 +1,2482 @@
+{
+  "dataset_id": "cv03-tr-a01-rev-a",
+  "part_number": "CV03-TR-A01",
+  "revision": "A",
+  "description": "CELLV03 Trailer",
+  "approver": "TinyManager",
+  "part_revision_count": 60,
+  "bom_source": "managed/bom/CV03-TR-A01_REV_A_2026_07_11_16_41_58.zip",
+  "managed_files": [
+    {
+      "path": "3mf/40MM AXLE SEVERAL SIZES_REV_.3mf",
+      "bytes": 249485,
+      "sha256": "4c9c7ea853c0c49f8b599f681862fc712518831dea220deca51ae2c83e35ab6c"
+    },
+    {
+      "path": "3mf/4177-35-CHAIN_REV_1.3mf",
+      "bytes": 47689,
+      "sha256": "b36c7e8e741a39b56330b43eda446a2cf61b76272ba52a78ad9c85b6c4fbd712"
+    },
+    {
+      "path": "3mf/ADR-HITCH_REV_A.3mf",
+      "bytes": 150450,
+      "sha256": "b7266cfc89567b30599b7d3dedc8dedc9458830df899a900b86426cedf5b5e37"
+    },
+    {
+      "path": "3mf/ADR-LED-IND_REV_.3mf",
+      "bytes": 27730,
+      "sha256": "6481b9d44766fd797d59bc4cec9bb24e5df706da88a349e1d2866dee029c9b91"
+    },
+    {
+      "path": "3mf/ADR-REF-A_REV_A.3mf",
+      "bytes": 23483,
+      "sha256": "c25214fbaa2ee2ea2b1d15a65b2a6ae566ee6ec8085ada8a399cd3d70c6ae0e1"
+    },
+    {
+      "path": "3mf/ADR-REF-W_REV_A.3mf",
+      "bytes": 23484,
+      "sha256": "c321a909852532d2e0af30b9db5da2769fa3cbd236e040aae8ac6b0e2a5fa7e8"
+    },
+    {
+      "path": "3mf/ADR-REG-PLATE_REV_.3mf",
+      "bytes": 57630,
+      "sha256": "6eba147756270c07a75b0aebf70acf727890b5111804003febd31b41383ae668"
+    },
+    {
+      "path": "3mf/ADR-VIN-PLATE_REV_A.3mf",
+      "bytes": 51833,
+      "sha256": "4d95e174e0e26f92b231f4c7512784655b61539f805c0041ec65f39b5e9f8f9f"
+    },
+    {
+      "path": "3mf/CV03-F01_REV_A.3mf",
+      "bytes": 233609,
+      "sha256": "ea6f67c139e58b7fdd9eeedd32054a55f4c387fbb0682699b477d2bb2ce71815"
+    },
+    {
+      "path": "3mf/CV03-F02_REV_B.3mf",
+      "bytes": 684108,
+      "sha256": "c4f486ca611ba01a49cfdcefe36c65f2d74b0137d3a77b36c815bbaebc7ceccc"
+    },
+    {
+      "path": "3mf/CV03-TR-01_REV_B.3mf",
+      "bytes": 14536,
+      "sha256": "e109e470486e2d170cfe25d85ed9954e18bcda94d7800736d735baafd9fdc6b4"
+    },
+    {
+      "path": "3mf/CV03-TR-02_REV_B.3mf",
+      "bytes": 14491,
+      "sha256": "0e916d7657a13062a86384fb0b8fa6fe80f55eb9bc753cd000c5a1af640bd181"
+    },
+    {
+      "path": "3mf/CV03-TR-03_REV_B.3mf",
+      "bytes": 8663,
+      "sha256": "c49dc744e38836a2943fd7988720e781eed2f70e7a58e0349d5add2a7d497203"
+    },
+    {
+      "path": "3mf/CV03-TR-04_REV_B.3mf",
+      "bytes": 3546,
+      "sha256": "f10c4b183b3c8ae09b02d96c9659f4318504b1a60d5e40288830afc11edec98c"
+    },
+    {
+      "path": "3mf/CV03-TR-05_REV_B.3mf",
+      "bytes": 13391,
+      "sha256": "6e1dafc2b0b2b55533718f9ccc5d28b3565e20891352c16d18bae925d9acbb65"
+    },
+    {
+      "path": "3mf/CV03-TR-06_REV_B.3mf",
+      "bytes": 4746,
+      "sha256": "bc3740e87699f69c04a11b472bf86433aa0b25abf46fcc551707fd887a52d519"
+    },
+    {
+      "path": "3mf/CV03-TR-07_REV_B.3mf",
+      "bytes": 10400,
+      "sha256": "a42da93955157383fda8764d21e926a65f53f5b86887ac163803037a5e812768"
+    },
+    {
+      "path": "3mf/CV03-TR-08_REV_B.3mf",
+      "bytes": 10439,
+      "sha256": "a724b42332badd29590fbee0b49f8ae3f134bebacf4ab20980105fbe71b9196b"
+    },
+    {
+      "path": "3mf/CV03-TR-09_REV_B.3mf",
+      "bytes": 4629,
+      "sha256": "2d1b790ee67177256effb45a9f13a285e1e667a5848ec242e2395e1a7f9f31af"
+    },
+    {
+      "path": "3mf/CV03-TR-10_REV_B.3mf",
+      "bytes": 19927,
+      "sha256": "d16f61a24593214f03784909a6bf2d7681e058657c564c6320bf0a00d31f3abc"
+    },
+    {
+      "path": "3mf/CV03-TR-11_REV_B.3mf",
+      "bytes": 13368,
+      "sha256": "648890061ef49411a5ae657317cc372764a67dfb0ca87abecc83cac587bc879b"
+    },
+    {
+      "path": "3mf/CV03-TR-12_REV_B.3mf",
+      "bytes": 5527,
+      "sha256": "31dfaac7cc43b57210950ce74953bf4ae3c013b499c05303df07f991371b5ff1"
+    },
+    {
+      "path": "3mf/CV03-TR-13_REV_B.3mf",
+      "bytes": 13200,
+      "sha256": "393fa6cb8f9ec49f40b802227adbc3a49c8131e49bc2711ee75b9310622180c5"
+    },
+    {
+      "path": "3mf/CV03-TR-14_REV_B.3mf",
+      "bytes": 5518,
+      "sha256": "49d54e30cd314b6ec4df2b1ad71ed4b239fa033123110ed726612f9d0bd80937"
+    },
+    {
+      "path": "3mf/CV03-TR-15_REV_B.3mf",
+      "bytes": 17814,
+      "sha256": "3e98057f64d5139e21699aa6e968fc9ef3802a16f18b6a5a26bf9c844c8bac6c"
+    },
+    {
+      "path": "3mf/CV03-TR-16_REV_B.3mf",
+      "bytes": 6354,
+      "sha256": "57312541dd857318e52c3a1eafcfc6cf1a3d0c3bd9a4365ef876c06c879f2dfb"
+    },
+    {
+      "path": "3mf/CV03-TR-17_REV_B.3mf",
+      "bytes": 6394,
+      "sha256": "ce05762fc61e89f85d3ec6fe998ea9f0b702058031a696ff07bd311213dd7890"
+    },
+    {
+      "path": "3mf/CV03-TR-18_REV_B.3mf",
+      "bytes": 10367,
+      "sha256": "ba1463ed9f9a3c7a926ab9859be727eea87101d85a1e408c0ac6e421721c4877"
+    },
+    {
+      "path": "3mf/CV03-TR-19_REV_B.3mf",
+      "bytes": 17285,
+      "sha256": "1d7d0d2423a6d8993783cbca02f61b7e6e173c8235f951e88a19fbfec2c6166d"
+    },
+    {
+      "path": "3mf/CV03-TR-20_REV_B.3mf",
+      "bytes": 17535,
+      "sha256": "07c630f3b77d62eef6ae82ce737df2ca678eee972caabf7f3f21ac99ec7c06e6"
+    },
+    {
+      "path": "3mf/CV03-TR-21_REV_B.3mf",
+      "bytes": 37383,
+      "sha256": "fd3284df73393e6f2bee794b98a97b41fa219525e88aaecd3207c073934a686f"
+    },
+    {
+      "path": "3mf/CV03-TR-22_REV_B.3mf",
+      "bytes": 7710,
+      "sha256": "df91c47d715761589668947d7119ad20733c396602cf8c0d917fd62e1980b40d"
+    },
+    {
+      "path": "3mf/CV03-TR-23_REV_B.3mf",
+      "bytes": 7703,
+      "sha256": "1c4259f5c62914534c8b73a7f55aabb70570ddd84d8f691b315d557b088eb6dc"
+    },
+    {
+      "path": "3mf/CV03-TR-24_REV_B.3mf",
+      "bytes": 10453,
+      "sha256": "406e68555b91c577a793aa85a29d91ce9d69fde8b7c25838b78676ddd8023095"
+    },
+    {
+      "path": "3mf/CV03-TR-26_REV_B.3mf",
+      "bytes": 8026,
+      "sha256": "d9a77311fec942f6f559aafa6af3434831e1272a682fed0b483baa09de7a73af"
+    },
+    {
+      "path": "3mf/CV03-TR-27_REV_B.3mf",
+      "bytes": 8057,
+      "sha256": "78604888caba5da7d31bf90186a2e8edd0effec9f1d6c824125df151be8bc734"
+    },
+    {
+      "path": "3mf/CV03-TR-A01_REV_A.3mf",
+      "bytes": 3838002,
+      "sha256": "aba2297528e631b6354414966d9532f38620a4b40e7ef8b76530fb5de337e125"
+    },
+    {
+      "path": "3mf/EYE TO EYE 5 LEAF 60MM SUSPENSION_REV_.3mf",
+      "bytes": 787476,
+      "sha256": "b5106b5ced0d3fb140f283a450bec0bade159a68429e317e0b1c9e41cf395900"
+    },
+    {
+      "path": "3mf/HANGER-F_REV_A.3mf",
+      "bytes": 6783,
+      "sha256": "1bff12aeedb5b3ae53a61c2c580c6e34ddcab962d366eabe4ea48405bd2c9b8c"
+    },
+    {
+      "path": "3mf/HANGER-R_REV_A.3mf",
+      "bytes": 5517,
+      "sha256": "3f626c4a9fff8d3116b2b708c5f471a499d14e00972ca75d8679ab280973c79c"
+    },
+    {
+      "path": "3mf/HUB_REV_.3mf",
+      "bytes": 725756,
+      "sha256": "d0a5a473d0bc406a9044e183cfd41389c3b0f2423f15ff9bedae783ef1558073"
+    },
+    {
+      "path": "3mf/MIRRORAXLE HUB 2200 LBS_1_1_REV_.3mf",
+      "bytes": 374419,
+      "sha256": "4448647df7de918166d212fc0f8277305aba1791ff64d7e908fdce845ce91176"
+    },
+    {
+      "path": "3mf/MUDGUARD_REV_A.3mf",
+      "bytes": 52522,
+      "sha256": "042a431ad042786e869208c812803a350e3849a529fee40ace8a5c53dc37d8c0"
+    },
+    {
+      "path": "3mf/OEM-JOCKEYWHEEL_REV_A.3mf",
+      "bytes": 151354,
+      "sha256": "dd4b5c4b7595ccea75404a6ec3aca66f067f5d7705ff9b138d6a688136ab7534"
+    },
+    {
+      "path": "3mf/R104-CMARK_REV_A.3mf",
+      "bytes": 3277,
+      "sha256": "139c0c66ae7e95582e9d69028be79e344e13044a2264c4221b498328560fe907"
+    },
+    {
+      "path": "3mf/REGO PLATE LIGHT_REV_.3mf",
+      "bytes": 45905,
+      "sha256": "3526f9b47b9f9918d81375b925f6b8579fc103c932459bbec8e2c4a6aabc6220"
+    },
+    {
+      "path": "3mf/SKF_L 44649_610_1_1_REV_.3mf",
+      "bytes": 170213,
+      "sha256": "4676e5ac73a3cb0422f973384e43d9bd89b9272362f219932da1236cf2283a95"
+    },
+    {
+      "path": "3mf/SPINDLE NUT 1 INCH_1_REV_.3mf",
+      "bytes": 105875,
+      "sha256": "67567fb53f07ac1ca7facac4776d2aee1dfd17c88b6f65953b28d0820a8d93bb"
+    },
+    {
+      "path": "3mf/SPINDLE WASHER 1 INCH_1_REV_.3mf",
+      "bytes": 7419,
+      "sha256": "bd05d5b4e26db373f8c661766dd02c41edd92e8dec1d8abf7ac4dc6c61d0ffb7"
+    },
+    {
+      "path": "3mf/STUD BOLT 1-2 X 20_REV_.3mf",
+      "bytes": 72402,
+      "sha256": "17ef89c682fb46de0a05512b4494e569aa821a3d0cd5826cd9c4fd50867031c5"
+    },
+    {
+      "path": "3mf/SUSPENSIONKIT-93IN_REV_A.3mf",
+      "bytes": 2214313,
+      "sha256": "e5f7cf4cf04cc32ad4fb603605c04dcb76752440d8b198e1153b487b99a53010"
+    },
+    {
+      "path": "3mf/WHEEL 155-80-R13_REV_.3mf",
+      "bytes": 460180,
+      "sha256": "ae6c940064fd50d6b600600d401dbd4d53a0e1efd7353798b1e8d2a76906f414"
+    },
+    {
+      "path": "bom/CV03-TR-A01_REV_A_2026_07_11_16_41_58.zip",
+      "bytes": 6117,
+      "sha256": "fd98d19417b505936154c5a9a48f335bfa659391d43bb8bac111e1232800e6e9"
+    },
+    {
+      "path": "dxf/CV03-TR-01_REV_B.dxf",
+      "bytes": 30466,
+      "sha256": "d8718be8e8ad0886c0ec4bff17334ed6f3e8def37e3d99973666200acd4c0d00"
+    },
+    {
+      "path": "dxf/CV03-TR-02_REV_B.dxf",
+      "bytes": 30473,
+      "sha256": "04c00862321c23a66f1dbddb353bd89dd8e493f9b04d8c5d02715ea94fc9cb90"
+    },
+    {
+      "path": "dxf/CV03-TR-03_REV_B.dxf",
+      "bytes": 22544,
+      "sha256": "cb92d62f1cf3908985ab8d9cdfb5eb1bf6d040bcdfa637a374f5958cef00acc3"
+    },
+    {
+      "path": "dxf/CV03-TR-04_REV_B.dxf",
+      "bytes": 21904,
+      "sha256": "08e8152815c928e4ec98fa56411e7ce8ee7159d96354a8d8f2230824a740c991"
+    },
+    {
+      "path": "dxf/CV03-TR-05_REV_B.dxf",
+      "bytes": 27722,
+      "sha256": "bbc51a93c58747f5d80acf7e3c7a24a8e2ab26ee9879fcd51df42f186c6a6128"
+    },
+    {
+      "path": "dxf/CV03-TR-06_REV_B.dxf",
+      "bytes": 25479,
+      "sha256": "72002c9434dd6b030c771965e88f6291c30af65368cceee7b51be7bf7381d456"
+    },
+    {
+      "path": "dxf/CV03-TR-07_REV_B.dxf",
+      "bytes": 28140,
+      "sha256": "2abfdeb4ed9009c1c4af47c1011df5c2b91ea83bf1794a35a675c8c88e2caf07"
+    },
+    {
+      "path": "dxf/CV03-TR-08_REV_B.dxf",
+      "bytes": 28138,
+      "sha256": "cdfe4f3ebbccf2622fc521b8d87b7fd1a7d57700060398f9c37e4fd3e43d965a"
+    },
+    {
+      "path": "dxf/CV03-TR-09_REV_B.dxf",
+      "bytes": 23733,
+      "sha256": "758e527c91b8761429a42f6c5642255bdccb2726fd82148e3b2f1dec3c303478"
+    },
+    {
+      "path": "dxf/CV03-TR-10_REV_B.dxf",
+      "bytes": 32052,
+      "sha256": "767ce55160cf6dca99f0d31c7e3259d5d1cbc66c0280b25230dcd857fab910b6"
+    },
+    {
+      "path": "dxf/CV03-TR-11_REV_B.dxf",
+      "bytes": 40503,
+      "sha256": "dda9cf0510baba1ab47ec42813a8eb2ab52096ddc88d7e0ddd2c7983912ca050"
+    },
+    {
+      "path": "dxf/CV03-TR-12_REV_B.dxf",
+      "bytes": 28546,
+      "sha256": "c2e3fe29ebc7e8295e68fe80d85328c1612701e953f2d93497718700ca386dc7"
+    },
+    {
+      "path": "dxf/CV03-TR-13_REV_B.dxf",
+      "bytes": 40223,
+      "sha256": "db4eee9a3f9bc894b9974b5b10637393283bc747af5f0066a927cc018a57b994"
+    },
+    {
+      "path": "dxf/CV03-TR-14_REV_B.dxf",
+      "bytes": 28548,
+      "sha256": "2ca79faafb10c099f7f93f468bc60fb03cc6c62bbca3a7b018250f1075fd546e"
+    },
+    {
+      "path": "dxf/CV03-TR-15_REV_B.dxf",
+      "bytes": 37771,
+      "sha256": "2f224905c0a330f2890fbe49b7986b639c88bbb595a7ad2ae991b28705790f36"
+    },
+    {
+      "path": "dxf/CV03-TR-16_REV_B.dxf",
+      "bytes": 26455,
+      "sha256": "75156727bb69c77634514ba04dde720fef757556ef4b4e2bf8800df779ddfdd7"
+    },
+    {
+      "path": "dxf/CV03-TR-17_REV_B.dxf",
+      "bytes": 26457,
+      "sha256": "f46322b089c41fc96853f2dcd9767ee6db01946137e3da7576399d05776d6462"
+    },
+    {
+      "path": "dxf/CV03-TR-18_REV_B.dxf",
+      "bytes": 28140,
+      "sha256": "5135e8efc4ed3a1d3f40147cd5181890c6a45d48a74b66fa896c6be30dcc3a74"
+    },
+    {
+      "path": "dxf/CV03-TR-19_REV_B.dxf",
+      "bytes": 34760,
+      "sha256": "c3671cf43a30e49bd9aaf767bd61ad33efe81e7ed3c8ef672f0ea226965e60ed"
+    },
+    {
+      "path": "dxf/CV03-TR-20_REV_B.dxf",
+      "bytes": 36218,
+      "sha256": "f09c659f230beaf01dadea11924b84fca90a5dafa99a1a4f3cfa767814d73fdd"
+    },
+    {
+      "path": "dxf/CV03-TR-21_REV_B.dxf",
+      "bytes": 34188,
+      "sha256": "f88decc9fd600d94854f9f39f7ff72b3f7bc40c97087f70ce22e3082d7f2bac6"
+    },
+    {
+      "path": "dxf/CV03-TR-22_REV_B.dxf",
+      "bytes": 27242,
+      "sha256": "1a615c1fe10c2f154f694d1ab5389e7dff15a168d2957c7dad948c1dce89f034"
+    },
+    {
+      "path": "dxf/CV03-TR-23_REV_B.dxf",
+      "bytes": 27249,
+      "sha256": "f75b3dfec75880279186ab931724cb717e9d1ea0d89d4f5943c54180e40d5f9a"
+    },
+    {
+      "path": "dxf/CV03-TR-24_REV_B.dxf",
+      "bytes": 28198,
+      "sha256": "1dcf126fbccffa0dce3c83981e45b8d6f7242ef56b8d54f3c4fa716426a9000d"
+    },
+    {
+      "path": "dxf/CV03-TR-26_REV_B.dxf",
+      "bytes": 22926,
+      "sha256": "c4129a5fe7cf632db94219cfb7852510a1ede851dfb5c6e10661915c74aa06e3"
+    },
+    {
+      "path": "dxf/CV03-TR-27_REV_B.dxf",
+      "bytes": 22896,
+      "sha256": "6c589855eb54c74a7815c8b07619f2177df0bd93aba19cf89bd69421fbc81f67"
+    },
+    {
+      "path": "edr/40MM AXLE SEVERAL SIZES_REV_.eprt",
+      "bytes": 234141,
+      "sha256": "5bc4a1efd575261a16466c98070b73069ce98d56e449f6d5100f840d0e4e2305"
+    },
+    {
+      "path": "edr/4177-35-CHAIN_REV_1.easm",
+      "bytes": 36935,
+      "sha256": "713da8b6fc0cff9acabb1c85ba71f20403d47255e6cb7ab2e71802dd5993675b"
+    },
+    {
+      "path": "edr/ADR-HITCH_REV_A.eprt",
+      "bytes": 95253,
+      "sha256": "c3f365fd413c0d31d95b9117dee99e746511d23e0a3e13fca74adbbdfa42d9e0"
+    },
+    {
+      "path": "edr/ADR-LED-IND_REV_.eprt",
+      "bytes": 19327,
+      "sha256": "128f0efdf529282e9485261ca3f13eab9fceca83e7e321d79ed9c5b378f0ee1e"
+    },
+    {
+      "path": "edr/ADR-REF-A_REV_A.eprt",
+      "bytes": 21329,
+      "sha256": "16a1d794fb55edbe981f77eb75b64647e4d21fe72ccff12976fc937fb7701df6"
+    },
+    {
+      "path": "edr/ADR-REF-W_REV_A.eprt",
+      "bytes": 21333,
+      "sha256": "9347a98effde16d798328c5db15d8dff533a554d483116fc654b2a7defe56d9b"
+    },
+    {
+      "path": "edr/ADR-REG-PLATE_REV_.eprt",
+      "bytes": 38709,
+      "sha256": "e5b0d432b4dc62a4b3c6e1fb405f3657962f28fd414dbfeba00c58868f7fcb66"
+    },
+    {
+      "path": "edr/ADR-VIN-PLATE_REV_A.eprt",
+      "bytes": 22069,
+      "sha256": "96d6987dc136964439b557535a8f2d61123bde0d96c5878612abfce363953904"
+    },
+    {
+      "path": "edr/CV03-F01_REV_A.easm",
+      "bytes": 179675,
+      "sha256": "43e538b2589684aea5e3d2111ddaf977be22afabb399edf6e1d8e3f8dd7689d5"
+    },
+    {
+      "path": "edr/CV03-F01_REV_A.edrw",
+      "bytes": 1244659,
+      "sha256": "b742a07b0eb6ece8600bc3a482d4bdfa771d9971656b1d7a98f1be12b0fd291f"
+    },
+    {
+      "path": "edr/CV03-F02_REV_B.easm",
+      "bytes": 209435,
+      "sha256": "cf9321ca7ceac9c398c520bbc4bf720f7dbcf8e486dcdeb949e7a9d095e283b4"
+    },
+    {
+      "path": "edr/CV03-F02_REV_B.edrw",
+      "bytes": 597907,
+      "sha256": "caaab5489171edd4286f4e60971f492955226ee92691d79b7071b15412445b63"
+    },
+    {
+      "path": "edr/CV03-TR-01_REV_B.edrw",
+      "bytes": 40066,
+      "sha256": "c094c665850319fc082acf43b835cd8d349922b457b6554c880d3941c459da4f"
+    },
+    {
+      "path": "edr/CV03-TR-01_REV_B.eprt",
+      "bytes": 13691,
+      "sha256": "b0548280ab803f1c0d05fe7eb2af90b68b4570a581bd7651d88d3e423f9f73eb"
+    },
+    {
+      "path": "edr/CV03-TR-02_REV_B.edrw",
+      "bytes": 40902,
+      "sha256": "eb624989e4c515ed6bf0d0f075c01de2dbff9c2f5f0257527d124733653990bc"
+    },
+    {
+      "path": "edr/CV03-TR-02_REV_B.eprt",
+      "bytes": 13681,
+      "sha256": "30f8573b992b0e09b3244d4c163a655aadf8c83c187d68303ca7ad849ec4b273"
+    },
+    {
+      "path": "edr/CV03-TR-03_REV_B.edrw",
+      "bytes": 35428,
+      "sha256": "ab467d5b3badd7289da70499c25aba5bd0634e8229ed02fdf8f27c98996ff0da"
+    },
+    {
+      "path": "edr/CV03-TR-03_REV_B.eprt",
+      "bytes": 8663,
+      "sha256": "5fe888a63c7583dc5a7825a6b9cf9e7fe820b3f64ace4481b27a1a48ba23cd2a"
+    },
+    {
+      "path": "edr/CV03-TR-04_REV_B.edrw",
+      "bytes": 24241,
+      "sha256": "5793857029c0e097bb9c477ad755400cda9821558631b1a41948da180940b88d"
+    },
+    {
+      "path": "edr/CV03-TR-04_REV_B.eprt",
+      "bytes": 5483,
+      "sha256": "f3129a67a799dbffb11e31f5beec90cf09f15f00e48d51d6318583c3d4a0d135"
+    },
+    {
+      "path": "edr/CV03-TR-05_REV_B.edrw",
+      "bytes": 41566,
+      "sha256": "6e166af5c2ede538bf5065a18094d015ec724c66a758eee8949392be53649772"
+    },
+    {
+      "path": "edr/CV03-TR-05_REV_B.eprt",
+      "bytes": 13023,
+      "sha256": "14a62c788d544b5d5c4f4894f7b31df4d0d76e488a4560982e57f66e88777972"
+    },
+    {
+      "path": "edr/CV03-TR-06_REV_B.edrw",
+      "bytes": 31261,
+      "sha256": "e4ef30fec42f2899a0467e5a1847693ff70cdd5bbaaf8e3a63cd38edcc46da9f"
+    },
+    {
+      "path": "edr/CV03-TR-06_REV_B.eprt",
+      "bytes": 6748,
+      "sha256": "35524aea243f01aa474fbd4fd48a1c3476c7d0a25ba15337374cff0c606634a9"
+    },
+    {
+      "path": "edr/CV03-TR-07_REV_B.edrw",
+      "bytes": 38570,
+      "sha256": "8bcf7762ef7645a7bc6cf069faee10a513a64faca184012aa2d4c0b722c71194"
+    },
+    {
+      "path": "edr/CV03-TR-07_REV_B.eprt",
+      "bytes": 10425,
+      "sha256": "9d86afef296b26224a8df43de9344d02ba414b9bd2ff7a4656ae8df4062fe6ed"
+    },
+    {
+      "path": "edr/CV03-TR-08_REV_B.edrw",
+      "bytes": 38093,
+      "sha256": "c03dc50ea2d890a87450d4f78fc3fef3685a6e634b6c22824935833688b4090b"
+    },
+    {
+      "path": "edr/CV03-TR-08_REV_B.eprt",
+      "bytes": 10334,
+      "sha256": "2d56ef7b49486e6f84a9072d3bf485c35932e69fce5a14de5c57c6120a37391e"
+    },
+    {
+      "path": "edr/CV03-TR-09_REV_B.edrw",
+      "bytes": 27477,
+      "sha256": "4835da7708413adffb8e9a73c503fda2ba946e2d244debc7c41f9b34229cac2f"
+    },
+    {
+      "path": "edr/CV03-TR-09_REV_B.eprt",
+      "bytes": 6122,
+      "sha256": "883348d60274f7fe782b2d66b19c553028b935b0778038292acc570db45dfedb"
+    },
+    {
+      "path": "edr/CV03-TR-10_REV_B.edrw",
+      "bytes": 49529,
+      "sha256": "67d4bd4b40a2d30d5fcdb345871061f827235d7f83dc574cdbf1ea9c85f6b2be"
+    },
+    {
+      "path": "edr/CV03-TR-10_REV_B.eprt",
+      "bytes": 17932,
+      "sha256": "60995b5a7f5e61b0eaa8bbc434c1f5c8c59bbad032c13adad4e50967ba9a2732"
+    },
+    {
+      "path": "edr/CV03-TR-11_REV_B.edrw",
+      "bytes": 42508,
+      "sha256": "289b64c17d75741edf33675765b5a6a46b43eaba764f361271322b82688a74f7"
+    },
+    {
+      "path": "edr/CV03-TR-11_REV_B.eprt",
+      "bytes": 12265,
+      "sha256": "e429a86f78df639a8fa9825528994d68ce4fd40845259df369ae854dd60bd5ec"
+    },
+    {
+      "path": "edr/CV03-TR-12_REV_B.edrw",
+      "bytes": 34167,
+      "sha256": "87110de21094881d83149d41b3cc2ac5eb7dbea493c8315f9e6b41819ecc88b4"
+    },
+    {
+      "path": "edr/CV03-TR-12_REV_B.eprt",
+      "bytes": 7421,
+      "sha256": "b679b5f290228e3b5acdfc531d369873b96c50e8fee1d5a96b9b610e52ad58db"
+    },
+    {
+      "path": "edr/CV03-TR-13_REV_B.edrw",
+      "bytes": 42843,
+      "sha256": "e97030880cb0a37e6634269e65ea68519c00e88da4878f1f105247d46581a6da"
+    },
+    {
+      "path": "edr/CV03-TR-13_REV_B.eprt",
+      "bytes": 12264,
+      "sha256": "4fc32869441df42b2ada2d130e0ff13a441a0568cba6c13e9bddcfc8606e45ca"
+    },
+    {
+      "path": "edr/CV03-TR-14_REV_B.edrw",
+      "bytes": 33234,
+      "sha256": "6ce8be03e8de2596819cdb3d28545f05fe0d53d3fbe61f586ece409f86e29942"
+    },
+    {
+      "path": "edr/CV03-TR-14_REV_B.eprt",
+      "bytes": 7517,
+      "sha256": "2ab619184594af2343b77509d635322bbc6fbfb110c011d02c336fa88e0c7223"
+    },
+    {
+      "path": "edr/CV03-TR-15_REV_B.edrw",
+      "bytes": 50664,
+      "sha256": "04966348fc9aea639f38a0c51ed48837b32c36fb7324f4bd3bddea98a972e5e2"
+    },
+    {
+      "path": "edr/CV03-TR-15_REV_B.eprt",
+      "bytes": 15541,
+      "sha256": "d98e0bbd6ab45fa12183e9d7fee1c345c971f770d2ebd5c97dca2a65af605a10"
+    },
+    {
+      "path": "edr/CV03-TR-16_REV_B.edrw",
+      "bytes": 31124,
+      "sha256": "df74cd5f03c03e4c33596e87939076b5fba48bb2cdcbeecb0d8021e229838f6c"
+    },
+    {
+      "path": "edr/CV03-TR-16_REV_B.eprt",
+      "bytes": 7437,
+      "sha256": "111b1b1e4e439ddc813375b84ff7910441ac462e388760b79760389183c619b5"
+    },
+    {
+      "path": "edr/CV03-TR-17_REV_B.edrw",
+      "bytes": 31870,
+      "sha256": "031f21cb05b9df729a8d6d72b5330ac13c070f66d58b3e0fa0de80dc99c0a01f"
+    },
+    {
+      "path": "edr/CV03-TR-17_REV_B.eprt",
+      "bytes": 7490,
+      "sha256": "63e01bb56855fbd0ee35a3c454519143b536846361a37815982ef53d8e988b5a"
+    },
+    {
+      "path": "edr/CV03-TR-18_REV_B.edrw",
+      "bytes": 40296,
+      "sha256": "f1fd569c580b4a10c46ccc439146628d87e5c95934c84c9ff576624bae421011"
+    },
+    {
+      "path": "edr/CV03-TR-18_REV_B.eprt",
+      "bytes": 10347,
+      "sha256": "7342b33124a27c5c8dee352d66e9064645cd2c5c107f6d2904b29bffe6561117"
+    },
+    {
+      "path": "edr/CV03-TR-19_REV_B.edrw",
+      "bytes": 46096,
+      "sha256": "18242f8f72fccbe6d92c61fa7d275e365f63126d486c61d04b131728aae32645"
+    },
+    {
+      "path": "edr/CV03-TR-19_REV_B.eprt",
+      "bytes": 14598,
+      "sha256": "148aab8e6a8aff2c8c09904195ce5f4294674b9a84733fbcaef1880f97e4c706"
+    },
+    {
+      "path": "edr/CV03-TR-20_REV_B.edrw",
+      "bytes": 45904,
+      "sha256": "75635b86a8afff59972ce654478b027838d5a5a9aaaa46b1a6941eda625e6603"
+    },
+    {
+      "path": "edr/CV03-TR-20_REV_B.eprt",
+      "bytes": 15063,
+      "sha256": "0329ad4cac6a207d4b4dd8fcf28bf9a35e662daf2926a351809c010f5f456036"
+    },
+    {
+      "path": "edr/CV03-TR-21_REV_B.edrw",
+      "bytes": 75736,
+      "sha256": "99feda0a0102f1a102a77a4850fab3aab3f83c79259fcb74998e5501f7b8b910"
+    },
+    {
+      "path": "edr/CV03-TR-21_REV_B.eprt",
+      "bytes": 29950,
+      "sha256": "96dd270acc1ac47e409bd451dc2f226ce52da559f10868ecb5402e6fc475f85f"
+    },
+    {
+      "path": "edr/CV03-TR-22_REV_B.edrw",
+      "bytes": 35632,
+      "sha256": "a5f748492d3d287ee26dddc6381f671e6a1bab836cbdb1e399923117b20d4505"
+    },
+    {
+      "path": "edr/CV03-TR-22_REV_B.eprt",
+      "bytes": 8388,
+      "sha256": "0e49968bf533a2bc42b25aebc92a6a80c0d875169e2c3b09ef8e0a3778aef2ef"
+    },
+    {
+      "path": "edr/CV03-TR-23_REV_B.edrw",
+      "bytes": 34573,
+      "sha256": "ba6897cfd66887ccea08344968906b8bf31aab0d6aaf968f59008bef324c4953"
+    },
+    {
+      "path": "edr/CV03-TR-23_REV_B.eprt",
+      "bytes": 8384,
+      "sha256": "cbc335355083839d0c7e22f99074fc9622c8bb0e157fa70e8cd949fbfbfde7d9"
+    },
+    {
+      "path": "edr/CV03-TR-24_REV_B.edrw",
+      "bytes": 38302,
+      "sha256": "40555fcb925411251103be37cd62994a2f29292e1e1af2d70c58df86b3b58748"
+    },
+    {
+      "path": "edr/CV03-TR-24_REV_B.eprt",
+      "bytes": 10498,
+      "sha256": "7ec7ef19dfb260f791b847429f9ebf6c85d2b76803f44ca4f2d6e40b8232445a"
+    },
+    {
+      "path": "edr/CV03-TR-26_REV_B.edrw",
+      "bytes": 29332,
+      "sha256": "3d19d02ee7fa0151b7e081aa12c7f3c3fdd9674a3153a02e1c10842105c8b3fd"
+    },
+    {
+      "path": "edr/CV03-TR-26_REV_B.eprt",
+      "bytes": 8591,
+      "sha256": "17fc841a9592adae4165daa62616858bfb3254b0864d9160320dc8b19c16c462"
+    },
+    {
+      "path": "edr/CV03-TR-27_REV_B.edrw",
+      "bytes": 34081,
+      "sha256": "34fcd45a69755d6e014f2480eb80a1706e2a5f33be59fe1ab1f33f8658f7aa90"
+    },
+    {
+      "path": "edr/CV03-TR-27_REV_B.eprt",
+      "bytes": 8582,
+      "sha256": "890d1fb5e7f2d847e047273e00d1521f515e908c4fd8c7190ecc9164c632bfe7"
+    },
+    {
+      "path": "edr/CV03-TR-A01_REV_A.easm",
+      "bytes": 3189402,
+      "sha256": "d405ed31cb33c04eccfdbf5a45a9a9e5f557be84e531f906fbb3eedbc1fb629a"
+    },
+    {
+      "path": "edr/CV03-TR-A01_REV_A.edrw",
+      "bytes": 3755353,
+      "sha256": "e44cbcfbf0314a5943a5d5223c21120074b225a44decc89fce086f1fafa445f8"
+    },
+    {
+      "path": "edr/EYE TO EYE 5 LEAF 60MM SUSPENSION_REV_.easm",
+      "bytes": 1091914,
+      "sha256": "1ced58f83d232bffb7ef4309ef81144a669a15da18d426d5cb6eb7dfefe043a3"
+    },
+    {
+      "path": "edr/HANGER-F_REV_A.eprt",
+      "bytes": 7492,
+      "sha256": "333e35195541463b1f9428f23a7e8a68b8ce2ef9f22b74388e9767c1654b253c"
+    },
+    {
+      "path": "edr/HANGER-R_REV_A.eprt",
+      "bytes": 6617,
+      "sha256": "84feede43e767f90568ccd844224c1bbfbcc56e1e497432e5c3f966676bbbe40"
+    },
+    {
+      "path": "edr/HUB_REV_.easm",
+      "bytes": 588992,
+      "sha256": "418fb72d8fa17ebc78a7c6808bd0b10562d92fba4d5627d62e4196f7d4564862"
+    },
+    {
+      "path": "edr/MIRRORAXLE HUB 2200 LBS_1_1_REV_.eprt",
+      "bytes": 278692,
+      "sha256": "65eff781bf777c282cb1d07af9cf424531e34f7d3cf4699505ccbd97da376b97"
+    },
+    {
+      "path": "edr/MUDGUARD_REV_A.eprt",
+      "bytes": 54463,
+      "sha256": "789f2884d58fb76884039b35c256de0c39a5e1751225dc66e5547d2260c36566"
+    },
+    {
+      "path": "edr/OEM-JOCKEYWHEEL_REV_A.eprt",
+      "bytes": 132029,
+      "sha256": "46992e9e494b4b9c4b51b207f91611bbddeb23d2446a05bb3ddd79f3ba56be5e"
+    },
+    {
+      "path": "edr/R104-CMARK_REV_A.eprt",
+      "bytes": 5962,
+      "sha256": "bd8288835ca5f50b0d5e3112fa9b814f478e4c946c4ea8a1d284b997c485cd3b"
+    },
+    {
+      "path": "edr/REGO PLATE LIGHT_REV_.eprt",
+      "bytes": 24213,
+      "sha256": "77314cb617041bad297a160627de2c40314b3dd1e25187d91baf580217f6a9bd"
+    },
+    {
+      "path": "edr/SKF_L 44649_610_1_1_REV_.eprt",
+      "bytes": 120946,
+      "sha256": "3c9f8195a493ef3b388e71e9bc55c834f6d0b6fda1176cf25dc802ecc0c65e2f"
+    },
+    {
+      "path": "edr/SPINDLE NUT 1 INCH_1_REV_.eprt",
+      "bytes": 127844,
+      "sha256": "34079028c0fd2ef00bd118723ec3c1f7325cad22319ad010cf7aac1318b23e07"
+    },
+    {
+      "path": "edr/SPINDLE WASHER 1 INCH_1_REV_.eprt",
+      "bytes": 6631,
+      "sha256": "9116f2a99770723851d57d219a6c6b292867117ec3a9907d8b4f40ebbdd9ffc2"
+    },
+    {
+      "path": "edr/STUD BOLT 1-2 X 20_REV_.eprt",
+      "bytes": 44903,
+      "sha256": "ff179b234ddb15f018bff21753c9b57b9eefd4cf54cdecb77eb36fc083d2df4f"
+    },
+    {
+      "path": "edr/SUSPENSIONKIT-93IN_REV_A.easm",
+      "bytes": 2178446,
+      "sha256": "b6aa3162bda4e2ca9510ba728d1593203e8a3d911d2c5a287a8d9a95b61eef83"
+    },
+    {
+      "path": "edr/WHEEL 155-80-R13_REV_.eprt",
+      "bytes": 231089,
+      "sha256": "348928ce27f500234fb6528293bb402db4f7ddebf184f96826e45fd97aba1b8a"
+    },
+    {
+      "path": "pdf/CV03-F01_REV_A.pdf",
+      "bytes": 719860,
+      "sha256": "ebc9b4026b8080226aee34c157ffdb4f9275d99718f01e011e0b2ea56b5a32a1"
+    },
+    {
+      "path": "pdf/CV03-F02_REV_B.pdf",
+      "bytes": 207299,
+      "sha256": "89b72c1886db8528ec0b9e78e3481e7b51b4e85ac6ca15939d512e19c6d9afa7"
+    },
+    {
+      "path": "pdf/CV03-TR-01_REV_B.pdf",
+      "bytes": 76178,
+      "sha256": "ef749c065f070108ec6f36c07c784fad4b3f1917f78074d0ccd5a01ecd494b41"
+    },
+    {
+      "path": "pdf/CV03-TR-02_REV_B.pdf",
+      "bytes": 72756,
+      "sha256": "5d0b15943cf2a2623b6e2509e49045da82076829c5deffdc88d2bd653ecf11bd"
+    },
+    {
+      "path": "pdf/CV03-TR-03_REV_B.pdf",
+      "bytes": 58913,
+      "sha256": "dea36f403afcacc902b525abb38c4f6cc0b6a35706ad19d06bd19a9f5de6f513"
+    },
+    {
+      "path": "pdf/CV03-TR-04_REV_B.pdf",
+      "bytes": 54894,
+      "sha256": "c10a08700c6dd2da97c28a60f9f95585ac555e1ab60d2efafb26531373e7bb56"
+    },
+    {
+      "path": "pdf/CV03-TR-05_REV_B.pdf",
+      "bytes": 80041,
+      "sha256": "dffe389af3871024c004c685edccf9a80edce6336f72e08e05ec4cbea0ced3ff"
+    },
+    {
+      "path": "pdf/CV03-TR-06_REV_B.pdf",
+      "bytes": 56996,
+      "sha256": "2a89fe13ce755192e622406bff94a7e385d37db6fb57dc60f65b67c9bba24e7a"
+    },
+    {
+      "path": "pdf/CV03-TR-07_REV_B.pdf",
+      "bytes": 76593,
+      "sha256": "801ae39652893342e49f292db66ad4102dbe6fab6bbb6940f96926f7f9e69420"
+    },
+    {
+      "path": "pdf/CV03-TR-08_REV_B.pdf",
+      "bytes": 74791,
+      "sha256": "e5c2e191541349251c7659d917dc67eacd593d2f2c688bc241460dcf25ccd0d5"
+    },
+    {
+      "path": "pdf/CV03-TR-09_REV_B.pdf",
+      "bytes": 56033,
+      "sha256": "f4491719e8b3a14b9a359c39b3cfacbc9e641e0c2ac14de5dd640db9d43ec45c"
+    },
+    {
+      "path": "pdf/CV03-TR-10_REV_B.pdf",
+      "bytes": 63482,
+      "sha256": "7d8bf09fa12901baefe12194e97b1fb5a763f35669f481aacc8996119c93d34d"
+    },
+    {
+      "path": "pdf/CV03-TR-11_REV_B.pdf",
+      "bytes": 81182,
+      "sha256": "b3f7aa1476640c20647b9e1505d411d050dd7bcb78b21c72e8726e8a7a2f7438"
+    },
+    {
+      "path": "pdf/CV03-TR-12_REV_B.pdf",
+      "bytes": 64709,
+      "sha256": "09ee8633d46c288d3c3594517bd2041fc171d0ab0535edcd1d9750dd313217df"
+    },
+    {
+      "path": "pdf/CV03-TR-13_REV_B.pdf",
+      "bytes": 82900,
+      "sha256": "30c098873c78bf3c8dcff819236ee38be954fd889ccf3c1d00312c8ec7eb4e39"
+    },
+    {
+      "path": "pdf/CV03-TR-14_REV_B.pdf",
+      "bytes": 61880,
+      "sha256": "c883eb66aa7a4e25a745b029bec4194831fecb06dc65e06cc58755284dbcdae6"
+    },
+    {
+      "path": "pdf/CV03-TR-15_REV_B.pdf",
+      "bytes": 73383,
+      "sha256": "37e5f4a13a2ead7be667faf0ad39d8f49fe161431685418e8b0b9f33cd5efe04"
+    },
+    {
+      "path": "pdf/CV03-TR-16_REV_B.pdf",
+      "bytes": 75030,
+      "sha256": "3377e8511dde76ff56a0e724a469a09cb6947964bdaff25f260b926b5e13a9e6"
+    },
+    {
+      "path": "pdf/CV03-TR-17_REV_B.pdf",
+      "bytes": 76808,
+      "sha256": "27a8cbdcce60c4b42b37b403b9f98a1dc1bb30e528445329592c5464f75d96f5"
+    },
+    {
+      "path": "pdf/CV03-TR-18_REV_B.pdf",
+      "bytes": 75553,
+      "sha256": "9d90eb2efb89128d53a089f2274ad0cda81db534bb3d4164734f63cf7af03162"
+    },
+    {
+      "path": "pdf/CV03-TR-19_REV_B.pdf",
+      "bytes": 75911,
+      "sha256": "377ff092e6dfe2358fbb20ecf7fad2640dfd01656bad701cc6f4fe8791116f70"
+    },
+    {
+      "path": "pdf/CV03-TR-20_REV_B.pdf",
+      "bytes": 76033,
+      "sha256": "ca0f1029cbbe92974b16dc3240d0e605bf71076491e86441656410266a953a25"
+    },
+    {
+      "path": "pdf/CV03-TR-21_REV_B.pdf",
+      "bytes": 83694,
+      "sha256": "d8906ac15c82b7adfd7181e0637eedba65a3a3e7aa7105eb189369e25e920e80"
+    },
+    {
+      "path": "pdf/CV03-TR-22_REV_B.pdf",
+      "bytes": 75306,
+      "sha256": "a75716f1df6cb45e3b0033bf4212a749a3f814d64405042502d2a298ba6e11af"
+    },
+    {
+      "path": "pdf/CV03-TR-23_REV_B.pdf",
+      "bytes": 73568,
+      "sha256": "af32ec5848080aabc5ac1e8f71576453b2d2a80db08487e12ffe28a9e06ceabd"
+    },
+    {
+      "path": "pdf/CV03-TR-24_REV_B.pdf",
+      "bytes": 76619,
+      "sha256": "0a42ada5e41cd3f1917dce1fae4cac3bdb02fdb4df31e957c66d56a2f4e63f30"
+    },
+    {
+      "path": "pdf/CV03-TR-26_REV_B.pdf",
+      "bytes": 65507,
+      "sha256": "8f31973ab699a8b3db465abc3dd46f0d9c90741e74346916627daf75ec747c16"
+    },
+    {
+      "path": "pdf/CV03-TR-27_REV_B.pdf",
+      "bytes": 80110,
+      "sha256": "9347c86def48d1d4d2ae411baac83806e6d9667f7723f382e92b09cb2899cde3"
+    },
+    {
+      "path": "pdf/CV03-TR-A01_REV_A.pdf",
+      "bytes": 463423,
+      "sha256": "cc3fd441563a0b0c5fb41947f3a1e0ac22371d5e455a39a81264d6e316642126"
+    },
+    {
+      "path": "ply/40MM AXLE SEVERAL SIZES_REV_.ply",
+      "bytes": 483067,
+      "sha256": "526e4a2ed028bfb401a9db192a04a2fe55a675b656a27f3d824b93ae243815fe"
+    },
+    {
+      "path": "ply/4177-35-CHAIN_REV_1.ply",
+      "bytes": 1553127,
+      "sha256": "a9cfe538e743d7d8a52d875fc713f8591b38c477232a26929d196797d098d67f"
+    },
+    {
+      "path": "ply/ADR-HITCH_REV_A.ply",
+      "bytes": 299698,
+      "sha256": "83bf1c4ab683c659ccbb7dd902055ba468fceb4b2cdfbd3ea88fd65a02b62bb6"
+    },
+    {
+      "path": "ply/ADR-LED-IND_REV_.ply",
+      "bytes": 64607,
+      "sha256": "dc80db9935fbf0170a43079673e96b8dbded2f4560fc69594b8d786a71a784b8"
+    },
+    {
+      "path": "ply/ADR-REF-A_REV_A.ply",
+      "bytes": 52369,
+      "sha256": "99504d476b26bc3132292da1f8b903096c87213308679f836d22424f011a1778"
+    },
+    {
+      "path": "ply/ADR-REF-W_REV_A.ply",
+      "bytes": 52369,
+      "sha256": "3f718ddf9cb112e79ad3d85f48f64673827c88be3159131c195b93f009d2b1fd"
+    },
+    {
+      "path": "ply/ADR-REG-PLATE_REV_.ply",
+      "bytes": 122023,
+      "sha256": "c0bd44067b4d72ff206b31c18452c5601bdd248849397ba305151c4d799b7b8d"
+    },
+    {
+      "path": "ply/ADR-VIN-PLATE_REV_A.ply",
+      "bytes": 10251,
+      "sha256": "478071ca9dcecd167b3fc858a501e9d812c8334cb48830102f7ad20da6bcb9d4"
+    },
+    {
+      "path": "ply/CV03-F01_REV_A.ply",
+      "bytes": 632981,
+      "sha256": "3dd76b22ba6b0a6f2058e894aa3bc8232c2c5646ac3506623a148c4c925908a8"
+    },
+    {
+      "path": "ply/CV03-F02_REV_B.ply",
+      "bytes": 4016792,
+      "sha256": "aef5d669abf7dc239ad348a5e8e2c210a312e83559006cd30d76d2aac89cb172"
+    },
+    {
+      "path": "ply/CV03-TR-01_REV_B.ply",
+      "bytes": 28728,
+      "sha256": "f7a4f179823b43e1777b7f1940fe15c097a50ecf8557c49e69f0dbe87ed8ce9a"
+    },
+    {
+      "path": "ply/CV03-TR-02_REV_B.ply",
+      "bytes": 28728,
+      "sha256": "d19540f6a692a8a58b0b700b52b01f5b5514ba6c9b5587ce6f8130b0001ffa5e"
+    },
+    {
+      "path": "ply/CV03-TR-03_REV_B.ply",
+      "bytes": 18239,
+      "sha256": "dbe1eadd27644e2cd5a220cc2a0791c180b9e8c1c8bcc3e7caebea060950de56"
+    },
+    {
+      "path": "ply/CV03-TR-04_REV_B.ply",
+      "bytes": 4302,
+      "sha256": "edeba0dc431bc9e299f76220fc361e73ee8fca6f07f99f44155d9cadc4421c1e"
+    },
+    {
+      "path": "ply/CV03-TR-05_REV_B.ply",
+      "bytes": 27694,
+      "sha256": "32d0b40c0be07e6680c1a451ac7457c3c5e0009797e3db3bd1cd6cf03946f732"
+    },
+    {
+      "path": "ply/CV03-TR-06_REV_B.ply",
+      "bytes": 6163,
+      "sha256": "bb2889ef268231468738dcabd58a79e29141479ae3d614e68b2b929148466ab1"
+    },
+    {
+      "path": "ply/CV03-TR-07_REV_B.ply",
+      "bytes": 23968,
+      "sha256": "30dec52b24fb86d850525755d45e4d9c0e06eae5345305bea4d1d74ba8e0f22a"
+    },
+    {
+      "path": "ply/CV03-TR-08_REV_B.ply",
+      "bytes": 24060,
+      "sha256": "b53d27f0ba335191dd01d06ef338be118ccb5894ff88ffa8721acd073ff11755"
+    },
+    {
+      "path": "ply/CV03-TR-09_REV_B.ply",
+      "bytes": 6879,
+      "sha256": "7cdb56bd31e53986390a5dd878854b1b6d8a9fd475cb73bb40f82918c4e5d4fc"
+    },
+    {
+      "path": "ply/CV03-TR-10_REV_B.ply",
+      "bytes": 47443,
+      "sha256": "f0ec02685d9e269c3124a819ec63d621aa3a88b72f1210a0c8fb1c865190f707"
+    },
+    {
+      "path": "ply/CV03-TR-11_REV_B.ply",
+      "bytes": 28818,
+      "sha256": "517430867a7dc861809f2aac28d03d90c9d31556a47d16cf97e98146456f8a4e"
+    },
+    {
+      "path": "ply/CV03-TR-12_REV_B.ply",
+      "bytes": 8623,
+      "sha256": "8d70354664c16ca3b0087308dad471f44d7b7eaa70e782edf1ab7d5522d55e37"
+    },
+    {
+      "path": "ply/CV03-TR-13_REV_B.ply",
+      "bytes": 28772,
+      "sha256": "62414f62bdc40015f6a58e8977dddf6c5fe10fcc0fc8496233f94b8b5bc29619"
+    },
+    {
+      "path": "ply/CV03-TR-14_REV_B.ply",
+      "bytes": 8623,
+      "sha256": "de7e0e70954628b6aefa1577003f2eff1faa5bf0a75d88d71919dc4fdbb227d2"
+    },
+    {
+      "path": "ply/CV03-TR-15_REV_B.ply",
+      "bytes": 44496,
+      "sha256": "0e857ce3d22c728f316a79d77b4a5000749854df3c55179466062496fa7fe5f0"
+    },
+    {
+      "path": "ply/CV03-TR-16_REV_B.ply",
+      "bytes": 13135,
+      "sha256": "2f18cae8ed5babd06063512cca732b37f7c562eedd58f4cb20e257fc716e31cf"
+    },
+    {
+      "path": "ply/CV03-TR-17_REV_B.ply",
+      "bytes": 13135,
+      "sha256": "e1ed62f485c67870a1c3468a96d4866da99ea52c0eaec9616b57097a3238d566"
+    },
+    {
+      "path": "ply/CV03-TR-18_REV_B.ply",
+      "bytes": 24060,
+      "sha256": "103014dbee6381c9106d07ae08354703bb659b8867173ece822b3c57225fe796"
+    },
+    {
+      "path": "ply/CV03-TR-19_REV_B.ply",
+      "bytes": 43576,
+      "sha256": "73a499d77d015bec880f78938a6c260ff23b7ea7f4e178258ead276bb0b16809"
+    },
+    {
+      "path": "ply/CV03-TR-20_REV_B.ply",
+      "bytes": 44312,
+      "sha256": "1d73c3c0e2722e7d839693f3374b07e51b2897ed6b867cb008cfcf3ade49474c"
+    },
+    {
+      "path": "ply/CV03-TR-21_REV_B.ply",
+      "bytes": 96673,
+      "sha256": "893e6dfa04c5aa1ac79752ebeec1535b2a585bb9bfebd851c33a907f28fd63d1"
+    },
+    {
+      "path": "ply/CV03-TR-22_REV_B.ply",
+      "bytes": 16815,
+      "sha256": "400271233b80b9e0989219850db0c072181cd356f4763bf6a34a30d99f0345e1"
+    },
+    {
+      "path": "ply/CV03-TR-23_REV_B.ply",
+      "bytes": 16815,
+      "sha256": "6da16a256214901d64c318cfa1ab6f4cd3ba575d5d8595b6cfa62d700b406589"
+    },
+    {
+      "path": "ply/CV03-TR-24_REV_B.ply",
+      "bytes": 23968,
+      "sha256": "50cfc790ed2af97a6445c1206876dccc9b7ab2bba97d0dcb1570986aa3389ac4"
+    },
+    {
+      "path": "ply/CV03-TR-26_REV_B.ply",
+      "bytes": 16743,
+      "sha256": "a0d97861df12d2294ae951da2cb9318bdfeda50aa386a020fee0eaf959fbd7aa"
+    },
+    {
+      "path": "ply/CV03-TR-27_REV_B.ply",
+      "bytes": 17019,
+      "sha256": "cfab9475473d626545bb63e81c486b2b4a9f6dac1f621fe3373dbb0ddd39f772"
+    },
+    {
+      "path": "ply/CV03-TR-A01_REV_A.ply",
+      "bytes": 4344618,
+      "sha256": "41e57bc0402ca5d2919c27928be2a4a04dc686746cdd3e405171eb7881b1eacb"
+    },
+    {
+      "path": "ply/EYE TO EYE 5 LEAF 60MM SUSPENSION_REV_.ply",
+      "bytes": 4331160,
+      "sha256": "4c290e244a43589affdff79dede085c9cb211fd308ba878619aede28006d359f"
+    },
+    {
+      "path": "ply/HANGER-F_REV_A.ply",
+      "bytes": 13781,
+      "sha256": "8f5e08462cd22f39847f1b911e103993e6f585647172cd7c727c840beda0a1bc"
+    },
+    {
+      "path": "ply/HANGER-R_REV_A.ply",
+      "bytes": 9135,
+      "sha256": "df01190b5d53b49a9c27fbc2defc186c311656957c2e9da469ddb818ff25a06a"
+    },
+    {
+      "path": "ply/HUB_REV_.ply",
+      "bytes": 2563168,
+      "sha256": "1652caa698d96d24bfe88a2c41b88a1a8ecec17c863fb7ad58662609a47c40f6"
+    },
+    {
+      "path": "ply/MIRRORAXLE HUB 2200 LBS_1_1_REV_.ply",
+      "bytes": 721287,
+      "sha256": "df3f7026bb0517f3bafead088bf1b94dac3f9a3d96e9bed901ab99f271c83e3f"
+    },
+    {
+      "path": "ply/MUDGUARD_REV_A.ply",
+      "bytes": 117709,
+      "sha256": "1f56b07e8cdaf8a302c323a3539956f34e35b60fb7916727b5e688edd0b98c7f"
+    },
+    {
+      "path": "ply/OEM-JOCKEYWHEEL_REV_A.ply",
+      "bytes": 351426,
+      "sha256": "be4b241e6e637a4083b298e24b186b34e9e10aac053dcc4c1ade52c018b5d918"
+    },
+    {
+      "path": "ply/R104-CMARK_REV_A.ply",
+      "bytes": 3730,
+      "sha256": "1bb9229a117648f8c08b969a6ec37ca34d7e488c898b5f73fe2b4faafec29ac3"
+    },
+    {
+      "path": "ply/REGO PLATE LIGHT_REV_.ply",
+      "bytes": 103141,
+      "sha256": "c36f86a03924555bbc5411bbe7341545bb809c3bd81081348edfcfa2ba5c2105"
+    },
+    {
+      "path": "ply/SKF_L 44649_610_1_1_REV_.ply",
+      "bytes": 428500,
+      "sha256": "1544d2a2e32d07c8b7f71c78f86162f015b88704641fff2fcd791f3184094001"
+    },
+    {
+      "path": "ply/SPINDLE NUT 1 INCH_1_REV_.ply",
+      "bytes": 182471,
+      "sha256": "db16f8a5c8b61f76a891b9b3b5bb47f7530223f958b7f737822dc0a115ead49c"
+    },
+    {
+      "path": "ply/SPINDLE WASHER 1 INCH_1_REV_.ply",
+      "bytes": 11579,
+      "sha256": "e9dbe21b9f15c91b0ebe7b74616741c7e5de055fca5f3376c8d26ea80d18dff8"
+    },
+    {
+      "path": "ply/STUD BOLT 1-2 X 20_REV_.ply",
+      "bytes": 158751,
+      "sha256": "70cb1e36badf869e6864481adb07502cc616ff001d67f5ffdcf7c0e5834fef6b"
+    },
+    {
+      "path": "ply/SUSPENSIONKIT-93IN_REV_A.ply",
+      "bytes": 16486269,
+      "sha256": "3b2051beb992b2bfa67e813045b62a5d7ed5c75815636de3e0e6eb924a8f3d2b"
+    },
+    {
+      "path": "ply/WHEEL 155-80-R13_REV_.ply",
+      "bytes": 1094797,
+      "sha256": "a788171ba18f2fa9518de4b7eb6f58578f6d9640620b9955b4516230c558bb56"
+    },
+    {
+      "path": "png/40MM AXLE SEVERAL SIZES_REV_.png",
+      "bytes": 29116,
+      "sha256": "49f63370e13a87a7648aab4330e9dd06ec6cfc12109eb03c54630ca551d26c24"
+    },
+    {
+      "path": "png/4177-35-CHAIN_REV_1.png",
+      "bytes": 165649,
+      "sha256": "d5a9b7095ca59c786e1b623e7fbd9850dda846cbb92c3a1091469dfd678653db"
+    },
+    {
+      "path": "png/4177-35-CHAIN_REV_1.thumbnail.png",
+      "bytes": 1629,
+      "sha256": "ef21a55cae10804c368b35d9c579f2272192968cf67513490d1612db9181eafe"
+    },
+    {
+      "path": "png/ADR-HITCH_REV_A.png",
+      "bytes": 227373,
+      "sha256": "c04515ed35e53bd80eeef6a8ba03061f452f71a2d87b62455e544609c4a6904a"
+    },
+    {
+      "path": "png/ADR-HITCH_REV_A.thumbnail.png",
+      "bytes": 3285,
+      "sha256": "e4d37bb400d3e0c7804075c9989ade8f0db3be6af0c4669f41fc70675c3b933d"
+    },
+    {
+      "path": "png/ADR-LED-IND_REV_.png",
+      "bytes": 203810,
+      "sha256": "45cd4a813fc9055315dba240d3bd319a7a73a298af46c803a5d0943c83dab89b"
+    },
+    {
+      "path": "png/ADR-REF-A_REV_A.png",
+      "bytes": 238058,
+      "sha256": "a0a046a475b1c9a84f512631e96d1b92ce4c078fa888501655b9ab8a3a3ac640"
+    },
+    {
+      "path": "png/ADR-REF-A_REV_A.thumbnail.png",
+      "bytes": 3959,
+      "sha256": "4a65a5b66cda6863f130982372a143c0c0db7be862b7abf279e98bdcbf9ab8b9"
+    },
+    {
+      "path": "png/ADR-REF-W_REV_A.png",
+      "bytes": 64711,
+      "sha256": "2606e1bed6654ac6ddc909e502ab13cd04a42743c9e2ae3e978f6833bb3c24d8"
+    },
+    {
+      "path": "png/ADR-REF-W_REV_A.thumbnail.png",
+      "bytes": 1687,
+      "sha256": "2a82c682590d2e4813dfce430c691db55285abda0cc44d2bf40d2a65ef5cfffd"
+    },
+    {
+      "path": "png/ADR-REG-PLATE_REV_.png",
+      "bytes": 189395,
+      "sha256": "06debddbee003ff9faf5457c66ea83fb45446c5cde11564426678da414c22a29"
+    },
+    {
+      "path": "png/ADR-VIN-PLATE_REV_A.png",
+      "bytes": 208730,
+      "sha256": "c64bdaedd58a38f3a6b6946fcd7a89e614609ef38ba9af2cc4541406da85f938"
+    },
+    {
+      "path": "png/ADR-VIN-PLATE_REV_A.thumbnail.png",
+      "bytes": 1646,
+      "sha256": "9561cc06524b7d8eba854d94cc556d1d6a5da89a5b402efbd9e3255ca7b36417"
+    },
+    {
+      "path": "png/CV03-F01_REV_A.png",
+      "bytes": 235526,
+      "sha256": "8dfe65c477d5f8247fc341105ccf07a6241a387ecd2718c8c883c1952db9cacf"
+    },
+    {
+      "path": "png/CV03-F01_REV_A.thumbnail.png",
+      "bytes": 9944,
+      "sha256": "c575127bc2039101fab662cac03e0d9b46f88d150444bca23075cf5b45e4b286"
+    },
+    {
+      "path": "png/CV03-F01_REV_A_DWG.png",
+      "bytes": 187638,
+      "sha256": "e7b0af64ac28b8d5ed678a03408c1b474f29d30f5e8860456790bd7a19cd05f7"
+    },
+    {
+      "path": "png/CV03-F02_REV_B.png",
+      "bytes": 143988,
+      "sha256": "057558307fa1bfa6d05d1d6a82f9c70ca885adc07d89cabcf9fb50d0d4de71bd"
+    },
+    {
+      "path": "png/CV03-F02_REV_B.thumbnail.png",
+      "bytes": 1533,
+      "sha256": "353bb8dbabac2041d682b94212647020fe159a1fb130d48b0e05accab621f6ac"
+    },
+    {
+      "path": "png/CV03-F02_REV_B_DWG.png",
+      "bytes": 155822,
+      "sha256": "60337429b2c683554e3d60fe0cb2ea7295436c078f3444263fe1dbf9fb34bebb"
+    },
+    {
+      "path": "png/CV03-TR-01_REV_B.png",
+      "bytes": 70530,
+      "sha256": "7d95ccc3307864add268c2d59b9fca3ed07412ce27aeaac7dff4b8d583d180ec"
+    },
+    {
+      "path": "png/CV03-TR-01_REV_B.thumbnail.png",
+      "bytes": 1507,
+      "sha256": "d96a162d03df1086dde1cc3c29b3e02f5338d0b90f0956fac877f30e214dee55"
+    },
+    {
+      "path": "png/CV03-TR-01_REV_B_DWG.png",
+      "bytes": 50314,
+      "sha256": "ec61b4213e73f0ec0ebb9b18d78453b3d3aa8b70ad81053199c964afa428618a"
+    },
+    {
+      "path": "png/CV03-TR-02_REV_B.png",
+      "bytes": 52946,
+      "sha256": "64bca39a3d33d875462ab6edcf59fb13bd264e4b9b20056e9ef0caa9bc99f030"
+    },
+    {
+      "path": "png/CV03-TR-02_REV_B.thumbnail.png",
+      "bytes": 1156,
+      "sha256": "e8fa8e0af7671e76582c1c28460a3bfc2d35ffbcb46473be9a26906e349da1fb"
+    },
+    {
+      "path": "png/CV03-TR-02_REV_B_DWG.png",
+      "bytes": 48036,
+      "sha256": "cde8750938e0a18e52432231f578ef3c4649ddc18933f3570483d7377866fab6"
+    },
+    {
+      "path": "png/CV03-TR-03_REV_B.png",
+      "bytes": 55362,
+      "sha256": "56b5090dbfdf8158b96ec9eaac9114f1cca858dc8a47d90c6bebcfba759fb54d"
+    },
+    {
+      "path": "png/CV03-TR-03_REV_B.thumbnail.png",
+      "bytes": 2246,
+      "sha256": "8850812c867da8ef84e26eaea5bc4ab4779e2cfa5eeaaa6107973a0296c92a4a"
+    },
+    {
+      "path": "png/CV03-TR-03_REV_B_DWG.png",
+      "bytes": 34929,
+      "sha256": "af5de0f8e3f25ed3c9b2e5f4f4772a5cc7f079b3c8f9786faa889a18869bf4d7"
+    },
+    {
+      "path": "png/CV03-TR-04_REV_B.png",
+      "bytes": 48478,
+      "sha256": "85b213478290c1e73bca69754931f04be5febecb295204961eda0d2e3c15c8d4"
+    },
+    {
+      "path": "png/CV03-TR-04_REV_B.thumbnail.png",
+      "bytes": 1997,
+      "sha256": "484f724284d2e19d1a06b0a1057c2e19776fb6d20a661574b62c25ae3ea22f3a"
+    },
+    {
+      "path": "png/CV03-TR-04_REV_B_DWG.png",
+      "bytes": 33171,
+      "sha256": "5faecbbf4c1edd6e58464fa10e46e69c5ca6298d1d653e15307ecd283bef66f2"
+    },
+    {
+      "path": "png/CV03-TR-05_REV_B.png",
+      "bytes": 124855,
+      "sha256": "f419c29b2445fa9ecdf33e989d7b91f5ea956423f04a76912f94885d7efd4bd6"
+    },
+    {
+      "path": "png/CV03-TR-05_REV_B.thumbnail.png",
+      "bytes": 2718,
+      "sha256": "6ef7a10178f2aec252003adb56f5c9963476bffb71b5a89cec744116c2f481b0"
+    },
+    {
+      "path": "png/CV03-TR-05_REV_B_DWG.png",
+      "bytes": 55061,
+      "sha256": "2453ea2aeb3ab4576e6cc0c3ed250f149c6b95b04cb0e0374266509e2717f399"
+    },
+    {
+      "path": "png/CV03-TR-06_REV_B.png",
+      "bytes": 42799,
+      "sha256": "c4f6614f88f63de4dcd5cd06b73954bdb86fc472d2aba1e6be015d27a43dda9f"
+    },
+    {
+      "path": "png/CV03-TR-06_REV_B.thumbnail.png",
+      "bytes": 3029,
+      "sha256": "5d7ca5d874fd4c5f732af1e33741fe1e46b8ea414fc7500c0c99e01d20e7da72"
+    },
+    {
+      "path": "png/CV03-TR-06_REV_B_DWG.png",
+      "bytes": 31851,
+      "sha256": "591a4bd11fc885e520e90478fd7fec411a7d8c34a8ab9de9e1f1954acd6945cc"
+    },
+    {
+      "path": "png/CV03-TR-07_REV_B.png",
+      "bytes": 138720,
+      "sha256": "48b4c050b8b7395115748c65145b6dc12f8473f2f4d10741622cfc8188604a1c"
+    },
+    {
+      "path": "png/CV03-TR-07_REV_B.thumbnail.png",
+      "bytes": 2868,
+      "sha256": "9eb05fb955985085ef4f45f0687f29fbf13fafdce63233e25b126ba7253218ea"
+    },
+    {
+      "path": "png/CV03-TR-07_REV_B_DWG.png",
+      "bytes": 47027,
+      "sha256": "d55ccaca4e3f299bca90a07c10f169578188b892d8060dbc5fac96fad4be0395"
+    },
+    {
+      "path": "png/CV03-TR-08_REV_B.png",
+      "bytes": 156336,
+      "sha256": "ff6db60b56df50b6d2bcf02175ba9c68da58c9a2f4f91a3ddfd6c838113b85bf"
+    },
+    {
+      "path": "png/CV03-TR-08_REV_B.thumbnail.png",
+      "bytes": 3483,
+      "sha256": "3fa9a460d8beb23da078fd446cb3a536fc3ba15cc853fcb96b26228bd502fc33"
+    },
+    {
+      "path": "png/CV03-TR-08_REV_B_DWG.png",
+      "bytes": 48510,
+      "sha256": "e051311f05cca4cc03bab84ce48a7d06a0d614c938af5fc6ce91ab034237438a"
+    },
+    {
+      "path": "png/CV03-TR-09_REV_B.png",
+      "bytes": 46884,
+      "sha256": "6c2a644d0772adcad701b2a687baacacc3df05bb6179872cfcef29ab94dec499"
+    },
+    {
+      "path": "png/CV03-TR-09_REV_B.thumbnail.png",
+      "bytes": 2184,
+      "sha256": "eb5d9b6b8e9a8246ff354892f9176f9beab5844562d0f38118c217d9ad5a2d38"
+    },
+    {
+      "path": "png/CV03-TR-09_REV_B_DWG.png",
+      "bytes": 33979,
+      "sha256": "854059d7105d3f08055e23e0ebf85a25dfb364d048fdf163ae9b075301485e97"
+    },
+    {
+      "path": "png/CV03-TR-10_REV_B.png",
+      "bytes": 132690,
+      "sha256": "47e76b0aa38086649786b95a8b551d44aa3859398c99dcb894b59f0de3b58bce"
+    },
+    {
+      "path": "png/CV03-TR-10_REV_B.thumbnail.png",
+      "bytes": 2732,
+      "sha256": "d8d6aada3e57a8e5ab9955e1fb8425242041f6df4628541a37283526588c7b47"
+    },
+    {
+      "path": "png/CV03-TR-10_REV_B_DWG.png",
+      "bytes": 41083,
+      "sha256": "a2f4ff46254faff77786ea13ab93bc2b3812a697f92066cb6bef0c79cd358fa0"
+    },
+    {
+      "path": "png/CV03-TR-11_REV_B.png",
+      "bytes": 130670,
+      "sha256": "d15d08ca2115085197fd61a083fa3dea3f980d497a9b65cf3b3a1c328a0d74dd"
+    },
+    {
+      "path": "png/CV03-TR-11_REV_B.thumbnail.png",
+      "bytes": 2408,
+      "sha256": "9f52832b6cd3b47d287b4d9c012572c603a5101f9b00f98cfd4ad11f66951285"
+    },
+    {
+      "path": "png/CV03-TR-11_REV_B_DWG.png",
+      "bytes": 62626,
+      "sha256": "6bc7714f006e693ec4d3bfe555ee55ea58000ae4487a67c789af8cb737710da2"
+    },
+    {
+      "path": "png/CV03-TR-12_REV_B.png",
+      "bytes": 61521,
+      "sha256": "1b88492f1e22413838a41ee9c8c5f397f697df497d4b0662f5805a5f1f7bc895"
+    },
+    {
+      "path": "png/CV03-TR-12_REV_B.thumbnail.png",
+      "bytes": 2074,
+      "sha256": "82fd7ec9b169342ae353be663313bf22554989a383cd4f952398bef038583209"
+    },
+    {
+      "path": "png/CV03-TR-12_REV_B_DWG.png",
+      "bytes": 40211,
+      "sha256": "0c549c98ec5328a540caab37c3aa838fd440f508e9bd97d696196a334fc1411e"
+    },
+    {
+      "path": "png/CV03-TR-13_REV_B.png",
+      "bytes": 108241,
+      "sha256": "01780d8ec79b1e4aa4a5955df2e2c6a5c33fd05a8617003cd54eedb4710303c1"
+    },
+    {
+      "path": "png/CV03-TR-13_REV_B.thumbnail.png",
+      "bytes": 2283,
+      "sha256": "a51aefd7f14e1c5ac6f468c82615343ab5ff53f4b0179ec7d5f4295c9b867d5c"
+    },
+    {
+      "path": "png/CV03-TR-13_REV_B_DWG.png",
+      "bytes": 54942,
+      "sha256": "926c56d496e23a7f10efc9883c7440d8757ae97101b8be9ddf93f21c427edac1"
+    },
+    {
+      "path": "png/CV03-TR-14_REV_B.png",
+      "bytes": 55937,
+      "sha256": "7bdcd728713fe50a3a9fa0439221611973efe010b3328b070c88930622e00d20"
+    },
+    {
+      "path": "png/CV03-TR-14_REV_B.thumbnail.png",
+      "bytes": 1728,
+      "sha256": "9c97d7c6bbe13a1b8621034da7c324043fef39eeb4b6bc32db8699dc89a9fef2"
+    },
+    {
+      "path": "png/CV03-TR-14_REV_B_DWG.png",
+      "bytes": 37904,
+      "sha256": "7c3aeee5966feba1fc0f3afbf269ce2ebd0c5092d53611a3b00159f493c92794"
+    },
+    {
+      "path": "png/CV03-TR-15_REV_B.png",
+      "bytes": 98937,
+      "sha256": "02cc3c3a57bd75ea570b5cf635b52700ea4dbdab898632650b17b62262154279"
+    },
+    {
+      "path": "png/CV03-TR-15_REV_B.thumbnail.png",
+      "bytes": 2257,
+      "sha256": "3e6abdcae13af45c89c09f6299da7fe7da9a1029cc5ec2bb49a1b6ec03c91159"
+    },
+    {
+      "path": "png/CV03-TR-15_REV_B_DWG.png",
+      "bytes": 69257,
+      "sha256": "1d8e9a26af4f951b91d81c1479d79f7f03144b42d17906f679fc1615849b3289"
+    },
+    {
+      "path": "png/CV03-TR-16_REV_B.png",
+      "bytes": 161096,
+      "sha256": "e4708bf40a95cf3aa41bea930ce004d5bf364a00dedf74998b65d428aadcb4ac"
+    },
+    {
+      "path": "png/CV03-TR-16_REV_B.thumbnail.png",
+      "bytes": 3485,
+      "sha256": "cb7b0106f0ef42033a5c82c7ae90ee37f7afb13e99985f38d391d350b0a5a002"
+    },
+    {
+      "path": "png/CV03-TR-16_REV_B_DWG.png",
+      "bytes": 54894,
+      "sha256": "c64abc38285dd828e28d2274b1356d6d6223e63dee5c98ceb8c98da7f5594da8"
+    },
+    {
+      "path": "png/CV03-TR-17_REV_B.png",
+      "bytes": 106985,
+      "sha256": "ff17370065ab758c5ce54a85a74f6ff6d6fed6790824aa75c6aa9250f8ef7fb0"
+    },
+    {
+      "path": "png/CV03-TR-17_REV_B.thumbnail.png",
+      "bytes": 2839,
+      "sha256": "ae10bf9ffb955c5866ac3f5ec430c3408d90e7bda66879dd203d9afb610b5aae"
+    },
+    {
+      "path": "png/CV03-TR-17_REV_B_DWG.png",
+      "bytes": 48676,
+      "sha256": "978748e823513e51e4fff431fb4f289d6eccd085c6aeb1131b3ea2b380417932"
+    },
+    {
+      "path": "png/CV03-TR-18_REV_B.png",
+      "bytes": 158998,
+      "sha256": "4a0340b7544f6b20e0e040efe894f3c56718877953c35480130973cee36cd36d"
+    },
+    {
+      "path": "png/CV03-TR-18_REV_B.thumbnail.png",
+      "bytes": 3481,
+      "sha256": "dfe46447444654dc082fcf49922b5fdb37fecfd5281ce67d19a72996de0ea852"
+    },
+    {
+      "path": "png/CV03-TR-18_REV_B_DWG.png",
+      "bytes": 52545,
+      "sha256": "af1f2d757557316e56bcf4b80ca5bbf82f13a52b46a018b995db52a2097a1547"
+    },
+    {
+      "path": "png/CV03-TR-19_REV_B.png",
+      "bytes": 118247,
+      "sha256": "83a6ead9c7d9e397c59899c22a055b3731536d56e025082a1cfc34c52ebdd8b1"
+    },
+    {
+      "path": "png/CV03-TR-19_REV_B.thumbnail.png",
+      "bytes": 2335,
+      "sha256": "f5447dcdb3975741d113544d5ec3f3d972fd3ab158d937dfd8db6e005be79ce3"
+    },
+    {
+      "path": "png/CV03-TR-19_REV_B_DWG.png",
+      "bytes": 61227,
+      "sha256": "ed2c66025cd820c83e21adfcdaef73e662cbabf82d7ed7afca9ad4d82bda05aa"
+    },
+    {
+      "path": "png/CV03-TR-20_REV_B.png",
+      "bytes": 118155,
+      "sha256": "82434ce36dd4d8b5994c1cb74166aea3d322c10e789647ffd2c8e7cde6a0ffc5"
+    },
+    {
+      "path": "png/CV03-TR-20_REV_B.thumbnail.png",
+      "bytes": 2350,
+      "sha256": "44d3b17c1541253c8cea16f8fe26125b133d45526d756acb09b592b9166392ec"
+    },
+    {
+      "path": "png/CV03-TR-20_REV_B_DWG.png",
+      "bytes": 62079,
+      "sha256": "b0f31414609e7096e961776b91ac16a60d85fe859140e8f8f1ca2d87cd4ecd7c"
+    },
+    {
+      "path": "png/CV03-TR-21_REV_B.png",
+      "bytes": 92367,
+      "sha256": "517237897c2973c2e8c091216fe5c5019184a1ce31b7cf9c134b07cf237648af"
+    },
+    {
+      "path": "png/CV03-TR-21_REV_B.thumbnail.png",
+      "bytes": 2175,
+      "sha256": "efe3f843fb9d36af9614b86f6fc3a089bec2cfd4f1f55155c43609055bbc8e0e"
+    },
+    {
+      "path": "png/CV03-TR-21_REV_B_DWG.png",
+      "bytes": 61028,
+      "sha256": "c307cb01e88e7de3fff19a3f68b404a62253f527cbc00d0fd5f66969c264a69b"
+    },
+    {
+      "path": "png/CV03-TR-22_REV_B.png",
+      "bytes": 146427,
+      "sha256": "6ebbb375b23f03124e760086b08d549003d93675a50ebe5b3db3785d67617e84"
+    },
+    {
+      "path": "png/CV03-TR-22_REV_B.thumbnail.png",
+      "bytes": 2953,
+      "sha256": "67a69829a2cd4f038cbe4977ba98b101d6d507e9ffd86d877eeb83c088968ce9"
+    },
+    {
+      "path": "png/CV03-TR-22_REV_B_DWG.png",
+      "bytes": 46549,
+      "sha256": "09c2e8001be0c7fd6042cea8549a4e7ccc4847471e4549350974fc98c3aa32da"
+    },
+    {
+      "path": "png/CV03-TR-23_REV_B.png",
+      "bytes": 161850,
+      "sha256": "75023570f60d45258f6bbffd4476a6656cb082c0d42e92a1d2499cd2dd273801"
+    },
+    {
+      "path": "png/CV03-TR-23_REV_B.thumbnail.png",
+      "bytes": 3551,
+      "sha256": "2bbaf2588f355f19113e5ff76aae94a8f1d9353678b80ec3b38bd9822c72f25f"
+    },
+    {
+      "path": "png/CV03-TR-23_REV_B_DWG.png",
+      "bytes": 51611,
+      "sha256": "a4023e08b52e51d34515ff67ba4bca0de6bb4a37bee7c956260bd88209a4a84d"
+    },
+    {
+      "path": "png/CV03-TR-24_REV_B.png",
+      "bytes": 139150,
+      "sha256": "2c7c82b1b63b27f6c529af9df632b56139e6f5ae0f6eb0e67b77bd32d49aad26"
+    },
+    {
+      "path": "png/CV03-TR-24_REV_B.thumbnail.png",
+      "bytes": 2865,
+      "sha256": "4b571bc575be8aace07b191d49c97d8df7d634d0932c8445c73b1b2a78a41083"
+    },
+    {
+      "path": "png/CV03-TR-24_REV_B_DWG.png",
+      "bytes": 47281,
+      "sha256": "38c3e3f5af3bbbdb227efac59077e90fb62e68ff6211dd64ace43bf66596d7ec"
+    },
+    {
+      "path": "png/CV03-TR-26_REV_B.png",
+      "bytes": 154594,
+      "sha256": "95ddc5f531cd8af041312ad1e9e72f98151c997c061ee15fafb6547fe1913624"
+    },
+    {
+      "path": "png/CV03-TR-26_REV_B.thumbnail.png",
+      "bytes": 3542,
+      "sha256": "8466db8a89d3ce2569d54a348b5f937385b5cb35e2c8740c175dbbae4da26286"
+    },
+    {
+      "path": "png/CV03-TR-26_REV_B_DWG.png",
+      "bytes": 47135,
+      "sha256": "86420b66e9d35aa392d4ca50384fa80eadab897aa96bebc3f0e5be53af17d30f"
+    },
+    {
+      "path": "png/CV03-TR-27_REV_B.png",
+      "bytes": 100115,
+      "sha256": "112083f6adea819decea991fa2fe2f0ec518ef2dd97a64e40b48db0eaa29f71d"
+    },
+    {
+      "path": "png/CV03-TR-27_REV_B.thumbnail.png",
+      "bytes": 2778,
+      "sha256": "72e06cb65d7ab4bfd1d12b329a1db6f8bb76a9b3e6e0cd67e136c901a6992dc9"
+    },
+    {
+      "path": "png/CV03-TR-27_REV_B_DWG.png",
+      "bytes": 53264,
+      "sha256": "2c1a0c37a597284c408b658983ffcf7d104ecfe9dd4d5f4c71708c2b77b7be56"
+    },
+    {
+      "path": "png/CV03-TR-A01_REV_A.png",
+      "bytes": 383409,
+      "sha256": "485b87b6c2df902ddf9153d16324831cf9018fc9f6f6416dc79401853a887e1d"
+    },
+    {
+      "path": "png/CV03-TR-A01_REV_A.thumbnail.png",
+      "bytes": 3193,
+      "sha256": "746a211b363664603cb59dec3398cc51d78de2028a0bfffc69dc5ed0dcd212e0"
+    },
+    {
+      "path": "png/CV03-TR-A01_REV_A_DWG.png",
+      "bytes": 213242,
+      "sha256": "befdafb2050798ec4167aa558f9057a362c5e53901ad9ac8b26eca4392778569"
+    },
+    {
+      "path": "png/EYE TO EYE 5 LEAF 60MM SUSPENSION_REV_.png",
+      "bytes": 153052,
+      "sha256": "33b96be28ec0b01f575c86ae9df8226c336704e7402aba9b1e7e3a4cee52528b"
+    },
+    {
+      "path": "png/HANGER-F_REV_A.png",
+      "bytes": 159985,
+      "sha256": "ea6b6bd327a93e6987aa86035975ee95df10d8699329618d74ac494520fa18c6"
+    },
+    {
+      "path": "png/HANGER-F_REV_A.thumbnail.png",
+      "bytes": 3216,
+      "sha256": "9a673ecb81c7a604c06c6ff4d5ff1bd90c823d81919eeeac4879ad7de89cae29"
+    },
+    {
+      "path": "png/HANGER-R_REV_A.png",
+      "bytes": 104484,
+      "sha256": "ddaf6f1e5e3b41eb8355f2f2e12dc01e19b45ec11193a17c66e39a073ef96f0c"
+    },
+    {
+      "path": "png/HANGER-R_REV_A.thumbnail.png",
+      "bytes": 3467,
+      "sha256": "d4df04c80d58276949a88d7bf3855a9a43b2b02c92b6999f2588770ae1144c28"
+    },
+    {
+      "path": "png/HUB_REV_.png",
+      "bytes": 212135,
+      "sha256": "d381dcd974be11d1006813845a3fbddcbe93b4a8a5a98f226a3a99b1745795ff"
+    },
+    {
+      "path": "png/MIRRORAXLE HUB 2200 LBS_1_1_REV_.png",
+      "bytes": 58796,
+      "sha256": "f17310d87b24fb5ca4d3c89c500b5c7156cfc7b11a399aa46408517f3ce66c4e"
+    },
+    {
+      "path": "png/MUDGUARD_REV_A.png",
+      "bytes": 52359,
+      "sha256": "28ed3b44d0e8fc4913c8bbcf49f6c447d221d9d66537499d8ebbf6405d91b46c"
+    },
+    {
+      "path": "png/OEM-JOCKEYWHEEL_REV_A.png",
+      "bytes": 154536,
+      "sha256": "718dcc6905bb3f93805a0d85bf09aec364b48a1c5b928b1d7eed13550a404bbe"
+    },
+    {
+      "path": "png/OEM-JOCKEYWHEEL_REV_A.thumbnail.png",
+      "bytes": 2330,
+      "sha256": "c9f5d6055cc9792703eeaa37d54a5a5edbeac5d9b13c1902f711d99d38ac0622"
+    },
+    {
+      "path": "png/R104-CMARK_REV_A.png",
+      "bytes": 21967,
+      "sha256": "4bb6c83901be3cbd8d34a19e47fc69d2f38f10e8a524dedb9862848c99fd115f"
+    },
+    {
+      "path": "png/R104-CMARK_REV_A.thumbnail.png",
+      "bytes": 607,
+      "sha256": "681d439287b9ddca5ccf7a48bf700920f59981f9d050b4f1f543714e5b851f69"
+    },
+    {
+      "path": "png/REGO PLATE LIGHT_REV_.png",
+      "bytes": 56628,
+      "sha256": "eecf3fa3028b8121d7a5718f64b97aa6534dbed5173834062718998626c2abc7"
+    },
+    {
+      "path": "png/SKF_L 44649_610_1_1_REV_.png",
+      "bytes": 331804,
+      "sha256": "d88407a7a766793b7b6110f52470919aab4135abfab98c20ee8eb11174b7b5fd"
+    },
+    {
+      "path": "png/SPINDLE NUT 1 INCH_1_REV_.png",
+      "bytes": 149576,
+      "sha256": "29e119ec67cb1c87896fb38d5caaf93d1328b9e5f54f339281abea4018b82c7f"
+    },
+    {
+      "path": "png/SPINDLE WASHER 1 INCH_1_REV_.png",
+      "bytes": 32478,
+      "sha256": "f7f8701185ccc0961655ee4d725476c0ecdc4b6b05791617592a44cef12d28df"
+    },
+    {
+      "path": "png/STUD BOLT 1-2 X 20_REV_.png",
+      "bytes": 319046,
+      "sha256": "388abb6fb0b9b5e7ff1acd9f18d4405b3853665d3c02d462a7eeb1667a17071d"
+    },
+    {
+      "path": "png/SUSPENSIONKIT-93IN_REV_A.png",
+      "bytes": 218700,
+      "sha256": "a97f1e42a0512a2f3db57cfcd2e281d8e6dd563db3116e7e190841446f69b80c"
+    },
+    {
+      "path": "png/SUSPENSIONKIT-93IN_REV_A.thumbnail.png",
+      "bytes": 2491,
+      "sha256": "2dea282e69b4a90877abf58b4fa649abc244a2b621619c84caae6a4699d3d7a2"
+    },
+    {
+      "path": "png/WHEEL 155-80-R13_REV_.png",
+      "bytes": 409555,
+      "sha256": "18d9bb71fefb99cd6c72ca3d20e054d6bef65a66b016f00badc5b8894a2f19c0"
+    },
+    {
+      "path": "step/40MM AXLE SEVERAL SIZES_REV_.step",
+      "bytes": 1484909,
+      "sha256": "7d11eea0854b2e33e68f15b7ab3ccb233dd472765978afe64d419dcbdd9ca13a"
+    },
+    {
+      "path": "step/4177-35-CHAIN_REV_1.step",
+      "bytes": 52805,
+      "sha256": "ab2fcb039dc9224df97c2b4b714f453fde318d3bd91094caa649ad41f607da99"
+    },
+    {
+      "path": "step/ADR-HITCH_REV_A.step",
+      "bytes": 408845,
+      "sha256": "34e2603dd61e065443e082cbcc0396f8ce0e96786bc1ae242bc598d3d729c392"
+    },
+    {
+      "path": "step/ADR-LED-IND_REV_.step",
+      "bytes": 181886,
+      "sha256": "373fbe3eb83f81ab716a8b7ed47b03eb0e99039d2010539bc72235557e01093d"
+    },
+    {
+      "path": "step/ADR-REF-A_REV_A.step",
+      "bytes": 393469,
+      "sha256": "fa653174fe42426d0fadce01d42ab4502a3fea7e38f80094148cab1f338ec046"
+    },
+    {
+      "path": "step/ADR-REF-W_REV_A.step",
+      "bytes": 393482,
+      "sha256": "b3b8abf7a68c992d2643ce8d30330a42c2af0b724a186f56281fa454d69ef9a2"
+    },
+    {
+      "path": "step/ADR-REG-PLATE_REV_.step",
+      "bytes": 1278835,
+      "sha256": "d735a14c9747a603d79c01d208cb853b4e6c0a52045cf84179f652f52de67321"
+    },
+    {
+      "path": "step/ADR-VIN-PLATE_REV_A.step",
+      "bytes": 41038,
+      "sha256": "b1b7c96d12114046269a5f032c0d546380f9d2a101c9c4bb59fd5d283bb02665"
+    },
+    {
+      "path": "step/CV03-F01_REV_A.step",
+      "bytes": 3673077,
+      "sha256": "af1e0da1310b90156ba63214d1d497ad5dcaa7009b25b406c57c4a5063df0c8c"
+    },
+    {
+      "path": "step/CV03-F02_REV_B.step",
+      "bytes": 4053610,
+      "sha256": "2aa648551dccfb5aa48db4cbdec3044b01eb7e021e6364cfcf9def0ab5aa0ad6"
+    },
+    {
+      "path": "step/CV03-TR-01_REV_B.step",
+      "bytes": 168361,
+      "sha256": "3d00b1b7f809f36383709c0c3c9f3837b52d155b0c24c0178ac6a99113b69299"
+    },
+    {
+      "path": "step/CV03-TR-02_REV_B.step",
+      "bytes": 166189,
+      "sha256": "26b93edd6695cafacc03c146f3eb3d963c3655341dbac898377879ac9deb1fbe"
+    },
+    {
+      "path": "step/CV03-TR-03_REV_B.step",
+      "bytes": 47524,
+      "sha256": "48ab1003469b8ba48faa959325feb6c94324b8da8d4ebbdc1d2ad875b8f42615"
+    },
+    {
+      "path": "step/CV03-TR-04_REV_B.step",
+      "bytes": 26242,
+      "sha256": "218ba9679dd0d9a4234b93a0430061de94d5cad4d2b36cfa77f29514c49e5229"
+    },
+    {
+      "path": "step/CV03-TR-05_REV_B.step",
+      "bytes": 135915,
+      "sha256": "92c1b3206e0d6cc84b6e9d2eb98a20ae2efe95dcbb8331042555dce44a337a20"
+    },
+    {
+      "path": "step/CV03-TR-06_REV_B.step",
+      "bytes": 73666,
+      "sha256": "13999378dc203cc5f7d47851842c90f613be42d8f7cb6a1df5ff48ee887bab42"
+    },
+    {
+      "path": "step/CV03-TR-07_REV_B.step",
+      "bytes": 119490,
+      "sha256": "3f73fa941ae971c3517e70594bbeb69649872526dde1fd9cfefda7ebbf62dfe7"
+    },
+    {
+      "path": "step/CV03-TR-08_REV_B.step",
+      "bytes": 119202,
+      "sha256": "9efa0a19451d325292a1ac3f65d5061742cf17b7606383f956e030ad31924bc4"
+    },
+    {
+      "path": "step/CV03-TR-09_REV_B.step",
+      "bytes": 55630,
+      "sha256": "942c03daab20374864cf5c1e6c6ac547464bf1ab650fa7b4b88c3bcf58ddec95"
+    },
+    {
+      "path": "step/CV03-TR-10_REV_B.step",
+      "bytes": 205463,
+      "sha256": "f89810c8c096bbf3caf03a8547aaadc67b3f12816ad70dd1db2098fab88b9a3b"
+    },
+    {
+      "path": "step/CV03-TR-11_REV_B.step",
+      "bytes": 263183,
+      "sha256": "62f24c901150a6fc1f7fc66aa1a1121df8257c9d4244debe739f0719aec77ce4"
+    },
+    {
+      "path": "step/CV03-TR-12_REV_B.step",
+      "bytes": 126415,
+      "sha256": "395b99d0bde80e987b4147a78d0aac22ee25ad89c40f7b94ff8c013a49657a1f"
+    },
+    {
+      "path": "step/CV03-TR-13_REV_B.step",
+      "bytes": 264353,
+      "sha256": "e953a48908684d9450a4200f7f36d631cec1168f7afa1ce7452a7c2ae1cdda0d"
+    },
+    {
+      "path": "step/CV03-TR-14_REV_B.step",
+      "bytes": 126158,
+      "sha256": "f38b107222e836be7b3c0757b4d3302a25372fd4f17db63dd383702302735995"
+    },
+    {
+      "path": "step/CV03-TR-15_REV_B.step",
+      "bytes": 251794,
+      "sha256": "2d979c2fcbc4902c94a05ec36f5e196f5338b75e8978fda2e3ec6d60dda5a0e6"
+    },
+    {
+      "path": "step/CV03-TR-16_REV_B.step",
+      "bytes": 92680,
+      "sha256": "b2c6fe723849e86ecda58d67c650c1557454b268ff5eec0b156ffc80c2219052"
+    },
+    {
+      "path": "step/CV03-TR-17_REV_B.step",
+      "bytes": 92504,
+      "sha256": "5392c9e86b0689b3b5f13e83a03132034d469201a631dc2934bc13efa8940460"
+    },
+    {
+      "path": "step/CV03-TR-18_REV_B.step",
+      "bytes": 118938,
+      "sha256": "fb713e6147fc3e46cda30f0eab021bd2dd7e8bd7d39f0b260e5c2608f2759831"
+    },
+    {
+      "path": "step/CV03-TR-19_REV_B.step",
+      "bytes": 213351,
+      "sha256": "dea2ef9a4d6903efa30b27c5ea695fa409ae0cf0dc5de6d19ee0fd3b5f783dee"
+    },
+    {
+      "path": "step/CV03-TR-20_REV_B.step",
+      "bytes": 230971,
+      "sha256": "b902f99284e13cc54a7f91ec5268cee88a02f58c40e843a45b7a0dbd92bbf284"
+    },
+    {
+      "path": "step/CV03-TR-21_REV_B.step",
+      "bytes": 267363,
+      "sha256": "263f26d5d0d06cfec19768e4c3b9b16126415429e7a2777a152b4484793af76d"
+    },
+    {
+      "path": "step/CV03-TR-22_REV_B.step",
+      "bytes": 103534,
+      "sha256": "18eb5b5e92e89d574782a3243f9fed79123f71ae8deee3413f8866a562b888e1"
+    },
+    {
+      "path": "step/CV03-TR-23_REV_B.step",
+      "bytes": 103358,
+      "sha256": "d609238fbcb420a33500616fcf2c5b669b939b101c2f57cc406e74334da77da5"
+    },
+    {
+      "path": "step/CV03-TR-24_REV_B.step",
+      "bytes": 119237,
+      "sha256": "9b477ce380d05c4e803b3a851f5e668170a087fa53becf9ffb3d3e706177dccf"
+    },
+    {
+      "path": "step/CV03-TR-26_REV_B.step",
+      "bytes": 56383,
+      "sha256": "bf51cc9fb6888be6ed0ab391153abaefbe9a2ffbae17e5082467c4028c8eed1d"
+    },
+    {
+      "path": "step/CV03-TR-27_REV_B.step",
+      "bytes": 56303,
+      "sha256": "3905b7463db94e2310e1ffb00ccafc6744e61352b1b5d7e32903e208bdab13cc"
+    },
+    {
+      "path": "step/CV03-TR-A01_REV_A.step",
+      "bytes": 17902313,
+      "sha256": "9cce8f00e6a935281c0c4c5907087a5dce54b433245cc2ee06826c2775b4bb6d"
+    },
+    {
+      "path": "step/EYE TO EYE 5 LEAF 60MM SUSPENSION_REV_.step",
+      "bytes": 3524594,
+      "sha256": "e353467801e013d9beab05182c7af57ee7371163c99542e16006c810bc736767"
+    },
+    {
+      "path": "step/HANGER-F_REV_A.step",
+      "bytes": 54681,
+      "sha256": "60e71ce0a27404e55b9bfec97fecf6dc4045fc55f72f21b9eaafc11e7c58657d"
+    },
+    {
+      "path": "step/HANGER-R_REV_A.step",
+      "bytes": 48567,
+      "sha256": "516055fd2354a581e37441240b48815d9beb88d5720c12f5bf4ecdbb07995e6b"
+    },
+    {
+      "path": "step/HUB_REV_.step",
+      "bytes": 3691470,
+      "sha256": "9e761a9bde8d1f46f9e4515b5d4241f18e7d0e1ec1bc253991e1bf563df3bad3"
+    },
+    {
+      "path": "step/MIRRORAXLE HUB 2200 LBS_1_1_REV_.step",
+      "bytes": 1995717,
+      "sha256": "d5a532e10e328f7a86d946eaa716364f525f96b3e8568404e308c6077ce20a1d"
+    },
+    {
+      "path": "step/MUDGUARD_REV_A.step",
+      "bytes": 267082,
+      "sha256": "069189b0f2706feb89fa8de759825bf89c5ae675178b61029d849b17b052c4e9"
+    },
+    {
+      "path": "step/OEM-JOCKEYWHEEL_REV_A.step",
+      "bytes": 397189,
+      "sha256": "afb29642497c3030a4dacadfc61f9227cf5b1b9f5666d4fa52a8a85f0c2072ba"
+    },
+    {
+      "path": "step/R104-CMARK_REV_A.step",
+      "bytes": 104378,
+      "sha256": "0cf4e5b14802f54bfddf68a68db542bf0df4fad6adf4ae66888bbf3c85786e6c"
+    },
+    {
+      "path": "step/REGO PLATE LIGHT_REV_.step",
+      "bytes": 178445,
+      "sha256": "911f92a49c562ff3d0ff214aa1b00abe85d548f6232c04d6a0fe0a44c69ae18d"
+    },
+    {
+      "path": "step/SKF_L 44649_610_1_1_REV_.step",
+      "bytes": 373255,
+      "sha256": "3f2db1f434a6d1248b710a1b1e9de222a772fcefc4a4bf2e2874dabef2b6943b"
+    },
+    {
+      "path": "step/SPINDLE NUT 1 INCH_1_REV_.step",
+      "bytes": 849640,
+      "sha256": "25a7509bea2edd9f319111a76a9f19d6f586817fc5988fb8b551abc44e545989"
+    },
+    {
+      "path": "step/SPINDLE WASHER 1 INCH_1_REV_.step",
+      "bytes": 17922,
+      "sha256": "132a3bfcf2002e193e9b3777cdd17a238402b9fd925409bb1acb8638fdf229eb"
+    },
+    {
+      "path": "step/STUD BOLT 1-2 X 20_REV_.step",
+      "bytes": 409203,
+      "sha256": "c11b88d17954309f189c88bd9f756fb682eccfbbbf294d5edc128fb7f1d93e64"
+    },
+    {
+      "path": "step/SUSPENSIONKIT-93IN_REV_A.step",
+      "bytes": 9532695,
+      "sha256": "2fb08189e57a4bd5a69cd2734f073b3dcd0dbefb747fed3893261259de0980f9"
+    },
+    {
+      "path": "step/WHEEL 155-80-R13_REV_.step",
+      "bytes": 746054,
+      "sha256": "b1102ba9089f675158b799e5a3b70008d033b58ac8342ce5d3d21343ad64b9e5"
+    },
+    {
+      "path": "thumbs/png/40MM AXLE SEVERAL SIZES_REV_.png",
+      "bytes": 9383,
+      "sha256": "a54de20868810e5a4721e1b8b82da7eda9e46056c34037f5fcc967f60a2a31ce"
+    },
+    {
+      "path": "thumbs/png/4177-35-CHAIN_REV_1.png",
+      "bytes": 9973,
+      "sha256": "d53d925397110e82880e3750954e0261be8cc302d10494ab88fc260e7efbc9c3"
+    },
+    {
+      "path": "thumbs/png/ADR-HITCH_REV_A.png",
+      "bytes": 17434,
+      "sha256": "f9532e8d563c1dfa5e42b873df28c6eacf0e759859645b60a421e68aa04870c2"
+    },
+    {
+      "path": "thumbs/png/ADR-LED-IND_REV_.png",
+      "bytes": 10401,
+      "sha256": "10c981b10bdb147680518dbd24c29a0de7f2c3b757428ce0cb83245e5091bf7e"
+    },
+    {
+      "path": "thumbs/png/ADR-REF-A_REV_A.png",
+      "bytes": 9917,
+      "sha256": "915ba0f45ca5030a2a5f008d7b66c5d235eab247aaea5a6960f023e670489a3c"
+    },
+    {
+      "path": "thumbs/png/ADR-REF-W_REV_A.png",
+      "bytes": 9495,
+      "sha256": "75d29f8a4868b80c1a416ed167eee0ef77c136e967121d668f2802f79e817f0a"
+    },
+    {
+      "path": "thumbs/png/ADR-REG-PLATE_REV_.png",
+      "bytes": 13202,
+      "sha256": "3a7befedb7b50d780755cdedb73cfede9f400b3d8aeb3ee4bc33eff5dab359a8"
+    },
+    {
+      "path": "thumbs/png/ADR-VIN-PLATE_REV_A.png",
+      "bytes": 13560,
+      "sha256": "db6eee1bab28f7e39ddefb8b99acdf903d3cc1c0d32d041cae7d20a7e015f99c"
+    },
+    {
+      "path": "thumbs/png/CV03-F01_REV_A.png",
+      "bytes": 22735,
+      "sha256": "216a6c07101fea95ed9e8c595500fcb6a516d21459494d3c05f878042e53b604"
+    },
+    {
+      "path": "thumbs/png/CV03-F01_REV_A_DWG.png",
+      "bytes": 21916,
+      "sha256": "8ccf7f3662a69e7637392b748320e2f7f14fe0e5298a07660fc0856f303b6c41"
+    },
+    {
+      "path": "thumbs/png/CV03-F02_REV_B.png",
+      "bytes": 23620,
+      "sha256": "e138fc1cc13057acd0626a1e32dd8140f13348ef4cb89a14db0f810bc1fd1c79"
+    },
+    {
+      "path": "thumbs/png/CV03-F02_REV_B_DWG.png",
+      "bytes": 20767,
+      "sha256": "aa655335424d773e4695b19d81cd234ab97df11f6dbb60d89c0285d1e62db2d4"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-01_REV_B.png",
+      "bytes": 8079,
+      "sha256": "b95573b100c02c5b0e91d30a38c57dca49752aa6e204d075db7be724ff161c0e"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-01_REV_B_DWG.png",
+      "bytes": 10195,
+      "sha256": "209ede0e5895e9b44a1c8af112f2d5178d8f349ec0f074377e75c9da4d26c485"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-02_REV_B.png",
+      "bytes": 10069,
+      "sha256": "e094b72ac067000bd0b6c352b108197f7e2db6410f78d3e9ed1789c3f680abf2"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-02_REV_B_DWG.png",
+      "bytes": 10234,
+      "sha256": "6d2551f90b7dc275bc6dd5e805be799e880e4b23f91f8219047a1893078f0c15"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-03_REV_B.png",
+      "bytes": 10198,
+      "sha256": "2c6f88c1d4e54e457e551ea26bbf515098e3ae565575fadd4761e689f5a11629"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-03_REV_B_DWG.png",
+      "bytes": 10118,
+      "sha256": "e189fdabb1d6dc48b1e50bf573421118fad6f8fe4b3e794ff2ea896d3b1f649c"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-04_REV_B.png",
+      "bytes": 9961,
+      "sha256": "cb818ab3160fd31767e2e0a08e4032ce86f9ff4e5e2ace4543d3680edcfa8124"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-04_REV_B_DWG.png",
+      "bytes": 9417,
+      "sha256": "b98c4477d9b866ab01bc28deeb6546cfda3aa908d4efb4c0dcb876f071661aa1"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-05_REV_B.png",
+      "bytes": 9259,
+      "sha256": "940a7cb741e57143c44ff6741bac57cca40650503d3aa74b110889fe7fc72603"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-05_REV_B_DWG.png",
+      "bytes": 9844,
+      "sha256": "64324742d1e64c3b43ce1cb46f82b7137eafeea06914733fd7fa3ad7aa9fa019"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-06_REV_B.png",
+      "bytes": 10223,
+      "sha256": "9a099ebb9918d5b88ab75aff60756ebb54e905f1501db9eece5243854f0537a3"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-06_REV_B_DWG.png",
+      "bytes": 9866,
+      "sha256": "50a0b47fd38a76961044547c14e814120ee92ad640314ca50300fc1a4aec86fa"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-07_REV_B.png",
+      "bytes": 9885,
+      "sha256": "e372c28deaecebbdfbde1ec90778dba6fd300b2a794057ff4c1537753e45f219"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-07_REV_B_DWG.png",
+      "bytes": 9681,
+      "sha256": "8d8b42bb7570e9e3bd95924f7495e284a9e5fbeb66bddb7a102ca662e85fac6a"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-08_REV_B.png",
+      "bytes": 10107,
+      "sha256": "acb5057b71ee5a809214b6aa30e71a1a7990f82dc45f42d89612d5846ed1207f"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-08_REV_B_DWG.png",
+      "bytes": 10208,
+      "sha256": "9a91e88e4d6fad455c1fff7ef3fd1834da0a0d0a61c1fa69eba5fe99b69e45e6"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-09_REV_B.png",
+      "bytes": 9815,
+      "sha256": "dfed94860bcad75e588bbe6032c599c743401ad181f3fdb99a283f9ab9acc293"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-09_REV_B_DWG.png",
+      "bytes": 9949,
+      "sha256": "b7de842d03844af7f9473ced0b6ee69702e4eb833b94c0a0d97a687af10c78cd"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-10_REV_B.png",
+      "bytes": 9790,
+      "sha256": "7d17f78a10634f77ebb36d7184b13c830672ae38803c84a313e92ff551f534c2"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-10_REV_B_DWG.png",
+      "bytes": 10069,
+      "sha256": "0f3725e9f382a8e0e17ac2d113e374f64798da55cf7b6fd6bd7c0b436cdefc67"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-11_REV_B.png",
+      "bytes": 10041,
+      "sha256": "9e3d417d4b0490f9f7a983b0041f3de3b2ec01388e404367ac8ac4233177b7ef"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-11_REV_B_DWG.png",
+      "bytes": 10054,
+      "sha256": "b41ecc70ba4a13f9ecad2a542a70154c02e928dec7d747c10d9fddd4cb7c6373"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-12_REV_B.png",
+      "bytes": 10123,
+      "sha256": "5a446b19478d8bfc8d7120bb2a7b6624a79591f777749571e128093cd955b194"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-12_REV_B_DWG.png",
+      "bytes": 10080,
+      "sha256": "82bdcf7e22ab0daf6f2996c48c494b220bb5c20c62119b1998920387d5df1368"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-13_REV_B.png",
+      "bytes": 10017,
+      "sha256": "00d37c1b6bc5abbcbfa0552de9ddb85f01de5f91bbbcc572b045225baac39084"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-13_REV_B_DWG.png",
+      "bytes": 10058,
+      "sha256": "a673b1788a7ecb1d42fc62f15892c25a9568060a938655bf163a2d897710887d"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-14_REV_B.png",
+      "bytes": 10073,
+      "sha256": "5a191b002bb0a0742e01db0a1881fec2ee4314bcb8a2f4f7df2bed344973a127"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-14_REV_B_DWG.png",
+      "bytes": 9878,
+      "sha256": "b31f628931ea0c6c2d2d2a659c9496121e77217b5f9a87a8ded5592371ac51e3"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-15_REV_B.png",
+      "bytes": 10224,
+      "sha256": "fd50a200f24861757e7a0fbf42c6c4624756cb18fe5d569d2554a7d058645d08"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-15_REV_B_DWG.png",
+      "bytes": 9108,
+      "sha256": "72e6275f888c5e684947ec3ab2190a8589730769ea659e5de09651764b03fb2d"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-16_REV_B.png",
+      "bytes": 9857,
+      "sha256": "c8baa21e58005e94b4f7bea201960e86095abf5777db84e6c0fd30b239b25d06"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-16_REV_B_DWG.png",
+      "bytes": 9752,
+      "sha256": "439bc47be16a6f5c06f54154ad76fad109c2a00e2c4a408b22d3ee78323ce63f"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-17_REV_B.png",
+      "bytes": 9745,
+      "sha256": "542f74bbb891cdd96aba7e899411f72c0ce9669e1e078f73cc9bf0d014170bd9"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-17_REV_B_DWG.png",
+      "bytes": 10053,
+      "sha256": "09877c7817b39bc5086ebd4bafb1224557aad0c0e7b08a520013ba3bb908ddd9"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-18_REV_B.png",
+      "bytes": 9814,
+      "sha256": "8a20f04b93cdab7777c8cea7a74ae90946bb68bfe368bd3227939f9d65c471e9"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-18_REV_B_DWG.png",
+      "bytes": 9986,
+      "sha256": "75a6ecc0a6e8ed447fd9e7a6bcbb3c5b36c39051beb16902c16baffbd910de8c"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-19_REV_B.png",
+      "bytes": 9976,
+      "sha256": "34c5574b7c625f107d9bddab56d7931b9639603aec606f506d99e610094debeb"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-19_REV_B_DWG.png",
+      "bytes": 10199,
+      "sha256": "37633c83baebbbdac14f333dd34694f876e5c60ec261374e226f64ead195f289"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-20_REV_B.png",
+      "bytes": 10009,
+      "sha256": "cdb1f40ce350d9c9b6699ac7c818b9e4849faf0060088f9c61080ed231c59b12"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-20_REV_B_DWG.png",
+      "bytes": 9735,
+      "sha256": "621f06fb1800adbcda354d23adf72bfaf9ae7c4b76c36fb8dd93bc2bde54895a"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-21_REV_B.png",
+      "bytes": 9513,
+      "sha256": "ea67fc090afe2cae0a9c7d36686b7a07f2966154a1c04e3ef7a33e0d5680317e"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-21_REV_B_DWG.png",
+      "bytes": 9600,
+      "sha256": "188b6e1bdfce2745bedc771254c576e5add8773626e8d8acb998f0f56096e5a8"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-22_REV_B.png",
+      "bytes": 10183,
+      "sha256": "659771b06f07b7868cc0e6f752ff8973743d276fccb3a70b73946be8271c5b45"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-22_REV_B_DWG.png",
+      "bytes": 10032,
+      "sha256": "4047b2569ecbad88e5d67446110092fbfd62f9ebf47816106d08c4b5363cd1fa"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-23_REV_B.png",
+      "bytes": 9944,
+      "sha256": "4d3545d03a7cd0da7f95ac80bd047a40a35a6411752642a853bfbe14eed3cbdb"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-23_REV_B_DWG.png",
+      "bytes": 9887,
+      "sha256": "b5945872a2fdb51d96a376621f518c579cda3f29a9c90249af4e29a792b24900"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-24_REV_B.png",
+      "bytes": 10029,
+      "sha256": "1d667a46fc5a87641d84f0a42cb37164ab9c58800db883e949f3cd9e465110d1"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-24_REV_B_DWG.png",
+      "bytes": 9625,
+      "sha256": "df8cc8e6e09d3d9e4d6b236e2015c146b07fe8bd0d6ae360e9fba7544c886eb9"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-26_REV_B.png",
+      "bytes": 9932,
+      "sha256": "361a456a188da9126e9291c1b6e9c4e6fd6d1fea77bfdb3cb95651fecdecac6a"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-26_REV_B_DWG.png",
+      "bytes": 9785,
+      "sha256": "c7e23ebc81dbefb8291204a880e58f4cbf7a698097be2ace228dbbd8f54ea69a"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-27_REV_B.png",
+      "bytes": 9512,
+      "sha256": "fb66f5b10749c158d88142618ea522d380604bd95bb693794611c909229d65e7"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-27_REV_B_DWG.png",
+      "bytes": 10196,
+      "sha256": "5d26249fda082f1ca30ebc5c962e422433534f84b64e258014f1391fa6eae823"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-A01_REV_A.png",
+      "bytes": 30042,
+      "sha256": "a4f48c2aa1071e3fa0d9172021bebd97371c9f6cbeac3ed9a3c5acaff706490f"
+    },
+    {
+      "path": "thumbs/png/CV03-TR-A01_REV_A_DWG.png",
+      "bytes": 21391,
+      "sha256": "ddeb6dd4745187c8019d6a36de0461b257c52315c29d2b2a92ad2e16727bab2c"
+    },
+    {
+      "path": "thumbs/png/EYE TO EYE 5 LEAF 60MM SUSPENSION_REV_.png",
+      "bytes": 14536,
+      "sha256": "f39f624c93b3b6c0050b027bb78c186fc00faff762b4b46905f814e1b05cfb67"
+    },
+    {
+      "path": "thumbs/png/HANGER-F_REV_A.png",
+      "bytes": 9984,
+      "sha256": "6ddaf26b54347bb3cbc9a0eceb1491aa2cce2967b5d61af7952b412466181dbf"
+    },
+    {
+      "path": "thumbs/png/HANGER-R_REV_A.png",
+      "bytes": 10275,
+      "sha256": "d2d81a82711b992783b125b0ca27b54768370417d3798c5c9d8f287dc558118d"
+    },
+    {
+      "path": "thumbs/png/HUB_REV_.png",
+      "bytes": 19251,
+      "sha256": "9ba02bd7271cf95feaaeb24f80acbabcd365d4b4c32cadcdd726159a21f40074"
+    },
+    {
+      "path": "thumbs/png/MIRRORAXLE HUB 2200 LBS_1_1_REV_.png",
+      "bytes": 14673,
+      "sha256": "cc1a4c0beb40e253d2ebbd0d750b1bc1360924c43e152414a53dbed01551e25d"
+    },
+    {
+      "path": "thumbs/png/MUDGUARD_REV_A.png",
+      "bytes": 13984,
+      "sha256": "61d00c5051b9f4c9826687a41a87fc4dd2b200edc54c05627addea4684e92310"
+    },
+    {
+      "path": "thumbs/png/OEM-JOCKEYWHEEL_REV_A.png",
+      "bytes": 11220,
+      "sha256": "64024b7079be064ce1ade81e657954639ac3e37bcb82bcb54a549919fa8398c9"
+    },
+    {
+      "path": "thumbs/png/R104-CMARK_REV_A.png",
+      "bytes": 1279,
+      "sha256": "a6ea8e1195271e93dc4224bc3f6e08768c785db4a8d295c3463aab4fe19e7479"
+    },
+    {
+      "path": "thumbs/png/REGO PLATE LIGHT_REV_.png",
+      "bytes": 13305,
+      "sha256": "eb56911e3a150e71776e68cb19e30767d0c7f5a29d3dcf865a2b65b015493bd0"
+    },
+    {
+      "path": "thumbs/png/SKF_L 44649_610_1_1_REV_.png",
+      "bytes": 20972,
+      "sha256": "b096ded7942547dcc22c562d53921b0b017b8f9a7152d6170100f12ac29f7b53"
+    },
+    {
+      "path": "thumbs/png/SPINDLE NUT 1 INCH_1_REV_.png",
+      "bytes": 18117,
+      "sha256": "816f93ac5e2925ff1317c3fe3ee5d0dd27292f8c2fb2f9a2e4eeb90fb89db1ef"
+    },
+    {
+      "path": "thumbs/png/SPINDLE WASHER 1 INCH_1_REV_.png",
+      "bytes": 11054,
+      "sha256": "810fb4ba45ffabcc16727947987a1ba633eb66268bfe012e5b11339d51d09aaa"
+    },
+    {
+      "path": "thumbs/png/STUD BOLT 1-2 X 20_REV_.png",
+      "bytes": 18437,
+      "sha256": "ef14c12c2a3f0cc7b72b37f9ba78b22cf7de346b67d2375022a8b4e3318a1852"
+    },
+    {
+      "path": "thumbs/png/SUSPENSIONKIT-93IN_REV_A.png",
+      "bytes": 14949,
+      "sha256": "724b887766acd60ef959201d19b787b46839864786fc8feb908081bc6da8414e"
+    },
+    {
+      "path": "thumbs/png/WHEEL 155-80-R13_REV_.png",
+      "bytes": 20037,
+      "sha256": "1c191ebe40677726c14b214a466f9b6b3a8d68b80a14af64984a5398712bef7b"
+    }
+  ],
+  "unavailable_files": []
+}

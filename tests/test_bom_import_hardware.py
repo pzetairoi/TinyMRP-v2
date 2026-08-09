@@ -12,6 +12,16 @@ from app.services.field_config import save_field_config
 from app.services.upload_pack import import_upload_pack
 
 
+SAMPLE_BOM = (
+    Path(__file__).resolve().parents[1]
+    / "sample_data"
+    / "cv03_tr_a01_rev_a"
+    / "managed"
+    / "bom"
+    / "CV03-TR-A01_REV_A_2026_07_11_16_41_58.zip"
+)
+
+
 def import_bom_zip(zip_bytes: bytes, filename: str, seed_tag: str = "test") -> dict:
     """Apply an import with draft-replacement policies; flatten diagnostics."""
     result = import_upload_pack(
@@ -221,7 +231,7 @@ def test_import_bom_conflicting_repeated_subassembly_preserves_existing_definiti
 
 
 def test_import_bom_no_duplicate_links_sample(app):
-    zip_path = Path(__file__).resolve().parents[1] / "testfiles" / "bom" / "13-2921_REV__2026_01_18_09_03_22.zip"
+    zip_path = SAMPLE_BOM
     if not zip_path.exists():
         pytest.skip("sample BOM zip not found")
     with zip_path.open("rb") as fh:
@@ -237,7 +247,7 @@ def test_import_bom_no_duplicate_links_sample(app):
 
 
 def test_import_bom_clears_existing_duplicates_sample(app):
-    zip_path = Path(__file__).resolve().parents[1] / "testfiles" / "bom" / "13-2921_REV__2026_01_18_09_03_22.zip"
+    zip_path = SAMPLE_BOM
     if not zip_path.exists():
         pytest.skip("sample BOM zip not found")
     with zip_path.open("rb") as fh:
