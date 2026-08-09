@@ -18,6 +18,7 @@ services:
     volumes:
       - mongo_data:/data/db
       - ./mongo-init.js:/docker-entrypoint-initdb.d/10-tinymrp-app-user.js:ro
+      - ./mongo-clear-data.js:/opt/tinymrp/mongo-clear-data.js:ro
     networks:
       - backend
     healthcheck:

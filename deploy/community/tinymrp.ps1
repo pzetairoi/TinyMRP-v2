@@ -204,7 +204,8 @@ function Restore-Stack([string]$Source, [bool]$WithDeliverables, [bool]$Confirme
     $remoteArchive = '/tmp/tinymrp-restore.archive.gz'
     Invoke-DockerCommand cp (Join-Path $Source 'mongo.archive.gz') "${container}:$remoteArchive" | Out-Null
     try {
-        Invoke-DockerCommand exec $container sh -c "exec mongorestore --quiet --drop --username `"`$MONGO_INITDB_ROOT_USERNAME`" --password `"`$MONGO_INITDB_ROOT_PASSWORD`" --authenticationDatabase admin --archive=$remoteArchive --gzip" | Out-Null
+        Invoke-DockerCommand exec $container sh -c "exec mongosh --quiet --username `"`$MONGO_INITDB_ROOT_USERNAME`" --password `"`$MONGO_INITDB_ROOT_PASSWORD`" --authenticationDatabase admin /opt/tinymrp/mongo-clear-data.js" | Out-Null
+        Invoke-DockerCommand exec $container sh -c "exec mongorestore --quiet --drop --username `"`$MONGO_INITDB_ROOT_USERNAME`" --password `"`$MONGO_INITDB_ROOT_PASSWORD`" --authenticationDatabase admin --nsInclude `"`$MONGO_INITDB_DATABASE.*`" --archive=$remoteArchive --gzip" | Out-Null
     } finally { try { Invoke-DockerCommand exec $container rm -f $remoteArchive | Out-Null } catch { Write-Warning $_ } }
     if ($WithDeliverables) {
         $archive = Join-Path $Source 'deliverables.tar.gz'

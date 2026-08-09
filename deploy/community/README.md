@@ -58,7 +58,9 @@ gzip integrity and uncompressed content size, and can optionally include the
 deliverables folder. `restore` replaces the TinyMRP database from one of those
 archives and optionally restores its deliverables snapshot. The configuration
 copy is recovery evidence and is not silently applied over live database
-credentials.
+credentials. Database restore is exact: collections created after the backup
+are removed before the archive is replayed. Deliverables restore is deliberately
+preservation-first and overlays the snapshot without deleting newer files.
 
 `uninstall` preserves the Mongo volume, configuration, backups, and
 deliverables by default. Only `uninstall --delete-data --yes` removes

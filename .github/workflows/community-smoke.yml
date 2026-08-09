@@ -42,7 +42,7 @@ jobs:
           TINYMRP_ADMIN_EMAIL: community-ci@example.com
           TINYMRP_IMAGE_REPOSITORY: tinymrp-community-ci
           TINYMRP_VERSION: v0.0.0-ci
-          TINYMRP_INSTALL_PULL: never
+          TINYMRP_INSTALL_PULL: missing
         run: |
           set -euo pipefail
           cleanup() {
@@ -59,7 +59,8 @@ jobs:
           }
           trap cleanup EXIT
 
-          export TINYMRP_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          TINYMRP_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          export TINYMRP_ADMIN_PASSWORD
           mkdir -p "$TINYMRP_DELIVERABLES_PATH"
           ./deploy/community/install.sh
           grep -Fx 'TINYMRP_SEED_ADMIN="false"' deploy/community/.env
@@ -98,8 +99,9 @@ jobs:
           from app.models.part import Part
           app = create_app()
           with app.app_context():
-              Part(part_number="COMMUNITY-CI-RESTORE-MARKER", revision="A").save()
-              assert Part.objects(part_number="COMMUNITY-CI-RESTORE-MARKER").count() == 1
+              database = Part._get_db()
+              database["community_ci_post_backup_only"].insert_one({"must_disappear": True})
+              assert database["community_ci_post_backup_only"].count_documents({}) == 1
           PY
           ./deploy/community/tinymrp.sh restore "$backup_dir" --yes
           "${COMPOSE[@]}" exec -T app python - <<'PY'
@@ -108,8 +110,9 @@ jobs:
           from app.models.part import Part
           app = create_app()
           with app.app_context():
+              database = Part._get_db()
               assert User.objects(email="community-ci@example.com").count() == 1
-              assert Part.objects(part_number="COMMUNITY-CI-RESTORE-MARKER").count() == 0
+              assert "community_ci_post_backup_only" not in database.list_collection_names()
           PY
 
           ./deploy/community/tinymrp.sh uninstall

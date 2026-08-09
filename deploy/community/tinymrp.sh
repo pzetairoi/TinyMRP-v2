@@ -61,7 +61,7 @@ compose() {
 }
 
 wait_for_app() {
-  local attempts="${1:-40}" container status
+  local attempts=40 container status
   container="$(compose ps -q app)"
   [[ -n "$container" ]] || return 1
   while (( attempts > 0 )); do
@@ -164,7 +164,7 @@ backup() {
 }
 
 restore() {
-  local source="${1:-}" option="${2:-}" confirmation db
+  local source="${1:-}" option="${2:-}" confirmation
   [[ -n "$source" ]] || die "Usage: ./tinymrp.sh restore BACKUP_DIR [--include-deliverables] [--yes]"
   require_install
   require_runtime
@@ -178,9 +178,12 @@ restore() {
   fi
   compose up -d --wait mongo
   compose stop app >/dev/null 2>&1 || true
-  db="$(env_get MONGO_DB)"; db="${db:-tinymrp}"
   if ! compose exec -T mongo sh -c \
-    'exec mongorestore --quiet --drop --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --archive --gzip' \
+    'exec mongosh --quiet --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin /opt/tinymrp/mongo-clear-data.js'; then
+    die "Could not clear the target database; the app remains stopped."
+  fi
+  if ! compose exec -T mongo sh -c \
+    'exec mongorestore --quiet --drop --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --nsInclude "$MONGO_INITDB_DATABASE.*" --archive --gzip' \
     <"$source/mongo.archive.gz"; then
     die "mongorestore failed; the app remains stopped."
   fi

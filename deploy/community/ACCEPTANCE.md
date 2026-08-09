@@ -6,8 +6,8 @@ restoring it on that host class.
 
 | Host / mode | Install and auth | Backup / restore | Update rollback | Uninstall preserves data | Status |
 | --- | --- | --- | --- | --- | --- |
-| Ubuntu 24.04 CI, localhost | `install.sh` clean-volume job | real dump, content check, marker restore | lifecycle logic covered; registry failure exercised in host acceptance | named Mongo volume inspected and restarted | Automated on every relevant change |
-| Windows Docker Desktop, localhost | `install.ps1` from an empty project/volume, authenticated Mongo, administrator, cleared bootstrap secret and writable bind mount | real 14 KB dump; post-backup marker removed by restore | nonexistent version failed and automatically restored the healthy prior image | default uninstall kept volume and administrator | Passed 2026-08-09; repeat from a versioned public bundle at release |
+| Ubuntu 24.04 CI, localhost | `install.sh` clean-volume job | real dump, content check, post-backup-only collection must disappear | lifecycle logic covered; registry failure exercised in host acceptance | named Mongo volume inspected and restarted | Automated on every relevant change; first remote run pending push |
+| Windows Docker Desktop, localhost | `install.ps1` from an empty project/volume, authenticated Mongo, administrator, cleared bootstrap secret and writable bind mount | real 14 KB dump; post-backup-only collection absent after exact restore | nonexistent version failed and automatically restored the healthy prior image | default uninstall kept volume and administrator | Passed 2026-08-09; repeat from a versioned public bundle at release |
 | Ubuntu/Debian, LAN | not yet run on a clean release host | not yet run | not yet run | not yet run | Release checklist |
 | Windows Docker Desktop, LAN | not yet run with Private-only firewall rule | not yet run | not yet run | not yet run | Release checklist |
 | Linux, domain/Caddy | Caddyfile validates and profile renders; real DNS/ACME not yet run | same data path as localhost | not yet run | not yet run | Do not call supported until real DNS/TLS acceptance passes |
@@ -22,7 +22,8 @@ For each row being promoted to supported:
 4. Confirm Mongo and Redis expose no host ports and the app hardening flags are
    present.
 5. Create a database backup and a backup including deliverables; verify hashes
-   and restore both to a disposable installation.
+   and restore both to a disposable installation. Create a new collection only
+   after the database backup and prove exact restore removes it.
 6. Update to the candidate version, then exercise a deliberately bad target to
    prove automatic image rollback.
 7. Uninstall normally and prove data returns after `start`.
