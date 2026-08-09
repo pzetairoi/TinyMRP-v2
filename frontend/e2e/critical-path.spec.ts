@@ -106,3 +106,33 @@ test.describe('signed in', () => {
     expect(blocked, `CSP blocked something on the parts list:\n${blocked.join('\n')}`).toHaveLength(0)
   })
 })
+
+/**
+ * An RBAC negative path in a real browser.
+ *
+ * This is the test the plan specifically asked for, and the one a unit test
+ * cannot fake: a permission denial that renders as a normal page is the
+ * failure mode this project has hit twice, once turning a 403 into a 200 on a
+ * path-traversal record. Here the server, the session and the UI all take part.
+ */
+test.describe('permission denial', () => {
+  const DENIED_EMAIL = process.env.E2E_DENIED_EMAIL || ''
+  const DENIED_PASSWORD = process.env.E2E_DENIED_PASSWORD || ''
+  test.skip(
+    !DENIED_EMAIL || !DENIED_PASSWORD,
+    'set E2E_DENIED_EMAIL/E2E_DENIED_PASSWORD to a low-privilege account',
+  )
+
+  test('a low-privilege account is refused the admin area', async ({ page }) => {
+    await page.goto('/login')
+    await page.fill('input[type="email"], input[name="email"]', DENIED_EMAIL)
+    await page.fill('input[type="password"]', DENIED_PASSWORD)
+    await page.click('button[type="submit"], input[type="submit"]')
+    await page.waitForLoadState('networkidle')
+    expect(page.url(), 'the low-privilege login itself failed').not.toContain('/login')
+
+    const response = await page.goto('/admin/')
+    // Refused, not rendered. A 200 here is the entire reason this test exists.
+    expect(response?.status(), 'a low-privilege account reached the admin area').not.toBe(200)
+  })
+})
