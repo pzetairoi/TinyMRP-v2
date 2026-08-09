@@ -83,6 +83,14 @@ test.describe('signed in', () => {
     await page.fill('input[type="password"]', PASSWORD)
     await page.click('button[type="submit"], input[type="submit"]')
     await page.waitForLoadState('networkidle')
+
+    // Assert the login WORKED before anything else runs. Without this, bad
+    // credentials surface as "the parts table is missing", which sends the
+    // next person looking at the parts page instead of at their password.
+    expect(
+      page.url(),
+      `login did not succeed - still at ${page.url()}. Check E2E_EMAIL/E2E_PASSWORD.`,
+    ).not.toContain('/login')
   })
 
   test('the parts list loads and renders rows without console errors', async ({ page }) => {
