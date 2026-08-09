@@ -594,7 +594,15 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       When triaging the rest, ask "could I distinguish this failing from
       this working?" before asking "is the fallback safe?".
 
-    NOT DONE, and worth being honest about: this is 10 of 276. The rest are
+    BATCH 4, file discovery (filescan.py). The two that matter on the
+      import path: unresolvable file sources make discovery find nothing,
+      so an import reports "no files" - which reads as a pack that
+      contained none rather than storage the server could not enumerate.
+      And an unreadable directory becomes an empty one, so every file
+      inside it silently stops being discovered. Permissions drift is the
+      usual cause and it is invisible from outside.
+
+    NOT DONE, and worth being honest about: this is 12 of 276. The rest are
       concentrated in best-effort UI paths where swallowing is defensible.
       Do not chase the count. The remaining ones worth reading are in
       filescan.py, extra_files.py and fileserve.py.

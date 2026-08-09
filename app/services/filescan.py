@@ -1,4 +1,5 @@
 # app/services/filescan.py — discovery + PartFile registry sync (upsert & stale removal)
+import logging
 import os, re
 from contextlib import contextmanager
 from datetime import datetime
@@ -11,6 +12,8 @@ from app.models.artifact import PartFile
 from app.services.app_settings import resolve_file_sources
 from app.services.canonical_fields import canonical_attr_key
 from app.services.timezone_utils import utc_now
+
+logger = logging.getLogger(__name__)
 
 _DATASHEET_ATTR_KEYS = {
     "datasheet",
@@ -46,6 +49,10 @@ def _sources(approved: Optional[bool] = None) -> List[Dict[str, Any]]:
         else:
             sources = resolve_file_sources()
     except Exception:
+        # No sources means discovery finds nothing, so an import reports "no
+        # files" - which reads as a pack that contained none, not as storage
+        # the server could not enumerate.
+        logger.exception("could not resolve file sources; discovery will find nothing")
         sources = []
     active = [src for src in sources if str(src.get("local_root") or "").strip()]
     if approved is None:
@@ -115,6 +122,10 @@ def _dir_index(directory: Path) -> Dict[str, Path]:
             # this has to behave identically on.
             index.setdefault(entry.name.casefold(), entry)
     except OSError:
+        # An unreadable directory becomes an empty one, so every file inside it
+        # silently stops being discovered. Permissions drift is the usual
+        # cause and it is invisible from the outside.
+        logger.warning("could not list %s; treating it as empty", directory, exc_info=True)
         index = {}
     if cache is not None:
         cache[key] = index
