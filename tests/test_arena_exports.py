@@ -309,3 +309,89 @@ def test_arena_file_links_export_builds_base_prefixed_rows(
     assert child_step["file title"] == "CMP-LINK_REV_B.stp"
     assert child_step["file location"] == "https://example.com/arena/STEP/CMP-LINK_REV_B.step"
     assert child_step["file description"] == "CMP-LINK_REV_B"
+
+
+def test_arena_bom_export_still_walks_a_shared_subassembly_twice(client):
+    """D2 (2026-08-09): the children/part-lookup cache added to walk() must
+    share the LOOKUP, not the traversal - same rule as _flatten_bom's memo in
+    docpacks.py, and the same fixture shape as its own regression test, so a
+    reviewer can compare them directly.
+
+    Arena's BOM format needs one row PER OCCURRENCE: a subassembly used at
+    two different places in the tree is two real, differently-quantified
+    lines on the exported sheet, not one. If the new cache had memoised the
+    WALK instead of just the constant-per-part lookups, this would collapse
+    to a single row and silently drop a line from every export that reuses a
+    subassembly - a wrong Arena BOM, not a slow one.
+    """
+    admin = _admin_user()
+    _login(client, admin)
+
+    root = Part(part_number="TOP-SHARE", revision="", description="Top").save()
+    mid_a = Part(part_number="MID-A-SHARE", revision="", description="Mid A").save()
+    mid_b = Part(part_number="MID-B-SHARE", revision="", description="Mid B").save()
+    shared = Part(part_number="SHARED-PART", revision="", description="Shared").save()
+
+    BOMLink(parent_pn=root.part_number, parent_rev="", child_pn=mid_a.part_number, child_rev="", qty=2).save()
+    BOMLink(parent_pn=root.part_number, parent_rev="", child_pn=mid_b.part_number, child_rev="", qty=5).save()
+    BOMLink(parent_pn=mid_a.part_number, parent_rev="", child_pn=shared.part_number, child_rev="", qty=3).save()
+    BOMLink(parent_pn=mid_b.part_number, parent_rev="", child_pn=shared.part_number, child_rev="", qty=3).save()
+
+    resp = client.post(
+        f"/api/parts/{root.part_number}/export/arena_bom",
+        json={"rev": "", "field_ids": ["part_number"]},
+    )
+    assert resp.status_code == 200
+    rows = _read_csv_response(resp)
+
+    shared_rows = [row for row in rows if row["item number"] == "SHARED-PART"]
+    assert len(shared_rows) == 2, f"a shared subassembly must appear once per path, got {shared_rows}"
+    assert {row["level"] for row in shared_rows} == {"2"}
+    assert {row["quantity"] for row in shared_rows} == {"3"}
+    assert {row["item name"] for row in shared_rows} == {"Shared"}
+
+
+def test_arena_file_links_export_deduplicates_a_diamond_shared_part(client, app, tmp_path):
+    """D2 (2026-08-09): _collect_unique_parts switched its recursion guard
+    from path-local ancestry to the global `seen` set, so a diamond-shared
+    part is walked once instead of once per path. Unlike the BOM export
+    above, this function's whole purpose is a deduplicated SET of parts to
+    look up files for - so the file-links sheet must list a shared part's
+    files exactly once no matter how many BOM paths reach it.
+    """
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+    app.config["FILE_SOURCES"] = [{"local_root": str(tmp_path)}]
+    admin = _admin_user()
+    _login(client, admin)
+
+    root = Part(part_number="TOP-LINKS", revision="", description="Top").save()
+    mid_a = Part(part_number="MID-A-LINKS", revision="", description="Mid A").save()
+    mid_b = Part(part_number="MID-B-LINKS", revision="", description="Mid B").save()
+    shared = Part(part_number="SHARED-LINKS", revision="", description="Shared").save()
+
+    BOMLink(parent_pn=root.part_number, parent_rev="", child_pn=mid_a.part_number, child_rev="", qty=1).save()
+    BOMLink(parent_pn=root.part_number, parent_rev="", child_pn=mid_b.part_number, child_rev="", qty=1).save()
+    BOMLink(parent_pn=mid_a.part_number, parent_rev="", child_pn=shared.part_number, child_rev="", qty=1).save()
+    BOMLink(parent_pn=mid_b.part_number, parent_rev="", child_pn=shared.part_number, child_rev="", qty=1).save()
+
+    shared_pdf = tmp_path / "deliverables" / "SHARED-LINKS_REV_.pdf"
+    shared_pdf.parent.mkdir(parents=True)
+    shared_pdf.write_bytes(b"pdf")
+    PartFile(
+        part_number=shared.part_number,
+        revision="",
+        ext_group="pdf",
+        ext="pdf",
+        rel_path="deliverables/SHARED-LINKS_REV_.pdf",
+        path=str(shared_pdf),
+    ).save()
+
+    resp = client.post(
+        f"/api/parts/{root.part_number}/export/arena_file_links",
+        json={"rev": "", "base_url": "https://example.com/arena"},
+    )
+    assert resp.status_code == 200
+    rows = _read_csv_response(resp)
+
+    shared_rows = [row for row in rows if row["item number"] == "SHARED-LINKS"]
+    assert len(shared_rows) == 1, f"a diamond-shared part's files must be listed once, got {shared_rows}"

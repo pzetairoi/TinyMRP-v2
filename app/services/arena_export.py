@@ -4,7 +4,7 @@ import csv
 import io
 import math
 import os
-from typing import Any, Callable, Dict, Iterable, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, Optional, Sequence, Tuple
 
 from app.models.artifact import PartFile
 from app.models.bom import BOMLink
@@ -244,8 +244,43 @@ def build_arena_bom_csv(
         }
     )
 
+    # Memoised for the life of this export, same principle as _flatten_bom's
+    # children cache (docpacks.py): a shared subassembly is legitimately
+    # walked more than once here, because Arena's BOM format needs one row
+    # PER OCCURRENCE-PATH - level, quantity and total_qty all vary by path,
+    # so the walk and its row output are deliberately NOT deduplicated. What
+    # IS shared, because it does not depend on which path reached the part,
+    # is the constant-per-part lookup work: the BOMLink children query, the
+    # Part fetch, its harvested attrs and its description. Re-running those
+    # for every occurrence was pure waste, not correctness.
+    _children_cache: Dict[Tuple[str, str], list] = {}
+    _part_lookup_cache: Dict[Tuple[str, str], Tuple[Optional[Part], str, str]] = {}
+
+    def children(pn: str, rev: str) -> list:
+        key = (pn, rev)
+        cached = _children_cache.get(key)
+        if cached is None:
+            cached = _child_links(pn, rev)
+            _children_cache[key] = cached
+        return cached
+
+    def part_lookup(pn: str, rev: str) -> Tuple[Optional[Part], str, str]:
+        key = (pn, rev)
+        cached = _part_lookup_cache.get(key)
+        if cached is not None:
+            return cached
+        part = _part_by(pn, rev)
+        attrs = harvest_part_attrs(part) if part else {}
+        effective_rev = _clean_rev(attrs.get("revision") or (part.revision if part else "") or rev)
+        description = _csv_text(
+            _resolve_values(part, ["description"], extra={"part_number": pn, "revision": effective_rev}).get("description")
+        )
+        result = (part, effective_rev, description)
+        _part_lookup_cache[key] = result
+        return result
+
     def walk(parent_pn: str, parent_rev: str, depth: int, ancestry: tuple[tuple[str, str], ...], parent_total_qty: float) -> None:
-        for link in _child_links(parent_pn, parent_rev):
+        for link in children(parent_pn, parent_rev):
             child_pn = str(getattr(link, "child_pn", None) or "").strip()
             if not child_pn:
                 continue
@@ -255,12 +290,7 @@ def build_arena_bom_csv(
                 continue
             if is_allowed and not is_allowed(child_pn, child_rev):
                 raise RuntimeError("Export scope is incomplete.")
-            child_part = _part_by(child_pn, child_rev)
-            child_attrs = harvest_part_attrs(child_part) if child_part else {}
-            effective_rev = _clean_rev(child_attrs.get("revision") or (child_part.revision if child_part else "") or child_rev)
-            description = _csv_text(
-                _resolve_values(child_part, ["description"], extra={"part_number": child_pn, "revision": effective_rev}).get("description")
-            )
+            child_part, effective_rev, description = part_lookup(child_pn, child_rev)
             next_ancestry = ancestry + (child_key,)
             # BOMLink.qty is the authoritative quantity for this parent/child
             # relationship. ``occurrences`` only preserves the individual
@@ -313,7 +343,7 @@ def _collect_unique_parts(
         seen.add(key)
         out.append(key)
 
-    def walk(parent_pn: str, parent_rev: str, ancestry: tuple[tuple[str, str], ...]) -> None:
+    def walk(parent_pn: str, parent_rev: str) -> None:
         add(parent_pn, parent_rev)
         for link in _child_links(parent_pn, parent_rev):
             child_pn = str(getattr(link, "child_pn", None) or "").strip()
@@ -321,14 +351,22 @@ def _collect_unique_parts(
                 continue
             child_rev = _clean_rev(getattr(link, "child_rev", "") or "")
             child_key = (child_pn, child_rev)
-            if child_key in ancestry:
+            # Unlike build_arena_bom_csv's walk() above, this function only
+            # wants the SET of reachable parts, with no per-path quantity or
+            # row output - so once a part has been seen, re-entering it can
+            # only repeat work already done. A `seen`-based guard is stronger
+            # than the ancestry-only cycle check it replaces (it also skips
+            # legitimate diamond-shared subassemblies, which is exactly the
+            # point) and it is correct here specifically because the result
+            # is a plain set, not a per-occurrence list.
+            if child_key in seen:
                 continue
             if is_allowed and not is_allowed(child_pn, child_rev):
                 raise RuntimeError("Export scope is incomplete.")
-            walk(child_pn, child_rev, ancestry + (child_key,))
+            walk(child_pn, child_rev)
 
     if not is_allowed or is_allowed(root_pn, root_rev):
-        walk(root_pn, root_rev, ((root_pn, root_rev),))
+        walk(root_pn, root_rev)
     return out
 
 
