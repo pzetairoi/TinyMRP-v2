@@ -40,9 +40,8 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
   STILL OPEN FROM postoptimizationplan.txt
     O1    CSP browser check.
     2.14  Backup retention and cadence. NEWEST AND MOST TIME-SENSITIVE.
-    2.13  Remove/retire legacy-login compat paths, after add-in compatibility
-          is confirmed.
-    2.12  Migrate and remove legacy roles safely.
+    2.13  CLOSED 2026-08-09. compat mode deleted entirely.
+    2.12  CLOSED 2026-08-09. The legacy admin bypass deleted entirely.
     2.11  Finish TypeScript errors and make tsc a real CI gate.
     2.7   Frontend page coverage + Playwright/axe coverage.
     2.8   Risk-ranked silent exception cleanup.
@@ -94,6 +93,14 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
   solidworks-addin/ STILL REQUIRES REAL SOLIDWORKS ACCEPTANCE.
     Do not claim compat code can be deleted based only on server tests.
 
+  THERE IS ONE AUTHENTICATION MODEL AND ONE ROLE MODEL. Do not add a second
+    "compatibility" path for anything. Both existed here, both were default-on,
+    and both were removed in one day once someone looked: the role bypass
+    granted every permission in the registry to a role name, and compat mode
+    let an application generate its own signing key. A compatibility path is
+    not a smaller version of a feature - it is a second implementation of the
+    security-critical one, kept where nobody tests it.
+
   A BACKUP IS NOT A BACKUP UNTIL IT HAS BEEN RESTORED.
     Carried forward because it has already cost this project twice: four
     consecutive backups were silently empty past a guard that only checked
@@ -108,8 +115,8 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 
   LANE A - SECURITY / LEGACY CLEANUP / OPERATIONS
     A1 O1 CSP browser check.
-    A2 2.13 legacy-login retirement.            DONE 2026-08-09 (c54abf3)
-    A3 2.12 legacy-role migration and removal.  DONE 2026-08-09 (f7c1133)
+    A2 2.13 legacy-login retirement.      CLOSED 2026-08-09 (c54abf3, eec2039)
+    A3 2.12 legacy-role removal.          CLOSED 2026-08-09 (f7c1133, 148d3ed)
     A4 2.14 backup retention and cadence.       DONE 2026-08-09 (4fe788e)
 
   LANE B - FRONTEND / QUALITY
@@ -160,7 +167,8 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       DONE WHEN: critical UI paths work with strict script CSP enforced and
       evidence is recorded in this plan.
 
-  A2  RETIRE LEGACY LOGIN / COMPAT PATHS                    SECURITY CLEANUP
+  A2  RETIRE LEGACY LOGIN / COMPAT PATHS      CLOSED 2026-08-09 - see log
+      Compat mode no longer exists. Task text kept for the record.
       First inventory every compat branch and every client that can still hit
       it. Confirm the deployed SolidWorks add-in works against strict mode.
       Then remove dead compat paths rather than preserving a second auth model.
@@ -174,7 +182,8 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       DONE WHEN: strict is the only supported production auth path, tests cover
       its fail-closed behaviour, and no known field client depends on compat.
 
-  A3  MIGRATE AND REMOVE LEGACY ROLES                              RBAC
+  A3  MIGRATE AND REMOVE LEGACY ROLES         CLOSED 2026-08-09 - see log
+      The legacy admin bypass no longer exists. Task text kept for the record.
       Identify the exact legacy role set from the role registry/RBAC history.
       Inspect live role assignments before deletion. Provide an additive,
       reversible mapping to canonical roles; migrate data first, remove code
@@ -187,7 +196,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       DONE WHEN: no live user depends on a legacy role name and legacy role
       handling is absent from normal code paths.
 
-  A4  BACKUP RETENTION AND CADENCE                            OPERATIONS
+  A4  BACKUP RETENTION AND CADENCE            DONE 2026-08-09 - see log
       Measured on mecs at 1.0 closure:
         deliverables.tar.gz   2.0 GB     99.9% of the backup
         mongo.archive.gz      2.3 MB     (27.1 MB uncompressed)
@@ -499,8 +508,11 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
     disk fills. Sequenced early because it is the only open item with a
     deadline set by physics rather than preference.
 
-  M2 - LEGACY REDUCTION
-    A2 + A3 complete with field-client/RBAC evidence.
+  M2 - LEGACY REDUCTION                                     REACHED 2026-08-09
+    A2 + A3 complete. Evidence: the SolidWorks add-in provably never reached
+    the removed CSRF code (API tokens return early from the guard), and the
+    live fleet was checked for holders of the legacy role before the bypass
+    was touched - mecs had none.
     Result: one auth model, one canonical role model.
 
   M3 - COMMUNITY STANDALONE MVP
@@ -534,6 +546,53 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  A2 + A3 FULLY CLOSED - the second auth model is gone
+    Baseline: A2/A3 had left the code behind default-off flags. The owner
+      asked for total removal: no function, no mention, no env file, no
+      script, nothing but the current system.
+
+    A3 legacy admin bypass, DELETED (148d3ed). legacy_admin_bypass_enabled,
+      _uses_legacy_admin_bypass, the LEGACY_ADMIN_BYPASS_ENABLED config,
+      AuthorizationDecision.used_legacy_admin_bypass and its audit key, and
+      nine call sites that short-circuited scope and permission checks.
+      The safeguards keyed on the old name were REPOINTED, not deleted -
+      the last-active-administrator check and the role-editing guards were
+      protecting the right thing under the wrong name, and now ask about
+      "administrator". A role named "admin" is an ordinary custom role.
+      HOW WIDE IT WAS, measured: 66 tests relied on an empty role named
+      "admin" to grant everything. That number is the honest measure of the
+      hole. Every test asserting the bypass worked was rewritten to assert
+      it does not, including one pinning that setting the old flag changes
+      nothing, so an .env still carrying it cannot restore it quietly.
+
+    A2 compat mode, DELETED (eec2039). security_mode() and is_strict_mode()
+      are gone, and with them every branch choosing between two behaviours
+      for CORS, cookies, upload caps, proxy limits, CSP and CSRF.
+      runtime_secrets no longer generates and persists its own SECRET_KEY
+      and SECURITY_PASSWORD_SALT when none are supplied - that path existed
+      only for compat, and an application that invents its own signing key
+      cannot tell a forged session from a real one after a restart. It
+      refuses to start instead.
+      Removed from: both compose files, all four env examples,
+      create-instance.sh, install-server.sh, the CI workflow, the
+      diagnostics report, /api/health, the READMEs, SECURITY.md and help.
+
+    THE TEST SUITE WAS HOLDING BOTH UP. It ran in compat, so it never
+      supplied secrets at all: 536 errors appeared the moment the generator
+      was removed. conftest now sets them explicitly, which is what any
+      real deployment must do. Same pattern as the CSRF discovery earlier -
+      the suite was resting on the permissive path, and it only shows when
+      the path is taken away.
+
+    A TRAP FOR DEPLOYMENT, worth checking before it bites: an instance
+      whose .env carries a secret shorter than 16 characters will no longer
+      START. Verified across the fleet beforehand - all three carry 48
+      characters, generated by install-server.sh. The shipped env examples
+      had placeholders too short to boot and were fixed.
+
+    Evidence/tests: 790 backend tests pass, ruff and bandit clean.
+    Remaining in Lane A: A1 only, and it needs a browser.
 
   2026-08-09  A2 + A3 + A4  DONE
     Baseline: v1.0.0 = f5b5913, fleet all strict and Mongo-authenticated.
