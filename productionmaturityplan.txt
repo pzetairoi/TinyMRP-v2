@@ -128,7 +128,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
   LANE B - FRONTEND / QUALITY
     B1 2.11 TypeScript + tsc in CI.       CLOSED 2026-08-09 (2c43444, f28233a)
     B2 2.7 page tests, then minimum Playwright + axe critical-path suite.
-    B3 2.8 silent exceptions, risk-ranked and incremental.
+    B3 2.8 silent exceptions.       IN PROGRESS 2026-08-09 (c1af532, +1)
 
   LANE C - COMMUNITY DOCKER DISTRIBUTION
     C1 architecture + public contract.
@@ -553,6 +553,37 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  B3 STARTED - two batches, highest risk first
+    Baseline: 276 silent exception handlers across 61 files. The plan says
+      work by risk, not by count, and that is what this does.
+
+    BATCH 1, authorisation and file access (c1af532). These already failed
+      CLOSED, which is right. What they did not do is SAY anything:
+        effective_permissions throws -> frozenset()  -> "holds no permissions"
+        scoped part lookup throws    -> None         -> "part does not exist"
+        file sources unresolvable    -> []           -> "there are no files"
+      Each is indistinguishable, at every level above, from a legitimate
+      denial. That is the failure where a bug removes everyone's access and
+      the logs agree everything is fine. Six handlers now log with a stack
+      trace before failing closed. Behaviour deliberately unchanged: this
+      buys observability, not new decisions.
+
+    BATCH 2, the import path. One of these is not an observability gap but
+      a CORRECTNESS one:
+        the ImportJournal idempotency lookup returned None on failure, which
+        means "no previous run found" - so a failed lookup does not just
+        lose a record, it defeats the duplicate check and THE SAME IMPORT
+        CAN RUN TWICE. Still allowed to proceed, because blocking imports on
+        a journal outage would be worse, but now loud.
+        A completed import whose audit record could not be written was also
+        silent; that is precisely the event someone later needs to
+        reconstruct.
+
+    NOT DONE, and worth being honest about: this is 8 of 276. The rest are
+      concentrated in best-effort UI paths where swallowing is defensible.
+      Do not chase the count. The remaining ones worth reading are in
+      filescan.py, extra_files.py and fileserve.py.
 
   2026-08-09  B1 CLOSED - typecheck green and gating, plus a 27% bundle cut
     Baseline: 18 typecheck errors, no typecheck in CI, index.js 1,318 kB.

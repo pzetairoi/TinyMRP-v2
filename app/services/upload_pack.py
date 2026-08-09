@@ -1616,6 +1616,16 @@ def previous_successful_import(key: str) -> ImportJournal | None:
             .first()
         )
     except Exception:  # pragma: no cover - journal must never break imports
+        # Returning None means "no previous run found", so a failure here does
+        # not just lose a record: it defeats the idempotency check and the
+        # SAME IMPORT CAN RUN TWICE. The import is still allowed to proceed -
+        # blocking on a journal outage would be worse - but this must be
+        # visible, because a duplicate import is a data problem, not a log gap.
+        logger.exception(
+            "import journal lookup failed for idempotency key %s; "
+            "a repeated submission will not be recognised as a duplicate",
+            key,
+        )
         return None
 
 

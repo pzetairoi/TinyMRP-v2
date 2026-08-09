@@ -249,7 +249,12 @@ def upload_pack():
             },
         )
     except Exception:
-        pass
+        # The import itself already succeeded, so this must not fail the
+        # request - but an import with no audit record is exactly the event
+        # someone will later need to reconstruct.
+        current_app.logger.exception(
+            "import completed but its audit record could not be written"
+        )
     return jsonify(result)
 @bp.get("/parts/<path:pn>/<path:rev>/extra")
 @login_required
