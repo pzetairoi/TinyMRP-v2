@@ -119,7 +119,8 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 2. ORDER OF WORK - CONCURRENT LANES
 ========================================================================
 
-  *** WHO HAS WHAT, 2026-08-09. Codex is working lane C in parallel. ***
+  *** WHO HAS WHAT, 2026-08-09. Codex closed lane C's repository work while
+      Claude continues lane B. External Community release acceptance remains. ***
 
     CLAUDE has touched, and lane C must not edit concurrently:
       app/services/{authorization,file_security,filescan,extra_files,
@@ -168,13 +169,13 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 
   LANE C - COMMUNITY DOCKER DISTRIBUTION
     C1 architecture + public contract.       DONE 2026-08-09 (98d14ea)
-    C2 release pipeline / Docker Hub.        IMPLEMENTED 318f38c; enable pending
+    C2 release pipeline / Docker Hub.        REPO DONE 318f38c; enable external
     C3 shared Compose.                       DONE 2026-08-09 (98d14ea, 318f38c)
-    C4 Linux installer and commands.         IMPLEMENTED 318f38c; CI run pending
+    C4 Linux installer and commands.         REPO DONE 318f38c,a5735df; CI run pending push
     C5 Windows installer and commands.       DONE localhost 2026-08-09 (318f38c)
-    C6 update / backup / restore / uninstall-preserve-data. DONE (318f38c)
-    C7 optional LAN/domain/Caddy modes.      IMPLEMENTED 318f38c; accept pending
-    C8 acceptance matrix/public docs.        ACTIVE 318f38c; LAN/domain pending
+    C6 update / backup / restore / uninstall-preserve-data. DONE localhost (a5735df)
+    C7 optional LAN/domain/Caddy modes.      REPO DONE 318f38c; host accept external
+    C8 acceptance matrix/public docs.        REPO DONE a5735df; release rows external
 
   LANE D - PERFORMANCE, MEASURE-ONLY FIRST
     D1 2.5 re-measure _flatten_bom.
@@ -611,6 +612,60 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  C REPOSITORY LINE COMPLETE - external release acceptance remains
+    Coordination: commit a5735df contains only Lane C paths under
+      deploy/community/** and .github/workflows/community-smoke.yml. Claude's
+      security workflow, browser workflow, .github/ci/** and frontend changes
+      remain unstaged and untouched so Lane B can finish independently.
+    C6 fix: exact restore now clears every non-system application collection
+      before replaying the verified archive, scopes mongorestore to the TinyMRP
+      database, and preserves its database-scoped readWrite user. Both Linux
+      and Windows lifecycle commands use the same contract.
+    C4/C8 fix: the Ubuntu job now pulls missing Mongo/Redis images while using
+      the locally built app image, passes actionlint, and creates a collection
+      only after backup so CI proves exact replacement rather than clearing a
+      document from a collection already present in the archive.
+    Windows Docker Desktop acceptance: clean install and authenticated backup
+      produced a 3,516-byte archive with 14,386 uncompressed Mongo bytes;
+      restore removed the post-backup-only collection (list index -1), retained
+      the scoped readWrite app user and administrator (count 1), and returned
+      HTTP 200 readiness on 127.0.0.1:5096. Destructive disposable uninstall
+      left zero Community containers and volumes; evidence backup was retained
+      under the acceptance temp directory.
+    Gates: PowerShell parser, ShellCheck warning level, base/domain Compose
+      rendering, actionlint 1.7.7 for both C workflows, and git diff check pass.
+    Commits: 318f38c supplies lifecycle/release packaging; a5735df supplies the
+      exact-restore regression and clean-runner fixes.
+    External boundaries: commits are local and not pushed, so the first Ubuntu
+      Actions run has not occurred. Docker Hub namespace/credentials and live
+      publication are not configured. Real LAN and DNS/ACME hosts remain open
+      release-matrix rows and must pass before those modes are called supported.
+
+  2026-08-09  C6 REOPENED / C4+C8 ACTIVE - post-crash audit found real gaps
+    Ownership remains Lane C/Codex only: deploy/community/** and
+      .github/workflows/community-smoke.yml/release-image.yml. Claude's Lane B
+      workflow, frontend and app files remain untouched.
+    C6 reproduced defect: after a verified 14,379-byte dump, a collection
+      created only after the backup survived restore with count=1. Both
+      lifecycle scripts use `mongorestore --drop`; that drops archived
+      collections before restoring them but does not remove collections absent
+      from the archive. The earlier marker reused an existing collection and
+      therefore did not test exact database replacement.
+    C4/C8 blockers: Community CI sets TINYMRP_INSTALL_PULL=never, which also
+      prevents Mongo/Redis pulls on a clean runner, and actionlint reports
+      SC2155 on the generated-password export. The workflow has not run on
+      GitHub because the C commits are still local (HEAD three ahead of origin).
+    Tests/gates: Windows clean install still passes; YAML, PowerShell parsing,
+      deployment-script ShellCheck and Compose rendering pass; actionlint fails
+      on the workflow; targeted restore semantics fail as above.
+    Commit: audit only at this point; superseded by a5735df and the completion
+      entry above.
+    What remained at audit time: make restore exact without losing
+      authenticated access, add the post-backup-only collection regression on
+      Linux CI, fix clean-runner
+      pulls/actionlint, rerun disposable lifecycle acceptance, then correct the
+      older DONE entry below with superseding evidence rather than deleting it.
 
   2026-08-09  C1/C3/C5/C6 DONE FOR LOCALHOST - real disposable acceptance
     Result: Windows Docker Desktop clean install generated secrets, created an
