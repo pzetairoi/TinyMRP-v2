@@ -618,7 +618,17 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       id - not just the fact that something went wrong. Everything else is
       best-effort cleanup and belongs at debug, not deleted and not raised.
 
-    NOT DONE, and worth being honest about: this is 14 of 276. The rest are
+    BATCH 6, document packs (docpacks.py, 90 handlers - the largest single
+      concentration). Only ONE was worth changing: a failed reportlab import
+      returned None, which drops a section from the pack. The document still
+      builds and still LOOKS complete, so the result is a manufacturing
+      document with a section quietly absent rather than a failure anyone
+      notices. The rest are PDF-structure parsing against malformed input,
+      where swallowing genuinely is the right answer.
+      That ratio is the argument against chasing the count: 1 in 90 here,
+      against 6 in 7 in authorization.py.
+
+    NOT DONE, and worth being honest about: this is 15 of 276. The rest are
       concentrated in best-effort UI paths where swallowing is defensible.
       Do not chase the count. The remaining ones worth reading are in
       filescan.py, extra_files.py and fileserve.py.

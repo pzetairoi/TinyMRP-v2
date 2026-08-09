@@ -359,6 +359,11 @@ def _missing_files_pdf(rows: List[Dict[str, object]]) -> Optional[bytes]:
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
         from reportlab.lib.styles import getSampleStyleSheet
     except Exception:
+        # Returning None drops this section from the pack entirely. The
+        # document still builds and still looks complete, so a missing or
+        # broken reportlab produces a MANUFACTURING DOCUMENT WITH A SECTION
+        # QUIETLY ABSENT rather than a failure anyone would notice.
+        logger.exception("reportlab unavailable; omitting a document-pack section")
         return None
     if not rows:
         return None
