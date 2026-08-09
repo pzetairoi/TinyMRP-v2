@@ -126,7 +126,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
     A4 2.14 backup retention and cadence.       DONE 2026-08-09 (4fe788e)
 
   LANE B - FRONTEND / QUALITY
-    B1 2.11 finish TypeScript and enforce tsc in CI.
+    B1 2.11 TypeScript + tsc in CI.       CLOSED 2026-08-09 (2c43444, f28233a)
     B2 2.7 page tests, then minimum Playwright + axe critical-path suite.
     B3 2.8 silent exceptions, risk-ranked and incremental.
 
@@ -228,7 +228,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       least daily, and a restore from the new layout has been proven on a
       disposable instance.
 
-  B1  MAKE TYPESCRIPT A REAL GATE                                 QUALITY
+  B1  MAKE TYPESCRIPT A REAL GATE             CLOSED 2026-08-09 - see log
       Current state: ambient declarations were repaired and errors reduced from
       25 to 18 at the 1.0 closure handover.
       Root cause of most of them was src/vite-env.d.ts holding a stale copy of
@@ -553,6 +553,59 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  B1 CLOSED - typecheck green and gating, plus a 27% bundle cut
+    Baseline: 18 typecheck errors, no typecheck in CI, index.js 1,318 kB.
+
+    B1 (2c43444). 25 errors -> 0, and `tsc --noEmit` is now a required step
+      in security.yml. THE SECOND HALF IS THE POINT: Vite's build does not
+      typecheck - esbuild strips types without checking them - so nothing
+      had ever caught a type error in this project.
+
+      What they actually were, none of them cosmetic:
+        GroupableFile declared only its grouping fields while the datasheet
+          code read name and rel_path off the same objects. The type lied
+          about the shape it described.
+        Four useState bindings written but never read; one read but never
+          written. State that drives nothing, or that cannot change.
+        encodeURIComponent given a string | undefined in part links.
+        A possibly non-primitive value rendered directly as a child.
+
+      Two were PrimeReact's gaps, not ours: TreeTableProps declares neither
+      filterDisplay nor size, both of which work at runtime and are in
+      visible use. Declared in src/primereact-augment.d.ts with a note to
+      delete them if upstream ships them - rather than casting the props
+      object, which would have hidden every other error on that element.
+
+    BUNDLE (f28233a). Measured, not estimated:
+        index.js  1,318 kB -> 984 kB   (378 -> 274 kB gzipped)
+        new DrawingMarkupWorkspace chunk 332 kB (104 kB gzipped)
+      27% off the initial download. fabric.js is a large canvas library and
+      the markup editor sits behind a tab most part visits never open, yet
+      every visitor downloaded it before rendering anything. React.lazy
+      behind Suspense - the same treatment the 3D viewer already had. The
+      pattern existed; it had only ever been applied once.
+
+      NOTHING WAS DELETED TO ACHIEVE THIS. The owner asked to remove unused
+      code; after measuring, the honest answer was that it is all used and
+      was simply being fetched at the wrong time.
+
+    WHAT IS LEFT IN THE BUNDLE, so nobody re-measures it: the remaining
+      984 kB is React, React Router and PrimeReact, used on every page.
+      Going further means route-level splitting, which risks navigation
+      regressions and should be measured before it is attempted. The 217 kB
+      of CSS is almost entirely the PrimeReact theme.
+
+    ON THE CSS CONSOLE WARNINGS the owner asked about (-moz-column-gap,
+      speak, font-named-instance, -ms-input-placeholder,
+      -moz-osx-font-smoothing): none are ours. Bootstrap arrives by CDN on
+      the server-rendered pages and is not in the bundle at all; the rest
+      ship inside PrimeIcons/PrimeReact. Silencing them would mean
+      vendoring and patching third-party CSS, which breaks on every
+      upgrade, to remove warnings that do not affect rendering. Do not.
+
+    Evidence: 336 frontend tests, typecheck green, build clean, 790 backend.
+    Remaining in Lane B: B2 and B3.
 
   2026-08-09  A1 CLOSED - strict script CSP enforced on test
     Baseline: script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net.
