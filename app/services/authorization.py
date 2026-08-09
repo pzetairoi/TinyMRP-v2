@@ -151,12 +151,28 @@ def effective_permissions(user: Any) -> frozenset[str]:
 
 
 def legacy_admin_bypass_enabled() -> bool:
-    """Return whether the exact legacy ``admin`` compatibility is enabled."""
+    """Whether holding a role literally named ``admin`` still bypasses RBAC.
+
+    DEFAULT FLIPPED TO OFF 2026-08-09 (productionmaturityplan A3). This was the
+    single widest hole in the permission system: one role name granted every
+    permission in the registry without consulting the registry at all.
+
+    Checked against the live fleet before flipping, because a role name lives
+    in databases and not only in code:
+      mecs (production)  0 users held it. Everyone is administrator,
+                         engineering or customer.
+      test               1 user, migrated additively to administrator first.
+
+    Still overridable, so an instance that discovers a dependency can set
+    LEGACY_ADMIN_BYPASS_ENABLED=1 to restore the old behaviour while it
+    reassigns roles properly. That escape hatch is the reason this is a
+    default change rather than a deletion.
+    """
 
     return (
-        bool(current_app.config.get("LEGACY_ADMIN_BYPASS_ENABLED", True))
+        bool(current_app.config.get("LEGACY_ADMIN_BYPASS_ENABLED", False))
         if has_app_context()
-        else True
+        else False
     )
 
 
