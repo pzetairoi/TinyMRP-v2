@@ -47,13 +47,11 @@ Create a local `.env` (do not commit it) or select one via `ENV_FILE` with at le
   - `FILES_ACCEL_REDIRECT_PREFIX`: optional internal Nginx location used for `X-Accel-Redirect`; leave this empty for the guided Caddy deployment and any setup that does not create and verify a matching internal route.
   - `FILES_ALLOW_LEGACY_TOKENS=false`: allow legacy base64 file tokens (off by default).
 - Optional:
-  - `TINYMRP_SECURITY_MODE=strict|compat`: security profile (default strict; compat is local-development/migration only).
   - `TINYMRP_ALLOWED_ORIGINS`: comma-separated allowlist for cross-origin requests. Same-origin browser use does not require CORS.
   - `TINYMRP_CORS_CREDENTIALS=true`: allow credentials when using an explicit allowlist.
   - `API_TOKEN_DEFAULT_TTL_DAYS=90`: lifetime applied to newly created API tokens.
   - `API_TOKEN_MAX_TTL_DAYS=365`: maximum lifetime users may request; must be at least the default.
   - `TINYMRP_MAX_CONTENT_MB`: global request size cap (falls back to Upload Pack max).
-  - `TINYMRP_RUNTIME_SECRETS_PATH`: override runtime secrets file path (compat mode only).
   - `FILE_HASH_MAX_BYTES`: compute/verify file hashes up to this size (0 to disable).
   - `VITE_BACKEND_URL`: dev proxy target for Vite (`frontend/vite.config.ts`).
   - `FORCE_HTTPS=true`: enforce HTTPS and set secure cookies.
@@ -74,28 +72,24 @@ Examples: `.env.dev.example`, `.env.docker.example`, `.env.server.example`.
 
 ---
 
-## Security Modes
+## Security Model
 
-- **strict (default)**: the same-origin browser uses its authenticated session and an origin/referer CSRF check; integrations and the SolidWorks add-in use bearer tokens. `/api/auth/check` is bearer-only, public-share APIs require their scoped share capability, and `/api/health` is anonymous. Browser-only APIs reject bearer substitution. CORS is disabled unless an origin is explicitly allowed, cookies are Secure + SameSite=Strict, and startup fails if secrets are missing or weak.
-- **compat (development/migration only)**: preserves legacy behavior for local HTTP and staged upgrades. It retains the session-origin CSRF guard and safer CORS defaults, but may persist generated runtime secrets when explicit secrets are missing. Do not expose compat mode to the public internet.
+There is one model. The same-origin browser uses its authenticated session plus
+an origin/referer CSRF check; integrations and the SolidWorks add-in use bearer
+tokens. `/api/auth/check` is bearer-only, public-share APIs require their scoped
+share capability, and `/api/health` is anonymous. Browser-only APIs reject
+bearer substitution. CORS is disabled unless an origin is explicitly allowed,
+cookies are Secure + SameSite=Strict, and startup fails if secrets are missing
+or weak.
 
-Since 1.0.0 every production instance runs strict mode, so compat exists only
-for local development and for staging an upgrade. Retiring it altogether is
-task A2 in `productionmaturityplan.txt`.
+A second "compat" profile used to exist for local HTTP and staged upgrades. It
+relaxed CORS and CSRF and could generate and persist its own secrets. It was
+removed after 1.0.0: an application that invents its own signing key cannot
+tell a forged session from a real one after a restart.
 
 See `SECURITY.md` for the full threat model and
 `docs/security/supply_chain_policy.md` for immutable pin updates and
 release-gate evidence.
-
-### Runtime secrets (compat mode)
-
-If `SECRET_KEY`/`SECURITY_PASSWORD_SALT` are missing or empty in compat mode, the app persists them to:
-
-```
-instance/runtime_secrets.json
-```
-
-Set explicit secrets in production to avoid warning logs and to support strict mode.
 
 ## Admin Settings
 
@@ -411,7 +405,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\run-tinymrp-container.
 ```
 
 This localhost/LAN-only helper intentionally persists
-`TINYMRP_SECURITY_MODE=compat` because it publishes plain HTTP. Do not expose it
 to the internet. Use the guided VPS/Caddy deployment for strict authentication,
 Secure cookies and TLS.
 

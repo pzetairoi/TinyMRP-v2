@@ -32,7 +32,6 @@ database does not reset any password or role assignment.
    `/opt/tinymrp_venv`, `pip install -r requirements.txt`. Everything owned by `tinymrp`.
 4. `/etc/tinymrp/.env` (mode `0640`, `root:tinymrp`) — start from `.env.server.example`;
    set strong `SECRET_KEY`/`SECURITY_PASSWORD_SALT` (`openssl rand -base64 48`) and
-   `TINYMRP_SECURITY_MODE=strict`.
 5. systemd: copy `deploy/tinymrp.service` to `/etc/systemd/system/` (sandboxed unit:
    `ProtectSystem=strict`, `NoNewPrivileges`, syscall filter; only the deliverables dir and
    `instance/` are writable). `systemctl enable --now tinymrp`.

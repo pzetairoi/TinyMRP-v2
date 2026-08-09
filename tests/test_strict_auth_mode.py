@@ -11,7 +11,6 @@ from app.models.customer import Customer
 from app.models.part import Part
 from app.services.api_tokens import create_token
 from app.services.part_shares import create_part_share
-from app.services.security_mode import security_mode
 from app.services.timezone_utils import utc_now
 
 
@@ -21,8 +20,7 @@ SAME_ORIGIN = {"Origin": STRICT_BASE_URL}
 
 @pytest.fixture
 def strict_app(monkeypatch):
-    monkeypatch.setenv("TINYMRP_SECURITY_MODE", "strict")
-    monkeypatch.setenv("SECRET_KEY", "s" * 64)
+    monkeypatch.setenv("SECRET_KEY", "s-padded-for-strict-mode-minimum-length" * 64)
     monkeypatch.setenv("SECURITY_PASSWORD_SALT", "strict-test-password-salt-123456789")
     app_module.init_mongo = lambda _app: None
     application = app_module.create_app()
@@ -53,11 +51,6 @@ def _login(client, user: User) -> None:
 
 def _error_code(response) -> str:
     return response.get_json()["error"]["code"]
-
-
-def test_security_mode_defaults_to_strict(monkeypatch):
-    monkeypatch.delenv("TINYMRP_SECURITY_MODE", raising=False)
-    assert security_mode() == "strict"
 
 
 def test_strict_browser_session_supports_navigation_and_same_origin_api_crud(
@@ -103,20 +96,6 @@ def test_strict_session_csrf_rejects_cross_origin_and_missing_origin(strict_clie
     )
     assert missing_origin.status_code == 400
     assert _error_code(missing_origin) == "csrf_failed"
-
-
-def test_invalid_bearer_cannot_bypass_session_csrf_in_compat(client, user):
-    _login(client, user)
-    response = client.put(
-        "/api/me/settings",
-        headers={
-            "Authorization": "Bearer definitely-invalid",
-            "Origin": "https://evil.example",
-        },
-        json={"ui_preferences": {"show_advanced": True}},
-    )
-    assert response.status_code == 400
-    assert _error_code(response) == "csrf_failed"
 
 
 def test_strict_bearer_only_and_dual_use_endpoint_categories(strict_client):

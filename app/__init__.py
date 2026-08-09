@@ -102,11 +102,9 @@ def create_app(config_object=None):
     except Exception:
         logger.warning("Could not load env file(s), continuing without them")
 
-    # Security mode is strict by default; compat must be selected explicitly
-    # for local development or a time-bounded migration.
-    from app.services.security_mode import security_mode as _security_mode
-    security_mode = _security_mode()
-    app.config["TINYMRP_SECURITY_MODE"] = security_mode
+    # There is one security model. The old compat mode is gone: it selected a
+    # second set of CORS, CSRF, cookie and upload rules, and every branch that
+    # read it now takes the strict path unconditionally.
     
         
     from app.services.processmeta import load_process_meta
@@ -231,11 +229,10 @@ def create_app(config_object=None):
         "EXTRA_FILES_ALLOWED",
         str(os.getenv("EXTRA_FILES_ALLOWED") or "true").strip().lower() in ("1", "true", "yes", "on"),
     )
-    if security_mode == "strict":
-        app.config["SESSION_COOKIE_SECURE"] = True
-        app.config["REMEMBER_COOKIE_SECURE"] = True
-        app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
-        app.config["REMEMBER_COOKIE_SAMESITE"] = "Strict"
+    app.config["SESSION_COOKIE_SECURE"] = True
+    app.config["REMEMBER_COOKIE_SECURE"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+    app.config["REMEMBER_COOKIE_SAMESITE"] = "Strict"
 
     # CORS allowlist (comma-separated, optional)
     app.config.setdefault("TINYMRP_ALLOWED_ORIGINS", os.getenv("TINYMRP_ALLOWED_ORIGINS") or "")
@@ -248,17 +245,11 @@ def create_app(config_object=None):
         except Exception:
             max_content_mb = None
     if not max_content_mb:
-        if security_mode == "strict":
-            max_content_mb = min(int(app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 200), 200)
-        else:
-            max_content_mb = int(app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 200)
+        max_content_mb = min(int(app.config.get("UPLOAD_PACK_MAX_ZIP_MB") or 200), 200)
     app.config.setdefault("MAX_CONTENT_LENGTH", int(max_content_mb) * 1024 * 1024)
 
     # Proxy size caps
-    if security_mode == "strict":
-        app.config.setdefault("FILES_PROXY_MAX_BYTES", int(os.getenv("FILES_PROXY_MAX_BYTES") or str(200 * 1024 * 1024)))
-    else:
-        app.config.setdefault("FILES_PROXY_MAX_BYTES", int(os.getenv("FILES_PROXY_MAX_BYTES") or str(2 * 1024 * 1024 * 1024)))
+    app.config.setdefault("FILES_PROXY_MAX_BYTES", int(os.getenv("FILES_PROXY_MAX_BYTES") or str(200 * 1024 * 1024)))
     
     app.config["TEMPLATES_AUTO_RELOAD"]=True # Enable auto-reload for templates in development
     
@@ -344,10 +335,10 @@ def create_app(config_object=None):
         else:
             logger.info("%s", mongo_auth_status["message"])
 
-    # Resolve secrets safely (persist in compat mode if missing/empty)
+    # Secrets must be supplied. They are never generated and persisted.
     from app.services.runtime_secrets import resolve_runtime_secrets
     try:
-        secret_key, password_salt = resolve_runtime_secrets(app, security_mode)
+        secret_key, password_salt = resolve_runtime_secrets(app, "strict")
     except RuntimeError as exc:
         raise RuntimeError(str(exc))
 
@@ -436,12 +427,10 @@ def create_app(config_object=None):
     if two_factor_enabled:
         totp_secret = (os.getenv("SECURITY_TOTP_SECRETS") or "").strip()
         if not totp_secret:
-            if security_mode == "strict":
-                raise RuntimeError(
-                    "SECURITY_TWO_FACTOR_ENABLED is set but SECURITY_TOTP_SECRETS is missing. "
-                    "Generate one with: python -c \"from passlib import totp; print(totp.generate_secret())\""
-                )
-            logger.warning("Two-factor requested but SECURITY_TOTP_SECRETS missing; 2FA stays OFF")
+            raise RuntimeError(
+                "SECURITY_TWO_FACTOR_ENABLED is set but SECURITY_TOTP_SECRETS is missing. "
+                "Generate one with: python -c \"from passlib import totp; print(totp.generate_secret())\""
+            )
         else:
             app.config["SECURITY_TWO_FACTOR"] = True
             app.config.setdefault("SECURITY_TWO_FACTOR_ENABLED_METHODS", ["authenticator"])
@@ -652,8 +641,7 @@ def create_app(config_object=None):
                     "font-src 'self' data: https://cdn.jsdelivr.net;",
                     f"connect-src {' '.join(connect_src)};",
                 ])
-                if security_mode == "strict":
-                    csp = " ".join([csp, "form-action 'self';", "upgrade-insecure-requests;"])
+                csp = " ".join([csp, "form-action 'self';", "upgrade-insecure-requests;"])
                 resp.headers.setdefault("Content-Security-Policy", csp)
 
                 # Optional report-only probe for the 'unsafe-inline' burn-down.
@@ -694,7 +682,6 @@ def create_app(config_object=None):
         api_auth_policy,
         extract_token_value,
         is_api_request,
-        is_strict_mode,
         resolve_cors_origin,
         session_csrf_allowed,
     )
@@ -759,14 +746,11 @@ def create_app(config_object=None):
         token_value = extract_token_value()
         if token_value:
             user = _authenticate_presented_api_token(token_value)
-            if not user and is_strict_mode():
+            if not user:
                 return api_error_response(
                     "invalid_token",
                     "The API bearer token is invalid, expired, or revoked.",
                 )
-
-        if not is_strict_mode():
-            return None
 
         has_session = bool(
             getattr(current_user, "is_authenticated", False)

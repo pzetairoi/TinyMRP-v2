@@ -270,8 +270,6 @@ def test_onefolder_helper_generates_credentials_outside_container_logs():
     compose = Path("docker-compose.onefolder.yml").read_text(encoding="utf-8")
 
     assert "RandomNumberGenerator" in helper
-    assert '"TINYMRP_SECURITY_MODE=compat"' in helper
-    assert "TINYMRP_SECURITY_MODE: ${TINYMRP_SECURITY_MODE:-compat}" in compose
     assert '"TINYMRP_SEED_ADMIN=$bootstrapEnabled"' in helper
     assert '"TINYMRP_ADMIN_EMAIL=$AdminEmail"' in helper
     assert '"TINYMRP_ADMIN_PASSWORD=$adminPassword"' in helper

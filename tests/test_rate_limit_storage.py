@@ -27,7 +27,6 @@ import app as app_module
 
 
 def _make_app(monkeypatch, **env):
-    monkeypatch.setenv("TINYMRP_SECURITY_MODE", "compat")
     monkeypatch.setenv("SECRET_KEY", "ratelimit-test-key")
     monkeypatch.setenv("SECURITY_PASSWORD_SALT", "ratelimit-test-salt")
     for key, value in env.items():
@@ -187,7 +186,24 @@ def test_an_expensive_endpoint_actually_returns_429(monkeypatch):
     )
     method = "POST" if "POST" in (rule.methods or set()) else "GET"
 
+    # The request has to get past authentication to reach the limiter, so the
+    # client is logged in. Unauthenticated callers are refused earlier and
+    # never exercise the limit at all.
+    with app.app_context():
+        from app.models.auth import User
+
+        user = User(
+            email="rate-limit@example.test",
+            password="x",
+            active=True,
+            fs_uniquifier="rate-limit-uniquifier",
+        ).save()
+
     with app.test_client() as client:
+        with client.session_transaction() as session:
+            session["_user_id"] = user.get_id()
+            session["_fresh"] = True
+        client.environ_base["HTTP_ORIGIN"] = "http://localhost"
         statuses = [
             client.open(str(rule.rule), method=method).status_code for _ in range(4)
         ]

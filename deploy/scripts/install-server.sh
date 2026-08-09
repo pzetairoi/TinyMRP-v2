@@ -2,7 +2,8 @@
 # TinyMRP — standalone Linux server installer (tier T2: bare-metal, nginx + gunicorn).
 #
 # Idempotent: safe to re-run; existing config values and certificates are kept.
-# Defaults to TINYMRP_SECURITY_MODE=strict with generated strong secrets.
+# Generates strong secrets. There is one security model; the old compat mode
+# and its second set of CORS/CSRF/cookie rules were removed.
 #
 # Usage:
 #   sudo ./deploy/scripts/install-server.sh --domain mrp.example.com [options]
@@ -132,7 +133,6 @@ FILES_LOCAL_ROOT=${DELIVERABLES_DIR}
 FILES_URL_PREFIX=/Deliverables
 SECRET_KEY=${SECRET_KEY}
 SECURITY_PASSWORD_SALT=${PASSWORD_SALT}
-TINYMRP_SECURITY_MODE=${SECURITY_MODE}
 FILES_TOKEN_TTL_SECONDS=86400
 RATE_LIMIT_ENABLED=true
 LOG_FORMAT=text

@@ -35,54 +35,6 @@ _PUBLIC_SHARE_ENDPOINTS = frozenset(
 )
 
 
-def security_mode() -> str:
-    if has_app_context():
-        val = current_app.config.get("TINYMRP_SECURITY_MODE")
-    else:
-        val = None
-    if not val:
-        val = os.getenv("TINYMRP_SECURITY_MODE", "")
-    val = str(val or "").strip().lower()
-    # RETIRED 2026-08-09 (productionmaturityplan A2). "compat" used to loosen
-    # CORS and the session CSRF origin check; those branches are gone and this
-    # is now the only remaining difference the value makes - it is reported by
-    # /api/health and nothing else reads it to weaken a check.
-    #
-    # Still resolved rather than deleted outright so an instance whose .env
-    # says compat keeps booting and keeps reporting honestly what it is
-    # configured as, instead of silently claiming strict. Removing the
-    # variable entirely is a separate, later step once no .env carries it.
-    if val == "compat":
-        _warn_compat_is_inert()
-        return "compat"
-    return "strict"
-
-
-_COMPAT_WARNED = False
-
-
-def _warn_compat_is_inert() -> None:
-    """Say it once per process, loudly enough to be acted on."""
-    global _COMPAT_WARNED
-    if _COMPAT_WARNED:
-        return
-    _COMPAT_WARNED = True
-    try:
-        import logging
-
-        logging.getLogger(__name__).warning(
-            "TINYMRP_SECURITY_MODE=compat no longer relaxes any security check. "
-            "The CORS and session-CSRF compatibility branches were removed. "
-            "Set it to strict, or remove it, to stop this warning."
-        )
-    except Exception:
-        pass
-
-
-def is_strict_mode() -> bool:
-    return security_mode() == "strict"
-
-
 def is_safe_method(method: str | None) -> bool:
     return (method or "").upper() in _SAFE_METHODS
 
@@ -190,13 +142,16 @@ def resolve_cors_origin() -> Tuple[str | None, bool]:
 
 
 def _cors_credentials_allowed(*, explicit: bool) -> bool:
-    if explicit:
-        # Only allow credentials when an explicit allowlist is set.
-        val = os.getenv("TINYMRP_CORS_CREDENTIALS", "")
-        return str(val).strip().lower() in ("1", "true", "yes", "on")
-    if is_strict_mode():
+    """Credentials are only ever allowed against an explicit allowlist.
+
+    There used to be a second answer here for compat mode, which returned True
+    for anything that had not matched an allowlist. There is one auth model
+    now, so an origin that was not explicitly allowed gets no credentials.
+    """
+    if not explicit:
         return False
-    return True
+    val = os.getenv("TINYMRP_CORS_CREDENTIALS", "")
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
 
 
 def request_has_token() -> bool:

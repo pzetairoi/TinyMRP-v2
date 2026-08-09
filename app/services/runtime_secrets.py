@@ -108,59 +108,21 @@ def _release_lock(lock_path: str | None) -> None:
         pass
 
 
-def resolve_runtime_secrets(app, mode: str) -> Tuple[str, str]:
+def resolve_runtime_secrets(app, mode: str = "strict") -> Tuple[str, str]:
+    """Return (secret_key, password_salt), or refuse to start.
+
+    There used to be a second path that generated secrets and persisted them to
+    a file when none were supplied. It existed for compat mode, which is gone.
+    An application that invents its own signing key cannot tell a forged
+    session from a real one after a restart, so this now fails loudly instead.
+
+    `mode` is accepted and ignored so existing callers keep working.
+    """
     env_secret = _normalize_env("SECRET_KEY")
     env_salt = _normalize_env("SECURITY_PASSWORD_SALT")
 
-    if mode == "strict":
-        if _is_default(env_secret) or _is_weak(env_secret):
-            raise RuntimeError("SECRET_KEY must be set to a strong value in strict mode.")
-        if _is_default(env_salt) or _is_weak(env_salt):
-            raise RuntimeError("SECURITY_PASSWORD_SALT must be set to a strong value in strict mode.")
-        return env_secret or "", env_salt or ""
-
-    # compat mode: use env when valid, otherwise load/persist runtime secrets
-    secret = env_secret if not _is_default(env_secret) else None
-    salt = env_salt if not _is_default(env_salt) else None
-
-    if secret and salt:
-        return secret, salt
-
-    path = _runtime_path(app)
-    data = _load_runtime_file(path)
-
-    if not env_secret or _is_default(env_secret) or not env_salt or _is_default(env_salt):
-        print(f"Warning: secrets missing/weak; using runtime secrets file at {path}. Set SECRET_KEY and SECURITY_PASSWORD_SALT for production/strict mode.")
-
-    if not secret:
-        stored_secret = data.get("SECRET_KEY")
-        if isinstance(stored_secret, str) and stored_secret.strip():
-            secret = stored_secret.strip()
-    if not salt:
-        stored_salt = data.get("SECURITY_PASSWORD_SALT")
-        if isinstance(stored_salt, str) and stored_salt.strip():
-            salt = stored_salt.strip()
-
-    generated = False
-    if not secret:
-        secret = _secrets.token_urlsafe(32)
-        data["SECRET_KEY"] = secret
-        generated = True
-    if not salt:
-        salt = _secrets.token_urlsafe(32)
-        data["SECURITY_PASSWORD_SALT"] = salt
-        generated = True
-
-    if generated:
-        lock = _acquire_lock(path)
-        try:
-            existing = _load_runtime_file(path)
-            # Preserve any keys that may have been written by another worker.
-            if existing:
-                for k, v in existing.items():
-                    data.setdefault(k, v)
-            _write_runtime_file(path, data)
-        finally:
-            _release_lock(lock)
-
-    return secret, salt
+    if _is_default(env_secret) or _is_weak(env_secret):
+        raise RuntimeError("SECRET_KEY must be set to a strong value.")
+    if _is_default(env_salt) or _is_weak(env_salt):
+        raise RuntimeError("SECURITY_PASSWORD_SALT must be set to a strong value.")
+    return env_secret or "", env_salt or ""

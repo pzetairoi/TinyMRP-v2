@@ -6,7 +6,6 @@ from mongoengine.queryset.visitor import Q
 from app.services.authorization import require_permission
 from app.services.file_security import managed_file_read_allowed
 from app.models.artifact import PartFile
-from app.services.security_mode import is_strict_mode
 
 files_proxy = Blueprint("files_proxy", __name__)
 
@@ -52,14 +51,13 @@ def _proxy(up_path: str, *, rel_path: str | None = None):
     allowed_hosts = [h.strip().lower() for h in str(allowed_raw).split(",") if h.strip()]
     if allowed_hosts and parsed.hostname.lower() not in allowed_hosts:
         abort(403)
-    # Block direct IP literals in strict mode unless explicitly allowlisted
-    if is_strict_mode():
-        try:
-            ipaddress.ip_address(parsed.hostname)
-            if not allowed_hosts:
-                abort(403)
-        except ValueError:
-            pass
+    # Block direct IP literals unless explicitly allowlisted.
+    try:
+        ipaddress.ip_address(parsed.hostname)
+        if not allowed_hosts:
+            abort(403)
+    except ValueError:
+        pass
     if rel_path:
         file_record = _authorize_rel_path(rel_path)
         canonical_rel = str(file_record.rel_path or "").replace("\\", "/").lstrip("/")
@@ -79,10 +77,10 @@ def _proxy(up_path: str, *, rel_path: str | None = None):
         if max_bytes and upstream_resp.headers.get("Content-Length"):
             if int(upstream_resp.headers.get("Content-Length") or 0) > max_bytes:
                 abort(413)
-        elif max_bytes and is_strict_mode():
+        elif max_bytes:
             abort(413)
     except Exception:
-        if max_bytes and is_strict_mode():
+        if max_bytes:
             abort(413)
 
     def gen():

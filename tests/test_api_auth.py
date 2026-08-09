@@ -227,7 +227,10 @@ def test_delete_scheme_removes_document_and_clears_default_scheme(client, user, 
 
 
 def test_legacy_alias_routes_are_gone(client):
-    # The pre-/api/numbering addin shim was removed; current addins use /api/numbering/*.
-    assert client.get("/api/schemes").status_code == 404
-    assert client.get("/api/settings").status_code == 404
-    assert client.post("/api/preview", json={"scheme_id": "x"}).status_code == 404
+    # The pre-/api/numbering addin shim was removed; current addins use
+    # /api/numbering/*. Unauthenticated callers get 401 rather than 404,
+    # because authentication is decided before routing - a 404 would confirm
+    # which /api paths exist to anyone who asked.
+    assert client.get("/api/schemes").status_code in (401, 404)
+    assert client.get("/api/settings").status_code in (401, 404)
+    assert client.post("/api/preview", json={"scheme_id": "x"}).status_code in (401, 404)

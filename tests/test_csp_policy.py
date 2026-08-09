@@ -28,9 +28,8 @@ import app as app_module
 
 
 def _make_app(monkeypatch, **env):
-    monkeypatch.setenv("TINYMRP_SECURITY_MODE", "compat")
     monkeypatch.setenv("SECRET_KEY", "csp-test-secret-key")
-    monkeypatch.setenv("SECURITY_PASSWORD_SALT", "csp-test-salt")
+    monkeypatch.setenv("SECURITY_PASSWORD_SALT", "csp-test-salt-padded-for-strict-mode-minimum-length")
     for key, value in env.items():
         if value is None:
             monkeypatch.delenv(key, raising=False)

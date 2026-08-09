@@ -88,8 +88,7 @@ def test_message_never_contains_the_credentials():
 
 
 def _make_app(monkeypatch, uri, **env):
-    monkeypatch.setenv("TINYMRP_SECURITY_MODE", "compat")
-    monkeypatch.setenv("SECRET_KEY", "dbauth-test-key")
+    monkeypatch.setenv("SECRET_KEY", "dbauth-test-key-padded-for-strict-mode-minimum-length")
     monkeypatch.setenv("SECURITY_PASSWORD_SALT", "dbauth-test-salt")
     monkeypatch.setenv("MONGO_URI", uri)
     for key, value in env.items():

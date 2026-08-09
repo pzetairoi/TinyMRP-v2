@@ -122,7 +122,6 @@ with the part number so it can be cleaned up.
 
 ## The browser shows an authentication or CSRF error
 
-1. In production, confirm `TINYMRP_SECURITY_MODE=strict` and use the public
    HTTPS URL. Strict cookies are not intended for a plain-HTTP public site.
 2. Confirm Caddy still forwards the original host and scheme. A browser write
    is rejected when its Origin/Referer does not match the routed instance.

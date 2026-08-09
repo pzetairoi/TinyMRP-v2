@@ -339,7 +339,7 @@ Verification evidence:
   The combined source tree
   passed **639 tests** in its production-derived Python 3.11.15 environment.
   A disposable pinned Mongo → TinyMRP → Caddy health request returned
-  `{"ok":true,"security_mode":"strict"}` and cleaned up all test resources.
+  `{"ok":true}` and cleaned up all test resources.
 - Effective Gitleaks defaults are restored. A tracked-HEAD archive is clean;
   scanning 407 commits exits 1 with exactly two unsuppressed candidates in a
   deleted `.env.example`. They remain a release blocker pending classification

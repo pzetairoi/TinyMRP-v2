@@ -42,7 +42,6 @@ def test_compat_mode_no_longer_relaxes_cors(monkeypatch):
     """
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="compat",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
@@ -62,7 +61,6 @@ def test_session_csrf_rejects_a_request_with_no_origin_or_referer(monkeypatch):
 
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="compat",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
@@ -73,7 +71,6 @@ def test_session_csrf_rejects_a_request_with_no_origin_or_referer(monkeypatch):
 def test_cors_strict_requires_allowlist(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="strict",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
         TINYMRP_ALLOWED_ORIGINS="",
@@ -86,7 +83,6 @@ def test_cors_strict_requires_allowlist(monkeypatch):
 def test_cors_strict_allowlist_no_creds_by_default(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="strict",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
         TINYMRP_ALLOWED_ORIGINS="http://example.com",
@@ -100,7 +96,6 @@ def test_cors_strict_allowlist_no_creds_by_default(monkeypatch):
 def test_strict_browser_api_accepts_same_origin_session(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="strict",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
@@ -118,10 +113,9 @@ def test_strict_browser_api_accepts_same_origin_session(monkeypatch):
     assert resp.status_code == 200
 
 
-def test_api_health_is_public_in_compat(monkeypatch):
+def test_api_health_is_public(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="compat",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
@@ -131,29 +125,11 @@ def test_api_health_is_public_in_compat(monkeypatch):
     assert resp.status_code == 200
     assert data["ok"] is True
     assert data["service"] == "tinymrp"
-    assert data["security_mode"] == "compat"
-
-
-def test_api_health_is_public_in_strict(monkeypatch):
-    app = _make_app(
-        monkeypatch,
-        TINYMRP_SECURITY_MODE="strict",
-        SECRET_KEY="test-secret-123456",
-        SECURITY_PASSWORD_SALT="test-salt-123456",
-    )
-    client = app.test_client()
-    resp = client.get("/api/health")
-    data = resp.get_json()
-    assert resp.status_code == 200
-    assert data["ok"] is True
-    assert data["service"] == "tinymrp"
-    assert data["security_mode"] == "strict"
 
 
 def test_auth_check_requires_token_in_strict(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="strict",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
@@ -175,7 +151,6 @@ def test_auth_check_requires_token_in_strict(monkeypatch):
 def test_session_csrf_blocks_cross_origin(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="compat",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
@@ -194,7 +169,6 @@ def test_session_csrf_blocks_cross_origin(monkeypatch):
 def test_files_proxy_blocks_ip_in_strict(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="strict",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
@@ -207,7 +181,6 @@ def test_files_proxy_blocks_ip_in_strict(monkeypatch):
 def test_files_proxy_no_redirects(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="compat",
         SECRET_KEY="test-secret-123456",
         SECURITY_PASSWORD_SALT="test-salt-123456",
     )
@@ -235,9 +208,8 @@ def test_files_proxy_no_redirects(monkeypatch):
 def test_upload_pack_size_cap(monkeypatch):
     app = _make_app(
         monkeypatch,
-        TINYMRP_SECURITY_MODE="compat",
-        SECRET_KEY="test-secret",
-        SECURITY_PASSWORD_SALT="test-salt",
+        SECRET_KEY="test-secret-padded-for-strict-mode-minimum-length",
+        SECURITY_PASSWORD_SALT="test-salt-padded-for-strict-mode-minimum-length",
     )
     app.config["UPLOAD_PACK_MAX_ZIP_MB"] = 1
     role = Role(name="importer", permissions=["imports.execute_low_risk", "imports.preview"]).save()

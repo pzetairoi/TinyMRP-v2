@@ -21,23 +21,19 @@ Key risks:
 - SSRF via file proxy configuration.
 - Oversized uploads or proxy responses (DoS).
 
-## Security Modes
+## Security Model
 
-TinyMRP supports two runtime security profiles via:
+One model, no alternatives:
 
-```
-TINYMRP_SECURITY_MODE=compat|strict
-```
+- An origin/referer CSRF guard on every session-authenticated unsafe request.
+  A request carrying neither header is refused.
+- CORS disabled unless an origin is explicitly allowlisted; credentials only
+  against that allowlist, never with a wildcard.
+- Secure + SameSite=Strict cookies.
+- `SECRET_KEY` and `SECURITY_PASSWORD_SALT` must be supplied and strong, or the
+  application refuses to start. It never generates its own.
 
-### compat (development/migration only)
-
-- Keeps existing behavior where possible.
-- Applies an origin/referer CSRF guard to session-authenticated unsafe requests.
-- Adds safer CORS behavior (no wildcard + credentials).
-- If `SECRET_KEY` or `SECURITY_PASSWORD_SALT` is missing/weak, a runtime secret may be generated and persisted with a warning.
-- Do not expose this profile to the public internet.
-
-### strict (default)
+### In detail
 
 - Browser/session APIs require the authenticated same-origin session; bearer tokens cannot substitute for browser access.
 - Integration APIs accept bearer tokens, with the token-check endpoint bearer-only.
@@ -76,9 +72,4 @@ If you suspect compromise:
 4. Review audit logs for suspicious actions.
 5. Verify proxy upstream and file roots are correct.
 
-Strict mode is the default and is live on every production instance as of
-1.0.0. To move an instance that is still on compat: set
-`TINYMRP_SECURITY_MODE="strict"` in its `.env`, recreate the app container,
-and confirm `/api/health` reports `security_mode: strict`. Keep a copy of the
-previous `.env` until any SolidWorks add-ins in the field have been exercised
-against it.
+

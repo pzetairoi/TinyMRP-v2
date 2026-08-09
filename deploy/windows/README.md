@@ -100,7 +100,6 @@ Set these values in the file:
 
 Keep:
 
-- `TINYMRP_SECURITY_MODE=compat`
 - `FORCE_HTTPS=false`
 - `FILES_PUBLIC_URLS=false`
 

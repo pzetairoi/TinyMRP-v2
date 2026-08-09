@@ -65,7 +65,6 @@ jobs:
           DELIVERABLES_DIR=$DELIVERABLES_DIR
           SECRET_KEY=$(openssl rand -hex 32)
           SECURITY_PASSWORD_SALT=$(openssl rand -hex 32)
-          TINYMRP_SECURITY_MODE=compat
           TINYMRP_ALLOWED_ORIGINS=http://localhost:$HTTP_PORT
           TINYMRP_CORS_CREDENTIALS=true
           TINYMRP_SEED_ADMIN=true

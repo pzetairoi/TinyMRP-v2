@@ -9,10 +9,12 @@ from app.models.auth import User
 
 @pytest.fixture(autouse=True)
 def _mongo_test_db(monkeypatch):
-    # The general regression suite exercises the explicitly supported local
-    # development compatibility profile. Strict-mode behavior has its own app
-    # fixtures and integration coverage.
-    monkeypatch.setenv("TINYMRP_SECURITY_MODE", "compat")
+    # Secrets must be supplied explicitly. The suite used to omit them because
+    # compat mode generated and persisted them on the fly; that mode is gone,
+    # and an application that invents its own signing key is exactly what
+    # strict refuses to do.
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-not-for-production")
+    monkeypatch.setenv("SECURITY_PASSWORD_SALT", "test-password-salt-not-real")
     disconnect(alias="tinymrp-v2")
     connect(
         alias="tinymrp-v2",

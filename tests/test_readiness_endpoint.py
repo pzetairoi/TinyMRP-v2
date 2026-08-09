@@ -23,7 +23,6 @@ import app as app_module
 
 
 def _make_app(monkeypatch, tmp_path=None, **config):
-    monkeypatch.setenv("TINYMRP_SECURITY_MODE", "compat")
     monkeypatch.setenv("SECRET_KEY", "readiness-test-key")
     monkeypatch.setenv("SECURITY_PASSWORD_SALT", "readiness-test-salt")
 
@@ -60,7 +59,6 @@ def test_liveness_contract_is_unchanged(monkeypatch):
     assert body["ok"] is True
     assert body["service"] == "tinymrp"
     assert "server_version" in body
-    assert "security_mode" in body
 
 
 def test_liveness_stays_ok_when_a_dependency_is_broken(monkeypatch):

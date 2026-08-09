@@ -7,7 +7,6 @@ from flask import Blueprint, current_app, jsonify
 from flask_security import auth_required
 
 from app.services.authorization import require_permission
-from app.services.security_mode import security_mode
 
 bp = Blueprint("api_health", __name__, url_prefix="/api")
 
@@ -30,7 +29,6 @@ def health():
         "ok": True,
         "service": "tinymrp",
         "server_version": _server_version(),
-        "security_mode": security_mode(),
     })
 
 
@@ -158,7 +156,6 @@ def diagnostics():
         "ok": True,
         "service": "tinymrp",
         "server_version": _server_version(),
-        "security_mode": security_mode(),
         "checks": {
             "database": _check_database(),
             "storage": _check_storage(),

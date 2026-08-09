@@ -10,9 +10,8 @@ from app.models.auth import User
 
 
 def _make_app(monkeypatch, runtime_path):
-    monkeypatch.delenv("SECRET_KEY", raising=False)
-    monkeypatch.delenv("SECURITY_PASSWORD_SALT", raising=False)
-    monkeypatch.setenv("TINYMRP_SECURITY_MODE", "compat")
+    monkeypatch.setenv("SECRET_KEY", "auth-recovery-test-secret-key")
+    monkeypatch.setenv("SECURITY_PASSWORD_SALT", "auth-recovery-test-password-salt")
     monkeypatch.setenv("TINYMRP_RUNTIME_SECRETS_PATH", str(runtime_path))
 
     disconnect(alias="tinymrp-v2")
@@ -35,7 +34,7 @@ def _csrf_token(client, path="/login"):
     return match.group(1)
 
 
-def test_login_logout_login_with_runtime_secrets(tmp_path, monkeypatch):
+def test_login_logout_login_round_trip(tmp_path, monkeypatch):
     runtime_path = tmp_path / "runtime_secrets.json"
     app = _make_app(monkeypatch, runtime_path)
 
@@ -70,23 +69,3 @@ def test_login_logout_login_with_runtime_secrets(tmp_path, monkeypatch):
     assert resp2.status_code in (302, 303)
 
 
-def test_runtime_secrets_persisted(tmp_path, monkeypatch):
-    runtime_path = tmp_path / "runtime_secrets.json"
-    app1 = _make_app(monkeypatch, runtime_path)
-    secret1 = app1.config.get("SECRET_KEY")
-    salt1 = app1.config.get("SECURITY_PASSWORD_SALT")
-    assert runtime_path.exists()
-
-    app2 = _make_app(monkeypatch, runtime_path)
-    assert app2.config.get("SECRET_KEY") == secret1
-    assert app2.config.get("SECURITY_PASSWORD_SALT") == salt1
-
-
-def test_runtime_secrets_create_missing_parent_directory(tmp_path, monkeypatch):
-    runtime_path = tmp_path / "missing" / "nested" / "runtime_secrets.json"
-
-    app = _make_app(monkeypatch, runtime_path)
-
-    assert app.config.get("SECRET_KEY")
-    assert app.config.get("SECURITY_PASSWORD_SALT")
-    assert runtime_path.exists()
