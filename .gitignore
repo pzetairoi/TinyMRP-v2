@@ -27,6 +27,10 @@ __pycache__/
 *$py.class
 
 
+# Editor / personal config — machine-specific, not shared project config
+.vscode/
+.idea/
+
 # .NET / Visual Studio
 bin/
 obj/
