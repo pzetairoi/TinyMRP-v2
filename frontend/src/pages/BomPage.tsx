@@ -270,9 +270,17 @@ export default function BomPage() {
     )
   }
 
-  function reviewRowClass(row: any) {
+  // PrimeReact's TreeTable rowClassName expects an object of
+  // { className: boolean }, not a string. Returning a string happened to work
+  // at runtime but was never the documented contract.
+  function reviewRowClass(row: any): Record<string, boolean> {
     const data = row?.data || row || {}
-    return data.has_pending_reviews ? `parts-review-row parts-review-row--${data.pending_review_severity || 'low'}` : ''
+    if (!data.has_pending_reviews) return {}
+    const severity = data.pending_review_severity || 'low'
+    return {
+      'parts-review-row': true,
+      [`parts-review-row--${severity}`]: true,
+    }
   }
 
   const [lazy, setLazy] = useState<LazyWUState>({
@@ -515,8 +523,10 @@ export default function BomPage() {
               sortable={field.sortable !== false}
               filter={field.filterable !== false}
               showFilterMenu={false}
-              filterMatchMode={field.data_type === 'boolean' ? 'equals' : 'contains'}
-              filterMatchModeOptions={field.data_type === 'boolean' ? ['equals'] : ['contains']}
+              filterMatchMode={field.data_type === 'boolean' ? FilterMatchMode.EQUALS : FilterMatchMode.CONTAINS}
+              filterMatchModeOptions={field.data_type === 'boolean'
+                ? [{ label: 'Equals', value: FilterMatchMode.EQUALS }]
+                : [{ label: 'Contains', value: FilterMatchMode.CONTAINS }]}
               filterPlaceholder={field.data_type === 'boolean' ? undefined : fieldFilterPlaceholder(field)}
               filterElement={field.data_type === 'boolean' ? booleanFilterElement : undefined}
               body={(row: WURow) => renderWhereUsedCell(field, row)}

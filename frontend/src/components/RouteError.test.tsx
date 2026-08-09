@@ -1,3 +1,4 @@
+import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { Outlet, RouterProvider, createMemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,11 +16,11 @@ import NotFoundPage from '../pages/NotFoundPage'
  * Both assertions below are about what the user SEES, not about internals.
  */
 
-function Boom(): JSX.Element {
+function Boom(): React.JSX.Element {
   throw new Error('exploded while rendering')
 }
 
-function renderAt(path: string, element: JSX.Element) {
+function renderAt(path: string, element: React.JSX.Element) {
   const router = createMemoryRouter(
     [
       {

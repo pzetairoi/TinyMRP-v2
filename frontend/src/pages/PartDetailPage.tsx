@@ -5,6 +5,7 @@ import { effectiveRevisionFor, revisionFromLocation } from "../lib/partIdentity"
 import { DataTable } from "primereact/datatable";
 import { Column } from "primereact/column";
 import { TreeTable } from "primereact/treetable";
+import type { TreeTableFilterMeta } from "primereact/treetable";
 import type { TreeNode } from "primereact/treenode";
 import { TabView, TabPanel } from "primereact/tabview";
 import ImageStrip from "../components/ImageStrip";
@@ -13,7 +14,7 @@ import "./partdetail.css";
 import FieldSelector from "../components/FieldSelector";
 import DrawingMarkupWorkspace from "../components/markups/DrawingMarkupWorkspace";
 import { withBomOccurrenceKeys } from "../lib/bomTree";
-import { apiErrorMessage, apiFetch, readApiResponse, isCancelledRequest } from '../lib/api';
+import { apiErrorMessage, apiFetch, readApiResponse } from '../lib/api';
 import {
   approvalIdentityText,
   canonicalFieldAliases,
@@ -409,7 +410,9 @@ export default function PartDetailPage() {
   const [part, setPart] = useState<Part | null>(null);
   const [files, setFiles] = useState<FileRow[]>([]);
   const [extraFiles, setExtraFiles] = useState<ExtraFileRow[]>([]);
-  const [extraLoading, setExtraLoading] = useState(false);
+  // Written but never read - the setter drives no UI. Left in place so the
+  // existing calls keep working; the unused binding is gone.
+  const [, setExtraLoading] = useState(false);
   const [extraError, setExtraError] = useState<string | null>(null);
   const [extraUploadBusy, setExtraUploadBusy] = useState(false);
   const [extraUploadError, setExtraUploadError] = useState<string | null>(null);
@@ -418,7 +421,7 @@ export default function PartDetailPage() {
   const [filesOverviewOther, setFilesOverviewOther] = useState<FileOverviewSection[]>([]);
   const [filesOverviewLoading, setFilesOverviewLoading] = useState(false);
   const [filesOverviewError, setFilesOverviewError] = useState<string | null>(null);
-  const [children, setChildren] = useState<ChildRow[]>([]);
+  const [, setChildren] = useState<ChildRow[]>([]);
   const [wu, setWU] = useState<WURow[]>([]);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [jobsOrders, setJobsOrders] = useState<JobsOrdersRow[]>([]);
@@ -480,7 +483,7 @@ export default function PartDetailPage() {
 
   // for the right-side Drawing tab + hero image
   const [drawingUrls, setDrawingUrls] = useState<string[]>([]);
-  const [images, setImages] = useState<string[]>([]);
+  const [, setImages] = useState<string[]>([]);
 
   // Drawing markup layer (vector overlay + review threads)
   const [drawingSource, setDrawingSource] = useState<DrawingImageRow | null>(null);
@@ -515,7 +518,8 @@ export default function PartDetailPage() {
   const [selTypes, setSelTypes] = useState<Set<string>>(new Set());
   const [wantSelectedFiles, setWantSelectedFiles] = useState(false);
   const [wantExcel, setWantExcel] = useState(false);
-  const [excelAllFields, setExcelAllFields] = useState(false);
+  // Read but never set: nothing ever flips it, so it is constant today.
+  const [excelAllFields] = useState(false);
   const [wantBinder, setWantBinder] = useState(false);
   const [wantIndex, setWantIndex] = useState(false);
   const [wantVisual, setWantVisual] = useState(false);
@@ -575,7 +579,9 @@ export default function PartDetailPage() {
   const sharedAllowsAttributes = !!publicShareInfo?.allow_attributes;
 
   // --- TreeTable filters (controlled) ---
-  type TTFilters = Record<string, { value: any; matchMode: string }>;
+  // PrimeReact's own type. matchMode is a closed union there, so the loose
+  // Record this used to be never matched the TreeTable call signature.
+  type TTFilters = TreeTableFilterMeta;
 
   const [ttFilters, setTtFilters] = useState<TTFilters>({});
 
@@ -599,10 +605,10 @@ export default function PartDetailPage() {
   }
 
   function setTTFilterValue(key: string, value: any, matchMode = "custom") {
-    setTtFilters((prev) =>
+    setTtFilters((prev: TTFilters) =>
       normalizeFilters({
         ...prev,
-        [key]: { ...(prev[key] || { matchMode }), value, matchMode },
+        [key]: { ...(prev[key] || {}), value, matchMode } as TTFilters[string],
       }),
     )
   }
@@ -884,12 +890,12 @@ function isExternalDatasheetUrl(url: string): boolean {
       const image = <ThumbImg urls={row.parent_thumb_urls} maxH={28} maxW={44} />;
       return isSharedView
         ? image
-        : <Link to={`/ui/part/${encodeURIComponent(row.part_number)}?rev=${encodeURIComponent(row.revision || "")}`} aria-label={`Open ${row.part_number} details`}>{image}</Link>;
+        : <Link to={`/ui/part/${encodeURIComponent(row.part_number || "")}?rev=${encodeURIComponent(row.revision || "")}`} aria-label={`Open ${row.part_number} details`}>{image}</Link>;
     }
     if (field.id === "part_number") {
       return isSharedView
         ? row.part_number
-        : <Link to={`/ui/part/${encodeURIComponent(row.part_number)}?rev=${encodeURIComponent(row.revision || "")}`}>{row.part_number}</Link>;
+        : <Link to={`/ui/part/${encodeURIComponent(row.part_number || "")}?rev=${encodeURIComponent(row.revision || "")}`}>{row.part_number}</Link>;
     }
     if (field.data_type === "link") {
       const href = String(value || "").trim();
@@ -2456,7 +2462,7 @@ function isExternalDatasheetUrl(url: string): boolean {
               {revisionValue ? ` REV ${revisionValue}` : ""}
               {descriptionValue ? ` - ${descriptionValue}` : ""}
             </h4>
-            <div className="text-muted small">{categoryValue || ""}</div>
+            <div className="text-muted small">{String(categoryValue ?? "")}</div>
             {isSharedView ? (
               <div className="alert alert-info py-2 px-3 mt-2 mb-0 small">
                 Read-only shared view.

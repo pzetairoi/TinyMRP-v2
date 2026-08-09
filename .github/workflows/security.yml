@@ -298,6 +298,15 @@ jobs:
       # than decorating.
       - name: Unit tests (Vitest)
         run: npm run test:coverage
+      # A real gate, added 2026-08-09. Vite's build does NOT typecheck - esbuild
+      # strips types without checking them - so nothing caught type errors here
+      # for as long as the project existed. When this was first run it found 25,
+      # including a stale copy of vite.config.ts sitting where the ambient CSS
+      # declarations belong, which meant no asset import had a type at all.
+      # It is a separate step from the build on purpose: a red typecheck should
+      # say "types", not "build failed".
+      - name: Typecheck (tsc)
+        run: npx tsc --noEmit -p tsconfig.app.json
       - name: Build
         run: npm run build
       - name: Upload frontend supply-chain evidence

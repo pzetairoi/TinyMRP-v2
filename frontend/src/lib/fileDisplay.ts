@@ -1,8 +1,16 @@
-/** Only the fields these helpers read; the page's GroupableFile satisfies it. */
+/** The fields the part-detail file helpers read.
+ *
+ * The first three drive grouping. name and rel_path are read when building
+ * datasheet labels: the objects always carried them, but the type did not
+ * declare them, so every use was an error TypeScript could not report while
+ * the typecheck was not running.
+ */
 export type GroupableFile = {
   ext_group?: string
   group?: string
   ext?: string
+  name?: string
+  rel_path?: string
 }
 
 /**
