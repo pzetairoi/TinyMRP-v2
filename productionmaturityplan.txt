@@ -602,7 +602,23 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       inside it silently stops being discovered. Permissions drift is the
       usual cause and it is invisible from outside.
 
-    NOT DONE, and worth being honest about: this is 12 of 276. The rest are
+    BATCH 5, extra-file uploads (extra_files.py). The one that matters: a
+      FAILED ROLLBACK was silent. The original exception is re-raised, so
+      the caller learns the upload failed - but not that the file on disk is
+      now in an unknown state relative to the database. It now names the
+      path, which is the only way anyone reconciles it later.
+      Staging-directory cleanup moved to debug rather than silence: leftover
+      temp dirs waste disk and break nothing, so they should be findable
+      without being noisy.
+
+    HOW TO JUDGE THE REST, distilled from five batches:
+      Ask "could I tell this failing apart from this working?" first. If
+      not, log it. Then ask "does the fallback leave state inconsistent?"
+      If yes, log the identifier needed to reconcile it - a path, a key, an
+      id - not just the fact that something went wrong. Everything else is
+      best-effort cleanup and belongs at debug, not deleted and not raised.
+
+    NOT DONE, and worth being honest about: this is 14 of 276. The rest are
       concentrated in best-effort UI paths where swallowing is defensible.
       Do not chase the count. The remaining ones worth reading are in
       filescan.py, extra_files.py and fileserve.py.

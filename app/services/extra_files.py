@@ -391,7 +391,16 @@ def store_associated_uploads(
                     if backup is not None and backup.exists():
                         os.replace(backup, final_path)
                 except OSError:
-                    pass
+                    # The rollback itself failed. The original exception is
+                    # about to be re-raised, so the caller learns the upload
+                    # failed - but not that the file on disk is now in an
+                    # unknown state. Name the path: it is the only way anyone
+                    # can reconcile it later.
+                    logger.exception(
+                        "could not roll back %s after a failed upload; "
+                        "the file on disk may not match the database",
+                        final_path,
+                    )
             raise
 
         for item in completed:
@@ -410,7 +419,9 @@ def store_associated_uploads(
                     child.unlink()
             stage_dir.rmdir()
         except OSError:
-            pass
+            # Best effort. Leftover staging directories waste disk but break
+            # nothing, so this stays quiet at anything above debug.
+            logger.debug("could not clean the staging directory %s", stage_dir, exc_info=True)
 
 
 def purge_associated_file(file_record: PartExtraFile) -> bool:
