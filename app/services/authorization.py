@@ -146,6 +146,10 @@ def effective_permissions(user: Any) -> frozenset[str]:
     try:
         return _permission_snapshot(user).permissions
     except Exception:
+        # Fail closed, but never silently. A user who suddenly holds no
+        # permissions looks exactly like a user who legitimately has none, so
+        # without this line a broken resolver reads as correct authorisation.
+        logger.exception("permission resolution failed; denying all permissions")
         return frozenset()
 
 
@@ -161,6 +165,7 @@ def has_permission(user: Any, permission: str) -> bool:
     try:
         return permission in effective_permissions(user)
     except Exception:
+        logger.exception("permission check failed for %s; denying", permission)
         return False
 
 
@@ -485,6 +490,7 @@ def parts_scope_is_unrestricted(user: Any) -> bool:
         modes = _scope_modes(scope, "parts", _RESOURCE_PERMISSIONS["parts"])
         return "global" in modes
     except Exception:
+        logger.exception("parts scope evaluation failed; treating scope as restricted")
         return False
 
 
@@ -530,7 +536,9 @@ def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
         if not current_app.config.get("ACL_ENFORCED", True):
             return None
     except Exception:
-        pass
+        # Reading config cannot normally fail. If it does, keep enforcing:
+        # the dangerous direction here is concluding ACL is switched off.
+        logger.exception("could not read ACL_ENFORCED; continuing to enforce")
     scope = _scope_context(user)
     if not scope.valid:
         return set()

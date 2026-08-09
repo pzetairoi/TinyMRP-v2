@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -17,6 +19,8 @@ from app.services.authorization import (
     permission_scope_modes,
     scope_queryset,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FileSecurityError(ValueError):
@@ -79,6 +83,11 @@ def _managed_storage_roots_uncached() -> tuple[StorageRoot, ...]:
                 if isinstance(item, dict)
             ]
     except Exception:
+        # No configured sources means no readable roots, so every managed-file
+        # check below refuses. That is the safe direction, but a
+        # misconfiguration that hides every file must not look like an empty
+        # instance.
+        logger.exception("could not resolve file sources; treating storage as empty")
         sources = []
 
     roots: list[StorageRoot] = []
@@ -352,6 +361,7 @@ def exact_file_part(
             .first()
         )
     except Exception:
+        logger.exception("scoped part lookup failed for %s rev %s; denying access", pn, rev)
         return None
     if part is None or (mutable and part_is_released(part)):
         return None
