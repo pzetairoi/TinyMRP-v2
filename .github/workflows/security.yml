@@ -309,6 +309,18 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.app.json
       - name: Build
         run: npm run build
+      # Browser-level critical path (B2). Deliberately small: it proves only
+      # what jsdom cannot see - that the built bundle runs, the enforced CSP
+      # does not block our own scripts, and an unauthenticated caller is
+      # refused. The signed-in test skips unless E2E_EMAIL/E2E_PASSWORD are
+      # provided, so this never carries working credentials.
+      # Needs a running instance; skipped unless PLAYWRIGHT_BASE_URL is set.
+      - name: Install Playwright browser
+        if: env.PLAYWRIGHT_BASE_URL != ''
+        run: npx playwright install --with-deps chromium
+      - name: Critical path + accessibility (Playwright + axe)
+        if: env.PLAYWRIGHT_BASE_URL != ''
+        run: npm run test:e2e
       - name: Upload frontend supply-chain evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
