@@ -655,7 +655,16 @@ def create_app(config_object=None):
                 ).strip().lower() in ("1", "true", "yes", "on"):
                     nonce = getattr(g, "csp_nonce", "")
                     strict_script = ["'self'", f"'nonce-{nonce}'", "https://cdn.jsdelivr.net"]
-                    strict_style = ["'self'", f"'nonce-{nonce}'", "https://cdn.jsdelivr.net"]
+                    # style-src keeps 'unsafe-inline' HERE TOO, deliberately.
+                    # The probe exists to size ONE migration: dropping
+                    # 'unsafe-inline' from script-src. Tightening style-src as
+                    # well produced hundreds of violations per page load from
+                    # PrimeReact injecting <style> elements at runtime and from
+                    # style="" attributes, none of which a nonce can ever
+                    # cover. That noise buried the only signal worth reading -
+                    # whether any SCRIPT violation exists - and made a clean
+                    # result look like a failed one.
+                    strict_style = ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"]
                     ro = " ".join([
                         "default-src 'self';",
                         "base-uri 'self';",

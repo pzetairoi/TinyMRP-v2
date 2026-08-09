@@ -159,9 +159,25 @@ def test_report_only_carries_the_stricter_policy(monkeypatch):
         report_only = resp.headers.get("Content-Security-Policy-Report-Only", "")
 
     assert report_only, "report-only header missing when the probe is enabled"
-    # The whole point: enforced still permits inline, report-only does not.
-    assert "'unsafe-inline'" in enforced
-    assert "'unsafe-inline'" not in report_only
+
+    def directive(policy: str, name: str) -> str:
+        for part in policy.split(";"):
+            part = part.strip()
+            if part.startswith(f"{name} "):
+                return part
+        return ""
+
+    # The probe sizes ONE migration: dropping 'unsafe-inline' from script-src.
+    assert "'unsafe-inline'" in directive(enforced, "script-src")
+    assert "'unsafe-inline'" not in directive(report_only, "script-src")
+    assert "'nonce-" in directive(report_only, "script-src")
+
+    # style-src keeps 'unsafe-inline' in BOTH. A nonce cannot cover a style=""
+    # attribute or a <style> element PrimeReact injects at runtime, so
+    # tightening it here reported hundreds of violations per page that nobody
+    # can act on - and buried the only question worth asking, which is whether
+    # any SCRIPT violation exists.
+    assert "'unsafe-inline'" in directive(report_only, "style-src")
     assert "'nonce-" in report_only
 
 
