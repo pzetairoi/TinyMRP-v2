@@ -6,7 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 ## [Unreleased]
 
 Nothing yet. Work planned for after 1.0.0 is tracked in
-`productionmaturityplan.txt`.
+`docs/planning/productionmaturityplan.txt`.
 
 ## [1.0.0] — 2026-08-08
 

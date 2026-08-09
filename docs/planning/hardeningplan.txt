@@ -2,9 +2,9 @@
 HARDENING PLAN — CLOSED 2026-08-07. HISTORY AND EVIDENCE, NOT A BACKLOG.
 ========================================================================
 Superseded by posthardeningplan.txt, optimizationplan.txt,
-postoptimizationplan.txt and finally productionmaturityplan.txt, which is
-the only open plan. Do not reopen an item here unless a regression is
-demonstrated.
+postoptimizationplan.txt and finally productionmaturityplan.txt (now at
+docs/planning/productionmaturityplan.txt), which is the only open plan. Do
+not reopen an item here unless a regression is demonstrated.
 
 ========================================================================
 STATUS LOG — kept for the record

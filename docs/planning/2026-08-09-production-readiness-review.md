@@ -2,7 +2,7 @@
 
 Author: Claude (this session). Scope: full read of `docs/planning/hardeningplan.txt`,
 `docs/planning/posthardeningplan.txt`, `docs/planning/optimizationplan.txt`,
-`docs/planning/postoptimizationplan.txt` and `productionmaturityplan.txt`, cross-checked
+`docs/planning/postoptimizationplan.txt` and `docs/planning/productionmaturityplan.txt`, cross-checked
 directly against the current code (not just against what the plans claim).
 Excludes Lane F (documentation/commercial, Codex's in-flight work) and the
 Nextcloud E1/N11 backlog item — both explicitly out of scope for this review,
@@ -42,7 +42,7 @@ close before calling this finished.
   code path re-enables either.
 - **Mongo authentication live fleet-wide**, verified positively — an
   unauthenticated request to `mecs` is refused. (This resolves an internal
-  contradiction found in the now-archived `postoptimizationplan.txt`, which
+  contradiction found in the now-archived `docs/planning/postoptimizationplan.txt`, which
   had two sections disagreeing on whether `mecs` was covered; the current
   state is unambiguous and later than that contradiction.)
 - **Session/CSRF**: `SESSION_COOKIE_HTTPONLY=True`, `SAMESITE=Strict` in
@@ -55,7 +55,7 @@ close before calling this finished.
   strict with a per-request nonce, no `unsafe-inline`. `style-src` keeps
   `unsafe-inline` as a documented, deliberate, low-risk decision (it can't
   execute code) — not unfinished work. This is task A1 in
-  `productionmaturityplan.txt`, which is the current name for the older
+  `docs/planning/productionmaturityplan.txt`, which is the current name for the older
   docs' `SEC-CSP-01` / "CSP browser check never done" — that flag is
   resolved, closed with actual browser evidence (three real pages, zero
   script-src violations).
@@ -106,8 +106,8 @@ close before calling this finished.
 - `docs/PRODUCTION_HARDENING_BASELINE.md` is a frozen snapshot from
   2026-08-07 (one incidental touch since). Its blocker table still shows
   several items as "Open" that are actually closed in the current
-  `productionmaturityplan.txt` (e.g. `SEC-CSP-01`, `OPS-DBAUTH-01`,
-  `QA-FE-01`). Treat `productionmaturityplan.txt` as authoritative for
+  `docs/planning/productionmaturityplan.txt` (e.g. `SEC-CSP-01`, `OPS-DBAUTH-01`,
+  `QA-FE-01`). Treat `docs/planning/productionmaturityplan.txt` as authoritative for
   current status; this file is historical evidence, same as the newly-moved
   `docs/planning/*.txt` files.
 
@@ -169,7 +169,7 @@ close before calling this finished.
   a wrong answer that looks right (89 are PDF/format parsing where
   swallowing is correct; the rest are best-effort UI decoration or
   already-logged accessor failures). Documented reasoning in
-  `productionmaturityplan.txt`'s B3 closure — don't re-open this as a
+  `docs/planning/productionmaturityplan.txt`'s B3 closure — don't re-open this as a
   counting exercise without a specific regression to justify it.
 
 ---
@@ -203,7 +203,7 @@ close before calling this finished.
 7. Either update `docs/PRODUCTION_HARDENING_BASELINE.md`'s blocker table to
    match current reality or add a banner marking it historical, so nobody
    re-opens an already-closed item by trusting it over
-   `productionmaturityplan.txt`.
+   `docs/planning/productionmaturityplan.txt`.
 
 None of the above reads as "unsafe for production" on its own. Together, #1
 and #2 are the two I'd actually block a real customer rollout on until
