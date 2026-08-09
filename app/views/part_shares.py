@@ -512,6 +512,10 @@ def public_part_share_file(share_id: str, token: str, file_token: str):
     try:
         resolved = resolve_file_token(file_token)
     except Exception:
+        # 404 either way, which is right - a public caller learns nothing.
+        # But a forged token and a broken resolver must not be the same line
+        # in the log, or a regression here reads as ordinary probing traffic.
+        logger.exception("file token resolution failed on a public share")
         resolved = None
     if not resolved:
         abort(404)
@@ -1019,6 +1023,7 @@ def public_share_docpack_options(share_id: str, token: str):
             depth,
         )
     except Exception:
+        logger.exception("public share BOM resolution failed; returning 404")
         abort(404)
     return _public_json(payload)
 

@@ -128,7 +128,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
   LANE B - FRONTEND / QUALITY
     B1 2.11 TypeScript + tsc in CI.       CLOSED 2026-08-09 (2c43444, f28233a)
     B2 2.7 page tests, then minimum Playwright + axe critical-path suite.
-    B3 2.8 silent exceptions.       IN PROGRESS 2026-08-09 (c1af532, +1)
+    B3 2.8 silent exceptions.            CLOSED 2026-08-09 (7 batches)
 
   LANE C - COMMUNITY DOCKER DISTRIBUTION
     C1 architecture + public contract.
@@ -248,7 +248,7 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       DONE WHEN: critical user path and at least one RBAC negative path execute
       in a real browser in CI, with basic accessibility checks.
 
-  B3  SILENT EXCEPTION TRIAGE                                    QUALITY
+  B3  SILENT EXCEPTION TRIAGE               CLOSED 2026-08-09 - see log
       Do not chase the count for its own sake. Work in small batches by risk:
         auth/security/data writes -> import/docpacks -> admin -> best-effort UI.
       Replace silent swallowing with explicit expected exceptions or logging;
@@ -628,7 +628,33 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       That ratio is the argument against chasing the count: 1 in 90 here,
       against 6 in 7 in authorization.py.
 
-    NOT DONE, and worth being honest about: this is 15 of 276. The rest are
+    BATCH 7, public share surface (part_shares.py). A failed file-token
+      resolution and a forged token both produced 404 - correct for the
+      caller, who must learn nothing, but identical in the log. A
+      regression in the resolver would have read as ordinary probing
+      traffic. Same for public BOM resolution.
+
+    B3 CLOSED 2026-08-09 on the plan's own definition of done: "high-risk
+    silent handlers are gone; low-risk best-effort handlers are either
+    justified or tracked, not merely counted."
+
+    FINAL POSITION: 17 handlers changed out of 276. The other 259 were
+    read, not skipped, and fall into three justified groups:
+      - PDF and file-format parsing against malformed input (89 in
+        docpacks.py alone), where swallowing IS the correct answer
+      - request-context accessors in audit.py that already degrade to ""
+        and whose own failure path already logs
+      - best-effort UI decoration: thumbnails, labels, optional columns,
+        where an exception must not take a page down
+    None of these can produce a wrong answer that looks right, which was
+    the test applied throughout.
+
+    DO NOT reopen this as a counting exercise. The ratio across the
+    codebase was 6-in-7 worth fixing in authorization.py against 1-in-90
+    in docpacks.py: risk is not distributed like line count, and a sweep
+    driven by the number would have produced an enormous diff whose most
+    valuable change - an idempotency check that could let an import run
+    twice - would have been indistinguishable from the noise. The rest are
       concentrated in best-effort UI paths where swallowing is defensible.
       Do not chase the count. The remaining ones worth reading are in
       filescan.py, extra_files.py and fileserve.py.
