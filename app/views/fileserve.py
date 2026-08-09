@@ -1,3 +1,4 @@
+import logging
 import os, mimetypes
 from urllib.parse import unquote
 from flask import Blueprint, current_app, send_file, abort, request, g
@@ -12,12 +13,18 @@ from app.services.file_security import (
 )
 from app.models.artifact import PartFile
 
+logger = logging.getLogger(__name__)
+
 bp = Blueprint("fileserve", __name__, url_prefix="/files")
 
 def _configured_roots() -> list[str]:
     try:
         return [str(root.path) for root in managed_storage_roots()]
     except Exception:
+        # No roots means nothing is servable, so EVERY file 404s. That is the
+        # safe direction and the most misleading one: it looks exactly like an
+        # instance whose files were never imported.
+        logger.exception("could not resolve managed storage roots; serving no files")
         return []
 
 def _safe_rel_path(rel: str) -> str | None:
@@ -173,5 +180,9 @@ def auth():
             return ("", 404)
         resolve_managed_path(matches[0], must_exist=False)
     except Exception:
+        # Refusing is correct - this is the path-traversal guard - but a 403
+        # caused by a resolver bug and a 403 caused by an actual traversal
+        # attempt should not be indistinguishable in the logs.
+        logger.exception("managed path resolution failed; refusing the request")
         return ("", 403)
     return ("", 204)

@@ -580,7 +580,21 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
         silent; that is precisely the event someone later needs to
         reconstruct.
 
-    NOT DONE, and worth being honest about: this is 8 of 276. The rest are
+    BATCH 3, file serving (fileserve.py). Same shape again: correct
+      fail-closed behaviour, no voice. Resolving storage roots to [] means
+      EVERY file 404s, which is the safe direction and also the most
+      misleading - it looks exactly like an instance whose files were never
+      imported. And a 403 from the path-traversal guard should be
+      distinguishable in the logs from a 403 caused by a resolver bug.
+
+    A PATTERN WORTH NAMING, since it held in all three batches: none of
+      these had the wrong behaviour. Every one already failed closed. The
+      defect was that failing closed and working correctly produced
+      identical output, so no amount of log-reading could tell them apart.
+      When triaging the rest, ask "could I distinguish this failing from
+      this working?" before asking "is the fallback safe?".
+
+    NOT DONE, and worth being honest about: this is 10 of 276. The rest are
       concentrated in best-effort UI paths where swallowing is defensible.
       Do not chase the count. The remaining ones worth reading are in
       filescan.py, extra_files.py and fileserve.py.
