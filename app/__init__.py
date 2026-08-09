@@ -231,14 +231,6 @@ def create_app(config_object=None):
         "EXTRA_FILES_ALLOWED",
         str(os.getenv("EXTRA_FILES_ALLOWED") or "true").strip().lower() in ("1", "true", "yes", "on"),
     )
-    # Temporary Stage 2 compatibility. Remove after the Stage 8 migration
-    # prerequisites are satisfied and disable permanently in Stage 9.
-    app.config.setdefault(
-        "LEGACY_ADMIN_BYPASS_ENABLED",
-        str(os.getenv("LEGACY_ADMIN_BYPASS_ENABLED") or "true").strip().lower()
-        in ("1", "true", "yes", "on"),
-    )
-
     if security_mode == "strict":
         app.config["SESSION_COOKIE_SECURE"] = True
         app.config["REMEMBER_COOKIE_SECURE"] = True

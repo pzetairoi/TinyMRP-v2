@@ -4,6 +4,7 @@ from app.models.bom import BOMLink
 from app.models.job import Job, JobBOMLine
 from app.models.order import Order, OrderLine
 from app.views.admin_jobs import _build_job_bom_rollup
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -68,7 +69,7 @@ def test_rollup_expands_orders_and_flags_overordered_children(app):
 
 
 def test_jobs_edit_shows_flat_tree_toggle_and_tree_levels(client, user):
-    role = Role(name="admin").save()
+    role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     user.roles = [role]
     user.save()
     _login(client, user)

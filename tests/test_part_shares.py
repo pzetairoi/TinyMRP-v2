@@ -5,6 +5,7 @@ from app.models.artifact import PartFile
 from app.models.auth import Role, User
 from app.models.bom import BOMLink
 from app.models.part import Part
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -29,7 +30,7 @@ def test_admin_can_create_public_share_and_revoke_it(client, app, tmp_path):
     app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
     app.config["FILE_SOURCES"] = [{"local_root": str(tmp_path)}]
 
-    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin_role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     admin = _make_user("admin-share@example.com", roles=[admin_role])
     part = Part(part_number="PN-SHARE", revision="A", description="Shared Part", attrs={"material": "Steel"}).save()
 
@@ -122,7 +123,7 @@ def test_public_share_can_include_children_and_docpacks(client, app, tmp_path):
     app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
     app.config["FILE_SOURCES"] = [{"local_root": str(tmp_path)}]
 
-    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin_role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     admin = _make_user("admin-share-children@example.com", roles=[admin_role])
     root = Part(part_number="PN-SHARE-ROOT", revision="A", description="Shared Root", attrs={"material": "Steel"}).save()
     child = Part(part_number="PN-SHARE-CHILD", revision="B", description="Shared Child", attrs={"material": "Aluminum"}).save()
@@ -190,7 +191,7 @@ def test_public_share_can_include_children_and_docpacks(client, app, tmp_path):
 
 
 def test_public_share_child_navigation_requires_flag(client):
-    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin_role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     admin = _make_user("admin-share-no-children@example.com", roles=[admin_role])
     root = Part(part_number="PN-SHARE-ROOT-NOCHILD", revision="A", description="Shared Root").save()
     child = Part(part_number="PN-SHARE-CHILD-NOFLAG", revision="B", description="Shared Child").save()
@@ -228,7 +229,7 @@ def test_non_admin_cannot_create_public_share(client):
 
 
 def test_public_share_part_detail_treats_placeholder_approval_alias_as_unapproved(client, app):
-    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin_role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     admin = _make_user("admin-share-approval@example.com", roles=[admin_role])
     _login(client, admin)
 
@@ -278,7 +279,7 @@ def test_share_list_resolves_a_blank_revision(client):
     sends rev= empty. Requiring revision == "" 404'd every part that has a real
     revision, which reached users as a page that only worked after F5.
     """
-    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin_role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     admin = _make_user("blank-rev@example.com", roles=[admin_role])
     Part(part_number="REVPART", revision="1", description="has a revision").save()
     _login(client, admin)
@@ -290,7 +291,7 @@ def test_share_list_resolves_a_blank_revision(client):
 
 def test_share_list_still_honours_an_explicit_revision(client):
     """A revision that genuinely does not exist must still 404."""
-    admin_role = Role.objects(name="admin").first() or Role(name="admin").save()
+    admin_role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     admin = _make_user("explicit-rev@example.com", roles=[admin_role])
     Part(part_number="REVPART2", revision="1", description="x").save()
     _login(client, admin)

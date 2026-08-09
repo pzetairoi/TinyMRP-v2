@@ -10,6 +10,7 @@ from app.services.attrs import normalize_record_attrs
 from app.services.docpacks import DocPackOptions, build_docpack
 from app.services.field_config import field_requires_runtime_scan, query_paths_for_field, save_field_config
 from app.services.part_materialized import rebuild_part_materialized_fields
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -18,7 +19,7 @@ def _login(client, user):
 
 
 def _admin_user():
-    role = Role(name="admin").save()
+    role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     return User(
         email="admin@example.com",
         password="test",

@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 import openpyxl
 from bson import ObjectId
 
+from app.services.permissions import PERMISSION_REGISTRY
 from app.models.artifact import PartFile
 from app.models.audit import AuditLog
 from app.models.auth import Role, User
@@ -49,7 +50,12 @@ def _user(email, *roles):
 
 
 def _admin(email="stage3b2b-admin@example.test"):
-    role = Role.objects(name="admin").first() or _role("admin", [])
+    # An administrator holds permissions explicitly. This used to fall back to
+    # an empty role named "admin", which worked only because that name bypassed
+    # the permission registry entirely.
+    role = Role.objects(name="administrator").first() or _role(
+        "administrator", sorted(PERMISSION_REGISTRY)
+    )
     return _user(email, role)
 
 
@@ -171,13 +177,20 @@ def test_standard_non_export_roles_and_disabled_legacy_admin_are_denied(client, 
         )
         assert response.status_code == 200, role_name
 
-    legacy_admin = _admin("legacy-export@example.test")
-    _login(client, legacy_admin)
+    # An administrator can export because the role lists the permission, not
+    # because of its name. The old bypass flag is gone and setting it changes
+    # nothing.
+    administrator = _admin("administrator-export@example.test")
+    _login(client, administrator)
     assert client.post(
         f"/api/parts/{part.part_number}/export/arena_bom",
         json={"rev": part.revision},
     ).status_code == 200
-    app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = False
+
+    nameless_admin = _user(
+        "bare-admin@export-role.example.test", _role("admin", [])
+    )
+    _login(client, nameless_admin)
     assert client.post(
         f"/api/parts/{part.part_number}/export/arena_bom",
         json={"rev": part.revision},

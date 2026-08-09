@@ -5,6 +5,7 @@ from app.models.artifact import PartFile
 from app.models.auth import Role, User
 from app.models.bom import BOMLink
 from app.models.part import Part
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -13,7 +14,7 @@ def _login(client, user):
 
 
 def _admin_user():
-    role = Role(name="admin").save()
+    role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     return User(
         email="arena-admin@example.com",
         password="test",

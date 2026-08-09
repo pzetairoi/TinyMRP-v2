@@ -3,6 +3,7 @@ from datetime import datetime
 from app.models.app_settings import AppSettings
 from app.models.auth import Role, User
 from app.services.timezone_utils import clear_timezone_cache, format_display_ts, parse_user_datetime
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -12,7 +13,7 @@ def _login(client, user):
 
 
 def _admin_user():
-    role = Role.objects(name="admin").first() or Role(name="admin").save()
+    role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     return User(
         email="admin-timezone@example.com",
         password="test",

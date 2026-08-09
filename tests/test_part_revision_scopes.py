@@ -393,7 +393,7 @@ def test_numbering_permissions_preview_side_effects_and_manager_shortcut(client)
     assert not has_permission(planner, "parts.purge")
 
 
-def test_purge_requires_canonical_or_exact_legacy_admin(client, app):
+def test_purge_requires_the_canonical_permission(client, app):
     for role_name in ("engineering", "commercial", "engineering_manager"):
         part = _released(f"PURGE-{role_name}", "A")
         user = _user(f"{role_name}-purge@stage3b1.test", _standard_role(role_name))
@@ -403,22 +403,18 @@ def test_purge_requires_canonical_or_exact_legacy_admin(client, app):
             json={"pn": part.part_number, "rev": part.revision},
         ).status_code == 403
 
+    # A role named "admin" with no permissions is now just a role with no
+    # permissions. It used to be able to purge parts.
     legacy_admin = _user("legacy-admin@stage3b1.test", _role("admin", []))
     legacy_part = _released("PURGE-ADMIN", "A")
     _login(client, legacy_admin)
-    app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = True
     assert client.post(
         "/api/part_delete",
         json={"pn": legacy_part.part_number, "rev": legacy_part.revision},
-    ).status_code == 200
-
-    disabled_part = _released("PURGE-DISABLED", "A")
-    app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = False
-    assert client.post(
-        "/api/part_delete",
-        json={"pn": disabled_part.part_number, "rev": disabled_part.revision},
     ).status_code == 403
 
+    # Only the canonical permission works.
+    purge_part = _released("PURGE-CANONICAL", "A")
     purge_user = _user(
         "canonical-purge@stage3b1.test",
         _role("canonical_purge", ["parts.purge"]),
@@ -426,7 +422,7 @@ def test_purge_requires_canonical_or_exact_legacy_admin(client, app):
     _login(client, purge_user)
     assert client.post(
         "/api/part_delete",
-        json={"pn": disabled_part.part_number, "rev": disabled_part.revision},
+        json={"pn": purge_part.part_number, "rev": purge_part.revision},
     ).status_code == 200
 
 

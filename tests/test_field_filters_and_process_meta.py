@@ -6,6 +6,7 @@ from app.models.auth import Role, User
 from app.models.bom import BOMLink
 from app.models.part import Part
 from app.services.field_config import ensure_active_part_field_indexes, save_field_config
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -14,7 +15,7 @@ def _login(client, user):
 
 
 def _admin_user():
-    role = Role(name="admin").save()
+    role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     return User(
         email="admin-filters@example.com",
         password="test",

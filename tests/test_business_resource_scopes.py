@@ -7,6 +7,7 @@ from app.models.order import Order, OrderLine
 from app.models.supplier import Supplier
 from app.services.api_tokens import create_token
 from app.services.standard_roles import STANDARD_ROLES
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _role(name, permissions):
@@ -555,9 +556,11 @@ def test_invalid_inaccessible_and_scope_failure_identifiers_fail_closed(
 
 
 def test_archive_endpoints_preserve_records_and_reject_unknown_fields(client):
+    # Was an empty role named "admin", which only worked because that name
+    # bypassed the permission registry. Archiving needs real permissions.
     admin = _user(
-        "legacy.admin@stage3a.test",
-        _role("admin", []),
+        "archive.administrator@stage3a.test",
+        _role("administrator", sorted(PERMISSION_REGISTRY)),
     )
     headers = _headers(admin)
     job = Job(job_number="JOB-ARCHIVE").save()

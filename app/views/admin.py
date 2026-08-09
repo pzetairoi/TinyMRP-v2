@@ -442,8 +442,15 @@ def _role_options():
     return options
 
 
-def _active_legacy_admin_count() -> int:
-    admin_role = Role.objects(name="admin").first()
+def _active_administrator_count() -> int:
+    """How many active users hold the canonical administrator role.
+
+    Used to refuse deactivating the last one. This used to count a role named
+    "admin", from when that name bypassed the permission system; it now counts
+    the role that actually carries administrative permissions, so the safeguard
+    protects the account it was always meant to.
+    """
+    admin_role = Role.objects(name="administrator").first()
     if admin_role is None:
         return 0
     return User.objects(active=True, roles=admin_role).count()
@@ -542,7 +549,7 @@ def users_bulk_delete():
         # irreversible, so "we could not prove this user is safe to delete" has
         # to mean skip, not proceed.
         try:
-            if u.has_role("admin"):
+            if u.has_role("administrator"):
                 skipped_admin += 1
                 continue
         except Exception:
@@ -597,10 +604,10 @@ def users_bulk_status():
         flash("No users selected.", "error")
         return redirect(url_for("admin.users_list"))
 
-    active_admins = _active_legacy_admin_count()
+    active_admins = _active_administrator_count()
     changed = 0
     skipped_self = 0
-    skipped_last_admin = 0
+    skipped_last_administrator = 0
     for user in User.objects(id__in=ids):
         is_deactivate = action == "deactivate"
         if (
@@ -609,14 +616,14 @@ def users_bulk_status():
         ):
             skipped_self += 1
             continue
-        is_legacy_admin = user.has_role("admin")
+        is_administrator = user.has_role("administrator")
         if (
             is_deactivate
             and user.active
-            and is_legacy_admin
+            and is_administrator
             and active_admins <= 1
         ):
-            skipped_last_admin += 1
+            skipped_last_administrator += 1
             continue
         next_active = action == "activate"
         if bool(user.active) == next_active:
@@ -631,7 +638,7 @@ def users_bulk_status():
             "account_deactivated" if is_deactivate else "account_reactivated"
         )
         revoke_user_sessions(user, reason=session_reason)
-        if is_deactivate and is_legacy_admin:
+        if is_deactivate and is_administrator:
             active_admins -= 1
         changed += 1
         try:
@@ -651,7 +658,7 @@ def users_bulk_status():
         flash(f"{action.title()}d {changed} user(s).", "success")
     if skipped_self:
         flash("Your own account was not deactivated.", "warning")
-    if skipped_last_admin:
+    if skipped_last_administrator:
         flash(
             "The only active legacy administrator was not deactivated.",
             "warning",
@@ -693,8 +700,8 @@ def users_create():
         if role_ids:
             selected_roles = list(Role.objects(id__in=role_ids))
             if (
-                any(role.name == "admin" for role in selected_roles)
-                and not current_user.has_role("admin")
+                any(role.name == "administrator" for role in selected_roles)
+                and not current_user.has_role("administrator")
             ):
                 abort(403)
             u.roles = selected_roles
@@ -728,8 +735,8 @@ def users_edit(user_id):
                 Role.objects(id__in=[rid for rid in role_ids if len(rid) == 24])
             )
         if (
-            any(role.name == "admin" for role in selected_roles)
-            and not current_user.has_role("admin")
+            any(role.name == "administrator" for role in selected_roles)
+            and not current_user.has_role("administrator")
         ):
             abort(403)
         requested_role_ids = {str(role.id) for role in selected_roles}
@@ -744,7 +751,7 @@ def users_edit(user_id):
         if not requested_active and u.active:
             if str(u.id) == str(current_user.id):
                 abort(403)
-            if u.has_role("admin") and _active_legacy_admin_count() <= 1:
+            if u.has_role("administrator") and _active_administrator_count() <= 1:
                 abort(403)
         u.roles = selected_roles
         u.active = requested_active

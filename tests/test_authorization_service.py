@@ -159,37 +159,35 @@ def test_ordinary_role_names_do_not_bypass_permissions(app, role_name):
         assert not authorise(user, "jobs.read").allowed
 
 
-def test_legacy_admin_bypass_is_exact_and_configurable(app):
+def test_a_role_named_admin_grants_nothing_by_itself(app):
+    """The legacy bypass is gone; "admin" is now just a name.
+
+    It used to grant every permission in the registry without consulting the
+    registry, and it was enabled by default. This test replaces the one that
+    asserted that behaviour, so the hole cannot be reopened quietly.
+    """
     admin = FakeUser([SimpleNamespace(name="admin", permissions=[])])
     admin_like = FakeUser([SimpleNamespace(name="admin_helper", permissions=[])])
-    portal_admin_like = FakeUser(
-        [
-            SimpleNamespace(name="customer", permissions=[]),
-            SimpleNamespace(name="administrator", permissions=[]),
-        ]
-    )
+    real = FakeUser([SimpleNamespace(name="administrator", permissions=["parts.read"])])
 
     with app.app_context():
-        app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = True
         decision = authorise(admin, "parts.read")
-        assert decision.allowed
-        assert decision.used_legacy_admin_bypass
-        assert not has_permission(admin_like, "parts.read")
-        assert not has_permission(portal_admin_like, "parts.read")
-        assert not has_permission(admin, "unknown.permission")
-
-        app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = False
+        assert not decision.allowed
         assert not has_permission(admin, "parts.read")
+        assert not has_permission(admin_like, "parts.read")
+        assert not has_permission(admin, "unknown.permission")
+        # A role only ever grants what it actually lists.
+        assert has_permission(real, "parts.read")
 
 
-def test_malformed_admin_role_object_does_not_activate_bypass(app):
-    malformed_admin = FakeUser(
-        [SimpleNamespace(name="admin", permissions="not-a-permission-list")]
-    )
+def test_setting_the_old_bypass_flag_does_nothing(app):
+    """An instance whose .env still carries LEGACY_ADMIN_BYPASS_ENABLED must
+    not silently regain the bypass."""
+    admin = FakeUser([SimpleNamespace(name="admin", permissions=[])])
 
     with app.app_context():
         app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = True
-        assert not has_permission(malformed_admin, "parts.read")
+        assert not has_permission(admin, "parts.read")
 
 
 def test_canonical_and_missing_permission_decisions():
@@ -443,7 +441,7 @@ def test_security_administrator_can_use_existing_admin_routes_without_self_escal
         )
         break_glass = _role("break_glass_administrator")
         planner = _role("planner", ["jobs.read"])
-        legacy_admin = _role("admin")
+        legacy_admin = _role("administrator")
         actor = _user("security-admin@example.com", [security_role])
         target = _user("role-target@example.com")
     _login(client, actor)
@@ -548,18 +546,24 @@ def test_permissions_required_preserves_http_and_all_required_semantics(client, 
     assert client.get("/_stage2/all").status_code == 200
 
 
-def test_permissions_required_uses_central_admin_setting(client, app):
+def test_permissions_required_checks_the_permission_not_the_role_name(client, app):
+    """@permissions_required used to let a role named "admin" straight through.
+
+    Now the decorator asks the same question for everyone: does this user hold
+    the permission?
+    """
+
     @app.get("/_stage2/admin")
     @permissions_required("parts.read")
     def stage2_admin():
         return {"ok": True}
 
     with app.app_context():
-        admin_role = _role("admin")
-        admin_user = _user("legacy-admin@example.com", [admin_role])
-    _login(client, admin_user)
+        bare_admin = _user("legacy-admin@example.com", [_role("admin")])
+        reader = _user("reader@example.com", [_role("reader", ["parts.read"])])
 
-    app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = True
-    assert client.get("/_stage2/admin").status_code == 200
-    app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = False
+    _login(client, bare_admin)
     assert client.get("/_stage2/admin").status_code == 403
+
+    _login(client, reader)
+    assert client.get("/_stage2/admin").status_code == 200

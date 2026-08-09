@@ -5,6 +5,7 @@ from flask import render_template, render_template_string, url_for
 
 from app.models.auth import Role, User
 from app.models.part import Part
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -28,7 +29,7 @@ def _make_user(email, roles=None):
 
 
 def _admin_user():
-    role = Role.objects(name="admin").first() or Role(name="admin").save()
+    role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     return User(
         email="ui-admin@example.com",
         password="test",

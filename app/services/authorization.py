@@ -38,7 +38,6 @@ class AuthorizationDecision:
     permission: str
     resource_type: str = ""
     resource_id: str = ""
-    used_legacy_admin_bypass: bool = False
 
 
 @dataclass(frozen=True)
@@ -150,38 +149,6 @@ def effective_permissions(user: Any) -> frozenset[str]:
         return frozenset()
 
 
-def legacy_admin_bypass_enabled() -> bool:
-    """Whether holding a role literally named ``admin`` still bypasses RBAC.
-
-    DEFAULT FLIPPED TO OFF 2026-08-09 (productionmaturityplan A3). This was the
-    single widest hole in the permission system: one role name granted every
-    permission in the registry without consulting the registry at all.
-
-    Checked against the live fleet before flipping, because a role name lives
-    in databases and not only in code:
-      mecs (production)  0 users held it. Everyone is administrator,
-                         engineering or customer.
-      test               1 user, migrated additively to administrator first.
-
-    Still overridable, so an instance that discovers a dependency can set
-    LEGACY_ADMIN_BYPASS_ENABLED=1 to restore the old behaviour while it
-    reassigns roles properly. That escape hatch is the reason this is a
-    default change rather than a deletion.
-    """
-
-    return (
-        bool(current_app.config.get("LEGACY_ADMIN_BYPASS_ENABLED", False))
-        if has_app_context()
-        else False
-    )
-
-
-def _uses_legacy_admin_bypass(user: Any) -> bool:
-    if not _is_authenticated(user) or not legacy_admin_bypass_enabled():
-        return False
-    return "admin" in _permission_snapshot(user).role_names
-
-
 def has_permission(user: Any, permission: str) -> bool:
     """Return whether a registered permission is effective for the user."""
 
@@ -192,9 +159,7 @@ def has_permission(user: Any, permission: str) -> bool:
     ):
         return False
     try:
-        return _uses_legacy_admin_bypass(user) or permission in effective_permissions(
-            user
-        )
+        return permission in effective_permissions(user)
     except Exception:
         return False
 
@@ -222,11 +187,9 @@ def _denied(
     permission: str,
     resource_type: str = "",
     resource_id: str = "",
-    used_legacy_admin_bypass: bool = False,
 ) -> AuthorizationDecision:
     decision = AuthorizationDecision(
         False, reason_code, permission, resource_type, resource_id,
-        used_legacy_admin_bypass,
     )
     try:
         log_authorization_denial(user, decision)
@@ -254,11 +217,10 @@ def authorise(
         reason = ""
     try:
         snapshot = _permission_snapshot(user) if not reason else _EMPTY_SNAPSHOT
-        used_admin = not reason and _uses_legacy_admin_bypass(user)
-        if not reason and not used_admin and permission not in snapshot.permissions:
+        if not reason and permission not in snapshot.permissions:
             reason = "missing_permission"
     except Exception:
-        reason, used_admin = "authorisation_error", False
+        reason = "authorisation_error"
     if reason:
         return _denied(
             user,
@@ -268,7 +230,7 @@ def authorise(
             resource_id=resource_id,
         )
     return AuthorizationDecision(
-        True, "allowed", permission, resource_type, resource_id, used_admin,
+        True, "allowed", permission, resource_type, resource_id,
     )
 
 
@@ -299,7 +261,6 @@ def log_authorization_denial(user: Any, decision: AuthorizationDecision) -> None
             "actor_id": actor_id, "permission": decision.permission,
             "reason_code": decision.reason_code, "endpoint": endpoint,
             "method": method,
-            "used_legacy_admin_bypass": decision.used_legacy_admin_bypass,
         },
     )
 
@@ -518,8 +479,6 @@ def parts_scope_is_unrestricted(user: Any) -> bool:
             return False
         if not has_permission(user, "parts.read_unreleased"):
             return False
-        if _uses_legacy_admin_bypass(user):
-            return True
         scope = _scope_context(user)
         if not scope.valid:
             return False
@@ -576,7 +535,7 @@ def _build_relationship_part_pairs(user: Any) -> set[tuple[str, str]] | None:
     if not scope.valid:
         return set()
     modes = _scope_modes(scope, "parts", "parts.read")
-    if "global" in modes or _uses_legacy_admin_bypass(user):
+    if "global" in modes:
         return None
     if not (
         scope.customer_ids
@@ -701,8 +660,6 @@ def scope_queryset(
         raise AuthorizationScopeError(f"Unsupported resource type: {resource_type}")
     if not _is_authenticated(user):
         return _deny_all(queryset)
-    if _uses_legacy_admin_bypass(user):
-        return queryset
     required_permission = permission or _RESOURCE_PERMISSIONS[normalized]
     if not has_permission(user, required_permission):
         return _deny_all(queryset)
@@ -755,8 +712,6 @@ def permission_scope_modes(
         return frozenset()
     if not has_permission(user, permission):
         return frozenset()
-    if _uses_legacy_admin_bypass(user):
-        return frozenset({"global"})
     try:
         scope = _scope_context(user)
         if not scope.valid:
@@ -790,8 +745,6 @@ def order_kind_allowed(user: Any, kind: str, permission: str) -> bool:
         return False
     if not has_permission(user, permission):
         return False
-    if _uses_legacy_admin_bypass(user):
-        return True
     try:
         scope = _scope_context(user)
         if not scope.valid:
@@ -820,8 +773,6 @@ def order_relationship_allowed(
         return False
     if not order_kind_allowed(user, normalized_kind, permission):
         return False
-    if _uses_legacy_admin_bypass(user):
-        return True
     try:
         scope = _scope_context(user)
         if not scope.valid:
@@ -987,7 +938,6 @@ def authorise_part_access(
             if query.only("id").first() is not None:
                 return AuthorizationDecision(
                     True, "allowed", "parts.read", "part", resource_id,
-                    permission.used_legacy_admin_bypass,
                 )
     except Exception:
         reason = "authorisation_error"
@@ -997,7 +947,6 @@ def authorise_part_access(
         permission="parts.read",
         resource_type="part",
         resource_id=resource_id,
-        used_legacy_admin_bypass=permission.used_legacy_admin_bypass,
     )
 
 

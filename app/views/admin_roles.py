@@ -537,7 +537,7 @@ def roles_create():
             "display_name": display_name,
             "description": description,
         }
-        if name == "admin" and not current_user.has_role("admin"):
+        if name == "administrator" and not current_user.has_role("administrator"):
             abort(403)
         if not re.fullmatch(r"[a-z0-9][a-z0-9_]*", name):
             flash(
@@ -639,9 +639,9 @@ def roles_edit(role_id):
         ):
             abort(403)
         if (
-            name == "admin"
-            and role.name != "admin"
-            and not current_user.has_role("admin")
+            name == "administrator"
+            and role.name != "administrator"
+            and not current_user.has_role("administrator")
         ):
             abort(403)
         if not definition and not re.fullmatch(r"[a-z0-9][a-z0-9_]*", name):
@@ -713,7 +713,11 @@ def roles_delete(role_id):
     except (DoesNotExist, ValidationError):
         abort(404)
 
-    if role.name in STANDARD_ROLES or role.name == "admin":
+    # Standard roles are protected because deleting one breaks the canonical
+    # model. A role named "admin" used to be protected too, from when that name
+    # bypassed the permission system; it carries no special meaning now, so it
+    # is deletable like any other custom role.
+    if role.name in STANDARD_ROLES:
         abort(403)
 
     assigned_count = User.objects(roles=role).count()

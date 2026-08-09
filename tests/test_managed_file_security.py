@@ -642,9 +642,13 @@ def test_part_physical_delete_requires_parts_and_files_purge(
     assert not Path(file_record.path).exists()
 
 
-def test_legacy_admin_physical_delete_depends_on_compatibility_flag(
-    client, app, tmp_path
-):
+def test_a_role_named_admin_cannot_physically_delete_files(client, app, tmp_path):
+    """This used to pass with the bypass on and fail with it off.
+
+    The bypass is gone, so a permissionless role named "admin" is refused
+    outright and the file survives - which is the point: physical deletion is
+    irreversible, and it must depend on a listed permission, not a name.
+    """
     app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
     part = _part("LEGACY-PURGE", "A", released=True)
     file_record = _managed(tmp_path, part.part_number, "A")
@@ -652,15 +656,9 @@ def test_legacy_admin_physical_delete_depends_on_compatibility_flag(
     _login(client, legacy)
     payload = {"pn": part.part_number, "rev": "A", "delete_files": True}
 
-    app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = False
     assert client.post("/api/part_delete", json=payload).status_code == 403
     assert Path(file_record.path).exists()
     assert Part.objects(id=part.id).first() is not None
-
-    app.config["LEGACY_ADMIN_BYPASS_ENABLED"] = True
-    assert client.post("/api/part_delete", json=payload).status_code == 200
-    assert not Path(file_record.path).exists()
-    assert Part.objects(id=part.id).first() is None
 
 
 def test_refresh_preflights_add_and_stale_removal_permissions(

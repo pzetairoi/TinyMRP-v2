@@ -12,6 +12,7 @@ from app.models.part import Part
 from app.models.bom import BOMLink
 from app.models.artifact import PartFile
 from app.services.excel_compile import CompileRow, build_excel_compile_zip
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -21,7 +22,7 @@ def _login(client, user):
 
 
 def _tools_user():
-    role = Role.objects(name="admin").first() or Role(name="admin").save()
+    role = Role.objects(name="administrator").first() or Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     return User(
         email=f"tools-{uuid.uuid4()}@example.com",
         password="test",

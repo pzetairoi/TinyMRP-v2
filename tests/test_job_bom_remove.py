@@ -1,6 +1,7 @@
 from app.models.auth import Role
 from app.models.job import Job, JobBOMLine
 from app.models.part import Part
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def _login(client, user):
@@ -10,7 +11,7 @@ def _login(client, user):
 
 
 def test_job_bom_remove_uses_line_rev(client, user):
-    role = Role(name="admin").save()
+    role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     user.roles = [role]
     user.save()
     _login(client, user)

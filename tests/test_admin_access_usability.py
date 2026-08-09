@@ -168,7 +168,7 @@ def test_custom_role_delete_blocks_assignments_and_protects_catalogue_roles(
         )
         reconcile_standard_roles()
         standard = Role.objects.get(name="commercial")
-        legacy_admin = _role("admin")
+        legacy_admin = Role.objects(name="administrator").first() or _role("administrator")
     _login(client, actor)
 
     edit = client.get(f"/admin/roles/{assigned_role.id}/edit")
@@ -196,10 +196,13 @@ def test_custom_role_delete_blocks_assignments_and_protects_catalogue_roles(
         resource="empty_custom_role",
     ).count() == 1
 
+    # Standard catalogue roles stay protected - deleting one breaks the
+    # canonical model. "administrator" is one of them.
     assert client.post(f"/admin/roles/{standard.id}/delete").status_code == 403
     assert client.post(f"/admin/roles/{legacy_admin.id}/delete").status_code == 403
     assert Role.objects(id=standard.id).count() == 1
     assert Role.objects(id=legacy_admin.id).count() == 1
+
 
 
 def test_custom_role_delete_requires_role_management_permission(client, app):
@@ -320,13 +323,13 @@ def test_admin_users_search_filters_pagination_and_role_cards(client, app):
     assert "Active account" in create_form
 
 
-def test_admin_user_activation_safeguards_self_and_last_legacy_admin(
+def test_admin_user_activation_safeguards_self_and_last_administrator(
     client,
     app,
 ):
     with app.app_context():
         actor = _access_actor("security.users.manage")
-        legacy_admin_role = _role("admin")
+        legacy_admin_role = Role.objects(name="administrator").first() or _role("administrator")
         last_admin = _user("last-admin@example.com", [legacy_admin_role])
         regular = _user("regular@example.com")
     _login(client, actor)

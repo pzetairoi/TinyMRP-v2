@@ -2,6 +2,7 @@
 from app.models.audit import AuditLog
 from app.services.audit import log_action
 from app.models.auth import Role, User
+from app.services.permissions import PERMISSION_REGISTRY
 
 
 def test_audit_log_captures_ip_method_endpoint(app):
@@ -25,7 +26,7 @@ def test_audit_log_captures_ip_method_endpoint(app):
 
 
 def test_admin_activity_view_groups_actions_and_keeps_technical_detail(client):
-    admin_role = Role(name="admin").save()
+    admin_role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     admin = User(email="audit-admin@example.com", password="test", active=True, fs_uniquifier="audit-admin", roles=[admin_role]).save()
     target = User(email="worker@example.com", password="test", active=True, fs_uniquifier="audit-worker").save()
     AuditLog(
