@@ -575,8 +575,32 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       could act on and burying the only question it existed to answer. A
       measurement that drowns its own signal is worse than no measurement.
 
+    CONFIRMED WITH REAL BROWSER USE, 2026-08-09. Parts list, part detail
+      (wheel_Assy, AWS-Z-012788), jobs and admin exercised against the
+      ENFORCED policy: not one CSP violation, every request 200, the UI
+      works. A1 is closed on evidence, not on a header check.
+
+    What the console does show is all noise, and worth naming so nobody
+      re-investigates it:
+        -moz-column-gap, speak, -webkit-text-size-adjust,
+        -ms-input-placeholder, font-named-instance
+      are vendor-prefixed declarations Bootstrap and PrimeReact ship for
+      other engines. Firefox drops them and renders correctly.
+      "Layout was forced before the page was fully loaded" is a perf hint.
+      NS_BINDING_ABORTED is a cancelled navigation.
+
+    ONE REAL, MINOR DEFECT FOUND (Lane B, not CSP):
+      "Error in parsing value for 'left'" and "for 'width'" on part detail
+      pages. Not from a template - the server-rendered inline styles are all
+      guarded - so a React component is setting left/width to something
+      invalid, most likely undefined or NaN reaching a style prop. Cosmetic
+      today; a wrong number there would be a layout bug tomorrow. Reproduce
+      by opening a part detail page in Firefox with the console filtered to
+      "parsing value".
+
     Remaining: roll the same flag to the other instances once test has had
-      real browser use. mecs and tinymrp-canada still allow inline scripts.
+      more real browser use. mecs and tinymrp-canada still allow inline
+      scripts.
 
   2026-08-09  A2 + A3 FULLY CLOSED - the second auth model is gone
     Baseline: A2/A3 had left the code behind default-off flags. The owner
