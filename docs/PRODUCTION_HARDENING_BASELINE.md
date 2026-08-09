@@ -17,7 +17,7 @@ Phase 0 changes described here.
 This document freezes the evidence used to start the commercial hardening
 roadmap. It is an engineering baseline, not a production approval. Public or
 paid-customer production remains a no-go until the open production blockers in
-this document and `hardeningplan.txt` are closed.
+this document and `docs/planning/hardeningplan.txt` are closed.
 
 ## Protected deployment requirement
 
@@ -398,7 +398,7 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 
 ## Handoff rules
 
-1. Read this document and the status block at the top of `hardeningplan.txt`.
+1. Read this document and the status block at the top of `docs/planning/hardeningplan.txt`.
 2. Work on `main`. The `hardening/production-readiness` branch was
    fast-forwarded into `main` on 2026-08-07 (78 commits) and then deleted; it
    no longer exists locally or on the remote.
@@ -413,12 +413,12 @@ contract tests plus rendered Compose/Caddy validation protect these behaviors.
 Phases 0-3 and 4A are complete, and all three proposed exceptions were
 dispositioned on 2026-08-04 (EXC-2026-001/002/003, expiring 2026-11-02).
 
-**The forward-looking execution document is `posthardeningplan.txt`.** A
+**The forward-looking execution document is `docs/planning/posthardeningplan.txt`.** A
 2026-08-07 audit re-verified this register against the code and found work the
 roadmap did not record: 182 silently-swallowed exceptions, no frontend error
 boundary, `/api/ready` wired to nothing, and Redis missing from the guided
 per-instance compose. This table remains the authoritative blocker status;
-`posthardeningplan.txt` says what to do about it and in what order.
+`docs/planning/posthardeningplan.txt` says what to do about it and in what order.
 
 ## Residual Phase 0 limitations
 

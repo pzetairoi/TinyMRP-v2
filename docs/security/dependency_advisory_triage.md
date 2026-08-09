@@ -252,7 +252,7 @@ reflected input, CSRF in action processing, open redirect, constructor injection
 via `deserializeErrors`, DoS via inefficient route matching). The current pin is
 strictly the better position.
 
-> This supersedes the earlier note in `hardeningplan.txt` that said no fixed
+> This supersedes the earlier note in `docs/planning/hardeningplan.txt` that said no fixed
 > version existed. A fix exists upstream — it is simply not published for the
 > package this application depends on.
 

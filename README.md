@@ -319,7 +319,7 @@ Optional override (not recommended in production):
 
 ## Quick Start (local dev)
 
-PowerShell snippet (from `handycommands.txt`):
+PowerShell snippet (from `docs/planning/handycommands.txt`):
 
 ```powershell
 # 1) (optional) Run nginx in front of Flask for protected file offload
@@ -478,7 +478,7 @@ docker compose --env-file C:\CADEXPORT\.tinymrp\compose.env -f C:\TinyMRP\Server
 
 Use the same `docker compose exec ...` pattern to run `user set-password`, `grant-role`, or `revoke-role`.
 
-Useful snippets (from `handycommands.txt`):
+Useful snippets (from `docs/planning/handycommands.txt`):
 
 ```bash
 docker compose up -d

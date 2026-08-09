@@ -39,7 +39,7 @@ compose deployments. For standalone servers:
 
 - **New installs:** use `sudo ./deploy/scripts/install-server.sh --domain <fqdn> --certbot
   --admin-email <email> --with-fail2ban --yes` (see `deploy/server/README.md` for variants).
-- **Existing standalone servers (e.g. installed per serverdeploymentguide.txt):** adopt the
+- **Existing standalone servers (e.g. installed per docs/planning/serverdeploymentguide.txt):** adopt the
   hardening incrementally, each step reversible:
 
 ```bash

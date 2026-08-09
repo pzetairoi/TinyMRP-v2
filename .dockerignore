@@ -52,5 +52,4 @@ solidworks-addin/*.md
 
 # Logs / misc
 *.log
-handycommands.txt
-serverdeploymentguide.txt
+docs/planning/

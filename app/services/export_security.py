@@ -312,7 +312,7 @@ def preflight_export_plan(
         # it had been refused with a 403.
         #
         # Keep the full check. The 5592 part queries it costs on a large
-        # assembly are recorded in optimizationplan.txt as still open; the
+        # assembly are recorded in docs/planning/optimizationplan.txt as still open; the
         # answer is to make the check cheap, not to reason it away.
         if not managed_file_read_allowed(
             user, file_record, parts_in_scope=parts_in_scope

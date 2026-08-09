@@ -41,7 +41,7 @@ high/critical advisory.
    scan the final image with the pinned Trivy version, and exercise a disposable
    Mongo → TinyMRP → Caddy health request.
 6. Record the old/new tag, digest/SHA, verification date, commands, test counts,
-   scan disposition, and rollback commit in `hardeningplan.txt` and the release
+   scan disposition, and rollback commit in `docs/planning/hardeningplan.txt` and the release
    notes. Commit pin updates separately from feature work.
 
 The Compose/rendering defaults support controlled emergency overrides through

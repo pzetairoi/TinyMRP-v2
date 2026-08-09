@@ -353,7 +353,7 @@ def create_app(config_object=None):
 
     # Plain MongoEngine connect – capture the connection object
     app.config.setdefault("MONGODB_ALIAS", "tinymrp-v2")
-    # Opt-in request profiler (optimizationplan.txt). Registers nothing unless
+    # Opt-in request profiler (docs/planning/optimizationplan.txt). Registers nothing unless
     # TINYMRP_PROFILE is set, so production pays no cost for its existence.
     #
     # MUST run before the Mongo client is created: pymongo applies a globally
