@@ -167,14 +167,14 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
     B3 2.8 silent exceptions.            CLOSED 2026-08-09 (7 batches)
 
   LANE C - COMMUNITY DOCKER DISTRIBUTION
-    C1 architecture + public contract.       ACTIVE 2026-08-09 (Codex)
-    C2 release pipeline / Docker Hub.        QUEUED behind C1/C3 (Codex)
-    C3 shared Compose.                       ACTIVE 2026-08-09 (Codex)
-    C4 Linux installer and commands.         QUEUED behind C3 (Codex)
-    C5 Windows installer and commands.       QUEUED behind C3 (Codex)
-    C6 update / backup / restore / uninstall-preserve-data. QUEUED (Codex)
-    C7 optional LAN/domain/Caddy modes.      QUEUED behind C3 (Codex)
-    C8 cross-platform acceptance matrix and public docs. QUEUED (Codex)
+    C1 architecture + public contract.       DONE 2026-08-09 (98d14ea)
+    C2 release pipeline / Docker Hub.        IMPLEMENTED 318f38c; enable pending
+    C3 shared Compose.                       DONE 2026-08-09 (98d14ea, 318f38c)
+    C4 Linux installer and commands.         IMPLEMENTED 318f38c; CI run pending
+    C5 Windows installer and commands.       DONE localhost 2026-08-09 (318f38c)
+    C6 update / backup / restore / uninstall-preserve-data. DONE (318f38c)
+    C7 optional LAN/domain/Caddy modes.      IMPLEMENTED 318f38c; accept pending
+    C8 acceptance matrix/public docs.        ACTIVE 318f38c; LAN/domain pending
 
   LANE D - PERFORMANCE, MEASURE-ONLY FIRST
     D1 2.5 re-measure _flatten_bom.
@@ -611,6 +611,48 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 ========================================================================
 
   Add newest entries at the top. Keep entries short.
+
+  2026-08-09  C1/C3/C5/C6 DONE FOR LOCALHOST - real disposable acceptance
+    Result: Windows Docker Desktop clean install generated secrets, created an
+      authenticated empty Mongo volume and least-privilege readWrite app user,
+      seeded one administrator, removed the bootstrap password from .env and
+      the recreated app, and served ready on loopback. Mongo/Redis had no host
+      ports; app was read-only with cap-drop/no-new-privileges; the deliverables
+      bind mount was writable.
+    C6 evidence: a real dump held 14,387 uncompressed bytes; checksums/content
+      checks passed; restore removed a post-backup marker and retained the
+      administrator. A nonexistent v9.9.9 update returned failure, restored the
+      old image reference automatically, and the app was healthy. Default
+      uninstall preserved the named Mongo volume and the administrator after
+      start. Disposable containers/volumes were removed after the test.
+    Files changed: install.ps1/cmd, tinymrp.ps1, lifecycle hardening in the
+      shared package, ACCEPTANCE.md and public Community docs.
+    Tests/gates: PowerShell parser, ShellCheck warning level, Compose base and
+      domain config, Caddy validate, live readiness/auth/data-survival checks.
+    Commits: 98d14ea has C1/C3/Linux base; 318f38c has the lifecycle,
+      release, acceptance and documentation completion.
+    What remains: the new Ubuntu CI job must run remotely; real LAN and
+      DNS/ACME host rows remain release acceptance, not claims made from YAML.
+
+  2026-08-09  C2/C4/C7/C8 IMPLEMENTED - acceptance boundaries explicit
+    C2: release-image.yml keeps GHCR/Trivy/SBOM, publishes one amd64 build to
+      every enabled registry, moves latest only for stable semver, validates
+      the same digest, and builds version-pinned Linux/Windows release bundles.
+      Docker Hub remains opt-in until namespace ownership and credentials exist.
+    C4/C8: install.sh has interactive and CI-safe non-interactive paths; a
+      dedicated Ubuntu job performs clean install, auth/hardening checks, real
+      backup/restore, and uninstall-preserve-data. Public/Docker Hub docs match
+      the bundle path. C7 localhost/LAN/domain variables and Caddy profile are
+      implemented; Caddy configuration validates, but real LAN firewall and
+      public DNS/ACME tests remain open in the matrix.
+    Files changed: release-image.yml, community-smoke.yml,
+      deploy/community/{install.sh,tinymrp.sh,Caddyfile,README.md,
+      DOCKER_HUB.md,ACCEPTANCE.md,release.env.example}, root README.md.
+    Tests/gates: actionlint 1.7.7, YAML parse, ShellCheck, Compose config and
+      Caddy validate pass.
+    Commit: 318f38c.
+    What remains: enable Docker Hub after namespace confirmation, observe the
+      Ubuntu job on GitHub, then execute LAN/domain release-host checklist.
 
   2026-08-09  B2 REOPENED - the browser suite was green because it never ran
     Found while starting the remaining Lane B work. Every Playwright step in
