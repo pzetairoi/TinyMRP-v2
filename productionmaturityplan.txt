@@ -27,6 +27,12 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
 
   RELEASE / FLEET
     - v1.0.0 is tagged and immutable.
+    - There is ONE authentication model and ONE role model. compat mode and
+      the legacy admin bypass were deleted outright on 2026-08-09, not
+      disabled. Do not look for a flag to re-enable either.
+    - Strict script CSP is enforced fleet-wide: script-src carries a
+      per-request nonce and no 'unsafe-inline'. style-src keeps
+      'unsafe-inline' permanently and that is a decision, not a backlog item.
     - Fleet Mongo authentication is CLOSED and live everywhere. Verified
       positively: unauthenticated access to mecs is refused.
     - Fleet strict authentication is CLOSED and live everywhere.
@@ -598,9 +604,20 @@ postoptimizationplan.txt at cc4f13c, after the draft's stated baseline.
       by opening a part detail page in Firefox with the console filtered to
       "parsing value".
 
-    Remaining: roll the same flag to the other instances once test has had
-      more real browser use. mecs and tinymrp-canada still allow inline
-      scripts.
+    ROLLED TO THE WHOLE FLEET 2026-08-09, at the owner's instruction and
+      knowingly ahead of extended soak time on test. All three instances
+      now enforce script-src without 'unsafe-inline'. Each keeps a rollback
+      copy at instances/<name>/.env.before-csp-20260809; restoring it and
+      recreating the app container reverts in under a minute.
+      mecs verified after: 200, healthy, doctor 0 failures, data unchanged
+      at parts=1479 bom=1572 files=4975.
+
+    A MISTAKE OF MINE WORTH COPYING THE FIX FROM: the readiness wait loop
+      used `curl -s -o /dev/null` and broke on the first iteration, because
+      curl exits 0 on a 502. It reported mecs as down when the container was
+      simply still starting. Wait on the STATUS CODE, not on curl's exit
+      code. Also seen: grepping container logs for "error" matches
+      gunicorn's own --error-logfile argument.
 
   2026-08-09  A2 + A3 FULLY CLOSED - the second auth model is gone
     Baseline: A2/A3 had left the code behind default-off flags. The owner
