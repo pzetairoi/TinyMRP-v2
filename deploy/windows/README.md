@@ -1,5 +1,10 @@
 # TinyMRP Windows LAN-Only Deployment (Simple Mode)
 
+> **The full guide is [`docs/deployment/03-windows-lan.md`](../../docs/deployment/03-windows-lan.md).**
+> It covers both Windows options — Docker Desktop (recommended, one script) and
+> the native service below — with every parameter, the backup and update
+> procedures, and a troubleshooting table. This page is the condensed checklist.
+
 This guide is for a private office/home LAN with no internet exposure.
 
 Goal:
@@ -90,16 +95,28 @@ Copy-Item "$AppRoot\deploy\windows\.env.windows.lan.example" $EnvFile -Force
 notepad $EnvFile
 ```
 
-Set these values in the file:
+Four values are marked `REQUIRED` in the template:
 
+- `TINYMRP_URL=http://tinymrp-lan.company.local` — the address users type.
+  **Include the scheme.** With `http://`, session cookies stay storable on a
+  plain-HTTP origin and the page does not try to upgrade its assets to TLS.
+  Declare `https://` without actually terminating TLS and every login bounces
+  straight back to the login form. It must match `server_name` in nginx and
+  the port nginx listens on.
+- `FILES_LOCAL_ROOT=C:/TinyMRP/data/deliverables` — forward slashes.
 - `SECRET_KEY` = long random value
-- `SECURITY_PASSWORD_SALT` = long random value
+- `SECURITY_PASSWORD_SALT` = a *different* long random value
+
+Generate both secrets with:
+
+```powershell
+powershell -c "[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')"
+```
+
+Keep the defaults for:
+
 - `MONGO_URI=mongodb://127.0.0.1:27017/tinymrp-v2`
-- `FILES_LOCAL_ROOT=C:/TinyMRP/data/deliverables`
-- `TINYMRP_ALLOWED_ORIGINS=http://tinymrp-lan.company.local`
-
-Keep:
-
+- `TINYMRP_TRUSTED_PROXY_HOPS=1` (nginx is the one proxy in front)
 - `FORCE_HTTPS=false`
 - `FILES_PUBLIC_URLS=false`
 
@@ -159,8 +176,25 @@ cd $AppRoot
 cd $AppRoot
 $env:ENV_FILE = $EnvFile
 .\.venv\Scripts\flask.exe --app run.py user seed-roles
-.\.venv\Scripts\flask.exe --app run.py user create --email admin@yourcompany.com --password "ChangeThisNow!"
-.\.venv\Scripts\flask.exe --app run.py user grant-admin --email admin@yourcompany.com
+.\.venv\Scripts\flask.exe --app run.py user bootstrap-admin --email admin@yourcompany.com
+```
+
+`bootstrap-admin` prompts for the password twice without echoing it, so it
+never lands in your shell history. It requires 12+ characters and grants the
+`administrator` role in one step.
+
+Optional: load the evaluation dataset and one demo login per role, so the
+install can be exercised before real data arrives.
+
+```powershell
+.\.venv\Scripts\flask.exe --app run.py demo install
+```
+
+The demo passwords are printed once. Remove them before this instance holds
+real data:
+
+```powershell
+.\.venv\Scripts\flask.exe --app run.py demo remove --disable
 ```
 
 ### 11) Test locally

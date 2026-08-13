@@ -2,6 +2,30 @@
 
 This page covers first deployment, safe updates, and operating basics for TinyMRP v2.
 
+## Full deployment guides
+
+Step-by-step guides for every deployment option live in `docs/deployment/` in
+the repository, and can be read on GitHub before you have a server:
+
+| Guide | Covers |
+| --- | --- |
+| `docs/deployment/README.md` | Which path to choose, and the three settings TinyMRP actually needs |
+| `docs/deployment/01-vm-docker.md` | A VM or server with Docker — the recommended single-instance path |
+| `docs/deployment/02-linux-bare-metal.md` | systemd + gunicorn + nginx, no Docker |
+| `docs/deployment/03-windows-lan.md` | Windows on an office LAN |
+| `docs/deployment/04-vps-multi-instance.md` | The guided Caddy multi-instance VPS path below, in detail |
+| `docs/deployment/05-configuration-reference.md` | Every environment variable |
+| `docs/deployment/06-first-run.md` | Administrator, roles, and the evaluation dataset |
+| `docs/deployment/07-troubleshooting.md` | Symptom-first fixes |
+| `docs/deployment/08-networking-and-tls.md` | Addresses, firewalls, and adding HTTPS to a LAN |
+| `docs/deployment/10-operations.md` | Backups, updates, uninstall |
+
+**One setting decides whether a deployment works at all: `TINYMRP_URL`.** It is
+the address users type, scheme included. Its scheme determines whether session
+cookies are marked `Secure` and whether the page asks browsers to upgrade
+assets to HTTPS. Declaring `https://` on a plain-HTTP LAN deployment makes every
+login bounce back to the login form.
+
 ## Deployment Options
 
 ### Recommended: Guided Ubuntu deployment
@@ -38,17 +62,33 @@ sudo ./deploy/scripts/update-all-instances.sh
 sudo ./deploy/scripts/rollback-instance.sh company1
 ```
 
+### Single VM or server with Docker
+
+The simplest supported deployment, and the one to use for a container in a VM.
+It runs TinyMRP, MongoDB and Redis and nothing else — no Nextcloud, no
+multi-instance machinery.
+
+```bash
+./deploy/community/install.sh --build --with-demo-data
+```
+
+It asks for a deliverables folder, an access mode (`localhost`, `lan` or
+`domain`) with its address, and the first administrator; it generates every
+secret itself. Full guide: `docs/deployment/01-vm-docker.md`.
+
 ### Hardened Windows LAN-Only (No Docker)
 
 Use this when IT requires a Windows workstation deployment with internal-only access.
 
-- Guide: `deploy/windows/README.md`
+- Guide: `docs/deployment/03-windows-lan.md` (or the condensed
+  `deploy/windows/README.md`)
 - IT ticket template: `deploy/windows/IT_REQUEST_TEMPLATE.md`
 - Hardened env template: `deploy/windows/.env.windows.lan.example`
 
 ### Advanced: Local developer runtime
 
 Use direct Python and Node only for development and debugging.
+Guide: `docs/deployment/09-local-development.md`.
 
 ## Prerequisites
 
@@ -257,20 +297,27 @@ sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
 ```
 
 Local domains such as `demo.test.local` and `demo.localhost` do not use public Let's Encrypt certificates.
-creating the instance. New HTTPS/internal-TLS guided instances default to strict.
 
-## Strict authentication on guided Caddy instances
+`--local-mode http` serves the instance over plain HTTP and writes
+`TINYMRP_URL=http://<domain>` into the instance `.env`. That is what keeps the
+session cookie storable on a plain-HTTP origin and stops the page asking
+browsers to upgrade its assets to TLS. `--local-mode internal-tls` uses Caddy's
+internal CA instead and writes an `https://` URL; every client must then trust
+that CA.
 
-exact origin, and strong secrets for every new instance. Caddy remains the TLS
-endpoint and forwards the host and scheme used by the browser. Normal browser
-pages and APIs use the signed session; unsafe browser API requests must have a
-same-origin Origin/Referer. The SolidWorks add-in and other integrations use API
-bearer tokens. Public part shares remain limited to their opaque share URL, and
-`/api/health` stays anonymous for Caddy/Docker health checks.
+## Authentication on guided Caddy instances
 
-Updating an older instance does not rewrite its saved security mode. To migrate
-its instance `.env`, recreate the app, and test browser login/write, add-in token
-check, and a public share before considering the migration complete.
+There is one security model. Every new instance gets an exact allowed origin
+and strong generated secrets. Caddy remains the TLS endpoint and forwards the
+host and scheme the browser used. Normal browser pages and APIs use the signed
+session; unsafe browser API requests must carry a same-origin Origin or
+Referer. The SolidWorks add-in and other integrations use API bearer tokens.
+Public part shares remain limited to their opaque share URL, and `/api/health`
+stays anonymous for Caddy and Docker health checks.
+
+The old compat mode and its second set of CORS, CSRF, cookie and upload rules
+were removed, along with `TINYMRP_SECURITY_MODE`. Nothing needs migrating: the
+strict path is now the only path.
 
 ## Windows LAN-Only Setup (No Docker)
 

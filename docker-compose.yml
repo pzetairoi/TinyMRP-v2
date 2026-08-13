@@ -92,6 +92,13 @@ services:
       FLASK_ENV: production
       SECRET_KEY: ${SECRET_KEY}
       SECURITY_PASSWORD_SALT: ${SECURITY_PASSWORD_SALT}
+      # The address browsers use. Its scheme decides whether session cookies
+      # are marked Secure and whether the CSP upgrades subresources to https —
+      # both of which break a plain-HTTP deployment if assumed wrongly.
+      TINYMRP_URL: ${TINYMRP_URL:-}
+      TINYMRP_BROWSER_TLS: ${TINYMRP_BROWSER_TLS:-auto}
+      # nginx below is the one proxy in front of the app.
+      TINYMRP_TRUSTED_PROXY_HOPS: ${TINYMRP_TRUSTED_PROXY_HOPS:-1}
       TINYMRP_ALLOWED_ORIGINS: ${TINYMRP_ALLOWED_ORIGINS}
       TINYMRP_CORS_CREDENTIALS: ${TINYMRP_CORS_CREDENTIALS}
       API_TOKEN_DEFAULT_TTL_DAYS: ${API_TOKEN_DEFAULT_TTL_DAYS:-90}

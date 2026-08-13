@@ -7,6 +7,7 @@ on:
       - "docker/**"
       - "app/**"
       - "requirements*.txt"
+      - "deploy/scripts/**"
       - ".github/workflows/community-smoke.yml"
   push:
     branches: ["main", "master"]
@@ -15,6 +16,7 @@ on:
       - "docker/**"
       - "app/**"
       - "requirements*.txt"
+      - "deploy/scripts/**"
       - ".github/workflows/community-smoke.yml"
   workflow_dispatch:
 
@@ -125,3 +127,111 @@ jobs:
           with app.app_context():
               assert User.objects(email="community-ci@example.com").count() == 1
           PY
+
+  lan-mode-plain-http:
+    # The LAN access mode was the one nobody could log into: the app assumed
+    # HTTPS, so it marked the session cookie Secure and told browsers to
+    # upgrade every page asset to TLS. Neither shows up on localhost, because
+    # browsers treat loopback as a potentially trustworthy origin and exempt it
+    # from both. Only a non-loopback address reproduces it, which is why this
+    # job installs against the runner's own LAN IP and drives a real login.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the app image from source
+        run: docker build -f docker/app/Dockerfile -t tinymrp-lan-ci:v0.0.0-ci .
+
+      - name: Install in LAN mode and prove a browser can hold a session
+        env:
+          TINYMRP_NON_INTERACTIVE: "1"
+          TINYMRP_DELIVERABLES_PATH: ${{ runner.temp }}/tinymrp-lan/deliverables
+          TINYMRP_ACCESS_MODE: lan
+          TINYMRP_APP_PORT: "5089"
+          TINYMRP_ADMIN_EMAIL: lan-ci@example.com
+          TINYMRP_IMAGE_REPOSITORY: tinymrp-lan-ci
+          TINYMRP_VERSION: v0.0.0-ci
+          TINYMRP_INSTALL_PULL: missing
+        run: |
+          set -euo pipefail
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if [[ -f deploy/community/.env ]]; then
+              if [[ "$status" -ne 0 ]]; then
+                docker compose --env-file deploy/community/.env -f deploy/community/compose.yaml logs --no-color app || true
+              fi
+              docker compose --env-file deploy/community/.env -f deploy/community/compose.yaml down -v --remove-orphans || true
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+
+          LAN_IP="$(hostname -I | awk '{print $1}')"
+          [[ "$LAN_IP" != 127.* ]] || { echo "::error::no non-loopback address to test with"; exit 1; }
+          export TINYMRP_LAN_HOST="$LAN_IP"
+          BASE="http://${LAN_IP}:5089"
+          echo "Testing against $BASE"
+
+          TINYMRP_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          export TINYMRP_ADMIN_PASSWORD
+          mkdir -p "$TINYMRP_DELIVERABLES_PATH"
+          ./deploy/community/install.sh --with-demo-data
+
+          # The installer must have declared the plain-HTTP address, and the
+          # value must reach the container - a value that stops at .env leaves
+          # the app assuming HTTPS.
+          grep -Fx "TINYMRP_URL=\"${BASE}\"" deploy/community/.env
+          grep -Fx 'TINYMRP_TRUSTED_PROXY_HOPS="0"' deploy/community/.env
+          COMPOSE=(docker compose --env-file deploy/community/.env -f deploy/community/compose.yaml)
+          "${COMPOSE[@]}" exec -T app printenv TINYMRP_URL | grep -Fx "$BASE"
+
+          curl --fail --silent --show-error "$BASE/api/ready" | python -m json.tool
+
+          # A `Secure` cookie is discarded by a browser on a plain-HTTP origin,
+          # so the session - and the CSRF token travelling in it - never
+          # survives to the login POST.
+          headers="$(curl --fail --silent --show-error --dump-header - --output /dev/null "$BASE/login")"
+          if grep -i '^set-cookie:' <<<"$headers" | grep -qi 'secure'; then
+            echo "::error::plain-HTTP LAN deployment issued a Secure session cookie"
+            exit 1
+          fi
+          # upgrade-insecure-requests rewrites every asset URL to https:// on a
+          # port that speaks HTTP, so the page renders with nothing loaded.
+          if grep -i '^content-security-policy:' <<<"$headers" | grep -q 'upgrade-insecure-requests'; then
+            echo "::error::plain-HTTP LAN deployment asked browsers to upgrade subresources"
+            exit 1
+          fi
+
+          # End to end: fetch the form, post the credentials with the cookie
+          # jar a browser would keep, and reach an authenticated page.
+          jar="$(mktemp)"
+          token="$(curl --fail --silent --show-error --cookie-jar "$jar" "$BASE/login" \
+            | grep -oP 'name="csrf_token"[^>]*value="\K[^"]+' | head -n1)"
+          [[ -n "$token" ]] || { echo "::error::no CSRF token in the login form"; exit 1; }
+          code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --cookie "$jar" --cookie-jar "$jar" \
+            --header "Referer: $BASE/login" \
+            --data-urlencode "email=$TINYMRP_ADMIN_EMAIL" \
+            --data-urlencode "password=$TINYMRP_ADMIN_PASSWORD" \
+            --data-urlencode "csrf_token=$token" \
+            "$BASE/login")"
+          [[ "$code" == "302" ]] || { echo "::error::login returned $code, expected a 302 redirect"; exit 1; }
+          code="$(curl --silent --output /dev/null --write-out '%{http_code}' --cookie "$jar" "$BASE/app")"
+          [[ "$code" == "200" ]] || { echo "::error::authenticated page returned $code; the session did not persist"; exit 1; }
+
+          # The demo dataset must be usable straight after a fresh install.
+          "${COMPOSE[@]}" exec -T app python - <<'PY'
+          from app import create_app
+          from app.models.auth import User
+          from app.models.part import Part
+          app = create_app()
+          with app.app_context():
+              assert User.objects(email__endswith="@demo.com").count() > 0, "no demo logins"
+              assert Part.objects(part_number="CV03-TR-A01").first() is not None, "sample part missing"
+          PY
+
+          echo "LAN mode verified end to end at $BASE"

@@ -9,10 +9,31 @@ param(
     [string]$Option,
     [switch]$IncludeDeliverables,
     [switch]$DeleteData,
-    [switch]$Yes
+    [switch]$Yes,
+    # Accept the Linux flag spelling too. Everything is documented with both
+    # forms, and people copy commands between the two platforms; without this,
+    # `.	inymrp.ps1 uninstall --delete-data --yes` dies inside PowerShell's
+    # parameter binder with "A parameter cannot be found that matches parameter
+    # name 'delete-data'", which says nothing about TinyMRP.
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$Rest
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Normalise the GNU-style flags into the switches the body already uses, so the
+# two platforms accept the same command lines.
+$extraArguments = @()
+foreach ($candidate in @($Argument, $Option) + @($Rest)) {
+    if ($candidate) { $extraArguments += $candidate.ToString().ToLowerInvariant() }
+}
+if ($extraArguments -contains '--include-deliverables') { $IncludeDeliverables = $true }
+if ($extraArguments -contains '--delete-data') { $DeleteData = $true }
+if ($extraArguments -contains '--yes') { $Yes = $true }
+# A positional argument that was really a flag must not be mistaken for a
+# backup directory or a version tag.
+if ($Argument -and $Argument.StartsWith('--')) { $Argument = '' }
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $EnvFile = Join-Path $ScriptDir '.env'
 $ComposeFile = Join-Path $ScriptDir 'compose.yaml'
@@ -250,12 +271,12 @@ switch ($Command) {
     'stop' { Assert-Runtime; Invoke-Compose --profile domain stop }
     'status' { Assert-Runtime; Invoke-Compose --profile domain ps }
     'logs' { Assert-Runtime; Invoke-Compose --profile domain logs --tail $(if ($Argument) { $Argument } else { '200' }) -f app mongo redis caddy }
-    'backup' { Backup-Stack ($IncludeDeliverables -or $Argument -eq '--include-deliverables') }
-    'restore' { Restore-Stack $Argument ($IncludeDeliverables -or $Option -eq '--include-deliverables') ($Yes -or $Option -eq '--yes') }
+    'backup' { Backup-Stack ([bool]$IncludeDeliverables) }
+    'restore' { Restore-Stack $Argument ([bool]$IncludeDeliverables) ([bool]$Yes) }
     'update' { Update-Stack $Argument }
     'uninstall' {
         Assert-Runtime
-        if ($DeleteData -or $Argument -eq '--delete-data') {
+        if ($DeleteData) {
             if (-not ($Yes -or $Option -eq '--yes')) { Stop-WithError 'Destructive use requires: .\tinymrp.ps1 uninstall -DeleteData -Yes' }
             Invoke-Compose --profile domain down -v --remove-orphans
             Write-Host 'Docker-managed Mongo/Caddy volumes deleted. Configuration, backups, and deliverables were preserved.'

@@ -77,6 +77,16 @@ services:
       FILES_PUBLIC_URLS: "false"
       FILES_ALLOW_LEGACY_TOKENS: "false"
       FILES_ACCEL_REDIRECT_PREFIX: ""
+      # The address browsers use, written by the installer from the access mode.
+      # Its scheme is what tells the app whether to mark session cookies Secure
+      # and whether to emit upgrade-insecure-requests. Both are correct over
+      # HTTPS and both make a plain-HTTP LAN install unusable, so this must
+      # reach the container - a LAN install that only sets it in .env silently
+      # gets the HTTPS posture and an unbreakable login loop.
+      TINYMRP_URL: ${TINYMRP_URL:-}
+      # localhost/lan publish this port directly (0 hops); domain mode puts
+      # Caddy in front (1 hop). The installer writes whichever applies.
+      TINYMRP_TRUSTED_PROXY_HOPS: ${TINYMRP_TRUSTED_PROXY_HOPS:-0}
       TINYMRP_ALLOWED_ORIGINS: ${TINYMRP_ALLOWED_ORIGINS:-http://localhost:5000}
       TINYMRP_CORS_CREDENTIALS: "true"
       TINYMRP_SEED_ADMIN: ${TINYMRP_SEED_ADMIN:-false}

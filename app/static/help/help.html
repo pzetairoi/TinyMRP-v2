@@ -1189,7 +1189,65 @@ approval barrier without widening the relationship scope.</p>
 </ul>
 </div></details></section><section class="help-chapter"><h1 id="installation">Installation</h1><div class="help-intro">
 <p>This page covers first deployment, safe updates, and operating basics for TinyMRP v2.</p>
-</div><details class="help-section" id="sec-deployment-options" open><summary><span class="help-section-title" id="deployment-options">Deployment Options</span></summary><div class="help-section-body">
+</div><details class="help-section" id="sec-full-deployment-guides" open><summary><span class="help-section-title" id="full-deployment-guides">Full deployment guides</span></summary><div class="help-section-body">
+<p>Step-by-step guides for every deployment option live in <code>docs/deployment/</code> in
+the repository, and can be read on GitHub before you have a server:</p>
+<table>
+<thead>
+<tr>
+<th>Guide</th>
+<th>Covers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docs/deployment/README.md</code></td>
+<td>Which path to choose, and the three settings TinyMRP actually needs</td>
+</tr>
+<tr>
+<td><code>docs/deployment/01-vm-docker.md</code></td>
+<td>A VM or server with Docker — the recommended single-instance path</td>
+</tr>
+<tr>
+<td><code>docs/deployment/02-linux-bare-metal.md</code></td>
+<td>systemd + gunicorn + nginx, no Docker</td>
+</tr>
+<tr>
+<td><code>docs/deployment/03-windows-lan.md</code></td>
+<td>Windows on an office LAN</td>
+</tr>
+<tr>
+<td><code>docs/deployment/04-vps-multi-instance.md</code></td>
+<td>The guided Caddy multi-instance VPS path below, in detail</td>
+</tr>
+<tr>
+<td><code>docs/deployment/05-configuration-reference.md</code></td>
+<td>Every environment variable</td>
+</tr>
+<tr>
+<td><code>docs/deployment/06-first-run.md</code></td>
+<td>Administrator, roles, and the evaluation dataset</td>
+</tr>
+<tr>
+<td><code>docs/deployment/07-troubleshooting.md</code></td>
+<td>Symptom-first fixes</td>
+</tr>
+<tr>
+<td><code>docs/deployment/08-networking-and-tls.md</code></td>
+<td>Addresses, firewalls, and adding HTTPS to a LAN</td>
+</tr>
+<tr>
+<td><code>docs/deployment/10-operations.md</code></td>
+<td>Backups, updates, uninstall</td>
+</tr>
+</tbody>
+</table>
+<p><strong>One setting decides whether a deployment works at all: <code>TINYMRP_URL</code>.</strong> It is
+the address users type, scheme included. Its scheme determines whether session
+cookies are marked <code>Secure</code> and whether the page asks browsers to upgrade
+assets to HTTPS. Declaring <code>https://</code> on a plain-HTTP LAN deployment makes every
+login bounce back to the login form.</p>
+</div></details><details class="help-section" id="sec-deployment-options"><summary><span class="help-section-title" id="deployment-options">Deployment Options</span></summary><div class="help-section-body">
 <h3 id="recommended-guided-ubuntu-deployment">Recommended: Guided Ubuntu deployment</h3>
 <p>Use the guided Linux deployment scripts for production and pilot environments. This path uses:</p>
 <ul>
@@ -1217,15 +1275,26 @@ sudo ./deploy/scripts/update-instance.sh company1
 sudo ./deploy/scripts/update-all-instances.sh
 sudo ./deploy/scripts/rollback-instance.sh company1
 </code></pre>
+<h3 id="single-vm-or-server-with-docker">Single VM or server with Docker</h3>
+<p>The simplest supported deployment, and the one to use for a container in a VM.
+It runs TinyMRP, MongoDB and Redis and nothing else — no Nextcloud, no
+multi-instance machinery.</p>
+<pre><code class="language-bash">./deploy/community/install.sh --build --with-demo-data
+</code></pre>
+<p>It asks for a deliverables folder, an access mode (<code>localhost</code>, <code>lan</code> or
+<code>domain</code>) with its address, and the first administrator; it generates every
+secret itself. Full guide: <code>docs/deployment/01-vm-docker.md</code>.</p>
 <h3 id="hardened-windows-lan-only-no-docker">Hardened Windows LAN-Only (No Docker)</h3>
 <p>Use this when IT requires a Windows workstation deployment with internal-only access.</p>
 <ul>
-<li>Guide: <code>deploy/windows/README.md</code></li>
+<li>Guide: <code>docs/deployment/03-windows-lan.md</code> (or the condensed
+<code>deploy/windows/README.md</code>)</li>
 <li>IT ticket template: <code>deploy/windows/IT_REQUEST_TEMPLATE.md</code></li>
 <li>Hardened env template: <code>deploy/windows/.env.windows.lan.example</code></li>
 </ul>
 <h3 id="advanced-local-developer-runtime">Advanced: Local developer runtime</h3>
-<p>Use direct Python and Node only for development and debugging.</p>
+<p>Use direct Python and Node only for development and debugging.
+Guide: <code>docs/deployment/09-local-development.md</code>.</p>
 </div></details><details class="help-section" id="sec-prerequisites"><summary><span class="help-section-title" id="prerequisites">Prerequisites</span></summary><div class="help-section-body">
 <ul>
 <li>Ubuntu host with internet access on ports <code>80</code> and <code>443</code>.</li>
@@ -1380,18 +1449,24 @@ sudo docker compose up -d --force-recreate
 <pre><code class="language-bash">sudo ./deploy/scripts/install-host.sh --local-mode http
 sudo ./deploy/scripts/create-instance.sh demo demo.test.local --local-mode http
 </code></pre>
-<p>Local domains such as <code>demo.test.local</code> and <code>demo.localhost</code> do not use public Let's Encrypt certificates.
-creating the instance. New HTTPS/internal-TLS guided instances default to strict.</p>
-</div></details><details class="help-section" id="sec-strict-authentication-on-guided-caddy-instances"><summary><span class="help-section-title" id="strict-authentication-on-guided-caddy-instances">Strict authentication on guided Caddy instances</span></summary><div class="help-section-body">
-<p>exact origin, and strong secrets for every new instance. Caddy remains the TLS
-endpoint and forwards the host and scheme used by the browser. Normal browser
-pages and APIs use the signed session; unsafe browser API requests must have a
-same-origin Origin/Referer. The SolidWorks add-in and other integrations use API
-bearer tokens. Public part shares remain limited to their opaque share URL, and
-<code>/api/health</code> stays anonymous for Caddy/Docker health checks.</p>
-<p>Updating an older instance does not rewrite its saved security mode. To migrate
-its instance <code>.env</code>, recreate the app, and test browser login/write, add-in token
-check, and a public share before considering the migration complete.</p>
+<p>Local domains such as <code>demo.test.local</code> and <code>demo.localhost</code> do not use public Let's Encrypt certificates.</p>
+<p><code>--local-mode http</code> serves the instance over plain HTTP and writes
+<code>TINYMRP_URL=http://&lt;domain&gt;</code> into the instance <code>.env</code>. That is what keeps the
+session cookie storable on a plain-HTTP origin and stops the page asking
+browsers to upgrade its assets to TLS. <code>--local-mode internal-tls</code> uses Caddy's
+internal CA instead and writes an <code>https://</code> URL; every client must then trust
+that CA.</p>
+</div></details><details class="help-section" id="sec-authentication-on-guided-caddy-instances"><summary><span class="help-section-title" id="authentication-on-guided-caddy-instances">Authentication on guided Caddy instances</span></summary><div class="help-section-body">
+<p>There is one security model. Every new instance gets an exact allowed origin
+and strong generated secrets. Caddy remains the TLS endpoint and forwards the
+host and scheme the browser used. Normal browser pages and APIs use the signed
+session; unsafe browser API requests must carry a same-origin Origin or
+Referer. The SolidWorks add-in and other integrations use API bearer tokens.
+Public part shares remain limited to their opaque share URL, and <code>/api/health</code>
+stays anonymous for Caddy and Docker health checks.</p>
+<p>The old compat mode and its second set of CORS, CSRF, cookie and upload rules
+were removed, along with <code>TINYMRP_SECURITY_MODE</code>. Nothing needs migrating: the
+strict path is now the only path.</p>
 </div></details><details class="help-section" id="sec-windows-lan-only-setup-no-docker"><summary><span class="help-section-title" id="windows-lan-only-setup-no-docker">Windows LAN-Only Setup (No Docker)</span></summary><div class="help-section-body">
 <p>Use this path for service-based Windows deployment with NGINX reverse proxy + Waitress.</p>
 <ol>
@@ -1814,6 +1889,16 @@ whole plan.</li>
 <tr>
 <td><code>TINYMRP_SEED_ADMIN</code></td>
 <td><code>false</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>TINYMRP_TRUSTED_PROXY_HOPS</code></td>
+<td><code>0</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>TINYMRP_URL</code></td>
+<td><code>http://localhost:5000</code></td>
 <td></td>
 </tr>
 <tr>

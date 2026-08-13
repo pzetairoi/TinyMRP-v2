@@ -9,7 +9,14 @@ param(
     [string]$AdminEmail,
     [Security.SecureString]$AdministratorPassword,
     [string]$ImageRepository,
-    [string]$Version
+    [string]$Version,
+    # Build the application image from this source checkout instead of pulling
+    # a published release image. Use it when you cloned the repository rather
+    # than downloading a versioned Community bundle.
+    [switch]$Build,
+    # Install the CV03 sample dataset and one demo login per role after the
+    # first start, and print those passwords once. Evaluation instances only.
+    [switch]$WithDemoData
 )
 
 $ErrorActionPreference = 'Stop'
@@ -79,10 +86,33 @@ Assert-SafeValue $plainAdminPassword
 
 if (-not $ImageRepository) { $ImageRepository = if ($env:TINYMRP_IMAGE_REPOSITORY) { $env:TINYMRP_IMAGE_REPOSITORY } else { Get-ReleaseValue 'TINYMRP_IMAGE_REPOSITORY' } }
 if (-not $Version) { $Version = if ($env:TINYMRP_VERSION) { $env:TINYMRP_VERSION } else { Get-ReleaseValue 'TINYMRP_VERSION' } }
-if (-not $ImageRepository -or -not $Version) { Stop-WithError 'This is not a versioned Community bundle. Pass -ImageRepository and -Version explicitly.' }
+if ($Build) {
+    # A clone has no release.env and no published image to pull, which used to
+    # stop the guided installer dead. Build the same Dockerfile the release
+    # pipeline builds, tagged uniquely so update still has a real before/after.
+    $RepoRoot = (Resolve-Path -LiteralPath (Join-Path $ScriptDir '..\..')).Path
+    $DockerfilePath = Join-Path $RepoRoot 'docker/app/Dockerfile'
+    if (-not (Test-Path -LiteralPath $DockerfilePath)) {
+        Stop-WithError "-Build needs a source checkout; $DockerfilePath is missing."
+    }
+    if (-not $ImageRepository) { $ImageRepository = 'tinymrp-local' }
+    if (-not $Version) {
+        $baseVersion = (Get-Content -LiteralPath (Join-Path $RepoRoot 'VERSION') -Raw).Trim()
+        if (-not $baseVersion) { Stop-WithError "Could not read $RepoRoot\VERSION." }
+        $buildId = ''
+        try { $buildId = (& git -C $RepoRoot rev-parse --short=7 HEAD 2>$null) } catch { $buildId = '' }
+        if (-not $buildId) { $buildId = (Get-Date).ToUniversalTime().ToString('yyyyMMddHHmmss') }
+        $Version = "$baseVersion-src.$($buildId.Trim())"
+    }
+}
+if (-not $ImageRepository -or -not $Version) { Stop-WithError 'This is not a versioned Community bundle. Re-run with -Build to build from source, or pass -ImageRepository and -Version explicitly.' }
 if ($Version -notmatch '^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { Stop-WithError 'Version must be a Docker-safe semantic version, never latest.' }
 
-$bindIp = '127.0.0.1'; $domain = ''; $acmeEmail = ''; $origin = "http://localhost:$Port"; $url = $origin
+# Nothing sits in front of the app in localhost/lan mode, so no X-Forwarded-*
+# header can be believed: a client that sends its own would get a private
+# rate-limit bucket and a forged address in the audit log. Domain mode puts
+# Caddy in front, which overwrites them.
+$bindIp = '127.0.0.1'; $domain = ''; $acmeEmail = ''; $origin = "http://localhost:$Port"; $url = $origin; $proxyHops = 0
 if ($AccessMode -eq 'lan') {
     if (-not $Address) {
         $detected = Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -ExpandProperty IPAddress -First 1
@@ -93,7 +123,7 @@ if ($AccessMode -eq 'lan') {
     if ((Test-Port 80) -or (Test-Port 443)) { Stop-WithError 'Domain mode requires free TCP ports 80 and 443.' }
     if (-not $Address) { $Address = Read-Default 'Public domain (DNS must point here)' 'tinymrp.example.com' }
     $domain = $Address; $acmeEmail = Read-Default 'ACME certificate email' $AdminEmail
-    $origin = "https://$domain"; $url = $origin
+    $origin = "https://$domain"; $url = $origin; $proxyHops = 1
 }
 
 New-Item -ItemType Directory -Force -Path $DeliverablesPath | Out-Null
@@ -107,7 +137,12 @@ Add-EnvValue $lines TINYMRP_VERSION $Version
 Add-EnvValue $lines ACCESS_MODE $AccessMode
 Add-EnvValue $lines APP_BIND_IP $bindIp
 Add-EnvValue $lines APP_PORT $Port.ToString()
+# TINYMRP_URL is not cosmetic: its scheme is what tells the application whether
+# to mark session cookies Secure and to emit upgrade-insecure-requests. Both are
+# right over HTTPS and both make a plain-HTTP LAN install impossible to log into,
+# so this value and the access mode must never disagree.
 Add-EnvValue $lines TINYMRP_URL $url
+Add-EnvValue $lines TINYMRP_TRUSTED_PROXY_HOPS $proxyHops.ToString()
 Add-EnvValue $lines TINYMRP_ALLOWED_ORIGINS $origin
 Add-EnvValue $lines DELIVERABLES_PATH $DeliverablesPath
 Add-EnvValue $lines MONGO_DB 'tinymrp'
@@ -133,6 +168,12 @@ Add-EnvValue $lines CADDY_BIND_IP '0.0.0.0'
 
 try {
     Invoke-DockerCommand compose --env-file $EnvFile -f $ComposeFile config --quiet | Out-Null
+    if ($Build) {
+        Write-Host "Building ${ImageRepository}:${Version} from $RepoRoot (several minutes on a first build)..."
+        Invoke-DockerCommand build -f $DockerfilePath -t "${ImageRepository}:${Version}" $RepoRoot
+        # The tag exists only on this host, so any pull attempt is certain to fail.
+        if (-not $env:TINYMRP_INSTALL_PULL) { $env:TINYMRP_INSTALL_PULL = 'never' }
+    }
     $pullMode = if ($env:TINYMRP_INSTALL_PULL) { $env:TINYMRP_INSTALL_PULL } else { 'always' }
     if ($pullMode -notin @('always', 'missing', 'never')) { Stop-WithError 'TINYMRP_INSTALL_PULL must be always, missing, or never.' }
     if ($AccessMode -eq 'domain') {
@@ -147,21 +188,55 @@ try {
     }
     [IO.File]::WriteAllLines($EnvFile, $lines, [Text.UTF8Encoding]::new($false))
     Invoke-DockerCommand compose --env-file $EnvFile -f $ComposeFile up -d --no-deps --force-recreate --wait app
+    if ($WithDemoData) {
+        Write-Host "`nInstalling the evaluation dataset..."
+        $demoOutput = Invoke-DockerCommand compose --env-file $EnvFile -f $ComposeFile exec -T app flask --app run.py demo install
+    }
 } catch {
     try { Invoke-DockerCommand compose --env-file $EnvFile -f $ComposeFile --profile domain logs --tail 100 app mongo redis caddy } catch { Write-Warning $_ }
     throw
 }
 
 if ($AccessMode -eq 'lan') {
-    $answer = Read-Host "Add a Windows Firewall rule for TCP $Port on Private networks only? (y/N)"
+    # Windows applies a firewall rule only on the profile(s) it is scoped to,
+    # and says nothing when none of them are active. A Private-scoped rule on a
+    # network Windows has classified Public is inert: the install looks
+    # finished and no other machine can connect. Surface it here, because
+    # nothing later in the process will.
+    $publicProfiles = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue |
+        Where-Object { $_.NetworkCategory -eq 'Public' })
+    $ruleProfiles = 'Private'
+    if ($publicProfiles) {
+        Write-Warning ("This network is classified Public on: " +
+            (($publicProfiles | ForEach-Object { $_.InterfaceAlias }) -join ', '))
+        Write-Host 'A Private-only firewall rule would have no effect there. Either reclassify'
+        Write-Host 'the network (recommended, and only if you trust it):'
+        Write-Host ('  Set-NetConnectionProfile -InterfaceAlias "' +
+            $publicProfiles[0].InterfaceAlias + '" -NetworkCategory Private')
+        Write-Host 'or let this installer scope the rule to Public as well.'
+        $widen = Read-Host 'Scope the rule to Public networks too? (y/N)'
+        if ($widen -match '^(y|yes)$') { $ruleProfiles = 'Private,Public' }
+    }
+    $answer = Read-Host "Add a Windows Firewall rule for TCP $Port on $ruleProfiles networks? (y/N)"
     if ($answer -match '^(y|yes)$') {
         try {
-            New-NetFirewallRule -DisplayName "TinyMRP Community ($Port)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile Private | Out-Null
-            Write-Host 'Private-network firewall rule added.'
+            New-NetFirewallRule -DisplayName "TinyMRP Community ($Port)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Profile $ruleProfiles | Out-Null
+            Write-Host "Firewall rule added for $ruleProfiles networks."
         } catch { Write-Warning "Firewall rule was not added (an elevated terminal may be required): $_" }
+    } else {
+        Write-Host 'No firewall rule added. Docker Desktop publishes ports through its own'
+        Write-Host 'rules, so this often still works; verify from another machine with:'
+        Write-Host "  Test-NetConnection <this-host> -Port $Port"
+        Write-Host 'and diagnose with deploy\windows\check_lan_access.ps1 if it fails.'
     }
 }
 
 Write-Host "`nTinyMRP Community is ready at $url"
 Write-Host "Administrator: $AdminEmail"
+if ($WithDemoData -and $demoOutput) {
+    Write-Host "`nEvaluation dataset installed. These demo passwords are shown ONCE:"
+    $demoOutput | ForEach-Object { Write-Host $_ }
+    Write-Host "`nRemove them before this instance holds real data:"
+    Write-Host "  docker compose --env-file `"$EnvFile`" -f `"$ComposeFile`" exec -T app flask --app run.py demo remove --disable"
+}
 Write-Host "Use .\tinymrp.ps1 status|logs|backup|update for operations."

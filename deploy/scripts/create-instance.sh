@@ -199,6 +199,14 @@ FILES_PUBLIC_URLS="false"
 FILES_ACCEL_REDIRECT_PREFIX=""
 FLASK_ENV="production"
 INSTANCE_URL="$(primary_url_for_domain "$DOMAIN" "$TLS_MODE")"
+# The same address the app must know about. Its scheme decides whether session
+# cookies are marked `Secure` and whether the CSP emits
+# upgrade-insecure-requests; both are correct behind Caddy's HTTPS and both
+# make a --local-mode http VM impossible to log into, so this has to follow
+# TLS_MODE rather than being assumed.
+TINYMRP_URL="$INSTANCE_URL"
+# Caddy terminates in front of every instance and overwrites X-Forwarded-*.
+TINYMRP_TRUSTED_PROXY_HOPS="1"
 TINYMRP_ALLOWED_ORIGINS="$INSTANCE_URL"
 TINYMRP_CORS_CREDENTIALS="true"
 TINYMRP_SEED_ADMIN="true"
@@ -252,6 +260,8 @@ upsert_env_value "$INSTANCE_ENV" "MONGO_APP_USER" "$MONGO_APP_USER"
 upsert_env_value "$INSTANCE_ENV" "MONGO_APP_PASSWORD" "$MONGO_APP_PASSWORD"
 upsert_env_value "$INSTANCE_ENV" "MONGO_ROOT_PASSWORD" "$MONGO_ROOT_PASSWORD"
 upsert_env_value "$INSTANCE_ENV" "RATE_LIMIT_STORAGE_URI" "$RATE_LIMIT_STORAGE_URI"
+upsert_env_value "$INSTANCE_ENV" "TINYMRP_URL" "$TINYMRP_URL"
+upsert_env_value "$INSTANCE_ENV" "TINYMRP_TRUSTED_PROXY_HOPS" "$TINYMRP_TRUSTED_PROXY_HOPS"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_ALLOWED_ORIGINS" "$TINYMRP_ALLOWED_ORIGINS"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_CORS_CREDENTIALS" "$TINYMRP_CORS_CREDENTIALS"
 upsert_env_value "$INSTANCE_ENV" "TINYMRP_SEED_ADMIN" "$TINYMRP_SEED_ADMIN"

@@ -16,7 +16,10 @@
 #   --self-signed              Generate a self-signed cert (labs / behind VPN)
 #   --cert <fullchain> --key <privkey>   Use existing certificates (internal CA)
 #   --http-only                No TLS (LAN pilots only; NOT for production)
-#   --compat                   Use compat security mode instead of strict
+#   --url <url>                Address users type, e.g. http://192.168.1.50.
+#                              Derived from --domain and the TLS mode when
+#                              omitted. Required for --http-only without
+#                              --domain. Must include http:// or https://.
 #   --with-fail2ban            Install fail2ban with the TinyMRP login jail
 #   --skip-ufw                 Do not configure the firewall
 #   --admin-email <email>      Seed admin email (first boot, empty DB only)
@@ -35,7 +38,7 @@ MONGO_URI=""
 TLS_MODE=""            # certbot | self-signed | provided | http-only
 CERT_FULLCHAIN=""
 CERT_KEY=""
-SECURITY_MODE=strict
+PUBLIC_URL=""
 WITH_FAIL2BAN=0
 SKIP_UFW=0
 ADMIN_EMAIL=""
@@ -55,7 +58,10 @@ while [ $# -gt 0 ]; do
     --cert) CERT_FULLCHAIN="${2:?}"; TLS_MODE=provided; shift 2 ;;
     --key) CERT_KEY="${2:?}"; shift 2 ;;
     --http-only) TLS_MODE=http-only; shift ;;
-    --compat) SECURITY_MODE=compat; shift ;;
+    --url) PUBLIC_URL="${2:?}"; shift 2 ;;
+    --compat)
+      die "--compat was removed with compat security mode. There is one security model; see docs/deployment/05-configuration-reference.md."
+      ;;
     --with-fail2ban) WITH_FAIL2BAN=1; shift ;;
     --skip-ufw) SKIP_UFW=1; shift ;;
     --admin-email) ADMIN_EMAIL="${2:?}"; shift 2 ;;
@@ -73,6 +79,40 @@ if [ "$TLS_MODE" != "http-only" ] && [ -z "$DOMAIN" ]; then
 fi
 if [ "$TLS_MODE" = "provided" ] && { [ -z "$CERT_FULLCHAIN" ] || [ -z "$CERT_KEY" ]; }; then
   die "--cert and --key are both required."
+fi
+
+# The address users type. Its SCHEME is what tells the application whether to
+# mark session cookies `Secure` and to emit upgrade-insecure-requests. Get it
+# wrong on an http-only host and login silently loops for ever: the browser
+# refuses to store a Secure cookie on a plain-HTTP origin, so the CSRF token
+# minted with the login form is gone by the time the form is posted.
+if [ -z "$PUBLIC_URL" ]; then
+  if [ "$TLS_MODE" = "http-only" ]; then
+    if [ -n "$DOMAIN" ]; then
+      PUBLIC_URL="http://${DOMAIN}"
+    else
+      DETECTED_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+      [ -n "$DETECTED_IP" ] || \
+        die "Could not detect this host's LAN address. Pass --url http://<ip-or-name>."
+      PUBLIC_URL="http://${DETECTED_IP}"
+      warn "No --url or --domain given; using detected address ${PUBLIC_URL}."
+    fi
+  else
+    PUBLIC_URL="https://${DOMAIN}"
+  fi
+fi
+case "$PUBLIC_URL" in
+  http://*|https://*) ;;
+  *) die "--url must start with http:// or https:// (got: ${PUBLIC_URL})." ;;
+esac
+if [ "$TLS_MODE" = "http-only" ]; then
+  case "$PUBLIC_URL" in
+    https://*) die "--http-only cannot be combined with an https:// --url." ;;
+  esac
+else
+  case "$PUBLIC_URL" in
+    http://*) die "A TLS mode was selected but --url is http://. Users would get cookies the browser discards." ;;
+  esac
 fi
 
 # ---------------------------------------------------------------- packages ---
@@ -123,11 +163,16 @@ chown -R tinymrp:tinymrp "$VENV_DIR"
 # ------------------------------------------------------------- environment ---
 mkdir -p "$ENV_DIR"
 if [ ! -f "$ENV_FILE" ]; then
-  log "Generating ${ENV_FILE} (security mode: ${SECURITY_MODE})"
+  log "Generating ${ENV_FILE} for ${PUBLIC_URL}"
   SECRET_KEY="$(openssl rand -base64 48 | tr -d '\n=+/')"
   PASSWORD_SALT="$(openssl rand -base64 48 | tr -d '\n=+/')"
   cat > "$ENV_FILE" <<ENVEOF
 # TinyMRP server environment — generated $(date -u +%Y-%m-%dT%H:%MZ) by install-server.sh
+# The address users type. Its scheme drives the session-cookie Secure flag and
+# the CSP; change it here (and in the nginx server_name) if the address moves.
+TINYMRP_URL=${PUBLIC_URL}
+# nginx is the single reverse proxy in front of gunicorn.
+TINYMRP_TRUSTED_PROXY_HOPS=1
 MONGO_URI=${MONGO_URI}
 FILES_LOCAL_ROOT=${DELIVERABLES_DIR}
 FILES_URL_PREFIX=/Deliverables
@@ -288,7 +333,13 @@ if [ -n "$ADMIN_EMAIL" ]; then
 fi
 
 log "Done. Summary:"
+log "  Open:         ${PUBLIC_URL}"
 log "  App:          systemctl status ${SERVICE_NAME}"
 log "  Logs:         journalctl -u ${SERVICE_NAME} -f"
-log "  Env:          ${ENV_FILE} (mode: ${SECURITY_MODE})"
+log "  Env:          ${ENV_FILE}"
+log "  Guide:        docs/deployment/02-linux-bare-metal.md"
 log "  Update flow:  see docs/UPDATING_PRODUCTION.md (Standalone nginx servers)"
+if [ "$TLS_MODE" = "http-only" ]; then
+  warn "No TLS: logins and session cookies cross this network in clear text."
+  warn "Keep this host off the public internet."
+fi

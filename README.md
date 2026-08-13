@@ -390,10 +390,43 @@ iscc solidworks-addin\installer.iss
 
 ---
 
+## Deployment
+
+Step-by-step guides for every deployment option are in
+[`docs/deployment/`](docs/deployment/README.md), written to be read on GitHub
+before you have a server:
+
+| Guide | Covers |
+| --- | --- |
+| [Choosing a path](docs/deployment/README.md) | The three settings TinyMRP actually needs |
+| [01 — VM / server with Docker](docs/deployment/01-vm-docker.md) | Recommended single instance, Linux or Windows Docker Desktop |
+| [02 — Linux bare metal](docs/deployment/02-linux-bare-metal.md) | systemd + gunicorn + nginx, no Docker |
+| [03 — Windows LAN](docs/deployment/03-windows-lan.md) | Office network, no internet exposure |
+| [04 — VPS, multiple instances](docs/deployment/04-vps-multi-instance.md) | Guided Caddy multi-tenant with automatic HTTPS |
+| [05 — Configuration reference](docs/deployment/05-configuration-reference.md) | Every environment variable |
+| [06 — First run](docs/deployment/06-first-run.md) | Administrator, roles, evaluation dataset |
+| [07 — Troubleshooting](docs/deployment/07-troubleshooting.md) | Symptom-first fixes |
+| [08 — Networking and TLS](docs/deployment/08-networking-and-tls.md) | Addresses, firewalls, HTTPS on a LAN |
+| [09 — Local development](docs/deployment/09-local-development.md) | Running from a checkout |
+| [10 — Operations](docs/deployment/10-operations.md) | Backups, updates, uninstall |
+| [11 — FAQ](docs/deployment/11-faq.md) | Common questions, including "other machines cannot reach it" |
+
+Only three things need configuring: the deliverables folder, the address users
+type (`TINYMRP_URL`, **scheme included**), and optionally the port. Secrets,
+database credentials and the reverse-proxy configuration are generated for you.
+
+Nextcloud is optional and is only available on the VPS path. Every other
+deployment ignores it entirely.
+
 ## TinyMRP Community (standalone Docker)
 
-For a single workstation or small server, download the versioned Community
-bundle from the matching GitHub release:
+For a single workstation, VM or small server. From a clone of this repository:
+
+```bash
+./deploy/community/install.sh --build --with-demo-data
+```
+
+Or download the versioned Community bundle from the matching GitHub release:
 
 - Linux: `tinymrp-community-vX.Y.Z.tar.gz`, then run `./install.sh`.
 - Windows Docker Desktop: `tinymrp-community-vX.Y.Z.zip`, then run

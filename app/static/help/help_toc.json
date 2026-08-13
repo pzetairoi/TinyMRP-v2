@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-09 14:59 UTC",
-  "commit": "f7ec7a1",
+  "generated_at": "2026-08-13 23:11 UTC",
+  "commit": "c8375c6",
   "items": [
     {
       "id": "getting-started",
@@ -261,6 +261,10 @@
       "title": "Installation",
       "sections": [
         {
+          "id": "full-deployment-guides",
+          "title": "Full deployment guides"
+        },
+        {
           "id": "deployment-options",
           "title": "Deployment Options"
         },
@@ -297,8 +301,8 @@
           "title": "Local VM Mode"
         },
         {
-          "id": "strict-authentication-on-guided-caddy-instances",
-          "title": "Strict authentication on guided Caddy instances"
+          "id": "authentication-on-guided-caddy-instances",
+          "title": "Authentication on guided Caddy instances"
         },
         {
           "id": "windows-lan-only-setup-no-docker",

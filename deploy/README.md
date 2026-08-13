@@ -1,6 +1,21 @@
-# Guided Ubuntu Deployment
+# Guided Ubuntu Deployment (multi-instance)
 
-This is the recommended Linux deployment path for TinyMRP production hosts.
+This is the recommended Linux path for a host serving **several** TinyMRP
+instances behind one reverse proxy with automatic HTTPS.
+
+> **Running only one instance?** Use
+> [`docs/deployment/01-vm-docker.md`](../docs/deployment/01-vm-docker.md)
+> instead — a single self-contained Compose stack with a guided installer, no
+> multi-tenant machinery and no Nextcloud.
+>
+> **Orientation for this path:**
+> [`docs/deployment/04-vps-multi-instance.md`](../docs/deployment/04-vps-multi-instance.md).
+> This page is the operational reference behind it.
+
+> **Nextcloud is optional.** Nothing on this path requires it. It is installed
+> only by the scripts with `nextcloud` in their name; skip them and TinyMRP
+> works exactly as described, with the deliverables folder as an ordinary
+> directory on the host.
 
 Default behavior:
 
@@ -11,8 +26,14 @@ Default behavior:
 - MongoDB stays private and is never published on the host.
 - Each TinyMRP instance gets its own private Docker network and database.
 - All public traffic enters through the shared `tinymrp_proxy` Docker network.
-  same-origin session with CSRF origin checks, while integrations use bearer
-  tokens. Existing instance updates preserve the mode already stored in `.env`.
+- Browsers use a same-origin session with CSRF origin checks; integrations use
+  API bearer tokens. There is one security model — the old compat mode and
+  `TINYMRP_SECURITY_MODE` were removed.
+- Each instance records the address users type in `TINYMRP_URL`. Its scheme
+  decides whether session cookies are marked `Secure` and whether the CSP emits
+  `upgrade-insecure-requests`, which is what makes `--local-mode http`
+  instances usable. See
+  [`docs/deployment/08-networking-and-tls.md`](../docs/deployment/08-networking-and-tls.md).
 
 The scripts live in `deploy/scripts/`:
 

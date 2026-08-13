@@ -488,6 +488,109 @@ def _link(parent_pn, child_pn, qty=1.0, uom="EA", alt_group="", phantom=False, s
     ).save()
 
 @click.group()
+def demo():
+    """Evaluation dataset: sample files, demo users, and role coverage."""
+
+
+@demo.command("install")
+@click.option(
+    "--deliverables",
+    "deliverables",
+    default=None,
+    help="Where to copy the managed sample files. Defaults to FILES_LOCAL_ROOT.",
+)
+@click.option("--domain", default="demo.com", show_default=True, help="Email domain for demo users.")
+@click.option(
+    "--overwrite-files",
+    is_flag=True,
+    help="Replace sample files that already exist in the deliverables root.",
+)
+@with_appcontext
+def demo_install(deliverables, domain, overwrite_files):
+    """Make a fresh install testable in one command.
+
+    Copies the CV03 sample deliverables, enables the permission-test
+    environment, and seeds one demo user per role scenario together with the
+    matching parts, BOM, customers, suppliers, jobs and orders.
+
+    The demo passwords are generated here and printed ONCE. They are stored
+    only as hashes, so a lost password means re-running this command.
+
+    Evaluation and disposable instances only: it creates real logins.
+    """
+    import json
+
+    from app.services.app_settings import set_permission_test_data_enabled
+    from app.services.rls_demo import seed_permission_test_environment
+    from app.services.sample_dataset import install_sample_deliverables
+
+    destination = str(
+        deliverables
+        or current_app.config.get("FILES_LOCAL_ROOT")
+        or current_app.config.get("FILE_ROOT_LOCAL")
+        or ""
+    ).strip()
+    if not destination:
+        raise click.ClickException(
+            "No deliverables root. Pass --deliverables or set FILES_LOCAL_ROOT."
+        )
+
+    files = install_sample_deliverables(destination, overwrite=bool(overwrite_files))
+    # Persist the toggle so the admin UI shows the demo controls too; the
+    # environment variable alone leaves the dashboard out of step with the data
+    # this command just created.
+    set_permission_test_data_enabled(True)
+    seeded = seed_permission_test_environment(domain=domain)
+
+    click.echo(
+        json.dumps(
+            {
+                "deliverables_root": destination,
+                "files": files,
+                "domain": seeded["domain"],
+                "counts": seeded["counts"],
+                "users": [
+                    {
+                        "email": row["email"],
+                        "password": row["password"],
+                        "roles": row["roles"],
+                    }
+                    for row in seeded["users"]
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    click.echo(
+        "\nThese passwords are shown once. Delete these accounts before the "
+        "instance carries real data: flask demo remove",
+        err=True,
+    )
+
+
+@demo.command("remove")
+@click.option("--domain", default="demo.com", show_default=True, help="Email domain for demo users.")
+@click.option("--disable", is_flag=True, help="Also hide the demo controls in the admin UI.")
+@with_appcontext
+def demo_remove(domain, disable):
+    """Delete the demo users and records seeded by `demo install`.
+
+    Sample files copied into the deliverables root are left alone: they may
+    have been imported, annotated or linked by then.
+    """
+    import json
+
+    from app.services.app_settings import set_permission_test_data_enabled
+    from app.services.rls_demo import reset_permission_test_environment
+
+    removed = reset_permission_test_environment(domain=domain)
+    if disable:
+        set_permission_test_data_enabled(False)
+    click.echo(json.dumps({"removed": dict(removed), "disabled": bool(disable)}, indent=2, sort_keys=True))
+
+
+@click.group()
 def data():
     """Data generation commands (demo parts & BOM)"""
 
@@ -879,6 +982,7 @@ def init_app(app):
     app.cli.add_command(user)
     app.cli.add_command(role)
     app.cli.add_command(share)
+    app.cli.add_command(demo)
     app.cli.add_command(data)
     app.cli.add_command(attrs)
     app.cli.add_command(annotations)

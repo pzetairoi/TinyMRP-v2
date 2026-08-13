@@ -3,11 +3,50 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ENV_FILE="$SCRIPT_DIR/.env"
+# Present only when this script runs from a git checkout rather than from an
+# extracted release bundle. --build needs it; nothing else does.
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." 2>/dev/null && pwd -P || true)"
+
+usage() {
+  cat <<'EOF'
+Usage: ./install.sh [--build] [--with-demo-data] [--help]
+
+Installs one TinyMRP instance (app + MongoDB + Redis) with Docker Compose.
+It asks for a deliverables folder, an access mode and address, and the first
+administrator, then generates every secret itself.
+
+Options:
+  --build           Build the application image from this source checkout
+                    instead of pulling a published release image. Use this
+                    when you cloned the repository rather than downloading a
+                    versioned Community bundle.
+  --with-demo-data  After the first start, install the CV03 sample dataset and
+                    one demo login per role, and print those passwords once.
+                    Evaluation instances only.
+
+Non-interactive use sets TINYMRP_NON_INTERACTIVE=1 plus
+TINYMRP_DELIVERABLES_PATH, TINYMRP_ADMIN_EMAIL, TINYMRP_ADMIN_PASSWORD, and
+for lan/domain modes TINYMRP_LAN_HOST or TINYMRP_DOMAIN + ACME_EMAIL.
+See docs/deployment/01-vm-docker.md for the full walkthrough.
+EOF
+}
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
 }
+
+BUILD_FROM_SOURCE="${TINYMRP_BUILD_FROM_SOURCE:-0}"
+INSTALL_DEMO_DATA="${TINYMRP_INSTALL_DEMO_DATA:-0}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build) BUILD_FROM_SOURCE=1 ;;
+    --with-demo-data) INSTALL_DEMO_DATA=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; die "Unknown argument: $1" ;;
+  esac
+  shift
+done
 
 prompt() {
   local label="$1" default="$2" value
@@ -70,8 +109,25 @@ release_value() {
 }
 image_repository="${TINYMRP_IMAGE_REPOSITORY:-$(release_value TINYMRP_IMAGE_REPOSITORY)}"
 version="${TINYMRP_VERSION:-$(release_value TINYMRP_VERSION)}"
+
+if [[ "$BUILD_FROM_SOURCE" == "1" ]]; then
+  # A clone has no release.env and no published image to pull, which used to
+  # stop the guided installer dead. Build the same Dockerfile the release
+  # pipeline builds, and tag it uniquely so `tinymrp.sh update` still has a
+  # meaningful before/after image reference.
+  [[ -f "$REPO_ROOT/docker/app/Dockerfile" ]] || \
+    die "--build needs a source checkout; ${REPO_ROOT}/docker/app/Dockerfile is missing."
+  image_repository="${TINYMRP_IMAGE_REPOSITORY:-tinymrp-local}"
+  if [[ -z "${TINYMRP_VERSION:-}" ]]; then
+    base_version="$(tr -d ' \t\r\n' <"$REPO_ROOT/VERSION" 2>/dev/null || true)"
+    [[ -n "$base_version" ]] || die "Could not read ${REPO_ROOT}/VERSION."
+    build_id="$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD 2>/dev/null || date -u +%Y%m%d%H%M%S)"
+    version="${base_version}-src.${build_id}"
+  fi
+fi
+
 [[ -n "$image_repository" && -n "$version" ]] || \
-  die "This is not a versioned Community bundle. Set TINYMRP_IMAGE_REPOSITORY and TINYMRP_VERSION explicitly."
+  die "This is not a versioned Community bundle. Re-run with --build to build from source, or set TINYMRP_IMAGE_REPOSITORY and TINYMRP_VERSION explicitly."
 [[ "$version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || die "TINYMRP_VERSION must be a Docker-safe semantic version."
 
 bind_ip=127.0.0.1
@@ -79,6 +135,11 @@ origin="http://localhost:$port"
 domain=""
 acme_email=""
 url="$origin"
+# Nothing sits in front of the app in localhost/lan mode, so no X-Forwarded-*
+# header can be believed: a client that sends its own would get a private
+# rate-limit bucket and a forged address in the audit log. Domain mode puts
+# Caddy in front, which overwrites them.
+proxy_hops=0
 if [[ "$mode" == "lan" ]]; then
   bind_ip=0.0.0.0
   if [[ "${TINYMRP_NON_INTERACTIVE:-0}" == "1" ]]; then
@@ -101,6 +162,7 @@ elif [[ "$mode" == "domain" ]]; then
   fi
   origin="https://$domain"
   url="$origin"
+  proxy_hops=1
 fi
 
 mkdir -p "$deliverables" "$SCRIPT_DIR/backups"
@@ -121,7 +183,12 @@ write_env_value TINYMRP_VERSION "$version"
 write_env_value ACCESS_MODE "$mode"
 write_env_value APP_BIND_IP "$bind_ip"
 write_env_value APP_PORT "$port"
+# TINYMRP_URL is not cosmetic: its scheme is what tells the application whether
+# to mark session cookies `Secure` and to emit upgrade-insecure-requests. Both
+# are right over HTTPS and both make a plain-HTTP LAN install impossible to log
+# into, so this value and the access mode must never disagree.
 write_env_value TINYMRP_URL "$url"
+write_env_value TINYMRP_TRUSTED_PROXY_HOPS "$proxy_hops"
 write_env_value TINYMRP_ALLOWED_ORIGINS "$origin"
 write_env_value DELIVERABLES_PATH "$deliverables"
 write_env_value MONGO_DB tinymrp
@@ -156,6 +223,15 @@ cleanup_on_error() {
 trap cleanup_on_error EXIT
 
 docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/compose.yaml" config --quiet
+
+if [[ "$BUILD_FROM_SOURCE" == "1" ]]; then
+  printf 'Building %s:%s from %s (this takes several minutes the first time)...\n' \
+    "$image_repository" "$version" "$REPO_ROOT"
+  docker build -f "$REPO_ROOT/docker/app/Dockerfile" -t "${image_repository}:${version}" "$REPO_ROOT"
+  # The tag exists only on this host, so any pull attempt is a guaranteed failure.
+  : "${TINYMRP_INSTALL_PULL:=never}"
+fi
+
 pull_mode="${TINYMRP_INSTALL_PULL:-always}"
 case "$pull_mode" in always|missing|never) ;; *) die "TINYMRP_INSTALL_PULL must be always, missing, or never." ;; esac
 if [[ "$mode" == "domain" ]]; then
@@ -170,7 +246,21 @@ fi
 sed -i 's/^TINYMRP_SEED_ADMIN=.*/TINYMRP_SEED_ADMIN="false"/; s/^TINYMRP_ADMIN_PASSWORD=.*/TINYMRP_ADMIN_PASSWORD=""/' "$ENV_FILE"
 docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/compose.yaml" up -d --no-deps --force-recreate --wait app
 
+demo_output=""
+if [[ "$INSTALL_DEMO_DATA" == "1" ]]; then
+  printf '\nInstalling the evaluation dataset...\n'
+  demo_output="$(docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/compose.yaml" \
+    exec -T app flask --app run.py demo install)"
+fi
+
 trap - EXIT
 printf '\nTinyMRP Community is ready at %s\n' "$url"
 printf 'Administrator: %s\n' "$admin_email"
-printf 'Use %s/tinymrp.sh status|logs|backup|update for operations.\n' "$SCRIPT_DIR"
+if [[ -n "$demo_output" ]]; then
+  printf '\nEvaluation dataset installed. These demo passwords are shown ONCE:\n'
+  printf '%s\n' "$demo_output"
+  printf '\nRemove them before this instance holds real data:\n'
+  printf '  docker compose --env-file %s -f %s exec -T app flask --app run.py demo remove --disable\n' \
+    "$ENV_FILE" "$SCRIPT_DIR/compose.yaml"
+fi
+printf '\nUse %s/tinymrp.sh status|logs|backup|update for operations.\n' "$SCRIPT_DIR"
