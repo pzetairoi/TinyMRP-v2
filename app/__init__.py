@@ -67,8 +67,8 @@ def create_app(config_object=None):
     import logging as _logging
     logger = _logging.getLogger("tinymrp.startup")
 
-    from werkzeug.middleware.proxy_fix import ProxyFix
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    # ProxyFix is applied after the env file is loaded, further down, because
+    # how many proxy hops to believe is configuration like anything else.
 
     # Application version (surfaced via /api/health). Env/config overrides win.
     if not (app.config.get("APP_VERSION") or os.getenv("APP_VERSION")):
@@ -105,8 +105,25 @@ def create_app(config_object=None):
     # There is one security model. The old compat mode is gone: it selected a
     # second set of CORS, CSRF, cookie and upload rules, and every branch that
     # read it now takes the strict path unconditionally.
-    
-        
+
+    # Trust X-Forwarded-* only as far as the topology justifies. Defaults to one
+    # hop, which is what every guided deployment has (Caddy or Nginx in front).
+    # Deployments that publish the application port directly should set
+    # TINYMRP_TRUSTED_PROXY_HOPS=0: with a forged X-Forwarded-For, an IP-keyed
+    # rate limit counts each request against a different bucket.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    from app.services.transport_posture import (
+        resolve_transport_posture,
+        resolve_trusted_proxy_hops,
+    )
+
+    proxy_hops = resolve_trusted_proxy_hops(os.environ)
+    app.config["TINYMRP_TRUSTED_PROXY_HOPS"] = proxy_hops
+    if proxy_hops:
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app, x_for=proxy_hops, x_proto=proxy_hops, x_host=proxy_hops
+        )
+
     from app.services.processmeta import load_process_meta
     app.config["PROCESS_META"] = load_process_meta()
 
@@ -229,13 +246,37 @@ def create_app(config_object=None):
         "EXTRA_FILES_ALLOWED",
         str(os.getenv("EXTRA_FILES_ALLOWED") or "true").strip().lower() in ("1", "true", "yes", "on"),
     )
-    app.config["SESSION_COOKIE_SECURE"] = True
-    app.config["REMEMBER_COOKIE_SECURE"] = True
+    # Cookie transport follows the address users actually browse to, declared
+    # once as TINYMRP_URL. A `Secure` cookie is discarded by the browser on a
+    # plain-HTTP origin, so hardcoding it True made every LAN deployment an
+    # unbreakable login loop while localhost carried on working (loopback is a
+    # potentially trustworthy origin and keeps Secure cookies anyway).
+    # See app/services/transport_posture.py.
+    posture = resolve_transport_posture(os.environ)
+    app.config["TINYMRP_URL"] = posture.public_url
+    app.config["TINYMRP_PUBLIC_ORIGIN"] = posture.origin
+    app.config["TINYMRP_BROWSER_TLS"] = posture.browser_tls
+    app.config["SESSION_COOKIE_SECURE"] = posture.browser_tls
+    app.config["REMEMBER_COOKIE_SECURE"] = posture.browser_tls
+    # SameSite stays Strict either way: it costs nothing over plain HTTP and is
+    # the defence that does not depend on the transport.
     app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
     app.config["REMEMBER_COOKIE_SAMESITE"] = "Strict"
+    logger.info(
+        "Browser transport: %s (%s)",
+        "HTTPS" if posture.browser_tls else "plain HTTP",
+        posture.detail,
+    )
+    if posture.warning:
+        logger.warning("SECURITY: %s", posture.warning)
 
-    # CORS allowlist (comma-separated, optional)
-    app.config.setdefault("TINYMRP_ALLOWED_ORIGINS", os.getenv("TINYMRP_ALLOWED_ORIGINS") or "")
+    # CORS allowlist (comma-separated, optional). Defaults to this instance's
+    # own origin so a minimal configuration does not have to repeat the address
+    # it already declared.
+    app.config.setdefault(
+        "TINYMRP_ALLOWED_ORIGINS",
+        (os.getenv("TINYMRP_ALLOWED_ORIGINS") or "").strip() or posture.origin,
+    )
 
     # Upload caps (Flask rejects larger requests before reading)
     max_content_mb = os.getenv("TINYMRP_MAX_CONTENT_MB")
@@ -530,7 +571,10 @@ def create_app(config_object=None):
     csrf.init_app(app)
 
     if bool(app.config.get("FORCE_HTTPS")):
+        # Redirecting every request to https means browsers reach this instance
+        # over TLS by definition, whatever the declared address said.
         app.config["PREFERRED_URL_SCHEME"] = "https"
+        app.config["TINYMRP_BROWSER_TLS"] = True
         app.config["SESSION_COOKIE_SECURE"] = True
         app.config["REMEMBER_COOKIE_SECURE"] = True
 
@@ -641,7 +685,14 @@ def create_app(config_object=None):
                     "font-src 'self' data: https://cdn.jsdelivr.net;",
                     f"connect-src {' '.join(connect_src)};",
                 ])
-                csp = " ".join([csp, "form-action 'self';", "upgrade-insecure-requests;"])
+                csp_tail = ["form-action 'self';"]
+                # upgrade-insecure-requests rewrites every subresource URL to
+                # https://. On a plain-HTTP origin that asks for TLS on a port
+                # that speaks HTTP, so scripts, styles and images all fail and
+                # the page renders unusable. Only emit it where TLS exists.
+                if bool(app.config.get("TINYMRP_BROWSER_TLS")):
+                    csp_tail.append("upgrade-insecure-requests;")
+                csp = " ".join([csp, *csp_tail])
                 resp.headers.setdefault("Content-Security-Policy", csp)
 
                 # Optional report-only probe for the 'unsafe-inline' burn-down.
