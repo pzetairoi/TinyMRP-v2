@@ -71,6 +71,60 @@ def test_sample_bom_metadata_seed_is_complete_idempotent_and_released(app):
         )
 
 
+def test_sample_files_resolve_inside_the_configured_deliverables_root(app, tmp_path):
+    """The dataset must be openable, not merely listed.
+
+    The records used to name the fixture copy inside the application package.
+    That path is outside every configured storage root, so resolve_managed_path
+    refused it and all 373 sample files answered 403 - the parts and BOM looked
+    right and not one drawing would open. The tree is copied into the
+    deliverables root precisely so the records can address it there.
+    """
+    from app.models.artifact import PartFile
+    from app.services.file_security import FileSecurityError, resolve_managed_path
+
+    install_sample_deliverables(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+
+    with app.app_context():
+        ensure_sample_engineering_records()
+
+        rows = list(PartFile.objects(source="sample-fixture"))
+        assert rows, "the fixture registered no files"
+        for row in rows:
+            assert Path(row.path).is_absolute()
+            assert Path(row.path).is_file(), f"{row.rel_path} was not copied into the root"
+            try:
+                resolved = resolve_managed_path(row, must_exist=True)
+            except FileSecurityError as exc:  # pragma: no cover - the regression
+                raise AssertionError(f"{row.rel_path} does not resolve: {exc}") from exc
+            assert str(resolved).startswith(str(tmp_path))
+
+
+def test_reseeding_repairs_sample_paths_written_before_the_fix(app, tmp_path):
+    """Existing evaluation instances must heal by re-running the seed."""
+    from app.models.artifact import PartFile
+    from app.services.file_security import resolve_managed_path
+
+    install_sample_deliverables(tmp_path)
+    app.config["FILES_LOCAL_ROOT"] = str(tmp_path)
+    app.config["FILE_ROOT_LOCAL"] = str(tmp_path)
+
+    with app.app_context():
+        ensure_sample_engineering_records()
+        # Recreate the broken state: an absolute path outside the root.
+        broken = PartFile.objects(source="sample-fixture").first()
+        broken.path = "/app/sample_data/cv03_tr_a01_rev_a/managed/" + broken.rel_path
+        broken.save()
+
+        report = ensure_sample_engineering_records()
+
+        assert report["part_files_repaired"] >= 1
+        repaired = PartFile.objects(id=broken.id).get()
+        assert str(resolve_managed_path(repaired, must_exist=True)).startswith(str(tmp_path))
+
+
 def test_sample_fixture_builds_a_real_root_and_child_docpack(app):
     with app.test_request_context("/"):
         ensure_sample_engineering_records()

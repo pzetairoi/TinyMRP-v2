@@ -139,6 +139,17 @@ def view(token: str):
 
 @bp.get("/auth")
 def auth():
+    """Authorisation subrequest for a reverse proxy serving deliverables.
+
+    nginx's auth_request understands exactly three answers: 2xx allows the
+    request, 401 and 403 deny it, and ANY other status is "auth request
+    unexpected status" - which nginx turns into a 500 for the end user. So
+    every refusal here must be 401 or 403, never 400 or 404, however tempting
+    a more precise code looks.
+
+    403 covers both "no such file" and "not allowed to read it", which is also
+    the non-disclosing answer: the two cases must not be distinguishable.
+    """
     if not getattr(current_user, "is_authenticated", False):
         return ("", 401)
     uri = (
@@ -148,7 +159,7 @@ def auth():
         or ""
     )
     if not uri:
-        return ("", 400)
+        return ("", 403)
     path = uri.split("?", 1)[0]
     path = unquote(path)
     prefixes = []
@@ -177,7 +188,9 @@ def auth():
             if managed_file_read_allowed(current_user, pf)
         ]
         if len(matches) != 1:
-            return ("", 404)
+            # Not 404: nginx cannot interpret it and answers the user with a
+            # 500 instead of denying the download.
+            return ("", 403)
         resolve_managed_path(matches[0], must_exist=False)
     except Exception:
         # Refusing is correct - this is the path-traversal guard - but a 403

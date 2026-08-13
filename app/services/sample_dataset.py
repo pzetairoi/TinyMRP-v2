@@ -128,8 +128,32 @@ def _fixture_file_groups(
     return coverage
 
 
+def configured_storage_root() -> str:
+    """The deliverables root this instance serves managed files from.
+
+    Sample records must point INTO that root. The fixture tree also exists
+    inside the application image, and pointing at it there looks equivalent but
+    is not: resolve_managed_path only trusts absolute paths that fall inside a
+    configured storage root, so a record naming the image copy resolves to
+    "file unavailable" and every sample file 403s. install_sample_deliverables
+    copies the tree into this root precisely so the records can address it.
+    """
+
+    from flask import current_app, has_app_context
+
+    if not has_app_context():
+        return ""
+    for key in ("FILES_LOCAL_ROOT", "FILE_ROOT_LOCAL"):
+        value = str(current_app.config.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _fixture_part_files(
     pairs: set[tuple[str, str]],
+    *,
+    storage_root: str = "",
 ) -> list[dict[str, Any]]:
     folded = {(pn.casefold(), rev.casefold()): (pn, rev) for pn, rev in pairs}
     records: list[dict[str, Any]] = []
@@ -159,7 +183,14 @@ def _fixture_part_files(
                 "ext": relative.suffix.lstrip(".").casefold(),
                 "is_dwg": drawing,
                 "rel_path": relative.as_posix(),
-                "path": str(MANAGED_ROOT / relative),
+                # Inside the configured deliverables root, which is where
+                # install_sample_deliverables copies the tree. Without a root
+                # configured (unit tests, and callers that only want metadata)
+                # keep naming the fixture inside the package, which is the only
+                # copy that exists in that case.
+                "path": str(
+                    (Path(storage_root) / relative) if storage_root else (MANAGED_ROOT / relative)
+                ),
                 "size": float(entry["bytes"]),
                 "sha256": entry["sha256"],
                 "source": "sample-fixture",
@@ -253,8 +284,28 @@ def ensure_sample_engineering_records() -> dict[str, int]:
             part_number__in=sorted({part_number for part_number, _revision in parsed["parts"]})
         ).only("part_number", "revision", "ext_group", "ext", "is_dwg")
     }
+    storage_root = configured_storage_root()
+
+    # Repair rows written before the path was root-relative. They named the
+    # copy inside the application image, which resolve_managed_path refuses
+    # because it is outside every configured storage root - so every sample
+    # file answered 403 and the dataset could be browsed but never opened.
+    # Only rows this fixture created are touched.
+    repaired_paths = 0
+    if storage_root:
+        expected_root = Path(storage_root)
+        for row in PartFile.objects(source="sample-fixture"):
+            relative = str(row.rel_path or "").strip()
+            if not relative:
+                continue
+            expected = str(expected_root / Path(relative))
+            if str(row.path or "") != expected:
+                row.path = expected
+                row.save()
+                repaired_paths += 1
+
     new_file_docs = []
-    for record in _fixture_part_files(set(parsed["parts"])):
+    for record in _fixture_part_files(set(parsed["parts"]), storage_root=storage_root):
         key = (
             record["part_number"].casefold(),
             record["revision"].casefold(),
@@ -279,7 +330,10 @@ def ensure_sample_engineering_records() -> dict[str, int]:
         "bom_links": created_links,
         "approvals_updated": approvals_updated,
         "part_files": created_part_files,
-        "part_files_total": len(_fixture_part_files(set(parsed["parts"]))),
+        "part_files_repaired": repaired_paths,
+        "part_files_total": len(
+            _fixture_part_files(set(parsed["parts"]), storage_root=storage_root)
+        ),
         "parts_total": len(parsed["parts"]),
         "bom_links_total": len(parsed["links"]),
     }
