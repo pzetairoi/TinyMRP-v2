@@ -410,6 +410,7 @@ before you have a server:
 | [09 — Local development](docs/deployment/09-local-development.md) | Running from a checkout |
 | [10 — Operations](docs/deployment/10-operations.md) | Backups, updates, uninstall |
 | [11 — FAQ](docs/deployment/11-faq.md) | Common questions, including "other machines cannot reach it" |
+| [12 — Windows, restricted](docs/deployment/12-restricted-windows-flask.md) | Locked-down host running `python run.py` |
 
 Only three things need configuring: the deliverables folder, the address users
 type (`TINYMRP_URL`, **scheme included**), and optionally the port. Secrets,

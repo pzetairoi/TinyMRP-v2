@@ -142,6 +142,115 @@ def _extract_env_vars() -> List[Dict[str, str]]:
     return sorted(out.values(), key=lambda r: r["key"])
 
 
+_SCRIPT_GROUPS = (
+    ("deploy/community", "Single instance with Docker (Linux, or Windows Docker Desktop)"),
+    ("deploy/scripts", "Guided multi-instance VPS with Caddy"),
+    ("deploy/windows", "Windows LAN service (nginx + waitress)"),
+    ("deploy/windows-restricted", "Windows, restricted host, python run.py"),
+    ("tools", "Maintenance and developer utilities"),
+)
+
+_SCRIPT_SKIP = {"lib/common.sh", "lib/nextcloud.sh", "lib/update.sh"}
+
+
+def _script_summary(text: str) -> str:
+    """One human sentence describing a script.
+
+    Tried in order: a PowerShell .SYNOPSIS, the header comment, the prose line
+    of a usage() heredoc, and finally the Usage line itself. Scripts document
+    themselves in all four styles, and a table of "See the script header" would
+    be worse than no table.
+    """
+
+    synopsis = re.search(r"\.SYNOPSIS\s*\r?\n\s*(.+)", text)
+    if synopsis:
+        return synopsis.group(1).strip()
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#!", "@echo", "setlocal")):
+            continue
+        if line.startswith("#") or line.startswith("REM "):
+            body = line.lstrip("#").removeprefix("REM ").strip(" =-")
+            if len(body) > 12 and not body.startswith("shellcheck"):
+                return body
+            continue
+        break
+
+    # The invocation line is the most useful single line for a script whose
+    # only documentation is a usage() block, and it is copy-pasteable. Prose
+    # from inside the block comes second: picking sentences out of it lands on
+    # continuation lines like "(regardless of --continue-on-error)".
+    usage = re.search(r"Usage:[ \t]*\r?\n?[ \t]*(\S.*)", text)
+    if usage:
+        candidate = usage.group(1).strip().strip('"').rstrip("'} ")
+        if len(candidate) > 8:
+            return candidate
+
+    heredoc = re.search(r"cat <<'?\w+'?\s*\r?\n(.*?)\r?\n\w+\s*$", text, re.DOTALL | re.MULTILINE)
+    if heredoc:
+        for raw in heredoc.group(1).splitlines():
+            line = raw.strip()
+            if not line or line.lower().startswith("usage"):
+                continue
+            if line.startswith(("sudo ", "./", "-", "$", "#", "(")) or line.endswith(":"):
+                continue
+            if len(line) > 12:
+                return line
+    return ""
+
+
+def _script_options(text: str) -> List[str]:
+    """Flags a script accepts, from a usage block, a case arm, or param()."""
+
+    options = []
+    for match in re.finditer(r"(?m)^\s*(--[a-z][a-z0-9-]*)\)", text):
+        options.append(match.group(1))
+    for match in re.finditer(r"(?m)^\s*\[(?:switch|string|int|Security\.SecureString)[^\]]*\]\s*\$(\w+)", text):
+        options.append("-" + match.group(1))
+    for match in re.finditer(r"(?m)^\s*\[(?:Parameter|ValidateSet|ValidateRange)[^\]]*\]\s*\r?\n\s*\[[^\]]+\]\s*\$(\w+)", text):
+        options.append("-" + match.group(1))
+    seen: List[str] = []
+    for option in options:
+        if option not in seen and option not in ("-Rest",):
+            seen.append(option)
+    return seen
+
+
+def _extract_deploy_scripts() -> List[Tuple[str, List[Dict[str, str]]]]:
+    """Catalogue every runnable deployment script, straight from the files.
+
+    Generated rather than hand-written so the help cannot drift from what the
+    scripts actually accept - the same reason the env and API tables are
+    generated.
+    """
+
+    groups: List[Tuple[str, List[Dict[str, str]]]] = []
+    for relative, title in _SCRIPT_GROUPS:
+        directory = REPO_ROOT / relative
+        if not directory.exists():
+            continue
+        rows: List[Dict[str, str]] = []
+        for path in sorted(directory.rglob("*")):
+            if path.suffix.lower() not in (".sh", ".ps1", ".cmd"):
+                continue
+            key = path.relative_to(directory).as_posix()
+            if key in _SCRIPT_SKIP:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            options = _script_options(text)
+            rows.append(
+                {
+                    "name": key,
+                    "summary": _script_summary(text) or "See the script header.",
+                    "options": ", ".join(f"`{o}`" for o in options) if options else "-",
+                }
+            )
+        if rows:
+            groups.append((f"{relative} - {title}", rows))
+    return groups
+
+
 def _extract_addin_options() -> List[Dict[str, str]]:
     path = REPO_ROOT / "solidworks-addin" / "TinyMRP.SolidWorksAddin" / "Services" / "PublishOptions.cs"
     if not path.exists():
@@ -247,6 +356,17 @@ def _render_placeholders() -> Dict[str, str]:
     tabs_rows = [[r["name"], r["desc"]] for r in addin_tabs]
     tabs_md = _markdown_table(["Tab", "Purpose"], tabs_rows)
 
+    script_sections = []
+    for title, rows in _extract_deploy_scripts():
+        script_sections.append(f"**`{title}`**")
+        script_sections.append(
+            _markdown_table(
+                ["Script", "What it does", "Options"],
+                [[f"`{r['name']}`", r["summary"], r["options"]] for r in rows],
+            )
+        )
+    scripts_md = "\n\n".join(script_sections) if script_sections else "_No scripts found._"
+
     return {
         "AUTO_UI_PAGES": ui_table,
         "AUTO_WEB_ROUTES": ui_table,
@@ -254,6 +374,7 @@ def _render_placeholders() -> Dict[str, str]:
         "AUTO_ENV_VARS": env_md,
         "AUTO_ADDIN_OPTIONS": addin_md,
         "AUTO_ADDIN_TABS": tabs_md,
+        "AUTO_DEPLOY_SCRIPTS": scripts_md,
     }
 
 

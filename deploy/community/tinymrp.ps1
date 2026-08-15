@@ -1,3 +1,7 @@
+<#
+.SYNOPSIS
+    Operate an installed Community stack: start, stop, status, logs, backup, restore, update, uninstall.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]

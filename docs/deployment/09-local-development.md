@@ -82,8 +82,26 @@ ENV_FILE=.env.dev flask --app run.py user bootstrap-admin --email dev@example.co
 
 Open <http://localhost:5000>.
 
-`run.py` starts Flask's development server with `debug=True`: auto-reload and
-tracebacks in the browser. Never expose it beyond your own machine.
+`run.py` reads everything from the environment, so it never needs a local edit:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `TINYMRP_BIND_HOST` | `0.0.0.0` when `TINYMRP_URL` is non-loopback, else `127.0.0.1` | Interface |
+| `TINYMRP_BIND_PORT` | the port in `TINYMRP_URL`, else `5000` | Port |
+| `TINYMRP_SERVER` | `waitress` when importable, else `flask` | Which server |
+| `TINYMRP_DEV` | off | Flask debugger and auto-reload |
+
+**The debugger is off unless you ask for it:**
+
+```bash
+TINYMRP_DEV=1 ENV_FILE=.env.dev python run.py
+```
+
+and `run.py` refuses to combine it with a non-loopback bind. Werkzeug's
+interactive traceback console executes arbitrary Python in the server process,
+so a debug server other people can reach is remote code execution behind a
+friendly error page. Override with `TINYMRP_ALLOW_REMOTE_DEBUG=1` only on an
+isolated network.
 
 ---
 

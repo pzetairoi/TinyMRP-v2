@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Operate an installed Community stack: start, stop, status, logs, backup, restore, update, uninstall.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"

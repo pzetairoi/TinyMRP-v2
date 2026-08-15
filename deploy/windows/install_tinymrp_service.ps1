@@ -1,3 +1,7 @@
+<#
+.SYNOPSIS
+    Register TinyMRP as an auto-starting Windows service running waitress behind nginx.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]

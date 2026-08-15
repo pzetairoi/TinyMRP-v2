@@ -1,3 +1,7 @@
+<#
+.SYNOPSIS
+    Apply the LAN-only Windows Firewall policy: allow the web port from your subnet, block the app and MongoDB ports.
+#>
 [CmdletBinding()]
 param(
     [string]$RuleGroup = "TinyMRP LAN",

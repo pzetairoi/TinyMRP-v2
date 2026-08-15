@@ -1,3 +1,7 @@
+<#
+.SYNOPSIS
+    One-folder Windows evaluation stack: keeps database, config and deliverables under a single chosen folder.
+#>
 param(
   [Parameter(Mandatory = $true, Position = 0)]
   [string]$DeliverablesDir,

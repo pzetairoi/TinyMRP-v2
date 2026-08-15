@@ -1,3 +1,7 @@
+<#
+.SYNOPSIS
+    Static check of the installer configuration logic; runs no Docker and changes nothing.
+#>
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot

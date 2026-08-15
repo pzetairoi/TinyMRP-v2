@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-13 23:11 UTC",
-  "commit": "c8375c6",
+  "generated_at": "2026-08-15 04:56 UTC",
+  "commit": "988f35d",
   "items": [
     {
       "id": "getting-started",
@@ -335,6 +335,60 @@
         {
           "id": "help-build-command",
           "title": "Help Build Command"
+        }
+      ]
+    },
+    {
+      "id": "deployment-step-by-step",
+      "title": "Deployment: step by step",
+      "sections": [
+        {
+          "id": "the-only-three-things-you-configure",
+          "title": "The only three things you configure"
+        },
+        {
+          "id": "which-variant-am-i",
+          "title": "Which variant am I?"
+        },
+        {
+          "id": "a-linux-vm-or-server-with-docker",
+          "title": "A. Linux VM or server with Docker"
+        },
+        {
+          "id": "b-windows-with-docker-desktop",
+          "title": "B. Windows with Docker Desktop"
+        },
+        {
+          "id": "c-linux-without-docker",
+          "title": "C. Linux without Docker"
+        },
+        {
+          "id": "d-windows-lan-service",
+          "title": "D. Windows LAN service"
+        },
+        {
+          "id": "e-windows-restricted-host-runpy",
+          "title": "E. Windows restricted host (`run.py`)"
+        },
+        {
+          "id": "f-vps-with-several-instances",
+          "title": "F. VPS with several instances"
+        },
+        {
+          "id": "after-any-install-first-login-and-sample-data",
+          "title": "After any install: first login and sample data"
+        },
+        {
+          "id": "every-deployment-script-and-its-options",
+          "title": "Every deployment script and its options"
+        },
+        {
+          "id": "every-configuration-variable",
+          "title": "Every configuration variable"
+        },
+        {
+          "id": "when-something-is-wrong",
+          "title": "When something is wrong"
         }
       ]
     },

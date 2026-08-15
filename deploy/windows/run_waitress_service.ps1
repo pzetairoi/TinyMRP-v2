@@ -1,3 +1,7 @@
+<#
+.SYNOPSIS
+    Service launcher: runs waitress-serve against app.wsgi:app with the configured env file.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]

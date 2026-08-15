@@ -1,3 +1,7 @@
+<#
+.SYNOPSIS
+    Guided TinyMRP Community install on Windows Docker Desktop (app + MongoDB + Redis).
+#>
 [CmdletBinding()]
 param(
     [string]$DeliverablesPath,
