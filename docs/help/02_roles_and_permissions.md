@@ -23,7 +23,7 @@ A permission never implies another. Holding `parts.read` does not grant
 | **Administrator** | Everything, including approved-data override and purge. |
 | **Security Administrator** | Users, roles, tokens and audit only. No parts, no jobs. |
 | **Engineering Manager** | All engineering data, plus review approval, moderation and the approved-data override. No purge, no commercial. |
-| **Engineering** | Parts, BOMs, files, shares, exports, part numbers, low-risk imports. Cannot override approved data. |
+| **Engineering** | Parts, BOMs, files, shares, exports, part numbers, and imports including overwriting drafts. Cannot touch approved data. |
 | **Commercial** | The full order workflow, customers and suppliers with financials, job planning. No engineering changes. |
 | **Internal** | Reads released business data, comments, pulls documentation. No financials, no drafts, no changes. |
 | **Workshop** | Job stages and material issue, released part documents, comments and markups. |
@@ -58,14 +58,19 @@ broaden the linked company, jobs, order kind or supplier PO-line subtree.
 
 ![A customer reviews the released parent drawing and requests approval for CV03-F02 REV B because the held child is correctly unavailable.](/static/help/img/customer-approval-request.png)
 
-### Creating approved data is allowed; changing it is not
+### Approval comes from CAD, not from TinyMRP
 
-Anyone with upload rights may import a part that arrives already approved —
-that is normal engineering output, not a privileged act.
+There is no button here that approves a part. Approval is read out of the
+columns of an imported pack, which is how it arrives from SolidWorks and PDM.
 
-Once that approved part exists, changing **anything** on it — properties, BOM
-or files — requires `imports.override_approved`, which by default only
-Administrators and Engineering Managers hold.
+Anyone with upload rights may therefore import a part that arrives already
+approved — that is normal engineering output, not a privileged act. Publishing
+a release onto a draft is allowed for the same reason: it destroys nothing.
+
+Once a part is approved here, changing **anything** on it — properties, BOM,
+files, or the approval itself — requires `imports.override_approved`, which by
+default only Administrators and Engineering Managers hold. Everything else about
+an import, including overwriting a draft outright, sits with Engineering.
 
 ### Approval status is visible to everyone who can see the part
 

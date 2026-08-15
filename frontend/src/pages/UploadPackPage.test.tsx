@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import UploadPackPage from './UploadPackPage'
 import { mockApi } from '../test/mockApi'
@@ -61,6 +62,36 @@ describe('UploadPackPage capability gating', () => {
     await waitFor(() =>
       expect(screen.getByText(/do not include import preview access/i)).toBeInTheDocument(),
     )
+  })
+
+  it('will not apply a pack that has not been previewed', async () => {
+    // The redline is the contract for what an apply writes, and overwriting
+    // now deletes properties the pack omits. Applying without a current
+    // preview means writing changes nobody has read.
+    mockApi(caps(['imports.preview', 'imports.execute_low_risk', 'imports.execute_approved']))
+
+    const { container } = render(<UploadPackPage />)
+    await waitFor(() =>
+      expect(screen.queryByText(/do not include import preview access/i)).not.toBeInTheDocument(),
+    )
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    await userEvent.upload(input, new File(['zip'], 'pack.zip', { type: 'application/zip' }))
+
+    expect(screen.getByRole('button', { name: /preview changes/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /apply import/i })).toBeDisabled()
+    expect(screen.getByText(/preview the current zip and policy first/i)).toBeInTheDocument()
+  })
+
+  it('keeps the approved-override tick out of reach without the permission', async () => {
+    mockApi(caps(['imports.preview', 'imports.execute_low_risk', 'imports.execute_approved']))
+
+    render(<UploadPackPage />)
+    await waitFor(() =>
+      expect(screen.queryByText(/do not include import preview access/i)).not.toBeInTheDocument(),
+    )
+
+    expect(screen.getByLabelText(/also overwrite/i)).toBeDisabled()
   })
 
   it('keeps both actions disabled until a file is chosen', async () => {

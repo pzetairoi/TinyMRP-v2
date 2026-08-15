@@ -65,7 +65,7 @@ def test_help_covers_the_features_users_ask_about(client, app, user):
         "parts.read_unreleased",
         "imports.override_approved",
         # The import policy reference, which the Import page links straight at.
-        "Import: what each policy does",
+        "Import: what each choice does",
         "What counts as approved",
         "Import FAQ",
     ):
@@ -80,7 +80,7 @@ def test_help_import_chapter_anchors_match_the_links_into_it(client, app, user):
 
     body = client.get("/help").get_data(as_text=True)
 
-    for anchor in ("import-what-each-policy-does", "what-counts-as-approved"):
+    for anchor in ("import-what-each-choice-does", "what-counts-as-approved"):
         assert f'id="{anchor}"' in body, anchor
 
 

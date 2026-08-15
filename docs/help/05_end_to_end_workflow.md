@@ -19,15 +19,17 @@ This page provides practical workflows that match current TinyMRP behavior.
 
 - Create upload pack ZIP from the add-in.
 - Open **Import** in the web app and choose the ZIP.
-- Set the three policies (Properties, BOM, Files) for what you intend.
-- Press **Preview** and read the redline. Nothing is written yet.
+- Choose **Add without overwriting** for a partial pack, or **Overwrite with
+  the pack** when the ZIP is a complete re-export.
+- Press **Preview** and read the redline. Nothing is written yet, and Apply
+  stays locked until the preview matches what you are sending.
 - Check the warnings: files that do not match a BOM row are skipped and listed
   there.
 - Press **Apply** only when the redline matches your intent.
 
 > **Note:** if the redline shows *blocked* rows against an existing approved
-> part, that is the override rule. Either the change is not wanted, or it needs
-> someone with `imports.override_approved`.
+> part, that is the approval rule. Either the change is not wanted, or it needs
+> someone with `imports.override_approved` to tick “also approved”.
 
 ### 4) Validate in Part Detail
 

@@ -15,16 +15,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
   reported those two rows as unchanged. The stored approval now matches the
   redline exactly.
 
+### Changed
+
+- **Importing is now two choices instead of three policies with four levels
+  each.** *Add without overwriting* fills what is empty; *Overwrite with the
+  pack* makes the part match the pack; a tick, gated on
+  `imports.override_approved`, extends that to approved part/revisions. The
+  advanced panel still sets Properties, BOM and Files separately, including
+  Skip. TinyMRP is a window onto what PDM already decided, so the page now reads
+  that way.
+- **Overwrite really overwrites.** It used to merge the pack on top of the
+  stored part, so a property the pack stopped carrying lingered for ever.
+  Overwriting now removes what the pack does not carry, and every removal is
+  shown as a `clear` row in the redline before anything is written. Values that
+  cannot come back from a pack are never removed: the import seed, a part number
+  allocated here (`cad_ref`, `numbering_scheme_id`), notes and comments, and the
+  unit of measure. Parts that appear only as a BOM child are never emptied,
+  because being listed as a child is not a definition.
+- **A release from CAD no longer needs an overwrite.** Approval only ever
+  arrives in a pack, and publishing one destroys nothing, so *Add* applies it to
+  a draft. Clearing an approval, or changing the approver or date of a part that
+  is already approved, still needs the tick.
+- **Engineering can overwrite drafts.** `imports.execute_approved` moved into
+  the standard Engineering role: re-publishing your own unreleased work from CAD
+  is ordinary work. Only approved part/revisions stay behind
+  `imports.override_approved`.
+- **The Import page says what state it is in.** A banner distinguishes a
+  *PREVIEW* from an applied *IMPORTED* run and carries the counts an apply
+  produced, which were previously only visible inside the downloaded JSON.
+  Parts are grouped by outcome — Blocked, Approved parts being changed, New,
+  Modified, No changes — with the first two open, each part on one line with its
+  thumbnail and a tally. Thumbnails come from the pack itself, so parts that do
+  not exist yet still have a picture.
+- **Apply is gated on a current preview**, and a plan that changes approved
+  parts or removes values asks for confirmation with both counts.
+
 ### Added
 
-- **Help chapter "Import: what each policy does"**, covering what Fill only,
-  Update drafts and Override approved write, skip or block for properties, the
-  BOM and files; how approval is read from a pack and when it can be cleared;
-  which permission each level needs; a ten-step exercise; and an FAQ. Linked
-  from the Import page itself.
-- **`tools/make_import_test_packs.py`**, which builds that exercise: ten upload
-  packs derived from the CV03 sample data, under a part-number prefix so the
-  exercise cannot collide with real parts.
+- **Help chapter "Import: what each choice does"**, covering what Add and
+  Overwrite write, skip, remove or block for properties, the BOM and files; how
+  approval is read from a pack and when it can be cleared; which permission each
+  choice needs; how to read the grouped redline; an eleven-step exercise; and an
+  FAQ. Linked from the Import page itself.
+- **`tools/make_import_test_packs.py`**, which builds that exercise: eleven
+  upload packs derived from the CV03 sample data, under a part-number prefix so
+  the exercise cannot collide with real parts. They cover a first release,
+  partial packs from other departments, a full re-export, a release, a new
+  revision, a change request against approved parts, a BOM-only re-import, a
+  restructure, a messy export, and the blank-approval-column trap.
 
 Other work planned for after 1.0.0 is tracked in
 `docs/planning/productionmaturityplan.txt`.

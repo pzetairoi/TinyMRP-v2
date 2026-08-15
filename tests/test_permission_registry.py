@@ -110,6 +110,9 @@ EXPECTED_ENGINEERING_PERMISSIONS = {
     "shares.revoke",
     "imports.preview",
     "imports.execute_low_risk",
+    # Overwriting a draft is ordinary engineering work; only approved parts
+    # stay behind imports.override_approved, which this role does not hold.
+    "imports.execute_approved",
     "comments.read",
     "comments.write",
     "markups.read",

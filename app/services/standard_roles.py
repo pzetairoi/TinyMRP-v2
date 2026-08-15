@@ -48,6 +48,10 @@ _ENGINEERING = (
     "shares.revoke",
     "imports.preview",
     "imports.execute_low_risk",
+    # Engineering re-publishes its own work from CAD, so overwriting a part
+    # that is still a draft is ordinary work rather than a privileged act.
+    # Only an approved part stays protected, behind the override below.
+    "imports.execute_approved",
     "comments.read",
     "comments.write",
     "markups.read",
@@ -57,7 +61,6 @@ _ENGINEERING = (
 )
 
 _ENGINEERING_MANAGER = _ENGINEERING + (
-    "imports.execute_approved",
     "imports.override_approved",
     "comments.moderate",
     "markups.moderate",
@@ -99,7 +102,7 @@ STANDARD_ROLES: dict[str, StandardRoleDefinition] = {
         _role(
             "engineering",
             "Engineering",
-            "Maintains parts, BOMs, files, shares and exports, allocates part numbers and runs low-risk imports; no numbering-scheme management, approved-data override or purge.",
+            "Maintains parts, BOMs, files, shares and exports, allocates part numbers and imports packs including overwriting draft data; no numbering-scheme management, approved-data override or purge.",
             _ENGINEERING,
         ),
         _role(

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-15 06:38 UTC",
-  "commit": "69f273c",
+  "generated_at": "2026-08-15 12:17 UTC",
+  "commit": "e256d7d",
   "items": [
     {
       "id": "getting-started",
@@ -83,12 +83,16 @@
       ]
     },
     {
-      "id": "import-what-each-policy-does",
-      "title": "Import: what each policy does",
+      "id": "import-what-each-choice-does",
+      "title": "Import: what each choice does",
       "sections": [
         {
-          "id": "the-four-levels-side-by-side",
-          "title": "The four levels, side by side"
+          "id": "the-two-choices-2",
+          "title": "The two choices"
+        },
+        {
+          "id": "overwrite-means-the-pack-wins-outright",
+          "title": "\u201cOverwrite\u201d means the pack wins outright"
         },
         {
           "id": "what-counts-as-approved",
@@ -107,12 +111,12 @@
           "title": "Files"
         },
         {
-          "id": "who-can-run-which-import",
-          "title": "Who can run which import"
+          "id": "who-can-do-what",
+          "title": "Who can do what"
         },
         {
-          "id": "what-the-redline-words-mean",
-          "title": "What the redline words mean"
+          "id": "reading-the-result",
+          "title": "Reading the result"
         },
         {
           "id": "guided-exercise-with-real-test-packs",

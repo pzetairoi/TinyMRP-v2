@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./uploadpack.css";
 import { apiErrorMessage, apiFetch } from "../lib/api";
-import { actionClass, valueText } from "../lib/importPlan";
+import {
+  actionClass,
+  groupOf,
+  resolveModes,
+  valueText,
+  type CategoryMode,
+  type GroupKey,
+  type Tier,
+} from "../lib/importPlan";
 
 type Capability = Record<string, boolean>;
 type Change = {
@@ -53,6 +61,8 @@ type PlanPart = {
   blocked: boolean;
   allowed: boolean;
   blocked_change_count: number;
+  /** Thumbnail carried by the pack; the only image a part that does not exist yet has. */
+  preview?: string;
 };
 type DuplicateChoice = {
   part_number: string;
@@ -74,6 +84,17 @@ type Plan = {
     modified_approved: number;
   };
 };
+type Metrics = {
+  parts_created?: number;
+  parts_updated?: number;
+  links_created?: number;
+  files_written?: number;
+  managed_files_written?: number;
+  associated_files_written?: number;
+  files_discovered?: number;
+  thumbnails_generated?: number;
+  operation_id?: string;
+};
 type UploadResult = {
   zip?: string;
   dry_run?: boolean;
@@ -82,64 +103,28 @@ type UploadResult = {
   /** Inline preview of the top-level part; response-only, never stored. */
   root_preview?: string;
   plan?: Plan;
-  metrics?: {
-    parts_created?: number;
-    parts_updated?: number;
-    links_created?: number;
-    files_written?: number;
-    managed_files_written?: number;
-    associated_files_written?: number;
-    files_discovered?: number;
-    thumbnails_generated?: number;
-  };
+  metrics?: Metrics;
   timings?: Record<string, number>;
   diagnostics?: Record<string, number | string | boolean>;
   capabilities?: Capability;
   warnings?: Array<string | { stage?: string; message?: string }>;
   errors?: Array<{ stage?: string; message?: string }>;
+  previously_imported_operation_id?: string;
+  previously_imported_at?: string;
+  /** When the result arrived, so an applied import is visibly a past event. */
+  received_at?: string;
 };
 
-type Filter = "all" | "changed" | "blocked" | "modified_approved";
-type DataMode = "skip" | "fill_blanks" | "replace_unapproved" | "replace_all";
-type BomMode = "skip" | "fill_if_empty" | "replace_unapproved" | "replace_all";
-type FileMode = "skip" | "add_missing" | "replace_unapproved" | "replace_all";
-type ApprovalMode = "preserve" | "import_unapproved" | "replace_all";
-type Preset = "preserve" | "unless_existing_approved" | "always" | "custom";
-
-// Quick presets that set the three independent policies at once. Touching an
-// individual policy below detaches it from the preset ("Custom").
-const PRESETS: Record<Exclude<Preset, "custom">, [DataMode, BomMode, FileMode]> = {
-  preserve: ["fill_blanks", "fill_if_empty", "add_missing"],
-  unless_existing_approved: ["replace_unapproved", "replace_unapproved", "replace_unapproved"],
-  always: ["replace_all", "replace_all", "replace_all"],
-};
-
-// Approval is just another property: it follows the Properties policy, gated by
-// the same permissions and the target's existing approved state.
-const APPROVAL_FOR_DATA: Record<DataMode, ApprovalMode> = {
-  skip: "preserve",
-  fill_blanks: "preserve",
-  replace_unapproved: "import_unapproved",
-  replace_all: "replace_all",
-};
-
-type Tone = "safe" | "draft" | "admin";
-const TIER_META: Record<Exclude<Preset, "custom">, { label: string; hint: string }> = {
-  preserve: {
-    label: "Fill only",
-    hint: "Fills blanks, empty BOMs and missing files. New parts import in full, including their approval. Nothing on an existing approved part is changed.",
-  },
-  unless_existing_approved: {
-    label: "Update drafts",
-    hint: "Also replaces existing draft (unapproved) data. Existing approved parts stay protected.",
-  },
-  always: {
-    label: "Override approved (Admin)",
-    hint: "Also changes existing approved parts -- their properties, BOM, files and approval status.",
+const TIER_META: Record<Tier, { label: string; hint: string }> = {
+  add: {
+    label: "Add without overwriting",
+    hint: "Fills blanks, empty BOMs and missing files, and records a release the pack brings. Nothing that already has a value is touched.",
+    },
+  overwrite: {
+    label: "Overwrite with the pack",
+    hint: "The pack wins: values are replaced and properties it does not carry are removed. Approved parts stay protected unless you tick the box.",
   },
 };
-const TONE_ALERT: Record<Tone, string> = { safe: "alert-success", draft: "alert-warning", admin: "alert-danger" };
-const TONE_BUTTON: Record<Tone, string> = { safe: "btn-success", draft: "btn-warning", admin: "btn-danger" };
 
 const stateLabels: Record<PlanPart["target_state"], string> = {
   new: "New",
@@ -152,6 +137,40 @@ const stateBadgeClass: Record<PlanPart["target_state"], string> = {
   existing_approved: "text-bg-warning",
 };
 
+// The outcome groups the redline is organised by. Order matters: what needs a
+// decision comes first, and the long tail of untouched parts comes last.
+const GROUPS: Array<{
+  key: GroupKey;
+  title: string;
+  hint: string;
+  tone: string;
+  openByDefault: boolean;
+}> = [
+  {
+    key: "blocked",
+    title: "Blocked",
+    hint: "Your policy or permissions stop these changes. Applying leaves them alone.",
+    tone: "border-danger",
+    openByDefault: true,
+  },
+  {
+    key: "modified_approved",
+    title: "Approved parts being changed",
+    hint: "Approved data this import overwrites. Review these before applying.",
+    tone: "border-warning",
+    openByDefault: true,
+  },
+  { key: "new", title: "New parts", hint: "Created by this import.", tone: "", openByDefault: false },
+  { key: "changed", title: "Modified", hint: "Existing drafts this import changes.", tone: "", openByDefault: false },
+  {
+    key: "unchanged",
+    title: "No changes",
+    hint: "Present in the pack, identical to what is stored.",
+    tone: "",
+    openByDefault: false,
+  },
+];
+
 function saveJson(name: string, data: unknown) {
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
@@ -163,23 +182,23 @@ function saveJson(name: string, data: unknown) {
   URL.revokeObjectURL(url);
 }
 
-function PolicySelect<T extends string>({
+function PolicySelect({
   id,
   label,
   help,
   value,
   onChange,
-  options,
+  canOverwrite,
 }: {
   id: string;
   label: string;
   help: string;
-  value: T;
-  onChange: (value: T) => void;
-  options: Array<{ value: T; label: string; disabled?: boolean }>;
+  value: CategoryMode;
+  onChange: (value: CategoryMode) => void;
+  canOverwrite: boolean;
 }) {
   return (
-    <div className="col-md-6">
+    <div className="col-md-4">
       <label className="form-label fw-semibold mb-1" htmlFor={id}>
         {label}
       </label>
@@ -187,13 +206,13 @@ function PolicySelect<T extends string>({
         id={id}
         className="form-select form-select-sm"
         value={value}
-        onChange={(event) => onChange(event.target.value as T)}
+        onChange={(event) => onChange(event.target.value as CategoryMode)}
       >
-        {options.map((option) => (
-          <option key={option.value} value={option.value} disabled={option.disabled}>
-            {option.label}
-          </option>
-        ))}
+        <option value="skip">Skip</option>
+        <option value="add">Add without overwriting</option>
+        <option value="overwrite" disabled={!canOverwrite}>
+          Overwrite with the pack
+        </option>
       </select>
       <div className="form-text">{help}</div>
     </div>
@@ -283,7 +302,9 @@ function Section({
                       {row.note ? <small className="text-muted">{row.note}</small> : null}
                     </td>
                     {showValues ? (
-                      <td className={row.action === "replace" ? "text-danger" : ""}>{valueText(row.before)}</td>
+                      <td className={["replace", "clear"].includes(row.action) ? "text-danger" : ""}>
+                        {valueText(row.before)}
+                      </td>
                     ) : null}
                     {showValues ? (
                       <td className={["add", "replace", "change"].includes(row.action) ? "text-primary" : ""}>
@@ -302,6 +323,55 @@ function Section({
         )}
       </div>
     </details>
+  );
+}
+
+/** A part thumbnail: from the pack when it carries one, otherwise from storage. */
+function PartThumb({
+  part,
+  applied,
+  size = 40,
+}: {
+  part: PlanPart;
+  applied: boolean;
+  size?: number;
+}) {
+  const [stored, setStored] = useState<string | null>(null);
+  const packed = part.preview || "";
+  // A stored image only exists once the part does, so it is worth fetching
+  // exactly when the pack carried nothing and the part is not new.
+  const wantStored = !packed && (applied || part.target_state !== "new");
+
+  useEffect(() => {
+    if (!wantStored) return;
+    let cancelled = false;
+    const qs = new URLSearchParams({ pn: part.part_number, rev: part.revision, mode: "preview" });
+    fetch(`/api/part_images?${qs.toString()}`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(response)))
+      .then((rows) => {
+        if (cancelled) return;
+        const url = Array.isArray(rows) && rows.length ? rows[0]?.urls?.[0] : "";
+        if (url) setStored(url);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [wantStored, part.part_number, part.revision]);
+
+  const src = packed || stored;
+  const style = { width: size, height: size, objectFit: "cover" as const, flex: "0 0 auto" };
+  if (!src) {
+    return <div className="rounded border bg-light" style={style} aria-hidden="true" />;
+  }
+  return (
+    <img
+      src={src}
+      alt={`${part.part_number} preview`}
+      className="rounded border"
+      style={style}
+      loading="lazy"
+    />
   );
 }
 
@@ -350,7 +420,27 @@ function RootPartCard({
   );
 }
 
-function PartRedline({ part, changedOnly }: { part: PlanPart; changedOnly: boolean }) {
+/** Counts of what happens to one part, so the collapsed row still says enough. */
+function partTally(part: PlanPart): string {
+  const effects = (rows: Row[]) => rows.filter((row) => isEffect(row.action)).length;
+  const bits: string[] = [];
+  const properties = effects(toPropertyRows([...part.properties, ...part.approval]));
+  const files = effects(toFileRows(part.files));
+  if (properties) bits.push(`${properties} propert${properties === 1 ? "y" : "ies"}`);
+  if (files) bits.push(`${files} file${files === 1 ? "" : "s"}`);
+  if (part.bom.action !== "unchanged") bits.push(`BOM ${part.bom.action.replaceAll("_", " ")}`);
+  return bits.join(" · ") || "no changes";
+}
+
+function PartRedline({
+  part,
+  changedOnly,
+  applied,
+}: {
+  part: PlanPart;
+  changedOnly: boolean;
+  applied: boolean;
+}) {
   const overridingApproved = part.target_state === "existing_approved" && part.changed;
   const sections = [
     {
@@ -374,12 +464,10 @@ function PartRedline({ part, changedOnly }: { part: PlanPart; changedOnly: boole
       empty: "No incoming BOM definition.",
     },
   ];
-  const badges = sections
-    .map((section) => [section.label, section.rows.filter((row) => isEffect(row.action)).length] as const)
-    .filter(([, count]) => count > 0);
   return (
-    <details className="border rounded p-2 bg-white">
-      <summary className="d-flex flex-wrap align-items-center gap-2">
+    <details className="border rounded bg-white upload-pack-part">
+      <summary className="d-flex flex-wrap align-items-center gap-2 p-2">
+        <PartThumb part={part} applied={applied} />
         <strong>
           {part.part_number} — {part.revision || "No revision"}
         </strong>
@@ -391,11 +479,9 @@ function PartRedline({ part, changedOnly }: { part: PlanPart; changedOnly: boole
         ) : !part.allowed ? (
           <span className="badge text-bg-danger">Blocked</span>
         ) : null}
-        <span className="small text-muted ms-auto">
-          {badges.length ? badges.map(([label, count]) => `${count} ${label}`).join(" · ") : "no changes"}
-        </span>
+        <span className="small text-muted ms-auto">{partTally(part)}</span>
       </summary>
-      <div className="mt-2">
+      <div className="px-2 pb-2">
         {sections.map((section) => (
           <Section key={section.title} {...section} changedOnly={changedOnly} />
         ))}
@@ -412,18 +498,23 @@ export default function UploadPackPage() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [changedOnly, setChangedOnly] = useState(true);
   // Operator picks for part numbers that appear more than once in the pack.
   const [duplicateChoices, setDuplicateChoices] = useState<Record<string, number>>({});
   const [capabilities, setCapabilities] = useState<Capability>({});
   const [capabilitiesError, setCapabilitiesError] = useState("");
-  const [dataMode, setDataMode] = useState<DataMode>("fill_blanks");
-  const [bomMode, setBomMode] = useState<BomMode>("fill_if_empty");
-  const [fileMode, setFileMode] = useState<FileMode>("add_missing");
+  const [tier, setTier] = useState<Tier>("add");
+  const [includeApproved, setIncludeApproved] = useState(false);
+  const [dataCategory, setDataCategory] = useState<CategoryMode | null>(null);
+  const [bomCategory, setBomCategory] = useState<CategoryMode | null>(null);
+  const [fileCategory, setFileCategory] = useState<CategoryMode | null>(null);
   const [rootPreviewUrl, setRootPreviewUrl] = useState<string | null>(null);
   const [rootPreviewStatus, setRootPreviewStatus] = useState("");
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(GROUPS.map((group) => [group.key, group.openByDefault])),
+  );
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     apiFetch<{ imports?: Capability }>("/api/import/capabilities")
@@ -509,43 +600,51 @@ export default function UploadPackPage() {
   const canAdvanced = !!capabilities["imports.execute_approved"];
   const canOverride = canAdvanced && !!capabilities["imports.override_approved"];
 
-  const approvalMode = APPROVAL_FOR_DATA[dataMode];
+  // The tier sets all three categories; the advanced panel can pull one out of
+  // step. Approved parts are only reachable through the tick, and only for a
+  // category that is actually overwriting.
+  const categories = useMemo(
+    () => ({
+      data: dataCategory ?? tier,
+      bom: bomCategory ?? tier,
+      file: fileCategory ?? tier,
+    }),
+    [tier, dataCategory, bomCategory, fileCategory],
+  );
 
-  const preset = useMemo<Preset>(() => {
-    const match = (Object.entries(PRESETS) as Array<[Exclude<Preset, "custom">, typeof PRESETS[Exclude<Preset, "custom">]]>).find(
-      ([, tuple]) => tuple[0] === dataMode && tuple[1] === bomMode && tuple[2] === fileMode,
-    );
-    return match ? match[0] : "custom";
-  }, [dataMode, bomMode, fileMode]);
+  const overrideActive = includeApproved && canOverride;
+  const modes = useMemo(
+    () => resolveModes({ tier, categories, includeApproved, canOverride }),
+    [tier, categories, includeApproved, canOverride],
+  );
+  const { data_mode: dataMode, bom_mode: bomMode, file_mode: fileMode, approval_mode: approvalMode } = modes;
+  const customised =
+    (dataCategory !== null && dataCategory !== tier) ||
+    (bomCategory !== null && bomCategory !== tier) ||
+    (fileCategory !== null && fileCategory !== tier);
 
-  function applyPreset(name: Exclude<Preset, "custom">) {
-    const [nextData, nextBom, nextFile] = PRESETS[name];
-    setDataMode(nextData);
-    setBomMode(nextBom);
-    setFileMode(nextFile);
+  function applyTier(next: Tier) {
+    setTier(next);
+    setDataCategory(null);
+    setBomCategory(null);
+    setFileCategory(null);
+    if (next === "add") setIncludeApproved(false);
   }
 
+  // The plan on screen only describes the ZIP and the policy it was built from.
+  // Changing either makes it stale, and applying a stale plan is exactly the
+  // mistake the preview exists to prevent.
+  const policySignature = `${dataMode}|${bomMode}|${fileMode}|${approvalMode}|${JSON.stringify(duplicateChoices)}`;
+  const [previewedSignature, setPreviewedSignature] = useState("");
+  const [previewedFile, setPreviewedFile] = useState<File | null>(null);
+  const previewCurrent =
+    !!result?.dry_run && previewedFile === file && previewedSignature === policySignature;
+
   const plan = result?.plan;
-  const matchesFilter = (part: PlanPart, name: Filter) => {
-    if (name === "changed") return part.changed;
-    if (name === "blocked") return part.blocked || !part.allowed;
-    // Approved parts the import actually alters — the ones worth reviewing.
-    if (name === "modified_approved") return part.target_state === "existing_approved" && part.changed;
-    return true;
-  };
-  const tabCounts = useMemo(() => {
-    const parts = plan?.parts || [];
-    return {
-      all: parts.length,
-      changed: parts.filter((part) => matchesFilter(part, "changed")).length,
-      blocked: parts.filter((part) => matchesFilter(part, "blocked")).length,
-      modified_approved: parts.filter((part) => matchesFilter(part, "modified_approved")).length,
-    } as Record<Filter, number>;
-  }, [plan]);
-  const visibleParts = useMemo(() => {
+  const applied = !!result && !result.dry_run;
+  const groups = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return (plan?.parts || []).filter((part) => {
-      if (!matchesFilter(part, filter)) return false;
+    const matches = (part: PlanPart) => {
       if (!needle) return true;
       // Search part identity plus the names of everything it touches, so a
       // file or child part number finds its parent row.
@@ -559,18 +658,30 @@ export default function UploadPackPage() {
         .join(" ")
         .toLowerCase()
         .includes(needle);
-    });
-  }, [plan, filter, search]);
-  // Surfaced at the top of the report so it's obvious at a glance whether approved data was touched.
-  const overrideCounts = useMemo(() => {
-    let overriding = 0;
-    let needsAdmin = 0;
+    };
+    const buckets: Record<GroupKey, PlanPart[]> = {
+      blocked: [],
+      modified_approved: [],
+      new: [],
+      changed: [],
+      unchanged: [],
+    };
     for (const part of plan?.parts || []) {
-      if (part.target_state !== "existing_approved" || !part.changed) continue;
-      if (part.allowed) overriding += 1;
-      else needsAdmin += 1;
+      if (!matches(part)) continue;
+      buckets[groupOf(part)].push(part);
     }
-    return { overriding, needsAdmin };
+    return buckets;
+  }, [plan, search]);
+  const totals = useMemo(() => {
+    const buckets: Record<GroupKey, number> = {
+      blocked: 0,
+      modified_approved: 0,
+      new: 0,
+      changed: 0,
+      unchanged: 0,
+    };
+    for (const part of plan?.parts || []) buckets[groupOf(part)] += 1;
+    return buckets;
   }, [plan]);
 
   function chooseFile(files: FileList | null) {
@@ -600,6 +711,8 @@ export default function UploadPackPage() {
     }
     if (dryRun) form.append("dry_run", "1");
 
+    const signature = policySignature;
+    const submitted = file;
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload/pack");
     xhr.responseType = "json";
@@ -614,8 +727,17 @@ export default function UploadPackPage() {
           : "";
         setError(`${payload.detail || payload.error || `HTTP ${xhr.status}`}.${missing}`);
       } else {
-        setResult(payload);
+        setResult({ ...payload, received_at: new Date().toLocaleString() });
         if (payload.capabilities) setCapabilities(payload.capabilities);
+        if (dryRun) {
+          setPreviewedSignature(signature);
+          setPreviewedFile(submitted);
+        } else {
+          // The plan just became history: it describes what was written, not
+          // what would happen if you pressed Apply again.
+          setPreviewedSignature("");
+          setPreviewedFile(null);
+        }
       }
       setProgress(100);
       setBusy(false);
@@ -627,16 +749,36 @@ export default function UploadPackPage() {
     xhr.send(form);
   }
 
-  const advancedSelected =
-    dataMode.includes("replace") ||
-    bomMode.includes("replace") ||
-    fileMode.includes("replace") ||
-    approvalMode !== "preserve";
-  const overrideSelected =
-    dataMode === "replace_all" || bomMode === "replace_all" || fileMode === "replace_all" || approvalMode === "replace_all";
-  // Red whenever approved data could be touched, amber for draft-only updates, green when nothing but blanks fill.
-  // Computed from the actual selected modes (not just the preset) so it stays accurate in "Custom".
-  const activeTone: Tone = overrideSelected ? "admin" : advancedSelected ? "draft" : "safe";
+  // What an apply would destroy, counted from the plan on screen. This is the
+  // number worth confirming, not the number of parts.
+  const destructive = useMemo(() => {
+    let approvedParts = 0;
+    let removals = 0;
+    for (const part of plan?.parts || []) {
+      if (!part.changed) continue;
+      if (part.target_state === "existing_approved") approvedParts += 1;
+      removals += part.properties.filter((row) => row.action === "clear").length;
+      removals += part.approval.filter((row) => row.action === "clear").length;
+      removals += part.bom.changes.filter((row) => row.action === "remove").length;
+      removals += part.files.filter((row) => row.action === "replace").length;
+    }
+    return { approvedParts, removals };
+  }, [plan]);
+
+  const overwriting = tier === "overwrite" || customised;
+  const tone = overrideActive ? "admin" : overwriting ? "draft" : "safe";
+  const toneAlert = tone === "admin" ? "alert-danger" : tone === "draft" ? "alert-warning" : "alert-success";
+  const applyBlockedReason = !file
+    ? "Select a ZIP first."
+    : !(canLowRisk || canAdvanced)
+      ? "Your roles cannot apply imports."
+      : overwriting && !canAdvanced
+        ? "Overwriting needs imports.execute_approved."
+        : overrideActive && !canOverride
+          ? "Overwriting approved parts needs imports.override_approved."
+          : !previewCurrent
+            ? "Preview the current ZIP and policy first."
+            : "";
 
   return (
     <div className="container-xxl py-3">
@@ -644,18 +786,18 @@ export default function UploadPackPage() {
         <div>
           <h4 className="mb-1">Import upload pack</h4>
           <div className="text-muted small">
-            Select a ZIP, choose an import policy, preview the exact redline, then apply it.
+            Select a ZIP, choose how it should be written, preview the exact redline, then apply it.
           </div>
         </div>
         {/* The policies decide what is filled, replaced or refused, so the page
             links straight at the chapter that spells that out. */}
         <a
           className="btn btn-sm btn-outline-secondary"
-          href="/help#import-what-each-policy-does"
+          href="/help#import-what-each-choice-does"
           target="_blank"
           rel="noreferrer"
         >
-          Help: what each policy does
+          Help: what each choice does
         </a>
       </div>
 
@@ -691,89 +833,108 @@ export default function UploadPackPage() {
           onChange={(event) => chooseFile(event.target.files)}
         />
 
-        <h6 className="mt-4">2. Select import policy</h6>
-        <div className="btn-group" role="group" aria-label="Import tier">
-          {(Object.keys(TIER_META) as Array<Exclude<Preset, "custom">>).map((tier) => {
-            const tierDisabled = tier === "unless_existing_approved" ? !canAdvanced : tier === "always" ? !canOverride : false;
-            const tierTone: Tone = tier === "always" ? "admin" : tier === "unless_existing_approved" ? "draft" : "safe";
-            return (
-              <button
-                key={tier}
-                type="button"
-                className={`btn ${preset === tier ? TONE_BUTTON[tierTone] : "btn-outline-secondary"}`}
-                disabled={tierDisabled}
-                onClick={() => applyPreset(tier)}
-              >
-                {TIER_META[tier].label}
-              </button>
-            );
-          })}
+        <h6 className="mt-4">2. Choose how the pack is written</h6>
+        <div className="btn-group" role="group" aria-label="Import mode">
+          {(Object.keys(TIER_META) as Tier[]).map((name) => (
+            <button
+              key={name}
+              type="button"
+              className={`btn ${
+                tier === name
+                  ? name === "overwrite"
+                    ? "btn-warning"
+                    : "btn-success"
+                  : "btn-outline-secondary"
+              }`}
+              disabled={name === "overwrite" && !canAdvanced}
+              onClick={() => applyTier(name)}
+            >
+              {TIER_META[name].label}
+            </button>
+          ))}
         </div>
         <div className="small text-muted mt-1">
-          {preset === "custom" ? "Custom — set via the advanced options below." : TIER_META[preset].hint}
+          {TIER_META[tier].hint}
+          {customised ? " (one or more categories adjusted below)" : ""}
         </div>
-        <div className={`alert ${TONE_ALERT[activeTone]} small mt-2 mb-0 fw-semibold`}>
-          {activeTone === "admin"
-            ? "Admin override active — existing approved parts will be overwritten if they differ."
-            : activeTone === "draft"
-              ? "Draft (unapproved) parts will be updated. Existing approved parts stay protected."
-              : "Safe: only blanks, empty BOMs and missing files are filled. Existing approved parts stay protected."}{" "}
-          Any uploader may import a new part that arrives already approved. Changing an
-          existing approved part — its properties, BOM or files — always needs the
-          override permission, regardless of policy.{" "}
+
+        <div className="form-check mt-2">
+          <input
+            className="form-check-input"
+            type="checkbox"
+            id="includeApproved"
+            checked={includeApproved}
+            disabled={!canOverride || tier === "add"}
+            onChange={(event) => setIncludeApproved(event.target.checked)}
+          />
+          <label className="form-check-label" htmlFor="includeApproved">
+            Also overwrite <strong>approved</strong> part/revisions
+            {!canOverride ? " (needs imports.override_approved)" : ""}
+          </label>
+        </div>
+
+        <div className={`alert ${toneAlert} small mt-2 mb-0`}>
+          {tone === "admin" ? (
+            <>
+              <strong>Approved data will be overwritten.</strong> Approved part/revisions this pack
+              describes are rewritten to match it — including their approval status, which is cleared
+              if the pack does not carry one.
+            </>
+          ) : tone === "draft" ? (
+            <>
+              <strong>Drafts are rewritten to match the pack.</strong> Properties the pack does not
+              carry are removed. Approved part/revisions stay untouched and are reported as blocked.
+            </>
+          ) : (
+            <>
+              <strong>Nothing existing is overwritten.</strong> Blanks, empty BOMs and missing files
+              are filled, and a release the pack carries is recorded on a draft. Approved
+              part/revisions stay untouched.
+            </>
+          )}{" "}
+          Approval always comes from the pack; TinyMRP never sets it.{" "}
           <a href="/help#what-counts-as-approved" target="_blank" rel="noreferrer">
-            How approval is read from the pack
+            How approval is read
           </a>
           .
         </div>
 
         <details className="mt-3">
-          <summary className="fw-semibold">Advanced: adjust properties, BOM and files individually</summary>
+          <summary className="fw-semibold">Advanced: set properties, BOM and files separately</summary>
           <div className="row g-3 mt-1">
             <PolicySelect
               id="dataMode"
               label="Properties"
-              help="Ordinary, custom and approval fields. Skip writes none of them. Approval follows this policy: any uploader may import a new part that is already approved, but changing one afterwards needs the override."
-              value={dataMode}
-              onChange={setDataMode}
-              options={[
-                { value: "skip", label: "Skip" },
-                { value: "fill_blanks", label: "Fill only", disabled: !canLowRisk },
-                { value: "replace_unapproved", label: "Update drafts", disabled: !canAdvanced },
-                { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
-              ]}
+              help="Ordinary, custom and approval fields. Overwriting also removes properties the pack does not carry."
+              value={categories.data}
+              canOverwrite={canAdvanced}
+              onChange={setDataCategory}
             />
             <PolicySelect
               id="bomMode"
               label="BOM"
-              help="Fill creates a whole BOM only when the exact parent/revision has none. Changing the BOM of an existing approved part needs the override."
-              value={bomMode}
-              onChange={setBomMode}
-              options={[
-                { value: "skip", label: "Skip" },
-                { value: "fill_if_empty", label: "Fill only", disabled: !canLowRisk },
-                { value: "replace_unapproved", label: "Update drafts", disabled: !canAdvanced },
-                { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
-              ]}
+              help="Add writes a BOM only when the exact parent/revision has none. Overwriting replaces the whole definition."
+              value={categories.bom}
+              canOverwrite={canAdvanced}
+              onChange={setBomCategory}
             />
             <PolicySelect
               id="fileMode"
               label="Files"
-              help="The same policy applies to managed deliverables and associated files. Replacing a file on an existing approved part needs the override. Files never create parts: anything not listed in the BOM is skipped and reported."
-              value={fileMode}
-              onChange={setFileMode}
-              options={[
-                { value: "skip", label: "Skip" },
-                { value: "add_missing", label: "Fill only", disabled: !canLowRisk },
-                { value: "replace_unapproved", label: "Update drafts", disabled: !canAdvanced },
-                { value: "replace_all", label: "Override approved (Admin)", disabled: !canOverride },
-              ]}
+              help="Deliverables and associated files. Overwriting replaces a file of the same identity; files the pack omits are never deleted."
+              value={categories.file}
+              canOverwrite={canAdvanced}
+              onChange={setFileCategory}
             />
+          </div>
+          <div className="form-text mt-2">
+            Sent as data_mode=<code>{dataMode}</code>, bom_mode=<code>{bomMode}</code>, file_mode=
+            <code>{fileMode}</code>, approval_mode=<code>{approvalMode}</code>.
           </div>
         </details>
 
-        <h6 className="mt-4">3. Preview changes &nbsp; 4. Apply import</h6>
-        <div className="d-flex gap-2 flex-wrap">
+        <h6 className="mt-4">3. Preview &nbsp; 4. Apply</h6>
+        <div className="d-flex gap-2 flex-wrap align-items-center">
           <button
             className="btn btn-outline-primary"
             type="button"
@@ -783,20 +944,26 @@ export default function UploadPackPage() {
             Preview changes
           </button>
           <button
-            className="btn btn-primary"
+            className={`btn ${tone === "admin" ? "btn-danger" : "btn-primary"}`}
             type="button"
-            disabled={
-              busy ||
-              !file ||
-              !(canLowRisk || canAdvanced) ||
-              (advancedSelected && !canAdvanced) ||
-              (overrideSelected && !canOverride)
-            }
-            onClick={() => submit(false)}
+            disabled={busy || !!applyBlockedReason}
+            onClick={() => {
+              if (destructive.approvedParts || destructive.removals) {
+                setConfirming(true);
+                return;
+              }
+              submit(false);
+            }}
           >
             Apply import
           </button>
-          {busy ? <span className="align-self-center text-muted small">Validating and planning…</span> : null}
+          {busy ? <span className="text-muted small">Validating and planning…</span> : null}
+          {!busy && applyBlockedReason ? (
+            <span className="text-muted small">{applyBlockedReason}</span>
+          ) : null}
+          {!busy && !applyBlockedReason ? (
+            <span className="text-success small">Preview is current — apply writes exactly what it shows.</span>
+          ) : null}
         </div>
         {busy || progress ? (
           <div className="progress mt-3" role="progressbar" aria-valuenow={progress}>
@@ -812,28 +979,91 @@ export default function UploadPackPage() {
         {error ? <div className="alert alert-danger mt-3 mb-0">{error}</div> : null}
       </div>
 
+      {confirming ? (
+        <div className="card border-danger p-3 mb-3">
+          <h6 className="text-danger mb-2">Confirm this import</h6>
+          <ul className="small mb-2">
+            {destructive.approvedParts ? (
+              <li>
+                <strong>{destructive.approvedParts}</strong> approved part/revision
+                {destructive.approvedParts === 1 ? "" : "s"} will be changed.
+              </li>
+            ) : null}
+            {destructive.removals ? (
+              <li>
+                <strong>{destructive.removals}</strong> value{destructive.removals === 1 ? "" : "s"},
+                BOM row{destructive.removals === 1 ? "" : "s"} or file{destructive.removals === 1 ? "" : "s"} will be
+                removed or overwritten.
+              </li>
+            ) : null}
+          </ul>
+          <div className="d-flex gap-2">
+            <button
+              className="btn btn-danger btn-sm"
+              type="button"
+              onClick={() => {
+                setConfirming(false);
+                submit(false);
+              }}
+            >
+              Yes, apply it
+            </button>
+            <button className="btn btn-outline-secondary btn-sm" type="button" onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {plan ? (
         <div className="card p-3">
-          <div className="d-flex justify-content-between align-items-start flex-wrap gap-2">
-            <div>
-              <h5 className="mb-1">{result?.dry_run ? "Preview redline" : "Applied import redline"}</h5>
-              <div className="small text-muted">
-                {plan.summary.parts} exact part/revisions · {plan.summary.changed} changed ·{" "}
-                {plan.summary.blocked} blocked
-              </div>
-              {overrideCounts.overriding || overrideCounts.needsAdmin ? (
-                <div className="small mt-1">
-                  {overrideCounts.overriding ? (
-                    <span className="badge text-bg-danger me-1">
-                      {overrideCounts.overriding} overriding approved
-                    </span>
-                  ) : null}
-                  {overrideCounts.needsAdmin ? (
-                    <span className="badge text-bg-warning">{overrideCounts.needsAdmin} need admin to override</span>
-                  ) : null}
-                </div>
+          {/* Whether anything was written is the first thing to read, so it is a
+              banner rather than a heading that changes wording. */}
+          <div className={`alert ${applied ? "alert-success" : "alert-warning"} d-flex flex-wrap gap-2 align-items-center`}>
+            <span className="fs-5 fw-semibold">
+              {applied ? "IMPORTED" : "PREVIEW"}
+            </span>
+            <span>
+              {applied ? (
+                <>
+                  {result?.metrics?.parts_created || 0} part(s) created,{" "}
+                  {result?.metrics?.parts_updated || 0} updated, {result?.metrics?.links_created || 0} BOM row(s),{" "}
+                  {result?.metrics?.files_written || 0} file(s) written,{" "}
+                  {result?.metrics?.files_discovered || 0} file record(s) reconciled.
+                </>
               ) : (
-                <div className="small text-success mt-1">No approved data is affected.</div>
+                <>Nothing has been written. This is what applying would do.</>
+              )}
+            </span>
+            <span className="ms-auto small text-muted">
+              {result?.zip}
+              {result?.received_at ? ` · ${result.received_at}` : ""}
+              {applied && result?.metrics?.operation_id ? ` · op ${result.metrics.operation_id.slice(0, 8)}` : ""}
+            </span>
+          </div>
+          {applied ? (
+            <div className="small text-muted mb-2">
+              To run another import, choose a ZIP and preview again.
+            </div>
+          ) : null}
+          {result?.previously_imported_operation_id ? (
+            <div className="alert alert-info small">
+              This exact pack and policy was already imported
+              {result.previously_imported_at ? ` on ${result.previously_imported_at}` : ""}. Running it
+              again is allowed and simply repeats it.
+            </div>
+          ) : null}
+
+          <div className="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div className="small text-muted">
+              {plan.summary.parts} exact part/revisions · {plan.summary.changed} changed ·{" "}
+              {plan.summary.blocked} blocked
+              {plan.summary.modified_approved ? (
+                <span className="badge text-bg-danger ms-2">
+                  {plan.summary.modified_approved} approved changed
+                </span>
+              ) : (
+                <span className="text-success ms-2">No approved data affected.</span>
               )}
             </div>
             <button
@@ -878,7 +1108,7 @@ export default function UploadPackPage() {
               </div>
               <div className="mb-2">
                 SolidWorks exports virtual components under their parent, so several rows can share
-                one part number. Pick which row to keep, then preview again.
+                one part number. The first row is kept unless you pick another, then preview again.
               </div>
               {plan.duplicates.map((dup) => {
                 const key = `${dup.part_number}␟${dup.revision}`;
@@ -912,26 +1142,7 @@ export default function UploadPackPage() {
             </div>
           ) : null}
 
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <div className="btn-group btn-group-sm" role="group" aria-label="Redline filter">
-              {(
-                [
-                  ["all", "All"],
-                  ["changed", "Changed"],
-                  ["blocked", "Blocked"],
-                  ["modified_approved", "Modified approved"],
-                ] as Array<[Filter, string]>
-              ).map(([name, label]) => (
-                <button
-                  key={name}
-                  type="button"
-                  className={`btn ${filter === name ? "btn-secondary" : "btn-outline-secondary"}`}
-                  onClick={() => setFilter(name)}
-                >
-                  {label} <span className="badge text-bg-light text-muted">{tabCounts[name]}</span>
-                </button>
-              ))}
-            </div>
+          <div className="d-flex flex-wrap align-items-center gap-2 my-3">
             <input
               type="search"
               className="form-control form-control-sm"
@@ -956,26 +1167,86 @@ export default function UploadPackPage() {
                 All rows
               </button>
             </div>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              onClick={() =>
+                setOpenGroups(Object.fromEntries(GROUPS.map((group) => [group.key, true])))
+              }
+            >
+              Expand all groups
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              onClick={() =>
+                setOpenGroups(Object.fromEntries(GROUPS.map((group) => [group.key, false])))
+              }
+            >
+              Collapse all
+            </button>
           </div>
 
           <div className="d-flex flex-column gap-2">
-            {visibleParts.map((part) => (
-              <PartRedline
-                key={`${part.part_number}:${part.revision}`}
-                part={part}
-                changedOnly={changedOnly}
-              />
-            ))}
-            {!visibleParts.length ? (
-              <div className="text-muted small">
-                {search.trim()
-                  ? "No parts match this search in the selected tab."
-                  : filter === "modified_approved"
-                    ? "No approved parts are altered by this import."
-                    : `No parts are ${filter === "blocked" ? "blocked" : "changed"} by this import.`}
-              </div>
+            {GROUPS.map((group) => {
+              const parts = groups[group.key];
+              const total = totals[group.key];
+              if (!total) return null;
+              return (
+                <details
+                  key={group.key}
+                  className={`border rounded ${group.tone}`}
+                  open={openGroups[group.key]}
+                  onToggle={(event) =>
+                    setOpenGroups((prev) => ({
+                      ...prev,
+                      [group.key]: (event.currentTarget as HTMLDetailsElement).open,
+                    }))
+                  }
+                >
+                  <summary className="px-2 py-2 d-flex flex-wrap align-items-center gap-2">
+                    <strong>{group.title}</strong>
+                    <span className="badge text-bg-secondary">{total}</span>
+                    <span className="small text-muted">{group.hint}</span>
+                  </summary>
+                  <div className="p-2 d-flex flex-column gap-2">
+                    {parts.length ? (
+                      parts.map((part) => (
+                        <PartRedline
+                          key={`${part.part_number}:${part.revision}`}
+                          part={part}
+                          changedOnly={changedOnly}
+                          applied={applied}
+                        />
+                      ))
+                    ) : (
+                      <div className="text-muted small">No part in this group matches the search.</div>
+                    )}
+                  </div>
+                </details>
+              );
+            })}
+            {!plan.parts.length ? (
+              <div className="text-muted small">This pack describes no part/revisions.</div>
             ) : null}
           </div>
+
+          {result?.warnings?.length ? (
+            <details className="mt-3 border-top pt-3">
+              <summary className="fw-semibold text-warning-emphasis">
+                Warnings ({result.warnings.length})
+              </summary>
+              <ul className="small mt-2 mb-0">
+                {result.warnings.map((warning, index) => (
+                  <li key={index}>
+                    {typeof warning === "string"
+                      ? warning
+                      : `${warning.stage ? `${warning.stage}: ` : ""}${warning.message || ""}`}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
 
           <details className="mt-3 border-top pt-3">
             <summary className="fw-semibold">Advanced details</summary>

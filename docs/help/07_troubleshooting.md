@@ -57,16 +57,19 @@ ignored.
 
 ## The import did nothing / did too much
 
-1. **Check the three policies.** Properties, BOM and Files are independent. All
-   three set to *Skip* writes nothing at all.
-2. **Preview first.** The redline lists every intended change before anything
-   is written. If the preview is empty, applying will also do nothing.
-3. **Look for "blocked".** Blocked rows are changes your policy or permissions
-   would not allow — most often an attempt to modify an existing approved part
-   without the override permission.
-4. **Check *skipped* against the Reason column.** *Fill only* deliberately keeps
-   any value that is not empty. See
-   [Import: what each policy does](#import-what-each-policy-does) for the full
+1. **Check which choice you made.** *Add* never overwrites; *Overwrite* makes
+   the part match the pack, removing what the pack does not carry. The advanced
+   panel can also have a category set to *Skip*.
+2. **Preview first.** The redline lists every intended change before anything is
+   written, and Apply only unlocks while that preview still matches.
+3. **Look for "blocked".** Blocked rows are changes your choice or permissions
+   would not allow — most often an approved part without the “also approved”
+   tick.
+4. **Check *skipped* against the Reason column.** *Add* deliberately keeps any
+   value that is not empty.
+5. **A screen full of *clear* rows** means you are overwriting with a partial
+   pack: it removes everything it omits. Use *Add* for partial packs. See
+   [Import: what each choice does](#import-what-each-choice-does) for the full
    matrix and an exercise that reproduces each case.
 
 ## An import says I lack permission
@@ -77,8 +80,8 @@ usual ones:
 | Missing | Means |
 | --- | --- |
 | `imports.execute_low_risk` | You may preview but not apply |
-| `imports.execute_approved` | The plan replaces existing draft data |
-| `imports.override_approved` | The plan changes an existing **approved** part |
+| `imports.execute_approved` | The plan overwrites data, or records a release |
+| `imports.override_approved` | The plan changes an existing **approved** part (the tick) |
 
 The last is deliberate: creating an approved part is allowed for any uploader,
 changing one is not.

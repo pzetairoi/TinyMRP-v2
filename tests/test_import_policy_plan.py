@@ -158,6 +158,142 @@ def test_fill_only_never_alters_an_approved_target(app, tmp_path):
         _run(data, dry_run=False, permissions={"imports.override_approved"})
 
 
+def test_overwrite_removes_properties_the_pack_does_not_carry(app):
+    """Overwrite means the pack wins outright, not "merge on top".
+
+    An operator choosing overwrite is told the stored part will end up as the
+    pack describes it. Leaving a stale material behind because this export
+    stopped carrying that column would quietly contradict that.
+    """
+
+    Part(
+        part_number="PLAN-WIPE-DATA",
+        revision="A",
+        description="Old description",
+        attrs={
+            "material": "Steel",
+            # An alias of the same logical field as "finish": both must go.
+            "treatment": "zinc",
+            "cost": "10.00",
+            # Never restorable from a CAD pack, so never wiped.
+            "seed": "upload-pack",
+            "cad_ref": "SW-1234",
+            "notes": "Written in TinyMRP",
+        },
+    ).save()
+    data = _pack([{"partnumber": "PLAN-WIPE-DATA", "revision": "A", "material": "Aluminium"}])
+
+    preview = _run(data, data_mode="replace_all", approval_mode="replace_all")
+    rows = {item["field_id"]: item for item in preview["plan"]["parts"][0]["properties"]}
+    assert rows["material"]["action"] == "replace"
+    assert rows["finish"]["action"] == "clear"
+    assert rows["cost"]["action"] == "clear"
+    assert rows["description"]["action"] == "clear"
+    assert "seed" not in rows and "cad_ref" not in rows and "notes" not in rows
+    assert "parts.update" in preview["plan"]["required_permissions"]
+
+    _run(data, dry_run=False, data_mode="replace_all", approval_mode="replace_all")
+    part = Part.objects.get(part_number="PLAN-WIPE-DATA", revision="A")
+    assert part.attrs["material"] == "Aluminium"
+    assert "treatment" not in part.attrs and "finish" not in part.attrs
+    assert "cost" not in part.attrs
+    assert part.description == ""
+    # Kept: TinyMRP's own bookkeeping and annotations.
+    assert part.attrs["cad_ref"] == "SW-1234"
+    assert part.attrs["notes"] == "Written in TinyMRP"
+    assert part.attrs["seed"]
+    # A part must never be left without a unit of measure.
+    assert part.uom == "EA"
+
+
+def test_overwrite_never_empties_a_part_the_pack_only_lists_as_a_child(app):
+    """A TREEBOM row is a reference, not a definition.
+
+    Children that appear only in the tree carry no properties at all. Wiping
+    them would mean that listing a part as a child empties it, which is a side
+    effect of the BOM rather than anything the pack said about that part.
+    """
+
+    Part(part_number="PLAN-KEEP-CHILD", revision="B", attrs={"material": "Steel"}).save()
+    data = _pack(
+        [{"partnumber": "PLAN-WIPE-PARENT", "revision": "A", "material": "Assembly"}],
+        [
+            ("1", "PLAN-WIPE-PARENT", "A", 1),
+            ("1.1", "PLAN-KEEP-CHILD", "B", 2),
+        ],
+    )
+
+    preview = _run(data, data_mode="replace_all", bom_mode="replace_all", approval_mode="replace_all")
+    child = next(
+        item for item in preview["plan"]["parts"] if item["part_number"] == "PLAN-KEEP-CHILD"
+    )
+    assert not any(item["action"] == "clear" for item in child["properties"])
+    assert not child["changed"]
+
+    _run(data, dry_run=False, data_mode="replace_all", bom_mode="replace_all", approval_mode="replace_all")
+    assert Part.objects.get(part_number="PLAN-KEEP-CHILD", revision="B").attrs["material"] == "Steel"
+
+
+def test_removals_are_blocked_on_approved_targets_without_the_override(app):
+    Part(
+        part_number="PLAN-WIPE-APPROVED",
+        revision="A",
+        attrs={"approved_by": "QA", "material": "Steel", "cost": "10.00"},
+    ).save()
+    data = _pack([{"partnumber": "PLAN-WIPE-APPROVED", "revision": "A", "material": "Steel"}])
+
+    drafts = _run(data, data_mode="replace_unapproved", approval_mode="import_unapproved")
+    cost = next(
+        item for item in drafts["plan"]["parts"][0]["properties"] if item["field_id"] == "cost"
+    )
+    assert cost["action"] == "blocked"
+    assert cost["after"] == "10.00"
+
+    _run(data, dry_run=False, data_mode="replace_unapproved", approval_mode="import_unapproved")
+    assert Part.objects.get(part_number="PLAN-WIPE-APPROVED", revision="A").attrs["cost"] == "10.00"
+
+
+def test_fill_only_never_removes_anything(app):
+    Part(
+        part_number="PLAN-FILL-KEEPS",
+        revision="A",
+        attrs={"material": "Steel", "cost": "10.00"},
+    ).save()
+    data = _pack([{"partnumber": "PLAN-FILL-KEEPS", "revision": "A", "material": "Aluminium"}])
+
+    preview = _run(data, permissions=LOW, data_mode="fill_blanks")
+    assert not any(
+        item["action"] == "clear" for item in preview["plan"]["parts"][0]["properties"]
+    )
+
+    _run(data, dry_run=False, permissions=LOW, data_mode="fill_blanks")
+    part = Part.objects.get(part_number="PLAN-FILL-KEEPS", revision="A")
+    assert part.attrs["cost"] == "10.00"
+    assert part.attrs["material"] == "Steel"
+
+
+def test_preview_carries_a_thumbnail_for_the_parts_it_plans(app):
+    """The redline names parts that do not exist yet, so nothing can be fetched.
+
+    The pack's own PNG is the only image available at preview time, and a
+    reviewer identifying a part by number alone is guessing.
+    """
+
+    import io as _io
+
+    from PIL import Image
+
+    buffer = _io.BytesIO()
+    Image.new("RGB", (240, 240), "teal").save(buffer, format="PNG")
+    data = _pack(
+        [{"partnumber": "PLAN-THUMB", "revision": "A"}],
+        files={"deliverables/png/PLAN-THUMB_REV_A.png": buffer.getvalue()},
+    )
+
+    entry = _run(data, permissions=LOW)["plan"]["parts"][0]
+    assert entry["preview"].startswith("data:image/png;base64,")
+
+
 def test_overriding_one_approval_field_keeps_the_other_two(app):
     """The apply must store exactly the approval the redline showed.
 

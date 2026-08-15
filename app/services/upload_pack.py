@@ -68,6 +68,27 @@ _TOP_LEVEL_FIELDS = {
     "manufacturer": "manufacturer",
     "mfr_part": "mfr_part",
 }
+# Overwrite means the pack wins outright: a property the pack does not carry is
+# removed rather than left behind, so what is stored is the last thing that came
+# in and nothing else. These keys are the exception, because nothing in a CAD
+# pack can restore them:
+#   seed                  - which import created the record
+#   cad_ref, numbering_*  - written when a part number is allocated in TinyMRP
+#   notes, comments*      - annotations, which on older parts still live in attrs
+# The three approval fields are absent on purpose: they are governed by the
+# approval policy, so the property wipe must never reach them.
+_PRESERVED_ATTR_KEYS = {
+    "seed",
+    "cad_ref",
+    "numbering_scheme_id",
+    "notes",
+    "comments",
+    "comments_search",
+}
+# Cleared with everything else would leave a part with no unit at all, and no
+# CAD pack omits it in practice.
+_UNCLEARABLE_FIELDS = {"uom"}
+_REPLACE_DATA_MODES = {"replace_unapproved", "replace_all"}
 _DELIVERABLE_GROUPS = {
     "png",
     "pdf",
@@ -194,6 +215,43 @@ def _deliverable_identity(filename: str) -> tuple[str, str, bool] | None:
         return None
     pn = clean_pn(base[:marker])
     return (pn, clean_rev(base[marker + 5 :]), drawing) if pn else None
+def _png_data_uri(payload: bytes, size: int) -> str:
+    """Downscale a packed PNG to an inline data URI, or return nothing."""
+
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(payload)) as image:
+            image = image.convert("RGBA")
+            image.thumbnail((size, size))
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG", optimize=True)
+    except Exception:
+        return ""
+    encoded = __import__("base64").b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def _packed_preview(
+    files: list[dict[str, Any]],
+    pair: tuple[str, str] | None,
+) -> bytes | None:
+    if not pair:
+        return None
+    source = next(
+        (
+            item
+            for item in files
+            if item["kind"] == "managed"
+            and item["pair"] == pair
+            and item["identity"][0] == "png"
+            and not item["identity"][2]
+        ),
+        None,
+    )
+    return source["bytes"] if source else None
+
+
 def _root_preview_data_uri(
     files: list[dict[str, Any]],
     root: tuple[str, str] | None,
@@ -205,33 +263,49 @@ def _root_preview_data_uri(
     outlive the thumbnails that an applied import generates.
     """
 
-    if not root:
-        return ""
-    source = next(
-        (
-            item
-            for item in files
-            if item["kind"] == "managed"
-            and item["pair"] == root
-            and item["identity"][0] == "png"
-            and not item["identity"][2]
-        ),
-        None,
-    )
-    if source is None:
-        return ""
-    try:
-        from PIL import Image
+    payload = _packed_preview(files, root)
+    return _png_data_uri(payload, 160) if payload else ""
 
-        with Image.open(io.BytesIO(source["bytes"])) as image:
-            image = image.convert("RGBA")
-            image.thumbnail((160, 160))
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG", optimize=True)
-    except Exception:
-        return ""
-    encoded = __import__("base64").b64encode(buffer.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
+
+def _attach_part_previews(
+    public: dict[str, Any],
+    parsed_package: dict[str, Any],
+    *,
+    size: int = 56,
+    budget_bytes: int = 1_500_000,
+) -> None:
+    """Give each planned part the thumbnail the pack carries for it.
+
+    Reading a redline of thirty parts by part number alone is guesswork, and
+    the parts that matter most are exactly the ones that do not exist yet, so
+    there is no stored thumbnail to fetch. The bytes are already in memory from
+    the parse, so this only costs a downscale.
+
+    Parts with an effect come first and a byte budget caps the response, so a
+    pack with hundreds of parts degrades to "the interesting ones have
+    pictures" instead of a response nobody can download.
+    """
+
+    files = parsed_package.get("files") or []
+    if not files:
+        return
+    ordered = sorted(
+        public["parts"],
+        key=lambda item: (
+            not (item["blocked"] or item["changed"]),
+            item["target_state"] != "new",
+        ),
+    )
+    spent = 0
+    for entry in ordered:
+        payload = _packed_preview(files, (entry["part_number"], entry["revision"]))
+        if not payload or spent >= budget_bytes:
+            continue
+        uri = _png_data_uri(payload, size)
+        if not uri:
+            continue
+        spent += len(uri)
+        entry["preview"] = uri
 
 
 def _claim_pair(
@@ -409,6 +483,9 @@ def parse_import_package(
         "treebom_parse_count": 0,
     }
     parts: dict[tuple[str, str], dict[str, Any]] = {}
+    # Identities the FLATBOM describes, as opposed to those a TREEBOM row merely
+    # referenced. Only the former may be overwritten wholesale.
+    property_pairs: set[tuple[str, str]] = set()
     # Rows whose identity collides with one already accepted; the operator picks
     # the winner rather than the import failing or silently keeping the last row.
     duplicates: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -457,6 +534,11 @@ def parse_import_package(
                     duplicates.setdefault(key, [parts[key]]).append(normalized)
                     continue
                 parts[key] = normalized
+                # Only these identities are described by the pack. Parts that
+                # exist solely because a TREEBOM row referenced them are not,
+                # which is what keeps an overwrite from emptying a child the
+                # pack never claimed to define.
+                property_pairs.add(key)
         if tree_names:
             diagnostics["treebom_parse_count"] = 1
             text = zf.read(safe_infos[tree_names[0]]).decode("utf-8-sig", errors="replace")
@@ -606,6 +688,7 @@ def parse_import_package(
     return {
         "filename": filename,
         "parts": parts,
+        "property_pairs": property_pairs,
         "links": links,
         "files": files,
         "root": root,
@@ -811,6 +894,69 @@ def _logical_incoming(
                 "top_level": attribute,
             }
     return values
+def _logical_surplus(
+    part: Part | None,
+    incoming: dict[str, dict[str, Any]],
+    aliases: dict[str, str],
+    fields: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Stored properties the pack does not carry, as removal rows.
+
+    Only consulted when the Properties policy is an overwrite. Each row names
+    one logical field, so the apply can drop every column that feeds it -- a
+    part holding both ``treatment`` and ``finish`` loses both when the pack
+    carries neither.
+    """
+
+    if part is None:
+        return []
+    surplus: dict[str, dict[str, Any]] = {}
+    for raw_key, value in (part.attrs or {}).items():
+        normalized_key = canonical_attr_key(raw_key)
+        if normalized_key in _IDENTITY_KEYS or normalized_key in _PRESERVED_ATTR_KEYS:
+            continue
+        field_id = aliases.get(normalized_key, normalized_key)
+        if (
+            field_id in _APPROVAL_FIELDS
+            or field_id in _UNCLEARABLE_FIELDS
+            or field_id in incoming
+            or field_id in surplus
+            or not _has_value(value)
+        ):
+            continue
+        field = fields.get(field_id) or {}
+        surplus[field_id] = {
+            "field_id": field_id,
+            "label": field.get("label") or str(raw_key),
+            "source_key": "",
+            "value": value,
+            "write_key": field_id,
+            "top_level": _TOP_LEVEL_FIELDS.get(field_id),
+        }
+    for field_id, attribute in _TOP_LEVEL_FIELDS.items():
+        if field_id in incoming or field_id in surplus or field_id in _UNCLEARABLE_FIELDS:
+            continue
+        value = getattr(part, attribute, None)
+        if not _has_value(value):
+            continue
+        field = fields.get(field_id) or {}
+        surplus[field_id] = {
+            "field_id": field_id,
+            "label": field.get("label") or field_id.replace("_", " ").title(),
+            "source_key": "",
+            "value": value,
+            "write_key": field_id,
+            "top_level": attribute,
+        }
+    return sorted(surplus.values(), key=lambda item: item["field_id"])
+
+
+def _surplus_action(mode: str, state: str) -> tuple[str, str]:
+    if state == "existing_approved" and mode != "replace_all":
+        return "blocked", "Overwrite does not alter approved targets."
+    return "clear", "Overwrite: the pack does not carry this property."
+
+
 def _existing_logical(
     part: Part | None,
     incoming: dict[str, Any],
@@ -1086,7 +1232,8 @@ def build_import_plan(
             else "existing_unapproved"
         )
         properties = []
-        for field_id, incoming in sorted(_logical_incoming(normalized, aliases, fields).items()):
+        incoming_fields = _logical_incoming(normalized, aliases, fields)
+        for field_id, incoming in sorted(incoming_fields.items()):
             before = _existing_logical(existing_part, incoming, aliases)
             action, reason = _property_action(
                 options["data_mode"],
@@ -1117,6 +1264,33 @@ def build_import_plan(
                     "reason": reason,
                 }
             )
+        # An overwrite means the pack wins outright, so anything it does not
+        # carry goes. Only a part the pack actually describes can be wiped: a
+        # part that reached the plan through a TREEBOM row alone carries no
+        # properties, and emptying it would be a side effect of listing it as a
+        # child rather than an instruction from the pack.
+        if (
+            options["data_mode"] in _REPLACE_DATA_MODES
+            and pair in parsed_package.get("property_pairs", set())
+        ):
+            for surplus in _logical_surplus(existing_part, incoming_fields, aliases, fields):
+                action, reason = _surplus_action(options["data_mode"], state)
+                properties.append(
+                    {
+                        "field_id": surplus["field_id"],
+                        "label": surplus["label"],
+                        "source_key": "",
+                        "write_key": surplus["write_key"],
+                        "top_level": surplus["top_level"],
+                        "raw_values": {},
+                        "alias_conflicts": {},
+                        "before": _json_value(surplus["value"]),
+                        "after": _json_value(surplus["value"]) if action == "blocked" else "",
+                        "action": action,
+                        "reason": reason,
+                    }
+                )
+            properties.sort(key=lambda item: item["field_id"])
         approval, approval_warnings = _approval_rows(
             existing_part,
             normalized.get("attrs") or {},
@@ -1342,9 +1516,19 @@ def _public_plan(
 def _apply_properties(part: Part, entry: dict[str, Any], aliases: dict[str, str]) -> None:
     attrs = normalize_record_attrs(dict(part.attrs or {}))
     for change in entry["properties"]:
-        if change["action"] not in {"add", "replace"}:
+        if change["action"] not in {"add", "replace", "clear"}:
             continue
         field_id = change["field_id"]
+        if change["action"] == "clear":
+            # Every column feeding this field goes, not just the canonical one.
+            attrs = {
+                key: value
+                for key, value in attrs.items()
+                if aliases.get(canonical_attr_key(key), canonical_attr_key(key)) != field_id
+            }
+            if change.get("top_level"):
+                setattr(part, change["top_level"], "")
+            continue
         if field_id == "process":
             for raw_key, value in change.get("raw_values", {}).items():
                 attrs[raw_key] = value
@@ -1949,6 +2133,7 @@ def import_upload_pack(
     config = get_field_config()
     plan = build_import_plan(parsed, state, options, config)
     public = _public_plan(plan, actor_permissions=actor_permissions)
+    _attach_part_previews(public, parsed)
     if actor_permissions is not None:
         preview_missing = {"imports.preview"} - set(actor_permissions)
         if dry_run and preview_missing:

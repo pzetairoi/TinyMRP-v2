@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Build the import-policy exercise packs from the checked-in CV03 sample.
 
-The Import page has three independent policies (Properties, BOM, Files), four
-levels each, and an approval rule that cuts across all of them. Reading the
-matrix is not the same as seeing it happen, so this generator produces a series
-of upload packs that walk one small assembly through a realistic engineering →
-manufacturing → purchasing → release → change-request flow. Every pack is a
-step in that story, and each step is chosen to make one policy behave visibly
-differently from the next.
+The Import page offers two choices -- add without overwriting, or let the pack
+win -- plus a tick for approved part/revisions. Reading that is not the same as
+seeing it happen, so this generator produces a series of upload packs that walk
+one small assembly through a realistic engineering -> manufacturing ->
+purchasing -> release -> change-request flow. Every pack is a step in that
+story, and each step is chosen to make one choice behave visibly differently
+from the next.
 
 The part data (descriptions, materials, processes, masses, sheet-metal figures)
 and every deliverable byte come from the owner-approved CV03-TR-A01 fixture in
@@ -23,7 +23,7 @@ Usage::
 Then upload the numbered ZIPs in order on the Import page. The generated
 README.md in the output folder repeats the story and the expected outcome of
 each step; the full explanation is in the app help, chapter "Import: what each
-policy actually does".
+choice does".
 """
 
 from __future__ import annotations
@@ -64,6 +64,22 @@ ALIAS_DUPLICATES = (
     "Weight",  # -> mass
     "oem_data_sheet",  # -> datasheet
     "oem_part_number",  # -> oem_partnumber
+)
+# The sheet-metal block a SolidWorks template exports for a folded part. Step 4
+# drops it to show what an overwrite does with a column the pack stopped
+# carrying: the stored value goes, rather than lingering forever.
+SHEET_METAL_COLUMNS = (
+    "SM-Length",
+    "SM-Width",
+    "SM-Thickness",
+    "SM-Area",
+    "SM-Area-Blank",
+    "SM-CuttingLength-Outer",
+    "SM-CuttingLength-Inner",
+    "SM-CutOuts",
+    "SM-Bends",
+    "SM-BendAllowance",
+    "SM-BendRadius",
 )
 
 
@@ -185,6 +201,7 @@ class Builder:
         *,
         revision: str | None = None,
         blanks: Iterable[str] = (),
+        drop: Iterable[str] = (),
         only: Iterable[str] | None = None,
         **overrides: Any,
     ) -> dict[str, Any]:
@@ -192,7 +209,12 @@ class Builder:
 
         ``only`` restricts the row to identity plus the named keys, which is
         how a later step in the story carries just the handful of values that
-        department actually owns instead of resending the whole record.
+        department actually owns instead of resending the whole record. Such a
+        partial pack is safe to *add* and destructive to *overwrite* -- which
+        is a lesson of the exercise rather than an accident.
+
+        ``drop`` removes columns from an otherwise complete row, which is what
+        a CAD template that stopped exporting a property looks like.
         """
 
         spec = self.spec(key)
@@ -215,6 +237,8 @@ class Builder:
             row[name] = ""
         for name in blanks:
             row[name] = ""
+        for name in drop:
+            row.pop(name, None)
         row.update(overrides)
         if only is not None:
             keep = {"partnumber", "revision", *APPROVAL_KEYS, *only, *overrides}
@@ -224,7 +248,6 @@ class Builder:
     def released_row(self, key: str, approver: str, date: str, **overrides: Any) -> dict[str, Any]:
         return self.row(
             key,
-            only=(),
             approved="Yes",
             ApprovedBy=approver,
             ApprovedDate=date,
@@ -232,20 +255,25 @@ class Builder:
         )
 
     def story_row(self, key: str, **overrides: Any) -> dict[str, Any]:
-        """A row for a step that runs AFTER the parts were released.
+        """A complete row for a step that runs AFTER the parts were released.
 
-        A row whose approval columns are empty is not "no opinion": under
-        Override approved an empty column wins like any other value and strips
-        the approval off the part. Steps that only mean to change data
-        therefore resend the approval step 4 established. Step 10 is the one
-        that deliberately leaves it out, so the damage is visible on purpose.
+        Complete on purpose: overwriting means the pack wins outright, so a
+        step that resends only a couple of columns would delete everything
+        else. A CAD re-export carries the whole record, and so do these.
+
+        The approval columns carry what step 4 established for the same
+        reason: an empty approval column is not "no opinion", and under the
+        approved override it strips the approval off the part. The last step
+        is the one that deliberately leaves it out, so the damage is visible.
         """
 
         approver, date = STORY_APPROVAL.get(key, ("", ""))
-        if not approver:
-            return self.row(key, only=(), **overrides)
-        approval = {"approved": "Yes", "ApprovedBy": approver, "ApprovedDate": date}
-        return self.row(key, only=(), **{**approval, **overrides})
+        approval = {
+            "approved": "Yes" if approver else "",
+            "ApprovedBy": approver,
+            "ApprovedDate": date,
+        }
+        return self.row(key, **{**approval, **overrides})
 
     # -- archive ----------------------------------------------------------
     def write(self, pack: Pack, out_dir: Path) -> Path:
@@ -343,7 +371,7 @@ def build_packs(builder: Builder) -> list[Pack]:
                 }
             ],
             expectations=[
-                "Every part is New, so Fill only creates all 7 parts, the BOM and every file.",
+                "Every part is New, so Add creates all 7 parts, the BOM and every file.",
                 "Required permissions: parts.create, bom.update, files.add, imports.execute_low_risk.",
                 "An Engineering user can run this step; nothing here needs the override.",
                 f"{pn('P01')} gets two PNG rows: the preview and the _DWG drawing screenshot.",
@@ -362,7 +390,7 @@ def build_packs(builder: Builder) -> list[Pack]:
                 "Process engineering sets the lead times, gives one part the "
                 "finish that was left empty, and wants to correct the material "
                 "and description of another. The parts are still drafts, so this "
-                "is where Fill only and Update drafts stop behaving the same."
+                "is where Add and Overwrite stop behaving the same."
             ),
             rows=[
                 builder.row(
@@ -370,7 +398,7 @@ def build_packs(builder: Builder) -> list[Pack]:
                     only=("description", "material", "finish", "leadtime"),
                     # Blank in step 1 → any policy above Skip fills this.
                     leadtime="10",
-                    # NOT blank in step 1 → only Update drafts replaces these.
+                    # NOT blank in step 1 -> only an overwrite replaces these.
                     finish="zinc plate",
                     material="MS PLATE GRADE 250",
                     description="75x50x4 CHANNEL 1925 A (rolled)",
@@ -387,12 +415,12 @@ def build_packs(builder: Builder) -> list[Pack]:
             ],
             tree=full_tree,
             expectations=[
-                "Fill only: every lead time is added and P02 gets its finish; the new "
-                "material, description and P01/F01's finish are skipped because those "
-                "fields already hold a value.",
-                "Update drafts: the same blanks are filled AND material, description and "
-                "finish are replaced — which needs imports.execute_approved, so plain "
-                "Engineering cannot run it.",
+                "Add: every lead time is added and P02 gets its finish; the new material, "
+                "description and P01/F01's finish are skipped because those fields already "
+                "hold a value.",
+                "This is a PARTIAL pack: it carries four columns, not a whole record. "
+                "Preview it with Overwrite to see what that would do — every other property "
+                "is listed as 'clear'. Look, then go back to Add before applying.",
                 "The BOM is identical to step 1, so the BOM section reports 'unchanged'.",
                 "No files travel in this pack; with Files on anything but Skip the plan "
                 "still lists the deliverables it re-discovered in storage.",
@@ -461,14 +489,15 @@ def build_packs(builder: Builder) -> list[Pack]:
                 }
             ],
             expectations=[
-                "Supplier, supplier part number, distributor and cost are blank, so every "
-                "policy above Skip adds them.",
-                f"Lead time on {pn('P01')} is already 10 from step 2: Fill only keeps 10, "
-                "Update drafts overwrites it with 21.",
+                "Supplier, supplier part number, distributor and cost are blank, so Add "
+                "fills them in.",
+                f"Lead time on {pn('P01')} is already 10 from step 2: Add keeps 10. Only an "
+                "overwrite would replace it with 21 — and this pack is partial too, so "
+                "preview it before deciding.",
                 "The datasheet PDF is matched to its owner through the datasheet attribute, "
                 "not through its file name.",
                 f"deliverables/pdf/{stem('P01')}.PDF is the SAME file identity as the step-1 "
-                "PDF: Fill only skips it, Update drafts replaces it.",
+                "PDF: Add skips it, an overwrite replaces it.",
                 "The supplier quote in extra/ is a new associated file, not a replacement.",
             ],
         )
@@ -478,33 +507,43 @@ def build_packs(builder: Builder) -> list[Pack]:
     packs.append(
         Pack(
             order=4,
-            slug="engineering_release_approved",
-            title="Engineering releases: approval arrives",
+            slug="full_reexport_overwrite",
+            title="A full re-export, written with Overwrite",
             story=(
-                "The drawings are signed off. The same identities come back "
-                "carrying an approver and an approval date. This is the step that "
-                "makes everything afterwards behave differently."
+                "Engineering re-exports the whole assembly from CAD after "
+                "correcting it. This is a COMPLETE record, which is what makes "
+                "it safe to overwrite with: whatever it does not carry is meant "
+                "to be gone. The template also stopped exporting the sheet-metal "
+                "block, so those properties disappear."
             ),
             rows=[
-                builder.released_row("P01", "FQ", "13/10/24"),
-                builder.released_row("P02", "FQ", "13/10/24"),
-                builder.released_row("P03", "FQ", "13/10/24"),
-                builder.released_row("F01", "FQ", "14/10/24"),
-                # No status column at all — an approver name alone approves it.
-                builder.row("B01", only=(), ApprovedBy="Purchasing"),
-                # Stays a draft: explicit "No" beats everything else.
-                builder.row("A01", only=(), approved="No"),
+                builder.row(
+                    "P01",
+                    drop=SHEET_METAL_COLUMNS,
+                    description="75x50x4 CHANNEL 1925 A (rolled edge)",
+                    mass="9.4",
+                ),
+                builder.row("P02", drop=SHEET_METAL_COLUMNS),
+                builder.row("P03", drop=SHEET_METAL_COLUMNS),
+                builder.row("F01"),
+                builder.row("A01"),
+                builder.row("B01"),
+                builder.row("B02"),
             ],
             tree=full_tree,
             expectations=[
-                "Fill only leaves approval alone: the approval rows read 'skipped — Approval "
-                "policy preserves existing approval fields'.",
-                "Update drafts applies the approval, because these targets are still drafts.",
-                f"{pn('B01')} shows that an approver name with no status column still counts "
-                "as approved.",
-                f"{pn('A01')} stays a draft: an explicit No wins over anything else in the row.",
-                "After applying this with Update drafts, four parts are approved and the rest "
-                "of the exercise needs the override.",
+                "Run this one with Overwrite. The parts are still drafts, so no tick is "
+                "needed and Engineering can do it.",
+                f"{pn('P01')}: the description and mass are replaced with the corrected "
+                "values, and the finish added in step 2 survives because this pack carries "
+                "it too.",
+                "The SM-* properties the template no longer exports are listed as 'clear' "
+                "and are removed — that is the overwrite rule doing its job.",
+                "The cost and lead time added in steps 2 and 3 are also cleared: this pack "
+                "does not carry those columns. That is the whole point of overwrite, and the "
+                "reason a partial pack must never be applied this way.",
+                "Nothing that came from TinyMRP itself is touched: an allocated part number "
+                "reference and any notes survive.",
             ],
         )
     )
@@ -513,6 +552,40 @@ def build_packs(builder: Builder) -> list[Pack]:
     packs.append(
         Pack(
             order=5,
+            slug="engineering_release_approved",
+            title="Engineering releases: approval arrives",
+            story=(
+                "The drawings are signed off in CAD and PDM. The same identities "
+                "come back carrying an approver and an approval date. Approval is "
+                "never set inside TinyMRP: it only ever arrives this way."
+            ),
+            rows=[
+                builder.released_row("P01", "FQ", "13/10/24"),
+                builder.released_row("P02", "FQ", "13/10/24"),
+                builder.released_row("P03", "FQ", "13/10/24"),
+                builder.released_row("F01", "FQ", "14/10/24"),
+                # No status column at all — an approver name alone approves it.
+                builder.row("B01", ApprovedBy="Purchasing"),
+                # Stays a draft: explicit "No" beats everything else.
+                builder.row("A01", approved="No"),
+            ],
+            tree=full_tree,
+            expectations=[
+                "Run it with Add. A release is new information, not a modification, so it "
+                "is applied without any overwrite.",
+                f"{pn('B01')} shows that an approver name with no status column still counts "
+                "as approved.",
+                f"{pn('A01')} stays a draft: an explicit No wins over anything else in the row.",
+                "After this step four parts are approved, and everything that follows needs "
+                "the approved tick to touch them.",
+            ],
+        )
+    )
+
+    # ---------------------------------------------------------------- 06 --
+    packs.append(
+        Pack(
+            order=6,
             slug="new_revision_line",
             title="A new revision supersedes an approved part",
             story=(
@@ -550,17 +623,17 @@ def build_packs(builder: Builder) -> list[Pack]:
             expectations=[
                 f"{pn('P01')} REV C is New, so any uploader may create it — approved and all.",
                 f"REV B of {pn('P01')} is not touched: a revision is a separate part.",
-                f"The BOM belongs to {pn('F01')}, which step 4 approved, so Fill only and "
-                "Update drafts both report the BOM as blocked.",
-                "Override approved is what lets the sub-assembly swap REV B for REV C.",
+                f"The BOM belongs to {pn('F01')}, which step 5 approved, so both Add and "
+                "Overwrite report the BOM as blocked.",
+                "The approved tick is what lets the sub-assembly swap REV B for REV C.",
             ],
         )
     )
 
-    # ---------------------------------------------------------------- 06 --
+    # ---------------------------------------------------------------- 07 --
     packs.append(
         Pack(
-            order=6,
+            order=7,
             slug="change_request_on_approved",
             title="A change request against approved parts",
             story=(
@@ -575,7 +648,7 @@ def build_packs(builder: Builder) -> list[Pack]:
                     "P01",
                     ApprovedDate="05/02/26",
                     description="75x50x4 CHANNEL 1925 A (CR-118 gusset)",
-                    material="MS PLATE GRADE 350",
+                    material="MS PLATE GRADE 450",
                     thickness="5",
                     mass="9.8",
                 ),
@@ -594,9 +667,9 @@ def build_packs(builder: Builder) -> list[Pack]:
                 f"deliverables/pdf/{stem('P01')}.pdf": _deliverable("pdf", "CV03-TR-06_REV_B.pdf"),
             },
             expectations=[
-                "With Fill only or Update drafts everything is blocked and the import is "
+                "With Add, or Overwrite without the tick, everything is blocked and the import is "
                 "still allowed to run — it simply changes nothing.",
-                "Override approved (Admin) applies all of it: properties, the quantity and "
+                "Overwrite plus the approved tick applies all of it: properties, the quantity and "
                 "the replaced PDF.",
                 "Required permissions include imports.override_approved, so Engineering "
                 "Manager or Administrator.",
@@ -605,10 +678,10 @@ def build_packs(builder: Builder) -> list[Pack]:
         )
     )
 
-    # ---------------------------------------------------------------- 07 --
+    # ---------------------------------------------------------------- 08 --
     packs.append(
         Pack(
-            order=7,
+            order=8,
             slug="bom_only_reimport",
             title="BOM-only re-import picks up files from storage",
             story=(
@@ -631,10 +704,10 @@ def build_packs(builder: Builder) -> list[Pack]:
         )
     )
 
-    # ---------------------------------------------------------------- 08 --
+    # ---------------------------------------------------------------- 09 --
     packs.append(
         Pack(
-            order=8,
+            order=9,
             slug="bom_restructure",
             title="The BOM is restructured",
             story=(
@@ -656,20 +729,20 @@ def build_packs(builder: Builder) -> list[Pack]:
                 ("1.3", pn("B02"), rev("B02"), 1),
             ],
             expectations=[
-                f"Fill only reports 'Fill if empty never merges into an existing BOM' — "
+                f"Add reports 'Fill if empty never merges into an existing BOM' - "
                 f"{pn('F01')} already has one.",
-                "Update drafts replaces the whole BOM when the parent is a draft; after step "
+                "Overwrite replaces the whole BOM when the parent is a draft; after step "
                 "4 the parent is approved, so it is blocked instead.",
-                "Override approved deletes the old rows and writes these three.",
+                "With the approved tick it deletes the old rows and writes these three.",
                 "Removing a row from the BOM never deletes the part itself.",
             ],
         )
     )
 
-    # ---------------------------------------------------------------- 09 --
+    # ---------------------------------------------------------------- 10 --
     packs.append(
         Pack(
-            order=9,
+            order=10,
             slug="messy_pack",
             title="A messy pack: duplicates, orphans and conflicts",
             story=(
@@ -726,21 +799,21 @@ def build_packs(builder: Builder) -> list[Pack]:
         )
     )
 
-    # ---------------------------------------------------------------- 10 --
+    # ---------------------------------------------------------------- 11 --
     packs.append(
         Pack(
-            order=10,
+            order=11,
             slug="blank_approval_columns",
             title="The trap: blank approval columns under Override",
             story=(
                 "The same parts, re-exported from a CAD file whose approval "
                 "properties were never written back, so every approval column "
-                "is empty. Under Fill only and Update drafts that is harmless. "
-                "Under Override approved an empty column wins like any other "
+                "is empty. Under Add, and under Overwrite without the tick, that is "
+                "harmless. With the approved tick an empty column wins like any other "
                 "value — and the approval is stripped off the part."
             ),
             rows=[
-                builder.row(key, only=("description",))
+                builder.row(key)
                 for key in ("P01", "P02", "P03", "F01")
             ],
             tree=[
@@ -750,12 +823,13 @@ def build_packs(builder: Builder) -> list[Pack]:
                 ("1.3", pn("P03"), rev("P03"), 2),
             ],
             expectations=[
-                "Preview with Fill only: the approval rows read 'skipped'. Nothing at risk.",
-                "Preview with Update drafts: the approval rows read 'blocked', because the "
+                "Preview with Add: the approval rows read 'blocked' — clearing an "
+                "approval is a change to an approved part, and Add cannot make it.",
+                "Preview with Overwrite (no tick): the approval rows read 'blocked', because the "
                 "targets are approved.",
-                "Preview with Override approved: 'Approved' changes to No and the approver "
+                "Preview with the approved tick: 'Approved' changes to No and the approver "
                 "and date are cleared. Read those rows before applying anything.",
-                "If you do apply it, re-run step 4 with Update drafts to sign the parts "
+                "If you do apply it, re-run step 5 with Add to sign the parts "
                 "again — they are drafts now, so that is allowed.",
                 "The lesson: an override run is only as safe as the columns in the pack.",
             ],
@@ -783,8 +857,8 @@ def _readme(builder: Builder, packs: list[Pack]) -> str:
         "cannot collide with real data.",
         "",
         "Upload them **in order** on the Import page, previewing before every apply.",
-        "The full explanation of what each policy does lives in the app help,",
-        "chapter *Import: what each policy actually does*.",
+        "The full explanation lives in the app help, chapter *Import: what each",
+        "choice does*.",
         "",
         "| Step | Pack | What it is |",
         "| --- | --- | --- |",

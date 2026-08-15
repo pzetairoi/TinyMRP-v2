@@ -237,54 +237,59 @@ Use it to spot systematic gaps before they reach a supplier.
 
 **What it is for:** bringing a SolidWorks upload pack into the database.
 
-> The next chapter, [Import: what each policy does](#import-what-each-policy-does),
-> is the full reference: exactly what fills, replaces or is blocked, how
-> approval behaves, who is allowed to do what, a ten-step exercise with
+> The next chapter, [Import: what each choice does](#import-what-each-choice-does),
+> is the full reference: exactly what fills, replaces, removes or is blocked,
+> how approval behaves, who is allowed to do what, an eleven-step exercise with
 > ready-made test packs, and an FAQ.
 
 ### The safe sequence
 
 1. Choose the ZIP.
-2. Pick a **policy** (below).
+2. Choose how it should be written (below).
 3. Press **Preview** — nothing is written.
 4. Read the redline.
-5. Press **Apply** if it is what you expected.
+5. Press **Apply**. It only becomes available once the preview matches what you
+   are about to send.
 
-![The Import page: the four numbered steps, with the policy chooser and its plain-language summary.](/static/help/img/import.png)
+![The Import page: the four numbered steps, with the two choices and their plain-language summary.](/static/help/img/import.png)
 
 The preview shows the top-level part with its image so you can confirm you
 picked the right pack. Until that part exists in the database the image comes
 from the pack itself and is not stored anywhere.
 
-### The three policies
+### The two choices
 
-Properties, BOM and Files are **independent**. Each can be set to:
-
-| Policy | Effect |
+| Choice | Effect |
 | --- | --- |
-| **Skip** | Touch nothing in this category |
-| **Fill only** | Fill blanks, empty BOMs and missing files |
-| **Update drafts** | Also replace existing *draft* data |
-| **Override approved (Admin)** | Also change existing *approved* parts |
+| **Add without overwriting** | Fills blanks, empty BOMs and missing files, and records a release the pack carries |
+| **Overwrite with the pack** | Makes the part match the pack: values are replaced, and properties the pack does not carry are **removed** |
+| **+ “also approved”** | Extends the overwrite to approved part/revisions. Needs `imports.override_approved` |
 
-The presets at the top set all three at once; changing one on its own switches
-you to *Custom*.
+The advanced panel can set Properties, BOM and Files separately, including
+*Skip*.
 
-> **The approval rule in one sentence:** any uploader may import a part that
-> arrives already approved, but changing an approved part that already exists
-> here — its properties, BOM *or* files — always needs the override permission.
+> **Overwrite only with a complete export.** A partial pack — a few columns put
+> together by hand — will remove everything it omits. The preview shows those as
+> *clear* rows before anything happens.
+
+> **The approval rule in one sentence:** approval always comes from the pack,
+> never from TinyMRP; a release is applied without overwriting, but changing or
+> removing the approval of a part that is already approved needs the tick.
 
 ### Reading the redline
 
-Parts are grouped, each with a badge: **New**, **Draft** or **Approved**.
-Inside, every property, BOM row and file is listed with what would happen —
-*add*, *replace*, *skipped*, *blocked*. Use the tabs to narrow to **Changed**,
-**Blocked** or **Modified approved**, and the *changed only* toggle to hide
-noise. A **JSON report** download captures the whole plan for a colleague.
+A banner says whether this is a **PREVIEW** or an applied **IMPORTED** run, and
+after an apply it carries the counts. Parts are grouped by what happens to them
+— **Blocked**, **Approved parts being changed**, **New**, **Modified**, **No
+changes** — with the first two open by default, so nothing important hides in a
+long list. Each part shows its thumbnail, a badge (**New**, **Draft**,
+**Approved**) and a one-line tally, and opens onto every property, BOM row and
+file with what would happen: *add*, *replace*, *clear*, *skipped*, *blocked*. A
+**JSON report** download captures the whole plan for a colleague.
 
 ![The import preview redline showing a new part beside a planned update to an approved part.](/static/help/img/upload-pack-redline.png)
 
-**Blocked** means the policy or your permissions stop that one change. The
+**Blocked** means your choice or your permissions stop that one change. The
 import can still proceed; blocked items are left alone.
 
 ### Files that do not belong to a part
