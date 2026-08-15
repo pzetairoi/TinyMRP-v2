@@ -60,11 +60,11 @@
       <a class="btn btn-sm btn-link ms-auto" href="{{ url_for('admin_audit.audit_list', user_id=user_id) if user_id else url_for('admin_audit.audit_list') }}">Clear all filters</a>
     </div>
 
-    <details class="tm-filter-details mt-2" {% if ip or action or endpoint or method or resource_type or start or end or include_background %}open{% endif %}>
+    <details class="tm-filter-details mt-2" {% if ip or action or api_endpoint or method or resource_type or start or end or include_background %}open{% endif %}>
       <summary>Technical and custom date filters</summary>
       <div class="row g-2 pt-3">
         <div class="col-md-3"><label class="form-label small">Action code</label><input class="form-control form-control-sm" name="action" value="{{ action or '' }}"></div>
-        <div class="col-md-3"><label class="form-label small">API endpoint</label><input class="form-control form-control-sm" name="endpoint" value="{{ endpoint or '' }}"></div>
+        <div class="col-md-3"><label class="form-label small">API endpoint</label><input class="form-control form-control-sm" name="api_endpoint" value="{{ api_endpoint or '' }}"></div>
         <div class="col-md-2"><label class="form-label small">Resource type</label><input class="form-control form-control-sm" name="resource_type" value="{{ resource_type or '' }}"></div>
         <div class="col-md-2"><label class="form-label small">IP address</label><input class="form-control form-control-sm" name="ip" value="{{ ip or '' }}"></div>
         <div class="col-md-2"><label class="form-label small">Method</label><select class="form-select form-select-sm" name="method"><option value="">Any</option>{% for m in ["GET","POST","PUT","PATCH","DELETE"] %}<option value="{{ m }}" {% if method == m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>

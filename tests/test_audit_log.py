@@ -185,3 +185,48 @@ def test_admin_activity_view_groups_actions_and_keeps_technical_detail(client):
     assert "12" in body
     assert "Technical details" in body
     assert "/api/part_detail" in body
+
+
+def test_pressing_apply_on_the_audit_filters_does_not_500(client):
+    """Regression: the "API endpoint" filter field used to be named
+    "endpoint" in both the form and the query string. Pressing Apply submits
+    every field in that one <form>, including the blank ones, so EVERY
+    filtered request carried "endpoint=" -- and url_for()'s own first
+    positional parameter is also called "endpoint", so splatting the
+    querystring straight into url_for(**args) raised "got multiple values
+    for argument 'endpoint'" on the very first link built for the page (the
+    "All" category filter, built unconditionally even with zero rows).
+    """
+
+    admin_role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
+    admin = User(
+        email="audit-filter-admin@example.com",
+        password="test",
+        active=True,
+        fs_uniquifier="audit-filter-admin",
+        roles=[admin_role],
+    ).save()
+    AuditLog(email="someone@example.com", action="part.view", resource="PART-1:A").save()
+    with client.session_transaction() as session:
+        session["_user_id"] = admin.get_id()
+        session["_fresh"] = True
+
+    # Exactly what the browser sends when the filter <form> is submitted with
+    # nothing typed in: every named input in the form, blank.
+    response = client.get(
+        "/admin/audit/"
+        "?q=&page=&email=&range=&action=&api_endpoint=&resource_type=&ip="
+        "&method=&start=&end=&limit=100&include_background="
+    )
+    assert response.status_code == 200
+
+    # And with the API endpoint field actually filled in.
+    response = client.get("/admin/audit/?api_endpoint=%2Fapi%2Fpart_detail")
+    assert response.status_code == 200
+    assert "someone@example.com" not in response.get_data(as_text=True)
+
+    # A stray legacy "endpoint" query key (an old bookmark, a hand-built
+    # link) must not resurrect the crash either, even though nothing in the
+    # app emits that key anymore.
+    response = client.get("/admin/audit/?endpoint=%2Fapi%2Fpart_detail")
+    assert response.status_code == 200

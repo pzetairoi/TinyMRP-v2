@@ -268,7 +268,13 @@ def audit_list():
     user_id = (request.args.get("user_id") or "").strip()
     ip = (request.args.get("ip") or "").strip()
     action = (request.args.get("action") or "").strip()
-    endpoint = (request.args.get("endpoint") or "").strip()
+    # Read from "api_endpoint" in the querystring, NOT "endpoint": that literal
+    # key would collide with url_for()'s own first positional parameter (also
+    # named "endpoint") the moment it flows back through filter_url()/pagination
+    # below via **current_args, raising "got multiple values for argument
+    # 'endpoint'" on every single filtered request. The AuditLog MODEL FIELD is
+    # still plain `endpoint` -- only the URL query key changes.
+    endpoint = (request.args.get("api_endpoint") or "").strip()
     page = (request.args.get("page") or "").strip()
     method = (request.args.get("method") or "").strip()
     resource_type = (request.args.get("resource_type") or "").strip()
@@ -332,6 +338,11 @@ def audit_list():
     def filter_url(**updates):
         args = dict(current_args)
         args.pop("offset", None)
+        # "endpoint" is url_for()'s OWN first positional parameter name; a
+        # stray one here (an old bookmark, a hand-built link -- our own form
+        # no longer emits it) would otherwise raise "got multiple values for
+        # argument 'endpoint'" the moment it is splatted in below.
+        args.pop("endpoint", None)
         for key, value in updates.items():
             if value:
                 args[key] = value
@@ -367,15 +378,9 @@ def audit_list():
     previous_url = ""
     next_url = ""
     if offset > 0:
-        previous_args = dict(current_args)
-        previous_args["offset"] = max(0, offset - limit)
-        previous_args["limit"] = limit
-        previous_url = url_for("admin_audit.audit_list", **previous_args)
+        previous_url = filter_url(limit=str(limit), offset=str(max(0, offset - limit)))
     if offset + len(logs) < filtered_total:
-        next_args = dict(current_args)
-        next_args["offset"] = offset + limit
-        next_args["limit"] = limit
-        next_url = url_for("admin_audit.audit_list", **next_args)
+        next_url = filter_url(limit=str(limit), offset=str(offset + limit))
     # Diagnostics: try pinging the Mongo server for the configured alias
     alias = current_app.config.get("MONGODB_ALIAS", "tinymrp-v2")
     uri = current_app.config.get("MONGO_URI")
@@ -409,7 +414,7 @@ def audit_list():
         user_id=user_id,
         ip=ip,
         action=action,
-        endpoint=endpoint,
+        api_endpoint=endpoint,
         page=page,
         method=method,
         resource_type=resource_type,
