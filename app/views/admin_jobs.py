@@ -35,7 +35,6 @@ from app.services.thumbs import thumb_urls_for
 from app.services.biz_utils import generate_job_number
 from app.services.part_norm import clean_rev
 from app.services.timezone_utils import parse_user_datetime, utc_now
-from app.services.audit import log_action
 
 bp = Blueprint("admin_jobs", __name__, url_prefix="/admin/jobs")
 
@@ -672,10 +671,6 @@ def jobs_view(job_id):
             _ = j.customer.id if j.customer else None
         except Exception:
             j.customer = None
-    try:
-        log_action("job.view", resource_type="job", resource=str(j.id))
-    except Exception:
-        pass
     users = _eligible_job_users() if user_has_permission(current_user, "jobs.assign") else []
     suppliers, customers = ([], []) if is_external else _job_form_destinations()
     allowed_bom = relationship_job_part_pairs(current_user, j)
@@ -949,10 +944,6 @@ def jobs_edit(job_id):
     j = _scoped_job(job_id, "jobs.update")
     if not j:
         abort(404)
-    try:
-        log_action("job.view", resource_type="job", resource=str(j.id))
-    except Exception:
-        pass
     if request.method == "POST":
         _require_job_form_permissions()
         j.job_number = (request.form.get("job_number") or j.job_number).strip()

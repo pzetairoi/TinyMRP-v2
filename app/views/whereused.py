@@ -1,7 +1,6 @@
 # app/views/whereused.py
 from flask import Blueprint, request, jsonify
 from flask_login import login_required
-from app.services.audit import log_action
 from app.models.artifact import PartFile
 from app.models.part import Part
 from app.models.bom import BOMLink
@@ -250,8 +249,4 @@ def whereused_lazy():
         )
         for row in rows[first:first+rows_per_page]
     ]
-    try:
-        log_action("whereused.view", resource_type="whereused", resource=f"{pn}:{rev or ''}")
-    except Exception:
-        pass
     return jsonify({"data": page, "totalRecords": total})

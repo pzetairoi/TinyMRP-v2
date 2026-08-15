@@ -288,16 +288,6 @@ def list_extra_files(pn: str, rev: str):
         ):
             continue
         rows.append(_extra_file_payload(ef))
-    try:
-        from app.services.audit import log_action
-        log_action(
-            "file.list",
-            resource_type="part",
-            resource=f"{pn_clean}:{rev_clean}",
-            meta={"associated_files": len(rows)},
-        )
-    except Exception:
-        pass
     return jsonify(rows)
 @bp.post("/parts/<path:pn>/<path:rev>/extra")
 @csrf.exempt

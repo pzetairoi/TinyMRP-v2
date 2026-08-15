@@ -21,7 +21,6 @@ from app.services.field_policies import (
     response_context,
 )
 from app.services.file_security import managed_file_group_allowed
-from app.services.audit import log_action
 from app.services.field_config import context_field_ids, get_field_config, resolve_part_field_values
 from app.services.part_norm import clean_rev
 from app.services.part_review_status import part_review_status_map
@@ -533,10 +532,6 @@ def bom_tree():
             review_statuses=review_statuses,
         )
         root["children"] = []   # lazy
-        try:
-            log_action("bom.view", resource_type="bom", resource=f"root:{p.part_number}:{p.revision or ''}")
-        except Exception:
-            pass
         return jsonify([root])
  
     if parent:
@@ -601,10 +596,6 @@ def bom_tree():
                 )
                 for l, c_pn, c_rev in visible
             ]
-            try:
-                log_action("bom.view", resource_type="bom", resource=f"children:{parent}:{(parent_rev or '')}")
-            except Exception:
-                pass
             kids.sort(key=lambda n: 1 if _is_hardware_node(n) else 0)
             return jsonify(kids)
         else:
@@ -623,10 +614,6 @@ def bom_tree():
                     ):
                         return jsonify([]), 403
                     kids.append(_node(child_pn, l, config=config, review_statuses=review_statuses))
-            try:
-                log_action("bom.view", resource_type="bom", resource=f"children:{parent}")
-            except Exception:
-                pass
             kids.sort(key=lambda n: 1 if _is_hardware_node(n) else 0)
             return jsonify(kids)
 
@@ -922,8 +909,4 @@ def bom_flat():
         rows.append(row)
     rows.sort(key=lambda item: (str(item.get("part_number") or ""), str(item.get("revision") or "")))
 
-    try:
-        log_action("bom.view", resource_type="bom", resource=f"flat:{root_part.part_number}:{root_rev}")
-    except Exception:
-        pass
     return jsonify(rows)

@@ -113,11 +113,6 @@ def options():
     meta = current_app.config.get("PROCESS_META", {})
     procs = [k for k in meta.keys() if not k.startswith("_")]
 
-    try:
-        # pn/rev already parsed above
-        log_action("docpack.options", resource_type="docpack", resource=f"{pn}:{rev or ''}")
-    except Exception:
-        pass
     return jsonify({
         "file_types": sorted(groups),
         "processes": sorted(procs),

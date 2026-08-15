@@ -13,8 +13,8 @@ from mongoengine import get_connection
 bp = Blueprint("admin_audit", __name__, url_prefix="/admin/audit")
 
 AUDIT_CATEGORIES = {
-    "view": ("Viewed", ("part.view", "parts.list", "whereused.view", "file.list", "file.view", "part.files.view", "docpack.options", "bom.view", "job.view", "order.view")),
-    "change": ("Changed", ("part.notes.update", "part.comments.add", "part.files.refresh", "part.delete")),
+    "view": ("Viewed", ("page.view", "part.view", "parts.list", "whereused.view", "file.list", "file.view", "part.files.view", "docpack.options", "bom.view", "job.view", "order.view")),
+    "change": ("Changed", ("page.action", "part.notes.update", "part.comments.add", "part.files.refresh", "part.delete")),
     "upload": ("Uploaded", ("upload.", "import.")),
     "export": ("Exported", ("arena.export.", "docpack.build", "download.")),
     "access": ("Access & admin", ("account.", "admin.", "session.", "share.", "auth.", "authorization.", "api_token.")),
@@ -28,6 +28,8 @@ RANGE_OPTIONS = {
 }
 
 ACTION_LABELS = {
+    "page.view": "Viewed a page",
+    "page.action": "Submitted a page action",
     "auth.login": "Signed in",
     "auth.logout": "Signed out",
     "parts.list": "Browsed the parts table",
@@ -70,7 +72,12 @@ _PAGE_LABELS = {
     "/admin/settings": "Application settings",
     "/admin/users": "Users",
     "/admin/roles": "Roles",
+    "/admin/jobs": "Jobs",
+    "/admin/orders": "Orders",
+    "/admin/customers": "Customers",
+    "/admin/suppliers": "Suppliers",
     "/tools": "Tools",
+    "/help": "Help",
 }
 
 _ACTION_PAGE_LABELS = {
@@ -91,6 +98,21 @@ _ACTION_PAGE_LABELS = {
 
 _SENSITIVE_META_FRAGMENTS = ("password", "secret", "token", "authorization", "cookie")
 
+# These actions were emitted by automatic page data loading in older builds.
+# Keep the records for traceability, but do not let them overwhelm the human
+# activity view unless an auditor explicitly asks to include them.
+LEGACY_BACKGROUND_ACTIONS = {
+    "bom.view",
+    "docpack.options",
+    "file.list",
+    "file.view",
+    "part.files.view",
+    "part.share.docpack.options",
+    "part.view",
+    "parts.list",
+    "whereused.view",
+}
+
 
 def _audit_category(action: str) -> tuple[str, str]:
     action_text = str(action or "")
@@ -102,7 +124,7 @@ def _audit_category(action: str) -> tuple[str, str]:
 
 def _resource_label(entry: AuditLog) -> str:
     resource = str(entry.resource or "").strip()
-    if not resource or entry.action == "parts.list":
+    if not resource or entry.action in {"page.view", "parts.list"}:
         return ""
     if entry.resource_type in {"part", "bom", "whereused", "docpack"}:
         cleaned = resource
@@ -130,6 +152,12 @@ def _friendly_page_label(page_path: str, entry: AuditLog) -> str:
         return "User administration"
     if path.startswith("/admin/roles/"):
         return "Role administration"
+    if path.startswith("/admin/jobs/"):
+        identifier = path.removeprefix("/admin/jobs/").split("/", 1)[0]
+        return f"Job {identifier}"
+    if path.startswith("/admin/orders/"):
+        identifier = path.removeprefix("/admin/orders/").split("/", 1)[0]
+        return f"Order {identifier}"
     for prefix, label in sorted(_PAGE_LABELS.items(), key=lambda item: len(item[0]), reverse=True):
         if path == prefix or path.startswith(f"{prefix}/"):
             return label
@@ -181,12 +209,15 @@ def _display_meta(entry: AuditLog) -> dict:
 def _activity_summary(user_id: str) -> dict | None:
     if not user_id:
         return None
-    base = AuditLog.objects(user_id=user_id)
+    base = AuditLog.objects(user_id=user_id, action__nin=sorted(LEGACY_BACKGROUND_ACTIONS))
     latest = base.order_by("-ts").first()
     part_resources = set()
-    for row in base(action="part.view").only("resource").limit(5000):
-        if row.resource:
-            part_resources.add(row.resource)
+    for row in base(action__in=["part.view", "page.view"]).only("action", "resource").limit(5000):
+        resource = str(row.resource or "")
+        if row.action == "part.view" and resource:
+            part_resources.add(resource)
+        elif row.action == "page.view" and urlsplit(resource).path.startswith("/ui/part/"):
+            part_resources.add(resource)
     upload_rows = list(base(action__in=["upload.pack", "upload.extra_files"]).only("action", "extra"))
     parts_uploaded = 0
     files_uploaded = 0
@@ -197,7 +228,7 @@ def _activity_summary(user_id: str) -> dict | None:
     changes = sum(
         base(action__icontains=token).count()
         for token in ("update", "add", "delete", "create", "edit", "refresh")
-    )
+    ) + base(action="page.action").count()
     exports = sum(base(action__startswith=prefix).count() for prefix in ("arena.export", "docpack.build", "download."))
     try:
         user = User.objects(id=user_id).only("email").first()
@@ -251,7 +282,8 @@ def audit_list():
     if range_key and not start:
         start = utc_now() - RANGE_OPTIONS[range_key][1]
 
-    q = Q()
+    include_background = (request.args.get("include_background") or "").strip().lower() in {"1", "true", "yes", "on"}
+    q = Q() if include_background else Q(action__nin=sorted(LEGACY_BACKGROUND_ACTIONS))
     if qtext:
         q = (
             Q(email__icontains=qtext)
@@ -310,12 +342,15 @@ def audit_list():
     for entry in logs:
         category_key, category_label = _audit_category(entry.action)
         page_context = _entry_page(entry)
+        label = ACTION_LABELS.get(entry.action, str(entry.action or "Activity").replace(".", " ").title())
+        if entry.action == "page.action":
+            label = str((entry.extra or {}).get("summary") or label)
         audit_rows.append(
             {
                 "entry": entry,
                 "category": category_key,
                 "category_label": category_label,
-                "label": ACTION_LABELS.get(entry.action, str(entry.action or "Activity").replace(".", " ").title()),
+                "label": label,
                 "page": page_context,
                 "resource_label": _resource_label(entry),
                 "meta": _display_meta(entry),
@@ -325,6 +360,7 @@ def audit_list():
             }
         )
     total = AuditLog.objects.count()
+    legacy_background_total = AuditLog.objects(action__in=sorted(LEGACY_BACKGROUND_ACTIONS)).count()
     filtered_total = AuditLog.objects(q).count()
     showing_start = offset + 1 if filtered_total and logs else 0
     showing_end = min(offset + len(logs), filtered_total)
@@ -377,6 +413,8 @@ def audit_list():
         page=page,
         method=method,
         resource_type=resource_type,
+        include_background=include_background,
+        legacy_background_total=legacy_background_total,
         range_key=range_key,
         range_options=[(key, label) for key, (label, _delta) in RANGE_OPTIONS.items()],
         start=local_input_value(explicit_start),

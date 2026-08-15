@@ -300,10 +300,6 @@ def orders_view(order_id):
             _ = getattr(o, ref_field).id if getattr(o, ref_field) else None
         except Exception:
             setattr(o, ref_field, None)
-    try:
-        log_action("order.view", resource_type="order", resource=str(o.id))
-    except Exception:
-        pass
     is_external = uses_portal_presentation(
         current_user,
         "orders.read",
@@ -691,10 +687,6 @@ def orders_edit(order_id):
     o = _scoped_order(order_id, "orders.update")
     if not o:
         abort(404)
-    try:
-        log_action("order.view", resource_type="order", resource=str(o.id))
-    except Exception:
-        pass
     # Guard broken references to avoid deref crashes
     for attr in ("job", "supplier", "customer"):
         try:

@@ -1,9 +1,11 @@
 # app/views/ui.py
 import json, os
-from flask import Blueprint, render_template, abort, current_app, request
+from flask import Blueprint, render_template, abort, current_app, jsonify, request
 from flask_login import login_required
 from flask_security import current_user
+from app.extensions import csrf
 from app.models.part import Part
+from app.services.audit import _safe_page_path, log_action
 from app.services.authorization import (
     authorised_get,
     has_any_permission,
@@ -11,6 +13,23 @@ from app.services.authorization import (
 )
 
 bp = Blueprint("ui", __name__, url_prefix="/ui")
+
+
+@bp.post("/activity/page-view")
+@csrf.exempt
+@login_required
+def page_view_activity():
+    data = request.get_json(silent=True) or {}
+    page_path = _safe_page_path(data.get("path") or "")
+    if not page_path.startswith("/ui/"):
+        return jsonify({"error": "invalid page path"}), 400
+    log_action(
+        "page.view",
+        resource_type="page",
+        resource=page_path,
+        meta={"page_path": page_path},
+    )
+    return ("", 204)
 
 def vite_assets():
     """

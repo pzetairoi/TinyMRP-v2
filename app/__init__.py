@@ -1169,6 +1169,9 @@ def create_app(config_object=None):
 
     from .cli import init_app as init_cli
     init_cli(app)
+
+    from app.services.audit import init_visible_page_audit
+    init_visible_page_audit(app)
     
     # ACL default (overridable via env)
     app.config.setdefault("ACL_ENFORCED", True)

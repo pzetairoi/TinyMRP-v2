@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import App from './App'
 
 /**
@@ -26,6 +26,31 @@ describe('App shell accessibility', () => {
     const main = screen.getByRole('main')
     expect(main).toHaveAttribute('id', 'main-content')
     expect(main).toContainElement(screen.getByText('page body'))
+  })
+
+  it('records the visible UI route once without auditing its background assets', async () => {
+    sessionStorage.clear()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const router = createMemoryRouter(
+      [{
+        path: '/',
+        element: <App />,
+        children: [{ path: '/ui/part/:pn', element: <p>part page</p> }],
+      }],
+      { initialEntries: ['/ui/part/CV03-TR-A01?rev=A&search=ignored'] },
+    )
+
+    render(<RouterProvider router={router} />)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/ui/activity/page-view',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: '/ui/part/CV03-TR-A01?rev=A' }),
+      }),
+    )
   })
 
   it('offers a skip link that targets that landmark', () => {

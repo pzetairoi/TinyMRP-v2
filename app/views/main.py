@@ -1,5 +1,6 @@
 import logging
 import os
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -7,6 +8,7 @@ from flask import Blueprint, render_template, send_file, abort, request, redirec
 from flask_login import login_required, logout_user
 from flask_security import auth_required, current_user
 from flask_security.utils import hash_password
+from mongoengine.queryset.visitor import Q
 
 from app.models.audit import AuditLog
 from app.models.job import Job
@@ -105,6 +107,23 @@ def _order_href(user, order_id: str) -> str | None:
     return None
 
 
+def _page_visit_resource(action: str, page_path: str) -> str:
+    parsed = urlsplit(page_path or "")
+    path = parsed.path.rstrip("/")
+    if action == "part.view" and path.startswith("/ui/part/"):
+        pn = unquote(path.removeprefix("/ui/part/")).strip()
+        rev = ((parse_qs(parsed.query).get("rev") or [""])[0]).strip()
+        return f"{pn}:{rev}" if pn else ""
+    route_prefix = {
+        "job.view": "/admin/jobs/",
+        "order.view": "/admin/orders/",
+    }.get(action)
+    if route_prefix and path.startswith(route_prefix):
+        identifier = path.removeprefix(route_prefix).split("/", 1)[0].strip()
+        return "" if identifier in {"", "new"} else identifier
+    return ""
+
+
 def _recently_visited_resources(user, action: str, limit: int, scan_cap: int = 200) -> list[str]:
     """Distinct resource identifiers this user actually opened, most-recent
     first, sourced from the audit log rather than "recently updated by
@@ -117,14 +136,24 @@ def _recently_visited_resources(user, action: str, limit: int, scan_cap: int = 2
     seen: set[str] = set()
     out: list[str] = []
     try:
+        page_prefix = {
+            "part.view": "/ui/part/",
+            "job.view": "/admin/jobs/",
+            "order.view": "/admin/orders/",
+        }.get(action, "__no_page_route__")
         entries = (
-            AuditLog.objects(user_id=uid, action=action)
+            AuditLog.objects(user_id=uid)(
+                Q(action=action)
+                | Q(action="page.view", resource__startswith=page_prefix)
+            )
             .order_by("-ts")
-            .only("resource")
+            .only("action", "resource")
             .limit(scan_cap)
         )
         for entry in entries:
             resource = (entry.resource or "").strip()
+            if entry.action == "page.view":
+                resource = _page_visit_resource(action, resource)
             if not resource or resource in seen:
                 continue
             seen.add(resource)

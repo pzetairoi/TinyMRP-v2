@@ -3,7 +3,6 @@ import os, mimetypes
 from urllib.parse import unquote
 from flask import Blueprint, current_app, send_file, abort, request, g
 from flask_login import login_required, current_user
-from app.services.audit import log_action
 from app.services.files_access import resolve_file_token
 from app.services.file_security import (
     FileSecurityError,
@@ -113,16 +112,6 @@ def view(token: str):
                 pass
         abort(404)
     ct, _ = mimetypes.guess_type(path)
-    try:
-        log_action(
-            "file.view",
-            resource_type="file",
-            resource=f"partfile:{pf.id}",
-            meta={"part": f"{pf.part_number}:{pf.revision or ''}", "kind": kind},
-        )
-    except Exception:
-        pass
-
     accel_prefix = (current_app.config.get("FILES_ACCEL_REDIRECT_PREFIX") or "").rstrip("/")
     if accel_prefix and rel:
         resp = current_app.response_class("")

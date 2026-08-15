@@ -12,7 +12,7 @@ class AuditLog(Document):
     - user_id: string of the user's id (ObjectId string) if available
     - email: user email at time of action
     - roles: comma-separated role names (snapshot)
-    - action: short keyword like 'part.view', 'bom.view', 'docpack.build', 'file.view'
+    - action: short keyword like 'page.view', 'docpack.build', or 'part.notes.update'
     - resource_type: e.g. 'part', 'bom', 'file'
     - resource: freeform identifier (like PN:REV, or rel path)
     - ip: remote ip address

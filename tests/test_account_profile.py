@@ -72,12 +72,13 @@ def test_account_home_shows_permissions_and_security_summary(client, app):
 
     _login(client, user)
 
-    # "Recently visited" is sourced from the audit log. The part-detail page
-    # is a JS shell that logs the visit via its own data API call, not the
-    # page route itself -- so hit that API, the same way the browser's JS
-    # would right after the page loads. Jobs/orders log directly on their
-    # (server-rendered) view route.
-    assert client.get(f"/api/part_detail?pn={part.part_number}&rev={part.revision}").status_code == 200
+    # "Recently visited" is sourced from visible-page audit records. Background
+    # data endpoints deliberately do not count as visits.
+    assert client.post(
+        "/ui/activity/page-view",
+        json={"path": part_href},
+        headers={"Origin": "http://localhost"},
+    ).status_code == 204
     assert client.get(job_href).status_code == 200
     assert client.get(order_href).status_code == 200
 

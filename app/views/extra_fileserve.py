@@ -2,7 +2,6 @@ import mimetypes
 from flask import Blueprint, abort, send_file
 from flask_login import current_user, login_required
 
-from app.services.audit import log_action
 from app.services.extra_files import resolve_extra_file_token
 from app.services.file_security import (
     FileSecurityError,
@@ -29,15 +28,6 @@ def view(token: str):
     except FileSecurityError:
         abort(404)
 
-    try:
-        log_action(
-            "file.view",
-            resource_type="file",
-            resource=f"extra:{ef.id}",
-            meta={"part": f"{ef.part_number}:{ef.revision or ''}"},
-        )
-    except Exception:
-        pass
     ct = ef.mime or mimetypes.guess_type(str(abs_path))[0] or "application/octet-stream"
     resp = send_file(abs_path, mimetype=ct, conditional=True, max_age=3600)
     resp.headers["Cache-Control"] = "private, max-age=3600"

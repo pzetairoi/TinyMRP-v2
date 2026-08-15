@@ -2,7 +2,6 @@
 from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 from app.services.authorization import require_permission
-from app.services.audit import log_action
 from app.services.file_security import (
     exact_file_part,
     managed_file_category_allowed,
@@ -108,8 +107,4 @@ def part_images():
                 },
             )
         )
-    try:
-        log_action("file.list", resource_type="file", resource=f"{pn}:{rev}")
-    except Exception:
-        pass
     return jsonify(rows)

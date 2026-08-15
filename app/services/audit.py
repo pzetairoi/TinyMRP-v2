@@ -11,6 +11,17 @@ from app.models.audit import AuditLog
 _SAFE_PAGE_QUERY_KEYS = {"job", "rev", "tab"}
 
 
+def _submitted_action_summary(endpoint_name: str) -> str:
+    name = str(endpoint_name or "").rsplit(".", 1)[-1].lower()
+    if any(token in name for token in ("delete", "purge", "remove")):
+        return "Deleted or removed a record"
+    if any(token in name for token in ("create", "new", "add")):
+        return "Created a record"
+    if any(token in name for token in ("edit", "update", "save", "prefs")):
+        return "Saved changes"
+    return "Submitted a page action"
+
+
 def _safe_str(v: Any, max_len: int = 500) -> str:
     try:
         s = str(v)
@@ -147,6 +158,11 @@ def log_action(action: str, resource_type: Optional[str] = None, resource: Optio
             extra=_meta,
         )
         entry.save()
+        if has_request_context():
+            try:
+                g._tinymrp_audit_event_written = True
+            except Exception:
+                pass
         # Optional debug logging
         try:
             if current_app and current_app.config.get("AUDIT_LOG_DEBUG"):
@@ -163,3 +179,70 @@ def log_action(action: str, resource_type: Optional[str] = None, resource: Optio
         except Exception:
             pass
     return None
+
+
+def init_visible_page_audit(app) -> None:
+    """Record rendered pages once, without treating their assets/API calls as visits."""
+    if getattr(app, "_tinymrp_visible_page_audit", False):
+        return
+    app._tinymrp_visible_page_audit = True
+
+    @app.after_request
+    def _record_rendered_page(response):
+        try:
+            path = request.path or ""
+            is_authenticated = bool(getattr(current_user, "is_authenticated", False))
+            successful = 200 <= response.status_code < 400
+            # Explicit action logs always win. This fallback covers traditional
+            # server-rendered forms (jobs, orders, settings, etc.) whose POST
+            # handler performed work but did not yet have a named audit event.
+            # API endpoints are excluded: several use POST purely for table
+            # searches, and deliberate API mutations already log explicitly.
+            if (
+                request.method in {"POST", "PUT", "PATCH", "DELETE"}
+                and successful
+                and is_authenticated
+                and not path.startswith(("/api/", "/ui/", "/files/", "/extra/", "/share/"))
+                and not getattr(g, "_tinymrp_audit_event_written", False)
+            ):
+                visible_page = _safe_page_path(
+                    request.headers.get("X-TinyMRP-Page")
+                    or request.referrer
+                    or request.url
+                )
+                target = _safe_page_path(request.url)
+                log_action(
+                    "page.action",
+                    resource_type="page",
+                    resource=target,
+                    meta={
+                        "page_path": visible_page or target,
+                        "summary": _submitted_action_summary(request.endpoint or ""),
+                        "status": response.status_code,
+                    },
+                )
+            is_visible_html = (
+                request.method == "GET"
+                and 200 <= response.status_code < 300
+                and response.mimetype == "text/html"
+            )
+            # React navigation is recorded by the route tracker after it has
+            # resolved the actual client-side URL. Recording the shell here as
+            # well would create two visits for one page load.
+            if not is_visible_html or path.startswith(("/ui/", "/share/")):
+                return response
+            if not is_authenticated:
+                return response
+            page_path = _safe_page_path(request.url)
+            if page_path:
+                log_action(
+                    "page.view",
+                    resource_type="page",
+                    resource=page_path,
+                    meta={"page_path": page_path},
+                )
+        except Exception:
+            # Auditing must never turn a successfully rendered page into an
+            # error response.
+            pass
+        return response

@@ -131,7 +131,7 @@ def test_stage1_empty_states_and_warning_pages_render(client, app, tmp_path):
         "/admin/orders/": "No orders found",
         "/admin/suppliers/": "No suppliers found",
         "/admin/customers/": "No customers found",
-        "/admin/audit/": "No activity found",
+        "/admin/audit/": "Page / location",
         "/admin/purge-parts": "This action permanently deletes data.",
         "/help": "Help content not generated yet",
     }

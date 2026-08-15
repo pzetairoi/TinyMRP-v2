@@ -3,7 +3,7 @@
 {% block title %}Activity & Audit - Admin{% endblock %}
 {% block content %}
 {% call page_header("Activity & Audit", "See who did what, where they did it, and the request behind it.", "System") %}
-  <div class="tm-helper-text">{{ filtered_total }} matching of {{ total }} recorded events</div>
+  <div class="tm-helper-text">{{ filtered_total }} matching of {{ total }} recorded events{% if legacy_background_total and not include_background %} · {{ legacy_background_total }} legacy background events hidden{% endif %}</div>
 {% endcall %}
 
 {% if activity_summary %}
@@ -60,7 +60,7 @@
       <a class="btn btn-sm btn-link ms-auto" href="{{ url_for('admin_audit.audit_list', user_id=user_id) if user_id else url_for('admin_audit.audit_list') }}">Clear all filters</a>
     </div>
 
-    <details class="tm-filter-details mt-2" {% if ip or action or endpoint or method or resource_type or start or end %}open{% endif %}>
+    <details class="tm-filter-details mt-2" {% if ip or action or endpoint or method or resource_type or start or end or include_background %}open{% endif %}>
       <summary>Technical and custom date filters</summary>
       <div class="row g-2 pt-3">
         <div class="col-md-3"><label class="form-label small">Action code</label><input class="form-control form-control-sm" name="action" value="{{ action or '' }}"></div>
@@ -71,6 +71,7 @@
         <div class="col-md-3"><label class="form-label small">Start ({{ selected_timezone }})</label><input class="form-control form-control-sm" type="datetime-local" name="start" value="{{ start }}"></div>
         <div class="col-md-3"><label class="form-label small">End ({{ selected_timezone }})</label><input class="form-control form-control-sm" type="datetime-local" name="end" value="{{ end }}"></div>
         <div class="col-md-2"><label class="form-label small">Rows per page</label><select class="form-select form-select-sm" name="limit">{% for n in [50,100,200,500] %}<option value="{{ n }}" {% if limit == n %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></div>
+        <div class="col-md-4 d-flex align-items-end"><div class="form-check mb-1"><input class="form-check-input" type="checkbox" id="auditBackground" name="include_background" value="1" {% if include_background %}checked{% endif %}><label class="form-check-label small" for="auditBackground">Include legacy file and background-request events</label></div></div>
       </div>
     </details>
   </div>

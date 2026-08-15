@@ -1144,11 +1144,6 @@ def parts_lazy():
     except Exception:
         pass
 
-    try:
-        log_action("parts.list", resource_type="parts", resource=f"first={first},rows={rows}")
-    except Exception:
-        pass
-
     return jsonify({"data": out, "totalRecords": filtered})
 
 
@@ -1375,15 +1370,6 @@ def part_detail():
         )
         for row in wu_rows
     ]
-
-    try:
-        log_action(
-            action="part.view",
-            resource_type="part",
-            resource=f"{p.part_number}:{p.revision or ''}",
-        )
-    except Exception:
-        pass
 
     can_jobs_manage = user_has_permission(current_user, "jobs.update")
     can_orders_manage = user_has_permission(current_user, "orders.update")
@@ -1726,15 +1712,6 @@ def part_files_overview(pn: str):
         ):
             continue
         rows.append(_extra_file_overview_row(ef))
-
-    try:
-        log_action(
-            "part.files.view",
-            resource_type="part",
-            resource=f"{p.part_number}:{current_rev}",
-        )
-    except Exception:
-        pass
 
     grouped = _group_file_overview_rows(rows, current_rev)
     for section in [grouped["current_revision"], *grouped["other_revisions"]]:

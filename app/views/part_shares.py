@@ -1002,20 +1002,6 @@ def public_share_docpack_options(share_id: str, token: str):
     part_number, revision = _requested_shared_part_key(share)
     depth = (request.args.get("depth") or "full").strip().lower()
     try:
-        log_action(
-            "part.share.docpack.options",
-            resource_type="part_share",
-            resource=f"{share.part_number}:{share.revision or ''}",
-            meta={
-                "share_id": str(share.id),
-                "pn": part_number,
-                "rev": revision,
-                "depth": depth,
-            },
-        )
-    except Exception:
-        logger.exception("audit log failed for public share docpack options")
-    try:
         payload = _share_docpack_options_payload(
             share,
             part_number,
