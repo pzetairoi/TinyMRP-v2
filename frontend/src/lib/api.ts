@@ -88,11 +88,17 @@ export async function apiFetch<T = any>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  // The server's audit log needs the UI route the user was actually looking
+  // at, not only the background API endpoint that happened to load its data.
+  const pagePath = typeof window === 'undefined'
+    ? ''
+    : `${window.location.pathname}${window.location.search}`
   const res = await fetch(path, {
     credentials: 'same-origin',
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(pagePath ? { 'X-TinyMRP-Page': pagePath } : {}),
       ...(options.headers || {}),
     },
   })

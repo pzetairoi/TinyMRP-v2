@@ -124,6 +124,18 @@ describe('apiFetch', () => {
     )
   })
 
+  it('identifies the visible UI page for server-side audit records', async () => {
+    const fetchMock = stubFetch()
+    window.history.replaceState({}, '', '/ui/part/PART-100?rev=A')
+
+    await apiFetch('/api/part_detail?pn=PART-100&rev=A')
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init.headers).toMatchObject({
+      'X-TinyMRP-Page': '/ui/part/PART-100?rev=A',
+    })
+  })
+
   it('sets a JSON content type that callers can extend, e.g. a CSRF token', async () => {
     const fetchMock = stubFetch()
     await apiFetch('/api/parts', { method: 'POST', headers: { 'X-CSRFToken': 'abc123' } })

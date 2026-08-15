@@ -67,4 +67,14 @@
       ev.preventDefault();
     }
   });
+
+  // A filter control that applies itself the moment it changes, e.g. the audit
+  // log's time range. Inline onchange="this.form.submit()" would need
+  // 'unsafe-inline', which is exactly what SEC-CSP-01 is burning down.
+  document.addEventListener('change', function (ev) {
+    var el = ev.target.closest('[data-act="submit-on-change"]');
+    if (el && el.form) {
+      el.form.submit();
+    }
+  });
 })();

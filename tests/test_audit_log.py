@@ -25,6 +25,55 @@ def test_audit_log_captures_ip_method_endpoint(app):
     assert "AuditTest/1.0" in (entry.ua or "")
 
 
+def test_audit_log_captures_the_calling_ui_page_and_redacts_share_tokens(app):
+    with app.test_request_context(
+        "/api/part_detail?pn=PART-100&rev=A",
+        headers={"X-TinyMRP-Page": "/ui/part/PART-100?rev=A&search=private"},
+    ):
+        log_action("part.view", resource_type="part", resource="PART-100:A")
+
+    entry = AuditLog.objects(action="part.view").first()
+    assert entry.extra["page_path"] == "/ui/part/PART-100?rev=A"
+
+    with app.test_request_context(
+        "/api/share/part/share-id/secret-token/part_detail",
+        headers={"X-TinyMRP-Page": "/share/part/share-id/secret-token?rev=B"},
+    ):
+        log_action("share.part.view", resource_type="part", resource="PART-200:B")
+
+    shared = AuditLog.objects(action="share.part.view").first()
+    assert shared.extra["page_path"] == "/share/part/[redacted]?rev=B"
+    assert "secret-token" not in shared.extra["page_path"]
+
+
+def test_admin_activity_can_filter_by_calling_ui_page(client):
+    admin_role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
+    admin = User(email="page-audit-admin@example.com", password="test", active=True, fs_uniquifier="page-audit-admin", roles=[admin_role]).save()
+    AuditLog(
+        email="parts-user@example.com",
+        action="parts.list",
+        endpoint="/api/parts_lazy",
+        extra={"page_path": "/ui/parts"},
+    ).save()
+    AuditLog(
+        email="upload-user@example.com",
+        action="upload.pack",
+        endpoint="/api/upload/pack",
+        extra={"page_path": "/ui/upload-pack"},
+    ).save()
+    with client.session_transaction() as session:
+        session["_user_id"] = admin.get_id()
+        session["_fresh"] = True
+
+    response = client.get("/admin/audit/?page=/ui/parts")
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "parts-user@example.com" in body
+    assert "upload-user@example.com" not in body
+    assert "Page / location" in body
+
+
 def test_admin_activity_view_groups_actions_and_keeps_technical_detail(client):
     admin_role = Role(name="administrator", permissions=sorted(PERMISSION_REGISTRY)).save()
     admin = User(email="audit-admin@example.com", password="test", active=True, fs_uniquifier="audit-admin", roles=[admin_role]).save()

@@ -361,6 +361,45 @@ body.tm-body {
 .tm-audit-technical dt { color: var(--tm-text-muted); font-size: .68rem; text-transform: uppercase; }
 .tm-audit-technical dd { font-family: var(--bs-font-monospace); font-size: .75rem; margin: 0; overflow-wrap: anywhere; }
 .tm-audit-technical__wide { grid-column: 1 / -1; }
+.tm-audit-stats--compact { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.tm-audit-quick-filters { align-items: center; display: flex; flex-wrap: wrap; gap: .4rem; }
+.tm-audit-results-head { color: var(--tm-text-muted); display: flex; font-size: .76rem; justify-content: space-between; padding: 0 .25rem .45rem; }
+.tm-audit-table-wrap { background: var(--tm-surface); border: 1px solid var(--tm-border); border-radius: var(--tm-radius); box-shadow: var(--tm-shadow-soft); }
+.tm-audit-table { font-size: .8rem; min-width: 68rem; vertical-align: top; }
+.tm-audit-table thead th { background: var(--tm-surface-soft); border-bottom-color: var(--tm-border-strong); color: #475569; font-size: .7rem; letter-spacing: .035em; padding: .6rem .65rem; text-transform: uppercase; white-space: nowrap; }
+.tm-audit-table tbody td { border-color: var(--tm-border); padding: .65rem; }
+.tm-audit-table tbody tr:last-child td { border-bottom: 0; }
+.tm-audit-table th:nth-child(1) { width: 8.2rem; }
+.tm-audit-table th:nth-child(2) { width: 13.5rem; }
+.tm-audit-table th:nth-child(3) { width: 20%; }
+.tm-audit-table th:nth-child(4) { width: 24%; }
+.tm-audit-table th:nth-child(5) { width: 27%; }
+.tm-audit-table__time { white-space: nowrap; }
+.tm-audit-table__time strong, .tm-audit-table__time span, .tm-audit-table__page code, .tm-audit-table__request small { display: block; }
+.tm-audit-table__time span, .tm-audit-table__request small { color: var(--tm-text-muted); font-size: .72rem; margin-top: .12rem; }
+.tm-audit-filter-link { color: var(--tm-text); text-decoration: none; }
+.tm-audit-filter-link:hover { color: var(--tm-accent); text-decoration: underline; }
+.tm-audit-table__page code, .tm-audit-table__request code { color: #475569; font-size: .7rem; overflow-wrap: anywhere; white-space: normal; }
+.tm-audit-table__page code { margin-top: .15rem; }
+.tm-audit-inferred { background: #f1f5f9; border-radius: 999px; color: #64748b; display: inline-block; font-size: .62rem; margin-top: .25rem; padding: .08rem .35rem; text-transform: uppercase; }
+.tm-audit-dot { background: #94a3b8; border-radius: 999px; display: inline-block; height: .52rem; margin-right: .4rem; width: .52rem; }
+.tm-audit-dot--view { background: #3b82f6; }
+.tm-audit-dot--change { background: #f59e0b; }
+.tm-audit-dot--upload { background: #8b5cf6; }
+.tm-audit-dot--export { background: #10b981; }
+.tm-audit-dot--access { background: #64748b; }
+.tm-audit-target { color: #334155; margin: .18rem 0 .28rem 1rem; overflow-wrap: anywhere; }
+.tm-audit-tags { display: flex; flex-wrap: wrap; gap: .3rem; margin-left: 1rem; }
+.tm-audit-tags a, .tm-audit-tags span { background: var(--tm-surface-soft); border: 1px solid var(--tm-border); border-radius: 999px; color: #64748b; font-family: var(--bs-font-monospace); font-size: .63rem; padding: .08rem .35rem; text-decoration: none; }
+.tm-audit-tags a:hover { border-color: var(--tm-accent); color: var(--tm-accent); }
+.tm-method { background: #e2e8f0; border-radius: .3rem; color: #334155; display: inline-block; font-family: var(--bs-font-monospace); font-size: .65rem; font-weight: 700; padding: .1rem .3rem; }
+.tm-method--get { background: #dbeafe; color: #1d4ed8; }
+.tm-method--post, .tm-method--put, .tm-method--patch { background: #fef3c7; color: #92400e; }
+.tm-method--delete { background: #fee2e2; color: #991b1b; }
+.tm-audit-table__request .tm-audit-technical dl { grid-template-columns: repeat(2, minmax(8rem, 1fr)); min-width: 22rem; }
+.tm-audit-technical pre { color: inherit; font-size: .68rem; margin: 0; max-height: 16rem; overflow: auto; white-space: pre-wrap; }
+.tm-audit-pagination { align-items: center; display: grid; font-size: .76rem; grid-template-columns: 1fr auto 1fr; margin-top: .75rem; }
+.tm-audit-pagination > :last-child { justify-self: end; }
 
 .tm-logo-preview { align-items: center; background: var(--tm-surface-soft); border: 1px solid var(--tm-border); border-radius: .75rem; display: flex; height: 5rem; justify-content: center; padding: .75rem; width: 9rem; }
 .tm-logo-preview img { max-height: 100%; max-width: 100%; }

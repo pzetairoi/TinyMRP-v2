@@ -1,10 +1,14 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from flask import request, current_app, g, has_request_context
 from flask_login import current_user
 
 from app.models.audit import AuditLog
+
+
+_SAFE_PAGE_QUERY_KEYS = {"job", "rev", "tab"}
 
 
 def _safe_str(v: Any, max_len: int = 500) -> str:
@@ -28,6 +32,27 @@ def _client_ip() -> str:
         if xri:
             return xri.strip()
         return request.remote_addr or ""
+    except Exception:
+        return ""
+
+
+def _safe_page_path(value: Any) -> str:
+    """Return useful UI location context without retaining credentials or tokens."""
+    try:
+        parsed = urlsplit(_safe_str(value, 1000))
+        path = parsed.path or ""
+        if not path.startswith("/"):
+            return ""
+        # Public share URLs contain a bearer credential in the path. The page
+        # type is useful to an auditor; the credential never is.
+        if path.startswith("/share/part/") or path.startswith("/api/share/part/"):
+            path = "/share/part/[redacted]"
+        safe_query = [
+            (key, val)
+            for key, val in parse_qsl(parsed.query, keep_blank_values=True)
+            if key.lower() in _SAFE_PAGE_QUERY_KEYS
+        ]
+        return _safe_str(path + (f"?{urlencode(safe_query)}" if safe_query else ""), 500)
     except Exception:
         return ""
 
@@ -97,8 +122,15 @@ def log_action(action: str, resource_type: Optional[str] = None, resource: Optio
                 endpoint = ""
             try:
                 _meta.setdefault("endpoint_name", _safe_str(request.endpoint or ""))
-                _meta.setdefault("referrer", _safe_str(request.referrer or ""))
+                _meta.setdefault("referrer", _safe_page_path(request.referrer or ""))
                 _meta.setdefault("request_id", _safe_str(request.headers.get("X-Request-Id") or ""))
+                page_path = _safe_page_path(
+                    request.headers.get("X-TinyMRP-Page")
+                    or request.referrer
+                    or request.url
+                )
+                if page_path:
+                    _meta.setdefault("page_path", page_path)
             except Exception:
                 pass
         entry = AuditLog(
