@@ -1122,12 +1122,12 @@ export default function UploadPackPage() {
                       className="form-select form-select-sm mt-1"
                       style={{ maxWidth: 520 }}
                       value={duplicateChoices[key] ?? 0}
-                      onChange={(event) =>
-                        setDuplicateChoices((prev) => ({
-                          ...prev,
-                          [key]: Number(event.target.value),
-                        }))
-                      }
+                      onChange={(event) => {
+                        // Same rule as the group toggle: read the value
+                        // before handing a function to setState.
+                        const choice = Number(event.target.value);
+                        setDuplicateChoices((prev) => ({ ...prev, [key]: choice }));
+                      }}
                     >
                       {dup.options.map((option) => (
                         <option key={option.index} value={option.index}>
@@ -1197,12 +1197,16 @@ export default function UploadPackPage() {
                   key={group.key}
                   className={`border rounded ${group.tone}`}
                   open={openGroups[group.key]}
-                  onToggle={(event) =>
-                    setOpenGroups((prev) => ({
-                      ...prev,
-                      [group.key]: (event.currentTarget as HTMLDetailsElement).open,
-                    }))
-                  }
+                  onToggle={(event) => {
+                    // Read the element NOW. React calls the updater below
+                    // later, and by then currentTarget is null -- which
+                    // crashed the whole redline the moment a group rendered,
+                    // because <details> fires toggle on mount.
+                    const isOpen = (event.currentTarget as HTMLDetailsElement | null)?.open ?? false;
+                    setOpenGroups((prev) =>
+                      prev[group.key] === isOpen ? prev : { ...prev, [group.key]: isOpen },
+                    );
+                  }}
                 >
                   <summary className="px-2 py-2 d-flex flex-wrap align-items-center gap-2">
                     <strong>{group.title}</strong>
