@@ -1063,11 +1063,14 @@ and the blocked rows are left alone.</p>
 purchasing, a re-export, release, a new revision and a change request. They are
 built from the CV03 sample data, and every part number carries a prefix so
 nothing can collide with real parts.</p>
-<p>Generate them on any machine with the repository checked out:</p>
+<p><strong><a href="/help/practice-packs.zip">Download the practice-pack bundle (.zip)</a></strong> — every
+step, a README repeating the story below, and the <code>out_of_band/</code> files step 8
+needs, all in one file. Unzip it; the file names match the table.</p>
+<p>Prefer to build it yourself, or want a different prefix? Generate it on any
+machine with the repository checked out:</p>
 <pre><code class="language-text">python tools/make_import_test_packs.py
 </code></pre>
-<p>They appear in <code>testfiles/import_scenarios/</code>, with a README repeating each step.
-Add <code>--prefix DEMO-</code> or <code>--out &lt;folder&gt;</code> for a different namespace or location.</p>
+<p>That writes the same packs to <code>testfiles/import_scenarios/</code>. Add <code>--prefix DEMO-</code> or <code>--out &lt;folder&gt;</code> for a different namespace or location.</p>
 <p><strong>Before you start:</strong></p>
 <ul>
 <li>Run the exercise on a <strong>test instance</strong>, not on production. It really does

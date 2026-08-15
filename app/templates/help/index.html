@@ -5,19 +5,36 @@
 
 {% block extra_head %}
 <style>
-  .help-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 1.5rem; }
+  .help-layout { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 1.5rem; }
   @media (max-width: 991px) { .help-layout { grid-template-columns: minmax(0, 1fr); } }
 
-  .help-nav { position: sticky; top: 1rem; align-self: start; max-height: calc(100vh - 2rem); overflow-y: auto; }
-  .help-nav a { display: block; padding: .2rem .5rem; border-radius: .35rem; color: inherit; text-decoration: none; font-size: .86rem; line-height: 1.35; }
+  /* Bootstrap's offcanvas-lg becomes a plain static block at >=992px and a
+     slide-in drawer below it. We only need to re-add the sticky, independently
+     scrollable behaviour the static desktop sidebar wants; the mobile drawer
+     chrome (backdrop, header, close button) is already correct out of the box. */
+  @media (min-width: 992px) {
+    #helpNavPanel { position: sticky !important; top: 1rem; align-self: start; }
+    #helpNavPanel .offcanvas-body { max-height: calc(100vh - 2rem); overflow-y: auto; padding: 0; }
+  }
+  .help-nav-toggle { display: inline-flex; align-items: center; gap: .4rem; }
+
+  .help-nav a { display: block; padding: .3rem .55rem; border-radius: .35rem; color: inherit; text-decoration: none; font-size: .87rem; line-height: 1.4; }
   .help-nav a:hover { background: rgba(13,110,253,.08); }
-  .help-nav-chapter > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: .35rem; }
+  .help-nav-chapter { border-radius: .4rem; margin-bottom: .15rem; }
+  .help-nav-chapter > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: .4rem; padding: .3rem .4rem; border-radius: .4rem; }
+  .help-nav-chapter > summary:hover { background: rgba(13,110,253,.06); }
   .help-nav-chapter > summary::-webkit-details-marker { display: none; }
-  .help-nav-chapter > summary::before { content: "\25B8"; color: #adb5bd; font-size: .75rem; transition: transform .15s ease; }
+  .help-nav-chapter > summary::before { content: "\25B8"; color: #adb5bd; font-size: .75rem; transition: transform .15s ease; flex: 0 0 auto; }
   .help-nav-chapter[open] > summary::before { transform: rotate(90deg); }
-  .help-nav-chapter > summary a { font-weight: 600; flex: 1; }
-  .help-nav-section { padding-left: 1.4rem !important; color: #6c757d; }
-  .help-nav-section.active { background: rgba(13,110,253,.12); color: #0d6efd; font-weight: 600; }
+  .help-nav-chapter-title { font-weight: 600; flex: 1; }
+  .help-nav-chapter[open] > summary { background: rgba(13,110,253,.08); }
+  .help-nav-sections { padding-left: 1.2rem; border-left: 2px solid #eef0f2; margin: .1rem 0 .35rem .55rem; }
+  .help-nav-section { color: #6c757d; border-left: 2px solid transparent; margin-left: -2px; }
+  .help-nav-section.active { background: rgba(13,110,253,.12); color: #0d6efd; font-weight: 600; border-left-color: #0d6efd; }
+  .help-nav-hidden { display: none !important; }
+
+  .help-crumb { font-size: .82rem; color: #6c757d; margin-bottom: .6rem; min-height: 1.1rem; }
+  .help-crumb strong { color: #495057; }
 
   /* One chapter = one h1 with its folded sections underneath. */
   .help-chapter { margin-bottom: 2.25rem; }
@@ -55,7 +72,7 @@
   .help-searching .help-section.help-hit { display: block; }
 
   @media print {
-    .help-nav, .help-toolbar { display: none; }
+    .help-nav, .help-nav-toggle, .help-toolbar { display: none; }
     .help-section-body { display: block !important; }
   }
 </style>
@@ -75,26 +92,62 @@
 {% else %}
 
 <div class="help-layout">
-  <nav class="help-nav d-none d-lg-block" aria-label="Help contents">
-    <div class="fw-semibold small text-uppercase text-muted mb-2">Contents</div>
-    {% for chapter in toc_items %}
-    <details class="help-nav-chapter"{% if loop.first %} open{% endif %}>
-      <summary><a href="#{{ chapter.id }}">{{ chapter.title }}</a></summary>
-      {% for section in chapter.sections %}
-      <a class="help-nav-section" href="#{{ section.id }}">{{ section.title }}</a>
-      {% endfor %}
-    </details>
-    {% endfor %}
-  </nav>
+  {# Bootstrap's responsive offcanvas: a plain sticky sidebar at >=992px, a
+     slide-in drawer (with its own backdrop and close button) below that --
+     one markup, both behaviours, so the contents tree is reachable on every
+     screen size instead of disappearing entirely on a tablet. #}
+  <div class="offcanvas-lg offcanvas-start help-nav" tabindex="-1" id="helpNavPanel" aria-labelledby="helpNavPanelLabel">
+    <div class="offcanvas-header">
+      <h2 class="offcanvas-title h6 mb-0" id="helpNavPanelLabel">Contents</h2>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" data-bs-target="#helpNavPanel" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+      <div class="fw-semibold small text-uppercase text-muted mb-2 d-none d-lg-block">Contents</div>
+      <nav aria-label="Help contents">
+        {% for chapter in toc_items %}
+        <details class="help-nav-chapter" data-chapter-id="{{ chapter.id }}">
+          {# The title is deliberately NOT a link: an <a href> nested inside a
+             <summary> fires its own navigation default action alongside the
+             <details> toggle default action on the same click, and browsers'
+             handling of that combination is not solid enough to build an
+             accordion on. Jumping straight to a chapter still works, from the
+             quick-jump select below. #}
+          <summary><span class="help-nav-chapter-title">{{ chapter.title }}</span></summary>
+          <div class="help-nav-sections">
+            {% for section in chapter.sections %}
+            <a class="help-nav-section" href="#{{ section.id }}">{{ section.title }}</a>
+            {% endfor %}
+          </div>
+        </details>
+        {% endfor %}
+      </nav>
+    </div>
+  </div>
 
-  <div>
-    <div class="help-toolbar d-flex flex-wrap gap-2 align-items-center mb-3">
-      <input id="helpSearch" class="form-control form-control-sm" style="max-width: 320px"
+  <div class="help-main">
+    <div class="help-toolbar d-flex flex-wrap gap-2 align-items-center mb-2">
+      <button class="btn btn-sm btn-outline-secondary help-nav-toggle d-lg-none" type="button"
+              data-bs-toggle="offcanvas" data-bs-target="#helpNavPanel" aria-controls="helpNavPanel">
+        <span aria-hidden="true">&#9776;</span> Contents
+      </button>
+      <select id="helpJump" class="form-select form-select-sm" style="max-width: 260px" aria-label="Jump to a chapter or section">
+        <option value="">Jump to…</option>
+        {% for chapter in toc_items %}
+        <optgroup label="{{ chapter.title }}">
+          <option value="{{ chapter.id }}">{{ chapter.title }}</option>
+          {% for section in chapter.sections %}
+          <option value="{{ section.id }}">&nbsp;&nbsp;{{ section.title }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+      <input id="helpSearch" class="form-control form-control-sm" style="max-width: 260px"
              placeholder="Search the help..." type="search" aria-label="Search help" />
-      <button id="helpExpand" class="btn btn-sm btn-outline-secondary" type="button">Expand all</button>
-      <button id="helpCollapse" class="btn btn-sm btn-outline-secondary" type="button">Collapse all</button>
+      <button id="helpExpand" class="btn btn-sm btn-outline-secondary">Expand all</button>
+      <button id="helpCollapse" class="btn btn-sm btn-outline-secondary">Collapse all</button>
       <span id="helpCount" class="small text-muted ms-auto" aria-live="polite"></span>
     </div>
+    <div id="helpCrumb" class="help-crumb d-none d-lg-block" aria-live="polite"></div>
 
     <div id="helpContent" class="help-content">
       {{ help_html|safe }}
@@ -111,8 +164,12 @@
     if (!content) return;
     var search = document.getElementById('helpSearch');
     var count = document.getElementById('helpCount');
+    var jump = document.getElementById('helpJump');
+    var crumb = document.getElementById('helpCrumb');
     var sections = Array.prototype.slice.call(content.querySelectorAll('.help-section'));
     var chapters = Array.prototype.slice.call(content.querySelectorAll('.help-chapter'));
+    var navChapters = Array.prototype.slice.call(document.querySelectorAll('.help-nav-chapter'));
+    var navSections = Array.prototype.slice.call(document.querySelectorAll('.help-nav-section'));
 
     function setAll(open) {
       sections.forEach(function (s) { s.open = open; });
@@ -122,12 +179,20 @@
     if (expand) expand.addEventListener('click', function () { setAll(true); });
     if (collapse) collapse.addEventListener('click', function () { setAll(false); });
 
-    // Search the whole text, not just headings, and open whatever matched.
+    // Search the whole text, not just headings, and open whatever matched --
+    // in both the content and the contents tree, so the sidebar itself prunes
+    // down to what is relevant instead of staying a full 12-chapter list.
     function filter() {
       var q = (search.value || '').toLowerCase().trim();
       if (!q) {
         content.classList.remove('help-searching');
         sections.concat(chapters).forEach(function (el) { el.classList.remove('help-hit'); });
+        navChapters.forEach(function (c) {
+          c.classList.remove('help-nav-hidden');
+          // Search may have left several chapters open at once; back to one.
+          c.open = false;
+        });
+        navSections.forEach(function (a) { a.classList.remove('help-nav-hidden'); });
         setAll(false);
         if (sections.length) sections[0].open = true;
         if (count) count.textContent = '';
@@ -135,6 +200,7 @@
       }
       content.classList.add('help-searching');
       var hits = 0;
+      var matchedIds = {};
       chapters.forEach(function (c) { c.classList.remove('help-hit'); });
       sections.forEach(function (s) {
         var match = (s.textContent || '').toLowerCase().indexOf(q) !== -1;
@@ -144,7 +210,20 @@
           hits += 1;
           var chapter = s.closest('.help-chapter');
           if (chapter) chapter.classList.add('help-hit');
+          var titleEl = s.querySelector('.help-section-title');
+          if (titleEl) matchedIds[titleEl.id] = true;
         }
+      });
+      navChapters.forEach(function (chapterEl) {
+        var anyMatch = false;
+        chapterEl.querySelectorAll('.help-nav-section').forEach(function (a) {
+          var id = a.getAttribute('href').slice(1);
+          var isMatch = !!matchedIds[id];
+          a.classList.toggle('help-nav-hidden', !isMatch);
+          if (isMatch) anyMatch = true;
+        });
+        chapterEl.classList.toggle('help-nav-hidden', !anyMatch);
+        if (anyMatch) chapterEl.open = true;
       });
       if (count) count.textContent = hits ? hits + ' section' + (hits === 1 ? '' : 's') : 'No matches';
     }
@@ -159,25 +238,111 @@
       var section = target.closest ? target.closest('.help-section') : null;
       if (section) section.open = true;
       target.scrollIntoView({ block: 'start' });
+      // On a small screen the hash may point at content behind the drawer;
+      // closing it after navigating keeps the jump from feeling like nothing
+      // happened.
+      var offcanvasEl = document.getElementById('helpNavPanel');
+      if (offcanvasEl && window.bootstrap && window.innerWidth < 992) {
+        var instance = window.bootstrap.Offcanvas.getInstance(offcanvasEl);
+        if (instance) instance.hide();
+      }
     }
     window.addEventListener('hashchange', revealFromHash);
     revealFromHash();
 
-    // Keep the sidebar in step with what is on screen, and open the chapter
-    // that owns the visible section.
-    var navLinks = Array.prototype.slice.call(document.querySelectorAll('.help-nav-section'));
+    // Keep the sidebar and breadcrumb in step with what is on screen: open
+    // ONLY the chapter that owns the visible section (closing every other one
+    // instead of letting them pile up as the page scrolls), scroll that link
+    // into view within the panel, and say plainly where you are.
     var byId = {};
-    navLinks.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
-    if (navLinks.length && 'IntersectionObserver' in window) {
+    navSections.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+
+    // The native <details> toggle -- fired for a click on its own summary, a
+    // plain `.open = true` from the code below, or the keyboard -- is the
+    // ONE place siblings get closed. Everything else here only ever SETS
+    // `.open` on a chapter and lets this reactive listener do the closing.
+    navChapters.forEach(function (chapterEl) {
+      chapterEl.addEventListener('toggle', function () {
+        // While searching, every matching chapter legitimately stays open at
+        // once to show every group of hits; the accordion only applies to
+        // ordinary browsing.
+        if (!chapterEl.open || content.classList.contains('help-searching')) return;
+        navChapters.forEach(function (d) {
+          if (d !== chapterEl) d.open = false;
+        });
+      });
+    });
+
+    function setActiveSection(link) {
+      navSections.forEach(function (a) { a.classList.remove('active'); });
+      if (!link) return;
+      link.classList.add('active');
+      if (typeof link.scrollIntoView === 'function') {
+        link.scrollIntoView({ block: 'nearest' });
+      }
+      setCrumb(link.closest('.help-nav-chapter'), link.textContent);
+    }
+
+    function setCrumb(chapterEl, sectionText) {
+      if (!crumb) return;
+      var chapterTitle = chapterEl ? chapterEl.querySelector('.help-nav-chapter-title').textContent : '';
+      if (!chapterTitle) {
+        crumb.textContent = '';
+      } else if (sectionText) {
+        crumb.innerHTML = '<strong>' + chapterTitle + '</strong> › ' + sectionText;
+      } else {
+        crumb.innerHTML = '<strong>' + chapterTitle + '</strong>';
+      }
+    }
+
+    // A big cross-page jump (a section link, or the quick-jump select) can
+    // take the browser the better part of a second to settle, and the
+    // scroll-driven observer below would otherwise report whatever is
+    // transiently passing through the top of the screen during that transit
+    // -- visibly flashing the wrong chapter open before snapping to the
+    // right one. A deliberate jump already KNOWS where it is going, so it
+    // asks the observer to stand down for a moment instead of racing it.
+    var suppressObserverUntil = 0;
+    function suppressObserverBriefly() {
+      suppressObserverUntil = Date.now() + 900;
+    }
+
+    navSections.forEach(function (link) {
+      link.addEventListener('click', function () {
+        var chapterEl = link.closest('.help-nav-chapter');
+        if (chapterEl) chapterEl.open = true;
+        setActiveSection(link);
+        suppressObserverBriefly();
+      });
+    });
+    if (jump) {
+      jump.addEventListener('change', function () {
+        var id = jump.value;
+        jump.value = '';
+        if (!id) return;
+        var link = byId[id];
+        var chapterEl = link ? link.closest('.help-nav-chapter') : document.querySelector('[data-chapter-id="' + id + '"]');
+        if (chapterEl) chapterEl.open = true;
+        if (link) {
+          setActiveSection(link);
+        } else {
+          setCrumb(chapterEl, '');
+        }
+        suppressObserverBriefly();
+        location.hash = id;
+      });
+    }
+
+    if (navSections.length && 'IntersectionObserver' in window) {
       var observer = new IntersectionObserver(function (entries) {
+        if (Date.now() < suppressObserverUntil) return;
         entries.forEach(function (entry) {
           if (!entry.isIntersecting) return;
           var link = byId[entry.target.id];
           if (!link) return;
-          navLinks.forEach(function (a) { a.classList.remove('active'); });
-          link.classList.add('active');
-          var chapter = link.closest('.help-nav-chapter');
-          if (chapter) chapter.open = true;
+          var chapterEl = link.closest('.help-nav-chapter');
+          if (chapterEl) chapterEl.open = true;
+          setActiveSection(link);
         });
       }, { rootMargin: '0px 0px -75% 0px' });
       content.querySelectorAll('.help-section-title').forEach(function (el) { observer.observe(el); });

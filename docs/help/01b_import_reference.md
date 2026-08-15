@@ -328,14 +328,19 @@ purchasing, a re-export, release, a new revision and a change request. They are
 built from the CV03 sample data, and every part number carries a prefix so
 nothing can collide with real parts.
 
-Generate them on any machine with the repository checked out:
+**[Download the practice-pack bundle (.zip)](/help/practice-packs.zip)** — every
+step, a README repeating the story below, and the `out_of_band/` files step 8
+needs, all in one file. Unzip it; the file names match the table.
+
+Prefer to build it yourself, or want a different prefix? Generate it on any
+machine with the repository checked out:
 
 ```text
 python tools/make_import_test_packs.py
 ```
 
-They appear in `testfiles/import_scenarios/`, with a README repeating each step.
-Add `--prefix DEMO-` or `--out <folder>` for a different namespace or location.
+That writes the same packs to `testfiles/import_scenarios/`. Add `--prefix
+DEMO-` or `--out <folder>` for a different namespace or location.
 
 **Before you start:**
 

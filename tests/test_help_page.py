@@ -84,6 +84,44 @@ def test_help_import_chapter_anchors_match_the_links_into_it(client, app, user):
         assert f'id="{anchor}"' in body, anchor
 
 
+def test_help_links_to_the_practice_pack_download(client, app, user):
+    """The exercise names files an operator cannot get without this link."""
+
+    _admin(user)
+    _login(client, user)
+
+    body = client.get("/help").get_data(as_text=True)
+    assert 'href="/help/practice-packs.zip"' in body
+
+
+def test_practice_pack_download_requires_login(client):
+    resp = client.get("/help/practice-packs.zip")
+    assert resp.status_code in (302, 401)
+
+
+def test_practice_pack_download_is_a_working_exercise_bundle(client, app, user):
+    """Every file the exercise table and README refer to must actually be in it."""
+
+    import io
+    import zipfile
+
+    _admin(user)
+    _login(client, user)
+
+    resp = client.get("/help/practice-packs.zip")
+    assert resp.status_code == 200
+    assert resp.mimetype == "application/zip"
+    assert "attachment" in (resp.headers.get("Content-Disposition") or "")
+
+    archive = zipfile.ZipFile(io.BytesIO(resp.data))
+    names = set(archive.namelist())
+    for step in range(1, 12):
+        assert any(name.startswith(f"{step:02d}_") for name in names), step
+    assert "README.md" in names
+    assert "index.json" in names
+    assert any(name.startswith("out_of_band/") for name in names)
+
+
 def test_help_screenshots_are_present_and_captioned(client, app, user):
     """A screenshot without a caption does not tell the reader what to notice."""
 
