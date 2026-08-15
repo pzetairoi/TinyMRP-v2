@@ -1360,21 +1360,30 @@ def _apply_properties(part: Part, entry: dict[str, Any], aliases: dict[str, str]
         attrs[change["write_key"]] = change["after"]
     part.attrs = attrs
 def _apply_approval(part: Part, entry: dict[str, Any], aliases: dict[str, str]) -> None:
-    changes = {
-        item["field_id"]: item
-        for item in entry["approval"]
-        if item["action"] in {"add", "change", "clear"}
-    }
-    if not changes:
+    """Rewrite the approval fields as one set, or leave them entirely alone.
+
+    Approval is written by dropping every configured alias of the three
+    approval fields and re-writing them under their canonical ids, which is
+    what normalises a legacy ``ApprovedBy`` column. That makes the rewrite
+    all-or-nothing: re-writing only the rows that CHANGED deletes the ones that
+    did not, so a run that merely moved the approval date used to strip the
+    approver and silently turn an approved part back into a draft -- while its
+    own redline said those two rows were unchanged. Every non-cleared row is
+    written back, so the stored approval always matches the redline.
+    """
+
+    if not any(item["action"] in {"add", "change", "clear"} for item in entry["approval"]):
         return
     attrs = {
         key: value
         for key, value in (part.attrs or {}).items()
         if aliases.get(canonical_attr_key(key), canonical_attr_key(key)) not in _APPROVAL_FIELDS
     }
-    for field_id, change in changes.items():
-        if change["action"] != "clear":
-            attrs[field_id] = change["after"]
+    for item in entry["approval"]:
+        # "after" holds the preserved value on skipped and blocked rows, so
+        # this keeps them exactly as the redline showed them.
+        if item["action"] != "clear" and _has_value(item["after"]):
+            attrs[item["field_id"]] = item["after"]
     part.attrs = normalize_record_attrs(attrs)
 def _file_coverage(
     plan: dict[str, Any],

@@ -75,3 +75,6 @@ instance/
 # Infrastructure reference: real addresses and domains, never published.
 deploy/fleet.local.md
 deploy/community/backups/
+
+# Generated import-policy exercise packs (tools/make_import_test_packs.py)
+testfiles/import_scenarios/

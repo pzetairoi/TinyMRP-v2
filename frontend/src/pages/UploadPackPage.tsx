@@ -640,11 +640,23 @@ export default function UploadPackPage() {
 
   return (
     <div className="container-xxl py-3">
-      <div className="border-bottom mb-3 pb-2">
-        <h4 className="mb-1">Import upload pack</h4>
-        <div className="text-muted small">
-          Select a ZIP, choose an import policy, preview the exact redline, then apply it.
+      <div className="border-bottom mb-3 pb-2 d-flex flex-wrap justify-content-between align-items-start gap-2">
+        <div>
+          <h4 className="mb-1">Import upload pack</h4>
+          <div className="text-muted small">
+            Select a ZIP, choose an import policy, preview the exact redline, then apply it.
+          </div>
         </div>
+        {/* The policies decide what is filled, replaced or refused, so the page
+            links straight at the chapter that spells that out. */}
+        <a
+          className="btn btn-sm btn-outline-secondary"
+          href="/help#import-what-each-policy-does"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Help: what each policy does
+        </a>
       </div>
 
       <div className="card p-3 mb-3">
@@ -708,7 +720,11 @@ export default function UploadPackPage() {
               : "Safe: only blanks, empty BOMs and missing files are filled. Existing approved parts stay protected."}{" "}
           Any uploader may import a new part that arrives already approved. Changing an
           existing approved part — its properties, BOM or files — always needs the
-          override permission, regardless of policy.
+          override permission, regardless of policy.{" "}
+          <a href="/help#what-counts-as-approved" target="_blank" rel="noreferrer">
+            How approval is read from the pack
+          </a>
+          .
         </div>
 
         <details className="mt-3">

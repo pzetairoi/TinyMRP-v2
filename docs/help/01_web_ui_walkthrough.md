@@ -237,6 +237,11 @@ Use it to spot systematic gaps before they reach a supplier.
 
 **What it is for:** bringing a SolidWorks upload pack into the database.
 
+> The next chapter, [Import: what each policy does](#import-what-each-policy-does),
+> is the full reference: exactly what fills, replaces or is blocked, how
+> approval behaves, who is allowed to do what, a ten-step exercise with
+> ready-made test packs, and an FAQ.
+
 ### The safe sequence
 
 1. Choose the ZIP.
@@ -293,8 +298,9 @@ file name if you expected that part to exist.
 
 ### Duplicate part numbers
 
-If the same part number and revision appears twice in one pack, the import
-stops and asks which entry to keep rather than guessing.
+If the same part number and revision appears twice in one pack, the preview
+keeps the **first** row, warns that the rows clashed, and offers a chooser. Pick
+the row you want and preview again. Nothing is guessed silently.
 
 ### Expected ZIP structure
 

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-08-15 04:56 UTC",
-  "commit": "988f35d",
+  "generated_at": "2026-08-15 06:38 UTC",
+  "commit": "69f273c",
   "items": [
     {
       "id": "getting-started",
@@ -79,6 +79,48 @@
         {
           "id": "admin",
           "title": "Admin"
+        }
+      ]
+    },
+    {
+      "id": "import-what-each-policy-does",
+      "title": "Import: what each policy does",
+      "sections": [
+        {
+          "id": "the-four-levels-side-by-side",
+          "title": "The four levels, side by side"
+        },
+        {
+          "id": "what-counts-as-approved",
+          "title": "What counts as approved"
+        },
+        {
+          "id": "properties",
+          "title": "Properties"
+        },
+        {
+          "id": "bom",
+          "title": "BOM"
+        },
+        {
+          "id": "files",
+          "title": "Files"
+        },
+        {
+          "id": "who-can-run-which-import",
+          "title": "Who can run which import"
+        },
+        {
+          "id": "what-the-redline-words-mean",
+          "title": "What the redline words mean"
+        },
+        {
+          "id": "guided-exercise-with-real-test-packs",
+          "title": "Guided exercise with real test packs"
+        },
+        {
+          "id": "import-faq",
+          "title": "Import FAQ"
         }
       ]
     },

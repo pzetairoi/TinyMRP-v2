@@ -64,8 +64,24 @@ def test_help_covers_the_features_users_ask_about(client, app, user):
         # Rules that are easy to trip over and must stay documented.
         "parts.read_unreleased",
         "imports.override_approved",
+        # The import policy reference, which the Import page links straight at.
+        "Import: what each policy does",
+        "What counts as approved",
+        "Import FAQ",
     ):
         assert topic in body, topic
+
+
+def test_help_import_chapter_anchors_match_the_links_into_it(client, app, user):
+    """The Import page deep-links into this chapter, so its anchors must exist."""
+
+    _admin(user)
+    _login(client, user)
+
+    body = client.get("/help").get_data(as_text=True)
+
+    for anchor in ("import-what-each-policy-does", "what-counts-as-approved"):
+        assert f'id="{anchor}"' in body, anchor
 
 
 def test_help_screenshots_are_present_and_captioned(client, app, user):

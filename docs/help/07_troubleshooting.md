@@ -64,6 +64,10 @@ ignored.
 3. **Look for "blocked".** Blocked rows are changes your policy or permissions
    would not allow — most often an attempt to modify an existing approved part
    without the override permission.
+4. **Check *skipped* against the Reason column.** *Fill only* deliberately keeps
+   any value that is not empty. See
+   [Import: what each policy does](#import-what-each-policy-does) for the full
+   matrix and an exercise that reproduces each case.
 
 ## An import says I lack permission
 

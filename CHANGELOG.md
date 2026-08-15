@@ -5,7 +5,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ## [Unreleased]
 
-Nothing yet. Work planned for after 1.0.0 is tracked in
+### Fixed
+
+- **Import no longer drops approval fields it said it would keep.** Approval is
+  written as one set — every alias is removed and the canonical fields are
+  re-written — but only the *changed* rows were written back. An import that
+  moved the approval date therefore deleted the approver and the approved
+  status, silently turning an approved part into a draft while its own redline
+  reported those two rows as unchanged. The stored approval now matches the
+  redline exactly.
+
+### Added
+
+- **Help chapter "Import: what each policy does"**, covering what Fill only,
+  Update drafts and Override approved write, skip or block for properties, the
+  BOM and files; how approval is read from a pack and when it can be cleared;
+  which permission each level needs; a ten-step exercise; and an FAQ. Linked
+  from the Import page itself.
+- **`tools/make_import_test_packs.py`**, which builds that exercise: ten upload
+  packs derived from the CV03 sample data, under a part-number prefix so the
+  exercise cannot collide with real parts.
+
+Other work planned for after 1.0.0 is tracked in
 `docs/planning/productionmaturityplan.txt`.
 
 ## [1.0.0] — 2026-08-08

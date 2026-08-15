@@ -345,6 +345,12 @@ common processes, and recently updated parts.</p>
 <hr />
 </div></details><details class="help-section" id="sec-import"><summary><span class="help-section-title" id="import">Import</span></summary><div class="help-section-body">
 <p><strong>What it is for:</strong> bringing a SolidWorks upload pack into the database.</p>
+<blockquote>
+<p>The next chapter, <a href="#import-what-each-policy-does">Import: what each policy does</a>,
+is the full reference: exactly what fills, replaces or is blocked, how
+approval behaves, who is allowed to do what, a ten-step exercise with
+ready-made test packs, and an FAQ.</p>
+</blockquote>
 <h3 id="the-safe-sequence">The safe sequence</h3>
 <ol>
 <li>Choose the ZIP.</li>
@@ -408,8 +414,9 @@ and reported in the warnings</strong>, never turned into a part of its own.</p>
 <p>Warnings like <em>&quot;Skipped … no BOM entry for …&quot;</em> are this rule working. Check the
 file name if you expected that part to exist.</p>
 <h3 id="duplicate-part-numbers">Duplicate part numbers</h3>
-<p>If the same part number and revision appears twice in one pack, the import
-stops and asks which entry to keep rather than guessing.</p>
+<p>If the same part number and revision appears twice in one pack, the preview
+keeps the <strong>first</strong> row, warns that the rows clashed, and offers a chooser. Pick
+the row you want and preview again. Nothing is guessed silently.</p>
 <h3 id="expected-zip-structure">Expected ZIP structure</h3>
 <pre><code class="language-text">bom/
   *_FLATBOM.txt
@@ -546,6 +553,582 @@ files, properties, comments, markups, whole parts, and even users and custom
 roles. It requires you to type a confirmation phrase. There is no undo. Take
 a database backup before a large purge.</p>
 </blockquote>
+</div></details></section><section class="help-chapter"><h1 id="import-what-each-policy-does">Import: what each policy does</h1><div class="help-intro">
+<p>The Import page takes a ZIP from the add-in and writes three different kinds of
+thing: <strong>part properties</strong>, the <strong>BOM</strong>, and <strong>files</strong>. Each of those has its
+own policy, and approval cuts across all three.</p>
+<p>This chapter is the detailed reference. The short version is in
+<a href="#import">Web UI walkthrough → Import</a>. If you only remember one sentence, make
+it this one:</p>
+<blockquote>
+<p>Nothing is written until you press <strong>Apply</strong>, and the <strong>preview redline is
+exactly what the apply will do</strong> — row by row.</p>
+</blockquote>
+</div><details class="help-section" id="sec-the-four-levels-side-by-side" open><summary><span class="help-section-title" id="the-four-levels-side-by-side">The four levels, side by side</span></summary><div class="help-section-body">
+<p>Every policy has the same four levels. What they mean depends on the target,
+which is always one exact <strong>part number + revision</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>New part</th>
+<th>Existing <strong>draft</strong> part</th>
+<th>Existing <strong>approved</strong> part</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Skip</strong></td>
+<td>Nothing in that category is written</td>
+<td>Nothing</td>
+<td>Nothing</td>
+</tr>
+<tr>
+<td><strong>Fill only</strong></td>
+<td>Everything in the pack is written</td>
+<td>Only what is empty is filled</td>
+<td><strong>Nothing — blocked</strong></td>
+</tr>
+<tr>
+<td><strong>Update drafts</strong></td>
+<td>Everything is written</td>
+<td>Filled <em>and</em> replaced</td>
+<td><strong>Nothing — blocked</strong></td>
+</tr>
+<tr>
+<td><strong>Override approved</strong></td>
+<td>Everything is written</td>
+<td>Filled <em>and</em> replaced</td>
+<td>Filled <em>and</em> replaced</td>
+</tr>
+</tbody>
+</table>
+<p>Three facts follow from that table and are worth stating on their own:</p>
+<ul>
+<li><strong>A new part is never protected.</strong> Any uploader may create a part that
+arrives complete and already approved. Creating is not overriding.</li>
+<li><strong>Fill only and Update drafts differ only on data that already exists.</strong> On a
+greenfield import they do exactly the same thing.</li>
+<li><strong>Only Override approved touches an approved part.</strong> Every other level
+reports the intended change as <em>blocked</em> and leaves the part alone.</li>
+</ul>
+<p><strong>Tip:</strong> the preset buttons set Properties, BOM and Files together. Change one
+in <em>Advanced</em> and the preset switches to <em>Custom</em> — which is fine and often
+what you want (for example Properties = <em>Fill only</em> with Files = <em>Update
+drafts</em>).</p>
+</div></details><details class="help-section" id="sec-what-counts-as-approved"><summary><span class="help-section-title" id="what-counts-as-approved">What counts as approved</span></summary><div class="help-section-body">
+<p>Approval is not a separate button; it is read out of the pack's columns.</p>
+<table>
+<thead>
+<tr>
+<th>In the pack</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>approved</code>, <code>is_approved</code>, <code>approval_status</code>, <code>released</code> = <code>yes</code>, <code>y</code>, <code>true</code>, <code>1</code>, <code>on</code>, <code>approved</code>, <code>released</code></td>
+<td>Approved</td>
+</tr>
+<tr>
+<td>The same columns = <code>no</code>, <code>n</code>, <code>false</code>, <code>0</code>, <code>off</code>, <code>draft</code>, <code>none</code>, <code>null</code>, <code>n/a</code>, <code>pending</code>, <code>tbc</code>, <code>tbd</code>, <code>wip</code>, <code>rejected</code>, <code>work in progress</code>, <code>-</code>, blank</td>
+<td>Not approved</td>
+</tr>
+<tr>
+<td><code>ApprovedBy</code>, <code>approved_by</code>, <code>approver</code>, <code>released_by</code> holding a <strong>name</strong></td>
+<td>Approved, by that person</td>
+</tr>
+<tr>
+<td>Any other text in one of those columns</td>
+<td>Treated as an approver's name — so the part counts as <strong>approved</strong></td>
+</tr>
+<tr>
+<td><code>ApprovedDate</code>, <code>approved_date</code></td>
+<td>Stored as the approval date; a date alone does <strong>not</strong> approve</td>
+</tr>
+</tbody>
+</table>
+<p><strong>An explicit &quot;no&quot; wins.</strong> A row with <code>approved = No</code> and <code>ApprovedBy = FQ</code> is a
+draft.</p>
+<p><strong>A stray word approves.</strong> Anything the list above does not recognise is read as
+an approver's name. If your CAD template writes something like <code>checked</code> into
+the approved column, the part will import as approved by &quot;checked&quot;. An
+administrator can add that word to the unapproved values in
+<strong>Admin → Fields &amp; exports</strong>.</p>
+<p><strong>Contradictions block instead of guessing.</strong> <code>approved = Yes</code> together with
+<code>is_approved = No</code>, or two different approver names, produces the warning
+<em>&quot;Incoming approval aliases conflict&quot;</em> and every approval row is blocked, under
+every policy.</p>
+<h3 id="approval-follows-the-properties-policy">Approval follows the Properties policy</h3>
+<p>The page has no separate approval selector. Approval is written with the
+properties:</p>
+<table>
+<thead>
+<tr>
+<th>Properties policy</th>
+<th>What happens to approval</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Skip</strong></td>
+<td>Approval fields are not written at all</td>
+</tr>
+<tr>
+<td><strong>Fill only</strong></td>
+<td>Existing approval is preserved — the rows read <em>skipped</em></td>
+</tr>
+<tr>
+<td><strong>Update drafts</strong></td>
+<td>Approval is applied to draft parts; blocked on approved ones</td>
+</tr>
+<tr>
+<td><strong>Override approved</strong></td>
+<td>The pack's approval wins, including a blank one</td>
+</tr>
+</tbody>
+</table>
+<p>That last row is the one that surprises people, so it has its own callout:</p>
+<blockquote>
+<p><strong>Common mistake:</strong> re-exporting a CAD file whose approval properties were
+never written back produces a pack with <strong>empty</strong> approval columns. Under
+<em>Fill only</em> and <em>Update drafts</em> that is harmless. Under <strong>Override approved</strong>
+an empty column wins like any other value: the redline shows <em>Approved</em>
+changing to No and the approver and date being <strong>cleared</strong>, and the apply
+does exactly that. Step 10 of the exercise below demonstrates it safely.</p>
+</blockquote>
+<p>Approval is written as a set. If the pack re-signs a part with a new date but
+the same approver, the approver and status stay exactly as the redline showed
+them.</p>
+</div></details><details class="help-section" id="sec-properties"><summary><span class="help-section-title" id="properties">Properties</span></summary><div class="help-section-body">
+<p>&quot;Properties&quot; means the ordinary fields (description, material, finish, mass…),
+your custom fields, and the approval fields.</p>
+<ul>
+<li><strong>Fill only</strong> writes a field when the current value is empty. A field that
+already holds anything — even <code>n/a</code> — is left alone and reported as
+<em>skipped</em>.</li>
+<li><strong>Update drafts</strong> also replaces non-empty values, but only on draft parts.</li>
+<li>An incoming value <strong>identical</strong> to the stored one is <em>unchanged</em> and does not
+make the part count as changed.</li>
+<li>Blank incoming values are still values on a <strong>new</strong> part: the field is
+created empty.</li>
+</ul>
+<h3 id="column-names-are-not-field-names">Column names are not field names</h3>
+<p>Several source columns map to the same logical field. The redline shows the
+field's label and, underneath, <em>from &lt;column&gt;</em> so you can see which column
+won.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Columns that feed it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Finish</td>
+<td><code>finish</code>, <code>treatment</code>, <code>colour</code>, <code>color</code></td>
+</tr>
+<tr>
+<td>Mass</td>
+<td><code>mass</code>, <code>weight</code></td>
+</tr>
+<tr>
+<td>OEM Part Number</td>
+<td><code>supplier_partnumber</code>, <code>supplier_part_number</code>, <code>oem_part_number</code>, <code>oem_partnumber</code></td>
+</tr>
+<tr>
+<td>Datasheet</td>
+<td><code>datasheet</code>, <code>oem_data_sheet</code>, <code>data_sheet</code>, <code>datasheet_url</code></td>
+</tr>
+<tr>
+<td>Description</td>
+<td><code>description</code>, <code>desc</code>, <code>desc1</code>, <code>summary_text</code></td>
+</tr>
+<tr>
+<td>Process</td>
+<td><code>process</code>, <code>process2</code>, <code>process3</code>, <code>secondprocess</code>, <code>thirdprocess</code> (all kept — Process is multi-value)</td>
+</tr>
+</tbody>
+</table>
+<p>If two of those columns disagree in the same row, the <strong>first one wins</strong> and
+the redline says so: <em>&quot;Conflicting duplicate aliases kept the first value
+(mass); ignored: Weight.&quot;</em> Nothing is lost silently.</p>
+<p>Administrators can change these mappings in <strong>Admin → Fields &amp; exports</strong>.</p>
+<h3 id="skip-still-creates-parts-when-something-else-needs-them">Skip still creates parts when something else needs them</h3>
+<p>With Properties = <em>Skip</em>, a BOM row or a file still needs its part to exist. The
+import creates those as <strong>empty shells</strong> — a part number, a revision and
+nothing else. That is intentional: the BOM cannot point at a part that is not
+there.</p>
+</div></details><details class="help-section" id="sec-bom"><summary><span class="help-section-title" id="bom">BOM</span></summary><div class="help-section-body">
+<p>A BOM belongs to one exact <strong>parent part + revision</strong>. <code>CV03-F01</code> revision A and
+revision B have separate, unrelated BOMs.</p>
+<ul>
+<li>The BOM is written <strong>whole</strong>. There is no merging of single rows: the import
+deletes every row of that parent/revision and writes the pack's rows.</li>
+<li><strong>Fill only</strong> writes a BOM only when the parent has <strong>none at all</strong>. If one
+exists, the redline says <em>&quot;Fill if empty never merges into an existing BOM&quot;</em>
+and lists what it would have done.</li>
+<li><strong>Update drafts</strong> replaces the whole BOM of a draft parent. <strong>Override
+approved</strong> does the same for an approved parent.</li>
+<li>Writing a BOM <strong>creates any child that does not exist yet</strong>, so the plan asks
+for <code>parts.create</code> as well as <code>bom.update</code>.</li>
+<li>Removing a row from a BOM never deletes the part itself. It is still in
+Inventory, just no longer used there.</li>
+<li>Quantities are per exact child revision. Swapping REV B for REV C shows as one
+<em>remove</em> plus one <em>add</em>, not as a change.</li>
+</ul>
+<p><strong>Common mistake:</strong> the parent/child links come from the dotted <strong>ITEM NO.</strong>
+column of the TREEBOM (<code>1</code>, <code>1.1</code>, <code>1.1.2</code>). A TREEBOM numbered <code>1</code>, <code>2</code>, <code>3</code>
+parses without error and produces <strong>no links at all</strong> — the parts import, the
+BOM stays empty.</p>
+</div></details><details class="help-section" id="sec-files"><summary><span class="help-section-title" id="files">Files</span></summary><div class="help-section-body">
+<p>Two kinds of file travel in a pack, and they are identified differently.</p>
+<h3 id="managed-deliverables-deliverablesgroup">Managed deliverables (<code>deliverables/&lt;group&gt;/…</code>)</h3>
+<p>The groups are <code>png</code>, <code>pdf</code>, <code>dxf</code>, <code>step</code>, <code>edr</code>, <code>3mf</code>, <code>ply</code>, <code>stl</code> and
+<code>datasheet</code>, and each only accepts its own file types.</p>
+<p>The identity is <strong>part + revision + group + extension + drawing flag</strong> — not the
+file name. The file name is only how the importer works out the part, the
+revision and whether it is a drawing:</p>
+<pre><code class="language-text">IMPTEST-P01_REV_B.pdf        → IMPTEST-P01, revision B, group pdf
+IMPTEST-P01_REV_B_DWG.png    → the drawing image: a SEPARATE identity from the preview PNG
+IMPTEST-B02_REV_.png         → a part with NO revision
+</code></pre>
+<p>Consequences worth knowing:</p>
+<ul>
+<li><strong>Everything after <code>_REV_</code> is the revision.</strong> <code>IMPTEST-P01_REV_B_SHEET2.pdf</code>
+is not a second sheet: it is revision <code>B_SHEET2</code>, which no BOM row declares,
+so it is skipped and reported.</li>
+<li><strong>The part number must match the BOM exactly, including case.</strong>
+<code>imptest-p01_rev_b.png</code> does not match <code>IMPTEST-P01</code>.</li>
+<li><strong>A file can be renamed and still be the same identity.</strong> <code>…_REV_B.PDF</code> and
+<code>…_REV_B.pdf</code> are one PDF: the second one <em>replaces</em> the first. The record
+then points at the new name and the old file stays behind in storage,
+unreferenced.</li>
+<li>Two different extensions in the same group are two identities: a part can
+hold both <code>.eprt</code> and <code>.easm</code> under <code>edr</code>.</li>
+<li><strong>Identical bytes are <em>unchanged</em>.</strong> Re-uploading the same file writes
+nothing.</li>
+<li>A <strong>datasheet</strong> whose name carries no <code>_REV_</code> is matched to its part through
+the part's datasheet column instead. If that matches no part, or more than
+one, it is reported and skipped.</li>
+</ul>
+<h3 id="associated-files-extrapnrev">Associated files (<code>extra/&lt;PN&gt;/&lt;REV&gt;/…</code>)</h3>
+<p>Here the identity <strong>is</strong> the stored path, so the file name matters: uploading
+<code>quote-v2.pdf</code> next to <code>quote-v1.pdf</code> adds a second file rather than replacing
+the first. An <code>extra/_manifest.json</code> can give each one a label.</p>
+<p>Use <code>__no_rev__</code> as the revision folder for a part that has no revision.</p>
+<h3 id="files-never-create-parts">Files never create parts</h3>
+<p>A deliverable whose name resolves to a part the BOM does not declare is skipped
+and reported — <em>&quot;Skipped … no BOM entry for …&quot;</em>. This is the rule that keeps CAD
+temp artefacts from becoming parts.</p>
+<h3 id="files-already-in-storage">Files already in storage</h3>
+<p>The add-in's <em>Create BOM</em> pack usually contains <strong>only</strong> the two BOM text files;
+the deliverables are already in the storage root. The import scans storage for
+every part in the pack and creates or repoints the file records it finds. In the
+redline these rows read <em>found in storage</em>.</p>
+<ul>
+<li>This runs on <strong>every</strong> import, including re-imports where nothing else
+changed, and including approved parts — pointing a record at bytes that
+already exist is not an overwrite.</li>
+<li>Setting <strong>Files = Skip</strong> turns the storage scan off entirely.</li>
+<li>It is the same operation as <strong>Part Details → Actions → Update files</strong>.</li>
+</ul>
+</div></details><details class="help-section" id="sec-who-can-run-which-import"><summary><span class="help-section-title" id="who-can-run-which-import">Who can run which import</span></summary><div class="help-section-body">
+<p>Two different things are checked: your permission to run an import of that
+risk level, and your permission to write the resources it touches.</p>
+<table>
+<thead>
+<tr>
+<th>Permission</th>
+<th>Needed for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>imports.preview</code></td>
+<td>Previewing at all</td>
+</tr>
+<tr>
+<td><code>imports.execute_low_risk</code></td>
+<td>Applying a plan that only creates parts and adds data or files</td>
+</tr>
+<tr>
+<td><code>imports.execute_approved</code></td>
+<td>Applying a plan that <strong>replaces</strong> anything, even on a draft</td>
+</tr>
+<tr>
+<td><code>imports.override_approved</code></td>
+<td>Applying a plan that changes an existing <strong>approved</strong> part</td>
+</tr>
+<tr>
+<td><code>parts.create</code>, <code>parts.update</code>, <code>bom.update</code>, <code>files.add</code>, <code>files.replace</code></td>
+<td>The writes themselves</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note the naming:</strong> <code>imports.execute_approved</code> is what <em>Update drafts</em> needs,
+even though no approved part is involved. It is the &quot;this import replaces data&quot;
+tier. Overriding an approved part needs <code>imports.override_approved</code> <strong>as well</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Can preview</th>
+<th>Fill only</th>
+<th>Update drafts</th>
+<th>Override approved</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Engineering</strong></td>
+<td>Yes</td>
+<td>Yes</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><strong>Engineering Manager</strong></td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><strong>Administrator</strong></td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<p>The page disables the levels you cannot use, and the redline lists <strong>Required</strong>
+and <strong>Missing</strong> permissions before you apply. An apply you are not allowed to
+run is refused whole — it never applies &quot;the parts you were allowed to&quot;.</p>
+</div></details><details class="help-section" id="sec-what-the-redline-words-mean"><summary><span class="help-section-title" id="what-the-redline-words-mean">What the redline words mean</span></summary><div class="help-section-body">
+<p>Each part is one foldable row with a badge — <strong>New</strong>, <strong>Draft</strong> or <strong>Approved</strong> —
+and inside it, three sections: Properties, Files, BOM.</p>
+<table>
+<thead>
+<tr>
+<th>Word</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>add</strong></td>
+<td>The value, file or BOM did not exist and will be written</td>
+</tr>
+<tr>
+<td><strong>replace</strong></td>
+<td>An existing value or file will be overwritten</td>
+</tr>
+<tr>
+<td><strong>change</strong> / <strong>clear</strong></td>
+<td>An approval field will be changed, or emptied</td>
+</tr>
+<tr>
+<td><strong>remove</strong></td>
+<td>A BOM row will disappear</td>
+</tr>
+<tr>
+<td><strong>unchanged</strong></td>
+<td>Incoming and stored values are identical</td>
+</tr>
+<tr>
+<td><strong>skipped</strong></td>
+<td>The policy chose not to write it (for example Fill only on a field that already has a value)</td>
+</tr>
+<tr>
+<td><strong>blocked</strong></td>
+<td>The policy or your permissions do not allow it — most often an approved target</td>
+</tr>
+<tr>
+<td><strong>link</strong></td>
+<td>A file already in storage will be attached to the part</td>
+</tr>
+</tbody>
+</table>
+<p><em>Skipped</em> and <em>blocked</em> both mean &quot;nothing happens to this row&quot;. The difference
+is why: <em>skipped</em> is the policy working as chosen, <em>blocked</em> is a protection you
+would need a higher level or another permission to pass.</p>
+<p>A plan containing blocked rows can still be applied. Everything else in it goes
+through and the blocked rows are left alone. The <strong>Blocked</strong> and <strong>Modified
+approved</strong> tabs are the review lists.</p>
+</div></details><details class="help-section" id="sec-guided-exercise-with-real-test-packs"><summary><span class="help-section-title" id="guided-exercise-with-real-test-packs">Guided exercise with real test packs</span></summary><div class="help-section-body">
+<p>Ten packs walk one small assembly through engineering, manufacturing,
+purchasing, release and a change request. They are built from the CV03 sample
+data, and every part number carries a prefix so nothing can collide with real
+data.</p>
+<p>Generate them on any machine with the repository checked out:</p>
+<pre><code class="language-text">python tools/make_import_test_packs.py
+</code></pre>
+<p>They appear in <code>testfiles/import_scenarios/</code>, with a README repeating each step.
+Add <code>--prefix DEMO-</code> or <code>--out &lt;folder&gt;</code> if you want a different namespace or
+location.</p>
+<p><strong>Before you start:</strong></p>
+<ul>
+<li>Run the exercise on a <strong>test instance</strong>, not on production. It really does
+create parts.</li>
+<li>You need two accounts to see the whole thing: one with the <strong>Engineering</strong>
+role and one with <strong>Engineering Manager</strong> (or Administrator). Anything above
+<em>Fill only</em> needs the manager — that is steps 2b, the second run of 3, 4, 5,
+6, 8 and 10.</li>
+<li>Work through the packs <strong>in order</strong>, and press <strong>Preview changes</strong> before
+every apply. The steps build on each other.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Pack</th>
+<th>Run it as</th>
+<th>What to look for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>01_engineering_release.zip</code></td>
+<td>Engineering, <strong>Fill only</strong></td>
+<td>7 new parts, 6 BOM rows, 14 files. Nothing is blocked; Engineering can do all of it</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>02_manufacturing_fills_blanks.zip</code></td>
+<td>Engineering, <strong>Fill only</strong></td>
+<td>Lead times are <em>added</em>; the new material and description are <em>skipped</em> — those fields are not empty</td>
+</tr>
+<tr>
+<td>2b</td>
+<td>the same pack</td>
+<td>Manager, <strong>Update drafts</strong></td>
+<td>The same rows now say <em>replace</em>. As Engineering the Apply button is refused: missing <code>imports.execute_approved</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>03_purchasing_supplier_data.zip</code></td>
+<td><strong>Fill only</strong>, then <strong>Update drafts</strong></td>
+<td>Supplier fields fill; the supplier's lead time is skipped because manufacturing already set one; the <code>.PDF</code> replaces the <code>.pdf</code> only on the second run</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>04_engineering_release_approved.zip</code></td>
+<td><strong>Fill only</strong>, then <strong>Update drafts</strong></td>
+<td>Fill only leaves approval alone (<em>skipped</em>). Update drafts signs the parts. <code>IMPTEST-B01</code> is approved by a name alone; <code>IMPTEST-A01</code> stays a draft because it says No</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>05_new_revision_line.zip</code></td>
+<td>Engineering <strong>Fill only</strong>, then Manager <strong>Override</strong></td>
+<td>REV C is created by Engineering. Pointing the approved sub-assembly at it is blocked until the override</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>06_change_request_on_approved.zip</code></td>
+<td>Any level, then <strong>Override</strong></td>
+<td>Everything is blocked below Override. With it, four properties, a PDF and a quantity change go through, and the approval date moves without losing the approver</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>07_bom_only_reimport.zip</code></td>
+<td><strong>Fill only</strong></td>
+<td>Copy <code>out_of_band/</code> into the deliverables root first. The two files appear as <em>found in storage</em>. Set Files = Skip and they disappear from the plan</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>08_bom_restructure.zip</code></td>
+<td><strong>Fill only</strong>, then <strong>Override</strong></td>
+<td>Fill only refuses to merge. Override deletes the old rows and writes the new ones. <code>IMPTEST-P02</code> survives as a part</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>09_messy_pack.zip</code></td>
+<td><strong>Fill only</strong>, preview only</td>
+<td>A duplicate part number to resolve, three file warnings, an approval conflict and an alias conflict — all reported, none guessed</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>10_blank_approval_columns.zip</code></td>
+<td>Preview at all three levels</td>
+<td>The trap: only under Override do the approval rows say <em>clear</em>. If you apply it, re-run step 4 with Update drafts to sign the parts again</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Tip:</strong> after any step, open one of the parts in Inventory and check the value
+you expected. The redline and the part must agree.</p>
+<p>Clean up afterwards by searching the prefix (<code>IMPTEST-</code>) in Inventory.</p>
+</div></details><details class="help-section" id="sec-import-faq"><summary><span class="help-section-title" id="import-faq">Import FAQ</span></summary><div class="help-section-body">
+<p><strong>Does Preview change anything?</strong>
+No. It parses the pack, reads the current data and builds the plan. Nothing is
+written, no file is stored, no thumbnail is generated.</p>
+<p><strong>I applied with Fill only and nothing happened. Why?</strong>
+Either the values already existed (<em>skipped</em>) or the targets are approved
+(<em>blocked</em>). Switch the redline to <em>All rows</em> and read the Reason column.</p>
+<p><strong>What is the difference between skipped and blocked?</strong>
+<em>Skipped</em> is your policy choosing not to write. <em>Blocked</em> is a protection: a
+higher level, or another permission, would be needed.</p>
+<p><strong>Can I import only the BOM, or only the files?</strong>
+Yes. Set the other policies to <em>Skip</em>. Parts still get created as empty shells
+if the BOM or a file needs them.</p>
+<p><strong>Why does &quot;Update drafts&quot; ask for a permission with &quot;approved&quot; in its name?</strong>
+<code>imports.execute_approved</code> is the tier for imports that replace existing data,
+whatever its state. Changing an actually-approved part additionally needs
+<code>imports.override_approved</code>.</p>
+<p><strong>Can someone without the override create an approved part?</strong>
+Yes, and that is deliberate. Producing approved engineering output is normal
+work. Changing an approved part that already exists is the restricted act.</p>
+<p><strong>Will an import ever un-approve a part?</strong>
+Only under <strong>Override approved</strong>, and only if the pack's approval columns say
+so — including when they are blank. The redline shows it as <em>clear</em> before you
+apply. See step 10 of the exercise.</p>
+<p><strong>I changed the approval date and the part became a draft.</strong>
+That was a defect, fixed on 2026-08-15. The apply now stores exactly the
+approval the redline shows. If you have a part in that state, re-import it with
+its approval columns filled, using Update drafts.</p>
+<p><strong>Why is my file not attached to the part?</strong>
+Check the name against <code>PARTNUMBER_REV_REVISION.ext</code>, including capitalisation
+of the part number, and check it is in the right group folder. Then look in the
+warnings for <em>&quot;no BOM entry for …&quot;</em>.</p>
+<p><strong>I renamed a PDF and now there are two files.</strong>
+For managed deliverables there should be one per identity — if you see two,
+they differ in extension (<code>.stp</code> vs <code>.step</code>) or in the <code>_DWG</code> flag. For
+associated files in <code>extra/</code>, a new name always means a new file.</p>
+<p><strong>The old file is still in storage after a replace.</strong>
+Yes. Replacing writes the new file and repoints the record; a file whose name
+changed is not deleted from disk. Clean those up in storage if they bother you.</p>
+<p><strong>Does re-importing the same pack twice do damage?</strong>
+No. Identical values are <em>unchanged</em>, identical bytes are <em>unchanged</em>, and the
+BOM is rewritten to the same content. The response also tells you the pack was
+already imported, with the earlier operation's id.</p>
+<p><strong>Why do file records get touched when nothing else changed?</strong>
+Because a BOM-only pack reconciles file records from storage every time. That is
+how deliverables produced outside an import get attached.</p>
+<p><strong>A part number appears twice in the pack.</strong>
+SolidWorks exports virtual components as <code>PN^parent</code>, and several can collapse
+onto one part number. The preview asks which row to keep; choose and preview
+again. Without a choice the first row wins and the pack still imports.</p>
+<p><strong>How big can a pack be?</strong>
+By default up to 1024 MB of pack, 5000 files. But the web request itself is
+capped at 200 MB unless an administrator raises it, so treat 200 MB as the
+practical limit for one upload.</p>
+<p><strong>Can I undo an import?</strong>
+Not as a single action. Preview is the safety net. If an import fails halfway,
+the parts it created are removed automatically, the page tells you whether
+anything was kept, and whatever cannot be undone is recorded for an
+administrator to reconcile.</p>
+<p><strong>Where do I see what an import did afterwards?</strong>
+The redline stays on screen after applying, and <strong>Download JSON report</strong> saves
+the whole plan. Every run is also written to the import journal, which an
+administrator can read at <code>/api/import/operations</code> — failures first, since
+those are the ones needing action.</p>
+<p><strong>Can I still get at an approved part's old values after an override?</strong>
+Not through the import. Overriding writes in place. If you need the old state,
+download the JSON report of the <em>preview</em> first: it carries the before value of
+every row.</p>
 </div></details></section><section class="help-chapter"><h1 id="roles-and-permissions">Roles and Permissions</h1><div class="help-intro">
 <p>Most &quot;why can't I…&quot; questions are answered here. TinyMRP hides what you cannot
 use rather than showing you a dead button, so a missing menu is usually the
@@ -2275,6 +2858,10 @@ is written. If the preview is empty, applying will also do nothing.</li>
 <li><strong>Look for &quot;blocked&quot;.</strong> Blocked rows are changes your policy or permissions
 would not allow — most often an attempt to modify an existing approved part
 without the override permission.</li>
+<li><strong>Check <em>skipped</em> against the Reason column.</strong> <em>Fill only</em> deliberately keeps
+any value that is not empty. See
+<a href="#import-what-each-policy-does">Import: what each policy does</a> for the full
+matrix and an exercise that reproduces each case.</li>
 </ol>
 </div></details><details class="help-section" id="sec-an-import-says-i-lack-permission"><summary><span class="help-section-title" id="an-import-says-i-lack-permission">An import says I lack permission</span></summary><div class="help-section-body">
 <p>The redline lists required and missing permissions <em>before</em> you apply. The

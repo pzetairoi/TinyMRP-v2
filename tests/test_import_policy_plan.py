@@ -158,6 +158,91 @@ def test_fill_only_never_alters_an_approved_target(app, tmp_path):
         _run(data, dry_run=False, permissions={"imports.override_approved"})
 
 
+def test_overriding_one_approval_field_keeps_the_other_two(app):
+    """The apply must store exactly the approval the redline showed.
+
+    Writing approval drops every alias and re-writes the canonical ids, so
+    re-writing only the CHANGED rows deleted the unchanged ones: moving the
+    approval date stripped the approver and quietly turned an approved part
+    back into a draft, contradicting its own preview.
+    """
+
+    Part(
+        part_number="PLAN-RESIGN",
+        revision="A",
+        attrs={"approved": True, "approved_by": "FQ", "approved_date": "13/10/24"},
+    ).save()
+    data = _pack(
+        [
+            {
+                "partnumber": "PLAN-RESIGN",
+                "revision": "A",
+                "approved": "Yes",
+                "ApprovedBy": "FQ",
+                "ApprovedDate": "05/02/26",
+            }
+        ]
+    )
+
+    preview = _run(data, data_mode="replace_all", approval_mode="replace_all")
+    rows = {item["field_id"]: item for item in preview["plan"]["parts"][0]["approval"]}
+    assert rows["approved"]["action"] == "unchanged"
+    assert rows["approved_by"]["action"] == "unchanged"
+    assert rows["approved_date"]["action"] == "change"
+
+    _run(data, dry_run=False, data_mode="replace_all", approval_mode="replace_all")
+    part = Part.objects.get(part_number="PLAN-RESIGN", revision="A")
+    assert part.attrs["approved"] is True
+    assert part.attrs["approved_by"] == "FQ"
+    assert part.attrs["approved_date"] == "05/02/26"
+    assert part.canonical["approved"] is True
+
+
+def test_override_with_blank_approval_columns_clears_the_approval(app):
+    """A blank approval column is a value, and Override lets the pack win.
+
+    Documented in the help as the trap it is: re-exporting a CAD file whose
+    approval properties were never written back, and importing it with
+    Override approved, un-approves the part. The redline says so before the
+    apply does it.
+    """
+
+    Part(
+        part_number="PLAN-WIPE",
+        revision="A",
+        attrs={"approved": True, "approved_by": "FQ", "approved_date": "13/10/24"},
+    ).save()
+    data = _pack(
+        [
+            {
+                "partnumber": "PLAN-WIPE",
+                "revision": "A",
+                "approved": "",
+                "ApprovedBy": "",
+                "ApprovedDate": "",
+            }
+        ]
+    )
+
+    preview = _run(data, data_mode="replace_all", approval_mode="replace_all")
+    rows = {item["field_id"]: item for item in preview["plan"]["parts"][0]["approval"]}
+    assert rows["approved"]["action"] == "change"
+    assert rows["approved_by"]["action"] == "clear"
+    assert rows["approved_date"]["action"] == "clear"
+
+    # Update drafts protects it; only the override carries it out.
+    drafts = _run(data, data_mode="replace_unapproved", approval_mode="import_unapproved")
+    assert all(
+        item["action"] == "blocked" for item in drafts["plan"]["parts"][0]["approval"]
+    )
+
+    _run(data, dry_run=False, data_mode="replace_all", approval_mode="replace_all")
+    part = Part.objects.get(part_number="PLAN-WIPE", revision="A")
+    assert part.attrs.get("approved") is False
+    assert "approved_by" not in part.attrs
+    assert part.canonical["approved"] is False
+
+
 def test_bom_modes_are_independent_and_show_add_remove_quantity_redline(app):
     Part(part_number="PLAN-PARENT", revision="A").save()
     BOMLink(
