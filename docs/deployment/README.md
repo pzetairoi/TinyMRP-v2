@@ -77,6 +77,7 @@ front end for the VPS path only; see
 | Situation | Run |
 | --- | --- |
 | Other machines cannot reach a Windows host | `deploy\windows\check_lan_access.ps1 -Port <port>` |
+| Anything wrong on a single Docker install | `./deploy/community/check-install.sh` |
 | Anything wrong on a multi-instance VPS | `sudo ./deploy/scripts/doctor.sh` |
 | Is it alive / is it ready? | `curl <url>/api/health` and `curl <url>/api/ready` |
 | What configuration is actually in effect? | **Admin → Diagnostics** (secrets redacted) |

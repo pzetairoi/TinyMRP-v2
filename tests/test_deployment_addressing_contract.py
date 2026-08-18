@@ -374,3 +374,61 @@ def test_the_update_path_is_documented_where_people_look(doc):
         f"{doc} does not distinguish a source install from a release install, "
         f"so a reader cannot tell which update form applies to them"
     )
+
+
+# --------------------------------------------------------------------------
+# The single-install diagnostic
+# --------------------------------------------------------------------------
+
+
+def test_the_community_install_has_a_read_only_diagnostic():
+    """Every other deployment path ships a checker; this one did not.
+
+    Windows LAN has check_lan_access.ps1, restricted Windows has
+    check-restricted-install.ps1, the VPS has doctor.sh. The single-VM Docker
+    path - the recommended one - had nothing, so "it does not work" had no
+    first command to run.
+    """
+    path = REPO_ROOT / "deploy/community/check-install.sh"
+    assert path.exists(), "deploy/community/check-install.sh is missing"
+    text = path.read_text(encoding="utf-8")
+    # It must be read-only in effect: no restart/recreate/build verbs.
+    for forbidden in ("up -d", "--force-recreate", "docker build", "env_set", "rm -rf"):
+        assert forbidden not in text, (
+            f"check-install.sh contains '{forbidden}'; it is documented as "
+            f"changing nothing and must stay that way"
+        )
+    # The checks that matter, each of which corresponds to a real field failure.
+    for probe in (
+        "TINYMRP_TRUSTED_PROXY_HOPS",   # proxy hops vs access mode
+        "ACCESS_MODE=lan but TINYMRP_URL",  # the login-loop trap
+        "mountpoint",                    # a share that did not mount
+        "/etc/fstab",                    # a share that will not remount at boot
+        "/api/ready",                    # database and disk
+        "Caddy Local Authority",         # internal vs public certificate
+    ):
+        assert probe in text, f"check-install.sh no longer checks for {probe}"
+
+
+def test_the_diagnostic_verifies_writes_rather_than_reading_permissions():
+    """`ls` is not evidence on a network share.
+
+    A CIFS mount with uid=1000 displays owner 1000 and mode rwxrwxr-x while the
+    file server still refuses every write, because the mount options only
+    change what Linux displays. The only meaningful test is an actual write
+    from inside the app container.
+    """
+    text = (REPO_ROOT / "deploy/community/check-install.sh").read_text(encoding="utf-8")
+    assert "docker exec" in text and "touch /data/deliverables" in text, (
+        "check-install.sh infers deliverables writability instead of writing a "
+        "probe file from inside the container"
+    )
+
+
+def test_the_file_share_recipe_carries_the_options_that_matter_at_boot():
+    text = _read("docs/deployment/11-faq.md")
+    for option in ("_netdev", "nofail", "credentials=", "uid=1000"):
+        assert option in text, f"the CIFS recipe lost {option}"
+    assert "only changes what Linux *displays*" in text, (
+        "the FAQ no longer warns that uid=1000 does not grant write permission"
+    )

@@ -456,6 +456,7 @@ All from `deploy/community/` (or the extracted bundle):
 ./tinymrp.sh stop                         # stop; data is untouched
 ./tinymrp.sh start                        # start again
 ./tinymrp.sh reconfigure                  # change address, port or access mode
+./check-install.sh                        # verify the whole setup, changes nothing
 ./tinymrp.sh backup                       # verified Mongo dump + config
 ./tinymrp.sh backup --include-deliverables
 ./tinymrp.sh restore backups/2026-08-14T02-00-00Z
@@ -701,7 +702,21 @@ Windows service.
 
 ## If something goes wrong
 
-Start with the log:
+Start with the check script. It is read-only, takes a few seconds, and its
+output names the fix for anything it finds:
+
+```bash
+cd deploy/community
+./check-install.sh
+```
+
+It verifies that the eight addressing keys agree, that every container is
+running and healthy, that the app container can genuinely write to the
+deliverables folder, that a network share is mounted and will remount at
+boot, that `/api/health` and `/api/ready` answer, and — in domain mode —
+whether the certificate is a public one or Caddy's internal one.
+
+Then the log:
 
 ```bash
 cd deploy/community

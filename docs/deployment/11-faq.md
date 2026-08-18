@@ -340,13 +340,51 @@ Repeated failures hit rate limits — use the staging endpoint while testing.
 
 ## Files and storage
 
-**Where do deliverables live and can it be a NAS?**
-Anywhere `FILES_LOCAL_ROOT` points, including an NFS or SMB mount, as long as
-it is mounted before the app starts and the app user can write to it. For CIFS,
-ownership comes from mount options, not `chown`:
+**Where do deliverables live and can it be a NAS or a Windows file share?**
+Anywhere `FILES_LOCAL_ROOT` points, including an NFS or SMB/CIFS mount, as long
+as it is mounted before the app starts and the app user can write to it. This
+is the normal setup when a CAD team drops files straight onto a share instead
+of uploading them through the browser.
+
+Put the credentials in a root-only file, `/etc/tinymrp-fileshare.cred`:
 
 ```
-//nas/cad /srv/tinymrp/deliverables cifs credentials=/etc/samba/creds,uid=1000,gid=1000,file_mode=0664,dir_mode=0775 0 0
+username=SVC-TinyMRP
+password=<the service account password>
+domain=YOURDOMAIN
+```
+
+```bash
+sudo chmod 600 /etc/tinymrp-fileshare.cred
+```
+
+Then one line in `/etc/fstab`:
+
+```
+//FILESERVER/CAD  /srv/tinymrp/deliverables  cifs  credentials=/etc/tinymrp-fileshare.cred,uid=1000,gid=1000,file_mode=0664,dir_mode=0775,vers=3.0,iocharset=utf8,_netdev,nofail  0  0
+```
+
+`_netdev` and `nofail` are not optional. Without `_netdev` the machine can try
+to mount before the network is up; without `nofail` a share that is briefly
+unreachable stops the boot at a maintenance prompt.
+
+Two traps, both of which look like data loss:
+
+1. **`uid=1000` only changes what Linux *displays*.** Write permission is still
+   decided by the file server's ACL for the account in the credentials file. A
+   share can show `drwxrwxr-x 1000 1000` in `ls -l` and still refuse every
+   write. Ask whoever owns the file server to grant that account **modify**
+   rights, then prove it with a real write rather than by reading `ls`:
+   `sudo -u '#1000' touch /srv/tinymrp/deliverables/probe && rm /srv/tinymrp/deliverables/probe`
+2. **A share that fails to mount leaves an empty local directory behind.** The
+   bind mount then succeeds against nothing, TinyMRP starts normally, and every
+   file appears to have vanished. `deploy/community/check-install.sh` checks for
+   exactly this, including whether the mount has an `/etc/fstab` entry at all.
+
+Verify the whole arrangement with:
+
+```bash
+./deploy/community/check-install.sh
 ```
 
 **"deliverables root is NOT writable by uid 1000".**

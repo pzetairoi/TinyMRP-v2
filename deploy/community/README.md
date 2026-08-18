@@ -79,6 +79,11 @@ Linux uses `./tinymrp.sh COMMAND`; Windows uses
 `logs`, `reconfigure`, `update`, `backup`, `restore`, and `uninstall`. Run a
 command without its required arguments to see its usage.
 
+`./check-install.sh` is a separate read-only diagnostic: it changes nothing and
+reports PASS/WARN/FAIL for addressing consistency, container health, real
+write access to the deliverables folder, network-share mounting, endpoint
+reachability, certificate issuer and backup freshness.
+
 `reconfigure` changes the address, port or access mode after installation. It
 rewrites all eight coupled keys in `.env` together, because when they disagree
 the symptom is a silent login loop rather than an error, and it restarts only

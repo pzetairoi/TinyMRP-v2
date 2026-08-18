@@ -247,11 +247,11 @@ sudo chmod -R u+rwX,g+rX /srv/tinymrp/deliverables
 
 On a VPS instance: `sudo ./deploy/scripts/fix-deliverables-permissions.sh <instance>`.
 
-For an SMB/CIFS mount, ownership comes from the mount options, not `chown`:
-
-```
-//nas/cad /srv/tinymrp/deliverables cifs credentials=/etc/samba/creds,uid=1000,gid=1000,file_mode=0664,dir_mode=0775 0 0
-```
+For an SMB/CIFS or NFS mount, `chown` is the wrong tool: ownership comes from
+the mount options, and write permission comes from the file server's ACL for
+the account you authenticate as — a share can display `1000 1000` and still
+refuse every write. The full recipe, both traps and the fstab line, is in
+[11 — FAQ, "Where do deliverables live"](11-faq.md#files-and-storage).
 
 ### `these deliverables subfolders are NOT writable: extra thumbs temp`
 
