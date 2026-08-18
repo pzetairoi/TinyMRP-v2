@@ -101,6 +101,52 @@ Two deliberate asymmetries:
 
 ### Update
 
+There are two kinds of Community install and each has its own update command.
+You do not have to remember which you have — running the wrong one prints the
+right one.
+
+| How it was installed | Update with |
+| --- | --- |
+| From a git checkout, `install.sh --build` | `./tinymrp.sh update` *(no argument)* |
+| From a versioned release bundle | `./tinymrp.sh update v2.1.0` |
+
+#### From a git checkout — `./tinymrp.sh update`
+
+This is the common case for anyone who cloned the repository.
+
+```bash
+cd /opt/tinymrp_v2/deploy/community
+./tinymrp.sh update
+```
+
+It does the whole sequence for you:
+
+1. checks the checkout is clean, on a branch, and has an upstream;
+2. `git fetch` and **fast-forward only** — it refuses to merge, so a diverged
+   host is reported rather than silently resolved;
+3. works out the new tag, `<VERSION>-src.<short-sha>`, and stops early with
+   "already up to date" if that image is already built and running;
+4. takes a verified Mongo backup **before** touching anything;
+5. rebuilds the image from `docker/app/Dockerfile`;
+6. rewrites `TINYMRP_VERSION` and recreates only the app container;
+7. waits for health, and on failure puts the previous version back and tells
+   you which backup to fall back on.
+
+The previous image is kept, so that rollback needs no rebuild. Mongo, Redis and
+your deliverables are never touched. Expect a few minutes; Docker's layer cache
+makes later updates much faster than the first build.
+
+It refuses to run with uncommitted changes in the checkout. That is deliberate:
+a rebuild bakes the working tree into the image, so building with local edits
+present produces something nobody can reproduce later. Commit or stash them
+first.
+
+If the update fails, nothing is lost — the running instance is left on the old
+version. `./tinymrp.sh status` shows what is running and `./tinymrp.sh logs`
+shows why.
+
+#### From a release bundle — `./tinymrp.sh update v2.1.0`
+
 ```bash
 ./tinymrp.sh update v2.1.0
 ```
@@ -113,19 +159,23 @@ to fall back on. Only the app image changes; data is untouched.
 `latest` is rejected: an unpinned tag makes "which version is running" and
 "roll back to the previous one" unanswerable.
 
-For a source-build install (`--build`), update by rebuilding:
+Asking a checkout-built install for a version number is also rejected, with an
+explanation: its image was built locally and never published, so there is no
+such tag to pull.
+
+#### Rolling back
+
+The previous image is still on the host, so a rollback is a version swap:
 
 ```bash
-cd /opt/tinymrp_v2
-./deploy/community/tinymrp.sh backup
-git fetch --tags && git checkout v2.1.0
-NEW="2.1.0-src.$(git rev-parse --short=7 HEAD)"
-docker build -f docker/app/Dockerfile -t "tinymrp-local:${NEW}" .
 cd deploy/community
-sed -i "s/^TINYMRP_VERSION=.*/TINYMRP_VERSION=\"${NEW}\"/" .env
+docker images tinymrp-local            # find the previous tag
+./tinymrp.sh backup                    # capture the current state first
+sed -i 's/^TINYMRP_VERSION=.*/TINYMRP_VERSION="2.0.0-src.abc1234"/' .env
 docker compose --env-file .env -f compose.yaml up -d --no-deps --force-recreate --wait app
-./tinymrp.sh status
 ```
+
+If the update itself failed, this already happened automatically.
 
 ### Uninstall
 

@@ -309,3 +309,68 @@ def test_the_installer_warns_that_an_internal_domain_is_not_publicly_trusted():
         "the installer never tells an internal-domain operator how to export "
         "the root certificate their clients must trust"
     )
+
+
+# --------------------------------------------------------------------------
+# A checkout-built instance must have a working update path
+# --------------------------------------------------------------------------
+
+
+def test_a_source_built_instance_can_be_updated_without_reinstalling():
+    """`update` must not demand a version a source install can never have.
+
+    install.sh --build tags the image <VERSION>-src.<sha>, which exists only on
+    that host. The registry path (`compose pull app`) therefore fails every
+    time, and requiring a semver argument asks for a tag that was never
+    published - so the only documented way to take new code was to reinstall.
+    """
+    text = _read("deploy/community/tinymrp.sh")
+    assert "update_from_source" in text, "tinymrp.sh has no source update path"
+    assert "is_source_install" in text, (
+        "tinymrp.sh cannot tell a checkout-built install from a released one, "
+        "so `update` cannot route to the right path"
+    )
+    # It has to actually move the checkout and rebuild, not just retag.
+    assert "git -C \"$repo_root\" fetch" in text, "source update never fetches"
+    assert "merge --ff-only" in text, (
+        "source update does not fast-forward; it could create a merge commit "
+        "or silently build a diverged tree"
+    )
+    assert "docker build" in text, "source update never rebuilds the image"
+    # Same guarantees as the registry path.
+    assert "backup" in text and "wait_for_app" in text
+
+
+def test_the_source_update_refuses_to_build_an_unreproducible_image():
+    """A rebuild bakes the working tree in, so a dirty checkout is refused."""
+    text = _read("deploy/community/tinymrp.sh")
+    assert "status --porcelain" in text, (
+        "source update does not check for uncommitted changes, so it can build "
+        "an image that corresponds to no commit"
+    )
+
+
+def test_powershell_has_the_same_source_update_path():
+    text = _read("deploy/community/tinymrp.ps1")
+    assert "Update-FromSource" in text
+    assert "Test-SourceInstall" in text
+    assert "merge --ff-only" in text
+    assert "status --porcelain" in text
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        "docs/deployment/01-vm-docker.md",
+        "docs/deployment/10-operations.md",
+        "deploy/community/README.md",
+    ],
+)
+def test_the_update_path_is_documented_where_people_look(doc):
+    """Undocumented, this is indistinguishable from having to reinstall."""
+    text = _read(doc)
+    assert "tinymrp.sh update" in text, f"{doc} never mentions the update command"
+    assert "--build" in text or "git checkout" in text or "checkout" in text, (
+        f"{doc} does not distinguish a source install from a release install, "
+        f"so a reader cannot tell which update form applies to them"
+    )

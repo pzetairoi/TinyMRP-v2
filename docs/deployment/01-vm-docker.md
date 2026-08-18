@@ -483,6 +483,49 @@ More detail in [10 — Backups, updates and uninstall](10-operations.md).
 
 ## Customising the deployment
 
+### Keeping it up to date
+
+You never have to reinstall to pick up new code. If you installed from a git
+checkout — that is, with `--build` — the update is one command:
+
+```bash
+cd /opt/tinymrp_v2/deploy/community
+./tinymrp.sh update
+```
+
+No version argument. It pulls the repository, rebuilds the image, swaps the app
+container over, and waits for it to report healthy — taking a verified Mongo
+backup first and rolling back automatically if the new build does not come up.
+Your `.env`, your database, and your deliverables are untouched: `.env` and
+`backups/` are both git-ignored, so a `git pull` cannot disturb your
+configuration.
+
+```
+Fetching origin/main...
+Updating from 2.0.0-src.b4465cf to 2.0.0-src.f6ba604...
+Creating authenticated Mongo backup...
+Building tinymrp-local:2.0.0-src.f6ba604 (several minutes; later builds reuse the cache)...
+...
+Updated TinyMRP from 2.0.0-src.b4465cf to 2.0.0-src.f6ba604.
+Pre-update backup: /opt/tinymrp_v2/deploy/community/backups/20260818T061500Z
+The previous image tinymrp-local:2.0.0-src.b4465cf was kept, so a rollback needs no rebuild.
+```
+
+Three things it refuses to do, each with a message saying what to do instead:
+
+- **Uncommitted changes in the checkout.** A rebuild bakes the working tree
+  into the image, so building with local edits produces something nobody can
+  reproduce. Commit or stash first. (Editing `.env` does not count — it is
+  git-ignored.)
+- **A diverged checkout.** It fast-forwards only; it will not create a merge
+  commit behind your back.
+- **A version argument on a checkout install.** That image was built here and
+  never published, so there is no such tag to pull.
+
+If you installed from a release bundle instead, updates are version-pinned:
+`./tinymrp.sh update v2.1.0`. Full detail, including rollback, is in
+[10 — Backups, updates and uninstall](10-operations.md#update).
+
 ### Trusting an internal certificate
 
 Only needed when your domain is an internal-only name such as

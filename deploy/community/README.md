@@ -76,8 +76,13 @@ rule after showing exactly what it will do.
 
 Linux uses `./tinymrp.sh COMMAND`; Windows uses
 `.\tinymrp.ps1 COMMAND`. Supported commands are `start`, `stop`, `status`,
-`logs`, `update`, `backup`, `restore`, and `uninstall`. Run a command without
-its required arguments to see its usage.
+`logs`, `reconfigure`, `update`, `backup`, `restore`, and `uninstall`. Run a
+command without its required arguments to see its usage.
+
+`reconfigure` changes the address, port or access mode after installation. It
+rewrites all eight coupled keys in `.env` together, because when they disagree
+the symptom is a silent login loop rather than an error, and it restarts only
+what has to restart.
 
 `backup` always captures a real Mongo archive and the configuration, verifies
 gzip integrity and uncompressed content size, and can optionally include the
@@ -99,8 +104,19 @@ The image normally chooses a conservative Gunicorn worker count from host CPU.
 Set `WEB_CONCURRENCY` in `.env` when memory measurements call for a lower fixed
 limit.
 
-Updates require an explicit semantic version tag and perform a verified backup
-first. If the replacement app does not become healthy, the command restores
-the previous image reference automatically. Database migrations may still
-require restoring the newly-created backup; keep it until the update is fully
-accepted.
+Updates depend on how the instance was installed, and running the wrong form
+prints the right one:
+
+- **Installed from a git checkout** (`install.sh --build`): `./tinymrp.sh
+  update` with **no argument**. It fast-forwards the checkout, rebuilds the
+  image from the same Dockerfile the installer used, and swaps the app
+  container over. It refuses to build a dirty working tree or a diverged
+  checkout, so the running image always corresponds to a known commit. The
+  previous image is kept, so a rollback needs no rebuild.
+- **Installed from a release bundle**: `./tinymrp.sh update vMAJOR.MINOR.PATCH`.
+  An explicit semantic version is required; `latest` is rejected.
+
+Both take a verified backup first, recreate only the app container, and restore
+the previous image reference automatically if the replacement does not become
+healthy. Database migrations may still require restoring the newly-created
+backup; keep it until the update is fully accepted.

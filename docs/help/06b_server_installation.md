@@ -59,6 +59,13 @@ first administrator, and generates every secret itself. Afterwards:
 hand-edit `.env`: eight keys have to agree, and when they disagree the symptom
 is a silent login loop rather than an error.
 
+`update` picks up new code without reinstalling. On an instance installed from
+a git checkout, run it with **no argument** — it pulls, rebuilds, swaps the app
+container over, backs up first and rolls back if the new build does not come
+up. On an instance installed from a release bundle, give it the version to move
+to: `./deploy/community/tinymrp.sh update v2.1.0`. Neither touches your
+database, your deliverables or your `.env`.
+
 The one setting that decides whether a deployment works at all is
 `TINYMRP_URL` — the address users type, **scheme included**. Its scheme is what
 tells the app whether to mark session cookies `Secure`. Declaring `https://` on
